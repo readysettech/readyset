@@ -48,8 +48,8 @@ impl IntAsFloat for u32 {
 pub(crate) fn coerce_integer<I, S>(
     val: I,
     src_type_name: S,
-    sql_type: &SqlType,
-    _from_sql_type: &DfType,
+    to_ty: &SqlType,
+    _from_ty: &DfType,
 ) -> ReadySetResult<DfValue>
 where
     i8: TryFrom<I>,
@@ -67,11 +67,11 @@ where
 {
     let err = || ReadySetError::DfValueConversionError {
         src_type: src_type_name.to_string(),
-        target_type: sql_type.to_string(),
+        target_type: to_ty.to_string(),
         details: "out of bounds".to_string(),
     };
 
-    match sql_type {
+    match to_ty {
         SqlType::Bool => {
             #[allow(clippy::eq_op)]
             {
@@ -203,7 +203,7 @@ where
         | SqlType::VarBit(_)
         | SqlType::Array(_) => Err(ReadySetError::DfValueConversionError {
             src_type: src_type_name.to_string(),
-            target_type: sql_type.to_string(),
+            target_type: to_ty.to_string(),
             details: "Not allowed".to_string(),
         }),
     }

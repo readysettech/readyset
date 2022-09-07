@@ -399,12 +399,12 @@ impl DfValue {
     ///     DfValue::TimestampTz(NaiveDate::from_ymd(2021, 01, 26).and_hms(10, 20, 37).into())
     /// );
     /// ```
-    pub fn coerce_to(&self, ty: &SqlType, from_ty: &DfType) -> ReadySetResult<DfValue> {
+    pub fn coerce_to(&self, to_ty: &SqlType, from_ty: &DfType) -> ReadySetResult<DfValue> {
         use crate::text::TextCoerce;
 
         let mk_err = || ReadySetError::DfValueConversionError {
             src_type: format!("{:?}", DfValueKind::from(self)),
-            target_type: ty.to_string(),
+            target_type: to_ty.to_string(),
             details: "unsupported".into(),
         };
 
@@ -413,38 +413,39 @@ impl DfValue {
         // been able to find any way to define a closure that takes generic parameters, which is
         // necessary if we want to support both u64 and i64 for both UnsignedInt and Int.
         macro_rules! handle_enum_or_coerce_int {
-            ($v:expr, $ty:expr, $from_ty:expr, $int_type:expr) => {
+            ($v:expr, $to_ty:expr, $from_ty:expr, $int_type:expr) => {
                 if let DfType::Sql(SqlType::Enum(enum_elements)) = $from_ty {
                     // This will either be u64 or i64, and if it's i64 then negative values will be
                     // converted to 0 anyway, so unwrap_or_default gets us what we want here:
                     let enum_val = u64::try_from(*$v).unwrap_or_default();
-                    r#enum::coerce_enum(enum_val, enum_elements, $ty, $from_ty)
+                    r#enum::coerce_enum(enum_val, enum_elements, $to_ty, $from_ty)
                 } else {
-                    integer::coerce_integer(*$v, $int_type, $ty, $from_ty)
+                    integer::coerce_integer(*$v, $int_type, $to_ty, $from_ty)
                 }
             };
         }
 
         match self {
             DfValue::None => Ok(DfValue::None),
-            DfValue::Array(arr) => match ty {
+            DfValue::Array(arr) => match to_ty {
                 SqlType::Array(t) => Ok(DfValue::from(arr.coerce_to(t, from_ty)?)),
                 SqlType::Text => Ok(DfValue::from(arr.to_string())),
                 _ => Err(mk_err()),
             },
-            dt if dt.sql_type().as_ref() == Some(ty) => Ok(self.clone()),
-            DfValue::Text(t) => t.coerce_to(ty, from_ty),
-            DfValue::TinyText(tt) => tt.coerce_to(ty, from_ty),
-            DfValue::TimestampTz(tz) => tz.coerce_to(ty),
-            DfValue::Int(v) => handle_enum_or_coerce_int!(v, ty, from_ty, "Int"),
-            DfValue::UnsignedInt(v) => handle_enum_or_coerce_int!(v, ty, from_ty, "UnsignedInt"),
+            dt if dt.sql_type().as_ref() == Some(to_ty) => Ok(self.clone()),
+            DfValue::Text(t) => t.coerce_to(to_ty, from_ty),
+            DfValue::TinyText(tt) => tt.coerce_to(to_ty, from_ty),
+            DfValue::TimestampTz(tz) => tz.coerce_to(to_ty),
+            DfValue::Int(v) => handle_enum_or_coerce_int!(v, to_ty, from_ty, "Int"),
+            DfValue::UnsignedInt(v) => handle_enum_or_coerce_int!(v, to_ty, from_ty, "UnsignedInt"),
+
             // We can coerce f32 as f64, because casting to the latter doesn't increase precision
             // and therfore is equivalent
-            DfValue::Float(f) => float::coerce_f64(*f as f64, ty, from_ty),
-            DfValue::Double(f) => float::coerce_f64(*f, ty, from_ty),
-            DfValue::Numeric(d) => float::coerce_decimal(d.as_ref(), ty, from_ty),
-            DfValue::Time(ts) if ty.is_any_text() => Ok(ts.to_string().into()),
-            DfValue::BitVector(vec) => match ty {
+            DfValue::Float(f) => float::coerce_f64(*f as f64, to_ty, from_ty),
+            DfValue::Double(f) => float::coerce_f64(*f, to_ty, from_ty),
+            DfValue::Numeric(d) => float::coerce_decimal(d.as_ref(), to_ty, from_ty),
+            DfValue::Time(ts) if to_ty.is_any_text() => Ok(ts.to_string().into()),
+            DfValue::BitVector(vec) => match to_ty {
                 SqlType::VarBit(None) => Ok(self.clone()),
                 SqlType::VarBit(max_size_opt) => match max_size_opt {
                     Some(max_size) if vec.len() > *max_size as usize => Err(mk_err()),
@@ -455,7 +456,7 @@ impl DfValue {
             DfValue::Time(_) | DfValue::ByteArray(_) | DfValue::Max => Err(mk_err()),
             DfValue::PassThrough(ref p) => Err(ReadySetError::DfValueConversionError {
                 src_type: format!("PassThrough[{}]", p.ty),
-                target_type: ty.to_string(),
+                target_type: to_ty.to_string(),
                 details: "PassThrough items cannot be coerced".into(),
             }),
         }

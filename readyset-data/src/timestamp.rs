@@ -323,8 +323,8 @@ impl TimestampTz {
     }
 
     /// Attempt to coerce this timestamp to a specific SqlType
-    pub(crate) fn coerce_to(&self, sql_type: &SqlType) -> ReadySetResult<DfValue> {
-        match sql_type {
+    pub(crate) fn coerce_to(&self, to_ty: &SqlType) -> ReadySetResult<DfValue> {
+        match to_ty {
             SqlType::Timestamp => {
                 // Conversion into timestamp without tz
                 Ok(DfValue::TimestampTz(self.to_chrono().naive_local().into()))
@@ -405,7 +405,7 @@ impl TimestampTz {
             | SqlType::UnsignedInt(_)
             | SqlType::Serial => Err(ReadySetError::DfValueConversionError {
                 src_type: "DfValue::TimestampTz".to_string(),
-                target_type: format!("{:?}", sql_type),
+                target_type: format!("{:?}", to_ty),
                 details: "Out of range".to_string(),
             }),
 
@@ -418,7 +418,7 @@ impl TimestampTz {
             | SqlType::VarBit(_)
             | SqlType::Array(_) => Err(ReadySetError::DfValueConversionError {
                 src_type: "DfValue::TimestampTz".to_string(),
-                target_type: format!("{:?}", sql_type),
+                target_type: format!("{:?}", to_ty),
                 details: "Not allowed".to_string(),
             }),
         }

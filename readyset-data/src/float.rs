@@ -37,14 +37,10 @@ where
     (val.round() as u64).try_into().ok()
 }
 
-pub(crate) fn coerce_f64(
-    val: f64,
-    sql_type: &SqlType,
-    from_type: &DfType,
-) -> ReadySetResult<DfValue> {
+pub(crate) fn coerce_f64(val: f64, to_ty: &SqlType, from_ty: &DfType) -> ReadySetResult<DfValue> {
     let err = |deets: &str| ReadySetError::DfValueConversionError {
         src_type: "Double".to_string(),
-        target_type: sql_type.to_string(),
+        target_type: to_ty.to_string(),
         details: deets.to_string(),
     };
 
@@ -58,7 +54,7 @@ pub(crate) fn coerce_f64(
         return Err(err("Nan not allowed"));
     }
 
-    match sql_type {
+    match to_ty {
         SqlType::Bool => Ok(DfValue::from(val != 0.0)),
 
         SqlType::Float | SqlType::Real => {
@@ -159,8 +155,8 @@ pub(crate) fn coerce_f64(
             crate::integer::coerce_integer(
                 coerce_f64_to_int::<i64>(val).ok_or_else(bounds_err)?,
                 "Double",
-                sql_type,
-                from_type,
+                to_ty,
+                from_ty,
             )
         }
 
@@ -176,16 +172,16 @@ pub(crate) fn coerce_f64(
 
 pub(crate) fn coerce_decimal(
     val: &Decimal,
-    sql_type: &SqlType,
-    from_type: &DfType,
+    to_ty: &SqlType,
+    from_ty: &DfType,
 ) -> ReadySetResult<DfValue> {
     let err = || ReadySetError::DfValueConversionError {
         src_type: "Decimal".to_string(),
-        target_type: sql_type.to_string(),
+        target_type: to_ty.to_string(),
         details: "out of bounds".to_string(),
     };
 
-    match sql_type {
+    match to_ty {
         SqlType::Bool => Ok(DfValue::from(!val.is_zero())),
 
         SqlType::Float | SqlType::Real => val
@@ -257,12 +253,9 @@ pub(crate) fn coerce_decimal(
         | SqlType::DateTime(_)
         | SqlType::Time
         | SqlType::Timestamp
-        | SqlType::TimestampTz => crate::integer::coerce_integer(
-            val.to_i64().ok_or_else(err)?,
-            "Decimal",
-            sql_type,
-            from_type,
-        ),
+        | SqlType::TimestampTz => {
+            crate::integer::coerce_integer(val.to_i64().ok_or_else(err)?, "Decimal", to_ty, from_ty)
+        }
 
         SqlType::Enum(_)
         | SqlType::MacAddr
@@ -272,7 +265,7 @@ pub(crate) fn coerce_decimal(
         | SqlType::VarBit(_)
         | SqlType::Array(_) => Err(ReadySetError::DfValueConversionError {
             src_type: "Decimal".to_string(),
-            target_type: sql_type.to_string(),
+            target_type: to_ty.to_string(),
             details: "Not allowed".to_string(),
         }),
     }
