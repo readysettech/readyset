@@ -950,6 +950,11 @@ impl NoriaConnector {
         ))
     }
 
+    /// Set the schema search path
+    pub fn set_schema_search_path(&mut self, search_path: Vec<SqlIdentifier>) {
+        self.schema_search_path = search_path;
+    }
+
     /// Returns a reference to the currently configured schema search path
     pub fn schema_search_path(&self) -> &[SqlIdentifier] {
         self.schema_search_path.as_ref()

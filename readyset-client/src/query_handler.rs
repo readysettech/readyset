@@ -1,10 +1,10 @@
-use nom_sql::SqlQuery;
+use nom_sql::{SqlIdentifier, SqlQuery};
 use readyset::ReadySetResult;
 
 use crate::backend::noria_connector;
 
 /// Classification for how we should be handling a SQL `SET` statement.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SetBehavior {
     /// This `SET` statement is unsupported.
     Unsupported,
@@ -12,6 +12,8 @@ pub enum SetBehavior {
     Proxy,
     /// This `SET` statement represents the `autocommit` flag being set either on or off.
     SetAutocommit(bool),
+    /// This `SET` statement represents the current schema search path being changed
+    SetSearchPath(Vec<SqlIdentifier>),
 }
 
 impl SetBehavior {

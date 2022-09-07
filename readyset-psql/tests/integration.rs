@@ -1256,7 +1256,7 @@ async fn placeholder_numbering_does_not_break_postgres_ignore() {
         .unwrap();
     sleep().await;
 
-    conn.simple_query("INSERT INTO Cats (id, val, name) VALUES (2, 1, 'Bob')")
+    conn.simple_query("INSERT INTO Cats (id, val, name) VALUES (2, 1, 'Bob)")
         .await
         .unwrap();
     sleep().await;
@@ -1282,10 +1282,39 @@ async fn show_readyset_status() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "Schema support is WIP (ENG-1447)"]
 async fn schema_qualifier() {
     let (opts, _handle) = setup(true).await;
     let conn = connect(opts).await;
-    conn.simple_query("CREATE TABLE t (a int)").await.unwrap();
-    assert!(conn.simple_query("SELECT public.t.a from t").await.is_ok());
+    conn.simple_query("CREATE TABLE public.t (a int)")
+        .await
+        .unwrap();
+    conn.simple_query("SELECT public.t.a from public.t")
+        .await
+        .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn schema_search_path() {
+    readyset_tracing::init_test_logging();
+    let (opts, _handle) = setup(true).await;
+    let conn = connect(opts).await;
+    conn.simple_query("CREATE TABLE s1.t (a int)")
+        .await
+        .unwrap();
+    conn.simple_query("CREATE TABLE s2.t (b int)")
+        .await
+        .unwrap();
+    conn.simple_query("CREATE TABLE s2.t2 (c int)")
+        .await
+        .unwrap();
+
+    // Schema search path: [s1, s2]
+    conn.simple_query("SET search_path = s1, s2").await.unwrap();
+    conn.simple_query("SELECT a FROM t").await.unwrap();
+    conn.simple_query("SELECT c FROM t2").await.unwrap();
+
+    // Schema search path: [s2, s1]
+    conn.simple_query("SET search_path = s2, s1").await.unwrap();
+    conn.simple_query("SELECT b FROM t").await.unwrap();
+    conn.simple_query("SELECT c FROM t2").await.unwrap();
 }

@@ -14,7 +14,6 @@ use readyset_client::{QueryHandler, SetBehavior};
 enum AllowedParameterValue {
     Literal(PostgresParameterValue),
     OneOf(HashSet<PostgresParameterValue>),
-    Predicate(fn(&PostgresParameterValue) -> bool),
 }
 
 impl AllowedParameterValue {
@@ -39,22 +38,8 @@ impl AllowedParameterValue {
             SetPostgresParameterValue::Value(val) => match self {
                 AllowedParameterValue::Literal(l) => val == l,
                 AllowedParameterValue::OneOf(m) => m.contains(val),
-                AllowedParameterValue::Predicate(p) => p(val),
             },
         }
-    }
-}
-
-fn search_path_starts_with_public(val: &PostgresParameterValue) -> bool {
-    let is_public = |val: &PostgresParameterValueInner| match val {
-        PostgresParameterValueInner::Literal(Literal::String(s)) => s == "public",
-        PostgresParameterValueInner::Identifier(ident) => ident == "public",
-        _ => false,
-    };
-
-    match val {
-        PostgresParameterValue::Single(val) => is_public(val),
-        PostgresParameterValue::List(vals) => vals.first().iter().copied().all(is_public),
     }
 }
 
@@ -339,7 +324,6 @@ lazy_static! {
             ("extra_float_digits", AllowedParameterValue::literal(1)),
             ("TimeZone",  AllowedParameterValue::literal("Etc/UTC")),
             ("bytea_output",  AllowedParameterValue::literal("hex")),
-            ("search_path", AllowedParameterValue::Predicate(search_path_starts_with_public)),
             ("transform_null_equals", AllowedParameterValue::literal(false)),
             ("backslash_quote", AllowedParameterValue::one_of([
                 PostgresParameterValue::identifier("safe_encoding"),
@@ -375,23 +359,45 @@ impl QueryHandler for PostgreSqlQueryHandler {
             {
                 SetBehavior::Proxy
             }
-            SetStatement::PostgresParameter(SetPostgresParameter { name, value, .. }) => {
-                if name.as_str() == "autocommit" {
-                    let allowed_values = AllowedParameterValue::one_of([
+            SetStatement::PostgresParameter(SetPostgresParameter { name, value, .. }) => match name
+                .as_str()
+            {
+                "autocommit" => SetBehavior::SetAutocommit(match value {
+                    SetPostgresParameterValue::Default => true,
+                    SetPostgresParameterValue::Value(val) => ![
                         PostgresParameterValue::literal(0),
                         PostgresParameterValue::literal(false),
                         PostgresParameterValue::identifier("off"),
-                    ]);
+                    ]
+                    .contains(val),
+                }),
+                "search_path" => {
+                    let value_to_string = |value: &PostgresParameterValueInner| match value {
+                        PostgresParameterValueInner::Identifier(id) => id.clone(),
+                        PostgresParameterValueInner::Literal(Literal::String(s)) => s.into(),
+                        PostgresParameterValueInner::Literal(lit) => lit.to_string().into(),
+                    };
 
-                    return SetBehavior::SetAutocommit(!allowed_values.set_value_is_allowed(value));
-                }
+                    let search_path = match value {
+                        SetPostgresParameterValue::Default => vec!["public".into()],
+                        SetPostgresParameterValue::Value(PostgresParameterValue::Single(val)) => {
+                            vec![value_to_string(val)]
+                        }
+                        SetPostgresParameterValue::Value(PostgresParameterValue::List(vals)) => {
+                            vals.iter().map(value_to_string).collect()
+                        }
+                    };
 
-                if let Some(allowed_value) = ALLOWED_PARAMETERS_WITH_VALUE.get(name.as_str()) {
-                    SetBehavior::proxy_if(allowed_value.set_value_is_allowed(value))
-                } else {
-                    SetBehavior::Unsupported
+                    SetBehavior::SetSearchPath(search_path)
                 }
-            }
+                _ => {
+                    if let Some(allowed_value) = ALLOWED_PARAMETERS_WITH_VALUE.get(name.as_str()) {
+                        SetBehavior::proxy_if(allowed_value.set_value_is_allowed(value))
+                    } else {
+                        SetBehavior::Unsupported
+                    }
+                }
+            },
             SetStatement::Names(SetNames { charset, .. }) => {
                 SetBehavior::proxy_if(charset.to_lowercase() == "utf8")
             }
@@ -420,28 +426,6 @@ mod tests {
         )
     }
 
-    fn is_unsupported(statement: &str) {
-        assert_eq!(
-            PostgreSqlQueryHandler::handle_set_statement(&parse_set_statement(statement)),
-            SetBehavior::Unsupported
-        )
-    }
-
-    #[test]
-    fn search_path_with_public_is_allowed() {
-        is_proxy("SET search_path = 'public', 'other'");
-    }
-
-    #[test]
-    fn search_path_not_starting_with_public_isnt_allowed() {
-        is_unsupported("SET search_path = 'other', 'public'");
-    }
-
-    #[test]
-    fn search_path_with_identifier_public_is_allowed() {
-        is_proxy("SET search_path = public, other");
-    }
-
     #[test]
     fn standard_conforming_strings_on_allowed() {
         is_proxy("SET standard_conforming_strings = on");
@@ -467,5 +451,44 @@ mod tests {
             )),
             SetBehavior::SetAutocommit(true),
         );
+    }
+
+    mod search_path {
+        use super::*;
+
+        fn sets_search_path(stmt: &str, search_path: Vec<&str>) {
+            assert_eq!(
+                PostgreSqlQueryHandler::handle_set_statement(&parse_set_statement(stmt)),
+                SetBehavior::SetSearchPath(search_path.into_iter().map(Into::into).collect())
+            );
+        }
+
+        #[test]
+        fn single_identifier() {
+            sets_search_path("SET search_path = s7", vec!["s7"])
+        }
+
+        #[test]
+        fn single_string() {
+            sets_search_path("SET search_path = 's7'", vec!["s7"])
+        }
+
+        #[test]
+        fn identifiers() {
+            sets_search_path(
+                "SET search_path = s1, s2,   public",
+                vec!["s1", "s2", "public"],
+            );
+        }
+
+        #[test]
+        fn identifiers_and_strings() {
+            sets_search_path("SET search_path = s1, 's three'", vec!["s1", "s three"]);
+        }
+
+        #[test]
+        fn default() {
+            sets_search_path("SET search_path to DEFAULT", vec!["public"]);
+        }
     }
 }

@@ -1941,6 +1941,10 @@ where
                     _ => {}
                 }
             }
+            SetBehavior::SetSearchPath(search_path) => {
+                trace!(?search_path, "Setting search_path");
+                self.noria.set_schema_search_path(search_path);
+            }
         }
 
         Ok(())
