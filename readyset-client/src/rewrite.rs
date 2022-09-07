@@ -43,7 +43,7 @@ fn use_fallback_pagination(
     offset: &Option<Literal>,
 ) -> bool {
     if server_supports_pagination &&
-        // Can't handle parametrized LIMIT even if support is enabled
+        // Can't handle parameterized LIMIT even if support is enabled
         !matches!(limit, Some(Literal::Placeholder(_))) &&
         // Can't handle bare OFFSET
         !(limit.is_none() && offset.is_some())
@@ -217,7 +217,7 @@ impl ProcessedQueryParams {
     }
 }
 
-/// Information about a single parametrized IN condition that has been rewritten to an equality
+/// Information about a single parameterized IN condition that has been rewritten to an equality
 /// condition
 #[derive(Debug, PartialEq, Eq, Clone)]
 struct RewrittenIn {
@@ -230,7 +230,7 @@ struct RewrittenIn {
 }
 
 /// This function replaces the current `value IN (?, ?, ?, ..)` expression with
-/// a parametrized point query, eg (value = '?')
+/// a parameterized point query, eg (value = '?')
 fn where_in_to_placeholders(
     leftmost_param_index: &mut usize,
     expr: &mut Expr,
@@ -318,9 +318,9 @@ impl<'ast> Visitor<'ast> for CollapseWhereInVisitor {
     }
 }
 
-/// Convert all instances of *parametrized* IN (`x IN (?, ?, ...)`) in the given `query` to a direct
-/// equality comparison (`x = ?`), returning a vector of [`RewrittenIn`] giving information about
-/// the rewritten in params.
+/// Convert all instances of *parameterized* IN (`x IN (?, ?, ...)`) in the given `query` to a
+/// direct equality comparison (`x = ?`), returning a vector of [`RewrittenIn`] giving information
+/// about the rewritten in params.
 ///
 /// Given that vector and the params provided by a user, [`explode_params`] can be used to construct
 /// a vector of lookup keys for executing that query.
@@ -343,10 +343,10 @@ fn collapse_where_in(query: &mut SelectStatement) -> ReadySetResult<Vec<Rewritte
         // aggregates. We could support this pretty easily, but for now it's not in-scope
         if !res.is_empty() {
             if has_aggregates {
-                unsupported!("Aggregates with parametrized IN are not supported");
+                unsupported!("Aggregates with parameterized IN are not supported");
             }
             if distinct {
-                unsupported!("DISTINCT with parametrized IN is not supported");
+                unsupported!("DISTINCT with parameterized IN is not supported");
             }
         }
     }
@@ -484,10 +484,11 @@ impl<'ast> Visitor<'ast> for NumberPlaceholdersVisitor {
     fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
         if let Literal::Placeholder(item) = literal {
             // client-provided queries aren't allowed to mix question-mark and dollar-number
-            // placeholders, but both autoparametrization and collapse-where-in create question mark
-            // placeholders, which in the intermediate state does end up with a query that has both
-            // placeholder styles - we need to make sure we number those question mark placeholders
-            // appropriately to not overlap with existing dollar-number placeholders.
+            // placeholders, but both autoparameterization and collapse-where-in create question
+            // mark placeholders, which in the intermediate state does end up with a
+            // query that has both placeholder styles - we need to make sure we number
+            // those question mark placeholders appropriately to not overlap with
+            // existing dollar-number placeholders.
             match item {
                 ItemPlaceholder::QuestionMark => {
                     // If we find a dollar-number placeholder, update our index to start numbering
@@ -1387,7 +1388,7 @@ mod tests {
         }
 
         #[test]
-        fn numbered_auto_parametrized_in() {
+        fn numbered_auto_parameterized_in() {
             let (keys, query) = process_and_make_keys(
                 "SELECT * FROM users WHERE x = 1 AND y IN (1, 2, 3) AND z = ?",
                 vec![1.into()],

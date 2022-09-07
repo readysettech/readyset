@@ -49,7 +49,7 @@ pub struct MigrationHandler<DB> {
     /// query for before marking it as Unsupported.
     max_retry: std::time::Duration,
 
-    /// Reciever to return the broadcast signal on.
+    /// Receiver to return the broadcast signal on.
     shutdown_recv: tokio::sync::broadcast::Receiver<()>,
 
     /// The time that we began performing migrations on the query.

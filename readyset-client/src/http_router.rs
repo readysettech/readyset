@@ -30,7 +30,7 @@ pub struct NoriaAdapterHttpRouter {
     /// A valve for the http stream to trigger closing.
     pub valve: Valve,
 
-    /// Used to retrive the prometheus scrape's render as a String when servicing
+    /// Used to retrieve the prometheus scrape's render as a String when servicing
     /// HTTP requests on /prometheus.
     pub prometheus_handle: Option<PrometheusHandle>,
 }

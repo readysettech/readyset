@@ -3,7 +3,7 @@ use readyset::ReadySetResult;
 
 use crate::backend::noria_connector;
 
-/// A trait describing the behaviour of how specific queries should be
+/// A trait describing the behavior of how specific queries should be
 /// handled by a noria-client [`Backend`].
 pub trait QueryHandler: Sized + Send {
     /// Whether or not a given query requires fallback.

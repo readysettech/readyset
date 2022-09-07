@@ -85,8 +85,8 @@ pub struct NoriaBackendInner {
     noria: ControllerHandle,
     inputs: BTreeMap<String, Table>,
     outputs: BTreeMap<String, View>,
-    /// The server can handle (non-parametrized) LIMITs and (parametrized) OFFSETs in the dataflow
-    /// graph
+    /// The server can handle (non-parameterized) LIMITs and (parameterized) OFFSETs in the
+    /// dataflow graph
     server_supports_pagination: bool,
 }
 
@@ -438,7 +438,7 @@ async fn short_circuit_empty_resultset(getter: &mut View) -> ReadySetResult<Quer
     }))
 }
 
-/// Provides the neccessary context to execute a select statement agains noria, either for a
+/// Provides the necessary context to execute a select statement against noria, either for a
 /// prepared or an ad-hoc query
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]

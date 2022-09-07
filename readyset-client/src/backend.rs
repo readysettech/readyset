@@ -6,6 +6,7 @@
 //!
 //! * `INSERT`, `DELETE`, `UPDATE` - on upstream
 //! * Anything inside a transaction - on upstream
+//! * Cached statements created with "always" - on ReadySet
 //! * `SELECT` - on ReadySet
 //! * Anything that failed on ReadySet, or while a migration is ongoing - on upstream
 //!
@@ -21,7 +22,7 @@
 //! ## Queries
 //!
 //! Queries are handled in a similar way to prepare statements. with the exception that additional
-//! overhead is required to parse and rewrite them prior to their executuion.
+//! overhead is required to parse and rewrite them prior to their execution.
 //!
 //! ## Migrations
 //!
@@ -38,12 +39,12 @@
 //! fallback. Enabled with the `--async-migrations` flag.
 //! * In request path: migrations will happen when either `CREATE CACHE` or
 //! `CREATE PREPARED STATEMENT` are called. It is also the only available option when a
-//! upstream fallback is not availbale.
+//! upstream fallback is not available.
 //!
 //! ## Caching
 //!
 //! Since we don't want to pay a penalty every time we execute a prepared statement, either
-//! on ReadySet or on the upstream fallback, we aggresively cache all the information required
+//! on ReadySet or on the upstream fallback, we aggressively cache all the information required
 //! for immediate execution. This way a statement can be immediately forwarded to either ReadySet
 //! or upstream with no additional overhead.
 //!
@@ -1116,8 +1117,8 @@ where
         }
     }
 
-    /// Attempts to migrate a query on noria, after it was marked as Succesful in the cache. If the
-    /// migration is succesful, the cached entry is marked as such and will attempt to resolve
+    /// Attempts to migrate a query on noria, after it was marked as Successful in the cache. If the
+    /// migration is successful, the cached entry is marked as such and will attempt to resolve
     /// noria first in the future
     ///
     /// # Panics
@@ -1149,8 +1150,8 @@ where
             _ => internal!("Only SELECT statements can be pending migration"),
         };
 
-        // At this point we got a succesful noria prepare, so we want to replace the Upstream result
-        // with a Both result
+        // At this point we got a successful noria prepare, so we want to replace the Upstream
+        // result with a Both result
         cached_entry.prep = PrepareResult::Both(noria_prep, upstream_prep);
         cached_entry.migration_state = MigrationState::Successful;
 
@@ -1742,7 +1743,7 @@ where
                     // Query requires a fallback and we can send it to fallback
                     self.query_fallback(query, &mut event).await
                 } else {
-                    // Query requires a fallback, but none is availbale
+                    // Query requires a fallback, but none is available
                     Handler::default_response(parsed_query)
                         .map(QueryResult::Noria)
                         .map_err(Into::into)
