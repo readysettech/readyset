@@ -2,7 +2,7 @@ use readyset::{ControllerHandle, ReadySetResult};
 use tokio::select;
 use tracing::{info, instrument, warn};
 
-use crate::query_status_cache::{MigrationState, QueryStatusCache};
+use crate::query_status_cache::{MigrationState, PrepareRequest, QueryStatusCache};
 
 pub struct OutputsSynchronizer {
     /// The noria connector used to query
@@ -43,9 +43,13 @@ impl OutputsSynchronizer {
                             //TODO(Dan): Update so that we only request changes to output since
                             //some timestamp. Also consider using query hashes instead of SqlQuery
                             outputs.iter().for_each(|(_, (query, always))| {
+                                let prep_request = PrepareRequest::new(query.clone(), vec![]);
                                 self.query_status_cache
-                                    .update_query_migration_state(query, MigrationState::Successful);
-                                self.query_status_cache.always_attempt_readyset(query, *always);
+                                    .update_query_migration_state(
+                                        &prep_request,
+                                        MigrationState::Successful
+                                    );
+                                self.query_status_cache.always_attempt_readyset(&prep_request, *always);
                             });
                         }
                         Err(e) => {

@@ -1048,12 +1048,15 @@ mod tests {
 
     mod anonymize {
         use super::*;
-        use crate::query_status_cache::Query;
+        use crate::query_status_cache::{PrepareRequest, Query};
 
         #[test]
         fn simple_query() {
-            let query: Query = parse_select_statement(
-                "SELECT id + 3 FROM users WHERE credit_card_number = \"look at this PII\"",
+            let query: Query = PrepareRequest::new(
+                parse_select_statement(
+                    "SELECT id + 3 FROM users WHERE credit_card_number = \"look at this PII\"",
+                ),
+                vec![],
             )
             .into();
             let expected = parse_select_statement(

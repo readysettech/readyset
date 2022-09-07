@@ -978,6 +978,14 @@ impl DeploymentHandle {
     pub fn adapter_handle(&mut self) -> Option<&mut AdapterHandle> {
         self.mysql_adapter.as_mut()
     }
+
+    /// Returns a reference to the name of the deployment.
+    ///
+    /// This is used to prefix cluster resources, and as the name of the database created in the
+    /// upstream
+    pub fn name(&self) -> &str {
+        self.name.as_ref()
+    }
 }
 
 impl Drop for DeploymentHandle {

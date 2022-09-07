@@ -5,7 +5,7 @@ use ::readyset::metrics::{recorded, DumpedMetricValue};
 use launchpad::hash::hash;
 use mysql_async::prelude::Queryable;
 use readyset_client::backend::QueryInfo;
-use readyset_client::query_status_cache::hash_to_query_id;
+use readyset_client::query_status_cache::{hash_to_query_id, PrepareRequest};
 use readyset_client_metrics::QueryDestination;
 use serial_test::serial;
 use test_utils::skip_slow_tests;
@@ -455,7 +455,10 @@ async fn dry_run_evaluates_support() {
         nom_sql::SqlQuery::Select(s) => s,
         _ => unreachable!(),
     };
-    let query_id = hash_to_query_id(hash(&select_query));
+    let query_id = hash_to_query_id(hash(&PrepareRequest::new(
+        select_query,
+        vec![deployment.name().into()],
+    )));
     let mut results = EventuallyConsistentResults::new();
     results.write(&[(
         query_id.clone(),

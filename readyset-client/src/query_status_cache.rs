@@ -9,23 +9,38 @@ use std::time::{Duration, Instant};
 
 use dashmap::DashMap;
 use launchpad::hash::hash;
-use nom_sql::SelectStatement;
+use nom_sql::{SelectStatement, SqlIdentifier};
 use serde::ser::SerializeSeq;
 use serde::{Serialize, Serializer};
 use tracing::error;
 
 use crate::rewrite::anonymize_literals;
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PrepareRequest {
+    pub statement: SelectStatement,
+    pub schema_search_path: Vec<SqlIdentifier>,
+}
+
+impl PrepareRequest {
+    pub fn new(statement: SelectStatement, schema_search_path: Vec<SqlIdentifier>) -> Self {
+        Self {
+            statement,
+            schema_search_path,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Eq)]
 /// A Query that was made against readyset, which could have either been parsed successfully or
 /// failed to parse.
 pub enum Query {
-    Parsed(Arc<SelectStatement>),
+    Parsed(Arc<PrepareRequest>),
     ParseFailed(Arc<String>),
 }
 
-impl From<SelectStatement> for Query {
-    fn from(stmt: SelectStatement) -> Self {
+impl From<PrepareRequest> for Query {
+    fn from(stmt: PrepareRequest) -> Self {
         Self::Parsed(Arc::new(stmt))
     }
 }
@@ -42,8 +57,8 @@ impl From<&str> for Query {
     }
 }
 
-impl Borrow<SelectStatement> for Query {
-    fn borrow(&self) -> &SelectStatement {
+impl Borrow<PrepareRequest> for Query {
+    fn borrow(&self) -> &PrepareRequest {
         match self {
             Query::ParseFailed(_) => {
                 panic!("cannot borrow a query that failed parsing as a select statement")
@@ -86,30 +101,23 @@ impl Hash for Query {
 impl Display for Query {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Query::Parsed(stmt) => write!(f, "{stmt}"),
+            Query::Parsed(q) => write!(f, "{}", q.statement),
             Query::ParseFailed(s) => write!(f, "{s}"),
         }
     }
 }
 
 impl Query {
-    fn hash(&self) -> u64 {
-        match self {
-            Query::Parsed(stmt) => hash(stmt),
-            Query::ParseFailed(s) => hash(s),
-        }
-    }
-
     /// Clones the inner query into a String and anonymizes it if it is a parsed SelectStatement.
     /// If the query failed to parse, an exact clone of the Query is returned.
     pub(crate) fn to_anonymized_string(&self) -> String {
         match self {
-            Query::Parsed(stmt) => {
-                let mut stmt = SelectStatement::clone(stmt);
-                anonymize_literals(&mut stmt);
-                stmt.to_string()
+            Query::Parsed(q) => {
+                let mut statement = q.statement.clone();
+                anonymize_literals(&mut statement);
+                statement.to_string()
             }
-            Query::ParseFailed(s) => String::clone(s),
+            Query::ParseFailed(s) => (**s).clone(),
         }
     }
 }
@@ -202,7 +210,7 @@ pub enum MigrationState {
 impl MigrationState {
     pub fn default_for_query(query: &Query) -> Self {
         match query {
-            Query::Parsed(_) => Self::Pending,
+            Query::Parsed { .. } => Self::Pending,
             Query::ParseFailed(_) => Self::Unsupported,
         }
     }
@@ -435,7 +443,7 @@ impl QueryStatusCache {
     {
         let q: Query = q.into();
         let status = match q {
-            Query::Parsed(_) => status,
+            Query::Parsed { .. } => status,
             Query::ParseFailed(_) => {
                 let mut status = status;
                 if status.migration_state != MigrationState::Unsupported {
@@ -446,7 +454,7 @@ impl QueryStatusCache {
             }
         };
 
-        self.ids.insert(hash_to_query_id(q.hash()), q.clone());
+        self.ids.insert(hash_to_query_id(hash(&q)), q.clone());
         self.statuses.insert(q, status);
     }
 
@@ -463,7 +471,7 @@ impl QueryStatusCache {
     /// PendingMigration.
     pub fn query_migration_state<Q>(&self, q: &Q) -> MigrationState
     where
-        Q: Into<Query> + std::hash::Hash + Eq + Clone,
+        Q: Into<Query> + Hash + Eq + Clone,
         Query: Borrow<Q>,
     {
         let query_state = self.statuses.get(q).map(|m| m.migration_state);
@@ -478,7 +486,7 @@ impl QueryStatusCache {
     /// PendingMigration.
     pub fn query_status<Q>(&self, q: &Q) -> QueryStatus
     where
-        Q: Into<Query> + std::hash::Hash + Eq + Clone,
+        Q: Into<Query> + Hash + Eq + Clone,
         Query: Borrow<Q>,
     {
         match self.statuses.get(q).map(|s| s.clone()) {
@@ -497,7 +505,7 @@ impl QueryStatusCache {
     /// Updates the transition time in the execution info for the given query.
     pub fn update_transition_time<Q>(&self, q: &Q, transition: &std::time::Instant)
     where
-        Q: Into<Query> + std::hash::Hash + Eq,
+        Q: Into<Query> + Hash + Eq,
         Query: Borrow<Q>,
     {
         if let Some(mut s) = self.statuses.get_mut(q) {
@@ -579,8 +587,8 @@ impl QueryStatusCache {
     /// again.
     pub fn update_query_migration_state<Q>(&self, q: &Q, m: MigrationState)
     where
-        Q: Into<Query> + Clone + std::hash::Hash + Eq,
-        Query: Borrow<Q>,
+        Q: Clone + Hash + Eq,
+        Query: From<Q> + Borrow<Q>,
     {
         match self.statuses.get_mut(q) {
             Some(mut s) if s.migration_state != MigrationState::Unsupported => {
@@ -609,8 +617,8 @@ impl QueryStatusCache {
     /// not already been registered.
     pub fn always_attempt_readyset<Q>(&self, q: &Q, always: bool)
     where
-        Q: Into<Query> + std::hash::Hash + Eq + Clone,
-        Query: Borrow<Q>,
+        Q: Hash + Eq + Clone,
+        Query: From<Q> + Borrow<Q>,
     {
         match self.statuses.get_mut(q) {
             Some(mut s) if s.migration_state != MigrationState::Unsupported => {
@@ -625,8 +633,8 @@ impl QueryStatusCache {
     /// again.
     pub fn update_query_status<Q>(&self, q: &Q, status: QueryStatus)
     where
-        Q: Into<Query> + std::hash::Hash + Eq + Clone,
-        Query: Borrow<Q>,
+        Q: Hash + Eq + Clone,
+        Query: From<Q> + Borrow<Q>,
     {
         match self.statuses.get_mut(q) {
             Some(mut s) if s.migration_state != MigrationState::Unsupported => {
@@ -769,7 +777,7 @@ mod tests {
     fn query_hashes_eq_inner_hashes() {
         // This ensures that calling query_status on a &SelectStatement or &String will find the
         // corresponding Query in the DashMap
-        let select = select_statement("SELECT * FROM t1").unwrap();
+        let select = PrepareRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
         let string = "SELECT * FROM t1".to_string();
         let q_select: Query = select.clone().into();
         let q_string: Query = string.clone().into();
@@ -780,8 +788,8 @@ mod tests {
     #[test]
     fn select_is_found_after_insert() {
         let cache = QueryStatusCache::new();
-        let q1 = select_statement("SELECT * FROM t1").unwrap();
-        let status = QueryStatus::default_for_query(&(q1.clone().into()));
+        let q1 = PrepareRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
+        let status = QueryStatus::default_for_query(&q1.clone().into());
         cache.insert(q1.clone());
         assert!(cache
             .ids
@@ -800,7 +808,7 @@ mod tests {
     fn string_is_found_after_insert() {
         let cache = QueryStatusCache::new();
         let q1 = "SELECT * FROM t1".to_string();
-        let status = QueryStatus::default_for_query(&(q1.clone().into()));
+        let status = QueryStatus::default_for_query(&q1.clone().into());
         cache.insert(q1.clone());
         assert!(cache
             .ids
@@ -818,8 +826,8 @@ mod tests {
     #[test]
     fn query_is_referenced_by_hash() {
         let cache = QueryStatusCache::new();
-        let q1 = select_statement("SELECT * FROM t1").unwrap();
-        let q2 = select_statement("SELECT * FROM t2").unwrap();
+        let q1 = PrepareRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
+        let q2 = PrepareRequest::new(select_statement("SELECT * FROM t2").unwrap(), vec![]);
 
         cache.query_migration_state(&q1);
         cache.update_query_migration_state(&q2, MigrationState::Successful);
@@ -837,7 +845,7 @@ mod tests {
     #[test]
     fn query_is_allowed() {
         let cache = QueryStatusCache::new();
-        let query = select_statement("SELECT * FROM t1").unwrap();
+        let query = PrepareRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
 
         assert_eq!(cache.query_migration_state(&query), MigrationState::Pending);
         assert_eq!(cache.pending_migration().len(), 1);
@@ -853,7 +861,7 @@ mod tests {
     #[test]
     fn query_is_denied() {
         let cache = QueryStatusCache::new();
-        let query = select_statement("SELECT * FROM t1").unwrap();
+        let query = PrepareRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
 
         assert_eq!(cache.query_migration_state(&query), MigrationState::Pending);
         assert_eq!(cache.pending_migration().len(), 1);
@@ -869,7 +877,7 @@ mod tests {
     #[test]
     fn query_is_inferred_denied_explicit() {
         let cache = QueryStatusCache::with_style(MigrationStyle::Explicit);
-        let query = select_statement("SELECT * FROM t1").unwrap();
+        let query = PrepareRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
 
         assert_eq!(cache.query_migration_state(&query), MigrationState::Pending);
         assert_eq!(cache.pending_migration().len(), 1);
@@ -887,11 +895,14 @@ mod tests {
         let cache = QueryStatusCache::with_style(MigrationStyle::Explicit);
 
         cache.update_query_migration_state(
-            &select_statement("SELECT * FROM t1").unwrap(),
+            &PrepareRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]),
             MigrationState::Successful,
         );
         cache.update_query_migration_state(
-            &select_statement("SELECT * FROM t1 WHERE id = ?").unwrap(),
+            &PrepareRequest::new(
+                select_statement("SELECT * FROM t1 WHERE id = ?").unwrap(),
+                vec![],
+            ),
             MigrationState::Successful,
         );
         assert_eq!(cache.allow_list().len(), 2);

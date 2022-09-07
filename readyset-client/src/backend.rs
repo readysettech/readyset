@@ -67,6 +67,7 @@
 //! The metadata for this feature is tracked in the QueryStatusCache for each query. We currently
 //! only trigger on networking related errors specifically to try to prevent this feature from
 //! being too heavy handed.
+
 use std::borrow::Cow;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
@@ -100,10 +101,9 @@ use tracing::{error, instrument, trace, warn};
 
 use crate::backend::noria_connector::ExecuteSelectContext;
 use crate::query_status_cache::{
-    DeniedQuery, ExecutionInfo, ExecutionState, MigrationState, Query, QueryStatus,
+    DeniedQuery, ExecutionInfo, ExecutionState, MigrationState, PrepareRequest, Query, QueryStatus,
     QueryStatusCache,
 };
-use crate::rewrite::anonymize_literals;
 use crate::upstream_database::NoriaCompare;
 pub use crate::upstream_database::UpstreamPrepare;
 use crate::{rewrite, QueryHandler, UpstreamDatabase};
@@ -425,8 +425,8 @@ where
     execution_info: Option<ExecutionInfo>,
     /// If query was successfully parsed, will store the parsed query
     parsed_query: Option<Arc<SqlQuery>>,
-    /// If statement was successfully rewritten, will store the rewritten statement
-    rewritten: Option<SelectStatement>,
+    /// If statement was successfully rewritten, will store the full prepare request
+    prepare_request: Option<PrepareRequest>,
 }
 
 impl<DB> CachedPreparedStatement<DB>
@@ -756,10 +756,12 @@ where
 
         let up_prep: OptionFuture<_> = self.upstream.as_mut().map(|u| u.prepare(query)).into();
         let noria_prep: OptionFuture<_> = do_noria
-            .then_some(
-                self.noria
-                    .prepare_select(select_meta.stmt.clone(), prep_idx, do_migrate),
-            )
+            .then_some(self.noria.prepare_select(
+                select_meta.stmt.clone(),
+                prep_idx,
+                do_migrate,
+                None,
+            ))
             .into();
 
         let (upstream_res, noria_res) = future::join(up_prep, noria_prep).await;
@@ -796,19 +798,30 @@ where
                     }
                 }
 
-                self.query_status_cache
-                    .update_query_migration_state(&select_meta.rewritten, state);
+                self.query_status_cache.update_query_migration_state(
+                    &PrepareRequest::new(
+                        select_meta.rewritten.clone(),
+                        self.noria.schema_search_path().to_owned(),
+                    ),
+                    state,
+                );
             }
             Some(Err(e)) => {
                 if e.caused_by_view_not_found() {
                     warn!(error = %e, "View not found during mirror_prepare()");
                     self.query_status_cache.update_query_migration_state(
-                        &select_meta.rewritten,
+                        &PrepareRequest::new(
+                            select_meta.rewritten.clone(),
+                            self.noria.schema_search_path().to_owned(),
+                        ),
                         MigrationState::Pending,
                     );
                 } else if e.caused_by_unsupported() {
                     self.query_status_cache.update_query_migration_state(
-                        &select_meta.rewritten,
+                        &PrepareRequest::new(
+                            select_meta.rewritten.clone(),
+                            self.noria.schema_search_path().to_owned(),
+                        ),
                         MigrationState::Unsupported,
                     );
                 } else {
@@ -874,7 +887,10 @@ where
     fn plan_prepare_select(&mut self, stmt: nom_sql::SelectStatement) -> PrepareMeta {
         match self.rewrite_select_and_check_noria(&stmt) {
             Some((rewritten, should_do_noria)) => {
-                let status = self.query_status_cache.query_status(&rewritten);
+                let status = self.query_status_cache.query_status(&PrepareRequest::new(
+                    rewritten.clone(),
+                    self.noria.schema_search_path().to_owned(),
+                ));
                 if self.proxy_state == ProxyState::ProxyAlways && !status.always {
                     PrepareMeta::Proxy
                 } else {
@@ -911,8 +927,13 @@ where
         {
             None
         } else {
-            let should_do_noria = self.query_status_cache.query_migration_state(&rewritten)
-                != MigrationState::Unsupported;
+            let should_do_noria =
+                self.query_status_cache
+                    .query_migration_state(&PrepareRequest::new(
+                        rewritten.clone(),
+                        self.noria.schema_search_path().to_owned(),
+                    ))
+                    != MigrationState::Unsupported;
             Some((rewritten, should_do_noria))
         }
     }
@@ -992,7 +1013,7 @@ where
         let meta = self.plan_prepare(query).await;
         let res = self.do_prepare(&meta, query, &mut query_event).await?;
 
-        let (parsed_query, migration_state, rewritten, always) = match meta {
+        let (parsed_query, migration_state, prepare_request, always) = match meta {
             PrepareMeta::Write { stmt } => (
                 Some(Arc::new(stmt)),
                 MigrationState::Successful,
@@ -1004,12 +1025,16 @@ where
                 rewritten,
                 always,
                 ..
-            }) => (
-                Some(Arc::new(SqlQuery::Select(stmt))),
-                self.query_status_cache.query_migration_state(&rewritten),
-                Some(rewritten),
-                always,
-            ),
+            }) => {
+                let request =
+                    PrepareRequest::new(rewritten, self.noria.schema_search_path().to_owned());
+                (
+                    Some(Arc::new(SqlQuery::Select(stmt))),
+                    self.query_status_cache.query_migration_state(&request),
+                    Some(request),
+                    always,
+                )
+            }
             _ => (None, MigrationState::Successful, None, false),
         };
 
@@ -1018,7 +1043,7 @@ where
             migration_state,
             execution_info: None,
             parsed_query,
-            rewritten,
+            prepare_request,
             always,
         };
 
@@ -1163,7 +1188,19 @@ where
             .expect("Cached entry for pending state");
 
         let noria_prep = match &**parsed_statement {
-            SqlQuery::Select(stmt) => noria.prepare_select(stmt.clone(), id, false).await?,
+            SqlQuery::Select(stmt) => {
+                noria
+                    .prepare_select(
+                        stmt.clone(),
+                        id,
+                        false,
+                        cached_entry
+                            .prepare_request
+                            .as_ref()
+                            .map(|pr| pr.schema_search_path.clone()),
+                    )
+                    .await?
+            }
             _ => internal!("Only SELECT statements can be pending migration"),
         };
 
@@ -1177,7 +1214,7 @@ where
 
     /// Iterate over the cache of the prepared statements, and invalidate those that are
     /// equal to the one provided
-    fn invalidate_prepared_statements_cache(&mut self, stmt: &SelectStatement) {
+    fn invalidate_prepared_statements_cache(&mut self, stmt: &PrepareRequest) {
         // Linear scan, but we shouldn't be doing it often, right?
         self.prepared_statements
             .iter_mut()
@@ -1185,11 +1222,11 @@ where
                 |CachedPreparedStatement {
                      prep,
                      migration_state,
-                     rewritten,
+                     prepare_request,
                      ..
                  }| {
                     if *migration_state == MigrationState::Successful
-                        && rewritten.as_ref() == Some(stmt)
+                        && prepare_request.as_ref() == Some(stmt)
                     {
                         *migration_state = MigrationState::Pending;
                         Some(prep)
@@ -1231,9 +1268,9 @@ where
             // finished by now
             let new_migration_state = self.query_status_cache.query_migration_state(
                 cached_statement
-                    .rewritten
+                    .prepare_request
                     .as_ref()
-                    .expect("Pending must have rewritten set"),
+                    .expect("Pending must have prepare_request set"),
             );
 
             if new_migration_state == MigrationState::Successful {
@@ -1252,7 +1289,7 @@ where
                 );
 
                 let always_readyset = cached_statement
-                    .rewritten
+                    .prepare_request
                     .as_ref()
                     .map(|stmt| self.query_status_cache.query_status(stmt).always)
                     .unwrap_or(false);
@@ -1311,7 +1348,7 @@ where
                 // Must exist or we would not have executed the query against ReadySet.
                 #[allow(clippy::unwrap_used)]
                 self.query_status_cache.update_query_migration_state(
-                    cached_statement.rewritten.as_ref().unwrap(),
+                    cached_statement.prepare_request.as_ref().unwrap(),
                     MigrationState::Unsupported,
                 );
             }
@@ -1390,6 +1427,7 @@ where
         &mut self,
         name: Option<&str>,
         mut stmt: SelectStatement,
+        override_schema_search_path: Option<Vec<SqlIdentifier>>,
         always: bool,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         // If we have another query with the same name, drop that query first
@@ -1405,12 +1443,16 @@ where
         // Now migrate the new query
         rewrite::process_query(&mut stmt, self.noria.server_supports_pagination())?;
         self.noria
-            .handle_create_cached_query(name, &stmt, always)
+            .handle_create_cached_query(name, &stmt, override_schema_search_path, always)
             .await?;
-        self.query_status_cache
-            .update_query_migration_state(&stmt, MigrationState::Successful);
-        self.query_status_cache
-            .always_attempt_readyset(&stmt, always);
+        self.query_status_cache.update_query_migration_state(
+            &PrepareRequest::new(stmt.clone(), self.noria.schema_search_path().to_owned()),
+            MigrationState::Successful,
+        );
+        self.query_status_cache.always_attempt_readyset(
+            &PrepareRequest::new(stmt.clone(), self.noria.schema_search_path().to_owned()),
+            always,
+        );
         Ok(noria_connector::QueryResult::Empty)
     }
 
@@ -1422,11 +1464,18 @@ where
         let maybe_select_statement = self.noria.select_statement_from_name(name);
         self.noria.drop_view(name).await?;
         if let Some(stmt) = maybe_select_statement {
-            self.query_status_cache
-                .update_query_migration_state(&stmt, MigrationState::Pending);
-            self.query_status_cache
-                .always_attempt_readyset(&stmt, false);
-            self.invalidate_prepared_statements_cache(&stmt);
+            self.query_status_cache.update_query_migration_state(
+                &PrepareRequest::new(stmt.clone(), self.noria.schema_search_path().to_owned()),
+                MigrationState::Pending,
+            );
+            self.query_status_cache.always_attempt_readyset(
+                &PrepareRequest::new(stmt.clone(), self.noria.schema_search_path().to_owned()),
+                false,
+            );
+            self.invalidate_prepared_statements_cache(&PrepareRequest::new(
+                stmt,
+                self.noria.schema_search_path().to_owned(),
+            ));
         }
         Ok(noria_connector::QueryResult::Empty)
     }
@@ -1493,16 +1542,11 @@ where
                 }
                 .to_string();
 
-                let query = match &query {
-                    Query::Parsed(ref stmt) => {
-                        let mut stmt = SelectStatement::clone(stmt);
-                        anonymize_literals(&mut stmt);
-                        stmt.to_string()
-                    }
-                    Query::ParseFailed(ref s) => s.to_string(),
-                };
-
-                vec![DfValue::from(id), DfValue::from(query), DfValue::from(s)]
+                vec![
+                    DfValue::from(id),
+                    DfValue::from(query.to_anonymized_string()),
+                    DfValue::from(s),
+                ]
             })
             .collect::<Vec<_>>();
         Ok(noria_connector::QueryResult::from_owned(
@@ -1533,11 +1577,14 @@ where
                 inner,
                 always,
             }) => {
-                let st = match inner {
-                    CacheInner::Statement(st) => *st.clone(),
+                let (stmt, search_path) = match inner {
+                    CacheInner::Statement(st) => (*st.clone(), None),
                     CacheInner::Id(id) => match self.query_status_cache.query(id.as_str()) {
                         Some(q) => match q {
-                            Query::Parsed(stmt) => SelectStatement::clone(&stmt),
+                            Query::Parsed(prepare_request) => (
+                                prepare_request.statement.clone(),
+                                Some(prepare_request.schema_search_path.clone()),
+                            ),
                             Query::ParseFailed(_) => {
                                 return Some(Err(ReadySetError::NoQueryForId {
                                     id: id.to_string(),
@@ -1551,7 +1598,8 @@ where
                 };
                 self.create_cached_query(
                     name.as_ref().map(|t| t.name.as_str() /* TODO: schema */),
-                    st,
+                    stmt,
+                    search_path,
                     *always,
                 )
                 .await
@@ -1578,7 +1626,7 @@ where
         &mut self,
         original_query: &str,
         original_stmt: SelectStatement,
-        rewritten: &SelectStatement,
+        prepare_request: &PrepareRequest,
         status: Option<QueryStatus>,
         event: &mut QueryExecutionEvent,
     ) -> Result<QueryResult<'_, DB>, DB::Error> {
@@ -1614,7 +1662,7 @@ where
             if did_work {
                 #[allow(clippy::unwrap_used)] // Validated by did_work.
                 self.query_status_cache.update_transition_time(
-                    rewritten,
+                    prepare_request,
                     &status.execution_info.unwrap().last_transition_time,
                 );
             }
@@ -1651,7 +1699,7 @@ where
                 }
                 if status != original_status {
                     self.query_status_cache
-                        .update_query_status(rewritten, status);
+                        .update_query_status(prepare_request, status);
                 }
                 Ok(noria_ok.into())
             }
@@ -1676,7 +1724,7 @@ where
 
                 if status != original_status {
                     self.query_status_cache
-                        .update_query_status(rewritten, status);
+                        .update_query_status(prepare_request, status);
                 }
 
                 // Try to execute on fallback if present, as long as query is not an `always`
@@ -1700,10 +1748,13 @@ where
     /// supplied select statement by rewriting it.
     /// Returns whether noria should try the select, along with the query status if it was obtained
     /// during processing.
-    fn noria_should_try_select(&self, q: &mut SelectStatement) -> (bool, Option<QueryStatus>) {
+    fn noria_should_try_select(&self, q: &mut PrepareRequest) -> (bool, Option<QueryStatus>) {
         let mut status = None;
-        let should_try = if rewrite::process_query(q, self.noria.server_supports_pagination())
-            .is_ok()
+        let should_try = if rewrite::process_query(
+            &mut q.statement,
+            self.noria.server_supports_pagination(),
+        )
+        .is_ok()
         {
             let s = self.query_status_cache.query_status(q);
             let should_try = if self.proxy_state.should_proxy() {
@@ -1714,7 +1765,7 @@ where
             status = Some(s);
             should_try
         } else {
-            warn!(statement = %Sensitive(&q), "This statement could not be rewritten by ReadySet");
+            warn!(statement = %Sensitive(&q.statement), "This statement could not be rewritten by ReadySet");
             matches!(self.proxy_state, ProxyState::Never | ProxyState::Fallback)
         };
 
@@ -1778,15 +1829,18 @@ where
                 }
             }
             Ok(SqlQuery::Select(stmt)) => {
-                let mut rewritten = stmt.clone();
-                let (noria_should_try, status) = self.noria_should_try_select(&mut rewritten);
+                let mut prepare_request = PrepareRequest::new(
+                    stmt.clone(),
+                    self.noria.schema_search_path().to_owned()
+                );
+                let (noria_should_try, status) = self.noria_should_try_select(&mut prepare_request);
                 if noria_should_try {
                     event.sql_type = SqlQueryType::Read;
                     if self.query_log_ad_hoc_queries {
                         event.query = Some(Arc::new(SqlQuery::Select(stmt.clone())));
                     }
 
-                    self.query_adhoc_select(query, stmt, &rewritten, status, &mut event).await
+                    self.query_adhoc_select(query, stmt, &prepare_request, status, &mut event).await
                 } else {
                     self.query_fallback(query, &mut event).await
                 }

@@ -10,7 +10,6 @@ use std::time::Instant;
 
 use launchpad::redacted::Sensitive;
 use metrics::counter;
-use nom_sql::SelectStatement;
 use readyset::recipe::changelist::{Change, ChangeList};
 use readyset::{ControllerHandle, ReadySetResult};
 use readyset_client_metrics::recorded;
@@ -18,7 +17,7 @@ use tokio::select;
 use tracing::{error, info, instrument, warn};
 
 use crate::backend::{noria_connector, NoriaConnector};
-use crate::query_status_cache::{MigrationState, Query, QueryStatusCache};
+use crate::query_status_cache::{MigrationState, PrepareRequest, Query, QueryStatusCache};
 use crate::upstream_database::{IsFatalError, NoriaCompare};
 use crate::{utils, UpstreamDatabase};
 
@@ -55,7 +54,7 @@ pub struct MigrationHandler<DB> {
     /// The time that we began performing migrations on the query.
     /// Queries are removed when a migration yields success or unsupported
     /// and re-added when they are found in the pending migration list.
-    start_time: HashMap<SelectStatement, Instant>,
+    start_time: HashMap<PrepareRequest, Instant>,
 }
 
 impl<DB> MigrationHandler<DB>
@@ -97,11 +96,11 @@ where
                     let has_controller = self.controller.is_some();
                     for q in to_process {
                         match &q.0 {
-                            Query::Parsed(ref stmt) => {
+                            Query::Parsed(prep_request) => {
                                 if has_controller {
-                                    self.perform_dry_run_migration(stmt).await
+                                    self.perform_dry_run_migration(prep_request).await
                                 } else {
-                                    self.perform_migration(stmt).await
+                                    self.perform_migration(prep_request).await
                                 }
                             }
                             Query::ParseFailed(_) => {
@@ -121,16 +120,18 @@ where
         Ok(())
     }
 
-    async fn perform_migration(&mut self, stmt: &SelectStatement) {
+    async fn perform_migration(&mut self, prepare_request: &PrepareRequest) {
         // If this is the first migration we are performing, add the query to the
         // start_time map.
-        if !self.start_time.contains_key(stmt) {
-            self.start_time.insert(stmt.clone(), Instant::now());
+        if !self.start_time.contains_key(prepare_request) {
+            self.start_time
+                .insert(prepare_request.clone(), Instant::now());
         }
 
         let upstream_result = match self.upstream {
             Some(ref mut db) if self.validate_queries => {
-                let mut upstream_result = db.prepare(stmt.to_string()).await;
+                // TODO(grfn): Set search path here
+                let mut upstream_result = db.prepare(prepare_request.statement.to_string()).await;
 
                 // If we returned an error indicating the connection was closed, we will try to
                 // reconnect. If that fails, we have an unrecoverable error and should wait until
@@ -140,13 +141,14 @@ where
                         if let Err(e) = db.reset().await {
                             error!(
                                 error = %e,
-                                query = %Sensitive(&stmt),
+                                query = %Sensitive(&prepare_request.statement),
                                 "MigrationHandler dropped conn to Upstream and failed to reconnnect",
                             );
                             return;
                         } else {
                             // Succeeded on reconnecting. Retry prepare.
-                            upstream_result = db.prepare(stmt.to_string()).await;
+                            upstream_result =
+                                db.prepare(prepare_request.statement.to_string()).await;
                         }
                     }
                     _ => {}
@@ -155,7 +157,7 @@ where
                 if let Err(e) = upstream_result {
                     error!(
                         error = %e,
-                        query = %Sensitive(stmt),
+                        query = %Sensitive(&prepare_request.statement),
                         "Query failed to be prepared against upstream",
                     );
                     return;
@@ -167,7 +169,16 @@ where
         };
 
         // Check if we can successfully prepare against noria as well.
-        match self.noria.prepare_select(stmt.clone(), 0, true).await {
+        match self
+            .noria
+            .prepare_select(
+                prepare_request.statement.clone(),
+                0,
+                true,
+                Some(prepare_request.schema_search_path.clone()),
+            )
+            .await
+        {
             Ok(n) => {
                 if self.validate_queries {
                     if let noria_connector::PrepareResult::Select {
@@ -184,7 +195,11 @@ where
                             .meta
                             .compare(schema, params)
                         {
-                            warn!(error = %e, query = %Sensitive(&stmt), "Query compare failed");
+                            warn!(
+                                error = %e,
+                                query = %Sensitive(&prepare_request.statement),
+                                "Query compare failed"
+                            );
                             // TODO(justin): Fix setting migration state to unsupported with
                             // validate_queries.
                             /*self.query_status_cache
@@ -197,33 +212,40 @@ where
                     }
                 }
                 counter!(recorded::MIGRATION_HANDLER_ALLOWED, 1);
-                self.start_time.remove(stmt);
+                self.start_time.remove(prepare_request);
                 self.query_status_cache
-                    .update_query_migration_state(stmt, MigrationState::Successful);
+                    .update_query_migration_state(prepare_request, MigrationState::Successful);
             }
             Err(e) if e.caused_by_unsupported() => {
-                error!(error = %e, query = %Sensitive(&stmt), "Select query is unsupported in ReadySet");
+                error!(
+                    error = %e,
+                    query = %Sensitive(&prepare_request.statement),
+                    "Select query is unsupported in ReadySet"
+                );
 
-                self.start_time.remove(stmt);
+                self.start_time.remove(prepare_request);
                 self.query_status_cache
-                    .update_query_migration_state(stmt, MigrationState::Unsupported);
+                    .update_query_migration_state(prepare_request, MigrationState::Unsupported);
             }
             // Errors that were not caused by unsupported may be transient, do nothing
             // so we may retry the migration on this query.
             Err(e) => {
-                warn!(error = %e,
-                      query = %Sensitive(&stmt),
-                      "Select query may have transiently failed");
-                if Instant::now() - *self.start_time.get(stmt).unwrap() > self.max_retry {
+                warn!(
+                    error = %e,
+                    query = %Sensitive(&prepare_request.statement),
+                    "Select query may have transiently failed"
+                );
+                if Instant::now() - *self.start_time.get(prepare_request).unwrap() > self.max_retry
+                {
                     // Query failed for long enough, it is unsupported.
                     self.query_status_cache
-                        .update_query_migration_state(stmt, MigrationState::Unsupported);
+                        .update_query_migration_state(prepare_request, MigrationState::Unsupported);
                 }
             }
         }
     }
 
-    async fn perform_dry_run_migration(&mut self, stmt: &SelectStatement) {
+    async fn perform_dry_run_migration(&mut self, prepare_request: &PrepareRequest) {
         let controller = if let Some(ref mut c) = self.controller {
             c
         } else {
@@ -231,26 +253,30 @@ where
         };
         let start_time = self
             .start_time
-            .entry(stmt.clone())
+            .entry(prepare_request.clone())
             .or_insert_with(Instant::now);
         if Instant::now() - *start_time > self.max_retry {
             // We've exceeded the max amount of times we'll try running dry runs with this query.
             // It's probably unsupported, but we'll allow a proper migration determine that.
             return;
         }
-        let qname = utils::generate_query_name(stmt);
-        let changelist = ChangeList::from_change(Change::create_cache(qname, stmt.clone(), false))
-            .with_schema_search_path(self.noria.schema_search_path().to_owned());
+        let qname = utils::generate_query_name(&prepare_request.statement);
+        let changelist = ChangeList::from_change(Change::create_cache(
+            qname,
+            prepare_request.statement.clone(),
+            false,
+        ))
+        .with_schema_search_path(prepare_request.schema_search_path.clone());
         match controller.dry_run(changelist).await {
             Ok(_) => {
-                self.start_time.remove(stmt);
+                self.start_time.remove(prepare_request);
                 self.query_status_cache
-                    .update_query_migration_state(stmt, MigrationState::DryRunSucceeded);
+                    .update_query_migration_state(prepare_request, MigrationState::DryRunSucceeded);
             }
             Err(e) if e.caused_by_unsupported() => {
-                self.start_time.remove(stmt);
+                self.start_time.remove(prepare_request);
                 self.query_status_cache
-                    .update_query_migration_state(stmt, MigrationState::Unsupported);
+                    .update_query_migration_state(prepare_request, MigrationState::Unsupported);
             }
             _ => {} // Leave it as pending.
         }

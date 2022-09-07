@@ -956,6 +956,7 @@ impl NoriaConnector {
         &mut self,
         name: Option<&str>,
         statement: &nom_sql::SelectStatement,
+        override_schema_search_path: Option<Vec<SqlIdentifier>>,
         always: bool,
     ) -> ReadySetResult<()> {
         let name: SqlIdentifier = name
@@ -966,7 +967,9 @@ impl NoriaConnector {
             statement.clone(),
             always,
         ))
-        .with_schema_search_path(self.schema_search_path.clone());
+        .with_schema_search_path(
+            override_schema_search_path.unwrap_or_else(|| self.schema_search_path.clone()),
+        );
 
         noria_await!(
             self.inner.get_mut().await?,
@@ -1307,6 +1310,7 @@ impl NoriaConnector {
         mut statement: nom_sql::SelectStatement,
         statement_id: u32,
         create_if_not_exist: bool,
+        override_schema_search_path: Option<Vec<SqlIdentifier>>,
     ) -> ReadySetResult<PrepareResult> {
         // extract parameter columns *for the client*
         // note that we have to do this *before* processing the query, otherwise the
