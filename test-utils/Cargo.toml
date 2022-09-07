@@ -6,4 +6,5 @@ authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 [dependencies]
+test-utils-proc-macros = { path = "./proc-macros" }
 # Avoid adding dependencies as this is included in tests.

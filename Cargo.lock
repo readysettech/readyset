@@ -5077,6 +5077,17 @@ dependencies = [
 [[package]]
 name = "test-utils"
 version = "0.0.0"
+dependencies = [
+ "test-utils-proc-macros",
+]
+
+[[package]]
+name = "test-utils-proc-macros"
+version = "0.0.0"
+dependencies = [
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "textwrap"
