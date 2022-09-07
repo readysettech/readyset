@@ -175,7 +175,9 @@ impl LRUEviction {
         let ctrs_save = ctrs.clone(); // Save the counters before sorting them to avoid atomic loads for the second time
 
         // We then find the value of the counter with the nkey'th value
-        let cutoff = {
+        let cutoff = if nkeys >= ctrs.len() {
+            u64::MAX
+        } else {
             let (_, val, _) = ctrs.select_nth_unstable(nkeys);
             *val
         };

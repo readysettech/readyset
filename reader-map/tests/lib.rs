@@ -1028,6 +1028,18 @@ fn eviction_lru() {
 
     w.publish();
     assert!(r.get(&y.0).unwrap().is_none());
+
+    // Check that if we evict all keys the map is empty
+    w.insert(x.0, x);
+    w.insert(y.0, y);
+    w.insert(z.0, z);
+
+    w.publish();
+
+    let to_evict = w.evict_keys(1.).collect::<Vec<_>>();
+    assert_eq!(to_evict.len(), 3);
+    w.publish();
+    assert_eq!(w.len(), 0);
 }
 
 #[test]
