@@ -1,4 +1,5 @@
 use std::env;
+use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -133,11 +134,46 @@ impl DbConnection {
     async fn connect(url: &str) -> ReadySetResult<Self> {
         if url.starts_with("mysql") {
             let opts: mysql_async::Opts = url.parse().unwrap();
-            let mut client = mysql_async::Conn::new(opts).await?;
+            let test_db_name = opts.db_name().unwrap();
+            let no_db_opts =
+                mysql_async::OptsBuilder::from_opts(opts.clone()).db_name::<String>(None);
+
+            // First, connect without a db
+            let mut client = mysql_async::Conn::new(no_db_opts).await?;
+
+            // Then drop and recreate the test db
+            client
+                .query_drop(format!("DROP DATABASE IF EXISTS {test_db_name};"))
+                .await?;
+            client
+                .query_drop(format!("CREATE DATABASE {test_db_name};"))
+                .await?;
+
+            // Then switch to the test db
+            client.query_drop(format!("USE {test_db_name};")).await?;
+
             // Set very low execution time, to make sure we override it later on
             client.query_drop("SET GLOBAL MAX_EXECUTION_TIME=1").await?;
             Ok(DbConnection::MySQL(client))
         } else if url.starts_with("postgresql") {
+            let opts = tokio_postgres::Config::from_str(url)?;
+
+            // Drop and recreate the test db
+            {
+                let test_db_name = opts.get_dbname().unwrap();
+                let mut no_db_opts = opts.clone();
+                no_db_opts.dbname("postgres");
+                let (no_db_client, conn) = no_db_opts.connect(tokio_postgres::NoTls).await?;
+                tokio::spawn(conn);
+
+                no_db_client
+                    .simple_query(&format!("DROP DATABASE IF EXISTS {test_db_name}"))
+                    .await?;
+                no_db_client
+                    .simple_query(&format!("CREATE DATABASE {test_db_name}"))
+                    .await?;
+            }
+
             let (client, conn) = tokio_postgres::connect(&pgsql_url(), tokio_postgres::NoTls)
                 .await
                 .unwrap();
