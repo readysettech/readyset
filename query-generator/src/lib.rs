@@ -964,7 +964,7 @@ impl From<CreateTableStatement> for TableSpec {
                 })
                 .collect(),
             column_name_counter: 0,
-            primary_key,
+            primary_key: primary_key.clone(),
         };
 
         for col in stmt
@@ -983,6 +983,7 @@ impl From<CreateTableStatement> for TableSpec {
                     _ => vec![],
                 })
             .map(|c| ColumnName::from(c.name))
+            .chain(primary_key)
         {
             // Unwrap: Unique key columns come from the CreateTableStatement we just
             // generated the TableSpec from. They should be valid columns.
