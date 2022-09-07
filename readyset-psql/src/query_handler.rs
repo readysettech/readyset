@@ -9,7 +9,7 @@ use nom_sql::{
 use readyset::ReadySetResult;
 use readyset_client::backend::noria_connector::QueryResult;
 use readyset_client::backend::{noria_connector, SelectSchema};
-use readyset_client::QueryHandler;
+use readyset_client::{QueryHandler, SetBehavior};
 
 enum AllowedParameterValue {
     Literal(PostgresParameterValue),
@@ -74,7 +74,6 @@ lazy_static! {
             "autovacuum_vacuum_cost_limit",
             "autovacuum_vacuum_scale_factor",
             "autovacuum_vacuum_threshold",
-            "autocommit",
             "default_text_search_config",
             "server_encoding",
             "timezone_abbreviations",
@@ -369,27 +368,13 @@ impl QueryHandler for PostgreSqlQueryHandler {
         }))
     }
 
-    fn is_set_allowed(stmt: &SetStatement) -> bool {
+    fn handle_set_statement(stmt: &SetStatement) -> SetBehavior {
         match stmt {
             SetStatement::PostgresParameter(SetPostgresParameter { name, .. })
                 if ALLOWED_PARAMETERS_ANY_VALUE.contains(name.to_ascii_lowercase().as_str()) =>
             {
-                true
+                SetBehavior::Proxy
             }
-            SetStatement::PostgresParameter(SetPostgresParameter { name, value, .. }) => {
-                if let Some(allowed_value) = ALLOWED_PARAMETERS_WITH_VALUE.get(name.as_str()) {
-                    allowed_value.set_value_is_allowed(value)
-                } else {
-                    false
-                }
-            }
-            SetStatement::Names(SetNames { charset, .. }) => charset.to_lowercase() == "utf8",
-            _ => false,
-        }
-    }
-
-    fn autocommit_state(stmt: &SetStatement) -> Option<bool> {
-        match stmt {
             SetStatement::PostgresParameter(SetPostgresParameter { name, value, .. }) => {
                 if name.as_str() == "autocommit" {
                     let allowed_values = AllowedParameterValue::one_of([
@@ -397,13 +382,20 @@ impl QueryHandler for PostgreSqlQueryHandler {
                         PostgresParameterValue::literal(false),
                         PostgresParameterValue::identifier("off"),
                     ]);
-                    let off = allowed_values.set_value_is_allowed(value);
-                    Some(!off)
+
+                    return SetBehavior::SetAutocommit(!allowed_values.set_value_is_allowed(value));
+                }
+
+                if let Some(allowed_value) = ALLOWED_PARAMETERS_WITH_VALUE.get(name.as_str()) {
+                    SetBehavior::proxy_if(allowed_value.set_value_is_allowed(value))
                 } else {
-                    None
+                    SetBehavior::Unsupported
                 }
             }
-            _ => None,
+            SetStatement::Names(SetNames { charset, .. }) => {
+                SetBehavior::proxy_if(charset.to_lowercase() == "utf8")
+            }
+            _ => SetBehavior::Unsupported,
         }
     }
 }
@@ -421,60 +413,59 @@ mod tests {
         }
     }
 
-    fn is_allowed(statement: &str) {
-        assert!(PostgreSqlQueryHandler::is_set_allowed(
-            &parse_set_statement(statement)
-        ))
+    fn is_proxy(statement: &str) {
+        assert_eq!(
+            PostgreSqlQueryHandler::handle_set_statement(&parse_set_statement(statement)),
+            SetBehavior::Proxy
+        )
     }
 
-    fn is_forbidden(statement: &str) {
-        assert!(!PostgreSqlQueryHandler::is_set_allowed(
-            &parse_set_statement(statement)
-        ))
+    fn is_unsupported(statement: &str) {
+        assert_eq!(
+            PostgreSqlQueryHandler::handle_set_statement(&parse_set_statement(statement)),
+            SetBehavior::Unsupported
+        )
     }
 
     #[test]
     fn search_path_with_public_is_allowed() {
-        is_allowed("SET search_path = 'public', 'other'");
+        is_proxy("SET search_path = 'public', 'other'");
     }
 
     #[test]
     fn search_path_not_starting_with_public_isnt_allowed() {
-        is_forbidden("SET search_path = 'other', 'public'");
+        is_unsupported("SET search_path = 'other', 'public'");
     }
 
     #[test]
     fn search_path_with_identifier_public_is_allowed() {
-        is_allowed("SET search_path = public, other");
+        is_proxy("SET search_path = public, other");
     }
 
     #[test]
     fn standard_conforming_strings_on_allowed() {
-        is_allowed("SET standard_conforming_strings = on");
+        is_proxy("SET standard_conforming_strings = on");
     }
 
     #[test]
     fn client_encoding_utf8_allowed() {
-        is_allowed("SET client_encoding = 'UTF8'");
+        is_proxy("SET client_encoding = 'UTF8'");
     }
 
     #[test]
     fn autcommit_state() {
         assert_eq!(
-            PostgreSqlQueryHandler::autocommit_state(&parse_set_statement("SET autocommit = off")),
-            Some(false),
-        );
-
-        assert_eq!(
-            PostgreSqlQueryHandler::autocommit_state(&parse_set_statement("SET autocommit = on")),
-            Some(true),
-        );
-
-        assert_eq!(
-            PostgreSqlQueryHandler::autocommit_state(&parse_set_statement(
-                "SET client_encoding = 'UTF8'",
+            PostgreSqlQueryHandler::handle_set_statement(&parse_set_statement(
+                "SET autocommit = off"
             )),
-            None,
+            SetBehavior::SetAutocommit(false),
+        );
+
+        assert_eq!(
+            PostgreSqlQueryHandler::handle_set_statement(&parse_set_statement(
+                "SET autocommit = on"
+            )),
+            SetBehavior::SetAutocommit(true),
         );
     }
 }

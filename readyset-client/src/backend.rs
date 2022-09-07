@@ -100,6 +100,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tracing::{error, instrument, trace, warn};
 
 use crate::backend::noria_connector::ExecuteSelectContext;
+use crate::query_handler::SetBehavior;
 use crate::query_status_cache::{
     DeniedQuery, ExecutionInfo, ExecutionState, MigrationState, PrepareRequest, Query, QueryStatus,
     QueryStatusCache,
@@ -1806,9 +1807,10 @@ where
             }
             // SET autocommit=1 needs to be handled explicitly or it will end up getting proxied in
             // most cases.
-            Ok(SqlQuery::Set(s)) if let Some(true) = Handler::autocommit_state(&s) => {
-                self.query_adhoc_non_select(query, &mut event, SqlQuery::Set(s)).await
-            }
+            Ok(SqlQuery::Set(s))
+                if Handler::handle_set_statement(&s) == SetBehavior::SetAutocommit(true) => {
+                    self.query_adhoc_non_select(query, &mut event, SqlQuery::Set(s)).await
+                }
             Ok(ref parsed_query) if Handler::requires_fallback(parsed_query) => {
                 if self.has_fallback() {
                     // Query requires a fallback and we can send it to fallback
@@ -1901,41 +1903,46 @@ where
         set: &SetStatement,
         event: &mut QueryExecutionEvent,
     ) -> Result<(), DB::Error> {
-        if !Handler::is_set_allowed(set) {
-            warn!(%set, "received unsupported SET statement");
-            match self.unsupported_set_mode {
-                UnsupportedSetMode::Error => {
-                    let e = ReadySetError::SetDisallowed {
-                        statement: query.to_string(),
-                    };
-                    if self.has_fallback() {
-                        event.set_noria_error(&e);
+        match Handler::handle_set_statement(set) {
+            SetBehavior::Unsupported => {
+                warn!(%set, "received unsupported SET statement");
+                match self.unsupported_set_mode {
+                    UnsupportedSetMode::Error => {
+                        let e = ReadySetError::SetDisallowed {
+                            statement: query.to_string(),
+                        };
+                        if self.has_fallback() {
+                            event.set_noria_error(&e);
+                        }
+                        return Err(e.into());
                     }
-                    return Err(e.into());
+                    UnsupportedSetMode::Proxy => {
+                        self.proxy_state = ProxyState::ProxyAlways;
+                    }
+                    UnsupportedSetMode::Allow => {}
                 }
-                UnsupportedSetMode::Proxy => {
-                    self.proxy_state = ProxyState::ProxyAlways;
-                }
-                UnsupportedSetMode::Allow => {}
             }
-        } else if let Some(on) = Handler::autocommit_state(set) {
-            warn!(%set, "received unsupported SET statement");
-            match self.unsupported_set_mode {
-                UnsupportedSetMode::Error if !on => {
-                    let e = ReadySetError::SetDisallowed {
-                        statement: query.to_string(),
-                    };
-                    if self.has_fallback() {
-                        event.set_noria_error(&e);
+            SetBehavior::Proxy => { /* Do nothing (the caller will proxy for us) */ }
+            SetBehavior::SetAutocommit(on) => {
+                warn!(%set, "received unsupported SET statement");
+                match self.unsupported_set_mode {
+                    UnsupportedSetMode::Error if !on => {
+                        let e = ReadySetError::SetDisallowed {
+                            statement: query.to_string(),
+                        };
+                        if self.has_fallback() {
+                            event.set_noria_error(&e);
+                        }
+                        return Err(e.into());
                     }
-                    return Err(e.into());
+                    UnsupportedSetMode::Proxy => {
+                        self.proxy_state.set_autocommit(on);
+                    }
+                    _ => {}
                 }
-                UnsupportedSetMode::Proxy => {
-                    self.proxy_state.set_autocommit(on);
-                }
-                _ => {}
             }
         }
+
         Ok(())
     }
 

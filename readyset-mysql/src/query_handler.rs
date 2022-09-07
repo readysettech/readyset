@@ -11,7 +11,7 @@ use readyset::results::Results;
 use readyset::{ColumnSchema, ReadySetError};
 use readyset_client::backend::noria_connector::QueryResult;
 use readyset_client::backend::SelectSchema;
-use readyset_client::QueryHandler;
+use readyset_client::{QueryHandler, SetBehavior};
 use readyset_data::DfValue;
 use readyset_errors::ReadySetResult;
 use tracing::warn;
@@ -880,10 +880,24 @@ impl QueryHandler for MySqlQueryHandler {
         }
     }
 
-    fn is_set_allowed(stmt: &nom_sql::SetStatement) -> bool {
+    fn handle_set_statement(stmt: &nom_sql::SetStatement) -> SetBehavior {
+        use SetBehavior::*;
+
         match stmt {
             nom_sql::SetStatement::Variable(set) => {
-                set.variables.iter().all(|(variable, value)| {
+                if let Some(val) = set.variables.iter().find_map(|(var, val)| {
+                    if var.name.as_str().eq_ignore_ascii_case("autocommit") {
+                        Some(val)
+                    } else {
+                        None
+                    }
+                }) {
+                    return SetAutocommit(
+                        matches!(val, Expr::Literal(Literal::UnsignedInteger(i)) if *i == 1),
+                    );
+                }
+
+                SetBehavior::proxy_if(set.variables.iter().all(|(variable, value)| {
                     if variable.scope == VariableScope::User {
                         return false;
                     }
@@ -918,29 +932,13 @@ impl QueryHandler for MySqlQueryHandler {
                         }
                         p => ALLOWED_PARAMETERS_ANY_VALUE.contains(p),
                     }
-                })
+                }))
             }
-            nom_sql::SetStatement::Names(names) => {
+            nom_sql::SetStatement::Names(names) => SetBehavior::proxy_if(
                 names.collation.is_none()
-                    && matches!(&names.charset[..], "latin1" | "utf8" | "utf8mb4")
-            }
-            nom_sql::SetStatement::PostgresParameter(_) => false,
-        }
-    }
-
-    fn autocommit_state(stmt: &nom_sql::SetStatement) -> Option<bool> {
-        match stmt {
-            nom_sql::SetStatement::Variable(set) => {
-                for (var, val) in set.variables.iter() {
-                    if var.name.as_str().eq_ignore_ascii_case("autocommit") {
-                        return Some(
-                            matches!(val, Expr::Literal(Literal::UnsignedInteger(i)) if *i == 1),
-                        );
-                    }
-                }
-                None
-            }
-            _ => None,
+                    && matches!(&names.charset[..], "latin1" | "utf8" | "utf8mb4"),
+            ),
+            nom_sql::SetStatement::PostgresParameter(_) => Unsupported,
         }
     }
 }
@@ -963,7 +961,10 @@ mod tests {
                 Expr::Literal(Literal::from(m)),
             )],
         });
-        assert!(MySqlQueryHandler::is_set_allowed(&stmt));
+        assert_eq!(
+            MySqlQueryHandler::handle_set_statement(&stmt),
+            SetBehavior::Proxy
+        );
     }
 
     #[test]
@@ -978,7 +979,10 @@ mod tests {
                 Expr::Literal(Literal::from(m)),
             )],
         });
-        assert!(!MySqlQueryHandler::is_set_allowed(&stmt));
+        assert_eq!(
+            MySqlQueryHandler::handle_set_statement(&stmt),
+            SetBehavior::Unsupported
+        );
     }
 
     #[test]

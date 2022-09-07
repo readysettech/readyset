@@ -3,8 +3,31 @@ use readyset::ReadySetResult;
 
 use crate::backend::noria_connector;
 
-/// A trait describing the behavior of how specific queries should be
-/// handled by a noria-client [`Backend`].
+/// Classification for how we should be handling a SQL `SET` statement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetBehavior {
+    /// This `SET` statement is unsupported.
+    Unsupported,
+    /// This `SET` statement is meaningless to ReadySet, so should be proxied upstream verbatim.
+    Proxy,
+    /// This `SET` statement represents the `autocommit` flag being set either on or off.
+    SetAutocommit(bool),
+}
+
+impl SetBehavior {
+    /// Return a [`SetBehavior`] specifying that a statement should be proxied if the argument is
+    /// `true`, or unsupported if the argument is `false`
+    pub fn proxy_if(b: bool) -> Self {
+        if b {
+            Self::Proxy
+        } else {
+            Self::Unsupported
+        }
+    }
+}
+
+/// A trait describing the behavior of how specific queries should be handled by a noria-client
+/// [`Backend`].
 pub trait QueryHandler: Sized + Send {
     /// Whether or not a given query requires fallback.
     fn requires_fallback(query: &SqlQuery) -> bool;
@@ -14,17 +37,8 @@ pub trait QueryHandler: Sized + Send {
     /// and there is no fallback mechanism enabled.
     fn default_response(query: &SqlQuery) -> ReadySetResult<noria_connector::QueryResult<'static>>;
 
-    /// Is the given SET statement allowed?
+    /// Classify the given SET statement based on how we should handle it
     ///
-    /// If this function returns true, the statement will be proxied to the upstream database, and
-    /// hence cannot change the behavior of upstream queries in a way that would not also be
-    /// reflected by ReadySet
-    fn is_set_allowed(stmt: &nom_sql::SetStatement) -> bool;
-
-    /// Checks if the set is trying to set the autocommit state.
-    ///
-    /// Some(true) if SET autocommit=1.
-    /// Some(false) if SET autocommit=0.
-    /// None if not autocommit related SET.
-    fn autocommit_state(stmt: &nom_sql::SetStatement) -> Option<bool>;
+    /// See the documentation of [`SetStatement`] for more information.
+    fn handle_set_statement(stmt: &nom_sql::SetStatement) -> SetBehavior;
 }

@@ -18,5 +18,5 @@ mod utils;
 
 pub use crate::backend::{Backend, BackendBuilder};
 pub use crate::outputs_synchronizer::OutputsSynchronizer;
-pub use crate::query_handler::QueryHandler;
+pub use crate::query_handler::{QueryHandler, SetBehavior};
 pub use crate::upstream_database::{UpstreamDatabase, UpstreamPrepare};
