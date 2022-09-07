@@ -83,7 +83,7 @@ use mysql_common::row::convert::{FromRow, FromRowError};
 use nom_sql::{
     CacheInner, CreateCacheStatement, DeleteStatement, Dialect, DropCacheStatement,
     InsertStatement, SelectStatement, SetStatement, ShowStatement, SqlIdentifier, SqlQuery, Table,
-    UpdateStatement,
+    UpdateStatement, UseStatement,
 };
 use readyset::consistency::Timestamp;
 use readyset::results::Results;
@@ -1959,8 +1959,12 @@ where
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let parsed_query = &parse_result;
 
-        if let SqlQuery::Set(s) = parsed_query {
-            self.handle_set(query, s, event)?;
+        match &parse_result {
+            SqlQuery::Set(s) => self.handle_set(query, s, event)?,
+            SqlQuery::Use(UseStatement { database }) => {
+                self.noria.set_schema_search_path(vec![database.clone()])
+            }
+            _ => (),
         }
 
         macro_rules! handle_ddl {
@@ -2061,24 +2065,16 @@ where
                         });
                         res
                     }
-                    SqlQuery::StartTransaction(_) | SqlQuery::Commit(_) | SqlQuery::Rollback(_) => {
+                    SqlQuery::StartTransaction(_)
+                    | SqlQuery::Commit(_)
+                    | SqlQuery::Rollback(_)
+                    | SqlQuery::Use(_) => {
                         let res = self.handle_transaction_boundaries(parsed_query).await;
                         self.last_query = Some(QueryInfo {
                             destination: QueryDestination::Upstream,
                             noria_error: String::new(),
                         });
                         res
-                    }
-                    SqlQuery::Use(stmt) => {
-                        match self.upstream.as_ref().and_then(|u| u.database()) {
-                            Some(db) if stmt.database == db => {
-                                Ok(QueryResult::Noria(noria_connector::QueryResult::Empty))
-                            }
-                            _ => {
-                                error!("USE statement attempted to change the database");
-                                unsupported!("USE");
-                            }
-                        }
                     }
                     SqlQuery::CreateCache(_)
                     | SqlQuery::DropCache(_)
@@ -2111,7 +2107,7 @@ where
                     // messages are dropped - we do not support transactions in noria standalone.
                     // We return an empty result set instead of an error to support test
                     // applications.
-                    SqlQuery::Set(_) | SqlQuery::Commit(_) => {
+                    SqlQuery::Set(_) | SqlQuery::Commit(_) | SqlQuery::Use(_) => {
                         Ok(noria_connector::QueryResult::Empty)
                     }
                     _ => {

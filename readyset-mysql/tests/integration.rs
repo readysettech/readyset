@@ -1637,3 +1637,20 @@ async fn simple_nonblocking_select() {
     rows.sort_by_key(|(a, _)| *a);
     assert_eq!(rows, vec![(4, 2)]);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn switch_database_with_use() {
+    let (opts, _handle) = setup(true).await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+
+    conn.query_drop("CREATE TABLE s1.t (a int)").await.unwrap();
+    conn.query_drop("CREATE TABLE s2.t (b int)").await.unwrap();
+    conn.query_drop("CREATE TABLE s2.t2 (c int)").await.unwrap();
+
+    conn.query_drop("USE s1;").await.unwrap();
+    conn.query_drop("SELECT a FROM t").await.unwrap();
+
+    conn.query_drop("USE s2;").await.unwrap();
+    conn.query_drop("SELECT b FROM t").await.unwrap();
+    conn.query_drop("SELECT c FROM t2").await.unwrap();
+}
