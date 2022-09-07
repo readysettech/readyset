@@ -221,6 +221,27 @@ impl Leader {
                         .map(|w| w.0)
                         .collect::<Vec<_>>());
                 }
+                (&Method::GET, "/allocated_bytes") => {
+                    let alloc_bytes = tikv_jemalloc_ctl::epoch::mib()
+                        .and_then(|m| m.advance())
+                        .and_then(|_| tikv_jemalloc_ctl::stats::allocated::mib())
+                        .and_then(|m| m.read())
+                        .ok();
+                    return_serialized!(alloc_bytes);
+                }
+                (&Method::POST, "/set_memory_limit") => {
+                    let (period, limit) = bincode::deserialize(&body)?;
+                    let res: Result<(), ReadySetError> = futures::executor::block_on(async move {
+                        let ds = self.dataflow_state_handle.read().await;
+                        for (_, worker) in ds.workers.iter() {
+                            worker
+                                .rpc::<()>(WorkerRequestKind::SetMemoryLimit { period, limit })
+                                .await?;
+                        }
+                        Ok(())
+                    });
+                    return_serialized!(res);
+                }
                 _ => {}
             }
 

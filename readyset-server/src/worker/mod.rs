@@ -5,6 +5,7 @@ use std::future::Future;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use dataflow::{DomainBuilder, DomainRequest, Packet, Readers};
 use futures::stream::FuturesUnordered;
@@ -77,6 +78,14 @@ pub enum WorkerRequestKind {
 
     /// Sent to validate that a connection actually works. Provokes an empty response.
     Ping,
+
+    /// Set the memory limit for this worker
+    SetMemoryLimit {
+        /// The period with which eviction check will be performed
+        period: Option<Duration>,
+        /// The limit in bytes
+        limit: Option<usize>,
+    },
 }
 
 /// A request to a running ReadySet worker, containing a request kind and a completion channel.
@@ -363,6 +372,11 @@ impl Worker {
                 rx.await.map_err(|_| nsde())?
             }
             WorkerRequestKind::Ping => Ok(None),
+            WorkerRequestKind::SetMemoryLimit { period, limit } => {
+                self.evict_interval = period.map(tokio::time::interval);
+                self.memory_limit = limit;
+                Ok(None)
+            }
         }
     }
 

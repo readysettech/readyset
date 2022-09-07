@@ -712,6 +712,20 @@ impl ControllerHandle {
         self.rpc("supports_pagination", (), self.request_timeout)
     }
 
+    /// Returns the amount of actually allocated memory
+    pub fn allocated_bytes(&mut self) -> impl Future<Output = ReadySetResult<Option<usize>>> + '_ {
+        self.rpc("allocated_bytes", (), self.request_timeout)
+    }
+
+    /// Set memory limit parameters
+    pub fn set_memory_limit(
+        &mut self,
+        period: Option<Duration>,
+        limit: Option<usize>,
+    ) -> impl Future<Output = ReadySetResult<()>> + '_ {
+        self.rpc("set_memory_limit", (period, limit), self.request_timeout)
+    }
+
     #[cfg(feature = "failure_injection")]
     pub fn failpoint(
         &mut self,
