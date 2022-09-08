@@ -1,0 +1,53 @@
+statement ok
+CREATE TABLE enum_test(id INTEGER PRIMARY KEY NOT NULL AUTO_INCREMENT, e ENUM('red', 'yellow', 'green'))
+
+statement ok
+INSERT INTO enum_test (e) VALUES ('green'), ('red'), ('purple')
+
+query IT rowsort
+SELECT id, e FROM enum_test;
+----
+1
+green
+2
+red
+3
+(empty)
+
+query IT nosort
+SELECT id, e FROM enum_test ORDER BY e;
+----
+3
+(empty)
+2
+red
+1
+green
+
+query IT rowsort
+SELECT id, e FROM enum_test WHERE e = 3;
+----
+1
+green
+
+query IT rowsort
+SELECT id, e FROM enum_test WHERE e = 'green';
+----
+1
+green
+
+query IT rowsort
+SELECT id, e FROM enum_test WHERE e <> 0;
+----
+1
+green
+2
+red
+
+query IT rowsort
+SELECT id, e FROM enum_test WHERE e < 3;
+----
+2
+red
+3
+(empty)
