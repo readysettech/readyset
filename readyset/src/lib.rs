@@ -358,7 +358,7 @@ pub use crate::view::View;
 #[doc(hidden)]
 pub use crate::view::{
     KeyComparison, LookupResult, ReadQuery, ReadReply, ReadReplyBatch, ReadReplyStats, SchemaType,
-    ViewQuery,
+    ViewCreateRequest, ViewQuery,
 };
 
 #[doc(hidden)]

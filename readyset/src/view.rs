@@ -19,7 +19,9 @@ use futures_util::stream::{StreamExt, TryStreamExt};
 use futures_util::{future, ready};
 use launchpad::intervals::{cmp_start_end, BoundPair};
 use launchpad::redacted::Sensitive;
-use nom_sql::{BinaryOperator, Column, ColumnSpecification, Relation, SqlIdentifier, SqlType};
+use nom_sql::{
+    BinaryOperator, Column, ColumnSpecification, Relation, SelectStatement, SqlIdentifier, SqlType,
+};
 use petgraph::graph::NodeIndex;
 use proptest::arbitrary::Arbitrary;
 use rand::prelude::IteratorRandom;
@@ -60,6 +62,33 @@ pub type KeyColumnIdx = usize;
 
 /// Index of a placeholder variable as it appears in the SQL query
 pub type PlaceholderIdx = usize;
+
+/// All the information necessary to create an (anonymous) view in the graph.
+///
+/// This structure is not used *directly* by any of the methods that actually create views in the
+/// graph, but is used throughout the codebase as a uniquely identifiable stand-in for a
+/// yet-to-be-created view
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ViewCreateRequest {
+    /// The query itself, as provided by the user
+    pub statement: SelectStatement,
+
+    /// The schema search path to use to resolve table references within the changelist
+    ///
+    /// This is actually passed as [`recipe::changelist::ChangeList::schema_search_path`] when
+    /// views are created.
+    pub schema_search_path: Vec<SqlIdentifier>,
+}
+
+impl ViewCreateRequest {
+    /// Initialize a new [`ViewCreateRequest`] with the given query and schema search path
+    pub fn new(statement: SelectStatement, schema_search_path: Vec<SqlIdentifier>) -> Self {
+        Self {
+            statement,
+            schema_search_path,
+        }
+    }
+}
 
 /// Representation of how a key column in a view maps back to a placeholder in the original query
 #[derive(Hash, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

@@ -1047,12 +1047,14 @@ mod tests {
     }
 
     mod anonymize {
+        use readyset::ViewCreateRequest;
+
         use super::*;
-        use crate::query_status_cache::{PrepareRequest, Query};
+        use crate::query_status_cache::Query;
 
         #[test]
         fn simple_query() {
-            let query: Query = PrepareRequest::new(
+            let query: Query = ViewCreateRequest::new(
                 parse_select_statement(
                     "SELECT id + 3 FROM users WHERE credit_card_number = \"look at this PII\"",
                 ),

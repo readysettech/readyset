@@ -1,11 +1,11 @@
 use std::time::Duration;
 
-use ::readyset::get_metric;
 use ::readyset::metrics::{recorded, DumpedMetricValue};
+use ::readyset::{get_metric, ViewCreateRequest};
 use launchpad::hash::hash;
 use mysql_async::prelude::Queryable;
 use readyset_client::backend::QueryInfo;
-use readyset_client::query_status_cache::{hash_to_query_id, PrepareRequest};
+use readyset_client::query_status_cache::hash_to_query_id;
 use readyset_client_metrics::QueryDestination;
 use serial_test::serial;
 use test_utils::slow;
@@ -455,7 +455,7 @@ async fn dry_run_evaluates_support() {
         nom_sql::SqlQuery::Select(s) => s,
         _ => unreachable!(),
     };
-    let query_id = hash_to_query_id(hash(&PrepareRequest::new(
+    let query_id = hash_to_query_id(hash(&ViewCreateRequest::new(
         select_query,
         vec![deployment.name().into()],
     )));

@@ -1,8 +1,8 @@
-use readyset::{ControllerHandle, ReadySetResult};
+use readyset::{ControllerHandle, ReadySetResult, ViewCreateRequest};
 use tokio::select;
 use tracing::{info, instrument, warn};
 
-use crate::query_status_cache::{MigrationState, PrepareRequest, QueryStatusCache};
+use crate::query_status_cache::{MigrationState, QueryStatusCache};
 
 pub struct ViewsSynchronizer {
     /// The noria connector used to query
@@ -43,13 +43,13 @@ impl ViewsSynchronizer {
                             //TODO(Dan): Update so that we only request changes to output since
                             //some timestamp. Also consider using query hashes instead of SqlQuery
                             views.iter().for_each(|(_, (query, always))| {
-                                let prep_request = PrepareRequest::new(query.clone(), vec![]);
+                                let view_request = ViewCreateRequest::new(query.clone(), vec![]);
                                 self.query_status_cache
                                     .update_query_migration_state(
-                                        &prep_request,
+                                        &view_request,
                                         MigrationState::Successful
                                     );
-                                self.query_status_cache.always_attempt_readyset(&prep_request, *always);
+                                self.query_status_cache.always_attempt_readyset(&view_request, *always);
                             });
                         }
                         Err(e) => {
