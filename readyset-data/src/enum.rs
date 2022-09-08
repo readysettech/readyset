@@ -26,8 +26,8 @@ pub(crate) fn coerce_enum(
 
         if idx == 0 {
             Ok(DfValue::from(""))
-        } else if let Some(enum_label) = enum_elements.get(idx - 1) {
-            Ok(DfValue::from(enum_label.to_string()))
+        } else if let Some(Literal::String(s)) = enum_elements.get(idx - 1) {
+            Ok(DfValue::from(s.as_str()))
         } else {
             Err(err())
         }
