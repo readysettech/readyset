@@ -9,14 +9,14 @@
 pub mod backend;
 pub mod http_router;
 pub mod migration_handler;
-pub mod outputs_synchronizer;
 mod query_handler;
 pub mod query_status_cache;
 pub mod rewrite;
 pub mod upstream_database;
 mod utils;
+pub mod views_synchronizer;
 
 pub use crate::backend::{Backend, BackendBuilder};
-pub use crate::outputs_synchronizer::OutputsSynchronizer;
 pub use crate::query_handler::{QueryHandler, SetBehavior};
 pub use crate::upstream_database::{UpstreamDatabase, UpstreamPrepare};
+pub use crate::views_synchronizer::ViewsSynchronizer;

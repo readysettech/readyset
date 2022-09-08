@@ -27,9 +27,9 @@ use readyset_client::backend::noria_connector::{NoriaConnector, ReadBehavior};
 use readyset_client::backend::MigrationMode;
 use readyset_client::http_router::NoriaAdapterHttpRouter;
 use readyset_client::migration_handler::MigrationHandler;
-use readyset_client::outputs_synchronizer::OutputsSynchronizer;
 use readyset_client::query_status_cache::{MigrationStyle, QueryStatusCache};
 use readyset_client::rewrite::anonymize_literals;
+use readyset_client::views_synchronizer::ViewsSynchronizer;
 use readyset_client::{Backend, BackendBuilder, QueryHandler, UpstreamDatabase};
 use readyset_client_metrics::QueryExecutionEvent;
 use readyset_dataflow::Readers;
@@ -280,9 +280,9 @@ pub struct Options {
     explicit_migrations: bool,
 
     // TODO(DAN): require explicit migrations
-    /// Specifies the polling interval in seconds for requesting outputs from the Leader.
+    /// Specifies the polling interval in seconds for requesting views from the Leader.
     #[clap(long, env = "OUTPUTS_POLLING_INTERVAL", default_value = "300")]
-    outputs_polling_interval: u64,
+    views_polling_interval: u64,
 
     /// The time to wait before canceling a migration request. Defaults to 30 minutes.
     #[clap(
@@ -563,16 +563,16 @@ where
         if options.explicit_migrations {
             rs_connect.in_scope(|| info!("Spawning explicit migrations task"));
             let ch = ch.clone();
-            let loop_interval = options.outputs_polling_interval;
+            let loop_interval = options.views_polling_interval;
             let shutdown_recv = shutdown_sender.subscribe();
             let fut = async move {
-                let mut outputs_synchronizer = OutputsSynchronizer::new(
+                let mut views_synchronizer = ViewsSynchronizer::new(
                     ch,
                     query_status_cache,
                     std::time::Duration::from_secs(loop_interval),
                     shutdown_recv,
                 );
-                outputs_synchronizer.run().await.map_err(move |e| {
+                views_synchronizer.run().await.map_err(move |e| {
                     error!(error = %e, "Outputs Synchronizer failed");
                     std::process::abort()
                 })

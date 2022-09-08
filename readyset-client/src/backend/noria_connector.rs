@@ -83,8 +83,8 @@ impl NoriaBackend {
 
 pub struct NoriaBackendInner {
     noria: ControllerHandle,
-    inputs: BTreeMap<Relation, Table>,
-    outputs: BTreeMap<Relation, View>,
+    tables: BTreeMap<Relation, Table>,
+    views: BTreeMap<Relation, View>,
     /// The server can handle (non-parameterized) LIMITs and (parameterized) OFFSETs in the
     /// dataflow graph
     server_supports_pagination: bool,
@@ -105,36 +105,36 @@ impl NoriaBackendInner {
         debug!(supported = %server_supports_pagination, "Check backend pagination support");
 
         Ok(NoriaBackendInner {
-            inputs: BTreeMap::new(),
-            outputs: BTreeMap::new(),
+            tables: BTreeMap::new(),
+            views: BTreeMap::new(),
             noria: ch,
             server_supports_pagination,
         })
     }
 
     async fn get_noria_table(&mut self, table: &Relation) -> ReadySetResult<&mut Table> {
-        if !self.inputs.contains_key(table) {
+        if !self.tables.contains_key(table) {
             let t = noria_await!(self, self.noria.table(table.clone()))?;
-            self.inputs.insert(table.to_owned(), t);
+            self.tables.insert(table.to_owned(), t);
         }
-        Ok(self.inputs.get_mut(table).unwrap())
+        Ok(self.tables.get_mut(table).unwrap())
     }
 
-    /// If `ignore_cache` is passed, the view cache, `outputs` will be ignored and a
-    /// view will be retrieve from noria.
+    /// If `ignore_cache` is passed, the view cache, `views` will be ignored and a view will be
+    /// retrieve from noria.
     async fn get_noria_view<'a>(
         &'a mut self,
         view: &Relation,
         invalidate_cache: bool,
     ) -> ReadySetResult<&'a mut View> {
         if invalidate_cache {
-            self.outputs.remove(view);
+            self.views.remove(view);
         }
-        if !self.outputs.contains_key(view) {
+        if !self.views.contains_key(view) {
             let vh = noria_await!(self, self.noria.view(view.clone()))?;
-            self.outputs.insert(view.to_owned(), vh);
+            self.views.insert(view.to_owned(), vh);
         }
-        Ok(self.outputs.get_mut(view).unwrap())
+        Ok(self.views.get_mut(view).unwrap())
     }
 }
 
@@ -514,9 +514,9 @@ impl NoriaConnector {
         Ok(QueryResult::Meta(vec![(label, graphviz).into()]))
     }
 
-    pub(crate) async fn verbose_outputs(&mut self) -> ReadySetResult<QueryResult<'static>> {
+    pub(crate) async fn verbose_views(&mut self) -> ReadySetResult<QueryResult<'static>> {
         let noria = &mut self.inner.get_mut().await?.noria;
-        let outputs = noria.verbose_outputs().await?;
+        let views = noria.verbose_views().await?;
         //TODO(DAN): this is ridiculous, update Meta instead
         let select_schema = SelectSchema {
             use_bogo: false,
@@ -561,7 +561,7 @@ impl NoriaConnector {
 
             columns: Cow::Owned(vec!["name".into(), "query".into(), "always".into()]),
         };
-        let data = outputs
+        let data = views
             .into_iter()
             .map(|(n, (mut q, always))| {
                 rewrite::anonymize_literals(&mut q);

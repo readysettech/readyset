@@ -3365,7 +3365,7 @@ async fn recipe_activates() {
     })
     .await;
     // one base node
-    assert_eq!(g.inputs().await.unwrap().len(), 1);
+    assert_eq!(g.tables().await.unwrap().len(), 1);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -3377,13 +3377,13 @@ async fn recipe_activates_and_migrates() {
     let mut g = start_simple_unsharded("recipe_activates_and_migrates").await;
     g.extend_recipe(r_txt.parse().unwrap()).await.unwrap();
     // one base node
-    assert_eq!(g.inputs().await.unwrap().len(), 1);
+    assert_eq!(g.tables().await.unwrap().len(), 1);
 
     g.extend_recipe(r1_txt.parse().unwrap()).await.unwrap();
     // still one base node
-    assert_eq!(g.inputs().await.unwrap().len(), 1);
+    assert_eq!(g.tables().await.unwrap().len(), 1);
     // two leaf nodes
-    assert_eq!(g.outputs().await.unwrap().len(), 2);
+    assert_eq!(g.views().await.unwrap().len(), 2);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -3396,14 +3396,14 @@ async fn recipe_activates_and_migrates_with_join() {
     g.extend_recipe(r_txt.parse().unwrap()).await.unwrap();
 
     // two base nodes
-    assert_eq!(g.inputs().await.unwrap().len(), 2);
+    assert_eq!(g.tables().await.unwrap().len(), 2);
 
     g.extend_recipe(r1_txt.parse().unwrap()).await.unwrap();
 
     // still two base nodes
-    assert_eq!(g.inputs().await.unwrap().len(), 2);
+    assert_eq!(g.tables().await.unwrap().len(), 2);
     // one leaf node
-    assert_eq!(g.outputs().await.unwrap().len(), 1);
+    assert_eq!(g.views().await.unwrap().len(), 1);
 }
 
 async fn test_queries(test: &str, file: &'static str, shard: bool, reuse: bool) {
@@ -3636,8 +3636,8 @@ async fn remove_query() {
 
     let mut g = start_simple_unsharded("remove_query").await;
     g.extend_recipe(r_txt.parse().unwrap()).await.unwrap();
-    assert_eq!(g.inputs().await.unwrap().len(), 1);
-    assert_eq!(g.outputs().await.unwrap().len(), 2);
+    assert_eq!(g.tables().await.unwrap().len(), 1);
+    assert_eq!(g.views().await.unwrap().len(), 2);
 
     let mut mutb = g.table("b").await.unwrap();
     let mut qa = g.view("qa").await.unwrap();
@@ -3670,8 +3670,8 @@ async fn remove_query() {
 
     // Remove qb and check that the graph still functions as expected.
     g.extend_recipe(r2_txt.parse().unwrap()).await.unwrap();
-    assert_eq!(g.inputs().await.unwrap().len(), 1);
-    assert_eq!(g.outputs().await.unwrap().len(), 1);
+    assert_eq!(g.tables().await.unwrap().len(), 1);
+    assert_eq!(g.views().await.unwrap().len(), 1);
     assert!(g.view("qb").await.is_err());
 
     mutb.insert(vec![

@@ -518,8 +518,8 @@ readyset:
       # -- Listening address and port for health check and metric endpoints.
       METRICS_ADDRESS: "0.0.0.0:6034"
 
-      # -- Polling interval in seconds for requesting outputs from the Leader.
-      OUTPUTS_POLLING_INTERVAL: 180
+      # -- Polling interval in seconds for requesting views from the Leader.
+      VIEWS_POLLING_INTERVAL: 180
 
       # -- Toggles running of migrations exclusively through CREATE CACHE
       # -- statements. Set to 0 (off) or 1 (on). Conflicts with ASYNC_MIGRATIONS.

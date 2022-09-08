@@ -1085,12 +1085,12 @@ mod tests {
             .await
             .unwrap();
 
-        let queries = noria.outputs().await.unwrap();
+        let queries = noria.views().await.unwrap();
         assert!(queries.contains_key(&"test_query".into()));
 
         noria.remove_query(&"test_query".into()).await.unwrap();
 
-        let queries = noria.outputs().await.unwrap();
+        let queries = noria.views().await.unwrap();
         assert!(!queries.contains_key(&"test_query".into()));
     }
 
@@ -1108,13 +1108,13 @@ mod tests {
             .await
             .unwrap();
 
-        let queries = noria.outputs().await.unwrap();
+        let queries = noria.views().await.unwrap();
         assert!(queries.contains_key(&"q1".into()));
         assert!(queries.contains_key(&"q2".into()));
 
         noria.remove_all_queries().await.unwrap();
 
-        let queries = noria.outputs().await.unwrap();
+        let queries = noria.views().await.unwrap();
         assert!(queries.is_empty());
     }
 
@@ -1184,8 +1184,8 @@ mod tests {
         let key_counts = noria.node_sizes().await.unwrap();
 
         let mut table = noria.table("key_count_test").await.unwrap();
-        // The table only contains the local index, so we use `inputs()` to get the global index
-        let table_idx = noria.inputs().await.unwrap()[&"key_count_test".into()];
+        // The table only contains the local index, so we use `tables()` to get the global index
+        let table_idx = noria.tables().await.unwrap()[&"key_count_test".into()];
         let view_idx = *noria.view("q1").await.unwrap().node();
 
         assert_eq!(

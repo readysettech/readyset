@@ -203,12 +203,9 @@ impl DfState {
         })
     }
 
-    /// Get a map of all known input nodes, mapping the name of the node to that node's
+    /// Get a map of all known base table nodes, mapping the name of the node to that node's
     /// [index](NodeIndex)
-    ///
-    /// Input nodes are here all nodes of type `Table`. The addresses returned by this function will
-    /// all have been returned as a key in the map from `commit` at some point in the past.
-    pub(super) fn inputs(&self) -> BTreeMap<Relation, NodeIndex> {
+    pub(super) fn tables(&self) -> BTreeMap<Relation, NodeIndex> {
         self.ingredients
             .neighbors_directed(self.source, petgraph::EdgeDirection::Outgoing)
             .filter_map(|n| {
@@ -225,12 +222,8 @@ impl DfState {
             .collect()
     }
 
-    /// Get a map of all known output nodes, mapping the name of the node to that node's
-    /// [index](NodeIndex)
-    ///
-    /// Output nodes here refers to nodes of type `Reader`, which is the nodes created in response
-    /// to calling `.maintain` or `.stream` for a node during a migration.
-    pub(super) fn outputs(&self) -> BTreeMap<Relation, NodeIndex> {
+    /// Get a map of all known views, mapping the name of the view to that node's [index](NodeIndex)
+    pub(super) fn views(&self) -> BTreeMap<Relation, NodeIndex> {
         self.ingredients
             .externals(petgraph::EdgeDirection::Outgoing)
             .filter_map(|n| {
@@ -246,14 +239,10 @@ impl DfState {
             .collect()
     }
 
-    /// Get a map of all known output nodes created from `CREATE CACHE` statements, mapping the
-    /// name of the node to a tuple of (`SelectStatement`, always) where always is a bool that
-    /// indicates whether the `CREATE CACHE` statement was created with the optional `ALWAYS`
-    /// argument.
-    ///
-    /// Output nodes here refers to nodes of type `Reader`, which is the nodes created in response
-    /// to calling `.maintain` or `.stream` for a node during a migration
-    pub(super) fn verbose_outputs(&self) -> BTreeMap<Relation, (SelectStatement, bool)> {
+    /// Get a map of all known views created from `CREATE CACHE` statements, mapping the name of the
+    /// view to a tuple of (`SelectStatement`, always) where always is a bool that indicates whether
+    /// the `CREATE CACHE` statement was created with the optional `ALWAYS` argument.
+    pub(super) fn verbose_views(&self) -> BTreeMap<Relation, (SelectStatement, bool)> {
         self.ingredients
             .externals(petgraph::EdgeDirection::Outgoing)
             .filter_map(|n| {
@@ -337,7 +326,7 @@ impl DfState {
             Err(_) => {
                 // if the recipe doesn't know about this query, traverse the graph.
                 // we need this do deal with manually constructed graphs (e.g., in tests).
-                if let Some(res) = self.outputs().get(&view_req.name) {
+                if let Some(res) = self.views().get(&view_req.name) {
                     *res
                 } else {
                     return Ok(None);
@@ -728,9 +717,9 @@ impl DfState {
     /// Collects a unique list of domains that might contain base tables. Errors out if a domain
     /// retrieved does not appears in self.domains.
     async fn domains_with_base_tables(&self) -> ReadySetResult<HashSet<DomainIndex>> {
-        #[allow(clippy::indexing_slicing)] // inputs returns valid node indices
+        #[allow(clippy::indexing_slicing)] // tables returns valid node indices
         let domains = self
-            .inputs()
+            .tables()
             .values()
             .map(|ni| self.ingredients[*ni].domain())
             .collect::<HashSet<_>>();

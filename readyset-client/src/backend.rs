@@ -1621,7 +1621,7 @@ where
             }
             SqlQuery::DropCache(DropCacheStatement { name }) => self.drop_cached_query(name).await,
             SqlQuery::DropAllCaches(_) => self.drop_all_caches().await,
-            SqlQuery::Show(ShowStatement::CachedQueries) => self.noria.verbose_outputs().await,
+            SqlQuery::Show(ShowStatement::CachedQueries) => self.noria.verbose_views().await,
             SqlQuery::Show(ShowStatement::ReadySetStatus) => self.noria.readyset_status().await,
             SqlQuery::Show(ShowStatement::ProxiedQueries) => self.show_proxied_queries().await,
             _ => {

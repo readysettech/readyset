@@ -293,37 +293,34 @@ impl ControllerHandle {
     /// Enumerate all known base tables.
     ///
     /// These have all been created in response to a `CREATE TABLE` statement in a recipe.
-    pub async fn inputs(&mut self) -> ReadySetResult<BTreeMap<Relation, NodeIndex>> {
+    pub async fn tables(&mut self) -> ReadySetResult<BTreeMap<Relation, NodeIndex>> {
         let body: hyper::body::Bytes = self
             .handle
             .ready()
             .await
-            .map_err(rpc_err!("ControllerHandle::inputs"))?
-            .call(ControllerRequest::new("inputs", &(), None)?)
+            .map_err(rpc_err!("ControllerHandle::tables"))?
+            .call(ControllerRequest::new("tables", &(), None)?)
             .await
-            .map_err(rpc_err!("ControllerHandle::inputs"))?;
+            .map_err(rpc_err!("ControllerHandle::tables"))?;
 
         Ok(bincode::deserialize(&body)?)
     }
 
     /// Enumerate all known external views.
     ///
-    /// These have all been created in response to a `CREATE EXT VIEW` statement in a recipe.
+    /// These have all been created in response to a `CREATE CACHE` or `CREATE VIEW` statement in a
+    /// recipe.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub async fn outputs(&mut self) -> ReadySetResult<BTreeMap<Relation, NodeIndex>> {
+    pub async fn views(&mut self) -> ReadySetResult<BTreeMap<Relation, NodeIndex>> {
         let body: hyper::body::Bytes = self
             .handle
             .ready()
             .await
-            .map_err(rpc_err!("ControllerHandle::outputs"))?
-            .call(ControllerRequest::new(
-                "outputs",
-                &(),
-                self.request_timeout,
-            )?)
+            .map_err(rpc_err!("ControllerHandle::views"))?
+            .call(ControllerRequest::new("views", &(), self.request_timeout)?)
             .await
-            .map_err(rpc_err!("ControllerHandle::outputs"))?;
+            .map_err(rpc_err!("ControllerHandle::views"))?;
 
         Ok(bincode::deserialize(&body)?)
     }
@@ -331,21 +328,21 @@ impl ControllerHandle {
     /// Enumerate all known external views. Includes the SqlQuery that created the view
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub async fn verbose_outputs(
+    pub async fn verbose_views(
         &mut self,
     ) -> ReadySetResult<BTreeMap<Relation, (SelectStatement, bool)>> {
         let body: hyper::body::Bytes = self
             .handle
             .ready()
             .await
-            .map_err(rpc_err!("ControllerHandle::verbose_outputs"))?
+            .map_err(rpc_err!("ControllerHandle::verbose_views"))?
             .call(ControllerRequest::new(
-                "verbose_outputs",
+                "verbose_views",
                 &(),
                 self.request_timeout,
             )?)
             .await
-            .map_err(rpc_err!("ControllerHandle::verbose_outputs"))?;
+            .map_err(rpc_err!("ControllerHandle::verbose_views"))?;
 
         Ok(bincode::deserialize(&body)?)
     }

@@ -251,20 +251,20 @@ impl Leader {
                 (&Method::GET | &Method::POST, "/controller_uri") => {
                     return_serialized!(self.controller_uri);
                 }
-                (&Method::POST, "/inputs") => {
+                (&Method::POST, "/tables") => {
                     let ds = futures::executor::block_on(self.dataflow_state_handle.read());
                     check_quorum!(ds);
-                    return_serialized!(ds.inputs())
+                    return_serialized!(ds.tables())
                 }
-                (&Method::POST, "/outputs") => {
+                (&Method::POST, "/views") => {
                     let ds = futures::executor::block_on(self.dataflow_state_handle.read());
                     check_quorum!(ds);
-                    return_serialized!(ds.outputs())
+                    return_serialized!(ds.views())
                 }
-                (&Method::POST, "/verbose_outputs") => {
+                (&Method::POST, "/verbose_views") => {
                     let ds = futures::executor::block_on(self.dataflow_state_handle.read());
                     check_quorum!(ds);
-                    return_serialized!(ds.verbose_outputs())
+                    return_serialized!(ds.verbose_views())
                 }
                 (&Method::GET | &Method::POST, "/instances") => {
                     let ds = futures::executor::block_on(self.dataflow_state_handle.read());
