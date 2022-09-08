@@ -31,7 +31,7 @@ use crate::replication::ReplicationOffsets;
 use crate::status::ReadySetStatus;
 use crate::table::{Table, TableBuilder, TableRpc};
 use crate::view::{View, ViewBuilder, ViewRpc};
-use crate::{NodeSize, ReplicationOffset, ViewFilter, ViewRequest};
+use crate::{NodeSize, ReplicationOffset, ViewCreateRequest, ViewFilter, ViewRequest};
 
 mod rpc;
 
@@ -345,6 +345,20 @@ impl ControllerHandle {
             .map_err(rpc_err!("ControllerHandle::verbose_views"))?;
 
         Ok(bincode::deserialize(&body)?)
+    }
+
+    /// For each of the given list of queries, determine whether that query (or a semantically
+    /// equivalent query) has been created as a `View`.
+    ///
+    /// To save on data, this returns a list of booleans corresponding to the provided list of
+    /// query, where each boolean is `true` if the query at the same position in the argument list
+    /// has been installed as a view.
+    pub async fn view_statuses(
+        &mut self,
+        queries: Vec<ViewCreateRequest>,
+    ) -> ReadySetResult<Vec<bool>> {
+        self.rpc("view_statuses", queries, self.request_timeout)
+            .await
     }
 
     /// Obtain a `View` that allows you to query the given external view.

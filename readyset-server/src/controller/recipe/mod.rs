@@ -5,6 +5,7 @@ use nom_sql::{CacheInner, CreateCacheStatement, CreateTableStatement, Relation, 
 use petgraph::graph::NodeIndex;
 use petgraph::visit::Bfs;
 use readyset::recipe::changelist::{Change, ChangeList};
+use readyset::ViewCreateRequest;
 use readyset_errors::{
     internal, internal_err, invariant, invariant_eq, ReadySetError, ReadySetResult,
 };
@@ -526,5 +527,16 @@ impl Recipe {
                 self.registry.remove_expression(name);
             }
         }
+    }
+
+    /// Returns `true` if, after rewriting, `self` contains a query that is semantically equivalent
+    /// to the given `query`.
+    ///
+    /// Returns an error if rewriting fails for any reason
+    pub(crate) fn contains(&self, query: ViewCreateRequest) -> ReadySetResult<bool> {
+        let statement = self
+            .inc
+            .rewrite(query.statement, &query.schema_search_path)?;
+        Ok(self.registry.contains(&statement))
     }
 }

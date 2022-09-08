@@ -266,6 +266,12 @@ impl Leader {
                     check_quorum!(ds);
                     return_serialized!(ds.verbose_views())
                 }
+                (&Method::POST, "/view_statuses") => {
+                    let body = bincode::deserialize(&body)?;
+                    let ds = futures::executor::block_on(self.dataflow_state_handle.read());
+                    check_quorum!(ds);
+                    return_serialized!(ds.view_statuses(body))
+                }
                 (&Method::GET | &Method::POST, "/instances") => {
                     let ds = futures::executor::block_on(self.dataflow_state_handle.read());
                     check_quorum!(ds);

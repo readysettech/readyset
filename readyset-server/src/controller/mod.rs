@@ -1067,8 +1067,12 @@ async fn handle_controller_request(
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
+    use nom_sql::{parse_select_statement, Dialect};
+    use readyset::recipe::changelist::ChangeList;
     use readyset::replication::ReplicationOffset;
-    use readyset::KeyCount;
+    use readyset::{KeyCount, ViewCreateRequest};
 
     use crate::integration_utils::start_simple;
 
@@ -1203,5 +1207,82 @@ mod tests {
             KeyCount::EstimatedRowCount(1)
         );
         assert_eq!(key_counts[&view_idx].key_count, KeyCount::ExactKeyCount(1));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn view_statuses() {
+        let mut noria = start_simple("view_statuses").await;
+
+        let query1 = parse_select_statement(Dialect::MySQL, "SELECT * FROM t1").unwrap();
+        let query2 = parse_select_statement(Dialect::MySQL, "SELECT * FROM t2").unwrap();
+
+        let schema_search_path = vec!["s1".into()];
+
+        let res1 = noria
+            .view_statuses(vec![
+                ViewCreateRequest::new(query1.clone(), schema_search_path.clone()),
+                ViewCreateRequest::new(query2.clone(), schema_search_path.clone()),
+            ])
+            .await
+            .unwrap();
+        assert_eq!(res1, vec![false, false]);
+
+        noria
+            .extend_recipe(
+                ChangeList::from_str(
+                    "CREATE TABLE t1 (x int); CREATE CACHE FROM SELECT * FROM t1;",
+                )
+                .unwrap()
+                .with_schema_search_path(schema_search_path.clone()),
+            )
+            .await
+            .unwrap();
+
+        let res2 = noria
+            .view_statuses(vec![
+                ViewCreateRequest::new(query1.clone(), schema_search_path.clone()),
+                ViewCreateRequest::new(query2.clone(), schema_search_path.clone()),
+            ])
+            .await
+            .unwrap();
+        assert_eq!(res2, vec![true, false]);
+
+        // A syntactically distinct, but semantically equivalent query
+        let query1_equivalent = parse_select_statement(Dialect::MySQL, "SELECT x FROM t1").unwrap();
+        let res3 = noria
+            .view_statuses(vec![ViewCreateRequest::new(
+                query1_equivalent,
+                schema_search_path.clone(),
+            )])
+            .await
+            .unwrap();
+        assert_eq!(res3, vec![true]);
+
+        // A change in schema_search_path that doesn't change the semantics
+        let query1_equivalent = parse_select_statement(Dialect::MySQL, "SELECT x FROM t1").unwrap();
+        let res3 = noria
+            .view_statuses(vec![ViewCreateRequest::new(
+                query1_equivalent,
+                vec!["s2".into(), "s1".into()],
+            )])
+            .await
+            .unwrap();
+        assert_eq!(res3, vec![true]);
+
+        // A change in schema_search_path that *does* change the semantics
+        noria
+            .extend_recipe(ChangeList::from_str("CREATE TABLE s2.t1 (x int)").unwrap())
+            .await
+            .unwrap();
+
+        let query1_equivalent = parse_select_statement(Dialect::MySQL, "SELECT x FROM t1").unwrap();
+        let res3 = noria
+            .view_statuses(vec![ViewCreateRequest::new(
+                query1_equivalent,
+                vec!["s2".into(), "s1".into()],
+            )])
+            .await
+            .unwrap();
+        assert_eq!(res3, vec![false]);
     }
 }

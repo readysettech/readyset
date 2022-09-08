@@ -70,6 +70,7 @@ impl RecipeExpr {
 
     /// Calculates a SHA-1 hash of the [`RecipeExpr`], to identify it based on its contents.
     pub(super) fn calculate_hash(&self) -> QueryID {
+        // NOTE: this has to be the same as `<SelectStatement as RegistryExpr>::query_id`
         use sha1::{Digest, Sha1};
         let mut hasher = Sha1::new();
         match self {
@@ -160,6 +161,14 @@ impl ExprRegistry {
         self.expressions.get(query_id)
     }
 
+    /// Returns true if the given expression exists in `self`
+    pub(super) fn contains<E>(&self, expression: &E) -> bool
+    where
+        E: RegistryExpr,
+    {
+        self.expressions.contains_key(&expression.query_id())
+    }
+
     /// Retrieves the original name for the query with the given `alias` (which might already be the
     /// original name). Returns `None` is there no [`RecipeExpr`] associated with the
     /// given `alias`.
@@ -235,6 +244,29 @@ impl From<CreateTableStatement> for RecipeExpr {
 impl From<CreateViewStatement> for RecipeExpr {
     fn from(cvs: CreateViewStatement) -> Self {
         RecipeExpr::View(cvs)
+    }
+}
+
+/// Trait to overload different types of expressions that might exist in the [`ExprRegistry`]
+pub trait RegistryExpr {
+    /// Return a unique ID for this expression
+    fn query_id(&self) -> QueryID;
+}
+
+impl RegistryExpr for RecipeExpr {
+    fn query_id(&self) -> QueryID {
+        self.calculate_hash()
+    }
+}
+
+impl RegistryExpr for SelectStatement {
+    fn query_id(&self) -> QueryID {
+        // NOTE: this has to be the same as `RecipeExpr::calculate_hash`
+        use sha1::{Digest, Sha1};
+        let mut hasher = Sha1::new();
+        hasher.update(hash(self).to_le_bytes());
+        // Sha1 digest is 20 byte long, so it is safe to consume only 16 bytes
+        u128::from_le_bytes(hasher.finalize()[..16].try_into().unwrap())
     }
 }
 
@@ -323,7 +355,7 @@ mod tests {
     }
 
     mod registry {
-        use nom_sql::Dialect;
+        use nom_sql::{parse_select_statement, Dialect};
 
         use super::*;
 
@@ -683,6 +715,20 @@ mod tests {
         fn aliases_count() {
             let registry = create_registry();
             assert_eq!(registry.num_aliases(), registry.aliases.len());
+        }
+
+        #[test]
+        fn contains() {
+            let mut registry = create_registry();
+            let stmt = parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table").unwrap();
+            registry
+                .add_query(RecipeExpr::Cache {
+                    name: "test".into(),
+                    statement: stmt.clone(),
+                    always: false,
+                })
+                .unwrap();
+            assert!(registry.contains(&stmt))
         }
     }
 }

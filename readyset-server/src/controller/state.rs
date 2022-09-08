@@ -43,7 +43,9 @@ use readyset::metrics::recorded;
 use readyset::recipe::changelist::{Change, ChangeList};
 use readyset::recipe::ExtendRecipeSpec;
 use readyset::replication::{ReplicationOffset, ReplicationOffsets};
-use readyset::{NodeSize, ReadySetError, ReadySetResult, ViewFilter, ViewRequest, ViewSchema};
+use readyset::{
+    NodeSize, ReadySetError, ReadySetResult, ViewCreateRequest, ViewFilter, ViewRequest, ViewSchema,
+};
 use readyset_errors::{internal, internal_err, invariant_eq, NodeType};
 use regex::Regex;
 use serde::de::DeserializeOwned;
@@ -271,6 +273,13 @@ impl DfState {
                     None
                 }
             })
+            .collect()
+    }
+
+    pub(super) fn view_statuses(&self, queries: Vec<ViewCreateRequest>) -> Vec<bool> {
+        queries
+            .into_iter()
+            .map(|query| self.recipe.contains(query).unwrap_or(false))
             .collect()
     }
 
