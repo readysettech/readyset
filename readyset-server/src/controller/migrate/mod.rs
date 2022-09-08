@@ -39,7 +39,7 @@ use dataflow::node::Column;
 use dataflow::prelude::*;
 use dataflow::{node, DomainRequest, ReaderProcessing};
 use metrics::{counter, histogram};
-use nom_sql::Table;
+use nom_sql::Relation;
 use readyset::metrics::recorded;
 use readyset::{KeyColumnIdx, ReadySetError, ViewPlaceholder};
 use tracing::{debug, debug_span, error, info, info_span, instrument, trace};
@@ -446,7 +446,7 @@ impl<'df> Migration<'df> {
     /// `ancestors`.
     pub fn add_ingredient<N, S2, CS, I>(&mut self, name: N, columns: CS, i: I) -> NodeIndex
     where
-        N: Into<Table>,
+        N: Into<Relation>,
         S2: Into<Column>,
         CS: IntoIterator<Item = S2>,
         I: Into<NodeOperator>,
@@ -485,7 +485,7 @@ impl<'df> Migration<'df> {
     /// The returned identifier can later be used to refer to the added ingredient.
     pub fn add_base<N, C, CS>(&mut self, name: N, columns: CS, b: node::special::Base) -> NodeIndex
     where
-        N: Into<Table>,
+        N: Into<Relation>,
         C: Into<Column>,
         CS: IntoIterator<Item = C>,
     {
@@ -598,7 +598,7 @@ impl<'df> Migration<'df> {
     fn ensure_reader_for(
         &mut self,
         n: NodeIndex,
-        name: Option<Table>,
+        name: Option<Relation>,
         reader_processing: ReaderProcessing,
     ) -> NodeIndex {
         use std::collections::hash_map::Entry;
@@ -668,7 +668,7 @@ impl<'df> Migration<'df> {
     /// To query into the maintained state, use `Leader::get_getter`.
     pub fn maintain(
         &mut self,
-        name: Table,
+        name: Relation,
         n: NodeIndex,
         index: &Index,
         reader_processing: ReaderProcessing,

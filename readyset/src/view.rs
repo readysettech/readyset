@@ -19,7 +19,7 @@ use futures_util::stream::{StreamExt, TryStreamExt};
 use futures_util::{future, ready};
 use launchpad::intervals::{cmp_start_end, BoundPair};
 use launchpad::redacted::Sensitive;
-use nom_sql::{BinaryOperator, Column, ColumnSpecification, SqlIdentifier, SqlType, Table};
+use nom_sql::{BinaryOperator, Column, ColumnSpecification, Relation, SqlIdentifier, SqlType};
 use petgraph::graph::NodeIndex;
 use proptest::arbitrary::Arbitrary;
 use rand::prelude::IteratorRandom;
@@ -107,7 +107,7 @@ pub struct ColumnBase {
     /// The name of the column in the base table
     pub column: SqlIdentifier,
     /// The name of the base table for this column
-    pub table: Table,
+    pub table: Relation,
 }
 
 /// Combines the specification for a columns with its base name
@@ -122,7 +122,7 @@ pub struct ColumnSchema {
 impl ColumnSchema {
     /// Create a new ColumnSchema from a ColumnSpecification representing a column directly in a
     /// base table with the given name.
-    pub fn from_base(spec: ColumnSpecification, table: Table) -> Self {
+    pub fn from_base(spec: ColumnSpecification, table: Relation) -> Self {
         Self {
             base: Some(ColumnBase {
                 column: spec.column.name.clone(),
@@ -825,7 +825,7 @@ impl<D> ReadReply<D> {
 #[doc(hidden)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ViewBuilder {
-    pub name: Table,
+    pub name: Relation,
 
     pub node: NodeIndex,
     pub columns: Arc<[SqlIdentifier]>,
@@ -931,7 +931,7 @@ impl ViewBuilder {
 /// share connections to the Soup workers.
 #[derive(Clone)]
 pub struct View {
-    name: Table,
+    name: Relation,
     node: NodeIndex,
     columns: Arc<[SqlIdentifier]>,
     schema: Option<ViewSchema>,
@@ -1190,7 +1190,7 @@ impl View {
     }
 
     /// Name associated with the reader associated with the view.
-    pub fn name(&self) -> &Table {
+    pub fn name(&self) -> &Relation {
         &self.name
     }
 

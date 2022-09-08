@@ -5,7 +5,7 @@ use mir::node::node_inner::MirNodeInner;
 use mir::{Column, MirNodeRef};
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::FunctionExpr::*;
-use nom_sql::{self, Expr, FieldDefinitionExpr, SelectStatement, SqlIdentifier, Table};
+use nom_sql::{self, Expr, FieldDefinitionExpr, Relation, SelectStatement, SqlIdentifier};
 use readyset_errors::{unsupported, ReadySetError};
 use readyset_sql_passes::is_aggregate;
 
@@ -17,9 +17,9 @@ use crate::ReadySetResult;
 // Move predicates above grouped_by nodes
 pub(super) fn make_predicates_above_grouped<'a>(
     mir_converter: &SqlToMirConverter,
-    name: Table,
+    name: Relation,
     qg: &QueryGraph,
-    node_for_rel: &HashMap<&Table, MirNodeRef>,
+    node_for_rel: &HashMap<&Relation, MirNodeRef>,
     node_count: usize,
     column_to_predicates: &HashMap<nom_sql::Column, Vec<&'a Expr>>,
     prev_node: &mut Option<MirNodeRef>,
@@ -106,9 +106,9 @@ pub(super) fn make_expressions_above_grouped(
 
 pub(super) fn make_grouped(
     mir_converter: &SqlToMirConverter,
-    name: Table,
+    name: Relation,
     qg: &QueryGraph,
-    node_for_rel: &HashMap<&Table, MirNodeRef>,
+    node_for_rel: &HashMap<&Relation, MirNodeRef>,
     node_count: usize,
     prev_node: &mut Option<MirNodeRef>,
     projected_exprs: &HashMap<Expr, SqlIdentifier>,
@@ -283,7 +283,7 @@ fn joinable_aggregate_nodes(agg_nodes: &[MirNodeRef]) -> Vec<MirNodeRef> {
 pub(super) fn post_lookup_aggregates(
     qg: &QueryGraph,
     stmt: &SelectStatement,
-    query_name: &Table,
+    query_name: &Relation,
 ) -> ReadySetResult<Option<PostLookupAggregates<Column>>> {
     if stmt.distinct {
         // DISTINCT is the equivalent of grouping by all projected columns but not actually doing

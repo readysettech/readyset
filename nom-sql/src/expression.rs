@@ -1283,14 +1283,14 @@ mod tests {
         #[test]
         fn nested_select() {
             use crate::select::SelectStatement;
-            use crate::table::Table;
+            use crate::table::Relation;
 
             let cond = "bar in (select col from foo)";
 
             let res = expression(Dialect::MySQL)(cond.as_bytes());
 
             let nested_select = Box::new(SelectStatement {
-                tables: vec![TableExpr::from(Table::from("foo"))],
+                tables: vec![TableExpr::from(Relation::from("foo"))],
                 fields: columns(&["col"]),
                 ..Default::default()
             });
@@ -1307,14 +1307,14 @@ mod tests {
         #[test]
         fn exists_in_select() {
             use crate::select::SelectStatement;
-            use crate::table::Table;
+            use crate::table::Relation;
 
             let cond = "exists (  select col from foo  )";
 
             let res = expression(Dialect::MySQL)(cond.as_bytes());
 
             let nested_select = Box::new(SelectStatement {
-                tables: vec![TableExpr::from(Table::from("foo"))],
+                tables: vec![TableExpr::from(Relation::from("foo"))],
                 fields: columns(&["col"]),
                 ..Default::default()
             });
@@ -1327,14 +1327,14 @@ mod tests {
         #[test]
         fn not_exists_in_select() {
             use crate::select::SelectStatement;
-            use crate::table::Table;
+            use crate::table::Relation;
 
             let cond = "not exists (select col from foo)";
 
             let res = expression(Dialect::MySQL)(cond.as_bytes());
 
             let nested_select = Box::new(SelectStatement {
-                tables: vec![TableExpr::from(Table::from("foo"))],
+                tables: vec![TableExpr::from(Relation::from("foo"))],
                 fields: columns(&["col"]),
                 ..Default::default()
             });
@@ -1350,14 +1350,14 @@ mod tests {
         #[test]
         fn and_with_nested_select() {
             use crate::select::SelectStatement;
-            use crate::table::Table;
+            use crate::table::Relation;
 
             let cond = "paperId in (select paperId from PaperConflict) and size > 0";
 
             let res = expression(Dialect::MySQL)(cond.as_bytes());
 
             let nested_select = Box::new(SelectStatement {
-                tables: vec![TableExpr::from(Table::from("PaperConflict"))],
+                tables: vec![TableExpr::from(Relation::from("PaperConflict"))],
                 fields: columns(&["paperId"]),
                 ..Default::default()
             });

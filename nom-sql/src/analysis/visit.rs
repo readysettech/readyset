@@ -14,8 +14,8 @@ use crate::{
     DropAllCachesStatement, DropCacheStatement, DropTableStatement, DropViewStatement,
     ExplainStatement, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, GroupByClause,
     InValue, InsertStatement, JoinClause, JoinConstraint, JoinRightSide, Literal, OrderClause,
-    SelectSpecification, SelectStatement, SetNames, SetPostgresParameter, SetStatement,
-    SetVariables, ShowStatement, SqlQuery, SqlType, Table, TableExpr, TableKey, UpdateStatement,
+    Relation, SelectSpecification, SelectStatement, SetNames, SetPostgresParameter, SetStatement,
+    SetVariables, ShowStatement, SqlQuery, SqlType, TableExpr, TableKey, UpdateStatement,
     UseStatement,
 };
 
@@ -73,7 +73,7 @@ pub trait Visitor<'ast>: Sized {
     /// Errors that can be thrown during execution of this visitor
     type Error;
 
-    fn visit_table(&mut self, _table: &'ast mut Table) -> Result<(), Self::Error> {
+    fn visit_table(&mut self, _table: &'ast mut Relation) -> Result<(), Self::Error> {
         Ok(())
     }
 
@@ -1000,7 +1000,7 @@ mod tests {
             Ok(())
         }
 
-        fn visit_table(&mut self, _table: &'ast mut Table) -> Result<(), Self::Error> {
+        fn visit_table(&mut self, _table: &'ast mut Relation) -> Result<(), Self::Error> {
             self.0 += 1;
             Ok(())
         }

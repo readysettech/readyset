@@ -1,7 +1,7 @@
 use std::str;
 use std::vec::Vec;
 
-use nom_sql::{CacheInner, CreateCacheStatement, CreateTableStatement, SqlQuery, Table};
+use nom_sql::{CacheInner, CreateCacheStatement, CreateTableStatement, Relation, SqlQuery};
 use petgraph::graph::NodeIndex;
 use petgraph::visit::Bfs;
 use readyset::recipe::changelist::{Change, ChangeList};
@@ -52,7 +52,7 @@ pub(super) enum Schema {
 #[allow(unused)]
 impl Recipe {
     /// Get the id associated with an alias
-    pub(crate) fn expression_by_alias(&self, alias: &Table) -> Option<SqlQuery> {
+    pub(crate) fn expression_by_alias(&self, alias: &Relation) -> Option<SqlQuery> {
         let expr = self.registry.get(alias).map(|e| match e {
             RecipeExpr::Table(cts) => SqlQuery::CreateTable(cts.clone()),
             RecipeExpr::View(cvs) => SqlQuery::CreateView(cvs.clone()),
@@ -123,17 +123,20 @@ impl Recipe {
         self.inc.enable_reuse(reuse_type)
     }
 
-    pub(in crate::controller) fn resolve_alias(&self, alias: &Table) -> Option<&Table> {
+    pub(in crate::controller) fn resolve_alias(&self, alias: &Relation) -> Option<&Relation> {
         self.registry.resolve_alias(alias)
     }
 
     /// Returns a set of all *original names* for all caches in the recipe (not including aliases)
-    pub(in crate::controller) fn cache_names(&self) -> impl Iterator<Item = &Table> + '_ {
+    pub(in crate::controller) fn cache_names(&self) -> impl Iterator<Item = &Relation> + '_ {
         self.registry.cache_names()
     }
 
     /// Obtains the `NodeIndex` for the node corresponding to a named query or a write type.
-    pub(in crate::controller) fn node_addr_for(&self, name: &Table) -> Result<NodeIndex, String> {
+    pub(in crate::controller) fn node_addr_for(
+        &self,
+        name: &Relation,
+    ) -> Result<NodeIndex, String> {
         // `name` might be an alias for another identical query, so resolve if needed
         let query_name = self.registry.resolve_alias(name).unwrap_or(name);
         match self.inc.get_query_address(query_name) {
@@ -143,7 +146,7 @@ impl Recipe {
     }
 
     /// Get schema for a base table or view in the recipe.
-    pub(super) fn schema_for(&self, name: &Table) -> Option<Schema> {
+    pub(super) fn schema_for(&self, name: &Relation) -> Option<Schema> {
         match self.inc.get_base_schema(name) {
             None => {
                 let s = match self.resolve_alias(name) {
@@ -307,7 +310,7 @@ impl Recipe {
 
     fn drop_and_recreate_table(
         &mut self,
-        table: &Table,
+        table: &Relation,
         new_table: CreateTableStatement,
         mig: &mut Migration,
     ) -> ReadySetResult<()> {
@@ -343,7 +346,7 @@ impl Recipe {
     //  Would we still need a `Recipe` structure if that's the case?
     pub(super) fn remove_expression(
         &mut self,
-        name_or_alias: &Table,
+        name_or_alias: &Relation,
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<Option<Vec<NodeIndex>>> {
         let expression = match self.registry.remove_expression(name_or_alias) {

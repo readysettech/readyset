@@ -14,7 +14,7 @@ use futures_util::stream::futures_unordered::FuturesUnordered;
 use futures_util::stream::TryStreamExt;
 use futures_util::{future, ready};
 use itertools::Either;
-use nom_sql::{CreateTableStatement, SqlIdentifier};
+use nom_sql::{CreateTableStatement, Relation, SqlIdentifier};
 use petgraph::graph::NodeIndex;
 use readyset_data::DfValue;
 use readyset_errors::{
@@ -275,7 +275,7 @@ pub struct TableBuilder {
     pub key: Vec<usize>,
     pub dropped: VecMap<DfValue>,
 
-    pub table_name: nom_sql::Table,
+    pub table_name: Relation,
     pub columns: Vec<SqlIdentifier>,
     pub schema: Option<CreateTableStatement>,
 
@@ -355,7 +355,7 @@ pub struct Table {
     key: Vec<usize>,
     columns: Vec<SqlIdentifier>,
     dropped: VecMap<DfValue>,
-    table_name: nom_sql::Table,
+    table_name: Relation,
     schema: Option<CreateTableStatement>,
     shards: Vec<TableRpc>,
     shard_addrs: Vec<SocketAddr>,
@@ -651,7 +651,7 @@ impl Service<TableRequest> for Table {
 
 impl Table {
     /// Get the name of this base table.
-    pub fn table_name(&self) -> &nom_sql::Table {
+    pub fn table_name(&self) -> &Relation {
         &self.table_name
     }
 

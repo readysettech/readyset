@@ -10,8 +10,8 @@ use common::IndexType;
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
     BinaryOperator, Column, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, InValue,
-    ItemPlaceholder, JoinConstraint, JoinOperator, JoinRightSide, Literal, OrderType,
-    SelectStatement, SqlIdentifier, Table, TableExpr, UnaryOperator,
+    ItemPlaceholder, JoinConstraint, JoinOperator, JoinRightSide, Literal, OrderType, Relation,
+    SelectStatement, SqlIdentifier, TableExpr, UnaryOperator,
 };
 use readyset::{PlaceholderIdx, ViewPlaceholder};
 use readyset_errors::{
@@ -26,14 +26,14 @@ use super::mir::{self, PAGE_NUMBER_COL};
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct LiteralColumn {
     pub name: SqlIdentifier,
-    pub table: Option<Table>,
+    pub table: Option<Relation>,
     pub value: Literal,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct ExprColumn {
     pub name: SqlIdentifier,
-    pub table: Option<Table>,
+    pub table: Option<Relation>,
     pub expression: Expr,
 }
 
@@ -172,8 +172,8 @@ impl OutputColumn {
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JoinRef {
-    pub src: Table,
-    pub dst: Table,
+    pub src: Relation,
+    pub dst: Relation,
 }
 
 /// An equality predicate on two expressions, used as the key for a join
@@ -193,7 +193,7 @@ pub struct Parameter {
 
 #[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub struct QueryGraphNode {
-    pub relation: Table,
+    pub relation: Relation,
     pub predicates: Vec<Expr>,
     pub columns: Vec<Column>,
     pub parameters: Vec<Parameter>,
@@ -233,10 +233,10 @@ pub struct ViewKey {
 // TODO(grfn): impl Arbitrary for this struct so we can make a proptest for that
 pub struct QueryGraph {
     /// Relations mentioned in the query.
-    pub relations: HashMap<Table, QueryGraphNode>,
+    pub relations: HashMap<Relation, QueryGraphNode>,
     /// Joins in the query.
     #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
-    pub edges: HashMap<(Table, Table), QueryGraphEdge>,
+    pub edges: HashMap<(Relation, Relation), QueryGraphEdge>,
     /// Aggregates in the query, represented as a map from the aggregate function to the alias for
     /// that aggregate function
     ///
@@ -393,10 +393,10 @@ impl QueryGraph {
 impl Hash for QueryGraph {
     fn hash<H: Hasher>(&self, state: &mut H) {
         // sorted iteration over relations, edges to ensure consistent hash
-        let mut rels: Vec<(&Table, &QueryGraphNode)> = self.relations.iter().collect();
+        let mut rels: Vec<(&Relation, &QueryGraphNode)> = self.relations.iter().collect();
         rels.sort_by(|a, b| a.0.cmp(b.0));
         rels.hash(state);
-        let mut edges: Vec<(&(Table, Table), &QueryGraphEdge)> = self.edges.iter().collect();
+        let mut edges: Vec<(&(Relation, Relation), &QueryGraphEdge)> = self.edges.iter().collect();
         edges.sort_by(|(a, _), (b, _)| match a.0.cmp(&b.0) {
             Ordering::Equal => a.1.cmp(&b.1),
             x => x,
@@ -450,7 +450,7 @@ fn split_conjunctions(ces: Vec<Expr>) -> Vec<Expr> {
 fn classify_conditionals(
     ce: &Expr,
     tables: &[TableExpr],
-    local: &mut HashMap<Table, Vec<Expr>>,
+    local: &mut HashMap<Relation, Vec<Expr>>,
     join: &mut Vec<JoinPredicate>,
     global: &mut Vec<Expr>,
     params: &mut Vec<Parameter>,
@@ -798,7 +798,7 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
     }
 
     // a handy closure for making new relation nodes
-    let new_node = |rel: Table,
+    let new_node = |rel: Relation,
                     preds: Vec<Expr>,
                     st: &SelectStatement|
      -> ReadySetResult<QueryGraphNode> {
@@ -853,7 +853,7 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
     // This is needed so that we don't end up with an empty query graph when there are no
     // conditionals, but rather with a one-node query graph that has no predicates.
     for table_expr in &st.tables {
-        let rel: Table = table_expr.table.clone();
+        let rel: Relation = table_expr.table.clone();
         qg.relations
             .insert(rel.clone(), new_node(rel, Vec::new(), st)?);
     }
@@ -867,7 +867,7 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                 }
             }
             JoinRightSide::NestedSelect(subquery, alias) => {
-                let rel: Table = alias.clone().into();
+                let rel: Relation = alias.clone().into();
                 if let Entry::Vacant(e) = qg.relations.entry(rel.clone()) {
                     let mut node = new_node(rel, vec![], st)?;
                     node.subgraph = Some((Box::new(to_query_graph(subquery)?), *subquery.clone()));
@@ -881,7 +881,7 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
     // 2. Add edges for each pair of joined relations. Note that we must keep track of the join
     //    predicates here already, but more may be added when processing the WHERE clause lateron.
     let mut join_predicates = Vec::new();
-    let col_expr = |tbl: &Table, col: &SqlIdentifier| -> Expr {
+    let col_expr = |tbl: &Relation, col: &SqlIdentifier| -> Expr {
         Expr::Column(Column {
             table: Some(tbl.clone()),
             name: col.clone(),
@@ -908,7 +908,8 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
 
                 // find all distinct tables mentioned in the condition
                 // conditions for now.
-                let mut tables_mentioned: Vec<Table> = cond.referred_tables().into_iter().collect();
+                let mut tables_mentioned: Vec<Relation> =
+                    cond.referred_tables().into_iter().collect();
 
                 let mut join_preds = vec![];
                 collect_join_predicates(cond.clone(), &mut join_preds)?;
@@ -1256,7 +1257,8 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
 
     // create initial join order
     {
-        let mut sorted_edges: Vec<(&(Table, Table), &QueryGraphEdge)> = qg.edges.iter().collect();
+        let mut sorted_edges: Vec<(&(Relation, Relation), &QueryGraphEdge)> =
+            qg.edges.iter().collect();
         // Sort the edges to ensure deterministic join order.
         sorted_edges.sort_by(|&(a, _), &(b, _)| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
 
@@ -1363,7 +1365,7 @@ mod tests {
             HashSet::from(["t".into(), "sq".into()])
         );
 
-        let subquery_rel = qg.relations.get(&Table::from("sq")).unwrap();
+        let subquery_rel = qg.relations.get(&Relation::from("sq")).unwrap();
         assert!(subquery_rel.subgraph.is_some());
     }
 

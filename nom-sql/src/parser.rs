@@ -424,7 +424,7 @@ mod tests {
         use std::hash::{Hash, Hasher};
 
         use super::*;
-        use crate::table::Table;
+        use crate::table::Relation;
 
         #[test]
         fn trim_query() {
@@ -454,7 +454,7 @@ mod tests {
             assert!(res.is_ok());
 
             let expected = SqlQuery::Insert(InsertStatement {
-                table: Table::from("users"),
+                table: Relation::from("users"),
                 fields: None,
                 data: vec![vec![42_u32.into(), "test".into()]],
                 ignore: false,
@@ -489,7 +489,7 @@ mod tests {
         use std::hash::{Hash, Hasher};
 
         use super::*;
-        use crate::table::Table;
+        use crate::table::Relation;
 
         #[test]
         fn trim_query() {
@@ -525,7 +525,7 @@ mod tests {
             assert!(res.is_ok());
 
             let expected = SqlQuery::Insert(InsertStatement {
-                table: Table::from("users"),
+                table: Relation::from("users"),
                 fields: None,
                 data: vec![vec![42_u32.into(), "test".into()]],
                 ignore: false,

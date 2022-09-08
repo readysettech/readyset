@@ -10,7 +10,7 @@ use itertools::Itertools;
 use mysql::prelude::*;
 use mysql::{Transaction, TxOpts};
 use mysql_async as mysql;
-use nom_sql::Table;
+use nom_sql::Relation;
 use readyset::recipe::changelist::ChangeList;
 use readyset::replication::{ReplicationOffset, ReplicationOffsets};
 use readyset::ReadySetResult;
@@ -198,7 +198,7 @@ impl MySqlReplicator {
     /// Call `SELECT * FROM table` and convert all rows into a ReadySet row
     /// it may seem inefficient but apparently that is the correct way to
     /// replicate a table, and `mysqldump` and `debezium` do just that
-    pub(crate) async fn dump_table(&self, table: &Table) -> mysql::Result<TableDumper> {
+    pub(crate) async fn dump_table(&self, table: &Relation) -> mysql::Result<TableDumper> {
         let mut tx = self
             .pool
             .start_transaction(tx_opts())
@@ -240,7 +240,7 @@ impl MySqlReplicator {
     }
 
     /// Issue a `LOCK TABLES tbl_name READ` for the table name provided
-    async fn lock_table(&self, table: &Table) -> mysql::Result<mysql::Conn> {
+    async fn lock_table(&self, table: &Relation) -> mysql::Result<mysql::Conn> {
         let mut conn = self.pool.get_conn().await?;
         let query = format!("LOCK TABLES {table} READ");
         conn.query_drop(query).await?;
@@ -379,8 +379,8 @@ impl MySqlReplicator {
     async fn dumper_task_for_table(
         &mut self,
         noria: &mut readyset::ControllerHandle,
-        table: Table,
-    ) -> ReadySetResult<JoinHandle<(Table, ReplicationOffset, ReadySetResult<()>)>> {
+        table: Relation,
+    ) -> ReadySetResult<JoinHandle<(Relation, ReplicationOffset, ReadySetResult<()>)>> {
         let span = info_span!("replicating table", %table);
         span.in_scope(|| info!("Acquiring read lock"));
         let mut read_lock = self.lock_table(&table).await?;
@@ -421,7 +421,7 @@ impl MySqlReplicator {
         let mut table_list = self
             .table_filter
             .tables()
-            .map(|(db, table)| Table {
+            .map(|(db, table)| Relation {
                 schema: Some(db.clone()),
                 name: table.clone(),
             })

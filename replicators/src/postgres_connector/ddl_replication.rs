@@ -38,7 +38,7 @@
 //!
 //! [dialect]: nom_sql::Dialect
 
-use nom_sql::{parse_query, Dialect, DropTableStatement, DropViewStatement, SqlQuery, Table};
+use nom_sql::{parse_query, Dialect, DropTableStatement, DropViewStatement, Relation, SqlQuery};
 use pgsql::tls::MakeTlsConnect;
 use readyset_errors::ReadySetResult;
 use serde::{Deserialize, Deserializer};
@@ -106,7 +106,7 @@ impl DdlEvent {
             | DdlEventOperation::CreateView
             | DdlEventOperation::AlterTable => self.statement.clone().unwrap().0.to_string(),
             DdlEventOperation::DropTable => DropTableStatement {
-                tables: vec![Table {
+                tables: vec![Relation {
                     schema: Some(self.schema.as_str().into()),
                     name: self.object.as_str().into(),
                 }],
@@ -380,7 +380,7 @@ mod tests {
             }) => {
                 assert_eq!(
                     name,
-                    Table {
+                    Relation {
                         schema: Some("public".into()),
                         name: "v".into()
                     }
@@ -394,7 +394,10 @@ mod tests {
                                 alias: None
                             }]
                         );
-                        assert_eq!(select_stmt.tables, vec![TableExpr::from(Table::from("t"))]);
+                        assert_eq!(
+                            select_stmt.tables,
+                            vec![TableExpr::from(Relation::from("t"))]
+                        );
                     }
                     _ => panic!(),
                 }

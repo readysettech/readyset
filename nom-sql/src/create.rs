@@ -21,13 +21,13 @@ use crate::create_table_options::{table_options, CreateTableOption};
 use crate::expression::expression;
 use crate::order::{order_type, OrderType};
 use crate::select::{nested_selection, selection, SelectStatement};
-use crate::table::{table_reference, Table};
+use crate::table::{table_reference, Relation};
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Dialect, SqlIdentifier};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct CreateTableStatement {
-    pub table: Table,
+    pub table: Relation,
     pub fields: Vec<ColumnSpecification>,
     pub keys: Option<Vec<TableKey>>,
     pub if_not_exists: bool,
@@ -106,7 +106,7 @@ impl fmt::Display for SelectSpecification {
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct CreateViewStatement {
-    pub name: Table,
+    pub name: Relation,
     pub fields: Vec<Column>,
     pub definition: Box<SelectSpecification>,
 }
@@ -144,7 +144,7 @@ pub enum CacheInner {
 /// This is a non-standard ReadySet specific extension to SQL
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct CreateCacheStatement {
-    pub name: Option<Table>,
+    pub name: Option<Relation>,
     pub inner: CacheInner,
     pub always: bool,
 }
@@ -653,7 +653,7 @@ mod tests {
     use crate::column::Column;
     use crate::common::type_identifier;
     use crate::create_table_options::{CharsetName, CollationName};
-    use crate::table::Table;
+    use crate::table::Relation;
     use crate::{BinaryOperator, ColumnConstraint, Expr, Literal, SqlType, TableExpr};
 
     #[test]
@@ -699,7 +699,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             CreateTableStatement {
-                table: Table::from("users"),
+                table: Relation::from("users"),
                 fields: vec![
                     ColumnSpecification::new(Column::from("id"), SqlType::BigInt(Some(20))),
                     ColumnSpecification::new(Column::from("name"), SqlType::VarChar(Some(255))),
@@ -719,7 +719,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             CreateTableStatement {
-                table: Table::from("t"),
+                table: Relation::from("t"),
                 fields: vec![ColumnSpecification::new(
                     Column::from("x"),
                     SqlType::Int(None)
@@ -738,7 +738,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             CreateTableStatement {
-                table: Table {
+                table: Relation {
                     schema: Some("db1".into()),
                     name: "t".into(),
                 },
@@ -763,7 +763,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             CreateTableStatement {
-                table: Table::from("users"),
+                table: Relation::from("users"),
                 fields: vec![
                     ColumnSpecification::new(Column::from("id"), SqlType::BigInt(Some(20))),
                     ColumnSpecification::new(Column::from("name"), SqlType::VarChar(Some(255))),
@@ -786,7 +786,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             CreateTableStatement {
-                table: Table::from("users"),
+                table: Relation::from("users"),
                 fields: vec![
                     ColumnSpecification::new(Column::from("id"), SqlType::BigInt(Some(20))),
                     ColumnSpecification::new(Column::from("name"), SqlType::VarChar(Some(255))),
@@ -821,7 +821,7 @@ mod tests {
                         (
                             None,
                             SelectStatement {
-                                tables: vec![TableExpr::from(Table::from("users"))],
+                                tables: vec![TableExpr::from(Relation::from("users"))],
                                 fields: vec![FieldDefinitionExpr::All],
                                 ..Default::default()
                             },
@@ -829,7 +829,7 @@ mod tests {
                         (
                             Some(CompoundSelectOperator::DistinctUnion),
                             SelectStatement {
-                                tables: vec![TableExpr::from(Table::from("old_users"))],
+                                tables: vec![TableExpr::from(Relation::from("old_users"))],
                                 fields: vec![FieldDefinitionExpr::All],
                                 ..Default::default()
                             },
@@ -1135,7 +1135,7 @@ mod tests {
 
         use super::*;
         use crate::column::Column;
-        use crate::table::Table;
+        use crate::table::Relation;
         use crate::{ColumnConstraint, Literal, SqlType, TableExpr};
 
         #[test]
@@ -1181,7 +1181,7 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 CreateTableStatement {
-                    table: Table::from("django_admin_log"),
+                    table: Relation::from("django_admin_log"),
                     fields: vec![
                         ColumnSpecification::with_constraints(
                             Column::from("id"),
@@ -1236,7 +1236,7 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 CreateTableStatement {
-                    table: Table::from("auth_group"),
+                    table: Relation::from("auth_group"),
                     fields: vec![
                         ColumnSpecification::with_constraints(
                             Column::from("id"),
@@ -1288,7 +1288,7 @@ mod tests {
                     name: "v".into(),
                     fields: vec![],
                     definition: Box::new(SelectSpecification::Simple(SelectStatement {
-                        tables: vec![TableExpr::from(Table::from("users"))],
+                        tables: vec![TableExpr::from(Relation::from("users"))],
                         fields: vec![FieldDefinitionExpr::All],
                         where_clause: Some(Expr::BinaryOp {
                             lhs: Box::new(Expr::Column("username".into())),
@@ -1322,7 +1322,7 @@ mod tests {
             };
             assert_eq!(
                 statement.tables,
-                vec![TableExpr::from(Table::from("users"))]
+                vec![TableExpr::from(Relation::from("users"))]
             );
         }
 
@@ -1339,7 +1339,7 @@ mod tests {
             };
             assert_eq!(
                 statement.tables,
-                vec![TableExpr::from(Table::from("users"))]
+                vec![TableExpr::from(Relation::from("users"))]
             );
         }
 
@@ -1349,7 +1349,7 @@ mod tests {
                 create_cached_query(Dialect::MySQL),
                 b"CREATE CACHE foo FROM q_0123456789ABCDEF"
             );
-            assert_eq!(res.name.unwrap(), Table::from("foo"));
+            assert_eq!(res.name.unwrap(), Relation::from("foo"));
             let id = match res.inner {
                 CacheInner::Id(s) => s,
                 _ => panic!(),
@@ -1384,7 +1384,7 @@ mod tests {
             };
             assert_eq!(
                 statement.tables,
-                vec![TableExpr::from(Table::from("users"))]
+                vec![TableExpr::from(Relation::from("users"))]
             );
             assert!(res.always);
         }
@@ -1418,7 +1418,7 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 CreateTableStatement {
-                    table: Table::from("comments"),
+                    table: Relation::from("comments"),
                     fields: vec![
                         ColumnSpecification::with_constraints(
                             Column::from("id"),
@@ -1480,7 +1480,7 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 CreateTableStatement {
-                    table: Table::from("user_newtalk"),
+                    table: Relation::from("user_newtalk"),
                     fields: vec![
                         ColumnSpecification::with_constraints(
                             Column::from("user_id"),
@@ -1569,7 +1569,7 @@ mod tests {
     mod postgres {
         use super::*;
         use crate::column::Column;
-        use crate::table::Table;
+        use crate::table::Relation;
         use crate::{ColumnConstraint, Literal, SqlType};
 
         #[test]
@@ -1601,7 +1601,7 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 CreateTableStatement {
-                    table: Table::from("groups"),
+                    table: Relation::from("groups"),
                     fields: vec![ColumnSpecification::new(
                         Column::from("id"),
                         SqlType::Int(None)
@@ -1635,7 +1635,7 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 CreateTableStatement {
-                    table: Table::from("django_admin_log"),
+                    table: Relation::from("django_admin_log"),
                     fields: vec![
                         ColumnSpecification::with_constraints(
                             Column::from("id"),
@@ -1690,7 +1690,7 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 CreateTableStatement {
-                    table: Table::from("auth_group"),
+                    table: Relation::from("auth_group"),
                     fields: vec![
                         ColumnSpecification::with_constraints(
                             Column::from("id"),
@@ -1741,7 +1741,7 @@ mod tests {
                     name: "v".into(),
                     fields: vec![],
                     definition: Box::new(SelectSpecification::Simple(SelectStatement {
-                        tables: vec![TableExpr::from(Table::from("users"))],
+                        tables: vec![TableExpr::from(Relation::from("users"))],
                         fields: vec![FieldDefinitionExpr::All],
                         where_clause: Some(Expr::BinaryOp {
                             lhs: Box::new(Expr::Column("username".into())),
@@ -1778,7 +1778,7 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 CreateTableStatement {
-                    table: Table::from("comments"),
+                    table: Relation::from("comments"),
                     fields: vec![
                         ColumnSpecification::with_constraints(
                             Column::from("id"),
@@ -1840,7 +1840,7 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 CreateTableStatement {
-                    table: Table::from("user_newtalk"),
+                    table: Relation::from("user_newtalk"),
                     fields: vec![
                         ColumnSpecification::with_constraints(
                             Column::from("user_id"),

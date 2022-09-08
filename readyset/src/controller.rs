@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use futures_util::future;
 use hyper::client::HttpConnector;
-use nom_sql::SelectStatement;
+use nom_sql::{Relation, SelectStatement};
 use parking_lot::RwLock;
 use petgraph::graph::NodeIndex;
 use readyset_errors::{
@@ -293,7 +293,7 @@ impl ControllerHandle {
     /// Enumerate all known base tables.
     ///
     /// These have all been created in response to a `CREATE TABLE` statement in a recipe.
-    pub async fn inputs(&mut self) -> ReadySetResult<BTreeMap<nom_sql::Table, NodeIndex>> {
+    pub async fn inputs(&mut self) -> ReadySetResult<BTreeMap<Relation, NodeIndex>> {
         let body: hyper::body::Bytes = self
             .handle
             .ready()
@@ -311,7 +311,7 @@ impl ControllerHandle {
     /// These have all been created in response to a `CREATE EXT VIEW` statement in a recipe.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub async fn outputs(&mut self) -> ReadySetResult<BTreeMap<nom_sql::Table, NodeIndex>> {
+    pub async fn outputs(&mut self) -> ReadySetResult<BTreeMap<Relation, NodeIndex>> {
         let body: hyper::body::Bytes = self
             .handle
             .ready()
@@ -333,7 +333,7 @@ impl ControllerHandle {
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub async fn verbose_outputs(
         &mut self,
-    ) -> ReadySetResult<BTreeMap<nom_sql::Table, (SelectStatement, bool)>> {
+    ) -> ReadySetResult<BTreeMap<Relation, (SelectStatement, bool)>> {
         let body: hyper::body::Bytes = self
             .handle
             .ready()
@@ -353,7 +353,7 @@ impl ControllerHandle {
     /// Obtain a `View` that allows you to query the given external view.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn view<I: Into<nom_sql::Table>>(
+    pub fn view<I: Into<Relation>>(
         &mut self,
         name: I,
     ) -> impl Future<Output = ReadySetResult<View>> + '_ {
@@ -368,7 +368,7 @@ impl ControllerHandle {
     /// view.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn view_from_workers<I: Into<nom_sql::Table>>(
+    pub fn view_from_workers<I: Into<Relation>>(
         &mut self,
         name: I,
         workers: Vec<Url>,
@@ -383,7 +383,7 @@ impl ControllerHandle {
     /// Obtain the replica of a `View` with the given replica index
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn view_with_replica<I: Into<nom_sql::Table>>(
+    pub fn view_with_replica<I: Into<Relation>>(
         &mut self,
         name: I,
         replica: usize,
@@ -449,7 +449,7 @@ impl ControllerHandle {
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub fn table<N>(&mut self, name: N) -> impl Future<Output = ReadySetResult<Table>> + '_
     where
-        N: Into<nom_sql::Table>,
+        N: Into<Relation>,
     {
         let name = name.into();
         async move {
@@ -586,7 +586,7 @@ impl ControllerHandle {
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub fn remove_query(
         &mut self,
-        name: &nom_sql::Table,
+        name: &Relation,
     ) -> impl Future<Output = ReadySetResult<()>> + '_ {
         self.rpc("remove_query", name, self.migration_timeout)
     }

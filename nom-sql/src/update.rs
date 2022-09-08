@@ -9,13 +9,13 @@ use serde::{Deserialize, Serialize};
 use crate::column::Column;
 use crate::common::{assignment_expr_list, statement_terminator};
 use crate::select::where_clause;
-use crate::table::{table_reference, Table};
+use crate::table::{table_reference, Relation};
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Dialect, Expr};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct UpdateStatement {
-    pub table: Table,
+    pub table: Relation,
     pub fields: Vec<(Column, Expr)>,
     pub where_clause: Option<Expr>,
 }
@@ -70,7 +70,7 @@ pub fn updating(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], UpdateStat
 mod tests {
     use super::*;
     use crate::column::Column;
-    use crate::table::Table;
+    use crate::table::Relation;
     use crate::{BinaryOperator, ItemPlaceholder, Literal};
 
     #[test]
@@ -81,7 +81,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             UpdateStatement {
-                table: Table::from("users"),
+                table: Relation::from("users"),
                 fields: vec![
                     (Column::from("id"), Expr::Literal(42_u32.into())),
                     (Column::from("name"), Expr::Literal("test".into())),
@@ -105,7 +105,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             UpdateStatement {
-                table: Table::from("users"),
+                table: Relation::from("users"),
                 fields: vec![
                     (Column::from("id"), Expr::Literal(Literal::from(42_u32)),),
                     (Column::from("name"), Expr::Literal(Literal::from("test",)),),
@@ -138,7 +138,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             UpdateStatement {
-                table: Table::from("users"),
+                table: Relation::from("users"),
                 fields: vec![(
                     Column::from("karma"),
                     Expr::BinaryOp {
@@ -155,7 +155,7 @@ mod tests {
     mod mysql {
         use super::*;
         use crate::column::Column;
-        use crate::table::Table;
+        use crate::table::Relation;
         use crate::Expr::UnaryOp;
         use crate::{BinaryOperator, Double, FunctionExpr, ItemPlaceholder, UnaryOperator};
 
@@ -176,7 +176,7 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 UpdateStatement {
-                    table: Table::from("stories"),
+                    table: Relation::from("stories"),
                     fields: vec![(
                         Column::from("hotness"),
                         UnaryOp {
@@ -200,7 +200,7 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 UpdateStatement {
-                    table: Table::from("users"),
+                    table: Relation::from("users"),
                     fields: vec![(
                         Column::from("karma"),
                         Expr::BinaryOp {
@@ -221,7 +221,7 @@ mod tests {
             assert_eq!(
                 res,
                 UpdateStatement {
-                    table: Table::from("group_permission"),
+                    table: Relation::from("group_permission"),
                     fields: vec![(
                         Column::from("permission"),
                         Expr::Call(FunctionExpr::Call {
@@ -246,7 +246,7 @@ mod tests {
     mod postgres {
         use super::*;
         use crate::column::Column;
-        use crate::table::Table;
+        use crate::table::Relation;
         use crate::Expr::UnaryOp;
         use crate::{BinaryOperator, Double, UnaryOperator};
 
@@ -267,7 +267,7 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 UpdateStatement {
-                    table: Table::from("stories"),
+                    table: Relation::from("stories"),
                     fields: vec![(
                         Column::from("hotness"),
                         UnaryOp {
@@ -291,7 +291,7 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 UpdateStatement {
-                    table: Table::from("users"),
+                    table: Relation::from("users"),
                     fields: vec![(
                         Column::from("karma"),
                         Expr::BinaryOp {

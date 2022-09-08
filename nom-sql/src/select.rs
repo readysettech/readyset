@@ -537,7 +537,7 @@ mod tests {
     use super::*;
     use crate::column::Column;
     use crate::common::FieldDefinitionExpr;
-    use crate::table::Table;
+    use crate::table::Relation;
     use crate::{BinaryOperator, Expr, FunctionExpr, InValue, ItemPlaceholder, SqlType};
 
     fn columns(cols: &[&str]) -> Vec<FieldDefinitionExpr> {
@@ -554,7 +554,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             SelectStatement {
-                tables: vec![TableExpr::from(Table::from("users"))],
+                tables: vec![TableExpr::from(Relation::from("users"))],
                 fields: columns(&["id", "name"]),
                 ..Default::default()
             }
@@ -592,7 +592,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             SelectStatement {
-                tables: vec![TableExpr::from(Table::from("users"))],
+                tables: vec![TableExpr::from(Relation::from("users"))],
                 fields: columns(&["users.id", "users.name"]),
                 ..Default::default()
             }
@@ -607,7 +607,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             SelectStatement {
-                tables: vec![TableExpr::from(Table::from("users"))],
+                tables: vec![TableExpr::from(Relation::from("users"))],
                 fields: vec![FieldDefinitionExpr::All],
                 ..Default::default()
             }
@@ -623,8 +623,8 @@ mod tests {
             res,
             SelectStatement {
                 tables: vec![
-                    TableExpr::from(Table::from("users")),
-                    TableExpr::from(Table::from("votes"))
+                    TableExpr::from(Relation::from("users")),
+                    TableExpr::from(Relation::from("votes"))
                 ],
                 fields: vec![FieldDefinitionExpr::AllInTable("users".into())],
                 ..Default::default()
@@ -640,7 +640,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             SelectStatement {
-                tables: vec![TableExpr::from(Table::from("users"))],
+                tables: vec![TableExpr::from(Relation::from("users"))],
                 fields: columns(&["id", "name"]),
                 ..Default::default()
             }
@@ -706,7 +706,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             SelectStatement {
-                tables: vec![TableExpr::from(Table::from("ContactInfo"))],
+                tables: vec![TableExpr::from(Relation::from("ContactInfo"))],
                 fields: vec![FieldDefinitionExpr::All],
                 where_clause: expected_where_cond,
                 ..Default::default()
@@ -744,7 +744,7 @@ mod tests {
             res1,
             SelectStatement {
                 tables: vec![TableExpr {
-                    table: Table {
+                    table: Relation {
                         schema: None,
                         name: "PaperTag".into(),
                     },
@@ -767,7 +767,7 @@ mod tests {
             res1,
             SelectStatement {
                 tables: vec![TableExpr {
-                    table: Table {
+                    table: Relation {
                         name: "PaperTag".into(),
                         schema: Some("db1".into()),
                     },
@@ -790,7 +790,7 @@ mod tests {
         assert_eq!(
             res1,
             SelectStatement {
-                tables: vec![TableExpr::from(Table::from("PaperTag"))],
+                tables: vec![TableExpr::from(Relation::from("PaperTag"))],
                 fields: vec![FieldDefinitionExpr::Expr {
                     alias: Some("TagName".into()),
                     expr: Expr::Column(Column::from("name"))
@@ -802,7 +802,7 @@ mod tests {
         assert_eq!(
             res2,
             SelectStatement {
-                tables: vec![TableExpr::from(Table::from("PaperTag"))],
+                tables: vec![TableExpr::from(Relation::from("PaperTag"))],
                 fields: vec![FieldDefinitionExpr::Expr {
                     expr: Expr::Column(Column::from("PaperTag.name")),
                     alias: Some("TagName".into()),
@@ -821,7 +821,7 @@ mod tests {
         assert_eq!(
             res1,
             SelectStatement {
-                tables: vec![TableExpr::from(Table::from("PaperTag"))],
+                tables: vec![TableExpr::from(Relation::from("PaperTag"))],
                 fields: vec![FieldDefinitionExpr::Expr {
                     alias: Some("TagName".into()),
                     expr: Expr::Column(Column {
@@ -836,7 +836,7 @@ mod tests {
         assert_eq!(
             res2,
             SelectStatement {
-                tables: vec![TableExpr::from(Table::from("PaperTag"))],
+                tables: vec![TableExpr::from(Relation::from("PaperTag"))],
                 fields: vec![FieldDefinitionExpr::Expr {
                     alias: Some("TagName".into()),
                     expr: Expr::Column(Column::from("PaperTag.name"))
@@ -861,7 +861,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             SelectStatement {
-                tables: vec![TableExpr::from(Table::from("PaperTag"))],
+                tables: vec![TableExpr::from(Relation::from("PaperTag"))],
                 distinct: true,
                 fields: columns(&["tag"]),
                 where_clause: expected_where_cond,
@@ -898,7 +898,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             SelectStatement {
-                tables: vec![TableExpr::from(Table::from("PaperStorage"))],
+                tables: vec![TableExpr::from(Relation::from("PaperStorage"))],
                 fields: columns(&["infoJson"]),
                 where_clause: expected_where_cond,
                 ..Default::default()
@@ -923,7 +923,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             SelectStatement {
-                tables: vec![TableExpr::from(Table::from("users"))],
+                tables: vec![TableExpr::from(Relation::from("users"))],
                 fields: vec![FieldDefinitionExpr::All],
                 where_clause: expected_where_cond,
                 limit: Some(10_u32.into()),
@@ -950,7 +950,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             SelectStatement {
-                tables: vec![TableExpr::from(Table::from("address"))],
+                tables: vec![TableExpr::from(Relation::from("address"))],
                 fields: vec![FieldDefinitionExpr::from(Expr::Call(agg_expr),),],
                 ..Default::default()
             }
@@ -964,7 +964,7 @@ mod tests {
         let res = selection(Dialect::MySQL)(qstring.as_bytes());
         let agg_expr = FunctionExpr::Max(Box::new(Expr::Column(Column::from("addr_id"))));
         let expected_stmt = SelectStatement {
-            tables: vec![TableExpr::from(Table::from("address"))],
+            tables: vec![TableExpr::from(Relation::from("address"))],
             fields: vec![FieldDefinitionExpr::Expr {
                 alias: Some("max_addr".into()),
                 expr: Expr::Call(agg_expr),
@@ -981,7 +981,7 @@ mod tests {
         let res = selection(Dialect::MySQL)(qstring.as_bytes());
         let agg_expr = FunctionExpr::CountStar;
         let expected_stmt = SelectStatement {
-            tables: vec![TableExpr::from(Table::from("votes"))],
+            tables: vec![TableExpr::from(Relation::from("votes"))],
             fields: vec![FieldDefinitionExpr::from(Expr::Call(agg_expr))],
             group_by: Some(GroupByClause {
                 fields: vec![FieldReference::Expr(Expr::Column(Column::from("aid")))],
@@ -1001,7 +1001,7 @@ mod tests {
             distinct: true,
         };
         let expected_stmt = SelectStatement {
-            tables: vec![TableExpr::from(Table::from("votes"))],
+            tables: vec![TableExpr::from(Relation::from("votes"))],
             fields: vec![FieldDefinitionExpr::from(Expr::Call(agg_expr))],
             group_by: Some(GroupByClause {
                 fields: vec![FieldReference::Expr(Expr::Column(Column::from("aid")))],
@@ -1031,7 +1031,7 @@ mod tests {
             distinct: false,
         };
         let expected_stmt = SelectStatement {
-            tables: vec![TableExpr::from(Table::from("votes"))],
+            tables: vec![TableExpr::from(Relation::from("votes"))],
             fields: vec![FieldDefinitionExpr::from(Expr::Call(agg_expr))],
             group_by: Some(GroupByClause {
                 fields: vec![FieldReference::Expr(Expr::Column(Column::from("aid")))],
@@ -1061,7 +1061,7 @@ mod tests {
             distinct: false,
         };
         let expected_stmt = SelectStatement {
-            tables: vec![TableExpr::from(Table::from("votes"))],
+            tables: vec![TableExpr::from(Relation::from("votes"))],
             fields: vec![FieldDefinitionExpr::from(Expr::Call(agg_expr))],
             group_by: Some(GroupByClause {
                 fields: vec![FieldReference::Expr(Expr::Column(Column::from("aid")))],
@@ -1092,7 +1092,7 @@ mod tests {
             distinct: false,
         };
         let expected_stmt = SelectStatement {
-            tables: vec![TableExpr::from(Table::from("votes"))],
+            tables: vec![TableExpr::from(Relation::from("votes"))],
             fields: vec![FieldDefinitionExpr::from(Expr::Call(agg_expr))],
             group_by: Some(GroupByClause {
                 fields: vec![FieldReference::Expr(Expr::Column(Column::from("aid")))],
@@ -1133,7 +1133,7 @@ mod tests {
             distinct: false,
         };
         let expected_stmt = SelectStatement {
-            tables: vec![TableExpr::from(Table::from("votes"))],
+            tables: vec![TableExpr::from(Relation::from("votes"))],
             fields: vec![FieldDefinitionExpr::Expr {
                 alias: Some("votes".into()),
                 expr: Expr::Call(agg_expr),
@@ -1171,7 +1171,7 @@ mod tests {
             ],
         };
         let expected_stmt = SelectStatement {
-            tables: vec![TableExpr::from(Table::from("sometable"))],
+            tables: vec![TableExpr::from(Relation::from("sometable"))],
             fields: vec![
                 FieldDefinitionExpr::Expr {
                     alias: Some("x".into()),
@@ -1212,8 +1212,8 @@ mod tests {
             res.unwrap().1,
             SelectStatement {
                 tables: vec![
-                    TableExpr::from(Table::from("item")),
-                    TableExpr::from(Table::from("author"))
+                    TableExpr::from(Relation::from("item")),
+                    TableExpr::from(Relation::from("author"))
                 ],
                 fields: vec![FieldDefinitionExpr::All],
                 where_clause: expected_where_cond,
@@ -1235,11 +1235,11 @@ mod tests {
 
         let res = selection(Dialect::MySQL)(qstring.as_bytes());
         let expected_stmt = SelectStatement {
-            tables: vec![TableExpr::from(Table::from("PaperConflict"))],
+            tables: vec![TableExpr::from(Relation::from("PaperConflict"))],
             fields: columns(&["paperId"]),
             join: vec![JoinClause {
                 operator: JoinOperator::Join,
-                right: JoinRightSide::Table(TableExpr::from(Table::from("PCMember"))),
+                right: JoinRightSide::Table(TableExpr::from(Relation::from("PCMember"))),
                 constraint: JoinConstraint::Using(vec![Column::from("contactId")]),
             }],
             ..Default::default()
@@ -1257,11 +1257,11 @@ mod tests {
 
         let res = selection(Dialect::MySQL)(qstring.as_bytes());
         let expected = SelectStatement {
-            tables: vec![TableExpr::from(Table::from("PCMember"))],
+            tables: vec![TableExpr::from(Relation::from("PCMember"))],
             fields: columns(&["PCMember.contactId"]),
             join: vec![JoinClause {
                 operator: JoinOperator::Join,
-                right: JoinRightSide::Table(TableExpr::from(Table::from("PaperReview"))),
+                right: JoinRightSide::Table(TableExpr::from(Relation::from("PaperReview"))),
                 constraint: JoinConstraint::On(Expr::BinaryOp {
                     lhs: Box::new(Expr::Column(Column::from("PCMember.contactId"))),
                     rhs: Box::new(Expr::Column(Column::from("PaperReview.contactId"))),
@@ -1304,14 +1304,14 @@ mod tests {
         let mkjoin = |tbl: &str, col: &str| -> JoinClause {
             JoinClause {
                 operator: JoinOperator::LeftJoin,
-                right: JoinRightSide::Table(TableExpr::from(Table::from(tbl))),
+                right: JoinRightSide::Table(TableExpr::from(Relation::from(tbl))),
                 constraint: JoinConstraint::Using(vec![Column::from(col)]),
             }
         };
         assert_eq!(
             res.unwrap().1,
             SelectStatement {
-                tables: vec![TableExpr::from(Table::from("ContactInfo"))],
+                tables: vec![TableExpr::from(Relation::from("ContactInfo"))],
                 fields: columns(&[
                     "PCMember.contactId",
                     "ChairAssistant.contactId",
@@ -1345,8 +1345,8 @@ mod tests {
 
         let inner_select = SelectStatement {
             tables: vec![
-                TableExpr::from(Table::from("orders")),
-                TableExpr::from(Table::from("order_line")),
+                TableExpr::from(Relation::from("orders")),
+                TableExpr::from(Relation::from("order_line")),
             ],
             fields: columns(&["o_c_id"]),
             where_clause: Some(inner_where_clause),
@@ -1361,8 +1361,8 @@ mod tests {
 
         let outer_select = SelectStatement {
             tables: vec![
-                TableExpr::from(Table::from("orders")),
-                TableExpr::from(Table::from("order_line")),
+                TableExpr::from(Relation::from("orders")),
+                TableExpr::from(Relation::from("order_line")),
             ],
             fields: columns(&["ol_i_id"]),
             where_clause: Some(outer_where_clause),
@@ -1383,7 +1383,7 @@ mod tests {
 
         let agg_expr = FunctionExpr::Max(Box::new(Expr::Column(Column::from("o_id"))));
         let recursive_select = SelectStatement {
-            tables: vec![TableExpr::from(Table::from("orders"))],
+            tables: vec![TableExpr::from(Relation::from("orders"))],
             fields: vec![FieldDefinitionExpr::from(Expr::Call(agg_expr))],
             ..Default::default()
         };
@@ -1408,8 +1408,8 @@ mod tests {
 
         let inner_select = SelectStatement {
             tables: vec![
-                TableExpr::from(Table::from("orders")),
-                TableExpr::from(Table::from("order_line")),
+                TableExpr::from(Relation::from("orders")),
+                TableExpr::from(Relation::from("order_line")),
             ],
             fields: columns(&["o_c_id"]),
             where_clause: Some(inner_where_clause),
@@ -1424,8 +1424,8 @@ mod tests {
 
         let outer_select = SelectStatement {
             tables: vec![
-                TableExpr::from(Table::from("orders")),
-                TableExpr::from(Table::from("order_line")),
+                TableExpr::from(Relation::from("orders")),
+                TableExpr::from(Relation::from("order_line")),
             ],
             fields: columns(&["ol_i_id"]),
             where_clause: Some(outer_where_clause),
@@ -1452,13 +1452,13 @@ mod tests {
 
         // N.B.: Don't alias the inner select to `inner`, which is, well, a SQL keyword!
         let inner_select = SelectStatement {
-            tables: vec![TableExpr::from(Table::from("order_line"))],
+            tables: vec![TableExpr::from(Relation::from("order_line"))],
             fields: columns(&["ol_i_id"]),
             ..Default::default()
         };
 
         let outer_select = SelectStatement {
-            tables: vec![TableExpr::from(Table::from("orders"))],
+            tables: vec![TableExpr::from(Relation::from("orders"))],
             fields: columns(&["o_id", "ol_i_id"]),
             join: vec![JoinClause {
                 operator: JoinOperator::Join,
@@ -1481,7 +1481,7 @@ mod tests {
         let res = selection(Dialect::MySQL)(qstr.as_bytes());
 
         let expected = SelectStatement {
-            tables: vec![TableExpr::from(Table::from("orders"))],
+            tables: vec![TableExpr::from(Relation::from("orders"))],
             fields: vec![FieldDefinitionExpr::from(Expr::BinaryOp {
                 lhs: Box::new(Expr::Call(FunctionExpr::Max(Box::new(Expr::Column(
                     "o_id".into(),
@@ -1501,7 +1501,7 @@ mod tests {
         let res = selection(Dialect::MySQL)(qstr.as_bytes());
 
         let expected = SelectStatement {
-            tables: vec![TableExpr::from(Table::from("orders"))],
+            tables: vec![TableExpr::from(Relation::from("orders"))],
             fields: vec![FieldDefinitionExpr::Expr {
                 alias: Some("double_max".into()),
                 expr: Expr::BinaryOp {
@@ -1550,7 +1550,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             SelectStatement {
-                tables: vec![TableExpr::from(Table::from("users"))],
+                tables: vec![TableExpr::from(Relation::from("users"))],
                 fields: vec![
                     FieldDefinitionExpr::from(Column::from("id")),
                     FieldDefinitionExpr::Expr {
@@ -1613,7 +1613,7 @@ mod tests {
                         expr: Expr::Column("x".into()),
                         alias: None,
                     }],
-                    tables: vec![TableExpr::from(Table::from("t"))],
+                    tables: vec![TableExpr::from(Relation::from("t"))],
                     ..Default::default()
                 },
             }],
@@ -1621,7 +1621,7 @@ mod tests {
                 expr: Expr::Column("x".into()),
                 alias: None,
             }],
-            tables: vec![TableExpr::from(Table::from("foo"))],
+            tables: vec![TableExpr::from(Relation::from("foo"))],
             ..Default::default()
         };
         let res = query.to_string();
@@ -1656,7 +1656,7 @@ mod tests {
         use super::*;
         use crate::column::Column;
         use crate::common::FieldDefinitionExpr;
-        use crate::table::Table;
+        use crate::table::Relation;
         use crate::{BinaryOperator, Expr, FunctionExpr, InValue};
 
         #[test]
@@ -1667,7 +1667,7 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 SelectStatement {
-                    tables: vec![TableExpr::from(Table::from("users"))],
+                    tables: vec![TableExpr::from(Relation::from("users"))],
                     fields: vec![
                         FieldDefinitionExpr::from(Column::from("id")),
                         FieldDefinitionExpr::Expr {
@@ -1698,7 +1698,7 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 SelectStatement {
-                    tables: vec![TableExpr::from(Table::from("users"))],
+                    tables: vec![TableExpr::from(Relation::from("users"))],
                     fields: vec![
                         FieldDefinitionExpr::from(Expr::Literal(Literal::Null,)),
                         FieldDefinitionExpr::from(Expr::Literal(Literal::UnsignedInteger(1),)),
@@ -1730,14 +1730,14 @@ mod tests {
             });
 
             let expected = SelectStatement {
-                tables: vec![TableExpr::from(Table::from("auth_permission"))],
+                tables: vec![TableExpr::from(Relation::from("auth_permission"))],
                 fields: vec![
                     FieldDefinitionExpr::from(Column::from("auth_permission.content_type_id")),
                     FieldDefinitionExpr::from(Column::from("auth_permission.codename")),
                 ],
                 join: vec![JoinClause {
                     operator: JoinOperator::Join,
-                    right: JoinRightSide::Table(TableExpr::from(Table::from(
+                    right: JoinRightSide::Table(TableExpr::from(Relation::from(
                         "django_content_type",
                     ))),
                     constraint: JoinConstraint::On(Expr::BinaryOp {
@@ -1785,7 +1785,7 @@ mod tests {
         use super::*;
         use crate::column::Column;
         use crate::common::FieldDefinitionExpr;
-        use crate::table::Table;
+        use crate::table::Relation;
         use crate::{BinaryOperator, Expr, FunctionExpr, InValue};
 
         #[test]
@@ -1796,7 +1796,7 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 SelectStatement {
-                    tables: vec![TableExpr::from(Table::from("users"))],
+                    tables: vec![TableExpr::from(Relation::from("users"))],
                     fields: vec![
                         FieldDefinitionExpr::from(Column::from("id")),
                         FieldDefinitionExpr::Expr {
@@ -1827,7 +1827,7 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 SelectStatement {
-                    tables: vec![TableExpr::from(Table::from("users"))],
+                    tables: vec![TableExpr::from(Relation::from("users"))],
                     fields: vec![
                         FieldDefinitionExpr::from(Expr::Literal(Literal::Null,)),
                         FieldDefinitionExpr::from(Expr::Literal(Literal::UnsignedInteger(1),)),
@@ -1859,14 +1859,14 @@ mod tests {
             });
 
             let expected = SelectStatement {
-                tables: vec![TableExpr::from(Table::from("auth_permission"))],
+                tables: vec![TableExpr::from(Relation::from("auth_permission"))],
                 fields: vec![
                     FieldDefinitionExpr::from(Column::from("auth_permission.content_type_id")),
                     FieldDefinitionExpr::from(Column::from("auth_permission.codename")),
                 ],
                 join: vec![JoinClause {
                     operator: JoinOperator::Join,
-                    right: JoinRightSide::Table(TableExpr::from(Table::from(
+                    right: JoinRightSide::Table(TableExpr::from(Relation::from(
                         "django_content_type",
                     ))),
                     constraint: JoinConstraint::On(Expr::BinaryOp {
@@ -1903,7 +1903,7 @@ mod tests {
             assert_eq!(
                 res.tables,
                 vec![TableExpr {
-                    table: Table {
+                    table: Relation {
                         schema: Some("public".into()),
                         name: "User".into(),
                     },

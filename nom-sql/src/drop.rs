@@ -10,7 +10,7 @@ use nom::IResult;
 use serde::{Deserialize, Serialize};
 
 use crate::common::{statement_terminator, ws_sep_comma};
-use crate::table::{table_list, table_reference, Table};
+use crate::table::{table_list, table_reference, Relation};
 use crate::whitespace::whitespace1;
 use crate::Dialect;
 
@@ -34,7 +34,7 @@ fn restrict_cascade(i: &[u8]) -> IResult<&[u8], (bool, bool)> {
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct DropTableStatement {
-    pub tables: Vec<Table>,
+    pub tables: Vec<Relation>,
     pub if_exists: bool,
 }
 
@@ -72,7 +72,7 @@ pub fn drop_table(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], DropTabl
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct DropCacheStatement {
-    pub name: Table,
+    pub name: Relation,
 }
 
 impl Display for DropCacheStatement {
@@ -95,7 +95,7 @@ pub fn drop_cached_query(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], D
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct DropViewStatement {
-    pub views: Vec<Table>,
+    pub views: Vec<Relation>,
     pub if_exists: bool,
 }
 
@@ -144,7 +144,7 @@ pub fn drop_all_caches(i: &[u8]) -> IResult<&[u8], DropAllCachesStatement> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::table::Table;
+    use crate::table::Relation;
 
     #[test]
     fn simple_drop_table() {
@@ -153,7 +153,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             DropTableStatement {
-                tables: vec![Table::from("users")],
+                tables: vec![Relation::from("users")],
                 if_exists: false,
             }
         );
@@ -176,11 +176,11 @@ mod tests {
         assert_eq!(
             res.tables,
             vec![
-                Table {
+                Relation {
                     name: "t1".into(),
                     schema: Some("schema1".into())
                 },
-                Table {
+                Relation {
                     name: "t2".into(),
                     schema: Some("schema2".into())
                 }
@@ -206,14 +206,14 @@ mod tests {
     #[test]
     fn drop_single_view() {
         let res = test_parse!(drop_view(Dialect::MySQL), b"DroP   ViEw  v ;");
-        assert_eq!(res.views, vec![Table::from("v")]);
+        assert_eq!(res.views, vec![Relation::from("v")]);
         assert!(!res.if_exists);
     }
 
     #[test]
     fn drop_view_if_exists() {
         let res = test_parse!(drop_view(Dialect::MySQL), b"DroP   ViEw  if EXISTS v ;");
-        assert_eq!(res.views, vec![Table::from("v")]);
+        assert_eq!(res.views, vec![Relation::from("v")]);
         assert!(res.if_exists);
     }
 
@@ -222,7 +222,11 @@ mod tests {
         let res = test_parse!(drop_view(Dialect::MySQL), b"DroP   ViEw  v1,   v2, v3 ;");
         assert_eq!(
             res.views,
-            vec![Table::from("v1"), Table::from("v2"), Table::from("v3")]
+            vec![
+                Relation::from("v1"),
+                Relation::from("v2"),
+                Relation::from("v3")
+            ]
         );
         assert!(!res.if_exists);
     }

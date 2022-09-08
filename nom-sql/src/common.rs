@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use crate::column::Column;
 use crate::dialect::Dialect;
 use crate::expression::expression;
-use crate::table::Table;
+use crate::table::Relation;
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::{literal, Expr, FunctionExpr, Literal, SqlIdentifier, SqlType};
 
@@ -86,7 +86,7 @@ pub enum TableKey {
         name: Option<SqlIdentifier>,
         index_name: Option<SqlIdentifier>,
         columns: Vec<Column>,
-        target_table: Table,
+        target_table: Relation,
         target_columns: Vec<Column>,
         on_delete: Option<ReferentialAction>,
         on_update: Option<ReferentialAction>,
@@ -232,7 +232,7 @@ impl fmt::Display for TableKey {
 #[allow(clippy::large_enum_variant)] // NOTE(grfn): do we actually care about this?
 pub enum FieldDefinitionExpr {
     All,
-    AllInTable(Table),
+    AllInTable(Relation),
     Expr {
         expr: Expr,
         alias: Option<SqlIdentifier>,
@@ -805,12 +805,12 @@ pub fn column_identifier_no_alias(dialect: Dialect) -> impl Fn(&[u8]) -> IResult
         ))(i)?;
         // Do we have a 'db/schema.table.' or 'table.' qualifier?
         let table = match (id1, id2) {
-            (Some(db), Some(t)) => Some(Table {
+            (Some(db), Some(t)) => Some(Relation {
                 schema: Some(db),
                 name: t,
             }),
             // (None, Some(t)) should be unreachable
-            (Some(t), None) | (None, Some(t)) => Some(Table::from(t)),
+            (Some(t), None) | (None, Some(t)) => Some(Relation::from(t)),
             (None, None) => None,
         };
         let (i, name) = dialect.identifier()(i)?;
@@ -924,11 +924,11 @@ fn all_in_table(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FieldDefin
         let (i, _) = tag("*")(i)?;
 
         let table = match ident2 {
-            Some(name) => Table {
+            Some(name) => Relation {
                 schema: Some(ident1),
                 name,
             },
-            None => Table {
+            None => Relation {
                 schema: None,
                 name: ident1,
             },
@@ -1247,7 +1247,7 @@ mod tests {
             let res2 = test_parse!(column_identifier_no_alias(Dialect::MySQL), b"db.t.c");
             let expected = Column {
                 name: "c".into(),
-                table: Some(Table {
+                table: Some(Relation {
                     schema: Some("db".into()),
                     name: "t".into(),
                 }),
@@ -1527,7 +1527,7 @@ mod tests {
             let res2 = test_parse!(column_identifier_no_alias(Dialect::PostgreSQL), b"db.t.c");
             let expected = Column {
                 name: "c".into(),
-                table: Some(Table {
+                table: Some(Relation {
                     schema: Some("db".into()),
                     name: "t".into(),
                 }),

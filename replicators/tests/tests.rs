@@ -6,7 +6,7 @@ use std::sync::Arc;
 use launchpad::eventually;
 use mysql_async::prelude::Queryable;
 use mysql_time::MysqlTime;
-use nom_sql::Table;
+use nom_sql::Relation;
 use readyset::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use readyset::recipe::changelist::ChangeList;
 use readyset::{ControllerHandle, ReadySetError, ReadySetResult};
@@ -327,7 +327,7 @@ impl TestHandle {
         let mut getter = self
             .controller()
             .await
-            .view(Table {
+            .view(Relation {
                 schema: Some("public".into()),
                 name: view_name.into(),
             })
@@ -341,7 +341,7 @@ impl TestHandle {
     #[track_caller]
     async fn assert_table_exists(&mut self, schema: &str, name: &str) {
         self.noria
-            .table(Table {
+            .table(Relation {
                 schema: Some(schema.into()),
                 name: name.into(),
             })
@@ -352,7 +352,7 @@ impl TestHandle {
     #[track_caller]
     async fn assert_table_missing(&mut self, schema: &str, name: &str) {
         self.noria
-            .table(Table {
+            .table(Relation {
                 schema: Some(schema.into()),
                 name: name.into(),
             })
@@ -624,7 +624,7 @@ async fn replication_many_tables_inner(url: &str) -> ReadySetResult<()> {
         // Just check that all of the tables are really there
         ctx.controller()
             .await
-            .table(Table {
+            .table(Relation {
                 schema: Some("public".into()),
                 name: format!("t{t}").into(),
             })
@@ -673,7 +673,7 @@ async fn replication_big_tables_inner(url: &str) -> ReadySetResult<()> {
         // Just check that all of the tables are really there
         ctx.controller()
             .await
-            .table(Table {
+            .table(Relation {
                 schema: Some("public".into()),
                 name: format!("t{t}").into(),
             })
@@ -1077,7 +1077,7 @@ async fn postgresql_ddl_replicate_drop_table() {
     let mut ctx = TestHandle::start_noria(pgsql_url(), None).await.unwrap();
     ctx.ready_notify.as_ref().unwrap().notified().await;
     ctx.noria
-        .table(Table {
+        .table(Relation {
             schema: Some("public".into()),
             name: "t1".into(),
         })
@@ -1090,7 +1090,7 @@ async fn postgresql_ddl_replicate_drop_table() {
     eventually! {
         let res = ctx
             .noria
-            .table(Table {
+            .table(Relation {
                 schema: Some("public".into()),
                 name: "t1".into(),
             })
@@ -1123,7 +1123,7 @@ async fn postgresql_ddl_replicate_create_table() {
 
     eventually!(ctx
         .noria
-        .table(Table {
+        .table(Relation {
             schema: Some("public".into()),
             name: "t2".into(),
         })
@@ -1146,14 +1146,14 @@ async fn postgresql_ddl_replicate_drop_view() {
     let mut ctx = TestHandle::start_noria(pgsql_url(), None).await.unwrap();
     ctx.ready_notify.as_ref().unwrap().notified().await;
     ctx.noria
-        .table(Table {
+        .table(Relation {
             schema: Some("public".into()),
             name: "t2".into(),
         })
         .await
         .unwrap();
     ctx.noria
-        .view(Table {
+        .view(Relation {
             schema: Some("public".into()),
             name: "t2_view".into(),
         })
@@ -1187,7 +1187,7 @@ async fn postgresql_ddl_replicate_create_view() {
     let mut ctx = TestHandle::start_noria(pgsql_url(), None).await.unwrap();
     ctx.ready_notify.as_ref().unwrap().notified().await;
     ctx.noria
-        .table(Table {
+        .table(Relation {
             schema: Some("public".into()),
             name: "t2".into(),
         })
@@ -1202,7 +1202,7 @@ async fn postgresql_ddl_replicate_create_view() {
 
     eventually!(ctx
         .noria
-        .view(Table {
+        .view(Relation {
             schema: Some("public".into()),
             name: "t2_view".into(),
         })

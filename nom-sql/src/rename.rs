@@ -7,7 +7,7 @@ use nom::IResult;
 use serde::{Deserialize, Serialize};
 
 use crate::common::ws_sep_comma;
-use crate::table::{table_reference, Table};
+use crate::table::{table_reference, Relation};
 use crate::whitespace::whitespace1;
 use crate::Dialect;
 
@@ -39,8 +39,8 @@ pub fn rename_table(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Rename
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct RenameTableOperation {
-    pub from: Table,
-    pub to: Table,
+    pub from: Relation,
+    pub to: Relation,
 }
 
 impl fmt::Display for RenameTableOperation {
@@ -65,7 +65,7 @@ fn rename_table_operation(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::table::Table;
+    use crate::table::Relation;
 
     #[test]
     fn simple_rename_table() {
@@ -75,8 +75,8 @@ mod tests {
             res,
             RenameTableStatement {
                 ops: vec![RenameTableOperation {
-                    from: Table::from("t1"),
-                    to: Table::from("t2")
+                    from: Relation::from("t1"),
+                    to: Relation::from("t2")
                 }]
             }
         );
@@ -91,8 +91,8 @@ mod tests {
             res,
             RenameTableStatement {
                 ops: vec![RenameTableOperation {
-                    from: Table::from("from"),
-                    to: Table::from("to")
+                    from: Relation::from("from"),
+                    to: Relation::from("to")
                 }]
             }
         );
@@ -108,16 +108,16 @@ mod tests {
             RenameTableStatement {
                 ops: vec![
                     RenameTableOperation {
-                        from: Table::from("t1"),
-                        to: Table::from("t2"),
+                        from: Relation::from("t1"),
+                        to: Relation::from("t2"),
                     },
                     RenameTableOperation {
-                        from: Table::from("change"),
-                        to: Table::from("t3"),
+                        from: Relation::from("change"),
+                        to: Relation::from("t3"),
                     },
                     RenameTableOperation {
-                        from: Table::from("t4"),
-                        to: Table::from("select")
+                        from: Relation::from("t4"),
+                        to: Relation::from("select")
                     }
                 ]
             }
@@ -136,8 +136,8 @@ mod tests {
             res,
             RenameTableStatement {
                 ops: vec![RenameTableOperation {
-                    from: Table::from("posts_likes"),
-                    to: Table::from("post_likes"),
+                    from: Relation::from("posts_likes"),
+                    to: Relation::from("post_likes"),
                 }]
             }
         );

@@ -30,7 +30,9 @@ use futures::stream::{self, StreamExt, TryStreamExt};
 use futures::{FutureExt, TryStream};
 use lazy_static::lazy_static;
 use metrics::{gauge, histogram};
-use nom_sql::{CacheInner, CreateCacheStatement, SelectStatement, SqlIdentifier, SqlQuery, Table};
+use nom_sql::{
+    CacheInner, CreateCacheStatement, Relation, SelectStatement, SqlIdentifier, SqlQuery,
+};
 use petgraph::visit::Bfs;
 use readyset::builders::{TableBuilder, ViewBuilder};
 use readyset::consensus::{Authority, AuthorityControl};
@@ -206,7 +208,7 @@ impl DfState {
     ///
     /// Input nodes are here all nodes of type `Table`. The addresses returned by this function will
     /// all have been returned as a key in the map from `commit` at some point in the past.
-    pub(super) fn inputs(&self) -> BTreeMap<Table, NodeIndex> {
+    pub(super) fn inputs(&self) -> BTreeMap<Relation, NodeIndex> {
         self.ingredients
             .neighbors_directed(self.source, petgraph::EdgeDirection::Outgoing)
             .filter_map(|n| {
@@ -228,7 +230,7 @@ impl DfState {
     ///
     /// Output nodes here refers to nodes of type `Reader`, which is the nodes created in response
     /// to calling `.maintain` or `.stream` for a node during a migration.
-    pub(super) fn outputs(&self) -> BTreeMap<Table, NodeIndex> {
+    pub(super) fn outputs(&self) -> BTreeMap<Relation, NodeIndex> {
         self.ingredients
             .externals(petgraph::EdgeDirection::Outgoing)
             .filter_map(|n| {
@@ -251,7 +253,7 @@ impl DfState {
     ///
     /// Output nodes here refers to nodes of type `Reader`, which is the nodes created in response
     /// to calling `.maintain` or `.stream` for a node during a migration
-    pub(super) fn verbose_outputs(&self) -> BTreeMap<Table, (SelectStatement, bool)> {
+    pub(super) fn verbose_outputs(&self) -> BTreeMap<Relation, (SelectStatement, bool)> {
         self.ingredients
             .externals(petgraph::EdgeDirection::Outgoing)
             .filter_map(|n| {
@@ -286,7 +288,7 @@ impl DfState {
     pub(super) fn find_reader_for(
         &self,
         node: NodeIndex,
-        name: &Table,
+        name: &Relation,
         filter: &Option<ViewFilter>,
     ) -> Option<NodeIndex> {
         // reader should be a child of the given node. however, due to sharding, it may not be an
@@ -461,7 +463,7 @@ impl DfState {
 
     /// Obtain a TableBuilder that can be used to construct a Table to perform writes and deletes
     /// from the given named base node.
-    pub(super) fn table_builder(&self, name: &Table) -> ReadySetResult<Option<TableBuilder>> {
+    pub(super) fn table_builder(&self, name: &Relation) -> ReadySetResult<Option<TableBuilder>> {
         let ni = self
             .recipe
             .node_addr_for(name)
@@ -747,7 +749,7 @@ impl DfState {
     }
 
     /// Returns a list of all table names that are currently involved in snapshotting.
-    pub(super) async fn snapshotting_tables(&self) -> ReadySetResult<HashSet<Table>> {
+    pub(super) async fn snapshotting_tables(&self) -> ReadySetResult<HashSet<Relation>> {
         let domains = self.domains_with_base_tables().await?;
         let table_indices: Vec<(DomainIndex, LocalNodeIndex)> = self
             .query_domains::<_, Vec<LocalNodeIndex>>(
@@ -770,7 +772,7 @@ impl DfState {
 
         table_indices
             .iter()
-            .map(|(di, lni)| -> ReadySetResult<Table> {
+            .map(|(di, lni)| -> ReadySetResult<Relation> {
                 #[allow(clippy::indexing_slicing)] // just came from self.domains
                 let li = *self.domain_nodes[di].get(*lni).ok_or_else(|| {
                     internal_err!("Domain {} returned nonexistent node {}", di, lni)
@@ -1051,7 +1053,7 @@ impl DfState {
 
     pub(super) fn set_domain_placement_local(
         &mut self,
-        node_name: Table,
+        node_name: Relation,
         shard: usize,
         node_restriction: DomainPlacementRestriction,
     ) {
@@ -1169,7 +1171,7 @@ impl DfState {
         }
     }
 
-    pub(super) async fn remove_query(&mut self, query_name: &Table) -> ReadySetResult<()> {
+    pub(super) async fn remove_query(&mut self, query_name: &Relation) -> ReadySetResult<()> {
         let name = match self.recipe.resolve_alias(query_name) {
             None => return Ok(()),
             Some(name) => name,

@@ -8,13 +8,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::common::statement_terminator;
 use crate::select::where_clause;
-use crate::table::{table_reference, Table};
+use crate::table::{table_reference, Relation};
 use crate::whitespace::whitespace1;
 use crate::{Dialect, Expr};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct DeleteStatement {
-    pub table: Table,
+    pub table: Relation,
     pub where_clause: Option<Expr>,
 }
 
@@ -53,7 +53,7 @@ pub fn deletion(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], DeleteStat
 mod tests {
     use super::*;
     use crate::column::Column;
-    use crate::table::Table;
+    use crate::table::Relation;
     use crate::{BinaryOperator, Literal};
 
     #[test]
@@ -63,7 +63,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             DeleteStatement {
-                table: Table::from("users"),
+                table: Relation::from("users"),
                 where_clause: None,
             }
         );
@@ -76,7 +76,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             DeleteStatement {
-                table: Table {
+                table: Relation {
                     schema: Some("db1".into()),
                     name: "users".into(),
                 },
@@ -98,7 +98,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             DeleteStatement {
-                table: Table::from("users"),
+                table: Relation::from("users"),
                 where_clause: expected_where_cond,
             }
         );

@@ -5,7 +5,7 @@ use itertools::Itertools;
 use nom_sql::analysis::visit::{
     walk_group_by_clause, walk_order_clause, walk_select_statement, Visitor,
 };
-use nom_sql::{Column, FieldDefinitionExpr, SelectStatement, SqlIdentifier, SqlQuery, Table};
+use nom_sql::{Column, FieldDefinitionExpr, Relation, SelectStatement, SqlIdentifier, SqlQuery};
 use readyset_errors::{internal, ReadySetError, ReadySetResult};
 use tracing::warn;
 
@@ -14,15 +14,15 @@ use crate::{outermost_table_exprs, util};
 pub trait ImpliedTableExpansion: Sized {
     fn expand_implied_tables(
         self,
-        table_columns: &HashMap<Table, Vec<SqlIdentifier>>,
+        table_columns: &HashMap<Relation, Vec<SqlIdentifier>>,
     ) -> ReadySetResult<Self>;
 }
 
 #[derive(Debug)]
 struct ExpandImpliedTablesVisitor<'schema> {
-    schema: &'schema HashMap<Table, Vec<SqlIdentifier>>,
+    schema: &'schema HashMap<Relation, Vec<SqlIdentifier>>,
     subquery_schemas: HashMap<SqlIdentifier, Vec<SqlIdentifier>>,
-    tables: HashSet<Table>,
+    tables: HashSet<Relation>,
     aliases: HashSet<SqlIdentifier>,
     // Are we currently in a position in the query that can reference aliases in the projected
     // field list?
@@ -30,7 +30,7 @@ struct ExpandImpliedTablesVisitor<'schema> {
 }
 
 impl<'schema> ExpandImpliedTablesVisitor<'schema> {
-    fn find_table(&self, column_name: &str) -> Option<Table> {
+    fn find_table(&self, column_name: &str) -> Option<Relation> {
         let mut matches = self
             .schema
             .iter()
@@ -38,7 +38,7 @@ impl<'schema> ExpandImpliedTablesVisitor<'schema> {
             .chain(
                 self.subquery_schemas
                     .iter()
-                    .map(|(n, fs)| (Table::from(n.clone()), fs)),
+                    .map(|(n, fs)| (Relation::from(n.clone()), fs)),
             )
             .filter(|(t, _)| self.tables.is_empty() || self.tables.contains(t))
             .filter_map(|(t, ws)| {
@@ -84,7 +84,7 @@ impl<'ast, 'schema> Visitor<'ast> for ExpandImpliedTablesVisitor<'schema> {
                 .map(|tbl| {
                     tbl.alias
                         .clone()
-                        .map(Table::from)
+                        .map(Relation::from)
                         .unwrap_or_else(|| tbl.table.clone())
                 })
                 .collect(),
@@ -153,7 +153,7 @@ impl<'ast, 'schema> Visitor<'ast> for ExpandImpliedTablesVisitor<'schema> {
 
 fn rewrite_select(
     mut select_statement: SelectStatement,
-    schema: &HashMap<Table, Vec<SqlIdentifier>>,
+    schema: &HashMap<Relation, Vec<SqlIdentifier>>,
 ) -> ReadySetResult<SelectStatement> {
     let mut visitor = ExpandImpliedTablesVisitor {
         schema,
@@ -170,7 +170,7 @@ fn rewrite_select(
 impl ImpliedTableExpansion for SelectStatement {
     fn expand_implied_tables(
         self,
-        table_columns: &HashMap<Table, Vec<SqlIdentifier>>,
+        table_columns: &HashMap<Relation, Vec<SqlIdentifier>>,
     ) -> ReadySetResult<Self> {
         rewrite_select(self, table_columns)
     }
@@ -179,7 +179,7 @@ impl ImpliedTableExpansion for SelectStatement {
 impl ImpliedTableExpansion for SqlQuery {
     fn expand_implied_tables(
         self,
-        table_columns: &HashMap<Table, Vec<SqlIdentifier>>,
+        table_columns: &HashMap<Relation, Vec<SqlIdentifier>>,
     ) -> ReadySetResult<SqlQuery> {
         Ok(match self {
             SqlQuery::CreateTable(..) => self,
@@ -230,8 +230,8 @@ mod tests {
         // SELECT users.name, articles.title FROM users, articles WHERE users.id = articles.author;
         let q = SelectStatement {
             tables: vec![
-                TableExpr::from(Table::from("users")),
-                TableExpr::from(Table::from("articles")),
+                TableExpr::from(Relation::from("users")),
+                TableExpr::from(Relation::from("articles")),
             ],
             fields: vec![
                 FieldDefinitionExpr::from(Column::from("name")),

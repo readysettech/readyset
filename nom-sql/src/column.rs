@@ -13,12 +13,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::common::{column_identifier_no_alias, parse_comment, type_identifier};
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, Double, Literal, SqlIdentifier, SqlType, Table};
+use crate::{Dialect, Double, Literal, Relation, SqlIdentifier, SqlType};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct Column {
     pub name: SqlIdentifier,
-    pub table: Option<Table>,
+    pub table: Option<Relation>,
 }
 
 impl fmt::Display for Column {

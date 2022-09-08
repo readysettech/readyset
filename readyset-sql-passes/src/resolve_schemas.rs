@@ -5,7 +5,7 @@
 use std::collections::{HashMap, HashSet};
 
 use nom_sql::analysis::visit::{self, walk_select_statement, Visitor};
-use nom_sql::{CreateTableStatement, SelectStatement, SqlIdentifier, Table, TableExpr};
+use nom_sql::{CreateTableStatement, Relation, SelectStatement, SqlIdentifier, TableExpr};
 
 struct ResolveSchemaVisitor<'schema> {
     /// Map from schema name to the set of table names in that schema
@@ -82,7 +82,7 @@ impl<'ast, 'schema> Visitor<'ast> for ResolveSchemaVisitor<'schema> {
         visit::walk_table_expr(self, table_expr)
     }
 
-    fn visit_table(&mut self, table: &'ast mut Table) -> Result<(), Self::Error> {
+    fn visit_table(&mut self, table: &'ast mut Relation) -> Result<(), Self::Error> {
         if table.schema.is_some() {
             return Ok(());
         }

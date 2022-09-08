@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use mir::MirNodeRef;
-use nom_sql::Table;
+use nom_sql::Relation;
 use readyset_errors::{internal, internal_err, invariant};
 
 use super::JoinKind;
@@ -10,7 +10,7 @@ use crate::controller::sql::query_graph::{JoinPredicate, JoinRef, QueryGraph, Qu
 use crate::ReadySetResult;
 
 struct JoinChain {
-    tables: HashSet<Table>,
+    tables: HashSet<Relation>,
     last_node: MirNodeRef,
 }
 
@@ -21,7 +21,7 @@ impl JoinChain {
         JoinChain { tables, last_node }
     }
 
-    pub(super) fn has_table(&self, table: &Table) -> bool {
+    pub(super) fn has_table(&self, table: &Relation) -> bool {
         self.tables.contains(table)
     }
 }
@@ -36,10 +36,10 @@ impl JoinChain {
 // a future predicate will bring these chains together.
 pub(super) fn make_joins(
     mir_converter: &SqlToMirConverter,
-    name: Table,
+    name: Relation,
     qg: &QueryGraph,
-    node_for_rel: &HashMap<&Table, MirNodeRef>,
-    correlated_nodes: &HashSet<&Table>,
+    node_for_rel: &HashMap<&Relation, MirNodeRef>,
+    correlated_nodes: &HashSet<&Relation>,
     node_count: usize,
 ) -> ReadySetResult<Vec<MirNodeRef>> {
     let mut join_nodes: Vec<MirNodeRef> = Vec::new();
@@ -96,7 +96,7 @@ pub(super) fn make_cross_joins(
     name: &str,
     node_count: &mut usize,
     nodes: Vec<MirNodeRef>,
-    correlated_nodes: &HashSet<&Table>,
+    correlated_nodes: &HashSet<&Relation>,
 ) -> ReadySetResult<Vec<MirNodeRef>> {
     let mut join_nodes = vec![];
     let mut nodes = nodes.into_iter();
@@ -169,10 +169,10 @@ fn from_join_ref<'a>(jref: &JoinRef, qg: &'a QueryGraph) -> (JoinKind, &'a [Join
 }
 
 fn pick_join_chains(
-    src: &Table,
-    dst: &Table,
+    src: &Relation,
+    dst: &Relation,
     join_chains: &mut Vec<JoinChain>,
-    node_for_rel: &HashMap<&Table, MirNodeRef>,
+    node_for_rel: &HashMap<&Relation, MirNodeRef>,
 ) -> (JoinChain, JoinChain) {
     let left_chain = match join_chains
         .iter()

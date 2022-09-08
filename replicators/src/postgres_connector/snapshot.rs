@@ -5,7 +5,7 @@ use std::future;
 
 use futures::stream::FuturesUnordered;
 use futures::{pin_mut, StreamExt, TryFutureExt};
-use nom_sql::{parse_key_specification_string, Dialect, SqlIdentifier, Table, TableKey};
+use nom_sql::{parse_key_specification_string, Dialect, Relation, SqlIdentifier, TableKey};
 use postgres_types::{accepts, FromSql, Type};
 use readyset::recipe::changelist::ChangeList;
 use readyset::{ReadySetError, ReadySetResult};
@@ -51,7 +51,7 @@ struct TableEntry {
 
 #[derive(Debug)]
 struct TableDescription {
-    name: Table,
+    name: Relation,
     columns: Vec<ColumnEntry>,
     constraints: Vec<ConstraintEntry>,
 }
@@ -199,7 +199,7 @@ impl TableEntry {
         let constraints = Self::get_constraints(self.oid, transaction).await?;
 
         Ok(TableDescription {
-            name: Table {
+            name: Relation {
                 schema: Some(self.schema.into()),
                 name: self.name.into(),
             },
@@ -515,7 +515,7 @@ mod tests {
     #[test]
     fn table_description_with_reserved_keywords_to_string_parses() {
         let desc = TableDescription {
-            name: Table {
+            name: Relation {
                 schema: Some("public".into()),
                 name: "ar_internal_metadata".into(),
             },

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use dataflow::{DurabilityMode, PersistenceParameters};
-use nom_sql::Table;
+use nom_sql::Relation;
 use readyset::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use readyset::metrics::client::MetricsClient;
 use readyset::metrics::{DumpedMetric, DumpedMetricValue, MetricsDump};
@@ -192,9 +192,9 @@ where
 
 pub fn assert_view_not_found<T, S>(err: ReadySetResult<T>, view_name: S)
 where
-    Table: From<S>,
+    Relation: From<S>,
 {
-    let view_name = Table::from(view_name);
+    let view_name = Relation::from(view_name);
     match err {
         Err(ReadySetError::ViewNotFound(name))
         | Err(ReadySetError::ViewNotFoundInWorkers { name, .. })

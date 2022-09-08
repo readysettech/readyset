@@ -25,7 +25,7 @@ use dataflow::utils::{dataflow_column, make_columns};
 use dataflow::{DurabilityMode, Expr as DfExpr, PersistenceParameters, ReaderProcessing};
 use futures::StreamExt;
 use itertools::Itertools;
-use nom_sql::{parse_query, BinaryOperator, Dialect, OrderType, SqlQuery, SqlType, Table};
+use nom_sql::{parse_query, BinaryOperator, Dialect, OrderType, Relation, SqlQuery, SqlType};
 use readyset::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use readyset::consistency::Timestamp;
 use readyset::internal::LocalNodeIndex;
@@ -8925,14 +8925,14 @@ async fn multiple_schemas_explicit() {
     .unwrap();
 
     let mut schema_1_t = g
-        .table(Table {
+        .table(Relation {
             schema: Some("schema_1".into()),
             name: "t".into(),
         })
         .await
         .unwrap();
     let mut schema_2_t = g
-        .table(Table {
+        .table(Relation {
             schema: Some("schema_2".into()),
             name: "t".into(),
         })

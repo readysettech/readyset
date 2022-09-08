@@ -7,17 +7,17 @@ use maplit::hashset;
 
 use crate::{
     CacheInner, Column, CreateCacheStatement, Expr, FieldDefinitionExpr, FieldReference,
-    FunctionExpr, InValue, JoinConstraint, SelectStatement, SqlQuery, Table,
+    FunctionExpr, InValue, JoinConstraint, Relation, SelectStatement, SqlQuery,
 };
 
 /// Extension trait providing the `referred_tables` method to various parts of the AST
 pub trait ReferredTables {
     /// Return a set of all tables referred to in `self`
-    fn referred_tables(&self) -> HashSet<Table>;
+    fn referred_tables(&self) -> HashSet<Relation>;
 }
 
 impl ReferredTables for SqlQuery {
-    fn referred_tables(&self) -> HashSet<Table> {
+    fn referred_tables(&self) -> HashSet<Relation> {
         match *self {
             SqlQuery::CreateTable(ref ctq) => hashset![ctq.table.clone()],
             SqlQuery::AlterTable(ref atq) => hashset![atq.table.clone()],
@@ -64,7 +64,7 @@ impl ReferredTables for SqlQuery {
 }
 
 impl ReferredTables for Expr {
-    fn referred_tables(&self) -> HashSet<Table> {
+    fn referred_tables(&self) -> HashSet<Relation> {
         self.referred_columns()
             .filter_map(|col| col.table.clone())
             .collect()

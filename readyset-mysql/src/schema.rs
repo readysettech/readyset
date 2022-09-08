@@ -1,6 +1,6 @@
 #![warn(clippy::panic)]
 
-use nom_sql::{self, ColumnConstraint, SqlType, Table};
+use nom_sql::{self, ColumnConstraint, Relation, SqlType};
 use readyset_errors::{unsupported, ReadySetResult};
 
 use crate::constants::DEFAULT_CHARACTER_SET;
@@ -162,7 +162,7 @@ pub(crate) fn convert_column(
             .column
             .table
             .clone()
-            .unwrap_or_else(|| Table {
+            .unwrap_or_else(|| Relation {
                 schema: None,
                 name: "".into(),
             })

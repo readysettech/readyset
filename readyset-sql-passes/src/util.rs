@@ -5,7 +5,7 @@ use itertools::Either;
 use nom_sql::analysis::is_aggregate;
 use nom_sql::{
     BinaryOperator, Column, CommonTableExpr, Expr, FieldDefinitionExpr, FunctionExpr, InValue,
-    JoinClause, JoinRightSide, SelectStatement, SqlIdentifier, Table, TableExpr,
+    JoinClause, JoinRightSide, Relation, SelectStatement, SqlIdentifier, TableExpr,
 };
 
 pub(crate) fn join_clause_tables(join: &JoinClause) -> impl Iterator<Item = &TableExpr> {
@@ -31,7 +31,7 @@ pub fn is_correlated(statement: &SelectStatement) -> bool {
         .map(|tbl| {
             tbl.alias
                 .clone()
-                .map(Table::from)
+                .map(Relation::from)
                 .unwrap_or_else(|| tbl.table.clone())
         })
         .collect();

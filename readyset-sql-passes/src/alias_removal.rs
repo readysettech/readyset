@@ -4,7 +4,7 @@ use std::mem;
 use itertools::Itertools;
 use nom_sql::analysis::visit::{walk_select_statement, Visitor};
 use nom_sql::{
-    Column, CommonTableExpr, JoinRightSide, SelectStatement, SqlIdentifier, SqlQuery, Table,
+    Column, CommonTableExpr, JoinRightSide, Relation, SelectStatement, SqlIdentifier, SqlQuery,
     TableExpr,
 };
 
@@ -13,20 +13,20 @@ pub enum TableAliasRewrite {
     /// An alias to a base table was rewritten
     Table {
         from: SqlIdentifier,
-        to_table: Table,
+        to_table: Relation,
     },
 
     /// An alias to a view was rewritten
     View {
         from: SqlIdentifier,
-        to_view: Table,
-        for_table: Table,
+        to_view: Relation,
+        for_table: Relation,
     },
 
     /// An alias to a common table expression was rewritten
     Cte {
         from: SqlIdentifier,
-        to_view: Table,
+        to_view: Relation,
         for_statement: Box<SelectStatement>, // box for perf
     },
 }
@@ -40,8 +40,8 @@ pub trait AliasRemoval {
 
 struct RemoveAliasesVisitor<'a> {
     query_name: &'a str,
-    table_remap: HashMap<SqlIdentifier, Table>,
-    col_table_remap: HashMap<SqlIdentifier, Table>,
+    table_remap: HashMap<SqlIdentifier, Relation>,
+    col_table_remap: HashMap<SqlIdentifier, Relation>,
     out: Vec<TableAliasRewrite>,
 }
 
@@ -218,7 +218,7 @@ mod tests {
     use nom_sql::{
         parse_query, parser, BinaryOperator, Column, Dialect, Expr, FieldDefinitionExpr,
         ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, Literal,
-        SelectStatement, SqlQuery, Table, TableExpr,
+        Relation, SelectStatement, SqlQuery, TableExpr,
     };
 
     use super::{AliasRemoval, TableAliasRewrite};
@@ -242,7 +242,7 @@ mod tests {
     fn it_removes_aliases() {
         let q = SelectStatement {
             tables: vec![TableExpr {
-                table: Table {
+                table: Relation {
                     name: "PaperTag".into(),
                     schema: None,
                 },
@@ -280,7 +280,7 @@ mod tests {
                 assert_eq!(
                     tq.tables,
                     vec![TableExpr {
-                        table: Table {
+                        table: Relation {
                             schema: None,
                             name: "PaperTag".into(),
                         },
@@ -315,7 +315,7 @@ mod tests {
         };
         let q = SelectStatement {
             tables: vec![TableExpr {
-                table: Table {
+                table: Relation {
                     schema: None,
                     name: "PaperTag".into(),
                 },
@@ -350,7 +350,7 @@ mod tests {
                 assert_eq!(
                     tq.tables,
                     vec![TableExpr {
-                        table: Table {
+                        table: Relation {
                             schema: None,
                             name: "PaperTag".into(),
                         },
@@ -391,7 +391,7 @@ mod tests {
                 assert_eq!(
                     tq.tables,
                     vec![TableExpr {
-                        table: Table {
+                        table: Relation {
                             schema: None,
                             name: "__query_name__t1".into(),
                         },
@@ -403,7 +403,7 @@ mod tests {
                     vec![JoinClause {
                         operator: JoinOperator::Join,
                         right: JoinRightSide::Table(TableExpr {
-                            table: Table {
+                            table: Relation {
                                 schema: None,
                                 name: "__query_name__t2".into(),
                             },

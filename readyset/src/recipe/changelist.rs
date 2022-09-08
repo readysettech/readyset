@@ -35,8 +35,8 @@ use std::str::FromStr;
 
 use nom_sql::{
     AlterTableStatement, CacheInner, CreateCacheStatement, CreateTableStatement,
-    CreateViewStatement, DropTableStatement, DropViewStatement, SelectStatement, SqlIdentifier,
-    SqlQuery, Table,
+    CreateViewStatement, DropTableStatement, DropViewStatement, Relation, SelectStatement,
+    SqlIdentifier, SqlQuery,
 };
 use readyset_errors::{unsupported, ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
@@ -258,7 +258,7 @@ pub enum Change {
     /// The removal of a [`RecipeExpr`].
     Drop {
         /// The name of the relation to remove.
-        name: Table,
+        name: Relation,
         /// If `false`, then an error should be thrown if the relation is not found.
         if_exists: bool,
     },
@@ -269,7 +269,7 @@ impl Change {
     /// [`SelectStatement`].
     pub fn create_cache<N>(name: N, statement: SelectStatement, always: bool) -> Self
     where
-        N: Into<Table>,
+        N: Into<Relation>,
     {
         Self::CreateCache(CreateCacheStatement {
             name: Some(name.into()),

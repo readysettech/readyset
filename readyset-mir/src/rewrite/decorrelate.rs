@@ -334,7 +334,7 @@ mod tests {
 
     use common::{DfValue, IndexType};
     use dataflow::ops::grouped::aggregate::Aggregation;
-    use nom_sql::{BinaryOperator, ColumnSpecification, Expr, Literal, SqlType, Table};
+    use nom_sql::{BinaryOperator, ColumnSpecification, Expr, Literal, Relation, SqlType};
 
     use super::*;
     use crate::node::{MirNode, MirNodeInner};
@@ -553,7 +553,7 @@ mod tests {
                 .unwrap()
                 .borrow()
                 .name(),
-            &Table::from("t2"),
+            &Relation::from("t2"),
             "t2_filter should be removed"
         );
 

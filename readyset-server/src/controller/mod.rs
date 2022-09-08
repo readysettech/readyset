@@ -14,7 +14,7 @@ use futures_util::StreamExt;
 use hyper::http::{Method, StatusCode};
 use launchpad::select;
 use metrics::{counter, gauge, histogram};
-use nom_sql::Table;
+use nom_sql::Relation;
 use readyset::consensus::{
     Authority, AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult,
     WorkerDescriptor, WorkerId, WorkerSchedulingConfig,
@@ -69,7 +69,7 @@ pub struct DomainPlacementRestriction {
 /// Each dataflow node, shard pair may have a DomainPlacementRestriction.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Debug)]
 pub struct NodeRestrictionKey {
-    node_name: Table,
+    node_name: Relation,
     shard: usize,
 }
 

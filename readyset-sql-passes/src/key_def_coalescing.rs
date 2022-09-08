@@ -40,7 +40,7 @@ impl KeyDefinitionCoalescing for CreateTableStatement {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{Column, SqlType, Table};
+    use nom_sql::{Column, Relation, SqlType};
 
     use super::*;
 
@@ -52,7 +52,7 @@ mod tests {
         // -->
         // CREATE TABLE t (id text, val text, PRIMARY KEY (id))
         let q = CreateTableStatement {
-            table: Table::from("t"),
+            table: Relation::from("t"),
             fields: vec![
                 ColumnSpecification::with_constraints(
                     Column::from("t.id"),
@@ -67,7 +67,7 @@ mod tests {
         };
 
         let ctq = q.coalesce_key_definitions();
-        assert_eq!(ctq.table, Table::from("t"));
+        assert_eq!(ctq.table, Relation::from("t"));
         assert_eq!(
             ctq.fields,
             vec![

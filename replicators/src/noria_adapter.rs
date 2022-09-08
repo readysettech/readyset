@@ -11,6 +11,7 @@ use futures::FutureExt;
 use launchpad::redacted::RedactedString;
 use launchpad::select;
 use metrics::{counter, histogram};
+use nom_sql::Relation;
 use readyset::consensus::Authority;
 use readyset::consistency::Timestamp;
 use readyset::metrics::recorded::{self, SnapshotStatusTag};
@@ -93,7 +94,7 @@ impl Default for Config {
 #[derive(Debug)]
 pub(crate) enum ReplicationAction {
     TableAction {
-        table: nom_sql::Table,
+        table: Relation,
         actions: Vec<TableOperation>,
         /// The transaction id of a table write operation. Each
         /// table write operation within a transaction should be assigned
@@ -135,9 +136,9 @@ pub struct NoriaAdapter {
     /// The binlog reader
     connector: Box<dyn Connector + Send + Sync>,
     /// A map of cached table mutators
-    mutator_map: HashMap<nom_sql::Table, Option<Table>>,
+    mutator_map: HashMap<Relation, Option<Table>>,
     /// A HashSet of tables we've already warned about not existing
-    warned_missing_tables: HashSet<nom_sql::Table>,
+    warned_missing_tables: HashSet<Relation>,
     /// The set of replication offsets for the schema and the tables, obtained from the controller
     /// at startup and maintained during replication.
     ///
@@ -573,7 +574,7 @@ impl NoriaAdapter {
     /// Send table actions to noria tables, and update the binlog position for the table
     async fn handle_table_actions(
         &mut self,
-        table: nom_sql::Table,
+        table: Relation,
         mut actions: Vec<TableOperation>,
         txid: Option<u64>,
         pos: ReplicationOffset,
@@ -710,10 +711,7 @@ impl NoriaAdapter {
 
     /// Get a mutator for a noria table from the cache if available, or fetch a new one
     /// from the controller and cache it. Returns None if the table doesn't exist in noria.
-    async fn mutator_for_table(
-        &mut self,
-        name: &nom_sql::Table,
-    ) -> ReadySetResult<Option<&mut Table>> {
+    async fn mutator_for_table(&mut self, name: &Relation) -> ReadySetResult<Option<&mut Table>> {
         match self.mutator_map.raw_entry_mut().from_key(name) {
             hash_map::RawEntryMut::Occupied(o) => Ok(o.into_mut().as_mut()),
             hash_map::RawEntryMut::Vacant(v) => match self.noria.table(name.clone()).await {

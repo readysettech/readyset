@@ -2,13 +2,13 @@ use std::collections::HashMap;
 
 use nom_sql::analysis::visit::{walk_select_statement, Visitor};
 use nom_sql::{
-    Column, Expr, FunctionExpr, SelectStatement, SqlIdentifier, SqlQuery, Table, TableExpr,
+    Column, Expr, FunctionExpr, Relation, SelectStatement, SqlIdentifier, SqlQuery, TableExpr,
 };
 use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
 
 #[derive(Debug)]
 pub struct CountStarRewriteVisitor<'schema> {
-    schemas: &'schema HashMap<Table, Vec<SqlIdentifier>>,
+    schemas: &'schema HashMap<Relation, Vec<SqlIdentifier>>,
     tables: Option<Vec<TableExpr>>,
 }
 
@@ -74,14 +74,14 @@ impl<'ast, 'schema> Visitor<'ast> for CountStarRewriteVisitor<'schema> {
 pub trait CountStarRewrite: Sized {
     fn rewrite_count_star(
         self,
-        schemas: &HashMap<Table, Vec<SqlIdentifier>>,
+        schemas: &HashMap<Relation, Vec<SqlIdentifier>>,
     ) -> ReadySetResult<Self>;
 }
 
 impl CountStarRewrite for SelectStatement {
     fn rewrite_count_star(
         mut self,
-        schemas: &HashMap<Table, Vec<SqlIdentifier>>,
+        schemas: &HashMap<Relation, Vec<SqlIdentifier>>,
     ) -> ReadySetResult<Self> {
         let mut visitor = CountStarRewriteVisitor {
             schemas,
@@ -96,7 +96,7 @@ impl CountStarRewrite for SelectStatement {
 impl CountStarRewrite for SqlQuery {
     fn rewrite_count_star(
         self,
-        schemas: &HashMap<Table, Vec<SqlIdentifier>>,
+        schemas: &HashMap<Relation, Vec<SqlIdentifier>>,
     ) -> ReadySetResult<SqlQuery> {
         match self {
             SqlQuery::Select(sq) => Ok(SqlQuery::Select(sq.rewrite_count_star(schemas)?)),

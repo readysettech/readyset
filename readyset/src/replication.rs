@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::hash::Hash;
 
-use nom_sql::Table;
+use nom_sql::Relation;
 use readyset_errors::{ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
@@ -94,7 +94,7 @@ pub struct ReplicationOffsets {
     /// Replication offset for each individual table, if any.
     ///
     /// A table with [`None`] as its replication offset has not yet been snapshotted successfully
-    pub tables: HashMap<Table, Option<ReplicationOffset>>,
+    pub tables: HashMap<Relation, Option<ReplicationOffset>>,
 }
 
 impl ReplicationOffsets {
@@ -153,7 +153,7 @@ impl ReplicationOffsets {
     pub fn has_table<T>(&self, table: &T) -> bool
     where
         T: ?Sized,
-        Table: Borrow<T>,
+        Relation: Borrow<T>,
         T: Hash + Eq,
     {
         self.tables.get(table).iter().any(|o| o.is_some())

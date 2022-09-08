@@ -22,7 +22,7 @@ use mir::node::{GroupedNodeType, MirNode};
 use mir::query::{MirQuery, QueryFlowParts};
 use mir::{Column, FlowNode, MirNodeRef};
 use nom_sql::{
-    ColumnConstraint, ColumnSpecification, Expr, OrderType, SqlIdentifier, SqlType, Table,
+    ColumnConstraint, ColumnSpecification, Expr, OrderType, Relation, SqlIdentifier, SqlType,
 };
 use petgraph::graph::NodeIndex;
 use readyset::internal::{Index, IndexType};
@@ -447,7 +447,7 @@ fn column_names(cs: &[Column]) -> Vec<&str> {
 }
 
 fn make_base_node(
-    name: Table,
+    name: Relation,
     column_specs: &mut [(ColumnSpecification, Option<usize>)],
     primary_key: Option<&[Column]>,
     unique_keys: &[Box<[Column]>],
@@ -511,7 +511,7 @@ fn make_base_node(
 }
 
 fn make_union_node(
-    name: Table,
+    name: Relation,
     columns: &[Column],
     emit: &[Vec<Column>],
     ancestors: &[MirNodeRef],
@@ -568,7 +568,7 @@ fn make_union_node(
 }
 
 fn make_filter_node(
-    name: Table,
+    name: Relation,
     parent: MirNodeRef,
     columns: &[Column],
     conditions: Expr,
@@ -590,7 +590,7 @@ fn make_filter_node(
 }
 
 fn make_grouped_node(
-    name: Table,
+    name: Relation,
     parent: MirNodeRef,
     columns: &[Column],
     on: &Column,
@@ -690,7 +690,7 @@ fn make_grouped_node(
 }
 
 fn make_identity_node(
-    name: Table,
+    name: Relation,
     parent: MirNodeRef,
     columns: &[Column],
     mig: &mut Migration<'_>,
@@ -710,7 +710,7 @@ fn make_identity_node(
 /// See [`MirNodeInner::Join`] for documentation on what `on_left`, `on_right`, and `project` mean
 /// here
 fn make_join_node(
-    name: Table,
+    name: Relation,
     left: MirNodeRef,
     right: MirNodeRef,
     columns: &[Column],
@@ -825,7 +825,7 @@ fn make_join_node(
 /// assumed to be group_by columns and all unique columns are considered to be the aggregate
 /// columns themselves.
 fn make_join_aggregates_node(
-    name: Table,
+    name: Relation,
     left: MirNodeRef,
     right: MirNodeRef,
     columns: &[Column],
@@ -905,7 +905,7 @@ fn make_join_aggregates_node(
 }
 
 fn make_latest_node(
-    name: Table,
+    name: Relation,
     parent: MirNodeRef,
     columns: &[Column],
     group_by: &[Column],
@@ -952,7 +952,7 @@ fn lower_expression(
 }
 
 fn make_project_node(
-    name: Table,
+    name: Relation,
     parent: MirNodeRef,
     source_columns: &[Column],
     emit: &[Column],
@@ -1038,7 +1038,7 @@ fn make_project_node(
 }
 
 fn make_distinct_node(
-    name: Table,
+    name: Relation,
     parent: MirNodeRef,
     columns: &[Column],
     group_by: &[Column],
@@ -1110,7 +1110,7 @@ fn make_distinct_node(
 }
 
 fn make_paginate_or_topk_node(
-    name: Table,
+    name: Relation,
     parent: MirNodeRef,
     columns: &[Column],
     order: &Option<Vec<(Column, OrderType)>>,
@@ -1231,7 +1231,7 @@ fn make_reader_processing(
 
 fn materialize_leaf_node(
     parent: &MirNodeRef,
-    name: Table,
+    name: Relation,
     key_cols: &[(Column, ViewPlaceholder)],
     index_type: IndexType,
     reader_processing: ReaderProcessing,

@@ -11,7 +11,6 @@ use database_utils::{DatabaseConnection, DatabaseURL};
 use itertools::Itertools;
 use nom_sql::{
     parse_query, BinaryOperator, CreateTableStatement, DeleteStatement, Dialect, Expr, SqlQuery,
-    Table,
 };
 use query_generator::{GeneratorState, QuerySeed};
 
@@ -338,7 +337,7 @@ impl Seed {
                 .iter()
                 .map(|(table_name, data)| {
                     let spec = self.generator.table(table_name.as_str()).unwrap();
-                    let table: Table = spec.name.clone().into();
+                    let table: nom_sql::Relation = spec.name.clone().into();
                     let pk = spec.primary_key.clone().ok_or_else(|| {
                         anyhow!(
                             "--include-deletes specified, but table {} missing a primary key",

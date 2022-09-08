@@ -1,9 +1,9 @@
 use nom_sql::analysis::visit::{self, Visitor};
-use nom_sql::{Column, CreateTableStatement, Table};
+use nom_sql::{Column, CreateTableStatement, Relation};
 
 #[derive(Debug, Default)]
 struct CreateTableColumnsVisitor {
-    table: Option<Table>,
+    table: Option<Relation>,
 }
 
 impl<'ast> Visitor<'ast> for CreateTableColumnsVisitor {

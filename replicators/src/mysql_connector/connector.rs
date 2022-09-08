@@ -9,7 +9,7 @@ use mysql_async as mysql;
 use mysql_common::binlog;
 use mysql_common::binlog::row::BinlogRow;
 use mysql_common::binlog::value::BinlogValue;
-use nom_sql::Table;
+use nom_sql::Relation;
 use readyset::replication::ReplicationOffset;
 use readyset::{ReadySetError, ReadySetResult};
 use readyset_data::DfValue;
@@ -330,7 +330,7 @@ impl MySqlBinlogConnector {
 
                     return Ok((
                         ReplicationAction::TableAction {
-                            table: Table {
+                            table: Relation {
                                 schema: Some(tme.database_name().into()),
                                 name: tme.table_name().into(),
                             },
@@ -380,7 +380,7 @@ impl MySqlBinlogConnector {
 
                     return Ok((
                         ReplicationAction::TableAction {
-                            table: Table {
+                            table: Relation {
                                 schema: Some(tme.database_name().into()),
                                 name: tme.table_name().into(),
                             },
@@ -415,7 +415,7 @@ impl MySqlBinlogConnector {
 
                     return Ok((
                         ReplicationAction::TableAction {
-                            table: Table {
+                            table: Relation {
                                 schema: Some(tme.database_name().into()),
                                 name: tme.table_name().into(),
                             },

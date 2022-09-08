@@ -11,13 +11,13 @@ use crate::column::Column;
 use crate::common::{
     assignment_expr_list, field_list, statement_terminator, value_list, ws_sep_comma,
 };
-use crate::table::{table_reference, Table};
+use crate::table::{table_reference, Relation};
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Dialect, Expr, Literal};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct InsertStatement {
-    pub table: Table,
+    pub table: Relation,
     pub fields: Option<Vec<Column>>,
     pub data: Vec<Vec<Literal>>,
     pub ignore: bool,
@@ -131,7 +131,7 @@ mod tests {
     use super::*;
     use crate::column::Column;
     use crate::literal::ItemPlaceholder;
-    use crate::table::Table;
+    use crate::table::Relation;
 
     #[test]
     fn insert_with_parameters() {
@@ -141,7 +141,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             InsertStatement {
-                table: Table::from("users"),
+                table: Relation::from("users"),
                 fields: Some(vec![Column::from("id"), Column::from("name")]),
                 data: vec![vec![
                     Literal::Placeholder(ItemPlaceholder::QuestionMark),
@@ -157,7 +157,7 @@ mod tests {
         use super::*;
         use crate::column::Column;
         use crate::literal::ItemPlaceholder;
-        use crate::table::Table;
+        use crate::table::Relation;
         use crate::BinaryOperator;
 
         #[test]
@@ -168,7 +168,7 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 InsertStatement {
-                    table: Table::from("users"),
+                    table: Relation::from("users"),
                     fields: None,
                     data: vec![vec![42_u32.into(), "test".into()]],
                     on_duplicate: None,
@@ -185,7 +185,7 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 InsertStatement {
-                    table: Table::from("users"),
+                    table: Relation::from("users"),
                     fields: None,
                     data: vec![vec![
                         42_u32.into(),
@@ -207,7 +207,7 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 InsertStatement {
-                    table: Table::from("users"),
+                    table: Relation::from("users"),
                     fields: Some(vec![Column::from("id"), Column::from("name")]),
                     data: vec![vec![42_u32.into(), "test".into()]],
                     on_duplicate: None,
@@ -225,7 +225,7 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 InsertStatement {
-                    table: Table::from("users"),
+                    table: Relation::from("users"),
                     fields: Some(vec![Column::from("id"), Column::from("name")]),
                     data: vec![vec![42_u32.into(), "test".into()]],
                     on_duplicate: None,
@@ -242,7 +242,7 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 InsertStatement {
-                    table: Table {
+                    table: Relation {
                         schema: Some("db1".into()),
                         name: "users".into(),
                     },
@@ -262,7 +262,7 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 InsertStatement {
-                    table: Table::from("users"),
+                    table: Relation::from("users"),
                     fields: Some(vec![Column::from("id"), Column::from("name")]),
                     data: vec![
                         vec![42_u32.into(), "test".into()],
@@ -283,7 +283,7 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 InsertStatement {
-                    table: Table::from("keystores"),
+                    table: Relation::from("keystores"),
                     fields: Some(vec![Column::from("key"), Column::from("value")]),
                     data: vec![vec![
                         Literal::Placeholder(ItemPlaceholder::DollarNumber(1)),
@@ -310,7 +310,7 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 InsertStatement {
-                    table: Table::from("users"),
+                    table: Relation::from("users"),
                     fields: Some(vec![Column::from("id"), Column::from("name")]),
                     data: vec![vec![42_u32.into(), "test".into()]],
                     on_duplicate: None,
@@ -332,7 +332,7 @@ mod tests {
     mod postgres {
         use super::*;
         use crate::column::Column;
-        use crate::table::Table;
+        use crate::table::Relation;
         use crate::BinaryOperator;
 
         #[test]
@@ -343,7 +343,7 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 InsertStatement {
-                    table: Table::from("users"),
+                    table: Relation::from("users"),
                     fields: None,
                     data: vec![vec![42_u32.into(), "test".into()]],
                     on_duplicate: None,
@@ -360,7 +360,7 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 InsertStatement {
-                    table: Table::from("users"),
+                    table: Relation::from("users"),
                     fields: None,
                     data: vec![vec![
                         42_u32.into(),
@@ -382,7 +382,7 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 InsertStatement {
-                    table: Table::from("users"),
+                    table: Relation::from("users"),
                     fields: Some(vec![Column::from("id"), Column::from("name")]),
                     data: vec![vec![42_u32.into(), "test".into()]],
                     on_duplicate: None,
@@ -400,7 +400,7 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 InsertStatement {
-                    table: Table::from("users"),
+                    table: Relation::from("users"),
                     fields: Some(vec![Column::from("id"), Column::from("name")]),
                     data: vec![vec![42_u32.into(), "test".into()]],
                     on_duplicate: None,
@@ -417,7 +417,7 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 InsertStatement {
-                    table: Table {
+                    table: Relation {
                         schema: Some("db1".into()),
                         name: "users".into(),
                     },
@@ -437,7 +437,7 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 InsertStatement {
-                    table: Table::from("users"),
+                    table: Relation::from("users"),
                     fields: Some(vec![Column::from("id"), Column::from("name")]),
                     data: vec![
                         vec![42_u32.into(), "test".into()],
@@ -458,7 +458,7 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 InsertStatement {
-                    table: Table::from("keystores"),
+                    table: Relation::from("keystores"),
                     fields: Some(vec![Column::from("key"), Column::from("value")]),
                     data: vec![vec![
                         Literal::Placeholder(ItemPlaceholder::DollarNumber(1)),
@@ -485,7 +485,7 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 InsertStatement {
-                    table: Table::from("users"),
+                    table: Relation::from("users"),
                     fields: Some(vec![Column::from("id"), Column::from("name")]),
                     data: vec![vec![42_u32.into(), "test".into()]],
                     ignore: false,

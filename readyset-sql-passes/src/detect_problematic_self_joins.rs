@@ -3,8 +3,8 @@ use std::iter;
 
 use itertools::{Either, Itertools};
 use nom_sql::{
-    BinaryOperator, Column, Expr, FieldDefinitionExpr, JoinConstraint, JoinRightSide,
-    SelectStatement, SqlIdentifier, SqlQuery, Table, TableExpr,
+    BinaryOperator, Column, Expr, FieldDefinitionExpr, JoinConstraint, JoinRightSide, Relation,
+    SelectStatement, SqlIdentifier, SqlQuery, TableExpr,
 };
 use readyset_errors::{internal_err, invalid_err, unsupported, unsupported_err, ReadySetResult};
 
@@ -30,7 +30,7 @@ fn check_select_statement<'a>(
         col: &'a Column,
         stmt: &'a SelectStatement,
         cte_ctx: &HashMap<&'a SqlIdentifier, &'a SelectStatement>,
-    ) -> ReadySetResult<impl Iterator<Item = ReadySetResult<(Table, &'a str)>> + 'a> {
+    ) -> ReadySetResult<impl Iterator<Item = ReadySetResult<(Relation, &'a str)>> + 'a> {
         let table = col.table.as_ref().ok_or_else(|| {
             internal_err!("detect_problematic_self_joins must be run after expand_implied_tables")
         })?;
@@ -60,10 +60,10 @@ fn check_select_statement<'a>(
 
             fn trace_subquery<'a>(
                 stmt: &'a SelectStatement,
-                table: Table,
+                table: Relation,
                 col_name: &'a str,
                 ctes: &HashMap<&'a SqlIdentifier, &'a SelectStatement>,
-            ) -> ReadySetResult<impl Iterator<Item = ReadySetResult<(Table, &'a str)>> + 'a>
+            ) -> ReadySetResult<impl Iterator<Item = ReadySetResult<(Relation, &'a str)>> + 'a>
             {
                 check_select_statement(stmt, ctes)?;
                 let expr = stmt
@@ -95,7 +95,9 @@ fn check_select_statement<'a>(
                         _ => Ok(Either::Right(iter::empty())),
                     })
                     .flatten_ok()
-                    .map(|r: Result<Result<_, _>, _>| -> Result<(Table, &str), _> { r.flatten() }))
+                    .map(
+                        |r: Result<Result<_, _>, _>| -> Result<(Relation, &str), _> { r.flatten() },
+                    ))
             }
 
             let mut res = None;

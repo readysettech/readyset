@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::vec::Vec;
 
-use nom_sql::Table;
+use nom_sql::Relation;
 use readyset::ReadySetError;
 
 use crate::controller::sql::query_graph::QueryGraph;
@@ -19,7 +19,7 @@ pub(in crate::controller) enum ReuseType {
     DirectExtension,
     PrefixReuse,
     #[allow(dead_code)]
-    BackjoinRequired(Vec<Table>),
+    BackjoinRequired(Vec<Relation>),
 }
 
 pub(in crate::controller) struct ReuseConfig {

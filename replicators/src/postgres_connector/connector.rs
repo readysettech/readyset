@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use futures::FutureExt;
 use launchpad::select;
-use nom_sql::Table;
+use nom_sql::Relation;
 use readyset::replication::ReplicationOffset;
 use readyset::{ReadySetError, ReadySetResult, TableOperation};
 use tokio_postgres as pgsql;
@@ -414,7 +414,7 @@ impl Connector for PostgresWalConnector {
         // Calling the ReadySet API is a bit expensive, therefore we try to queue as many
         // actions as possible before calling into the API.
         const MAX_QUEUED_ACTIONS: usize = 100;
-        let mut cur_table = Table {
+        let mut cur_table = Relation {
             schema: None,
             name: "".into(),
         };
@@ -473,7 +473,7 @@ impl Connector for PostgresWalConnector {
                             cur_lsn.into(),
                         ));
                     } else {
-                        cur_table = Table {
+                        cur_table = Relation {
                             schema: Some(schema.into()),
                             name: table.into(),
                         };

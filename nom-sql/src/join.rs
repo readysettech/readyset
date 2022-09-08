@@ -113,7 +113,7 @@ mod tests {
     use super::*;
     use crate::common::FieldDefinitionExpr;
     use crate::select::{selection, JoinClause, SelectStatement};
-    use crate::{BinaryOperator, Dialect, Table};
+    use crate::{BinaryOperator, Dialect, Relation};
 
     #[test]
     fn inner_join() {
@@ -130,11 +130,11 @@ mod tests {
             rhs: Box::new(Expr::Column(Column::from("taggings.tag_id"))),
         };
         let expected_stmt = SelectStatement {
-            tables: vec![TableExpr::from(Table::from("tags"))],
+            tables: vec![TableExpr::from(Relation::from("tags"))],
             fields: vec![FieldDefinitionExpr::AllInTable("tags".into())],
             join: vec![JoinClause {
                 operator: JoinOperator::InnerJoin,
-                right: JoinRightSide::Table(TableExpr::from(Table::from("taggings"))),
+                right: JoinRightSide::Table(TableExpr::from(Relation::from("taggings"))),
                 constraint: JoinConstraint::On(join_cond),
             }],
             ..Default::default()

@@ -3,12 +3,12 @@ use std::fmt::Display;
 use std::{fmt, mem};
 
 use itertools::Itertools;
-use nom_sql::{self, SqlIdentifier, Table};
+use nom_sql::{self, Relation, SqlIdentifier};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Column {
-    pub table: Option<Table>,
+    pub table: Option<Relation>,
     pub name: SqlIdentifier,
     pub aliases: Vec<Column>,
 }
@@ -16,7 +16,7 @@ pub struct Column {
 impl Column {
     pub fn new<T, N>(table: Option<T>, name: N) -> Self
     where
-        T: Into<Table>,
+        T: Into<Relation>,
         N: Into<SqlIdentifier>,
     {
         Column {
@@ -70,7 +70,7 @@ impl Column {
     #[must_use]
     pub fn aliased_as_table<T>(mut self, table: T) -> Self
     where
-        T: Into<Table>,
+        T: Into<Relation>,
     {
         self.aliases.push(Column {
             table: Some(table.into()),
@@ -80,7 +80,7 @@ impl Column {
         self
     }
 
-    pub(crate) fn has_table(&self, table: &Table) -> bool {
+    pub(crate) fn has_table(&self, table: &Relation) -> bool {
         self.table.iter().any(|t| t == table) || self.aliases.iter().any(|c| c.has_table(table))
     }
 }

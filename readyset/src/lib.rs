@@ -233,7 +233,7 @@ pub(crate) const PENDING_LIMIT: usize = 8192;
 use std::fmt::{self, Display};
 use std::ops::AddAssign;
 
-use nom_sql::SqlType;
+use nom_sql::{Relation, SqlType};
 use readyset_tracing::propagation::Instrumented;
 use replication::ReplicationOffset;
 use tokio_tower::multiplex;
@@ -386,7 +386,7 @@ pub enum ViewFilter {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ViewRequest {
     /// Name of the view being requested.
-    pub name: nom_sql::Table,
+    pub name: Relation,
     /// Filter to be applied when searching for a view.
     pub filter: Option<ViewFilter>,
 }
@@ -398,7 +398,7 @@ pub struct ReaderAddress {
     /// The index of the reader node in the dataflow graph
     pub node: petgraph::graph::NodeIndex,
     /// The name of the reader
-    pub name: nom_sql::Table,
+    pub name: Relation,
     /// The shard index
     pub shard: usize,
 }

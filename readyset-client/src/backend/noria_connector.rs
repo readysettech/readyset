@@ -9,8 +9,8 @@ use dataflow_expression::Expr as DfExpr;
 use itertools::Itertools;
 use launchpad::redacted::Sensitive;
 use nom_sql::{
-    self, BinaryOperator, ColumnConstraint, DeleteStatement, InsertStatement, SelectStatement,
-    SqlIdentifier, SqlQuery, SqlType, UpdateStatement,
+    self, BinaryOperator, ColumnConstraint, DeleteStatement, InsertStatement, Relation,
+    SelectStatement, SqlIdentifier, SqlQuery, SqlType, UpdateStatement,
 };
 use readyset::consistency::Timestamp;
 use readyset::internal::LocalNodeIndex;
@@ -46,7 +46,7 @@ pub(crate) enum PreparedStatement {
 
 #[derive(Clone)]
 pub(crate) struct PreparedSelectStatement {
-    name: nom_sql::Table,
+    name: Relation,
     statement: Box<nom_sql::SelectStatement>,
     processed_query_params: ProcessedQueryParams,
 }
@@ -83,8 +83,8 @@ impl NoriaBackend {
 
 pub struct NoriaBackendInner {
     noria: ControllerHandle,
-    inputs: BTreeMap<nom_sql::Table, Table>,
-    outputs: BTreeMap<nom_sql::Table, View>,
+    inputs: BTreeMap<Relation, Table>,
+    outputs: BTreeMap<Relation, View>,
     /// The server can handle (non-parameterized) LIMITs and (parameterized) OFFSETs in the
     /// dataflow graph
     server_supports_pagination: bool,
@@ -112,7 +112,7 @@ impl NoriaBackendInner {
         })
     }
 
-    async fn get_noria_table(&mut self, table: &nom_sql::Table) -> ReadySetResult<&mut Table> {
+    async fn get_noria_table(&mut self, table: &Relation) -> ReadySetResult<&mut Table> {
         if !self.inputs.contains_key(table) {
             let t = noria_await!(self, self.noria.table(table.clone()))?;
             self.inputs.insert(table.to_owned(), t);
@@ -124,7 +124,7 @@ impl NoriaBackendInner {
     /// view will be retrieve from noria.
     async fn get_noria_view<'a>(
         &'a mut self,
-        view: &nom_sql::Table,
+        view: &Relation,
         invalidate_cache: bool,
     ) -> ReadySetResult<&'a mut View> {
         if invalidate_cache {
@@ -270,14 +270,14 @@ impl<'a> QueryResult<'a> {
 #[derive(Clone)]
 pub struct ViewCache {
     /// Global cache of view endpoints and prepared statements.
-    global: Arc<RwLock<HashMap<SelectStatement, nom_sql::Table>>>,
+    global: Arc<RwLock<HashMap<SelectStatement, Relation>>>,
     /// Thread-local version of global cache (consulted first).
-    local: HashMap<SelectStatement, nom_sql::Table>,
+    local: HashMap<SelectStatement, Relation>,
 }
 
 impl ViewCache {
     /// Construct a new ViewCache with a passed in global view cache.
-    pub fn new(global_cache: Arc<RwLock<HashMap<SelectStatement, nom_sql::Table>>>) -> ViewCache {
+    pub fn new(global_cache: Arc<RwLock<HashMap<SelectStatement, Relation>>>) -> ViewCache {
         ViewCache {
             global: global_cache,
             local: HashMap::new(),
@@ -285,11 +285,7 @@ impl ViewCache {
     }
 
     /// Registers a statement with the provided name into both the local and global view caches.
-    pub fn register_statement(
-        &mut self,
-        name: &nom_sql::Table,
-        statement: &nom_sql::SelectStatement,
-    ) {
+    pub fn register_statement(&mut self, name: &Relation, statement: &nom_sql::SelectStatement) {
         self.local
             .entry(statement.clone())
             .or_insert_with(|| name.clone());
@@ -305,10 +301,7 @@ impl ViewCache {
     /// Retrieves the name for the provided statement if it's in the cache. We first check local
     /// cache, and if it's not there we check global cache. If it's in global but not local, we
     /// backfill local cache before returning the result.
-    pub fn statement_name(
-        &mut self,
-        statement: &nom_sql::SelectStatement,
-    ) -> Option<nom_sql::Table> {
+    pub fn statement_name(&mut self, statement: &nom_sql::SelectStatement) -> Option<Relation> {
         let maybe_name = if let Some(name) = self.local.get(statement) {
             return Some(name.clone());
         } else {
@@ -325,7 +318,7 @@ impl ViewCache {
     }
 
     /// Removes the statement with the given name from both the global and local caches.
-    pub fn remove_statement(&mut self, name: &nom_sql::Table) {
+    pub fn remove_statement(&mut self, name: &Relation) {
         self.local.retain(|_, v| v != name);
         tokio::task::block_in_place(|| {
             self.global.write().unwrap().retain(|_, v| v != name);
@@ -342,7 +335,7 @@ impl ViewCache {
 
     /// Returns the select statement based on a provided name if it exists in either the local or
     /// global caches.
-    pub fn select_statement_from_name(&self, name: &nom_sql::Table) -> Option<SelectStatement> {
+    pub fn select_statement_from_name(&self, name: &Relation) -> Option<SelectStatement> {
         self.local
             .iter()
             .find(|(_, n)| *n == name)
@@ -362,7 +355,7 @@ impl ViewCache {
 
 pub struct NoriaConnector {
     inner: NoriaBackend,
-    auto_increments: Arc<RwLock<HashMap<nom_sql::Table, atomic::AtomicUsize>>>,
+    auto_increments: Arc<RwLock<HashMap<Relation, atomic::AtomicUsize>>>,
     /// Global and thread-local cache of view endpoints and prepared statements.
     view_cache: ViewCache,
 
@@ -371,7 +364,7 @@ pub struct NoriaConnector {
     /// Set of views that have failed on previous requests. Separate from the backend
     /// to allow returning references to schemas from views all the way to mysql-srv,
     /// but on subsequent requests, do not use a failed view.
-    failed_views: HashSet<nom_sql::Table>,
+    failed_views: HashSet<Relation>,
 
     /// How to handle issuing reads against ReadySet. See [`ReadBehavior`].
     read_behavior: ReadBehavior,
@@ -463,8 +456,8 @@ pub(crate) enum ExecuteSelectContext<'ctx> {
 impl NoriaConnector {
     pub async fn new(
         ch: ControllerHandle,
-        auto_increments: Arc<RwLock<HashMap<nom_sql::Table, atomic::AtomicUsize>>>,
-        query_cache: Arc<RwLock<HashMap<SelectStatement, nom_sql::Table>>>,
+        auto_increments: Arc<RwLock<HashMap<Relation, atomic::AtomicUsize>>>,
+        query_cache: Arc<RwLock<HashMap<SelectStatement, Relation>>>,
         read_behavior: ReadBehavior,
         schema_search_path: Vec<SqlIdentifier>,
     ) -> Self {
@@ -481,8 +474,8 @@ impl NoriaConnector {
 
     pub async fn new_with_local_reads(
         ch: ControllerHandle,
-        auto_increments: Arc<RwLock<HashMap<nom_sql::Table, atomic::AtomicUsize>>>,
-        query_cache: Arc<RwLock<HashMap<SelectStatement, nom_sql::Table>>>,
+        auto_increments: Arc<RwLock<HashMap<Relation, atomic::AtomicUsize>>>,
+        query_cache: Arc<RwLock<HashMap<SelectStatement, Relation>>>,
         read_behavior: ReadBehavior,
         read_request_handler: Option<ReadRequestHandler>,
         schema_search_path: Vec<SqlIdentifier>,
@@ -966,7 +959,7 @@ impl NoriaConnector {
     /// this function is the only way to create a view in noria.
     pub async fn handle_create_cached_query(
         &mut self,
-        name: Option<&nom_sql::Table>,
+        name: Option<&Relation>,
         statement: &nom_sql::SelectStatement,
         override_schema_search_path: Option<Vec<SqlIdentifier>>,
         always: bool,
@@ -1001,10 +994,10 @@ impl NoriaConnector {
         q: &nom_sql::SelectStatement,
         prepared: bool,
         create_if_not_exist: bool,
-    ) -> ReadySetResult<nom_sql::Table> {
+    ) -> ReadySetResult<Relation> {
         match self.view_cache.statement_name(q) {
             None => {
-                let qname: nom_sql::Table = utils::generate_query_name(q).into();
+                let qname: Relation = utils::generate_query_name(q).into();
 
                 // add the query to ReadySet
                 if create_if_not_exist {
@@ -1045,7 +1038,7 @@ impl NoriaConnector {
 
     /// Make a request to ReadySet to drop the query with the given name, and remove it from all
     /// internal state.
-    pub async fn drop_view(&mut self, name: &nom_sql::Table) -> ReadySetResult<()> {
+    pub async fn drop_view(&mut self, name: &Relation) -> ReadySetResult<()> {
         noria_await!(
             self.inner.get_mut().await?,
             self.inner.get_mut().await?.noria.remove_query(name)
@@ -1064,7 +1057,7 @@ impl NoriaConnector {
         Ok(())
     }
 
-    pub fn select_statement_from_name(&self, name: &nom_sql::Table) -> Option<SelectStatement> {
+    pub fn select_statement_from_name(&self, name: &Relation) -> Option<SelectStatement> {
         self.view_cache.select_statement_from_name(name)
     }
 
@@ -1810,7 +1803,7 @@ mod tests {
     use super::*;
 
     mod view_cache {
-        use nom_sql::{parse_select_statement, Dialect};
+        use nom_sql::{parse_select_statement, Dialect, Relation};
 
         use super::*;
         #[test]
@@ -1818,7 +1811,7 @@ mod tests {
             let global = Arc::new(RwLock::new(HashMap::new()));
             let mut view_cache = ViewCache::new(global);
 
-            let name = nom_sql::Table::from("test_statement_name");
+            let name = Relation::from("test_statement_name");
             let statement = parse_select_statement(Dialect::MySQL, "SELECT a_col FROM t1").unwrap();
 
             view_cache.register_statement(&name, &statement);

@@ -2,7 +2,9 @@ use std::collections::HashMap;
 use std::mem;
 
 use nom_sql::analysis::visit::{self, Visitor};
-use nom_sql::{Column, Expr, FieldDefinitionExpr, SelectStatement, SqlIdentifier, SqlQuery, Table};
+use nom_sql::{
+    Column, Expr, FieldDefinitionExpr, Relation, SelectStatement, SqlIdentifier, SqlQuery,
+};
 use readyset_errors::{ReadySetError, ReadySetResult};
 
 use crate::util::{self, join_clause_tables};
@@ -12,12 +14,12 @@ pub trait StarExpansion: Sized {
     /// columns in those tables
     fn expand_stars(
         self,
-        table_columns: &HashMap<Table, Vec<SqlIdentifier>>,
+        table_columns: &HashMap<Relation, Vec<SqlIdentifier>>,
     ) -> ReadySetResult<Self>;
 }
 
 struct ExpandStarsVisitor<'schema> {
-    table_columns: &'schema HashMap<Table, Vec<SqlIdentifier>>,
+    table_columns: &'schema HashMap<Relation, Vec<SqlIdentifier>>,
 }
 
 impl<'ast, 'schema> Visitor<'ast> for ExpandStarsVisitor<'schema> {
@@ -33,7 +35,7 @@ impl<'ast, 'schema> Visitor<'ast> for ExpandStarsVisitor<'schema> {
         let subquery_schemas =
             util::subquery_schemas(&select_statement.ctes, &select_statement.join);
 
-        let expand_table = |table: Table| -> ReadySetResult<_> {
+        let expand_table = |table: Relation| -> ReadySetResult<_> {
             Ok(if table.schema.is_none() {
                 // Can only reference subqueries with tables that don't have a schema
                 subquery_schemas.get(&table.name).cloned()
@@ -87,7 +89,7 @@ impl<'ast, 'schema> Visitor<'ast> for ExpandStarsVisitor<'schema> {
 impl StarExpansion for SelectStatement {
     fn expand_stars(
         mut self,
-        table_columns: &HashMap<Table, Vec<SqlIdentifier>>,
+        table_columns: &HashMap<Relation, Vec<SqlIdentifier>>,
     ) -> ReadySetResult<Self> {
         let mut visitor = ExpandStarsVisitor { table_columns };
         visitor.visit_select_statement(&mut self)?;
@@ -98,7 +100,7 @@ impl StarExpansion for SelectStatement {
 impl StarExpansion for SqlQuery {
     fn expand_stars(
         self,
-        write_schemas: &HashMap<Table, Vec<SqlIdentifier>>,
+        write_schemas: &HashMap<Relation, Vec<SqlIdentifier>>,
     ) -> ReadySetResult<Self> {
         Ok(match self {
             SqlQuery::Select(sq) => SqlQuery::Select(sq.expand_stars(write_schemas)?),

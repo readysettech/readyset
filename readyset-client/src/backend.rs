@@ -82,8 +82,8 @@ use launchpad::redacted::Sensitive;
 use mysql_common::row::convert::{FromRow, FromRowError};
 use nom_sql::{
     CacheInner, CreateCacheStatement, DeleteStatement, Dialect, DropCacheStatement,
-    InsertStatement, SelectStatement, SetStatement, ShowStatement, SqlIdentifier, SqlQuery, Table,
-    UpdateStatement, UseStatement,
+    InsertStatement, Relation, SelectStatement, SetStatement, ShowStatement, SqlIdentifier,
+    SqlQuery, UpdateStatement, UseStatement,
 };
 use readyset::consistency::Timestamp;
 use readyset::results::Results;
@@ -1445,7 +1445,7 @@ where
     /// Forwards a `CREATE CACHE` request to noria
     async fn create_cached_query(
         &mut self,
-        name: Option<&Table>,
+        name: Option<&Relation>,
         mut stmt: SelectStatement,
         override_schema_search_path: Option<Vec<SqlIdentifier>>,
         always: bool,
@@ -1479,7 +1479,7 @@ where
     /// Forwards a `DROP CACHE` request to noria
     async fn drop_cached_query(
         &mut self,
-        name: &Table,
+        name: &Relation,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         let maybe_select_statement = self.noria.select_statement_from_name(name);
         self.noria.drop_view(name).await?;

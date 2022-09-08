@@ -11,8 +11,8 @@ use ::mir::{reuse as mir_reuse, Column, MirNodeRef};
 use ::serde::{Deserialize, Serialize};
 use nom_sql::{
     BinaryOperator, CompoundSelectOperator, CompoundSelectStatement, CreateTableStatement,
-    CreateViewStatement, FieldDefinitionExpr, SelectSpecification, SelectStatement, SqlIdentifier,
-    Table, TableExpr,
+    CreateViewStatement, FieldDefinitionExpr, Relation, SelectSpecification, SelectStatement,
+    SqlIdentifier, TableExpr,
 };
 use petgraph::graph::NodeIndex;
 use readyset::internal::IndexType;
@@ -73,18 +73,18 @@ impl Default for Config {
 // crate viz for tests
 pub(crate) struct SqlIncorporator {
     mir_converter: SqlToMirConverter,
-    leaf_addresses: HashMap<Table, NodeIndex>,
+    leaf_addresses: HashMap<Relation, NodeIndex>,
 
     /// Stores VIEWs and CACHE queries.
-    named_queries: HashMap<Table, u64>,
+    named_queries: HashMap<Relation, u64>,
     query_graphs: HashMap<u64, QueryGraph>,
     /// Stores CREATE TABLE statements.
-    base_mir_queries: HashMap<Table, MirQuery>,
+    base_mir_queries: HashMap<Relation, MirQuery>,
     mir_queries: HashMap<u64, MirQuery>,
     num_queries: usize,
 
-    base_schemas: HashMap<Table, CreateTableStatement>,
-    view_schemas: HashMap<Table, Vec<SqlIdentifier>>,
+    base_schemas: HashMap<Relation, CreateTableStatement>,
+    view_schemas: HashMap<Relation, Vec<SqlIdentifier>>,
 
     pub(crate) config: Config,
 }
@@ -184,10 +184,10 @@ impl SqlIncorporator {
     /// name will be generated from the query. In either case, returns the name of the added query.
     pub(crate) fn add_query(
         &mut self,
-        name: Option<Table>,
+        name: Option<Relation>,
         stmt: SelectStatement,
         mig: &mut Migration<'_>,
-    ) -> ReadySetResult<Table> {
+    ) -> ReadySetResult<Relation> {
         let name = name.unwrap_or_else(|| format!("q_{}", self.num_queries).into());
         let (qfp, _) = self.add_select_query(
             name.clone(),
@@ -202,24 +202,24 @@ impl SqlIncorporator {
         Ok(name)
     }
 
-    pub(super) fn get_base_schema(&self, table: &Table) -> Option<CreateTableStatement> {
+    pub(super) fn get_base_schema(&self, table: &Relation) -> Option<CreateTableStatement> {
         self.base_schemas.get(table).cloned()
     }
 
-    pub(super) fn get_view_schema(&self, name: &Table) -> Option<Vec<String>> {
+    pub(super) fn get_view_schema(&self, name: &Relation) -> Option<Vec<String>> {
         self.view_schemas
             .get(name)
             .map(|s| s.iter().map(SqlIdentifier::to_string).collect())
     }
 
     #[cfg(test)]
-    fn get_flow_node_address(&self, name: &Table, v: usize) -> Option<NodeIndex> {
+    fn get_flow_node_address(&self, name: &Relation, v: usize) -> Option<NodeIndex> {
         self.mir_converter.get_flow_node_address(name, v)
     }
 
     /// Retrieves the flow node associated with a given query's leaf view.
     #[allow(unused)]
-    pub(super) fn get_query_address(&self, name: &Table) -> Option<NodeIndex> {
+    pub(super) fn get_query_address(&self, name: &Relation) -> Option<NodeIndex> {
         match self.leaf_addresses.get(name) {
             None => self.mir_converter.get_leaf(name),
             Some(na) => Some(*na),
@@ -230,7 +230,7 @@ impl SqlIncorporator {
         self.leaf_addresses.values().any(|nn| *nn == ni)
     }
 
-    pub(super) fn get_leaf_name(&self, ni: NodeIndex) -> Option<&Table> {
+    pub(super) fn get_leaf_name(&self, ni: NodeIndex) -> Option<&Relation> {
         self.leaf_addresses
             .iter()
             .find(|(_, idx)| **idx == ni)
@@ -239,7 +239,7 @@ impl SqlIncorporator {
 
     fn consider_query_graph(
         &mut self,
-        query_name: &Table,
+        query_name: &Relation,
         is_name_required: bool,
         st: &SelectStatement,
         is_leaf: bool,
@@ -549,7 +549,7 @@ impl SqlIncorporator {
 
     fn add_compound_query(
         &mut self,
-        query_name: Table,
+        query_name: Relation,
         query: CompoundSelectStatement,
         is_name_required: bool,
         is_leaf: bool,
@@ -591,7 +591,7 @@ impl SqlIncorporator {
 
     fn select_query_to_mir(
         &mut self,
-        query_name: Table,
+        query_name: Relation,
         is_name_required: bool,
         sq: SelectStatement,
         is_leaf: bool,
@@ -641,7 +641,7 @@ impl SqlIncorporator {
     /// and MIR nodes that were added
     fn add_select_query(
         &mut self,
-        query_name: Table,
+        query_name: Relation,
         mut stmt: SelectStatement,
         is_name_required: bool,
         is_leaf: bool,
@@ -706,7 +706,10 @@ impl SqlIncorporator {
         Ok((qfp, opt_mir))
     }
 
-    pub(super) fn remove_query(&mut self, query_name: &Table) -> ReadySetResult<Option<NodeIndex>> {
+    pub(super) fn remove_query(
+        &mut self,
+        query_name: &Relation,
+    ) -> ReadySetResult<Option<NodeIndex>> {
         let nodeid = self
             .leaf_addresses
             .remove(query_name)
@@ -743,7 +746,7 @@ impl SqlIncorporator {
 
     /// Removes the base table with the given `name`, and all the MIR queries
     /// that depend on it.
-    pub(super) fn remove_base(&mut self, name: &Table) -> ReadySetResult<NodeIndex> {
+    pub(super) fn remove_base(&mut self, name: &Relation) -> ReadySetResult<NodeIndex> {
         debug!(%name, "Removing base from SqlIncorporator");
         if self.base_schemas.remove(name).is_none() {
             warn!(
@@ -775,7 +778,7 @@ impl SqlIncorporator {
             .ok_or_else(|| invalid_err!("tried to remove unknown base {}", name))
     }
 
-    fn register_query(&mut self, query_name: Table, qg: Option<QueryGraph>, mir: &MirQuery) {
+    fn register_query(&mut self, query_name: Relation, qg: Option<QueryGraph>, mir: &MirQuery) {
         debug!(%query_name, "registering query");
         self.view_schemas
             .insert(query_name.clone(), mir.fields.clone());
@@ -806,7 +809,7 @@ impl SqlIncorporator {
 #[cfg(test)]
 mod tests {
     use dataflow::prelude::*;
-    use nom_sql::{parse_create_table, parse_select_statement, Column, Dialect, SqlType, Table};
+    use nom_sql::{parse_create_table, parse_select_statement, Column, Dialect, Relation, SqlType};
     use readyset_data::DfType;
 
     use super::SqlIncorporator;
@@ -814,7 +817,7 @@ mod tests {
     use crate::integration_utils;
 
     /// Helper to grab a reference to a named view.
-    fn get_node<'a>(inc: &SqlIncorporator, mig: &'a Migration<'_>, name: &Table) -> &'a Node {
+    fn get_node<'a>(inc: &SqlIncorporator, mig: &'a Migration<'_>, name: &Relation) -> &'a Node {
         let na = inc
             .get_flow_node_address(name, 0)
             .unwrap_or_else(|| panic!("No node named {name} exists"));
@@ -825,7 +828,7 @@ mod tests {
     fn get_parent_node<'a>(
         inc: &SqlIncorporator,
         mig: &'a Migration<'_>,
-        name: &Table,
+        name: &Relation,
     ) -> &'a Node {
         let na = inc
             .get_flow_node_address(name, 0)
@@ -834,7 +837,7 @@ mod tests {
         &mig.graph()[ni]
     }
 
-    fn get_reader<'a>(inc: &SqlIncorporator, mig: &'a Migration<'_>, name: &Table) -> &'a Node {
+    fn get_reader<'a>(inc: &SqlIncorporator, mig: &'a Migration<'_>, name: &Relation) -> &'a Node {
         let na = inc
             .get_flow_node_address(name, 0)
             .unwrap_or_else(|| panic!("No node named {name} exists"));
@@ -906,7 +909,7 @@ mod tests {
             assert_eq!(ncount, 2);
             assert_eq!(
                 get_node(&inc, mig, &"users".into()).name(),
-                &Table::from("users")
+                &Relation::from("users")
             );
 
             assert!(inc
@@ -1121,7 +1124,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(
                 get_node(&inc, mig, &"users".into()).name(),
-                &Table::from("users")
+                &Relation::from("users")
             );
             assert_eq!(
                 get_node(&inc, mig, &"users".into())
@@ -1152,7 +1155,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 3);
             assert_eq!(
                 get_node(&inc, mig, &"articles".into()).name(),
-                &Table::from("articles")
+                &Relation::from("articles")
             );
             assert_eq!(
                 get_node(&inc, mig, &"articles".into())
@@ -1216,7 +1219,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(
                 get_node(&inc, mig, &"users".into()).name(),
-                &Table::from("users")
+                &Relation::from("users")
             );
             assert_eq!(
                 get_node(&inc, mig, &"users".into())
@@ -1280,7 +1283,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(
                 get_node(&inc, mig, &"votes".into()).name(),
-                &Table::from("votes")
+                &Relation::from("votes")
             );
             assert_eq!(
                 get_node(&inc, mig, &"votes".into())
@@ -1406,7 +1409,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(
                 get_node(&inc, mig, &"users".into()).name(),
-                &Table::from("users")
+                &Relation::from("users")
             );
             assert_eq!(
                 get_node(&inc, mig, &"users".into())
@@ -1499,7 +1502,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(
                 get_node(&inc, mig, &"users".into()).name(),
-                &Table::from("users")
+                &Relation::from("users")
             );
             assert_eq!(
                 get_node(&inc, mig, &"users".into())
@@ -1909,7 +1912,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(
                 get_node(&inc, mig, &"votes".into()).name(),
-                &Table::from("votes")
+                &Relation::from("votes")
             );
             assert_eq!(
                 get_node(&inc, mig, &"votes".into())
@@ -1982,7 +1985,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(
                 get_node(&inc, mig, &"votes".into()).name(),
-                &Table::from("votes")
+                &Relation::from("votes")
             );
             assert_eq!(
                 get_node(&inc, mig, &"votes".into())
@@ -2055,7 +2058,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(
                 get_node(&inc, mig, &"votes".into()).name(),
-                &Table::from("votes")
+                &Relation::from("votes")
             );
             assert_eq!(
                 get_node(&inc, mig, &"votes".into())
@@ -2130,7 +2133,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(
                 get_node(&inc, mig, &"votes".into()).name(),
-                &Table::from("votes")
+                &Relation::from("votes")
             );
             assert_eq!(
                 get_node(&inc, mig, &"votes".into())
@@ -2205,7 +2208,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(
                 get_node(&inc, mig, &"votes".into()).name(),
-                &Table::from("votes")
+                &Relation::from("votes")
             );
             assert_eq!(
                 get_node(&inc, mig, &"votes".into())
@@ -2278,7 +2281,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(
                 get_node(&inc, mig, &"votes".into()).name(),
-                &Table::from("votes")
+                &Relation::from("votes")
             );
             assert_eq!(
                 get_node(&inc, mig, &"votes".into())
@@ -2369,7 +2372,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(
                 get_node(&inc, mig, &"votes".into()).name(),
-                &Table::from("votes")
+                &Relation::from("votes")
             );
             assert_eq!(
                 get_node(&inc, mig, &"votes".into())
@@ -2429,7 +2432,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(
                 get_node(&inc, mig, &"votes".into()).name(),
-                &Table::from("votes")
+                &Relation::from("votes")
             );
             assert_eq!(
                 get_node(&inc, mig, &"votes".into())
@@ -2506,7 +2509,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(
                 get_node(&inc, mig, &"votes".into()).name(),
-                &Table::from("votes")
+                &Relation::from("votes")
             );
             assert_eq!(
                 get_node(&inc, mig, &"votes".into())
@@ -3239,7 +3242,7 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(
                 get_node(&inc, mig, &"users".into()).name(),
-                &Table::from("users")
+                &Relation::from("users")
             );
             assert_eq!(
                 get_node(&inc, mig, &"users".into())

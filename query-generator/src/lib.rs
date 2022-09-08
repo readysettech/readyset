@@ -87,7 +87,7 @@ use nom_sql::{
     BinaryOperator, Column, ColumnConstraint, ColumnSpecification, CommonTableExpr,
     CreateTableStatement, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, InValue,
     ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, Literal, OrderClause,
-    OrderType, SelectStatement, SqlIdentifier, SqlType, Table, TableExpr, TableKey,
+    OrderType, Relation, SelectStatement, SqlIdentifier, SqlType, TableExpr, TableKey,
 };
 use parking_lot::Mutex;
 use proptest::arbitrary::{any, any_with, Arbitrary};
@@ -416,9 +416,9 @@ impl Borrow<str> for TableName {
     }
 }
 
-impl From<TableName> for Table {
+impl From<TableName> for Relation {
     fn from(name: TableName) -> Self {
-        Table {
+        Relation {
             name: name.0,
             schema: None,
         }
@@ -2065,7 +2065,7 @@ fn column_in_query<'state>(state: &mut QueryState<'state>, query: &mut SelectSta
             let table = state.some_table_mut();
             query
                 .tables
-                .push(TableExpr::from(Table::from(table.name.clone())));
+                .push(TableExpr::from(Relation::from(table.name.clone())));
             let colname = table.some_column_name();
             Column {
                 name: colname.into(),
@@ -2105,7 +2105,7 @@ impl QueryOperation {
                 if query.tables.is_empty() {
                     query
                         .tables
-                        .push(TableExpr::from(Table::from(tbl.name.clone())));
+                        .push(TableExpr::from(Relation::from(tbl.name.clone())));
                 }
 
                 let col = tbl.fresh_column_with_type(agg.column_type());
@@ -2141,11 +2141,11 @@ impl QueryOperation {
                 if query.tables.is_empty() {
                     query
                         .tables
-                        .push(TableExpr::from(Table::from(tbl.name.0.as_str())));
+                        .push(TableExpr::from(Relation::from(tbl.name.0.as_str())));
                 }
 
                 let col_expr = Expr::Column(Column {
-                    table: Some(Table::from(tbl.name.0.as_str())),
+                    table: Some(Relation::from(tbl.name.0.as_str())),
                     ..col.clone().into()
                 });
 
@@ -2232,7 +2232,7 @@ impl QueryOperation {
                 if query.tables.is_empty() {
                     query
                         .tables
-                        .push(TableExpr::from(Table::from(left_table_name.clone())));
+                        .push(TableExpr::from(Relation::from(left_table_name.clone())));
                 }
 
                 let right_table = state.fresh_table_mut();
@@ -2242,7 +2242,7 @@ impl QueryOperation {
 
                 query.join.push(JoinClause {
                     operator: *operator,
-                    right: JoinRightSide::Table(TableExpr::from(Table::from(
+                    right: JoinRightSide::Table(TableExpr::from(Relation::from(
                         right_table.name.clone(),
                     ))),
                     constraint: JoinConstraint::On(Expr::BinaryOp {
@@ -2364,7 +2364,7 @@ impl QueryOperation {
                         let table = state.some_table_in_query_mut(&query);
 
                         if query.tables.is_empty() {
-                            query.tables.push(TableExpr::from(Table::from(table.name.clone())));
+                            query.tables.push(TableExpr::from(Relation::from(table.name.clone())));
                         }
 
                         let mut arguments = Vec::new();
@@ -2424,7 +2424,7 @@ impl QueryOperation {
                 if query.tables.is_empty() {
                     query
                         .tables
-                        .push(TableExpr::from(Table::from(table.name.clone())));
+                        .push(TableExpr::from(Relation::from(table.name.clone())));
                 }
 
                 let column_name = table.some_column_name();
@@ -2458,7 +2458,7 @@ impl QueryOperation {
                 if query.tables.is_empty() {
                     query
                         .tables
-                        .push(TableExpr::from(Table::from(table.name.clone())));
+                        .push(TableExpr::from(Relation::from(table.name.clone())));
                 }
 
                 let column_name = table.some_column_name();
@@ -2782,7 +2782,7 @@ impl Subquery {
                     statement: subquery,
                 });
                 (
-                    JoinRightSide::Table(TableExpr::from(Table {
+                    JoinRightSide::Table(TableExpr::from(Relation {
                         name: subquery_name.clone(),
                         schema: None,
                     })),
@@ -2809,7 +2809,7 @@ impl Subquery {
                         let subquery_table = state.some_table_not_in_query_mut(query);
                         subquery
                             .tables
-                            .push(TableExpr::from(Table::from(subquery_table.name.clone())));
+                            .push(TableExpr::from(Relation::from(subquery_table.name.clone())));
                         subquery_table.name.clone()
                     };
                     let subquery_col = state

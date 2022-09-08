@@ -20,8 +20,8 @@ use std::collections::{HashMap, HashSet};
 
 pub use nom_sql::analysis::{contains_aggregate, is_aggregate};
 use nom_sql::{
-    CompoundSelectStatement, CreateTableStatement, CreateViewStatement, SelectSpecification,
-    SelectStatement, SqlIdentifier, Table,
+    CompoundSelectStatement, CreateTableStatement, CreateViewStatement, Relation,
+    SelectSpecification, SelectStatement, SqlIdentifier,
 };
 use readyset_errors::ReadySetResult;
 
@@ -48,11 +48,11 @@ pub use crate::util::{
 pub struct RewriteContext<'a> {
     /// Map from names of views and tables in the database, to (ordered) lists of the column names
     /// in those views
-    pub view_schemas: &'a HashMap<Table, Vec<SqlIdentifier>>,
+    pub view_schemas: &'a HashMap<Relation, Vec<SqlIdentifier>>,
 
     /// Map from names of *tables* in the database, to the [`CreateTableStatement`] that was used
     /// to create that table. Each key in this map should also exist in [`view_schemas`].
-    pub base_schemas: &'a HashMap<Table, CreateTableStatement>,
+    pub base_schemas: &'a HashMap<Relation, CreateTableStatement>,
 
     /// Ordered list of schema names to search in when resolving schema names of tables
     pub search_path: &'a [SqlIdentifier],

@@ -19,7 +19,7 @@ use launchpad::redacted::RedactedString;
 use maplit::hashmap;
 use metrics::SharedString;
 use metrics_exporter_prometheus::PrometheusBuilder;
-use nom_sql::{Dialect, SelectStatement, SqlQuery};
+use nom_sql::{Dialect, Relation, SelectStatement, SqlQuery};
 use readyset::consensus::{AuthorityControl, AuthorityType, ConsulAuthority};
 use readyset::metrics::recorded;
 use readyset::{ControllerHandle, ReadySetError};
@@ -373,8 +373,8 @@ where
 
         info!(%listen_address, "Listening for new connections");
 
-        let auto_increments: Arc<RwLock<HashMap<nom_sql::Table, AtomicUsize>>> = Arc::default();
-        let query_cache: Arc<RwLock<HashMap<SelectStatement, nom_sql::Table>>> = Arc::default();
+        let auto_increments: Arc<RwLock<HashMap<Relation, AtomicUsize>>> = Arc::default();
+        let query_cache: Arc<RwLock<HashMap<SelectStatement, Relation>>> = Arc::default();
 
         let rs_connect = span!(Level::INFO, "Connecting to RS server");
         rs_connect.in_scope(|| info!(%options.authority_address, %options.deployment));

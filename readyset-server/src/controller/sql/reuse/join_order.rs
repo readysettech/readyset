@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::vec::Vec;
 
-use nom_sql::Table;
+use nom_sql::Relation;
 
 use super::super::query_graph::{JoinRef, QueryGraph, QueryGraphEdge};
 use super::helpers::predicate_implication::join_predicates_are_equivalent;
@@ -12,7 +12,7 @@ use crate::ReadySetResult;
 #[derive(Debug, Clone)]
 struct JoinChain {
     join_order: Vec<JoinRef>,
-    relations: HashSet<Table>,
+    relations: HashSet<Relation>,
     stopped: bool,
 }
 
@@ -39,7 +39,7 @@ impl JoinChain {
         !self.relations.is_disjoint(&other.relations)
     }
 
-    fn has_relation(&self, rel: &Table) -> bool {
+    fn has_relation(&self, rel: &Relation) -> bool {
         self.relations.contains(rel)
     }
 

@@ -5,7 +5,7 @@ use std::convert::TryInto;
 
 use launchpad::hash::hash;
 use nom_sql::{
-    CreateTableStatement, CreateViewStatement, SelectSpecification, SelectStatement, Table,
+    CreateTableStatement, CreateViewStatement, Relation, SelectSpecification, SelectStatement,
 };
 use readyset_errors::{ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
@@ -23,7 +23,7 @@ pub(super) enum RecipeExpr {
     View(CreateViewStatement),
     /// Expression that represents a `CREATE CACHE` statement.
     Cache {
-        name: Table,
+        name: Relation,
         statement: SelectStatement,
         always: bool,
     },
@@ -31,7 +31,7 @@ pub(super) enum RecipeExpr {
 
 impl RecipeExpr {
     /// Returns the name associated with the [`RecipeExpr`].
-    pub(crate) fn name(&self) -> &Table {
+    pub(crate) fn name(&self) -> &Relation {
         match self {
             RecipeExpr::Table(stmt) => &stmt.table,
             RecipeExpr::View(cvs) => &cvs.name,
@@ -42,7 +42,7 @@ impl RecipeExpr {
     /// Returns the set of table names being referenced by the [`RecipeExpr`] (for views and
     /// queries).
     /// If the [`RecipeExpr`] is a [`RecipeExpr::Table`], then the set will be empty.
-    pub(super) fn table_references(&self) -> HashSet<Table> {
+    pub(super) fn table_references(&self) -> HashSet<Relation> {
         match self {
             RecipeExpr::Table(_) => HashSet::new(),
             RecipeExpr::View(cvs) => {
@@ -101,7 +101,7 @@ pub(super) struct ExprRegistry {
     ///
     /// # Invariants
     /// - Each `QueryID` present here *must* exist as key in the `expressions` map.
-    aliases: HashMap<Table, QueryID>,
+    aliases: HashMap<Relation, QueryID>,
 }
 
 impl ExprRegistry {
@@ -155,7 +155,7 @@ impl ExprRegistry {
 
     /// Retrieves the [`RecipeExpr`] associated with the given name or alias.
     /// If no query is found, returns `None`.
-    pub(super) fn get(&self, alias: &Table) -> Option<&RecipeExpr> {
+    pub(super) fn get(&self, alias: &Relation) -> Option<&RecipeExpr> {
         let query_id = self.aliases.get(alias)?;
         self.expressions.get(query_id)
     }
@@ -163,7 +163,7 @@ impl ExprRegistry {
     /// Retrieves the original name for the query with the given `alias` (which might already be the
     /// original name). Returns `None` is there no [`RecipeExpr`] associated with the
     /// given `alias`.
-    pub(super) fn resolve_alias(&self, name_or_alias: &Table) -> Option<&Table> {
+    pub(super) fn resolve_alias(&self, name_or_alias: &Relation) -> Option<&Relation> {
         self.aliases
             .get(name_or_alias)
             .map(|query_id| self.expressions[query_id].name())
@@ -171,7 +171,7 @@ impl ExprRegistry {
 
     /// Returns an iterator over all *original names* for all caches in the recipe (not including
     /// aliases)
-    pub(super) fn cache_names(&self) -> impl Iterator<Item = &Table> + '_ {
+    pub(super) fn cache_names(&self) -> impl Iterator<Item = &Relation> + '_ {
         self.expressions.values().filter_map(|expr| match expr {
             RecipeExpr::Cache { name, .. } => Some(name),
             _ => None,
@@ -181,7 +181,7 @@ impl ExprRegistry {
     /// Removes the [`RecipeExpr`] associated with the given name (or alias), if
     /// it exists, and all the [`RecipeExpr`]s that depend on it.
     /// Returns the removed [`RecipeExpr`] if it was present, or `None` otherwise.
-    pub(super) fn remove_expression(&mut self, name_or_alias: &Table) -> Option<RecipeExpr> {
+    pub(super) fn remove_expression(&mut self, name_or_alias: &Relation) -> Option<RecipeExpr> {
         let query_id = *self.aliases.get(name_or_alias)?;
         self.aliases.retain(|_, v| *v != query_id);
         let expression = self.expressions.remove(&query_id)?;
@@ -208,7 +208,7 @@ impl ExprRegistry {
         self.aliases.len()
     }
 
-    fn assign_alias(&mut self, alias: Table, query_id: QueryID) -> ReadySetResult<()> {
+    fn assign_alias(&mut self, alias: Relation, query_id: QueryID) -> ReadySetResult<()> {
         match self.aliases.entry(alias.clone()) {
             Entry::Occupied(e) => {
                 if *e.get() != query_id {
@@ -249,7 +249,7 @@ mod tests {
 
         #[test]
         fn name() {
-            let table_name: Table = "test_table".into();
+            let table_name: Relation = "test_table".into();
             let create_table = RecipeExpr::Table(
                 nom_sql::parse_create_table(Dialect::MySQL, "CREATE TABLE test_table (col1 INT);")
                     .unwrap(),
@@ -257,7 +257,7 @@ mod tests {
 
             assert_eq!(create_table.name(), &table_name);
 
-            let query_name: Table = "test_query".into();
+            let query_name: Relation = "test_query".into();
             let cached_query = RecipeExpr::Cache {
                 name: query_name.clone(),
                 statement: nom_sql::parse_select_statement(
@@ -270,7 +270,7 @@ mod tests {
 
             assert_eq!(cached_query.name(), &query_name);
 
-            let view_name: Table = "test_view".into();
+            let view_name: Relation = "test_view".into();
             let view = RecipeExpr::View(CreateViewStatement {
                 name: view_name.clone(),
                 fields: vec![],
@@ -343,7 +343,7 @@ mod tests {
             expressions.insert(table_qid, create_table);
             aliases.insert("test_table".into(), table_qid);
 
-            let query_name: Table = "test_query".into();
+            let query_name: Relation = "test_query".into();
             let cached_query = RecipeExpr::Cache {
                 name: query_name.clone(),
                 statement: nom_sql::parse_select_statement(
@@ -358,7 +358,7 @@ mod tests {
             aliases.insert(query_name, query_qid);
             aliases.insert("test_query_alias".into(), query_qid);
 
-            let view_name: Table = "test_view".into();
+            let view_name: Relation = "test_view".into();
             let view = RecipeExpr::View(CreateViewStatement {
                 name: view_name.clone(),
                 fields: vec![],
@@ -398,7 +398,7 @@ mod tests {
         #[test]
         fn add_cached_query() {
             let mut registry = create_registry();
-            let query_name: Table = "test_query2".into();
+            let query_name: Relation = "test_query2".into();
             let cached_query = RecipeExpr::Cache {
                 name: query_name.clone(),
                 statement: nom_sql::parse_select_statement(
@@ -427,7 +427,7 @@ mod tests {
         #[test]
         fn add_existing_cached_query() {
             let mut registry = create_registry();
-            let query_name: Table = "test_query2".into();
+            let query_name: Relation = "test_query2".into();
             let select =
                 nom_sql::parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table;")
                     .unwrap();
@@ -467,7 +467,7 @@ mod tests {
         #[test]
         fn add_view() {
             let mut registry = create_registry();
-            let view_name: Table = "test_view2".into();
+            let view_name: Relation = "test_view2".into();
             let view = RecipeExpr::View(CreateViewStatement {
                 name: view_name.clone(),
                 fields: vec![],
@@ -508,7 +508,7 @@ mod tests {
             let select =
                 nom_sql::parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table;")
                     .unwrap();
-            let view_name: Table = "test_view2".into();
+            let view_name: Relation = "test_view2".into();
             let view = RecipeExpr::View(CreateViewStatement {
                 name: view_name.clone(),
                 fields: vec![],
@@ -616,8 +616,8 @@ mod tests {
         #[test]
         fn remove_query() {
             let mut registry = create_registry();
-            let name: Table = "test_query".into();
-            let alias: Table = "test_query_alias".into();
+            let name: Relation = "test_query".into();
+            let alias: Relation = "test_query_alias".into();
             let expression = registry.get(&name).unwrap().clone();
             let expression_qid = *registry.aliases.get(&name).unwrap();
             let num_expressions = registry.expressions.len();
@@ -640,8 +640,8 @@ mod tests {
         #[test]
         fn remove_view() {
             let mut registry = create_registry();
-            let name: Table = "test_view".into();
-            let alias: Table = "test_view_alias".into();
+            let name: Relation = "test_view".into();
+            let alias: Relation = "test_view_alias".into();
             let expression = registry.get(&name).unwrap().clone();
             let expression_qid = *registry.aliases.get(&name).unwrap();
             let num_expressions = registry.expressions.len();
@@ -664,7 +664,7 @@ mod tests {
         #[test]
         fn remove_table() {
             let mut registry = create_registry();
-            let name: Table = "test_table".into();
+            let name: Relation = "test_table".into();
             let expression = registry.get(&name).unwrap().clone();
             let removed_expression = registry.remove_expression(&name).unwrap();
             assert_eq!(removed_expression, expression);

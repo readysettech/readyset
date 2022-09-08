@@ -16,8 +16,8 @@ use mir::MirNodeRef;
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
     BinaryOperator, ColumnSpecification, CompoundSelectOperator, CreateTableStatement, Expr,
-    FieldDefinitionExpr, FieldReference, FunctionExpr, Literal, OrderClause, OrderType,
-    SelectStatement, SqlIdentifier, Table, TableKey, UnaryOperator,
+    FieldDefinitionExpr, FieldReference, FunctionExpr, Literal, OrderClause, OrderType, Relation,
+    SelectStatement, SqlIdentifier, TableKey, UnaryOperator,
 };
 use petgraph::graph::NodeIndex;
 use readyset::ViewPlaceholder;
@@ -148,9 +148,9 @@ pub(crate) struct Config {
 pub(super) struct SqlToMirConverter {
     pub(in crate::controller::sql) config: Config,
     pub(in crate::controller::sql) base_schemas:
-        HashMap<Table, Vec<(usize, Vec<ColumnSpecification>)>>,
-    pub(in crate::controller::sql) current: HashMap<Table, usize>,
-    pub(in crate::controller::sql) nodes: HashMap<(Table, usize), MirNodeRef>,
+        HashMap<Relation, Vec<(usize, Vec<ColumnSpecification>)>>,
+    pub(in crate::controller::sql) current: HashMap<Relation, usize>,
+    pub(in crate::controller::sql) nodes: HashMap<(Relation, usize), MirNodeRef>,
     pub(in crate::controller::sql) schema_version: usize,
 }
 
@@ -159,7 +159,7 @@ impl SqlToMirConverter {
     /// Needed for deserialization, as the [`SqlToMirConverter`] is the
     /// source of truth to know the [`MirNodeRef`]s that compose the
     /// MIR graph.
-    pub(super) fn nodes(&self) -> &HashMap<(Table, usize), MirNodeRef> {
+    pub(super) fn nodes(&self) -> &HashMap<(Relation, usize), MirNodeRef> {
         &self.nodes
     }
 
@@ -172,7 +172,7 @@ impl SqlToMirConverter {
         self.config = config;
     }
 
-    fn get_view(&self, view_name: &Table) -> ReadySetResult<MirNodeRef> {
+    fn get_view(&self, view_name: &Relation) -> ReadySetResult<MirNodeRef> {
         let v = self
             .current
             .get(view_name)
@@ -189,7 +189,7 @@ impl SqlToMirConverter {
     pub(super) fn add_leaf_below(
         &mut self,
         prior_leaf: MirNodeRef,
-        name: &Table,
+        name: &Relation,
         params: &[Column],
         index_type: IndexType,
         project_columns: Option<Vec<Column>>,
@@ -266,7 +266,7 @@ impl SqlToMirConverter {
 
     pub(super) fn compound_query_to_mir(
         &mut self,
-        name: &Table,
+        name: &Relation,
         sqs: Vec<MirQuery>,
         op: CompoundSelectOperator,
         order: &Option<OrderClause>,
@@ -400,7 +400,11 @@ impl SqlToMirConverter {
     }
 
     // pub(super) viz for tests
-    pub(super) fn get_flow_node_address(&self, name: &Table, version: usize) -> Option<NodeIndex> {
+    pub(super) fn get_flow_node_address(
+        &self,
+        name: &Relation,
+        version: usize,
+    ) -> Option<NodeIndex> {
         match self.nodes.get(&(name.clone(), version)) {
             None => None,
             Some(node) => node
@@ -411,7 +415,7 @@ impl SqlToMirConverter {
         }
     }
 
-    pub(super) fn get_leaf(&self, name: &Table) -> Option<NodeIndex> {
+    pub(super) fn get_leaf(&self, name: &Relation) -> Option<NodeIndex> {
         match self.current.get(name) {
             None => None,
             Some(v) => self.get_flow_node_address(name, *v),
@@ -436,7 +440,7 @@ impl SqlToMirConverter {
         ))
     }
 
-    pub(super) fn remove_query(&mut self, name: &Table, mq: &MirQuery) -> ReadySetResult<()> {
+    pub(super) fn remove_query(&mut self, name: &Relation, mq: &MirQuery) -> ReadySetResult<()> {
         use std::collections::VecDeque;
 
         let v = self
@@ -470,7 +474,7 @@ impl SqlToMirConverter {
         Ok(())
     }
 
-    pub(super) fn remove_base(&mut self, name: &Table, mq: &MirQuery) -> ReadySetResult<()> {
+    pub(super) fn remove_base(&mut self, name: &Relation, mq: &MirQuery) -> ReadySetResult<()> {
         debug!(%name, "Removing base node");
         self.remove_query(name, mq)?;
         if self.base_schemas.remove(name).is_none() {
@@ -481,7 +485,7 @@ impl SqlToMirConverter {
 
     pub(super) fn named_query_to_mir(
         &mut self,
-        name: &Table,
+        name: &Relation,
         sq: SelectStatement,
         qg: &QueryGraph,
         has_leaf: bool,
@@ -522,7 +526,7 @@ impl SqlToMirConverter {
 
     fn make_base_node(
         &mut self,
-        name: &Table,
+        name: &Relation,
         cols: &[ColumnSpecification],
         keys: Option<&Vec<TableKey>>,
     ) -> ReadySetResult<MirNodeRef> {
@@ -770,7 +774,7 @@ impl SqlToMirConverter {
 
     fn make_union_from_same_base(
         &self,
-        name: Table,
+        name: Relation,
         ancestors: Vec<MirNodeRef>,
         columns: Vec<Column>,
         duplicate_mode: union::DuplicateMode,
@@ -791,7 +795,7 @@ impl SqlToMirConverter {
         ))
     }
 
-    fn make_filter_node(&self, name: Table, parent: MirNodeRef, conditions: Expr) -> MirNodeRef {
+    fn make_filter_node(&self, name: Relation, parent: MirNodeRef, conditions: Expr) -> MirNodeRef {
         trace!(%name, %conditions, "Added filter node");
         MirNode::new(
             name,
@@ -804,7 +808,7 @@ impl SqlToMirConverter {
 
     fn make_aggregate_node(
         &self,
-        name: Table,
+        name: Relation,
         func_col: Column,
         function: FunctionExpr,
         group_cols: Vec<Column>,
@@ -956,7 +960,7 @@ impl SqlToMirConverter {
 
     fn make_grouped_node(
         &self,
-        name: Table,
+        name: Relation,
         output_column: Column,
         (parent_node, on): (MirNodeRef, Column),
         group_by: Vec<Column>,
@@ -992,7 +996,7 @@ impl SqlToMirConverter {
 
     fn make_join_node(
         &self,
-        name: Table,
+        name: Relation,
         join_predicates: &[JoinPredicate],
         left_node: MirNodeRef,
         right_node: MirNodeRef,
@@ -1088,7 +1092,7 @@ impl SqlToMirConverter {
 
     fn make_join_aggregates_node(
         &self,
-        name: Table,
+        name: Relation,
         aggregates: &[MirNodeRef; 2],
     ) -> ReadySetResult<MirNodeRef> {
         trace!("Added join aggregates node");
@@ -1103,7 +1107,7 @@ impl SqlToMirConverter {
 
     fn make_projection_helper(
         &self,
-        name: Table,
+        name: Relation,
         parent: MirNodeRef,
         fn_cols: Vec<Column>,
     ) -> MirNodeRef {
@@ -1118,7 +1122,7 @@ impl SqlToMirConverter {
 
     fn make_project_node(
         &self,
-        name: Table,
+        name: Relation,
         parent_node: MirNodeRef,
         emit: Vec<Column>,
         expressions: Vec<(SqlIdentifier, Expr)>,
@@ -1139,7 +1143,7 @@ impl SqlToMirConverter {
 
     fn make_distinct_node(
         &self,
-        name: Table,
+        name: Relation,
         parent: MirNodeRef,
         group_by: Vec<Column>,
     ) -> MirNodeRef {
@@ -1245,7 +1249,7 @@ impl SqlToMirConverter {
 
     fn make_predicate_nodes(
         &self,
-        name: Table,
+        name: Relation,
         parent: MirNodeRef,
         ce: &Expr,
         nc: usize,
@@ -1412,7 +1416,7 @@ impl SqlToMirConverter {
 
     fn predicates_above_group_by<'a>(
         &self,
-        name: Table,
+        name: Relation,
         column_to_predicates: &HashMap<nom_sql::Column, Vec<&'a Expr>>,
         over_col: &nom_sql::Column,
         parent: MirNodeRef,
@@ -1504,7 +1508,7 @@ impl SqlToMirConverter {
     #[allow(clippy::cognitive_complexity)]
     fn make_nodes_for_selection(
         &self,
-        name: &Table,
+        name: &Relation,
         st: SelectStatement,
         qg: &QueryGraph,
         has_leaf: bool,
@@ -1517,8 +1521,8 @@ impl SqlToMirConverter {
         // Canonical operator order: B-J-F-G-P-R
         // (Base, Join, Filter, GroupBy, Project, Reader)
         {
-            let mut node_for_rel: HashMap<&Table, MirNodeRef> = HashMap::default();
-            let mut correlated_relations: HashSet<&Table> = Default::default();
+            let mut node_for_rel: HashMap<&Relation, MirNodeRef> = HashMap::default();
+            let mut correlated_relations: HashSet<&Relation> = Default::default();
 
             // Convert the query parameters to an ordered list of columns that will comprise the
             // lookup key if a leaf node is attached.
@@ -1526,7 +1530,7 @@ impl SqlToMirConverter {
 
             // 0. Base nodes (always reused)
             let mut base_nodes: Vec<MirNodeRef> = Vec::new();
-            let mut sorted_rels: Vec<&Table> = qg.relations.keys().collect();
+            let mut sorted_rels: Vec<&Relation> = qg.relations.keys().collect();
             sorted_rels.sort_unstable();
             for rel in &sorted_rels {
                 let base_for_rel = if let Some((subgraph, subquery)) = &qg.relations[*rel].subgraph

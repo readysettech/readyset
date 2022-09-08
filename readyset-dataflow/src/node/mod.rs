@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use nom_sql::{SqlIdentifier, Table};
+use nom_sql::{Relation, SqlIdentifier};
 use readyset::consistency::Timestamp;
 use readyset_data::DfType;
 use serde::{Deserialize, Serialize};
@@ -39,11 +39,11 @@ pub struct Column {
     ///
     /// TODO: Use this information to lookup the column specification required for returning a
     /// resultset to the client.
-    source: Option<Table>,
+    source: Option<Relation>,
 }
 
 impl Column {
-    pub fn new(name: SqlIdentifier, ty: DfType, source: Option<Table>) -> Self {
+    pub fn new(name: SqlIdentifier, ty: DfType, source: Option<Relation>) -> Self {
         Self { name, ty, source }
     }
 
@@ -58,7 +58,7 @@ impl Column {
     }
 
     /// Originating column
-    pub fn source(&self) -> Option<&Table> {
+    pub fn source(&self) -> Option<&Relation> {
         self.source.as_ref()
     }
 
@@ -81,7 +81,7 @@ impl From<nom_sql::ColumnSpecification> for Column {
 #[must_use]
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Node {
-    name: nom_sql::Table,
+    name: Relation,
     index: Option<IndexPair>,
     domain: Option<DomainIndex>,
     columns: Vec<Column>,
@@ -113,7 +113,7 @@ pub struct Node {
 impl Node {
     pub fn new<N, S2, CS, NT>(name: N, columns: CS, inner: NT) -> Node
     where
-        N: Into<Table>,
+        N: Into<Relation>,
         S2: Into<Column>,
         CS: IntoIterator<Item = S2>,
         NT: Into<NodeType>,
@@ -139,7 +139,7 @@ impl Node {
         Self::new(self.name.clone(), self.columns.clone(), n)
     }
 
-    pub fn named_mirror<NT: Into<NodeType>>(&self, n: NT, name: Table) -> Node {
+    pub fn named_mirror<NT: Into<NodeType>>(&self, n: NT, name: Relation) -> Node {
         Self::new(name, self.columns.clone(), n)
     }
 
@@ -343,7 +343,7 @@ impl Node {
 
 // publicly accessible attributes
 impl Node {
-    pub fn name(&self) -> &Table {
+    pub fn name(&self) -> &Relation {
         &self.name
     }
 

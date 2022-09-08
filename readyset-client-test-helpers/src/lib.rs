@@ -7,7 +7,7 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use nom_sql::SelectStatement;
+use nom_sql::{Relation, SelectStatement};
 use readyset::consensus::{Authority, LocalAuthorityStore};
 use readyset_client::backend::noria_connector::{NoriaConnector, ReadBehavior};
 use readyset_client::backend::{BackendBuilder, MigrationMode, UnsupportedSetMode};
@@ -161,8 +161,8 @@ where
         handle.backend_ready().await;
     }
 
-    let auto_increments: Arc<RwLock<HashMap<nom_sql::Table, AtomicUsize>>> = Arc::default();
-    let query_cache: Arc<RwLock<HashMap<SelectStatement, nom_sql::Table>>> = Arc::default();
+    let auto_increments: Arc<RwLock<HashMap<Relation, AtomicUsize>>> = Arc::default();
+    let query_cache: Arc<RwLock<HashMap<SelectStatement, Relation>>> = Arc::default();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
 
