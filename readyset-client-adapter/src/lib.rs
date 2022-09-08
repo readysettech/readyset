@@ -551,7 +551,10 @@ where
                     shutdown_recv,
                 );
 
-                migration_handler.run().await
+                migration_handler.run().await.map_err(move |e| {
+                    error!(error = %e, "Migration Handler failed");
+                    std::process::abort()
+                })
             };
 
             rt.handle().spawn(abort_on_panic(fut));
@@ -569,7 +572,10 @@ where
                     std::time::Duration::from_secs(loop_interval),
                     shutdown_recv,
                 );
-                outputs_synchronizer.run().await
+                outputs_synchronizer.run().await.map_err(move |e| {
+                    error!(error = %e, "Outputs Synchronizer failed");
+                    std::process::abort()
+                })
             };
             rt.handle().spawn(abort_on_panic(fut));
         }
