@@ -546,29 +546,16 @@ where
     }
 
     async fn on_init(&mut self, database: &str, w: InitWriter<'_, W>) -> io::Result<()> {
-        let res = if self.has_fallback() {
-            match self.database() {
-                Some(db_name) => {
-                    if db_name.to_ascii_lowercase() == database.to_ascii_lowercase() {
-                        // We are already using the correct database. Write back an ok packet.
-                        w.ok().await
-                    } else {
-                        w.error(
-                            mysql_srv::ErrorKind::ER_UNKNOWN_ERROR,
-                            "Tried to use database that ReadySet is not replicating from"
-                                .to_string()
-                                .as_bytes(),
-                        )
-                        .await
-                    }
-                }
-                None => w.ok().await,
+        match self.set_database(database).await {
+            Ok(()) => w.ok().await,
+            Err(e) => {
+                w.error(
+                    mysql_srv::ErrorKind::ER_UNKNOWN_ERROR,
+                    e.to_string().as_bytes(),
+                )
+                .await
             }
-        } else {
-            w.ok().await
-        };
-
-        Ok(res?)
+        }
     }
 
     async fn on_close(&mut self, _: u32) {}

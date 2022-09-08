@@ -711,6 +711,25 @@ where
             .expect("Too many prepared statements")
     }
 
+    /// Switch the active database for this backend to the given named database.
+    ///
+    /// Internally, this will set the schema search path to a single-element vector with the
+    /// database, and send a `USE` command to the upstream, if any.
+    pub async fn set_database(&mut self, db: &str) -> Result<(), DB::Error> {
+        if let Some(upstream) = &mut self.upstream {
+            upstream
+                .query(
+                    UseStatement {
+                        database: db.into(),
+                    }
+                    .to_string(),
+                )
+                .await?;
+        }
+        self.noria.set_schema_search_path(vec![db.into()]);
+        Ok(())
+    }
+
     /// Executes query on the upstream database, for when it cannot be parsed or executed by noria.
     /// Returns the query result, or an error if fallback is not configured
     #[instrument_root(level = "info")]
