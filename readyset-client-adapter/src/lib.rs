@@ -596,10 +596,7 @@ where
                     std::time::Duration::from_secs(loop_interval),
                     shutdown_recv,
                 );
-                views_synchronizer.run().await.map_err(move |e| {
-                    error!(error = %e, "Outputs Synchronizer failed");
-                    std::process::abort()
-                })
+                views_synchronizer.run().await
             };
             rt.handle().spawn(abort_on_panic(fut));
         }

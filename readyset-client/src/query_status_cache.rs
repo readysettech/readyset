@@ -105,6 +105,15 @@ impl Query {
             Query::ParseFailed(s) => (**s).clone(),
         }
     }
+
+    /// If this query was successfully parsed, returns the inner [`Arc<ViewCreateRequest>`],
+    /// otherwise returns [`None`]
+    pub(crate) fn into_parsed(self) -> Option<Arc<ViewCreateRequest>> {
+        match self {
+            Query::Parsed(vcr) => Some(vcr),
+            Query::ParseFailed(_) => None,
+        }
+    }
 }
 
 /// Converts a u64 query hash to a query id
