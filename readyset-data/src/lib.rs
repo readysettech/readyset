@@ -3534,5 +3534,22 @@ mod tests {
                 )
             )
         }
+
+        #[test]
+        fn enum_coercions() {
+            let variants = ["red", "yellow", "green"];
+            let enum_ty = SqlType::from_enum_variants(
+                variants.iter().map(|s| Literal::String(s.to_string())),
+            );
+            let from_ty = DfType::Sql(enum_ty.clone());
+
+            // Test conversions from enums to strings
+            for dv in [DfValue::Int(2), DfValue::UnsignedInt(2)] {
+                assert_eq!(
+                    "yellow",
+                    dv.coerce_to(&SqlType::Text, &from_ty).unwrap().to_string()
+                )
+            }
+        }
     }
 }
