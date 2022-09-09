@@ -96,6 +96,10 @@ pub(crate) fn coerce_f64(val: f64, to_ty: &SqlType, from_ty: &DfType) -> ReadySe
             .ok_or_else(bounds_err)
             .map(DfValue::from),
 
+        SqlType::Enum(_) => coerce_f64_to_uint::<u32>(val)
+            .ok_or_else(bounds_err)
+            .map(DfValue::from),
+
         SqlType::TinyText
         | SqlType::MediumText
         | SqlType::Text
@@ -160,8 +164,7 @@ pub(crate) fn coerce_f64(val: f64, to_ty: &SqlType, from_ty: &DfType) -> ReadySe
             )
         }
 
-        SqlType::Enum(_)
-        | SqlType::MacAddr
+        SqlType::MacAddr
         | SqlType::Inet
         | SqlType::Uuid
         | SqlType::Bit(_)
@@ -206,6 +209,8 @@ pub(crate) fn coerce_decimal(
         SqlType::UnsignedSmallInt(_) => val.to_u16().ok_or_else(err).map(DfValue::from),
         SqlType::UnsignedInt(_) => val.to_u32().ok_or_else(err).map(DfValue::from),
         SqlType::UnsignedBigInt(_) => val.to_u64().ok_or_else(err).map(DfValue::from),
+
+        SqlType::Enum(_) => val.to_u32().ok_or_else(err).map(DfValue::from),
 
         SqlType::TinyText
         | SqlType::MediumText
@@ -257,8 +262,7 @@ pub(crate) fn coerce_decimal(
             crate::integer::coerce_integer(val.to_i64().ok_or_else(err)?, "Decimal", to_ty, from_ty)
         }
 
-        SqlType::Enum(_)
-        | SqlType::MacAddr
+        SqlType::MacAddr
         | SqlType::Inet
         | SqlType::Uuid
         | SqlType::Bit(_)

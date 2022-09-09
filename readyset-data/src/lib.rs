@@ -3215,6 +3215,7 @@ mod tests {
         use launchpad::arbitrary::{
             arbitrary_naive_date, arbitrary_naive_date_time, arbitrary_naive_time,
         };
+        use rust_decimal::Decimal;
         use test_strategy::proptest;
         use SqlType::*;
 
@@ -3559,6 +3560,21 @@ mod tests {
                         .coerce_to(&SqlType::Text, &from_ty)
                         .unwrap()
                         .to_string()
+                );
+            }
+
+            // Test valid coercions from other number types to enums
+            let from_vals = [
+                DfValue::Int(3),
+                DfValue::UnsignedInt(3),
+                DfValue::Float(3.0),
+                DfValue::Double(3.0),
+                DfValue::Numeric(Arc::new(Decimal::new(3, 0))),
+            ];
+            for dv in from_vals {
+                assert_eq!(
+                    DfValue::Int(3),
+                    dv.coerce_to(&enum_ty, &DfType::Unknown).unwrap()
                 );
             }
         }
