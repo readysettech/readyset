@@ -5,7 +5,7 @@ use std::sync::Arc;
 use readyset_errors::{ReadySetError, ReadySetResult};
 use rust_decimal::Decimal;
 
-use crate::{DfType, DfValue, SqlType};
+use crate::{r#enum, DfType, DfValue, SqlType};
 
 /// A convenience trait that implements casts of i64 and u64 to f32 and f64
 pub(crate) trait IntAsFloat {
@@ -90,14 +90,12 @@ where
         SqlType::UnsignedSmallInt(_) => u16::try_from(val).map_err(|_| err()).map(DfValue::from),
         SqlType::UnsignedInt(_) => u32::try_from(val).map_err(|_| err()).map(DfValue::from),
         SqlType::UnsignedBigInt(_) => u64::try_from(val).map_err(|_| err()).map(DfValue::from),
+
         SqlType::Enum(elements) => {
-            // If we're out of range of usize, we'll convert to 0 anyway
+            // Values above the number of elements are converted to 0 by MySQL, and anything that
+            // can't be held in a usize is certainly too high, hence the .unwrap_or(0)
             let idx = usize::try_from(val).unwrap_or(0);
-            if idx > elements.len() {
-                Ok(DfValue::UnsignedInt(0))
-            } else {
-                Ok(DfValue::from(idx))
-            }
+            Ok(DfValue::from(r#enum::apply_enum_limits(idx, elements)))
         }
 
         SqlType::TinyText
