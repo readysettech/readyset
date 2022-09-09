@@ -30,5 +30,5 @@ kubectl create secret \
   readyset-db-url \
   --from-literal=url="${CONN_STRING}" \
   --from-literal=username="${DB_USERNAME}" \
-  --from-literal=database="${DB_NAME}"
-  --from-literal=password="${DB_PASSWORD}" \
+  --from-literal=database="${DB_NAME}" \
+  --from-literal=password="${DB_PASSWORD}"
