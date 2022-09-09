@@ -90,9 +90,15 @@ where
         SqlType::UnsignedSmallInt(_) => u16::try_from(val).map_err(|_| err()).map(DfValue::from),
         SqlType::UnsignedInt(_) => u32::try_from(val).map_err(|_| err()).map(DfValue::from),
         SqlType::UnsignedBigInt(_) => u64::try_from(val).map_err(|_| err()).map(DfValue::from),
-        // Any enum index should fit within a u32 (technically a u16 for MySQL but we'll leave it
-        // open to four-byte values to maybe allow for future Postgres support):
-        SqlType::Enum(_) => u32::try_from(val).map_err(|_| err()).map(DfValue::from),
+        SqlType::Enum(elements) => {
+            // If we're out of range of usize, we'll convert to 0 anyway
+            let idx = usize::try_from(val).unwrap_or(0);
+            if idx > elements.len() {
+                Ok(DfValue::UnsignedInt(0))
+            } else {
+                Ok(DfValue::from(idx))
+            }
+        }
 
         SqlType::TinyText
         | SqlType::MediumText

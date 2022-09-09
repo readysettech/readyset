@@ -3563,6 +3563,14 @@ mod tests {
                 );
             }
 
+            // Test coercion of out-of-range integers to enum
+            for i in [-1, 0, 4] {
+                let dv = DfValue::Int(i)
+                    .coerce_to(&enum_ty, &DfType::Unknown)
+                    .unwrap();
+                assert_eq!(0, <u32>::try_from(dv).unwrap());
+            }
+
             // Test valid coercions from other number types to enums
             let from_vals = [
                 DfValue::Int(3),
