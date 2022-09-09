@@ -416,7 +416,7 @@ async fn server_and_adapter_auto_restart() {
         .unwrap();
 
     let adapter_handle = deployment
-        .adapter_handle()
+        .first_adapter_handle()
         .expect("adapter handle expected to exist");
     adapter_handle
         .process

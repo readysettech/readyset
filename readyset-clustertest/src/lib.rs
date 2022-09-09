@@ -296,7 +296,7 @@ pub struct ServerParams {
     /// `--no-readers` flag to the noria server binary
     no_readers: bool,
     /// Only allow domains containing readers to run on this server. Corresponds to the
-    /// [`--reader-only`] flag to the noria server binary
+    /// `--reader-only` flag to the noria server binary
     reader_only: bool,
 }
 
@@ -334,8 +334,8 @@ pub struct DeploymentBuilder {
     quorum: usize,
     /// Parameters for the set of readyset-server instances in the deployment.
     servers: Vec<ServerParams>,
-    /// Deploy the mysql adapter.
-    mysql_adapter: bool,
+    /// How many readyset-mysql adapter instances to deploy
+    mysql_adapters: usize,
     /// Deploy mysql and use binlog replication.
     mysql: bool,
     /// The type of authority to use for cluster management.
@@ -397,7 +397,7 @@ impl DeploymentBuilder {
             shards: None,
             quorum: 1,
             servers: vec![],
-            mysql_adapter: false,
+            mysql_adapters: 0,
             mysql: false,
             authority: AuthorityType::from_str(&env.authority).unwrap(),
             authority_address: env.authority_address,
@@ -445,11 +445,19 @@ impl DeploymentBuilder {
         self
     }
 
-    /// Deploys an adapter server as part of this deployment. This will
-    /// populate [`DeploymentHandle::mysql_connection_str`] with the adapter's
-    /// MySQL connection string.
+    /// Deploys a single adapter server as part of this deployment.
+    ///
+    /// This will overwrite any previous call to [`Self::set_mysql_adapters`]
     pub fn deploy_mysql_adapter(mut self) -> Self {
-        self.mysql_adapter = true;
+        self.mysql_adapters = 1;
+        self
+    }
+
+    /// Sets the number of mysql adapter servers to deploy as part of this deployment.
+    ///
+    /// This will overwrite any previous call to [`Self::deploy_mysql_adapter`]
+    pub fn with_mysql_adapters(mut self, num_adapters: usize) -> Self {
+        self.mysql_adapters = num_adapters;
         self
     }
 
@@ -609,8 +617,9 @@ impl DeploymentBuilder {
         let metrics_handle = ControllerHandle::new(metrics_authority).await;
         let metrics = MetricsClient::new(metrics_handle).unwrap();
 
-        // Start a MySQL adapter instance.
-        let mysql_adapter_handle = if self.mysql_adapter || self.mysql {
+        // Start `self.mysql_adapters` MySQL adapter instances.
+        let mut mysql_adapters = Vec::with_capacity(self.mysql_adapters);
+        for _ in 0..self.mysql_adapters {
             // TODO(justin): Turn this into a stateful object.
             port = get_next_good_port(Some(port));
             let metrics_port = get_next_good_port(Some(port));
@@ -629,15 +638,15 @@ impl DeploymentBuilder {
                 self.auto_restart,
             )
             .await?;
+
             // Sleep to give the adapter time to startup.
             sleep(Duration::from_millis(2000)).await;
-            Some(AdapterHandle {
+
+            mysql_adapters.push(AdapterHandle {
                 conn_str: format!("mysql://127.0.0.1:{}", port),
                 process,
             })
-        } else {
-            None
-        };
+        }
 
         let mut handle = DeploymentHandle {
             handle,
@@ -652,7 +661,7 @@ impl DeploymentBuilder {
             shards: self.shards,
             quorum: self.quorum,
             port,
-            mysql_adapter: mysql_adapter_handle,
+            mysql_adapters,
             replicator_restart_timeout: self.replicator_restart_timeout,
             reader_replicas: self.reader_replicas,
             auto_restart: self.auto_restart,
@@ -745,9 +754,8 @@ pub struct DeploymentHandle {
     quorum: usize,
     /// Next new server port.
     port: u16,
-    /// Holds a handle to the mysql adapter if this deployment includes
-    /// a mysql adapter.
-    mysql_adapter: Option<AdapterHandle>,
+    /// Holds a list of handles to the mysql adapters for this deployment, if any
+    mysql_adapters: Vec<AdapterHandle>,
     /// Replicator restart timeout in seconds.
     replicator_restart_timeout: Option<u64>,
     /// Number of times to replicate reader domains
@@ -770,11 +778,22 @@ impl DeploymentHandle {
         &mut self.metrics
     }
 
-    /// Creates a [`mysql_async::Conn`] to the MySQL adapter in the deployment.
-    /// Otherwise panics if the adapter does not exist or a connection can not
-    /// be made.
-    pub async fn adapter(&self) -> mysql_async::Conn {
-        let addr = &self.mysql_adapter.as_ref().unwrap().conn_str;
+    /// Creates a [`mysql_async::Conn`] to the first MySQL adapter in the deployment.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the adapter does not exist or a connection can not be made.
+    pub async fn first_adapter(&self) -> mysql_async::Conn {
+        self.adapter(0).await
+    }
+
+    /// Creates a [`mysql_async::Conn`] to the MySQL adapter at the given index in the deployment.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the adapter does not exist or a connection can not be made.
+    pub async fn adapter(&self, idx: usize) -> mysql_async::Conn {
+        let addr = &self.mysql_adapters[idx].conn_str;
         let opts = mysql_async::Opts::from_url(addr).unwrap();
         mysql_async::Conn::new(opts.clone()).await.unwrap()
     }
@@ -940,7 +959,7 @@ impl DeploymentHandle {
         for h in &mut self.noria_server_handles {
             let _ = h.1.process.kill();
         }
-        if let Some(adapter_handle) = &mut self.mysql_adapter {
+        for adapter_handle in &mut self.mysql_adapters {
             let _ = adapter_handle.process.kill();
         }
 
@@ -973,10 +992,16 @@ impl DeploymentHandle {
         self.noria_server_handles.get_mut(url)
     }
 
-    /// Returns a mutable reference to the [`AdapterHandle`] for a readyset-adapter if one exists
-    /// Otherwise, `None` is returned.
-    pub fn adapter_handle(&mut self) -> Option<&mut AdapterHandle> {
-        self.mysql_adapter.as_mut()
+    /// Returns a mutable reference to the [`AdapterHandle`] for the first readyset-adapter if one
+    /// exists Otherwise, `None` is returned.
+    pub fn first_adapter_handle(&mut self) -> Option<&mut AdapterHandle> {
+        self.adapter_handle(0)
+    }
+
+    /// Returns a mutable reference to the [`AdapterHandle`] for the readyset-adapter at the given
+    /// index. Returns `None` if the index is out-of-bounds
+    pub fn adapter_handle(&mut self, idx: usize) -> Option<&mut AdapterHandle> {
+        self.mysql_adapters.get_mut(idx)
     }
 
     /// Returns a reference to the name of the deployment.

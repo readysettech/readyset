@@ -30,7 +30,7 @@ async fn create_table_insert_test() {
         .await
         .unwrap();
 
-    let mut adapter = deployment.adapter().await;
+    let mut adapter = deployment.first_adapter().await;
     let _ = adapter
         .query_drop(
             r"CREATE TABLE t1 (
@@ -69,7 +69,7 @@ async fn mirror_prepare_exec_test() {
         .unwrap();
 
     // Create a table and write to it through the adapter.
-    let mut adapter = deployment.adapter().await;
+    let mut adapter = deployment.first_adapter().await;
     adapter
         .query_drop(
             r"CREATE TABLE t1 (
@@ -121,7 +121,7 @@ async fn async_migrations_confidence_check() {
         .await
         .unwrap();
 
-    let mut adapter = deployment.adapter().await;
+    let mut adapter = deployment.first_adapter().await;
     adapter
         .query_drop(
             r"CREATE TABLE t1 (
@@ -186,7 +186,7 @@ async fn failure_during_query() {
         .await
         .unwrap();
 
-    let mut adapter = deployment.adapter().await;
+    let mut adapter = deployment.first_adapter().await;
     adapter
         .query_drop("CREATE CACHE FROM SELECT * FROM t1 WHERE uid = ?")
         .await
@@ -215,7 +215,7 @@ async fn query_cached_view_after_failure() {
         .await
         .unwrap();
 
-    let mut adapter = deployment.adapter().await;
+    let mut adapter = deployment.first_adapter().await;
     let _ = adapter
         .query_drop(
             r"CREATE TABLE t1 (
@@ -310,7 +310,7 @@ async fn test_fallback_recovery_period() {
         .await
         .unwrap();
 
-    let mut adapter = deployment.adapter().await;
+    let mut adapter = deployment.first_adapter().await;
 
     adapter
         .query_drop("CREATE CACHE FROM SELECT * FROM t1 WHERE uid = ?")
@@ -417,7 +417,7 @@ async fn dry_run_evaluates_support() {
         .await
         .unwrap();
 
-    let mut adapter = deployment.adapter().await;
+    let mut adapter = deployment.first_adapter().await;
     adapter
         .query_drop(
             r"CREATE TABLE t1 (
@@ -499,7 +499,7 @@ async fn correct_data_after_restart() {
         .await
         .unwrap();
 
-    let mut adapter = deployment.adapter().await;
+    let mut adapter = deployment.first_adapter().await;
     let _ = adapter
         .query_drop(
             r"CREATE TABLE t1 (
@@ -586,7 +586,7 @@ async fn create_view_after_worker_failure() {
         .await
         .unwrap();
 
-    let mut adapter = deployment.adapter().await;
+    let mut adapter = deployment.first_adapter().await;
     adapter
         .query_drop("CREATE CACHE FROM SELECT * FROM t1;")
         .await
@@ -660,7 +660,7 @@ async fn update_during_failure() {
         .unwrap();
     sleep(Duration::from_secs(5)).await;
 
-    let mut adapter = deployment.adapter().await;
+    let mut adapter = deployment.first_adapter().await;
 
     // Perform the same writes on t1 and t1 so we use the same `results` struct
     // for both.
@@ -747,7 +747,7 @@ async fn upquery_to_failed_reader_domain() {
         .await
         .unwrap();
 
-    let mut adapter = deployment.adapter().await;
+    let mut adapter = deployment.first_adapter().await;
     adapter
         .query_drop("CREATE CACHE FROM SELECT * FROM t1 WHERE uid = ?")
         .await
@@ -793,7 +793,7 @@ async fn upquery_through_failed_domain() {
         .await
         .unwrap();
 
-    let mut adapter = deployment.adapter().await;
+    let mut adapter = deployment.first_adapter().await;
     adapter
         .query_drop("CREATE CACHE FROM SELECT * FROM t1 WHERE uid = ?")
         .await
@@ -837,7 +837,7 @@ async fn update_propagation_through_failed_domain() {
         .await
         .unwrap();
 
-    let mut adapter = deployment.adapter().await;
+    let mut adapter = deployment.first_adapter().await;
     adapter
         .query_drop("CREATE CACHE FROM SELECT * FROM t1 WHERE uid = ?")
         .await
@@ -915,7 +915,7 @@ async fn end_to_end_with_restarts() {
         .await
         .unwrap();
 
-    let mut adapter = deployment.adapter().await;
+    let mut adapter = deployment.first_adapter().await;
     let _ = adapter
         .query_drop(
             r"CREATE TABLE t1 (
@@ -987,7 +987,7 @@ async fn view_survives_restart() {
         .await
         .unwrap();
 
-    let mut adapter = deployment.adapter().await;
+    let mut adapter = deployment.first_adapter().await;
     let _ = adapter
         .query_drop(
             r"CREATE TABLE t1 (
@@ -1075,7 +1075,7 @@ async fn writes_survive_restarts() {
         .unwrap();
     sleep(Duration::from_secs(5)).await;
 
-    let mut adapter = deployment.adapter().await;
+    let mut adapter = deployment.first_adapter().await;
     adapter
         .query_drop(r"CREATE CACHE FROM SELECT * FROM t1 where uid = 1;")
         .await
@@ -1231,7 +1231,7 @@ async fn correct_deployment_permissions() {
         .await
         .unwrap();
 
-    let mut adapter = deployment.adapter().await;
+    let mut adapter = deployment.first_adapter().await;
     assert!(
         query_until_expected_from_noria(
             &mut adapter,
@@ -1273,7 +1273,7 @@ async fn post_deployment_permissions_lock_table() {
     // Time for replication to work, 4x the replicator restart timeout.
     sleep(Duration::from_secs(20)).await;
 
-    let mut adapter = deployment.adapter().await;
+    let mut adapter = deployment.first_adapter().await;
     assert!(
         query_until_expected_from_noria(
             &mut adapter,
@@ -1318,7 +1318,7 @@ async fn post_deployment_permissions_replication() {
     // Time for replication to work, 4x the replicator restart timeout.
     sleep(Duration::from_secs(20)).await;
 
-    let mut adapter = deployment.adapter().await;
+    let mut adapter = deployment.first_adapter().await;
     assert!(
         query_until_expected_from_noria(
             &mut adapter,
