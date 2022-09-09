@@ -10,7 +10,7 @@ use itertools::Itertools;
 use launchpad::redacted::Sensitive;
 use nom_sql::{
     self, BinaryOperator, ColumnConstraint, DeleteStatement, InsertStatement, Relation,
-    SelectStatement, SqlIdentifier, SqlQuery, SqlType, UpdateStatement,
+    SqlIdentifier, SqlQuery, SqlType, UpdateStatement,
 };
 use readyset::consistency::Timestamp;
 use readyset::internal::LocalNodeIndex;
@@ -18,8 +18,8 @@ use readyset::recipe::changelist::{Change, ChangeList};
 use readyset::results::{ResultIterator, Results};
 use readyset::{
     ColumnSchema, ControllerHandle, KeyColumnIdx, KeyComparison, ReadQuery, ReaderAddress,
-    ReadySetError, ReadySetResult, SchemaType, Table, TableOperation, View, ViewPlaceholder,
-    ViewQuery, ViewSchema,
+    ReadySetError, ReadySetResult, SchemaType, Table, TableOperation, View, ViewCreateRequest,
+    ViewPlaceholder, ViewQuery, ViewSchema,
 };
 use readyset_data::{DfType, DfValue};
 use readyset_errors::ReadySetError::PreparedStatementMissing;
@@ -270,14 +270,14 @@ impl<'a> QueryResult<'a> {
 #[derive(Clone)]
 pub struct ViewCache {
     /// Global cache of view endpoints and prepared statements.
-    global: Arc<RwLock<HashMap<SelectStatement, Relation>>>,
+    global: Arc<RwLock<HashMap<ViewCreateRequest, Relation>>>,
     /// Thread-local version of global cache (consulted first).
-    local: HashMap<SelectStatement, Relation>,
+    local: HashMap<ViewCreateRequest, Relation>,
 }
 
 impl ViewCache {
     /// Construct a new ViewCache with a passed in global view cache.
-    pub fn new(global_cache: Arc<RwLock<HashMap<SelectStatement, Relation>>>) -> ViewCache {
+    pub fn new(global_cache: Arc<RwLock<HashMap<ViewCreateRequest, Relation>>>) -> ViewCache {
         ViewCache {
             global: global_cache,
             local: HashMap::new(),
@@ -285,15 +285,15 @@ impl ViewCache {
     }
 
     /// Registers a statement with the provided name into both the local and global view caches.
-    pub fn register_statement(&mut self, name: &Relation, statement: &nom_sql::SelectStatement) {
+    pub fn register_statement(&mut self, name: &Relation, view_request: ViewCreateRequest) {
         self.local
-            .entry(statement.clone())
+            .entry(view_request.clone())
             .or_insert_with(|| name.clone());
-        tokio::task::block_in_place(|| {
+        tokio::task::block_in_place(move || {
             self.global
                 .write()
                 .unwrap()
-                .entry(statement.clone())
+                .entry(view_request)
                 .or_insert_with(|| name.clone());
         });
     }
@@ -301,18 +301,18 @@ impl ViewCache {
     /// Retrieves the name for the provided statement if it's in the cache. We first check local
     /// cache, and if it's not there we check global cache. If it's in global but not local, we
     /// backfill local cache before returning the result.
-    pub fn statement_name(&mut self, statement: &nom_sql::SelectStatement) -> Option<Relation> {
-        let maybe_name = if let Some(name) = self.local.get(statement) {
+    pub fn statement_name(&mut self, view_request: &ViewCreateRequest) -> Option<Relation> {
+        let maybe_name = if let Some(name) = self.local.get(view_request) {
             return Some(name.clone());
         } else {
             // Didn't find it in local, so let's check global.
             let gc = tokio::task::block_in_place(|| self.global.read().unwrap());
-            gc.get(statement).cloned()
+            gc.get(view_request).cloned()
         };
 
         maybe_name.map(|n| {
             // Backfill into local before we return.
-            self.local.insert(statement.clone(), n.clone());
+            self.local.insert(view_request.clone(), n.clone());
             n
         })
     }
@@ -333,9 +333,9 @@ impl ViewCache {
         })
     }
 
-    /// Returns the select statement based on a provided name if it exists in either the local or
-    /// global caches.
-    pub fn select_statement_from_name(&self, name: &Relation) -> Option<SelectStatement> {
+    /// Returns the original view create request based on a provided name if it exists in either the
+    /// local or global caches.
+    pub fn view_create_request_from_name(&self, name: &Relation) -> Option<ViewCreateRequest> {
         self.local
             .iter()
             .find(|(_, n)| *n == name)
@@ -457,7 +457,7 @@ impl NoriaConnector {
     pub async fn new(
         ch: ControllerHandle,
         auto_increments: Arc<RwLock<HashMap<Relation, atomic::AtomicUsize>>>,
-        query_cache: Arc<RwLock<HashMap<SelectStatement, Relation>>>,
+        query_cache: Arc<RwLock<HashMap<ViewCreateRequest, Relation>>>,
         read_behavior: ReadBehavior,
         schema_search_path: Vec<SqlIdentifier>,
     ) -> Self {
@@ -475,7 +475,7 @@ impl NoriaConnector {
     pub async fn new_with_local_reads(
         ch: ControllerHandle,
         auto_increments: Arc<RwLock<HashMap<Relation, atomic::AtomicUsize>>>,
-        query_cache: Arc<RwLock<HashMap<SelectStatement, Relation>>>,
+        query_cache: Arc<RwLock<HashMap<ViewCreateRequest, Relation>>>,
         read_behavior: ReadBehavior,
         read_request_handler: Option<ReadRequestHandler>,
         schema_search_path: Vec<SqlIdentifier>,
@@ -964,17 +964,17 @@ impl NoriaConnector {
         override_schema_search_path: Option<Vec<SqlIdentifier>>,
         always: bool,
     ) -> ReadySetResult<()> {
-        let name = name
-            .cloned()
-            .unwrap_or_else(|| utils::generate_query_name(statement).into());
+        let name = name.cloned().unwrap_or_else(|| {
+            utils::generate_query_name(statement, self.schema_search_path()).into()
+        });
+        let schema_search_path =
+            override_schema_search_path.unwrap_or_else(|| self.schema_search_path.clone());
         let changelist = ChangeList::from_change(Change::create_cache(
             name.clone(),
             statement.clone(),
             always,
         ))
-        .with_schema_search_path(
-            override_schema_search_path.unwrap_or_else(|| self.schema_search_path.clone()),
-        );
+        .with_schema_search_path(schema_search_path.clone());
 
         noria_await!(
             self.inner.get_mut().await?,
@@ -984,7 +984,10 @@ impl NoriaConnector {
         // If the query is already in there with a different name, we don't need to make a new name
         // for it, as *lookups* only need one of the names for the query, and when we drop it we'll
         // be hitting noria anyway
-        self.view_cache.register_statement(&name, statement);
+        self.view_cache.register_statement(
+            &name,
+            ViewCreateRequest::new(statement.clone(), schema_search_path),
+        );
 
         Ok(())
     }
@@ -995,9 +998,11 @@ impl NoriaConnector {
         prepared: bool,
         create_if_not_exist: bool,
     ) -> ReadySetResult<Relation> {
-        match self.view_cache.statement_name(q) {
+        let view_request = ViewCreateRequest::new(q.clone(), self.schema_search_path.clone());
+        match self.view_cache.statement_name(&view_request) {
             None => {
-                let qname: Relation = utils::generate_query_name(q).into();
+                let qname: Relation =
+                    utils::generate_query_name(q, self.schema_search_path()).into();
 
                 // add the query to ReadySet
                 if create_if_not_exist {
@@ -1028,7 +1033,7 @@ impl NoriaConnector {
                     error!(error = %e, "getting view from noria failed");
                     return Err(e);
                 }
-                self.view_cache.register_statement(&qname, q);
+                self.view_cache.register_statement(&qname, view_request);
 
                 Ok(qname)
             }
@@ -1057,8 +1062,8 @@ impl NoriaConnector {
         Ok(())
     }
 
-    pub fn select_statement_from_name(&self, name: &Relation) -> Option<SelectStatement> {
-        self.view_cache.select_statement_from_name(name)
+    pub fn view_create_request_from_name(&self, name: &Relation) -> Option<ViewCreateRequest> {
+        self.view_cache.view_create_request_from_name(name)
     }
 
     async fn do_insert(
@@ -1806,6 +1811,7 @@ mod tests {
         use nom_sql::{parse_select_statement, Dialect, Relation};
 
         use super::*;
+
         #[test]
         fn register_and_remove_statement() {
             let global = Arc::new(RwLock::new(HashMap::new()));
@@ -1813,14 +1819,15 @@ mod tests {
 
             let name = Relation::from("test_statement_name");
             let statement = parse_select_statement(Dialect::MySQL, "SELECT a_col FROM t1").unwrap();
+            let view_request = ViewCreateRequest::new(statement, vec!["s1".into()]);
 
-            view_cache.register_statement(&name, &statement);
-            let retrieved_statement = view_cache.select_statement_from_name(&name);
-            assert_eq!(Some(statement), retrieved_statement);
+            view_cache.register_statement(&name, view_request.clone());
+            let retrieved_request = view_cache.view_create_request_from_name(&name);
+            assert_eq!(Some(view_request), retrieved_request);
 
             view_cache.remove_statement(&name);
-            let retrieved_statement = view_cache.select_statement_from_name(&name);
-            assert_eq!(None, retrieved_statement);
+            let retrieved_request = view_cache.view_create_request_from_name(&name);
+            assert_eq!(None, retrieved_request);
         }
 
         #[test]
@@ -1830,30 +1837,34 @@ mod tests {
 
             let statement1 = parse_select_statement(Dialect::MySQL, "SELECT a FROM t1").unwrap();
             let statement2 = parse_select_statement(Dialect::MySQL, "SELECT b FROM t2").unwrap();
+            let create_request_1 = ViewCreateRequest::new(statement1, vec!["schema1".into()]);
+            let create_request_2 = ViewCreateRequest::new(statement2, vec!["schema2".into()]);
 
-            view_cache.register_statement(&"q1".into(), &statement1);
-            view_cache.register_statement(&"q2".into(), &statement2);
+            view_cache.register_statement(&"q1".into(), create_request_1.clone());
+            view_cache.register_statement(&"q2".into(), create_request_2.clone());
 
             assert_eq!(
-                view_cache.select_statement_from_name(&"q1".into()),
-                Some(statement1)
+                view_cache.view_create_request_from_name(&"q1".into()),
+                Some(create_request_1)
             );
             assert_eq!(
-                view_cache.select_statement_from_name(&"q2".into()),
-                Some(statement2)
+                view_cache.view_create_request_from_name(&"q2".into()),
+                Some(create_request_2)
             );
 
             view_cache.clear();
 
-            assert_eq!(view_cache.select_statement_from_name(&"q1".into()), None);
-            assert_eq!(view_cache.select_statement_from_name(&"q2".into()), None);
+            assert_eq!(view_cache.view_create_request_from_name(&"q1".into()), None);
+            assert_eq!(view_cache.view_create_request_from_name(&"q2".into()), None);
             assert!(global.read().unwrap().is_empty());
         }
     }
 
     mod build_view_query {
         use lazy_static::lazy_static;
-        use nom_sql::{parse_query, Column, ColumnSpecification, Dialect, SqlType};
+        use nom_sql::{
+            parse_query, Column, ColumnSpecification, Dialect, SelectStatement, SqlType,
+        };
         use readyset::ColumnBase;
 
         use super::*;

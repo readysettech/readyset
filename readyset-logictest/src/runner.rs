@@ -14,9 +14,9 @@ use console::style;
 use database_utils::{DatabaseConnection, DatabaseType, DatabaseURL};
 use itertools::Itertools;
 use mysql_srv::MysqlIntermediary;
-use nom_sql::{Relation, SelectStatement};
+use nom_sql::Relation;
 use readyset::consensus::{Authority, LocalAuthorityStore};
-use readyset::ControllerHandle;
+use readyset::{ControllerHandle, ViewCreateRequest};
 use readyset_client::backend::noria_connector::ReadBehavior;
 use readyset_client::backend::{BackendBuilder, NoriaConnector};
 use readyset_client::query_status_cache::QueryStatusCache;
@@ -495,7 +495,7 @@ impl TestScript {
         let database_type = run_opts.database_type;
         let replication_url = run_opts.replication_url.clone();
         let auto_increments: Arc<RwLock<HashMap<Relation, AtomicUsize>>> = Arc::default();
-        let query_cache: Arc<RwLock<HashMap<SelectStatement, Relation>>> = Arc::default();
+        let query_cache: Arc<RwLock<HashMap<ViewCreateRequest, Relation>>> = Arc::default();
         let mut retry: usize = 0;
         let listener = loop {
             retry += 1;

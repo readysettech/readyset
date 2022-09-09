@@ -1455,10 +1455,11 @@ where
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         // If we have another query with the same name, drop that query first
         if let Some(name) = name {
-            if let Some(stmt) = self.noria.select_statement_from_name(name) {
+            if let Some(view_request) = self.noria.view_create_request_from_name(name) {
                 warn!(
-                    "Dropping query previously cached as {name}, stmt={}",
-                    Sensitive(&stmt)
+                    statement = %Sensitive(&view_request.statement),
+                    %name,
+                    "Dropping previously cached query",
                 );
                 self.drop_cached_query(name).await?;
             }
@@ -1484,21 +1485,14 @@ where
         &mut self,
         name: &Relation,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
-        let maybe_select_statement = self.noria.select_statement_from_name(name);
+        let maybe_view_request = self.noria.view_create_request_from_name(name);
         self.noria.drop_view(name).await?;
-        if let Some(stmt) = maybe_select_statement {
-            self.query_status_cache.update_query_migration_state(
-                &ViewCreateRequest::new(stmt.clone(), self.noria.schema_search_path().to_owned()),
-                MigrationState::Pending,
-            );
-            self.query_status_cache.always_attempt_readyset(
-                &ViewCreateRequest::new(stmt.clone(), self.noria.schema_search_path().to_owned()),
-                false,
-            );
-            self.invalidate_prepared_statements_cache(&ViewCreateRequest::new(
-                stmt,
-                self.noria.schema_search_path().to_owned(),
-            ));
+        if let Some(view_request) = maybe_view_request {
+            self.query_status_cache
+                .update_query_migration_state(&view_request, MigrationState::Pending);
+            self.query_status_cache
+                .always_attempt_readyset(&view_request, false);
+            self.invalidate_prepared_statements_cache(&view_request);
         }
         Ok(noria_connector::QueryResult::Empty)
     }

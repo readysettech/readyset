@@ -257,7 +257,8 @@ where
             // It's probably unsupported, but we'll allow a proper migration determine that.
             return;
         }
-        let qname = utils::generate_query_name(&view_request.statement);
+        let qname =
+            utils::generate_query_name(&view_request.statement, &view_request.schema_search_path);
         let changelist = ChangeList::from_change(Change::create_cache(
             qname,
             view_request.statement.clone(),

@@ -1318,3 +1318,44 @@ async fn schema_search_path() {
     conn.simple_query("SELECT b FROM t").await.unwrap();
     conn.simple_query("SELECT c FROM t2").await.unwrap();
 }
+
+/// Tests that two queries that are syntactically equivalent, but semantically different due to
+/// different search paths, are executed as separate queries
+#[tokio::test(flavor = "multi_thread")]
+async fn same_query_different_search_path() {
+    readyset_tracing::init_test_logging();
+    let (opts, _handle) = setup(true).await;
+    let conn = connect(opts).await;
+    conn.simple_query("CREATE TABLE s1.t (a int)")
+        .await
+        .unwrap();
+    conn.simple_query("INSERT INTO s1.t (a) values (1)")
+        .await
+        .unwrap();
+    conn.simple_query("CREATE TABLE s2.t (a int)")
+        .await
+        .unwrap();
+    conn.simple_query("INSERT INTO s2.t (a) values (2)")
+        .await
+        .unwrap();
+
+    // Schema search path: [s1, s2]
+    conn.simple_query("SET search_path = s1, s2").await.unwrap();
+    assert_eq!(
+        conn.query_one("SELECT a FROM t", &[])
+            .await
+            .unwrap()
+            .get::<_, i32>(0),
+        1
+    );
+
+    // Schema search path: [s2, s1]
+    conn.simple_query("SET search_path = s2, s1").await.unwrap();
+    assert_eq!(
+        conn.query_one("SELECT a FROM t", &[])
+            .await
+            .unwrap()
+            .get::<_, i32>(0),
+        2
+    );
+}

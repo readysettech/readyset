@@ -4,7 +4,7 @@ use std::convert::{TryFrom, TryInto};
 use launchpad::hash::hash;
 use nom_sql::{
     BinaryOperator, Column, ColumnConstraint, CreateTableStatement, DeleteStatement, Expr,
-    InsertStatement, Literal, SelectStatement, SqlQuery, TableKey, UpdateStatement,
+    InsertStatement, Literal, SelectStatement, SqlIdentifier, SqlQuery, TableKey, UpdateStatement,
 };
 use readyset::{Modification, Operation};
 use readyset_data::{DfType, DfValue};
@@ -552,8 +552,11 @@ pub(crate) fn coerce_params(
     }
 }
 
-pub(crate) fn generate_query_name(statement: &nom_sql::SelectStatement) -> String {
-    format!("q_{:x}", hash(statement))
+pub(crate) fn generate_query_name(
+    statement: &nom_sql::SelectStatement,
+    schema_search_path: &[SqlIdentifier],
+) -> String {
+    format!("q_{:x}", hash(&(statement, schema_search_path)))
 }
 
 #[cfg(test)]

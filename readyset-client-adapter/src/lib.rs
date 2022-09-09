@@ -19,10 +19,10 @@ use launchpad::redacted::RedactedString;
 use maplit::hashmap;
 use metrics::SharedString;
 use metrics_exporter_prometheus::PrometheusBuilder;
-use nom_sql::{Dialect, Relation, SelectStatement, SqlQuery};
+use nom_sql::{Dialect, Relation, SqlQuery};
 use readyset::consensus::{AuthorityControl, AuthorityType, ConsulAuthority};
 use readyset::metrics::recorded;
-use readyset::{ControllerHandle, ReadySetError};
+use readyset::{ControllerHandle, ReadySetError, ViewCreateRequest};
 use readyset_client::backend::noria_connector::{NoriaConnector, ReadBehavior};
 use readyset_client::backend::MigrationMode;
 use readyset_client::http_router::NoriaAdapterHttpRouter;
@@ -398,7 +398,7 @@ where
         info!(%listen_address, "Listening for new connections");
 
         let auto_increments: Arc<RwLock<HashMap<Relation, AtomicUsize>>> = Arc::default();
-        let query_cache: Arc<RwLock<HashMap<SelectStatement, Relation>>> = Arc::default();
+        let query_cache: Arc<RwLock<HashMap<ViewCreateRequest, Relation>>> = Arc::default();
 
         let rs_connect = span!(Level::INFO, "Connecting to RS server");
         rs_connect.in_scope(|| info!(%options.authority_address, %options.deployment));
