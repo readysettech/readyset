@@ -361,6 +361,10 @@ pub struct DeploymentBuilder {
     /// that query has continously failed for query_max_failure_seconds.
     /// None if not enabled.
     fallback_recovery_seconds: Option<u64>,
+    /// Specifies the polling interval for the adapter to request views from the Leader.
+    ///
+    /// Corresponds to [`readyset_client_adapter::Options::views_polling_interval`]
+    views_polling_interval: Duration,
     /// Optional username for the MySQL user.
     mysql_user: Option<String>,
     /// Optional password for the MySQL user.
@@ -408,6 +412,7 @@ impl DeploymentBuilder {
             dry_run_migration_interval: None,
             query_max_failure_seconds: None,
             fallback_recovery_seconds: None,
+            views_polling_interval: Duration::from_secs(300),
             mysql_user: None,
             mysql_pass: None,
             replicator_restart_timeout: None,
@@ -485,7 +490,7 @@ impl DeploymentBuilder {
     }
 
     /// Overrides the maximum time a query may continuously fail in the adapter.
-    /// [`Self::deploy_mysql_adapter`] to be set on this deployment.
+    /// Requires [`Self::deploy_mysql_adapter`] to be set on this deployment.
     pub fn query_max_failure_seconds(mut self, secs: u64) -> Self {
         self.query_max_failure_seconds = Some(secs);
         self
@@ -493,9 +498,16 @@ impl DeploymentBuilder {
 
     /// Overrides the fallback recovery period in the adapter that we enter when a query has
     /// repeatedly failed for query_max_failure_seconds.
-    /// [`Self::deploy_mysql_adapter`] to be set on this deployment.
+    /// Requires [`Self::deploy_mysql_adapter`] to be set on this deployment.
     pub fn fallback_recovery_seconds(mut self, secs: u64) -> Self {
         self.fallback_recovery_seconds = Some(secs);
+        self
+    }
+
+    /// Overrides the interval at which to poll for updated view status.
+    /// Requires [`Self::deploy_mysql_adapter`] to be set on this deployment.
+    pub fn views_polling_interval(mut self, interval: Duration) -> Self {
+        self.views_polling_interval = interval;
         self
     }
 
@@ -635,6 +647,7 @@ impl DeploymentBuilder {
                 self.dry_run_migration_interval,
                 self.query_max_failure_seconds,
                 self.fallback_recovery_seconds,
+                self.views_polling_interval,
                 self.auto_restart,
             )
             .await?;
@@ -1091,6 +1104,7 @@ async fn start_mysql_adapter(
     dry_run_migration_interval: Option<u64>,
     query_max_failure_seconds: Option<u64>,
     fallback_recovery_seconds: Option<u64>,
+    views_polling_interval: Duration,
     auto_restart: bool,
 ) -> Result<ProcessHandle> {
     let mut builder = AdapterBuilder::new(noria_mysql_path)
@@ -1099,7 +1113,8 @@ async fn start_mysql_adapter(
         .metrics_port(metrics_port)
         .authority_addr(authority_addr)
         .authority(authority)
-        .auto_restart(auto_restart);
+        .auto_restart(auto_restart)
+        .views_polling_interval(views_polling_interval);
 
     if let Some(interval) = async_migration_interval {
         builder = builder.async_migrations(interval);

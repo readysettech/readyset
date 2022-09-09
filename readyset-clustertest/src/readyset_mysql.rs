@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use ::readyset::metrics::{recorded, DumpedMetricValue};
 use ::readyset::{get_metric, ViewCreateRequest};
+use launchpad::eventually;
 use launchpad::hash::hash;
 use mysql_async::prelude::Queryable;
 use readyset_client::backend::QueryInfo;
@@ -20,6 +21,14 @@ fn readyset_mysql(name: &str) -> DeploymentBuilder {
     DeploymentBuilder::new(name)
         .deploy_mysql()
         .deploy_mysql_adapter()
+}
+
+async fn last_statement_destination(conn: &mut mysql_async::Conn) -> QueryDestination {
+    conn.query_first::<QueryInfo, _>("EXPLAIN LAST STATEMENT")
+        .await
+        .unwrap()
+        .unwrap()
+        .destination
 }
 
 #[clustertest]
@@ -1329,6 +1338,55 @@ async fn post_deployment_permissions_replication() {
         )
         .await
     );
+
+    deployment.teardown().await.unwrap();
+}
+
+#[clustertest]
+async fn views_synchronize_between_deployments() {
+    let mut deployment = readyset_mysql("views_synchronize_between_deployments")
+        .with_servers(1, ServerParams::default())
+        .with_mysql_adapters(2)
+        .views_polling_interval(Duration::from_secs(1))
+        .explicit_migrations(500)
+        .deploy_mysql()
+        .start()
+        .await
+        .unwrap();
+
+    let mut adapter_0 = deployment.adapter(0).await;
+    let mut adapter_1 = deployment.adapter(1).await;
+
+    adapter_0
+        .query_drop("CREATE TABLE t1 (x INT);")
+        .await
+        .unwrap();
+
+    // Get a query in the status cache for adapter 1
+    adapter_1.query_drop("SELECT * FROM t1;").await.unwrap();
+    assert_eq!(
+        last_statement_destination(&mut adapter_1).await,
+        QueryDestination::Upstream
+    );
+
+    // Then create that query via adapter 0
+    adapter_0
+        .query_drop("CREATE CACHE FROM SELECT * FROM t1;")
+        .await
+        .unwrap();
+
+    // Ensure it's been successfully created in adapter 0
+    adapter_0.query_drop("SELECT * FROM t1;").await.unwrap();
+    assert_eq!(
+        last_statement_destination(&mut adapter_0).await,
+        QueryDestination::Readyset
+    );
+
+    // Eventually it should show up in adapter 1 too
+    eventually! {
+        adapter_1.query_drop("SELECT * FROM t1;");
+        last_statement_destination(&mut adapter_1).await == QueryDestination::Readyset
+    }
 
     deployment.teardown().await.unwrap();
 }

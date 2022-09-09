@@ -274,6 +274,10 @@ impl AdapterBuilder {
         self.push_arg("--fallback-recovery-seconds", &secs.to_string())
     }
 
+    pub fn views_polling_interval(self, duration: Duration) -> Self {
+        self.push_arg("--views-polling-interval", &duration.as_secs().to_string())
+    }
+
     pub fn auto_restart(mut self, auto_restart: bool) -> Self {
         self.auto_restart = auto_restart;
         self
