@@ -3582,6 +3582,8 @@ mod tests {
                 DfValue::Double(3.1),
                 DfValue::Double(3.9),
                 DfValue::Numeric(Arc::new(Decimal::new(3, 0))),
+                DfValue::Numeric(Arc::new(Decimal::new(31, 1))),
+                DfValue::Numeric(Arc::new(Decimal::new(39, 1))),
             ];
             for dv in from_vals {
                 assert_eq!(
@@ -3608,6 +3610,14 @@ mod tests {
                 DfValue::Double(-0.1),
                 DfValue::Double(-1.0),
                 DfValue::Double(f64::MAX),
+                DfValue::Numeric(Arc::new(Decimal::new(4, 0))),
+                DfValue::Numeric(Arc::new(Decimal::new(41, 1))),
+                DfValue::Numeric(Arc::new(Decimal::new(0, 0))),
+                DfValue::Numeric(Arc::new(Decimal::new(1, 1))),
+                DfValue::Numeric(Arc::new(Decimal::new(9, 1))),
+                DfValue::Numeric(Arc::new(Decimal::new(-1, 1))),
+                DfValue::Numeric(Arc::new(Decimal::new(-1, 0))),
+                DfValue::Numeric(Arc::new(Decimal::MAX)),
             ];
             for dv in from_vals {
                 let result = dv.coerce_to(&enum_ty, &DfType::Unknown).unwrap();

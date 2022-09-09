@@ -209,7 +209,9 @@ pub(crate) fn coerce_decimal(
         SqlType::UnsignedInt(_) => val.to_u32().ok_or_else(err).map(DfValue::from),
         SqlType::UnsignedBigInt(_) => val.to_u64().ok_or_else(err).map(DfValue::from),
 
-        SqlType::Enum(_) => val.to_u32().ok_or_else(err).map(DfValue::from),
+        SqlType::Enum(elements) => {
+            Ok(r#enum::apply_enum_limits(usize::try_from(*val).unwrap_or(0), elements).into())
+        }
 
         SqlType::TinyText
         | SqlType::MediumText
