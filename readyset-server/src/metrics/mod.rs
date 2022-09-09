@@ -1,5 +1,6 @@
 //! Support for recording and exporting in-memory metrics using the [`metrics`] crate
 
+use once_cell::sync::OnceCell;
 use thiserror::Error;
 
 pub use crate::metrics::composite_recorder::{CompositeMetricsRecorder, RecorderType};
@@ -13,7 +14,7 @@ mod recorders;
 
 /// The type of the static, globally accessible metrics recorder.
 type GlobalRecorder = CompositeMetricsRecorder;
-static mut METRICS_RECORDER: Option<GlobalRecorder> = None;
+static METRICS_RECORDER: OnceCell<&'static GlobalRecorder> = OnceCell::new();
 
 /// Error value returned from [`install_global_recorder`] if a metrics recorder is already set.
 ///
@@ -23,32 +24,20 @@ static mut METRICS_RECORDER: Option<GlobalRecorder> = None;
 #[error("Metrics recorder installed twice!")]
 pub struct RecorderInstalledTwice;
 
-impl From<metrics::SetRecorderError> for RecorderInstalledTwice {
-    fn from(_: metrics::SetRecorderError) -> Self {
-        RecorderInstalledTwice
-    }
-}
-
 /// Installs a new global recorder
-///
-/// # Safety
-///
-/// This function is unsafe to call when there are multiple threads; it MUST be called before
-/// other threads are created.
-pub unsafe fn install_global_recorder(rec: GlobalRecorder) -> Result<(), RecorderInstalledTwice> {
-    #[allow(clippy::panic)] // documented panic
-    if std::mem::replace(&mut METRICS_RECORDER, Some(rec)).is_some() {
-        return Err(RecorderInstalledTwice);
-    }
-    metrics::set_recorder_racy(METRICS_RECORDER.as_ref().unwrap()).map_err(|e| e.into())
+pub fn install_global_recorder(rec: GlobalRecorder) -> Result<(), RecorderInstalledTwice> {
+    let rec = Box::leak(Box::new(rec));
+    METRICS_RECORDER
+        .set(rec)
+        .map_err(|_| RecorderInstalledTwice)?;
+    metrics::set_recorder(rec).expect("Would fail on OnceCell");
+    Ok(())
 }
 
 /// Gets an [`Option`] with the static reference to the installed metrics recorder.
 /// This method returns [`None`] if `install()` has not been called yet.
 pub fn get_global_recorder() -> Option<&'static GlobalRecorder> {
-    // SAFETY: no data races possible, since METRICS_RECORDER is only mutated once (and the
-    // `install()` function is marked `unsafe`).
-    unsafe { METRICS_RECORDER.as_ref() }
+    METRICS_RECORDER.get().cloned()
 }
 
 /// A metrics recorder that can be cleared.

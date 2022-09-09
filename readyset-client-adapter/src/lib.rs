@@ -33,6 +33,7 @@ use readyset_client::views_synchronizer::ViewsSynchronizer;
 use readyset_client::{Backend, BackendBuilder, QueryHandler, UpstreamDatabase};
 use readyset_client_metrics::QueryExecutionEvent;
 use readyset_dataflow::Readers;
+use readyset_server::metrics::{CompositeMetricsRecorder, MetricsRecorder};
 use readyset_server::worker::readers::{retry_misses, Ack, BlockingRead, ReadRequestHandler};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetryReporter};
 use stream_cancel::Valve;
@@ -229,6 +230,9 @@ pub struct Options {
     /// Enable recording and exposing Prometheus metrics
     #[clap(long, env = "PROMETHEUS_METRICS")]
     prometheus_metrics: bool,
+
+    #[clap(long, hide = true)]
+    noria_metrics: bool,
 
     /// Enable logging queries and execution metrics in prometheus. This creates a
     /// histogram per unique query.
@@ -450,6 +454,7 @@ where
         ));
         rs_connect.in_scope(|| info!("Now capturing ctrl-c and SIGTERM events"));
 
+        let mut recorders = Vec::new();
         let prometheus_handle = if options.prometheus_metrics {
             let _guard = rt.enter();
             let database_label: readyset_client_metrics::DatabaseType = self.database_type.into();
@@ -460,11 +465,24 @@ where
                 .build_recorder();
 
             let handle = recorder.handle();
-            metrics::set_boxed_recorder(Box::new(recorder))?;
+            recorders.push(MetricsRecorder::Prometheus(recorder));
             Some(handle)
         } else {
             None
         };
+
+        if options.noria_metrics {
+            recorders.push(MetricsRecorder::Noria(
+                readyset_server::NoriaMetricsRecorder::new(),
+            ));
+        }
+
+        if !recorders.is_empty() {
+            readyset_server::metrics::install_global_recorder(
+                CompositeMetricsRecorder::with_recorders(recorders),
+            )?;
+        }
+
         rs_connect.in_scope(|| info!("PrometheusHandle created"));
 
         metrics::counter!(

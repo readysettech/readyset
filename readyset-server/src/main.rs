@@ -157,21 +157,18 @@ fn main() -> anyhow::Result<()> {
         Either::Right(future::ok(opts.external_address.unwrap_or(opts.address)))
     };
 
-    // SAFETY: we haven't initialized threads that might call the recorder yet
-    unsafe {
-        let mut recs = Vec::new();
-        if opts.noria_metrics {
-            recs.push(MetricsRecorder::Noria(NoriaMetricsRecorder::new()));
-        }
-        if opts.prometheus_metrics {
-            recs.push(MetricsRecorder::Prometheus(
-                PrometheusBuilder::new()
-                    .add_global_label("deployment", &opts.deployment)
-                    .build_recorder(),
-            ));
-        }
-        install_global_recorder(CompositeMetricsRecorder::with_recorders(recs)).unwrap();
+    let mut recs = Vec::new();
+    if opts.noria_metrics {
+        recs.push(MetricsRecorder::Noria(NoriaMetricsRecorder::new()));
     }
+    if opts.prometheus_metrics {
+        recs.push(MetricsRecorder::Prometheus(
+            PrometheusBuilder::new()
+                .add_global_label("deployment", &opts.deployment)
+                .build_recorder(),
+        ));
+    }
+    install_global_recorder(CompositeMetricsRecorder::with_recorders(recs)).unwrap();
 
     metrics::counter!(
         recorded::NORIA_STARTUP_TIMESTAMP,
