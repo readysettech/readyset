@@ -5,7 +5,7 @@ use readyset_errors::{ReadySetError, ReadySetResult};
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 
-use crate::{DfType, DfValue};
+use crate::{r#enum, DfType, DfValue};
 
 fn coerce_f64_to_int<I>(val: f64) -> Option<I>
 where
@@ -96,9 +96,8 @@ pub(crate) fn coerce_f64(val: f64, to_ty: &SqlType, from_ty: &DfType) -> ReadySe
             .ok_or_else(bounds_err)
             .map(DfValue::from),
 
-        SqlType::Enum(_) => coerce_f64_to_uint::<u32>(val)
-            .ok_or_else(bounds_err)
-            .map(DfValue::from),
+        // The numeric cast from f64 to usize will round down, which is what we want for enums:
+        SqlType::Enum(elements) => Ok(r#enum::apply_enum_limits(val as usize, elements).into()),
 
         SqlType::TinyText
         | SqlType::MediumText

@@ -3576,7 +3576,11 @@ mod tests {
                 DfValue::Int(3),
                 DfValue::UnsignedInt(3),
                 DfValue::Float(3.0),
+                DfValue::Float(3.1),
+                DfValue::Float(3.9),
                 DfValue::Double(3.0),
+                DfValue::Double(3.1),
+                DfValue::Double(3.9),
                 DfValue::Numeric(Arc::new(Decimal::new(3, 0))),
             ];
             for dv in from_vals {
@@ -3584,6 +3588,30 @@ mod tests {
                     DfValue::Int(3),
                     dv.coerce_to(&enum_ty, &DfType::Unknown).unwrap()
                 );
+            }
+
+            // Test out-of-range coercion for non-integer types
+            let from_vals = [
+                DfValue::Float(4.0),
+                DfValue::Float(4.1),
+                DfValue::Float(0.0),
+                DfValue::Float(0.1),
+                DfValue::Float(0.9),
+                DfValue::Float(-0.1),
+                DfValue::Float(-1.0),
+                DfValue::Float(f32::MAX),
+                DfValue::Double(4.0),
+                DfValue::Double(4.1),
+                DfValue::Double(0.0),
+                DfValue::Double(0.1),
+                DfValue::Double(0.9),
+                DfValue::Double(-0.1),
+                DfValue::Double(-1.0),
+                DfValue::Double(f64::MAX),
+            ];
+            for dv in from_vals {
+                let result = dv.coerce_to(&enum_ty, &DfType::Unknown).unwrap();
+                assert_eq!(0, <u32>::try_from(result).unwrap());
             }
         }
     }
