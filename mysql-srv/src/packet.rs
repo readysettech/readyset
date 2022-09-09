@@ -405,7 +405,7 @@ fn packet(i: &[u8]) -> nom::IResult<&[u8], (u8, Packet<'_>)> {
 
 #[cfg(test)]
 mod tests {
-    use test_utils::skip_slow_tests;
+    use test_utils::slow;
 
     use super::*;
 
@@ -467,10 +467,8 @@ mod tests {
     }
 
     #[tokio::test]
+    #[slow]
     async fn test_large_packet_write() {
-        if skip_slow_tests() {
-            return;
-        }
         let (u_out, u_in) = tokio::net::UnixStream::pair().unwrap();
 
         let packets = vec![

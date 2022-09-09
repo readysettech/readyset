@@ -8,7 +8,7 @@ use readyset_client::backend::QueryInfo;
 use readyset_client::query_status_cache::{hash_to_query_id, PrepareRequest};
 use readyset_client_metrics::QueryDestination;
 use serial_test::serial;
-use test_utils::skip_slow_tests;
+use test_utils::slow;
 use tokio::time::{sleep, timeout};
 
 use crate::utils::*;
@@ -905,11 +905,8 @@ async fn update_propagation_through_failed_domain() {
 /// Fail the controller 10 times and check if we can execute the query. This
 /// test will pass if we correctly execute queries against fallback.
 #[clustertest]
+#[slow]
 async fn end_to_end_with_restarts() {
-    if skip_slow_tests() {
-        return;
-    }
-
     let mut deployment = readyset_mysql("ct_end_to_end_with_restarts")
         .quorum(2)
         .add_server(ServerParams::default().with_volume("v1"))
@@ -981,11 +978,8 @@ async fn end_to_end_with_restarts() {
 /// Fail the controller 10 times and check if we can query a view following
 /// a restart.
 #[clustertest]
+#[slow]
 async fn view_survives_restart() {
-    if skip_slow_tests() {
-        return;
-    }
-
     let mut deployment = readyset_mysql("ct_view_survives_restarts")
         .quorum(2)
         .with_servers(2, ServerParams::default())
@@ -1052,11 +1046,8 @@ async fn view_survives_restart() {
 // This test currently fails because we drop writes to failed workers.
 #[clustertest]
 #[ignore]
+#[slow]
 async fn writes_survive_restarts() {
-    if skip_slow_tests() {
-        return;
-    }
-
     let mut deployment = readyset_mysql("ct_writes_survive_restarts")
         .quorum(2)
         .add_server(ServerParams::default().with_volume("v1"))
@@ -1256,11 +1247,8 @@ async fn correct_deployment_permissions() {
 }
 
 #[clustertest]
+#[slow]
 async fn post_deployment_permissions_lock_table() {
-    if skip_slow_tests() {
-        return;
-    }
-
     let mut deployment = readyset_mysql("ct_post_deployment_permissions_lock_table")
         .with_servers(1, ServerParams::default())
         .with_user("client", "password")
@@ -1301,11 +1289,8 @@ async fn post_deployment_permissions_lock_table() {
 }
 
 #[clustertest]
+#[slow]
 async fn post_deployment_permissions_replication() {
-    if skip_slow_tests() {
-        return;
-    }
-
     let mut deployment = readyset_mysql("ct_post_deployment_permissions_replication")
         .with_servers(1, ServerParams::default())
         .with_user("client", "password")
