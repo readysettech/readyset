@@ -1,5 +1,5 @@
 use nom_sql::{Literal, SqlType};
-use readyset_errors::{ReadySetError, ReadySetResult};
+use readyset_errors::ReadySetResult;
 
 use crate::{integer, DfType, DfValue};
 
@@ -14,13 +14,7 @@ pub(crate) fn coerce_enum(
     from_ty: &DfType,
 ) -> ReadySetResult<DfValue> {
     if to_ty.is_any_text() {
-        let err = || ReadySetError::DfValueConversionError {
-            src_type: "Enum".to_string(),
-            target_type: to_ty.to_string(),
-            details: "out of bounds".to_string(),
-        };
-
-        let idx = usize::try_from(enum_value).map_err(|_| err())?;
+        let idx = usize::try_from(enum_value).unwrap_or(0);
 
         // TODO Enforce length limits for Char/VarChar if applicable
 
@@ -29,7 +23,7 @@ pub(crate) fn coerce_enum(
         } else if let Some(Literal::String(s)) = enum_elements.get(idx - 1) {
             Ok(DfValue::from(s.as_str()))
         } else {
-            Err(err())
+            Ok(DfValue::from("")) // must be out of bounds of enum_elements
         }
     } else {
         integer::coerce_integer(enum_value, "Enum", to_ty, from_ty)

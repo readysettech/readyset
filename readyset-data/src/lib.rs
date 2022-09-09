@@ -3550,6 +3550,17 @@ mod tests {
                     dv.coerce_to(&SqlType::Text, &from_ty).unwrap().to_string()
                 )
             }
+
+            // Test conversion of invalid enum indices to the empty string
+            for i in [-1, 0, 4] {
+                assert_eq!(
+                    "",
+                    DfValue::Int(i)
+                        .coerce_to(&SqlType::Text, &from_ty)
+                        .unwrap()
+                        .to_string()
+                );
+            }
         }
     }
 }
