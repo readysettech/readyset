@@ -78,7 +78,7 @@ pub enum TableKey {
         columns: Vec<Column>,
     },
     Key {
-        name: SqlIdentifier,
+        name: Option<SqlIdentifier>,
         columns: Vec<Column>,
         index_type: Option<IndexType>,
     },
@@ -159,7 +159,10 @@ impl fmt::Display for TableKey {
                 columns,
                 index_type,
             } => {
-                write!(f, "KEY `{}` ", name)?;
+                write!(f, "KEY ")?;
+                if let Some(name) = name {
+                    write!(f, "`{name}` ")?;
+                }
                 write!(
                     f,
                     "({})",

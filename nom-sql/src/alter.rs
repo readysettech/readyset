@@ -605,7 +605,7 @@ mod tests {
                 AlterTableStatement {
                     table: Relation::from("flags"),
                     definitions: vec![AlterTableDefinition::AddKey(TableKey::Key {
-                        name: "flags_created_at_index".into(),
+                        name: Some("flags_created_at_index".into()),
                         columns: vec![Column::from("created_at")],
                         index_type: None,
                     })],

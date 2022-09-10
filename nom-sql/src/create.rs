@@ -289,26 +289,27 @@ fn foreign_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
     move |i| {
         // constraint users_group foreign key (group_id) references `groups` (id),
         // CONSTRAINT identifier
-        let (i, _) = opt(move |i| {
-            let (i, _) = tag_no_case("constraint")(i)?;
-            whitespace1(i)
-        })(i)?;
-        let (i, name) = opt(dialect.identifier())(i)?;
+        let (i, name) = map(
+            opt(move |i| {
+                let (i, _) = tag_no_case("constraint")(i)?;
+                opt(preceded(whitespace1, dialect.identifier()))(i)
+            }),
+            |n| n.flatten(),
+        )(i)?;
 
         // FOREIGN KEY identifier
         let (i, _) = whitespace0(i)?;
         let (i, _) = tag_no_case("foreign")(i)?;
         let (i, _) = whitespace0(i)?;
         let (i, _) = tag_no_case("key")(i)?;
-        let (i, index_name) = opt(preceded(whitespace1, dialect.identifier()))(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, index_name) = opt(terminated(dialect.identifier(), whitespace1))(i)?;
 
         // (columns)
-        let (i, _) = whitespace0(i)?;
         let (i, _) = tag("(")(i)?;
-        let (i, columns) = separated_list0(
-            terminated(tag(","), whitespace0),
-            column_identifier_no_alias(dialect),
-        )(i)?;
+        let (i, _) = whitespace0(i)?;
+        let (i, columns) = separated_list0(ws_sep_comma, column_identifier_no_alias(dialect))(i)?;
+        let (i, _) = whitespace0(i)?;
         let (i, _) = tag(")")(i)?;
 
         // REFERENCES
@@ -320,10 +321,8 @@ fn foreign_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
         // (columns)
         let (i, _) = whitespace0(i)?;
         let (i, _) = tag("(")(i)?;
-        let (i, target_columns) = separated_list0(
-            terminated(tag(","), whitespace0),
-            column_identifier_no_alias(dialect),
-        )(i)?;
+        let (i, target_columns) =
+            separated_list0(ws_sep_comma, column_identifier_no_alias(dialect))(i)?;
         let (i, _) = tag(")")(i)?;
 
         // ON DELETE
@@ -408,8 +407,7 @@ fn unique(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
 fn key_or_index(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
     move |i| {
         let (i, _) = alt((tag_no_case("key"), tag_no_case("index")))(i)?;
-        let (i, _) = whitespace0(i)?;
-        let (i, name) = dialect.identifier()(i)?;
+        let (i, name) = opt(preceded(whitespace1, dialect.identifier()))(i)?;
         let (i, _) = whitespace0(i)?;
         let (i, columns) = delimited(
             tag("("),
@@ -1067,7 +1065,7 @@ mod tests {
         assert_eq!(
             res.keys,
             Some(vec![TableKey::Key {
-                name: "age_key".into(),
+                name: Some("age_key".into()),
                 columns: vec!["age".into()],
                 index_type: Some(IndexType::BTree),
             }])
@@ -1437,7 +1435,7 @@ mod tests {
                             columns: vec![Column::from("comment")]
                         },
                         TableKey::Key {
-                            name: "confidence_idx".into(),
+                            name: Some("confidence_idx".into()),
                             columns: vec![Column::from("confidence")],
                             index_type: None
                         },
@@ -1447,17 +1445,17 @@ mod tests {
                             index_type: None
                         },
                         TableKey::Key {
-                            name: "story_id_short_id".into(),
+                            name: Some("story_id_short_id".into()),
                             columns: vec![Column::from("story_id"), Column::from("short_id")],
                             index_type: None
                         },
                         TableKey::Key {
-                            name: "thread_id".into(),
+                            name: Some("thread_id".into()),
                             columns: vec![Column::from("thread_id")],
                             index_type: None,
                         },
                         TableKey::Key {
-                            name: "index_comments_on_user_id".into(),
+                            name: Some("index_comments_on_user_id".into()),
                             columns: vec![Column::from("user_id")],
                             index_type: None
                         },
@@ -1563,6 +1561,24 @@ mod tests {
           KEY `el_from_index_60` (`el_from`,`el_index_60`,`el_id`)
         )";
             create_table(Dialect::MySQL)(qstring.as_bytes()).unwrap();
+        }
+
+        #[test]
+        fn employees_dept_manager() {
+            test_parse!(
+                create_table(Dialect::MySQL),
+                b"CREATE TABLE dept_manager (
+                    dept_no      CHAR(4)         NOT NULL,
+                    emp_no       INT             NOT NULL,
+                    from_date    DATE            NOT NULL,
+                    to_date      DATE            NOT NULL,
+                    KEY         (emp_no),
+                    KEY         (dept_no),
+                    FOREIGN KEY (emp_no)  REFERENCES employees (emp_no)    ,
+                    FOREIGN KEY (dept_no) REFERENCES departments (dept_no) ,
+                    PRIMARY KEY (emp_no,dept_no)
+                )"
+            );
         }
     }
 
@@ -1797,7 +1813,7 @@ mod tests {
                             columns: vec![Column::from("comment")]
                         },
                         TableKey::Key {
-                            name: "confidence_idx".into(),
+                            name: Some("confidence_idx".into()),
                             columns: vec![Column::from("confidence")],
                             index_type: None
                         },
@@ -1807,17 +1823,17 @@ mod tests {
                             index_type: None,
                         },
                         TableKey::Key {
-                            name: "story_id_short_id".into(),
+                            name: Some("story_id_short_id".into()),
                             columns: vec![Column::from("story_id"), Column::from("short_id")],
                             index_type: None
                         },
                         TableKey::Key {
-                            name: "thread_id".into(),
+                            name: Some("thread_id".into()),
                             columns: vec![Column::from("thread_id")],
                             index_type: None
                         },
                         TableKey::Key {
-                            name: "index_comments_on_user_id".into(),
+                            name: Some("index_comments_on_user_id".into()),
                             columns: vec![Column::from("user_id")],
                             index_type: None
                         },
@@ -2018,12 +2034,12 @@ mod tests {
                         index_type: None,
                     },
                     TableKey::Key {
-                        name: "access_tokens_user_id_foreign".into(),
+                        name: Some("access_tokens_user_id_foreign".into()),
                         columns: vec!["user_id".into()],
                         index_type: None,
                     },
                     TableKey::Key {
-                        name: "access_tokens_type_index".into(),
+                        name: Some("access_tokens_type_index".into()),
                         columns: vec!["type".into()],
                         index_type: None,
                     },
