@@ -110,3 +110,4 @@ LEFT JOIN `symfony_demo_tag` AS `s2_`
 ON (`s2_`.`id` = `s3_`.`tag_id`)
 WHERE (`s0_`.`published_at` <= '2022-01-27 04:11:19')
 ----
+0
