@@ -126,10 +126,11 @@ impl SqlIncorporator {
     where
         S: Rewrite,
     {
-        stmt.rewrite(RewriteContext {
+        stmt.rewrite(&mut RewriteContext {
             view_schemas: &self.view_schemas,
             base_schemas: &self.base_schemas,
             search_path,
+            invalidating_tables: None, // TODO
         })
     }
 

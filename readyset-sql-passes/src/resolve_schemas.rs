@@ -21,6 +21,9 @@ struct ResolveSchemaVisitor<'schema> {
     /// Each element of this `Vec` is a level of subquery nesting, which can be `pop()`ed after
     /// walking through a query.
     alias_stack: Vec<HashSet<SqlIdentifier>>,
+
+    /// List of tables which, if created, should invalidate this query.
+    invalidating_tables: Option<&'schema mut Vec<Relation>>,
 }
 
 impl<'schema> ResolveSchemaVisitor<'schema> {
@@ -97,10 +100,20 @@ impl<'ast, 'schema> Visitor<'ast> for ResolveSchemaVisitor<'schema> {
         }
 
         if let Some(schema) = self.search_path.iter().find(|schema| {
-            self.tables
+            let found = self
+                .tables
                 .get(schema)
                 .into_iter()
-                .any(|ts| ts.contains(&table.name))
+                .any(|ts| ts.contains(&table.name));
+            if !found {
+                if let Some(invalidating) = self.invalidating_tables.as_deref_mut() {
+                    invalidating.push(Relation {
+                        schema: Some((**schema).clone()),
+                        name: table.name.clone(),
+                    });
+                }
+            }
+            found
         }) {
             table.schema = Some(schema.clone());
         }
@@ -112,6 +125,10 @@ impl<'ast, 'schema> Visitor<'ast> for ResolveSchemaVisitor<'schema> {
 pub trait ResolveSchemas {
     /// Attempt to resolve schemas for all non-schema-qualified table references in `self` by
     /// looking up those tables in `tables`, using `search_path` for precedence.
+    ///
+    /// During resolution, if any schema is "skipped over" when resolving a table, that table will
+    /// be added to `invalidating_tables` if provided, to mark that if that table is later created
+    /// this query should be invalidated
     ///
     /// A couple of details worth noting:
     ///
@@ -126,6 +143,7 @@ pub trait ResolveSchemas {
         self,
         tables: HashMap<&'schema SqlIdentifier, HashSet<&'schema SqlIdentifier>>,
         search_path: &'schema [SqlIdentifier],
+        invalidating_tables: Option<&'schema mut Vec<Relation>>,
     ) -> Self;
 }
 
@@ -134,11 +152,13 @@ impl ResolveSchemas for SelectStatement {
         mut self,
         tables: HashMap<&'schema SqlIdentifier, HashSet<&'schema SqlIdentifier>>,
         search_path: &'schema [SqlIdentifier],
+        invalidating_tables: Option<&'schema mut Vec<Relation>>,
     ) -> Self {
         let Ok(()) = ResolveSchemaVisitor {
             tables,
             search_path,
             alias_stack: Default::default(),
+            invalidating_tables,
         }
         .visit_select_statement(&mut self);
 
@@ -151,11 +171,13 @@ impl ResolveSchemas for CreateTableStatement {
         mut self,
         tables: HashMap<&'schema SqlIdentifier, HashSet<&'schema SqlIdentifier>>,
         search_path: &'schema [SqlIdentifier],
+        invalidating_tables: Option<&'schema mut Vec<Relation>>,
     ) -> Self {
         let Ok(()) = ResolveSchemaVisitor {
             tables,
             search_path,
             alias_stack: Default::default(),
+            invalidating_tables,
         }
         .visit_create_table_statement(&mut self);
 
@@ -189,6 +211,7 @@ mod tests {
                 (&"s3".into(), HashSet::from([&"t4".into()])),
             ]),
             &["s1".into(), "s2".into()],
+            None,
         );
         assert_eq!(
             result, expected,
@@ -270,6 +293,25 @@ mod tests {
         create_table_rewrites_to(
             "create table new_table (id int primary key, t2_id int, foreign key (t2_id) references t2 (id))",
             "create table s1.new_table (id int primary key, t2_id int, foreign key (t2_id) references s1.t2 (id))",
+        );
+    }
+
+    #[test]
+    fn writes_to_invalidating_tables() {
+        let input = parse_select_statement("select * from t");
+        let mut invalidating_tables = vec![];
+        let _result = input.resolve_schemas(
+            HashMap::from([(&"s2".into(), HashSet::from([&"t".into()]))]),
+            &["s1".into(), "s2".into()],
+            Some(&mut invalidating_tables),
+        );
+
+        assert_eq!(
+            invalidating_tables,
+            vec![Relation {
+                schema: Some("s1".into()),
+                name: "t".into(),
+            }]
         );
     }
 }

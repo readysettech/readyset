@@ -44,7 +44,7 @@ pub use crate::util::{
 };
 
 /// Context provided to all query rewriting passes.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub struct RewriteContext<'a> {
     /// Map from names of views and tables in the database, to (ordered) lists of the column names
     /// in those views
@@ -56,6 +56,14 @@ pub struct RewriteContext<'a> {
 
     /// Ordered list of schema names to search in when resolving schema names of tables
     pub search_path: &'a [SqlIdentifier],
+
+    /// Optional list of tables which, if created, should invalidate this query.
+    ///
+    /// This is (optionally) inserted into during rewriting of certain queries when the
+    /// [resolve_schemas pass][] attempts to resolve a table within a schema but is unable to.
+    ///
+    /// [resolve_schemas pass]: crate::resolve_schemas
+    pub invalidating_tables: Option<&'a mut Vec<Relation>>,
 }
 
 impl<'a> RewriteContext<'a> {
@@ -80,26 +88,34 @@ impl<'a> RewriteContext<'a> {
 /// [context]: RewriteContext
 pub trait Rewrite: Sized {
     /// Rewrite this SQL statement to normalize, validate, and desugar it
-    fn rewrite(self, _context: RewriteContext) -> ReadySetResult<Self> {
+    fn rewrite(self, _context: &mut RewriteContext) -> ReadySetResult<Self> {
         Ok(self)
     }
 }
 
 impl Rewrite for CreateTableStatement {
-    fn rewrite(self, context: RewriteContext) -> ReadySetResult<Self> {
+    fn rewrite(self, context: &mut RewriteContext) -> ReadySetResult<Self> {
         Ok(self
-            .resolve_schemas(context.tables(), context.search_path)
+            .resolve_schemas(
+                context.tables(),
+                context.search_path,
+                context.invalidating_tables.as_deref_mut(),
+            )
             .normalize_create_table_columns()
             .coalesce_key_definitions())
     }
 }
 
 impl Rewrite for SelectStatement {
-    fn rewrite(self, context: RewriteContext) -> ReadySetResult<Self> {
+    fn rewrite(self, context: &mut RewriteContext) -> ReadySetResult<Self> {
         self.rewrite_between()
             .scalar_optimize_expressions()
             .strip_post_filters()
-            .resolve_schemas(context.tables(), context.search_path)
+            .resolve_schemas(
+                context.tables(),
+                context.search_path,
+                context.invalidating_tables.as_deref_mut(),
+            )
             .expand_stars(context.view_schemas)?
             .expand_implied_tables(context.view_schemas)?
             .normalize_topk_with_aggregate()?
@@ -111,7 +127,7 @@ impl Rewrite for SelectStatement {
 }
 
 impl Rewrite for CreateViewStatement {
-    fn rewrite(mut self, context: RewriteContext) -> ReadySetResult<Self> {
+    fn rewrite(mut self, context: &mut RewriteContext) -> ReadySetResult<Self> {
         if self.name.schema.is_none() {
             if let Some(first_schema) = context.search_path.first() {
                 self.name.schema = Some(first_schema.clone())
