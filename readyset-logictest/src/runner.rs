@@ -14,7 +14,7 @@ use console::style;
 use database_utils::{DatabaseConnection, DatabaseType, DatabaseURL};
 use itertools::Itertools;
 use mysql_srv::MysqlIntermediary;
-use nom_sql::Relation;
+use nom_sql::{Dialect, Relation};
 use readyset::consensus::{Authority, LocalAuthorityStore};
 use readyset::{ControllerHandle, ViewCreateRequest};
 use readyset_client::backend::noria_connector::ReadBehavior;
@@ -527,7 +527,7 @@ impl TestScript {
             let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
 
             macro_rules! make_backend {
-                ($upstream:ty, $handler:ty) => {{
+                ($upstream:ty, $handler:ty, $dialect:expr $(,)?) => {{
                     // cannot use .await inside map
                     #[allow(clippy::manual_map)]
                     let upstream = match replication_url.clone() {
@@ -545,13 +545,18 @@ impl TestScript {
                     BackendBuilder::new()
                         .require_authentication(false)
                         .validate_queries(true, true)
+                        .dialect($dialect)
                         .build::<_, $handler>(noria, upstream, query_status_cache)
                 }};
             }
 
             match database_type {
                 DatabaseType::MySQL => MysqlIntermediary::run_on_tcp(
-                    readyset_mysql::Backend::new(make_backend!(MySqlUpstream, MySqlQueryHandler)),
+                    readyset_mysql::Backend::new(make_backend!(
+                        MySqlUpstream,
+                        MySqlQueryHandler,
+                        Dialect::MySQL,
+                    )),
                     s,
                 )
                 .await
@@ -560,7 +565,8 @@ impl TestScript {
                     psql_srv::run_backend(
                         readyset_psql::Backend(make_backend!(
                             PostgreSqlUpstream,
-                            PostgreSqlQueryHandler
+                            PostgreSqlQueryHandler,
+                            Dialect::PostgreSQL,
                         )),
                         s,
                     )
