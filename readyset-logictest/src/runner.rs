@@ -244,8 +244,11 @@ impl TestScript {
     ) -> anyhow::Result<()> {
         let mut prev_was_statement = false;
 
+        let is_readyset = noria.is_some();
         let conditional_skip = |conditionals: &[Conditional]| {
             return conditionals.iter().any(|s| match s {
+                Conditional::SkipIf(c) if c == "readyset" => is_readyset,
+                Conditional::OnlyIf(c) if c == "readyset" => !is_readyset,
                 Conditional::SkipIf(c) if c == &opts.database_type.to_string() => true,
                 Conditional::OnlyIf(c) if c != &opts.database_type.to_string() => true,
                 _ => false,
