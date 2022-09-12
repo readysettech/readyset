@@ -413,14 +413,14 @@ impl DfValue {
         // been able to find any way to define a closure that takes generic parameters, which is
         // necessary if we want to support both u64 and i64 for both UnsignedInt and Int.
         macro_rules! handle_enum_or_coerce_int {
-            ($v:expr, $to_ty:expr, $from_ty:expr, $int_type:expr) => {
+            ($v:expr, $to_ty:expr, $from_ty:expr) => {
                 if let DfType::Sql(SqlType::Enum(enum_elements)) = $from_ty {
                     // This will either be u64 or i64, and if it's i64 then negative values will be
                     // converted to 0 anyway, so unwrap_or_default gets us what we want here:
                     let enum_val = u64::try_from(*$v).unwrap_or_default();
                     r#enum::coerce_enum(enum_val, enum_elements, $to_ty, $from_ty)
                 } else {
-                    integer::coerce_integer(*$v, $int_type, $to_ty, $from_ty)
+                    integer::coerce_integer(*$v, $to_ty, $from_ty)
                 }
             };
         }
@@ -436,8 +436,8 @@ impl DfValue {
             DfValue::Text(t) => t.coerce_to(to_ty, from_ty),
             DfValue::TinyText(tt) => tt.coerce_to(to_ty, from_ty),
             DfValue::TimestampTz(tz) => tz.coerce_to(to_ty),
-            DfValue::Int(v) => handle_enum_or_coerce_int!(v, to_ty, from_ty, "Int"),
-            DfValue::UnsignedInt(v) => handle_enum_or_coerce_int!(v, to_ty, from_ty, "UnsignedInt"),
+            DfValue::Int(v) => handle_enum_or_coerce_int!(v, to_ty, from_ty),
+            DfValue::UnsignedInt(v) => handle_enum_or_coerce_int!(v, to_ty, from_ty),
 
             // We can coerce f32 as f64, because casting to the latter doesn't increase precision
             // and therfore is equivalent

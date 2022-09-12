@@ -157,7 +157,6 @@ pub(crate) fn coerce_f64(val: f64, to_ty: &SqlType, from_ty: &DfType) -> ReadySe
         SqlType::Date | SqlType::DateTime(_) | SqlType::Timestamp | SqlType::TimestampTz => {
             crate::integer::coerce_integer(
                 coerce_f64_to_int::<i64>(val).ok_or_else(bounds_err)?,
-                "Double",
                 to_ty,
                 from_ty,
             )
@@ -260,7 +259,7 @@ pub(crate) fn coerce_decimal(
         | SqlType::Time
         | SqlType::Timestamp
         | SqlType::TimestampTz => {
-            crate::integer::coerce_integer(val.to_i64().ok_or_else(err)?, "Decimal", to_ty, from_ty)
+            crate::integer::coerce_integer(val.to_i64().ok_or_else(err)?, to_ty, from_ty)
         }
 
         SqlType::MacAddr

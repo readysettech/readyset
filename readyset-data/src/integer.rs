@@ -45,11 +45,10 @@ impl IntAsFloat for u32 {
 /// Note that this only handles converting *integer types*, not other types with values represented
 /// as integers (for example, enums). The conversion logic for other such types is implemented
 /// elsewhere.
-pub(crate) fn coerce_integer<I, S>(
+pub(crate) fn coerce_integer<I>(
     val: I,
-    src_type_name: S,
     to_ty: &SqlType,
-    _from_ty: &DfType,
+    from_ty: &DfType,
 ) -> ReadySetResult<DfValue>
 where
     i8: TryFrom<I>,
@@ -63,10 +62,9 @@ where
     Decimal: From<I>,
     usize: TryFrom<I>,
     I: std::ops::BitXor<I, Output = I> + std::cmp::Eq + Copy + fmt::Display + IntAsFloat,
-    S: ToString,
 {
     let err = || ReadySetError::DfValueConversionError {
-        src_type: src_type_name.to_string(),
+        src_type: from_ty.to_string(),
         target_type: to_ty.to_string(),
         details: "out of bounds".to_string(),
     };
@@ -206,7 +204,7 @@ where
         | SqlType::Bit(_)
         | SqlType::VarBit(_)
         | SqlType::Array(_) => Err(ReadySetError::DfValueConversionError {
-            src_type: src_type_name.to_string(),
+            src_type: from_ty.to_string(),
             target_type: to_ty.to_string(),
             details: "Not allowed".to_string(),
         }),

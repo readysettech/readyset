@@ -26,7 +26,7 @@ pub(crate) fn coerce_enum(
             Ok(DfValue::from("")) // must be out of bounds of enum_elements
         }
     } else {
-        integer::coerce_integer(enum_value, "Enum", to_ty, from_ty)
+        integer::coerce_integer(enum_value, to_ty, from_ty)
     }
 }
 
