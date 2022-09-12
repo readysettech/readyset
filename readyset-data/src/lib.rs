@@ -403,7 +403,7 @@ impl DfValue {
         use crate::text::TextCoerce;
 
         let mk_err = || ReadySetError::DfValueConversionError {
-            src_type: format!("{:?}", DfValueKind::from(self)),
+            src_type: from_ty.to_string(),
             target_type: to_ty.to_string(),
             details: "unsupported".into(),
         };
