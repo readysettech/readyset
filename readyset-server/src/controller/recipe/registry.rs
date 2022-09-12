@@ -1,7 +1,6 @@
 use std::borrow::Borrow;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
-use std::convert::TryInto;
 
 use launchpad::hash::hash;
 use nom_sql::{
@@ -275,7 +274,7 @@ mod tests {
     use super::*;
 
     mod expression {
-        use nom_sql::Dialect;
+        use nom_sql::{parse_create_table, parse_select_statement, Dialect};
 
         use super::*;
 
@@ -283,8 +282,7 @@ mod tests {
         fn name() {
             let table_name: Relation = "test_table".into();
             let create_table = RecipeExpr::Table(
-                nom_sql::parse_create_table(Dialect::MySQL, "CREATE TABLE test_table (col1 INT);")
-                    .unwrap(),
+                parse_create_table(Dialect::MySQL, "CREATE TABLE test_table (col1 INT);").unwrap(),
             );
 
             assert_eq!(create_table.name(), &table_name);
@@ -292,11 +290,8 @@ mod tests {
             let query_name: Relation = "test_query".into();
             let cached_query = RecipeExpr::Cache {
                 name: query_name.clone(),
-                statement: nom_sql::parse_select_statement(
-                    Dialect::MySQL,
-                    "SELECT * FROM test_table;",
-                )
-                .unwrap(),
+                statement: parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table;")
+                    .unwrap(),
                 always: false,
             };
 
@@ -307,8 +302,7 @@ mod tests {
                 name: view_name.clone(),
                 fields: vec![],
                 definition: Box::new(SelectSpecification::Simple(
-                    nom_sql::parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table;")
-                        .unwrap(),
+                    parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table;").unwrap(),
                 )),
             });
 
@@ -319,19 +313,15 @@ mod tests {
         fn table_references() {
             let table_name = "test_table".into();
             let create_table = RecipeExpr::Table(
-                nom_sql::parse_create_table(Dialect::MySQL, "CREATE TABLE test_table (col1 INT);")
-                    .unwrap(),
+                parse_create_table(Dialect::MySQL, "CREATE TABLE test_table (col1 INT);").unwrap(),
             );
 
             assert!(create_table.table_references().is_empty());
 
             let cached_query = RecipeExpr::Cache {
                 name: "test_query".into(),
-                statement: nom_sql::parse_select_statement(
-                    Dialect::MySQL,
-                    "SELECT * FROM test_table;",
-                )
-                .unwrap(),
+                statement: parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table;")
+                    .unwrap(),
                 always: false,
             };
 
@@ -343,8 +333,7 @@ mod tests {
                 name: "test_view".into(),
                 fields: vec![],
                 definition: Box::new(SelectSpecification::Simple(
-                    nom_sql::parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table;")
-                        .unwrap(),
+                    parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table;").unwrap(),
                 )),
             });
 
@@ -355,160 +344,131 @@ mod tests {
     }
 
     mod registry {
-        use nom_sql::{parse_select_statement, Dialect};
+        use nom_sql::{parse_create_table, parse_select_statement, Dialect};
 
         use super::*;
 
-        fn create_registry() -> ExprRegistry {
-            // We *manually* build an `ExprRegistry` with a valid
-            // state, to avoid creating it using the methods that we intend
-            // to test.
-            let mut expressions = HashMap::new();
-            let mut dependencies = HashMap::new();
-            let mut aliases = HashMap::new();
+        fn setup() -> ExprRegistry {
+            let mut registry = ExprRegistry::new();
 
-            let create_table = RecipeExpr::Table(
-                nom_sql::parse_create_table(Dialect::MySQL, "CREATE TABLE test_table (col1 INT);")
+            registry
+                .add_query(RecipeExpr::Table(
+                    parse_create_table(Dialect::MySQL, "CREATE TABLE test_table (col1 INT);")
+                        .unwrap(),
+                ))
+                .unwrap();
+
+            let statement =
+                parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table;").unwrap();
+            registry
+                .add_query(RecipeExpr::Cache {
+                    name: "test_query".into(),
+                    statement: statement.clone(),
+                    always: false,
+                })
+                .unwrap();
+            registry
+                .add_query(RecipeExpr::Cache {
+                    name: "test_query_alias".into(),
+                    statement,
+                    always: false,
+                })
+                .unwrap();
+
+            let statement =
+                parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table").unwrap();
+            registry
+                .add_query(RecipeExpr::Cache {
+                    name: "test_query".into(),
+                    statement: statement.clone(),
+                    always: false,
+                })
+                .unwrap();
+            registry
+                .add_query(RecipeExpr::Cache {
+                    name: "test_query_alias".into(),
+                    statement,
+                    always: false,
+                })
+                .unwrap();
+
+            let view = SelectSpecification::Simple(
+                parse_select_statement(Dialect::MySQL, "SELECT DISTINCT * FROM test_table;")
                     .unwrap(),
             );
-            let table_qid = create_table.calculate_hash();
-            expressions.insert(table_qid, create_table);
-            aliases.insert("test_table".into(), table_qid);
+            registry
+                .add_query(RecipeExpr::View(CreateViewStatement {
+                    name: "test_view".into(),
+                    fields: vec![],
+                    definition: Box::new(view.clone()),
+                }))
+                .unwrap();
 
-            let query_name: Relation = "test_query".into();
-            let cached_query = RecipeExpr::Cache {
-                name: query_name.clone(),
-                statement: nom_sql::parse_select_statement(
-                    Dialect::MySQL,
-                    "SELECT * FROM test_table;",
-                )
-                .unwrap(),
-                always: false,
-            };
-            let query_qid = cached_query.calculate_hash();
-            expressions.insert(query_qid, cached_query);
-            aliases.insert(query_name, query_qid);
-            aliases.insert("test_query_alias".into(), query_qid);
+            registry
+                .add_query(RecipeExpr::View(CreateViewStatement {
+                    name: "test_view_alias".into(),
+                    fields: vec![],
+                    definition: Box::new(view),
+                }))
+                .unwrap();
 
-            let view_name: Relation = "test_view".into();
-            let view = RecipeExpr::View(CreateViewStatement {
-                name: view_name.clone(),
-                fields: vec![],
-                definition: Box::new(SelectSpecification::Simple(
-                    nom_sql::parse_select_statement(
-                        Dialect::MySQL,
-                        "SELECT DISTINCT * FROM test_table;",
-                    )
-                    .unwrap(),
-                )),
-            });
-            let view_qid = view.calculate_hash();
-            expressions.insert(view_qid, view);
-            aliases.insert(view_name, view_qid);
-            aliases.insert("test_view_alias".into(), view_qid);
-
-            let table_dependencies = dependencies
-                .entry(table_qid)
-                .or_insert_with(|| HashSet::new());
-            table_dependencies.insert(query_qid);
-            table_dependencies.insert(view_qid);
-            ExprRegistry {
-                expressions,
-                dependencies,
-                aliases,
-            }
-        }
-
-        #[test]
-        fn new() {
-            let registry = ExprRegistry::new();
-            assert!(registry.expressions.is_empty());
-            assert!(registry.dependencies.is_empty());
-            assert!(registry.aliases.is_empty());
+            registry
         }
 
         #[test]
         fn add_cached_query() {
-            let mut registry = create_registry();
-            let query_name: Relation = "test_query2".into();
-            let cached_query = RecipeExpr::Cache {
-                name: query_name.clone(),
-                statement: nom_sql::parse_select_statement(
+            let mut registry = setup();
+
+            let expr = RecipeExpr::Cache {
+                name: "test_query2".into(),
+                statement: parse_select_statement(
                     Dialect::MySQL,
                     "SELECT DISTINCT * FROM test_table;",
                 )
                 .unwrap(),
                 always: false,
             };
-            let num_expressions = registry.expressions.len();
-            let num_dependencies = registry.dependencies.len();
-            let num_aliases = registry.aliases.len();
-            assert!(registry.add_query(cached_query.clone()).unwrap());
-            assert_eq!(registry.expressions.len(), num_expressions + 1);
-            assert_eq!(registry.dependencies.len(), num_dependencies);
-            assert_eq!(registry.aliases.len(), num_aliases + 1);
-            let query_qid = registry.aliases.get(&query_name).unwrap();
-            // And the ID stored should be the same as the one in expressions.
-            assert_eq!(registry.expressions.get(query_qid).unwrap(), &cached_query);
 
-            let table_dependencies = registry.dependencies.values().next().unwrap();
-            assert_eq!(table_dependencies.len(), 3);
-            assert!(table_dependencies.contains(query_qid));
+            assert!(registry.add_query(expr.clone()).unwrap());
+
+            let result = registry.get(&"test_query2".into()).unwrap();
+            assert_eq!(*result, expr);
         }
 
         #[test]
         fn add_existing_cached_query() {
-            let mut registry = create_registry();
-            let query_name: Relation = "test_query2".into();
-            let select =
-                nom_sql::parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table;")
-                    .unwrap();
-            let cached_query = RecipeExpr::Cache {
-                name: query_name.clone(),
-                statement: select.clone(),
+            let mut registry = setup();
+
+            let expr = RecipeExpr::Cache {
+                name: "test_query2".into(),
+                statement: parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table;")
+                    .unwrap(),
                 always: false,
             };
-            let num_expressions = registry.expressions.len();
-            let num_dependencies = registry.dependencies.len();
-            let num_aliases = registry.aliases.len();
-            assert!(!registry.add_query(cached_query).unwrap());
-            assert_eq!(registry.expressions.len(), num_expressions);
-            assert_eq!(registry.dependencies.len(), num_dependencies);
-            assert_eq!(registry.aliases.len(), num_aliases + 1);
-            let query_qid = registry.aliases.get(&query_name).unwrap();
-            let stored_expression = registry.expressions.get(query_qid).unwrap();
-            if let RecipeExpr::Cache {
-                name, statement, ..
-            } = stored_expression
-            {
-                assert_ne!(name.clone(), query_name);
-                assert_eq!(statement.clone(), select);
-            } else {
-                panic!("Expected CachedQuery");
-            }
-            assert_eq!(
-                registry.aliases.get(stored_expression.name()).unwrap(),
-                query_qid
-            );
+            assert!(!registry.add_query(expr).unwrap());
 
-            let table_dependencies = registry.dependencies.values().next().unwrap();
-            assert_eq!(table_dependencies.len(), 2);
-            assert!(table_dependencies.contains(query_qid));
+            let result = registry.get(&"test_query2".into()).unwrap();
+            assert_eq!(
+                *result,
+                RecipeExpr::Cache {
+                    name: "test_query".into(),
+                    statement: parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table;")
+                        .unwrap(),
+                    always: false
+                }
+            );
         }
 
         #[test]
         fn add_view() {
-            let mut registry = create_registry();
+            let mut registry = setup();
             let view_name: Relation = "test_view2".into();
             let view = RecipeExpr::View(CreateViewStatement {
                 name: view_name.clone(),
                 fields: vec![],
                 definition: Box::new(SelectSpecification::Simple(
-                    nom_sql::parse_select_statement(
-                        Dialect::MySQL,
-                        "SELECT DISTINCT * FROM test_table;",
-                    )
-                    .unwrap(),
+                    parse_select_statement(Dialect::MySQL, "SELECT DISTINCT * FROM test_table;")
+                        .unwrap(),
                 )),
             });
             let num_expressions = registry.expressions.len();
@@ -523,7 +483,7 @@ mod tests {
             assert_eq!(registry.expressions.get(view_qid).unwrap(), &view);
 
             let table_dependencies = registry.dependencies.values().next().unwrap();
-            assert_eq!(table_dependencies.len(), 3);
+            assert_eq!(table_dependencies.len(), 4);
             assert!(table_dependencies.contains(view_qid));
         }
 
@@ -536,10 +496,9 @@ mod tests {
         #[test]
         #[ignore]
         fn add_existing_view() {
-            let mut registry = create_registry();
+            let mut registry = setup();
             let select =
-                nom_sql::parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table;")
-                    .unwrap();
+                parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table;").unwrap();
             let view_name: Relation = "test_view2".into();
             let view = RecipeExpr::View(CreateViewStatement {
                 name: view_name.clone(),
@@ -578,55 +537,35 @@ mod tests {
 
         #[test]
         fn add_table() {
-            let mut registry = create_registry();
-            let table_name = "test_table2".into();
-            let create_table = RecipeExpr::Table(
-                nom_sql::parse_create_table(Dialect::MySQL, "CREATE TABLE test_table2 (col1 INT);")
-                    .unwrap(),
-            );
-            let num_expressions = registry.expressions.len();
-            let num_dependencies = registry.dependencies.len();
-            let num_aliases = registry.aliases.len();
-            assert!(registry.add_query(create_table.clone()).unwrap());
-            assert_eq!(registry.expressions.len(), num_expressions + 1);
-            assert_eq!(registry.dependencies.len(), num_dependencies);
-            assert_eq!(registry.aliases.len(), num_aliases + 1);
-            let table_qid = registry.aliases.get(&table_name).unwrap();
-            // And the ID stored should be the same as the one in expressions.
-            assert_eq!(registry.expressions.get(table_qid).unwrap(), &create_table);
+            let mut registry = setup();
 
-            assert!(!registry.dependencies.contains_key(table_qid));
-            let table_dependencies = registry.dependencies.values().next().unwrap();
-            assert_eq!(table_dependencies.len(), 2);
-            assert!(!table_dependencies.contains(table_qid));
+            let expr = RecipeExpr::Table(
+                parse_create_table(Dialect::MySQL, "CREATE TABLE test_table2 (col1 INT);").unwrap(),
+            );
+            assert!(registry.add_query(expr.clone()).unwrap());
+
+            let result = registry.get(&"test_table2".into()).unwrap();
+            assert_eq!(*result, expr);
         }
 
         #[test]
         fn add_existing_table() {
-            let mut registry = create_registry();
-            let table_name = "test_table".into();
-            let create_table = RecipeExpr::Table(
-                nom_sql::parse_create_table(Dialect::MySQL, "CREATE TABLE test_table (col1 INT);")
-                    .unwrap(),
-            );
-            let num_expressions = registry.expressions.len();
-            let num_dependencies = registry.dependencies.len();
-            let num_aliases = registry.aliases.len();
-            assert!(!registry.add_query(create_table.clone()).unwrap());
-            assert_eq!(registry.expressions.len(), num_expressions);
-            assert_eq!(registry.dependencies.len(), num_dependencies);
-            assert_eq!(registry.aliases.len(), num_aliases);
-            let table_qid = registry.aliases.get(&table_name).unwrap();
-            assert_eq!(registry.expressions.get(table_qid).unwrap(), &create_table);
+            let mut registry = setup();
 
-            let table_dependencies = registry.dependencies.values().next().unwrap();
-            assert_eq!(table_dependencies.len(), 2);
-            assert!(!table_dependencies.contains(table_qid));
+            assert!(!registry
+                .add_query(
+                    RecipeExpr::Table(
+                        parse_create_table(Dialect::MySQL, "CREATE TABLE test_table (col1 INT);")
+                            .unwrap(),
+                    )
+                    .clone()
+                )
+                .unwrap());
         }
 
         #[test]
         fn get_by_name() {
-            let registry = create_registry();
+            let registry = setup();
             let query_name = "test_query".into();
             let query = registry.get(&query_name).unwrap();
             assert_eq!(query.name().clone(), query_name);
@@ -636,7 +575,7 @@ mod tests {
 
         #[test]
         fn get_by_alias() {
-            let registry = create_registry();
+            let registry = setup();
             let query_alias = "test_query_alias".into();
             let query = registry.get(&query_alias).unwrap();
             assert_ne!(query.name().clone(), query_alias);
@@ -647,55 +586,31 @@ mod tests {
 
         #[test]
         fn remove_query() {
-            let mut registry = create_registry();
-            let name: Relation = "test_query".into();
-            let alias: Relation = "test_query_alias".into();
-            let expression = registry.get(&name).unwrap().clone();
-            let expression_qid = *registry.aliases.get(&name).unwrap();
-            let num_expressions = registry.expressions.len();
-            let num_dependencies = registry.dependencies.len();
-            let num_aliases = registry.aliases.len();
-            let removed_expression = registry.remove_expression(&name).unwrap();
-            assert_eq!(removed_expression, expression);
-            assert_eq!(registry.expressions.len(), num_expressions - 1);
-            assert_eq!(registry.dependencies.len(), num_dependencies);
-            // expression had 2 aliases
-            assert_eq!(registry.aliases.len(), num_aliases - 2);
-            assert!(!registry.aliases.contains_key(&name));
-            assert!(!registry.aliases.contains_key(&alias));
+            let mut registry = setup();
 
-            let table_dependencies = registry.dependencies.values().next().unwrap();
-            assert_eq!(table_dependencies.len(), 1);
-            assert!(!table_dependencies.contains(&expression_qid));
+            let expr = registry.remove_expression(&"test_query".into()).unwrap();
+            assert_eq!(
+                expr,
+                RecipeExpr::Cache {
+                    name: "test_query".into(),
+                    statement: parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table")
+                        .unwrap(),
+                    always: false
+                }
+            );
+            assert!(registry.get(&"test_query_alias".into()).is_none())
         }
 
         #[test]
         fn remove_view() {
-            let mut registry = create_registry();
-            let name: Relation = "test_view".into();
-            let alias: Relation = "test_view_alias".into();
-            let expression = registry.get(&name).unwrap().clone();
-            let expression_qid = *registry.aliases.get(&name).unwrap();
-            let num_expressions = registry.expressions.len();
-            let num_dependencies = registry.dependencies.len();
-            let num_aliases = registry.aliases.len();
-            let removed_expression = registry.remove_expression(&name).unwrap();
-            assert_eq!(removed_expression, expression);
-            assert_eq!(registry.expressions.len(), num_expressions - 1);
-            assert_eq!(registry.dependencies.len(), num_dependencies);
-            // expression had 2 aliases
-            assert_eq!(registry.aliases.len(), num_aliases - 2);
-            assert!(!registry.aliases.contains_key(&name));
-            assert!(!registry.aliases.contains_key(&alias));
-
-            let table_dependencies = registry.dependencies.values().next().unwrap();
-            assert_eq!(table_dependencies.len(), 1);
-            assert!(!table_dependencies.contains(&expression_qid));
+            let mut registry = setup();
+            registry.remove_expression(&"test_view".into()).unwrap();
+            assert!(registry.get(&"test_view".into()).is_none());
         }
 
         #[test]
         fn remove_table() {
-            let mut registry = create_registry();
+            let mut registry = setup();
             let name: Relation = "test_table".into();
             let expression = registry.get(&name).unwrap().clone();
             let removed_expression = registry.remove_expression(&name).unwrap();
@@ -707,19 +622,19 @@ mod tests {
 
         #[test]
         fn len() {
-            let registry = create_registry();
+            let registry = setup();
             assert_eq!(registry.len(), registry.expressions.len());
         }
 
         #[test]
         fn aliases_count() {
-            let registry = create_registry();
+            let registry = setup();
             assert_eq!(registry.num_aliases(), registry.aliases.len());
         }
 
         #[test]
         fn contains() {
-            let mut registry = create_registry();
+            let mut registry = setup();
             let stmt = parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table").unwrap();
             registry
                 .add_query(RecipeExpr::Cache {
