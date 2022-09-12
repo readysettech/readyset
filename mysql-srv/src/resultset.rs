@@ -12,7 +12,7 @@ use crate::{writers, Column, ErrorKind, StatementData};
 
 pub(crate) const DEFAULT_ROW_CAPACITY: usize = 4096;
 pub(crate) const MAX_POOL_ROW_CAPACITY: usize = DEFAULT_ROW_CAPACITY * 4;
-pub(crate) const MAX_POOL_ROWS: usize = 2048;
+pub(crate) const MAX_POOL_ROWS: usize = 4096;
 
 /// Convenience type for responding to a client `USE <db>` command.
 pub struct InitWriter<'a, W: AsyncWrite + Unpin> {
@@ -398,7 +398,7 @@ where
     }
 
     /// Indicate that no more column data will be written for the current row.
-    pub fn end_row(&mut self) -> io::Result<()> {
+    pub async fn end_row(&mut self) -> io::Result<()> {
         if self.columns.is_empty() {
             self.col += 1;
             return Ok(());
@@ -417,6 +417,10 @@ where
 
         self.col = 0;
 
+        if self.result.writer.queue_len() > MAX_POOL_ROWS {
+            self.result.writer.flush().await?;
+        }
+
         Ok(())
     }
 
@@ -426,7 +430,7 @@ where
     /// [`QueryResultWriter::start`](struct.QueryResultWriter.html#method.start). If it does not,
     /// this method will return an error indicating that an invalid value type or specification was
     /// provided.
-    pub fn write_row<I, E>(&mut self, row: I) -> io::Result<()>
+    pub async fn write_row<I, E>(&mut self, row: I) -> io::Result<()>
     where
         I: IntoIterator<Item = E>,
         E: ToMysqlValue,
@@ -436,7 +440,7 @@ where
                 self.write_col(v)?;
             }
         }
-        self.end_row()
+        self.end_row().await
     }
 }
 
@@ -489,7 +493,7 @@ impl<'a, W: AsyncWrite + Unpin + 'a> RowWriter<'a, W> {
     /// End this resultset response, and indicate to the client that no more rows are coming.
     pub async fn finish_one(mut self) -> io::Result<QueryResultWriter<'a, W>> {
         if !self.columns.is_empty() && self.col != 0 {
-            self.end_row()?;
+            self.end_row().await?;
         }
         self.finish_inner()?;
         Ok(self.result)

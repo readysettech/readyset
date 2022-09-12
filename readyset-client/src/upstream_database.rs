@@ -58,7 +58,9 @@ pub trait UpstreamDatabase: Sized + Send {
     /// This type is used as the value inside of [`QueryResult::Upstream`][]
     ///
     /// [`QueryResult::Upstream`]: crate::backend::QueryResult::Upstream
-    type QueryResult: Debug + Send + 'static;
+    type QueryResult<'a>: Debug
+    where
+        Self: 'a;
 
     /// A type representing metadata about a prepared statement.
     ///
@@ -106,14 +108,14 @@ pub trait UpstreamDatabase: Sized + Send {
     /// 'on_prepare', this method should return
     /// ['Err(Error::ReadySet(ReadySetError::PreparedStatementMissing))'](readyset::ReadySetError::
     /// PreparedStatementMissing)
-    async fn execute(
-        &mut self,
+    async fn execute<'a>(
+        &'a mut self,
         statement_id: u32,
         params: &[DfValue],
-    ) -> Result<Self::QueryResult, Self::Error>;
+    ) -> Result<Self::QueryResult<'a>, Self::Error>;
 
     /// Execute a raw, un-prepared query
-    async fn query<'a, S>(&'a mut self, query: S) -> Result<Self::QueryResult, Self::Error>
+    async fn query<'a, S>(&'a mut self, query: S) -> Result<Self::QueryResult<'a>, Self::Error>
     where
         S: AsRef<str> + Send + Sync + 'a;
 
@@ -123,18 +125,18 @@ pub trait UpstreamDatabase: Sized + Send {
     async fn handle_ryw_write<'a, S>(
         &'a mut self,
         query: S,
-    ) -> Result<(Self::QueryResult, String), Self::Error>
+    ) -> Result<(Self::QueryResult<'a>, String), Self::Error>
     where
         S: AsRef<str> + Send + Sync + 'a;
 
     /// Handle starting a transaction with the upstream database.
-    async fn start_tx(&mut self) -> Result<Self::QueryResult, Self::Error>;
+    async fn start_tx<'a>(&'a mut self) -> Result<Self::QueryResult<'a>, Self::Error>;
 
     /// Handle committing a transaction to the upstream database.
-    async fn commit(&mut self) -> Result<Self::QueryResult, Self::Error>;
+    async fn commit<'a>(&'a mut self) -> Result<Self::QueryResult<'a>, Self::Error>;
 
     /// Handle rolling back the ongoing transaction for this connection to the upstream db.
-    async fn rollback(&mut self) -> Result<Self::QueryResult, Self::Error>;
+    async fn rollback<'a>(&'a mut self) -> Result<Self::QueryResult<'a>, Self::Error>;
 
     /// Return schema dump from the upstream database, for inclusion in a query analysis bundle.
     async fn schema_dump(&mut self) -> Result<Vec<u8>, anyhow::Error>;

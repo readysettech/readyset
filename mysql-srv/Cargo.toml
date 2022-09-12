@@ -25,6 +25,7 @@ thiserror = "1.0.26"
 sha-1 = "0.9.6"
 mysql-time = { path = "../mysql-time" }
 tracing = "0.1.35"
+readyset-data = { path = "../readyset-data" }
 
 [dev-dependencies]
 tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git" }

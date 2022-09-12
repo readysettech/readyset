@@ -123,6 +123,10 @@ impl<W: AsyncWrite + Unpin> PacketWriter<W> {
         Ok(())
     }
 
+    pub fn queue_len(&self) -> usize {
+        self.queue.len()
+    }
+
     /// Send all the currently queued packets. Does not flush the writer.
     pub async fn write_queued_packets(&mut self) -> Result<(), tokio::io::Error> {
         let mut slices = queued_packet_slices(&self.queue);

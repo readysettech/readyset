@@ -5,6 +5,7 @@
 #![feature(is_sorted)]
 #![feature(if_let_guard)]
 #![feature(arc_unwrap_or_clone)]
+#![feature(generic_associated_types)]
 #![deny(unreachable_pub)]
 
 pub mod backend;

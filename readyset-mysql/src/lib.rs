@@ -1,3 +1,5 @@
+#![feature(generic_associated_types)]
+
 mod backend;
 mod constants;
 mod error;

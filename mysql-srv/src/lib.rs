@@ -19,6 +19,7 @@
 //! # use std::io;
 //! # use std::net;
 //! # use std::thread;
+//! use std::collections::HashMap;
 //! use std::iter;
 //!
 //! use async_trait::async_trait;
@@ -33,6 +34,7 @@
 //!         &mut self,
 //!         _: &str,
 //!         info: StatementMetaWriter<'_, W>,
+//!         schema_cache: &mut HashMap<u32, CachedSchema>,
 //!     ) -> io::Result<()> {
 //!         info.reply(42, &[], &[]).await
 //!     }
@@ -41,6 +43,7 @@
 //!         _: u32,
 //!         _: ParamParser<'_>,
 //!         results: QueryResultWriter<'_, W>,
+//!         schema_cache: &mut HashMap<u32, CachedSchema>,
 //!     ) -> io::Result<()> {
 //!         results.completed(0, 0, None).await
 //!     }
@@ -68,7 +71,7 @@
 //!                         character_set: myc::constants::UTF8_GENERAL_CI,
 //!                     }];
 //!                     let mut w = results.start(cols).await?;
-//!                     w.write_row(iter::once(67108864u32))?;
+//!                     w.write_row(iter::once(67108864u32)).await?;
 //!                     Ok(w.finish().await?)
 //!                 }
 //!                 _ => Ok(results.completed(0, 0, None).await?),
@@ -154,11 +157,13 @@ extern crate mysql_common as myc;
 
 use std::collections::HashMap;
 use std::io;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use constants::{CLIENT_PLUGIN_AUTH, PROTOCOL_41, RESERVED, SECURE_CONNECTION};
 use error::{other_error, OtherErrorKind};
 use mysql_common::constants::CapabilityFlags;
+use readyset_data::DfType;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net;
 use tracing::{debug, trace};
@@ -236,8 +241,12 @@ pub trait MysqlShim<W: AsyncWrite + Unpin + Send> {
     /// The provided [`StatementMetaWriter`](struct.StatementMetaWriter.html) should be used to
     /// notify the client of the statement id assigned to the prepared statement, as well as to
     /// give metadata about the types of parameters and returned columns.
-    async fn on_prepare(&mut self, query: &str, info: StatementMetaWriter<'_, W>)
-        -> io::Result<()>;
+    async fn on_prepare(
+        &mut self,
+        query: &str,
+        info: StatementMetaWriter<'_, W>,
+        schema_cache: &mut HashMap<u32, CachedSchema>,
+    ) -> io::Result<()>;
 
     /// Called when the client executes a previously prepared statement.
     ///
@@ -249,6 +258,7 @@ pub trait MysqlShim<W: AsyncWrite + Unpin + Send> {
         id: u32,
         params: ParamParser<'_>,
         results: QueryResultWriter<'_, W>,
+        schema_cache: &mut HashMap<u32, CachedSchema>,
     ) -> io::Result<()>;
 
     /// Called when the client wishes to deallocate resources associated with a previously prepared
@@ -275,12 +285,26 @@ pub trait MysqlShim<W: AsyncWrite + Unpin + Send> {
     }
 }
 
+/// Stores a preencoded result schema for a prepared MySQL statement
+pub struct CachedSchema {
+    /// The MySQL schema
+    pub mysql_schema: Vec<Column>,
+    /// Associated ReadySet types
+    pub column_types: Vec<DfType>,
+    /// Mapping from ReadySet return schema to the MySQL return schema
+    pub column_map: Vec<Option<usize>>,
+    /// Preencoded schema as a byte dump
+    pub preencoded_schema: Arc<[u8]>,
+}
+
 /// A server that speaks the MySQL/MariaDB protocol, and can delegate client commands to a backend
 /// that implements [`MysqlShim`](trait.MysqlShim.html).
 pub struct MysqlIntermediary<B, R: AsyncRead + Unpin, W: AsyncWrite + Unpin> {
     shim: B,
     reader: packet::PacketReader<R>,
     writer: packet::PacketWriter<W>,
+    /// A cache of schemas per statement id
+    schema_cache: HashMap<u32, CachedSchema>,
 }
 
 impl<B: MysqlShim<net::tcp::OwnedWriteHalf> + Send>
@@ -337,6 +361,7 @@ impl<B: MysqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
             shim,
             reader: r,
             writer: w,
+            schema_cache: HashMap::new(),
         };
         if mi.init().await? {
             mi.run().await?;
@@ -520,6 +545,7 @@ impl<B: MysqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
                             ::std::str::from_utf8(q)
                                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
                             w,
+                            &mut self.schema_cache,
                         )
                         .await?;
                 }
@@ -546,7 +572,9 @@ impl<B: MysqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
                     {
                         let params = params::ParamParser::new(params, state);
                         let w = QueryResultWriter::new(&mut self.writer, true);
-                        self.shim.on_execute(stmt, params, w).await?;
+                        self.shim
+                            .on_execute(stmt, params, w, &mut self.schema_cache)
+                            .await?;
                     }
                     state.long_data.clear();
                 }

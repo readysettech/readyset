@@ -31,7 +31,7 @@ impl Deref for Backend {
 }
 
 impl Backend {
-    async fn query(&mut self, query: &str) -> Result<QueryResponse<'_>, Error> {
+    async fn query<'a>(&'a mut self, query: &'a str) -> Result<QueryResponse<'_>, Error> {
         Ok(QueryResponse(self.0.query(query).await?))
     }
 
@@ -53,7 +53,7 @@ impl ps::Backend for Backend {
     const SERVER_VERSION: &'static str = "13.4 (ReadySet)";
 
     async fn on_init(&mut self, _database: &str) -> Result<ps::CredentialsNeeded, ps::Error> {
-        match self.require_authentication {
+        match self.does_require_authentication() {
             true => Ok(ps::CredentialsNeeded::Cleartext),
             false => Ok(ps::CredentialsNeeded::None),
         }

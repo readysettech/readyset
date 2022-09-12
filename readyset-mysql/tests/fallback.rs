@@ -480,7 +480,7 @@ async fn always_should_never_proxy() {
         .await
         .unwrap();
     conn.query_drop("set @foo = 5").await.unwrap();
-    let prepared = conn.query_drop("SELECT * FROM t").await.unwrap();
+    conn.query_drop("SELECT * FROM t").await.unwrap();
     assert_eq!(
         last_query_info(&mut conn).await.destination,
         QueryDestination::Readyset

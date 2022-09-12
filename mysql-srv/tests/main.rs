@@ -8,6 +8,7 @@ extern crate nom;
 extern crate tokio;
 
 use core::iter;
+use std::collections::HashMap;
 use std::future::Future;
 use std::marker::PhantomData;
 use std::pin::Pin;
@@ -17,8 +18,8 @@ use async_trait::async_trait;
 use mysql::prelude::Queryable;
 use mysql::Row;
 use mysql_srv::{
-    Column, ErrorKind, InitWriter, MysqlIntermediary, MysqlShim, ParamParser, QueryResultWriter,
-    StatementMetaWriter,
+    CachedSchema, Column, ErrorKind, InitWriter, MysqlIntermediary, MysqlShim, ParamParser,
+    QueryResultWriter, StatementMetaWriter,
 };
 use tokio::io::AsyncWrite;
 use tokio::net::tcp::OwnedWriteHalf;
@@ -61,6 +62,7 @@ where
         &mut self,
         query: &str,
         info: StatementMetaWriter<'_, W>,
+        _schema_cache: &mut HashMap<u32, CachedSchema>,
     ) -> io::Result<()> {
         let id = (self.on_p)(query);
         info.reply(id, &self.params, &self.columns).await
@@ -71,6 +73,7 @@ where
         id: u32,
         params: ParamParser<'_>,
         results: QueryResultWriter<'_, W>,
+        _schema_cache: &mut HashMap<u32, CachedSchema>,
     ) -> io::Result<()> {
         let mut extract_params = Vec::new();
         for p in params {
@@ -102,7 +105,7 @@ where
                         character_set: DEFAULT_CHARACTER_SET,
                     }];
                     let mut w = results.start(cols).await?;
-                    w.write_row(iter::once(67108864u32))?;
+                    w.write_row(iter::once(67108864u32)).await?;
                     Ok(w.finish().await?)
                 }
                 _ => Ok(results.completed(0, 0, None).await?),
@@ -496,8 +499,8 @@ fn it_queries_many_rows() {
                 let mut w = w.start(&cols).await?;
                 w.write_col(1024i16)?;
                 w.write_col(1025i16)?;
-                w.end_row()?;
-                w.write_row(&[1024i16, 1025i16])?;
+                w.end_row().await?;
+                w.write_row(&[1024i16, 1025i16]).await?;
                 w.finish().await
             })
         },
@@ -831,8 +834,8 @@ fn it_prepares_many() {
                 let mut w = w.start(&cols).await?;
                 w.write_col(1024i16)?;
                 w.write_col(1025i16)?;
-                w.end_row()?;
-                w.write_row(&[1024i16, 1025i16])?;
+                w.end_row().await?;
+                w.write_row(&[1024i16, 1025i16]).await?;
                 w.finish().await
             })
         },
@@ -993,7 +996,7 @@ fn prepared_nulls() {
             let cols = cols.clone();
             Box::pin(async move {
                 let mut w = w.start(&cols).await?;
-                w.write_row(vec![None::<i16>, Some(42)])?;
+                w.write_row(vec![None::<i16>, Some(42)]).await?;
                 w.finish().await
             })
         },

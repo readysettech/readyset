@@ -1,3 +1,5 @@
+#![feature(generic_associated_types)]
+
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use clap::Parser;

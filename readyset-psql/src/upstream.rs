@@ -104,7 +104,7 @@ impl NoriaCompare for StatementMeta {
 impl UpstreamDatabase for PostgreSqlUpstream {
     type Config = Config;
     type StatementMeta = StatementMeta;
-    type QueryResult = QueryResult;
+    type QueryResult<'a> = QueryResult;
     type Error = Error;
 
     async fn connect(url: String, config: Config) -> Result<Self, Error> {
@@ -178,7 +178,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         Ok(UpstreamPrepare { statement_id, meta })
     }
 
-    async fn query<'a, S>(&'a mut self, query: S) -> Result<Self::QueryResult, Error>
+    async fn query<'a, S>(&'a mut self, query: S) -> Result<Self::QueryResult<'a>, Error>
     where
         S: AsRef<str> + Send + Sync + 'a,
     {
@@ -205,18 +205,18 @@ impl UpstreamDatabase for PostgreSqlUpstream {
     async fn handle_ryw_write<'a, S>(
         &'a mut self,
         _query: S,
-    ) -> Result<(Self::QueryResult, String), Error>
+    ) -> Result<(Self::QueryResult<'a>, String), Error>
     where
         S: AsRef<str> + Send + Sync + 'a,
     {
         unsupported!("Read-Your-Write not yet implemented for PostgreSQL")
     }
 
-    async fn execute(
-        &mut self,
+    async fn execute<'a>(
+        &'a mut self,
         statement_id: u32,
         params: &[DfValue],
-    ) -> Result<Self::QueryResult, Error> {
+    ) -> Result<Self::QueryResult<'a>, Error> {
         let statement = self
             .prepared_statements
             .get(&statement_id)
@@ -249,19 +249,19 @@ impl UpstreamDatabase for PostgreSqlUpstream {
     }
 
     /// Handle starting a transaction with the upstream database.
-    async fn start_tx(&mut self) -> Result<Self::QueryResult, Error> {
+    async fn start_tx<'a>(&'a mut self) -> Result<Self::QueryResult<'a>, Error> {
         self.client.query("START TRANSACTION", &[]).await?;
         Ok(QueryResult::Command)
     }
 
     /// Handle committing a transaction to the upstream database.
-    async fn commit(&mut self) -> Result<Self::QueryResult, Error> {
+    async fn commit<'a>(&'a mut self) -> Result<Self::QueryResult<'a>, Error> {
         self.client.query("COMMIT", &[]).await?;
         Ok(QueryResult::Command)
     }
 
     /// Handle rolling back the ongoing transaction for this connection to the upstream db.
-    async fn rollback(&mut self) -> Result<Self::QueryResult, Error> {
+    async fn rollback<'a>(&'a mut self) -> Result<Self::QueryResult<'a>, Error> {
         self.client.query("ROLLBACK", &[]).await?;
         Ok(QueryResult::Command)
     }

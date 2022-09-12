@@ -308,27 +308,31 @@ impl BackendBuilder {
         };
 
         Backend {
-            parsed_query_cache: HashMap::new(),
-            prepared_statements: Vec::new(),
             noria,
             upstream,
-            proxy_state,
-            slowlog: self.slowlog,
-            dialect: self.dialect,
             users: self.users,
-            require_authentication: self.require_authentication,
-            ticket: self.ticket,
-            timestamp_client: self.timestamp_client,
             query_log_sender: self.query_log_sender,
-            query_log_ad_hoc_queries: self.query_log_ad_hoc_queries,
-            query_status_cache,
-            validate_queries: self.validate_queries,
-            fail_invalidated_queries: self.fail_invalidated_queries,
-            unsupported_set_mode: self.unsupported_set_mode,
-            migration_mode: self.migration_mode,
             last_query: None,
-            query_max_failure_duration: Duration::new(self.query_max_failure_seconds, 0),
-            fallback_recovery_duration: Duration::new(self.fallback_recovery_seconds, 0),
+            state: BackendState {
+                proxy_state,
+                parsed_query_cache: HashMap::new(),
+                prepared_statements: Vec::new(),
+                query_status_cache,
+                ticket: self.ticket,
+                timestamp_client: self.timestamp_client,
+            },
+            settings: BackendSettings {
+                slowlog: self.slowlog,
+                dialect: self.dialect,
+                require_authentication: self.require_authentication,
+                validate_queries: self.validate_queries,
+                fail_invalidated_queries: self.fail_invalidated_queries,
+                unsupported_set_mode: self.unsupported_set_mode,
+                migration_mode: self.migration_mode,
+                query_max_failure_duration: Duration::new(self.query_max_failure_seconds, 0),
+                query_log_ad_hoc_queries: self.query_log_ad_hoc_queries,
+                fallback_recovery_duration: Duration::new(self.fallback_recovery_seconds, 0),
+            },
             _query_handler: PhantomData,
         }
     }
@@ -465,21 +469,39 @@ pub struct Backend<DB, Handler>
 where
     DB: UpstreamDatabase,
 {
-    // a cache of all previously parsed queries
-    parsed_query_cache: HashMap<String, SqlQuery>,
-    // all queries previously prepared on noria or upstream, mapped by their ID.
-    prepared_statements: Vec<CachedPreparedStatement<DB>>,
     /// ReadySet connector used for reads, and writes when no upstream DB is present
     noria: NoriaConnector,
     /// Optional connector to the upstream DB. Used for fallback reads and all writes if it exists
     upstream: Option<DB>,
-    proxy_state: ProxyState,
-    slowlog: bool,
-    /// SQL dialect to use when parsing queries from clients
-    dialect: Dialect,
     /// Map from username to password for all users allowed to connect to the db
     pub users: HashMap<String, String>,
-    pub require_authentication: bool,
+
+    query_log_sender: Option<UnboundedSender<QueryExecutionEvent>>,
+
+    /// Information regarding the last query sent over this connection. If None, then no queries
+    /// have been handled using this connection (Backend) yet.
+    last_query: Option<QueryInfo>,
+
+    /// Encapsulates the inner state of this [`Backend`]
+    state: BackendState<DB>,
+    /// The settings with which the [`Backend`] was started
+    settings: BackendSettings,
+
+    _query_handler: PhantomData<Handler>,
+}
+
+/// Variables that keep track of the [`Backend`] state
+struct BackendState<DB>
+where
+    DB: UpstreamDatabase,
+{
+    proxy_state: ProxyState,
+    /// A cache of queries that we've seen, and their current state, used for processing
+    query_status_cache: &'static QueryStatusCache,
+    // a cache of all previously parsed queries
+    parsed_query_cache: HashMap<String, SqlQuery>,
+    // all queries previously prepared on noria or upstream, mapped by their ID.
+    prepared_statements: Vec<CachedPreparedStatement<DB>>,
     /// Current RYW ticket. `None` if RYW is not enabled. This `ticket` will
     /// be updated as the client makes writes so as to be an accurate low watermark timestamp
     /// required to make RYW-consistent reads. On reads, the client will pass in this ticket to be
@@ -489,36 +511,29 @@ where
     /// is responsible for creating accurate RYW timestamps/tickets based on writes made by the
     /// Backend client.
     timestamp_client: Option<TimestampClient>,
+}
 
-    query_log_sender: Option<UnboundedSender<QueryExecutionEvent>>,
-
+/// Settings that have no state and are constant for a given [`Backend`]
+struct BackendSettings {
+    /// SQL dialect to use when parsing queries from clients
+    dialect: Dialect,
+    slowlog: bool,
+    require_authentication: bool,
     /// Whether to log ad-hoc queries by full query text in the query logger.
     query_log_ad_hoc_queries: bool,
-
-    /// A cache of queries that we've seen, and their current state, used for processing
-    query_status_cache: &'static QueryStatusCache,
-
     /// Run select statements with query validation.
     validate_queries: bool,
-    fail_invalidated_queries: bool,
-
     /// How to behave when receiving unsupported `SET` statements
     unsupported_set_mode: UnsupportedSetMode,
-
     /// How this backend handles migrations, See MigrationMode.
     migration_mode: MigrationMode,
-    /// Information regarding the last query sent over this connection. If None, then no queries
-    /// have been handled using this connection (Backend) yet.
-    last_query: Option<QueryInfo>,
-
     /// The maximum duration that a query can continuously fail for before we enter into a recovery
     /// period.
     query_max_failure_duration: Duration,
     /// The recovery period that we enter into for a given query, when that query has
     /// repeatedly failed for query_max_failure_duration.
     fallback_recovery_duration: Duration,
-
-    _query_handler: PhantomData<Handler>,
+    fail_invalidated_queries: bool,
 }
 
 /// QueryInfo holds information regarding the last query that was sent along this connection
@@ -648,27 +663,19 @@ impl<DB: UpstreamDatabase> PrepareResult<DB> {
 
 /// The type returned when a query is carried out by `Backend`, through either the `query` or
 /// `execute` functions.
-pub enum QueryResult<'a, DB: UpstreamDatabase> {
+pub enum QueryResult<'a, DB: UpstreamDatabase>
+where
+    DB: 'a,
+{
     /// Results from noria
     Noria(noria_connector::QueryResult<'a>),
     /// Results from upstream
-    Upstream(DB::QueryResult),
+    Upstream(DB::QueryResult<'a>),
 }
 
 impl<'a, DB: UpstreamDatabase> From<noria_connector::QueryResult<'a>> for QueryResult<'a, DB> {
     fn from(r: noria_connector::QueryResult<'a>) -> Self {
         Self::Noria(r)
-    }
-}
-
-// Because js_client needs an owned version to pass we implement a manual
-// `into_owned`, the things we do for performance
-impl<'a, DB: UpstreamDatabase> QueryResult<'a, DB> {
-    pub fn into_owned(self) -> QueryResult<'static, DB> {
-        match self {
-            QueryResult::Noria(n) => QueryResult::Noria(n.into_owned()),
-            QueryResult::Upstream(u) => QueryResult::Upstream(u),
-        }
     }
 }
 
@@ -700,14 +707,14 @@ where
 {
     /// The identifier of the last prepared statement (which is always the last in the vector)
     pub fn last_prepared_id(&self) -> u32 {
-        (self.prepared_statements.len() - 1)
+        (self.state.prepared_statements.len() - 1)
             .try_into()
             .expect("Too many prepared statements")
     }
 
     /// The identifier we can reserve for the next prepared statement
     pub fn next_prepared_id(&self) -> u32 {
-        (self.prepared_statements.len())
+        (self.state.prepared_statements.len())
             .try_into()
             .expect("Too many prepared statements")
     }
@@ -734,12 +741,12 @@ where
     /// Executes query on the upstream database, for when it cannot be parsed or executed by noria.
     /// Returns the query result, or an error if fallback is not configured
     #[instrument_root(level = "info")]
-    pub async fn query_fallback(
-        &mut self,
-        query: &str,
+    pub async fn query_fallback<'a>(
+        upstream: Option<&'a mut DB>,
+        query: &'a str,
         event: &mut QueryExecutionEvent,
-    ) -> Result<QueryResult<'static, DB>, DB::Error> {
-        let upstream = self.upstream.as_mut().ok_or_else(|| {
+    ) -> Result<QueryResult<'a, DB>, DB::Error> {
+        let upstream = upstream.ok_or_else(|| {
             ReadySetError::Internal("This case requires an upstream connector".to_string())
         })?;
         event.destination = Some(QueryDestination::Upstream);
@@ -808,18 +815,20 @@ where
                     // If we are using `validate_queries`, a query that was successfully
                     // migrated may actually be unsupported if the schema or columns do not
                     // match up.
-                    if self.validate_queries {
+                    if self.settings.validate_queries {
                         if let Err(e) = upstream_res.meta.compare(schema, params) {
-                            if self.fail_invalidated_queries {
+                            if self.settings.fail_invalidated_queries {
                                 internal!("Query comparison failed to validate: {}", e);
                             }
-                            warn!(error = %e, query = %Sensitive(&select_meta.stmt), "Query compare failed");
+                            warn!(error = %e,
+                                  query = %Sensitive(&select_meta.stmt),
+                                  "Query compare failed");
                             state = MigrationState::Unsupported;
                         }
                     }
                 }
 
-                self.query_status_cache.update_query_migration_state(
+                self.state.query_status_cache.update_query_migration_state(
                     &ViewCreateRequest::new(
                         select_meta.rewritten.clone(),
                         self.noria.schema_search_path().to_owned(),
@@ -830,7 +839,7 @@ where
             Some(Err(e)) => {
                 if e.caused_by_view_not_found() {
                     warn!(error = %e, "View not found during mirror_prepare()");
-                    self.query_status_cache.update_query_migration_state(
+                    self.state.query_status_cache.update_query_migration_state(
                         &ViewCreateRequest::new(
                             select_meta.rewritten.clone(),
                             self.noria.schema_search_path().to_owned(),
@@ -838,7 +847,7 @@ where
                         MigrationState::Pending,
                     );
                 } else if e.caused_by_unsupported() {
-                    self.query_status_cache.update_query_migration_state(
+                    self.state.query_status_cache.update_query_migration_state(
                         &ViewCreateRequest::new(
                             select_meta.rewritten.clone(),
                             self.noria.schema_search_path().to_owned(),
@@ -909,12 +918,13 @@ where
         match self.rewrite_select_and_check_noria(&stmt) {
             Some((rewritten, should_do_noria)) => {
                 let status = self
+                    .state
                     .query_status_cache
                     .query_status(&ViewCreateRequest::new(
                         rewritten.clone(),
                         self.noria.schema_search_path().to_owned(),
                     ));
-                if self.proxy_state == ProxyState::ProxyAlways && !status.always {
+                if self.state.proxy_state == ProxyState::ProxyAlways && !status.always {
                     PrepareMeta::Proxy
                 } else {
                     PrepareMeta::Select(PrepareSelectMeta {
@@ -923,14 +933,15 @@ where
                         should_do_noria,
                         // For select statements only InRequestPath should trigger migrations
                         // synchronously, or if no upstream is present.
-                        must_migrate: self.migration_mode == MigrationMode::InRequestPath
+                        must_migrate: self.settings.migration_mode == MigrationMode::InRequestPath
                             || !self.has_fallback(),
                         always: status.always,
                     })
                 }
             }
             None => {
-                warn!(statement = %Sensitive(&stmt), "This statement could not be rewritten by ReadySet");
+                warn!(statement = %Sensitive(&stmt),
+                      "This statement could not be rewritten by ReadySet");
                 PrepareMeta::FailedToRewrite
             }
         }
@@ -951,7 +962,8 @@ where
             None
         } else {
             let should_do_noria =
-                self.query_status_cache
+                self.state
+                    .query_status_cache
                     .query_migration_state(&ViewCreateRequest::new(
                         rewritten.clone(),
                         self.noria.schema_search_path().to_owned(),
@@ -963,7 +975,7 @@ where
 
     /// Provides metadata required to prepare a query
     async fn plan_prepare(&mut self, query: &str) -> PrepareMeta {
-        if self.proxy_state == ProxyState::ProxyAlways {
+        if self.state.proxy_state == ProxyState::ProxyAlways {
             return PrepareMeta::Proxy;
         }
 
@@ -979,7 +991,7 @@ where
                 PrepareMeta::Unimplemented
             }
             Err(_) => {
-                let mode = if self.proxy_state == ProxyState::Never {
+                let mode = if self.state.proxy_state == ProxyState::Never {
                     PrepareMeta::FailedToParse
                 } else {
                     PrepareMeta::Proxy
@@ -1053,7 +1065,9 @@ where
                     ViewCreateRequest::new(rewritten, self.noria.schema_search_path().to_owned());
                 (
                     Some(Arc::new(SqlQuery::Select(stmt))),
-                    self.query_status_cache.query_migration_state(&request),
+                    self.state
+                        .query_status_cache
+                        .query_migration_state(&request),
                     Some(request),
                     always,
                 )
@@ -1070,9 +1084,9 @@ where
             always,
         };
 
-        self.prepared_statements.push(cache_entry);
+        self.state.prepared_statements.push(cache_entry);
 
-        Ok(&self.prepared_statements.last().unwrap().prep)
+        Ok(&self.state.prepared_statements.last().unwrap().prep)
     }
 
     /// Executes a prepared statement on ReadySet
@@ -1174,7 +1188,8 @@ where
                     }
                 }
                 if !matches!(noria_err, ReadySetError::ReaderMissingKey) {
-                    warn!(error = %noria_err, "Error received from noria, sending query to fallback");
+                    warn!(error = %noria_err,
+                          "Error received from noria, sending query to fallback");
                 }
 
                 Self::execute_upstream(upstream, upstream_prep, params, event, true).await
@@ -1239,7 +1254,8 @@ where
     /// equal to the one provided
     fn invalidate_prepared_statements_cache(&mut self, stmt: &ViewCreateRequest) {
         // Linear scan, but we shouldn't be doing it often, right?
-        self.prepared_statements
+        self.state
+            .prepared_statements
             .iter_mut()
             .filter_map(
                 |CachedPreparedStatement {
@@ -1275,6 +1291,7 @@ where
     ) -> Result<QueryResult<'_, DB>, DB::Error> {
         self.last_query = None;
         let cached_statement = self
+            .state
             .prepared_statements
             .get_mut(id as usize)
             .ok_or(PreparedStatementMissing { statement_id: id })?;
@@ -1284,12 +1301,12 @@ where
 
         let upstream = &mut self.upstream;
         let noria = &mut self.noria;
-        let ticket = self.ticket.clone();
+        let ticket = self.state.ticket.clone();
 
         if cached_statement.migration_state.is_pending() {
             // We got a statement with a pending migration, we want to check if migration is
             // finished by now
-            let new_migration_state = self.query_status_cache.query_migration_state(
+            let new_migration_state = self.state.query_status_cache.query_migration_state(
                 cached_statement
                     .view_request
                     .as_ref()
@@ -1307,14 +1324,14 @@ where
                 false
             } else {
                 let is_recovering = cached_statement.in_fallback_recovery(
-                    self.query_max_failure_duration,
-                    self.fallback_recovery_duration,
+                    self.settings.query_max_failure_duration,
+                    self.settings.fallback_recovery_duration,
                 );
 
                 let always_readyset = cached_statement
                     .view_request
                     .as_ref()
-                    .map(|stmt| self.query_status_cache.query_status(stmt).always)
+                    .map(|stmt| self.state.query_status_cache.query_status(stmt).always)
                     .unwrap_or(false);
 
                 if cached_statement.is_unsupported_execute() {
@@ -1322,7 +1339,7 @@ where
                 } else if always_readyset {
                     false
                 } else {
-                    is_recovering || self.proxy_state.should_proxy()
+                    is_recovering || self.state.proxy_state.should_proxy()
                 }
             }
         };
@@ -1370,7 +1387,7 @@ where
                 //
                 // Must exist or we would not have executed the query against ReadySet.
                 #[allow(clippy::unwrap_used)]
-                self.query_status_cache.update_query_migration_state(
+                self.state.query_status_cache.update_query_migration_state(
                     cached_statement.view_request.as_ref().unwrap(),
                     MigrationState::Unsupported,
                 );
@@ -1385,40 +1402,47 @@ where
                 .map(|e| e.to_string())
                 .unwrap_or_default(),
         });
-        log_query(self.query_log_sender.as_ref(), event, self.slowlog);
+        log_query(self.query_log_sender.as_ref(), event, self.settings.slowlog);
 
         result
     }
 
     /// Should only be called with a SqlQuery that is of type StartTransaction, Commit, or
     /// Rollback. Used to handle transaction boundary queries.
-    pub async fn handle_transaction_boundaries(
-        &mut self,
+    async fn handle_transaction_boundaries<'a>(
+        upstream: Option<&'a mut DB>,
+        proxy_state: &mut ProxyState,
         query: &SqlQuery,
-    ) -> Result<QueryResult<'static, DB>, DB::Error> {
-        let upstream = self.upstream.as_mut().ok_or_else(|| {
+    ) -> Result<QueryResult<'a, DB>, DB::Error> {
+        let upstream = upstream.ok_or_else(|| {
             ReadySetError::Internal("This case requires an upstream connector".to_string())
         })?;
 
         match query {
             SqlQuery::StartTransaction(_) => {
                 let result = QueryResult::Upstream(upstream.start_tx().await?);
-                self.proxy_state.start_transaction();
+                proxy_state.start_transaction();
                 Ok(result)
             }
             SqlQuery::Commit(_) => {
                 let result = QueryResult::Upstream(upstream.commit().await?);
-                self.proxy_state.end_transaction();
+                proxy_state.end_transaction();
                 Ok(result)
             }
             SqlQuery::Rollback(_) => {
                 let result = QueryResult::Upstream(upstream.rollback().await?);
-                self.proxy_state.end_transaction();
+                proxy_state.end_transaction();
                 Ok(result)
             }
             _ => {
-                error!("handle_transaction_boundary was called with a SqlQuery that was not of type StartTransaction, Commit, or Rollback");
-                internal!("handle_transaction_boundary was called with a SqlQuery that was not of type StartTransaction, Commit, or Rollback");
+                error!(
+                    "handle_transaction_boundary was called with a SqlQuery that was not of type \
+                     StartTransaction, Commit, or Rollback"
+                );
+                internal!(
+                    "handle_transaction_boundary was called with a SqlQuery that was not of type \
+                     StartTransaction, Commit, or Rollback"
+                );
             }
         }
     }
@@ -1469,11 +1493,11 @@ where
         self.noria
             .handle_create_cached_query(name, &stmt, override_schema_search_path, always)
             .await?;
-        self.query_status_cache.update_query_migration_state(
+        self.state.query_status_cache.update_query_migration_state(
             &ViewCreateRequest::new(stmt.clone(), self.noria.schema_search_path().to_owned()),
             MigrationState::Successful,
         );
-        self.query_status_cache.always_attempt_readyset(
+        self.state.query_status_cache.always_attempt_readyset(
             &ViewCreateRequest::new(stmt.clone(), self.noria.schema_search_path().to_owned()),
             always,
         );
@@ -1488,9 +1512,11 @@ where
         let maybe_view_request = self.noria.view_create_request_from_name(name);
         self.noria.drop_view(name).await?;
         if let Some(view_request) = maybe_view_request {
-            self.query_status_cache
+            self.state
+                .query_status_cache
                 .update_query_migration_state(&view_request, MigrationState::Pending);
-            self.query_status_cache
+            self.state
+                .query_status_cache
                 .always_attempt_readyset(&view_request, false);
             self.invalidate_prepared_statements_cache(&view_request);
         }
@@ -1500,8 +1526,8 @@ where
     /// Forwards a `DROP ALL CACHES` request to noria
     async fn drop_all_caches(&mut self) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         self.noria.drop_all_caches().await?;
-        self.query_status_cache.clear();
-        self.prepared_statements.iter_mut().for_each(
+        self.state.query_status_cache.clear();
+        self.state.prepared_statements.iter_mut().for_each(
             |CachedPreparedStatement {
                  prep,
                  migration_state,
@@ -1533,7 +1559,7 @@ where
             base: None,
         };
 
-        let queries = self.query_status_cache.deny_list();
+        let queries = self.state.query_status_cache.deny_list();
         let select_schema = SelectSchema {
             use_bogo: false,
             schema: Cow::Owned(vec![
@@ -1577,7 +1603,8 @@ where
         query: &'a SqlQuery,
         event: &mut QueryExecutionEvent,
     ) -> Option<ReadySetResult<noria_connector::QueryResult<'static>>> {
-        event.sql_type = SqlQueryType::Other; // Those will get cleared if it was not destined to noria
+        // Those will get cleared if it was not destined to noria
+        event.sql_type = SqlQueryType::Other;
         event.destination = Some(QueryDestination::Readyset);
 
         let _t = event.start_noria_timer();
@@ -1596,7 +1623,7 @@ where
             }) => {
                 let (stmt, search_path) = match inner {
                     CacheInner::Statement(st) => (*st.clone(), None),
-                    CacheInner::Id(id) => match self.query_status_cache.query(id.as_str()) {
+                    CacheInner::Id(id) => match self.state.query_status_cache.query(id.as_str()) {
                         Some(q) => match q {
                             Query::Parsed(view_request) => (
                                 view_request.statement.clone(),
@@ -1623,7 +1650,8 @@ where
             SqlQuery::Show(ShowStatement::ProxiedQueries) => self.show_proxied_queries().await,
             _ => {
                 drop(_t);
-                event.readyset_duration.take(); // Clear readyset timer, since it was not a readyset request
+                // Clear readyset timer, since it was not a readyset request
+                event.readyset_duration.take();
                 return None;
             }
         };
@@ -1631,14 +1659,18 @@ where
         Some(res)
     }
 
-    async fn query_adhoc_select(
-        &mut self,
-        original_query: &str,
+    #[allow(clippy::too_many_arguments)]
+    async fn query_adhoc_select<'a>(
+        noria: &'a mut NoriaConnector,
+        upstream: Option<&'a mut DB>,
+        settings: &BackendSettings,
+        state: &mut BackendState<DB>,
+        original_query: &'a str,
         original_stmt: SelectStatement,
         view_request: &ViewCreateRequest,
         status: Option<QueryStatus>,
         event: &mut QueryExecutionEvent,
-    ) -> Result<QueryResult<'_, DB>, DB::Error> {
+    ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let mut status = status.unwrap_or(QueryStatus {
             migration_state: MigrationState::Unsupported,
             execution_info: None,
@@ -1647,35 +1679,34 @@ where
         let original_status = status.clone();
         let did_work = if let Some(ref mut i) = status.execution_info {
             i.reset_if_exceeded_recovery(
-                self.query_max_failure_duration,
-                self.fallback_recovery_duration,
+                settings.query_max_failure_duration,
+                settings.fallback_recovery_duration,
             )
         } else {
             false
         };
 
         if !status.always
-            && (self.has_fallback()
-                && (self.migration_mode != MigrationMode::InRequestPath
+            && (upstream.is_some()
+                && (settings.migration_mode != MigrationMode::InRequestPath
                     && status.migration_state != MigrationState::Successful)
                 || (status.migration_state == MigrationState::Unsupported)
-                || (self.has_fallback()
-                    && status
-                        .execution_info
-                        .as_mut()
-                        .map(|i| {
-                            i.execute_network_failure_exceeded(self.query_max_failure_duration)
-                        })
-                        .unwrap_or(false)))
+                || (status
+                    .execution_info
+                    .as_mut()
+                    .map(|i| {
+                        i.execute_network_failure_exceeded(settings.query_max_failure_duration)
+                    })
+                    .unwrap_or(false)))
         {
             if did_work {
                 #[allow(clippy::unwrap_used)] // Validated by did_work.
-                self.query_status_cache.update_transition_time(
+                state.query_status_cache.update_transition_time(
                     view_request,
                     &status.execution_info.unwrap().last_transition_time,
                 );
             }
-            return self.query_fallback(original_query, event).await;
+            return Self::query_fallback(upstream, original_query, event).await;
         }
 
         let noria_res = {
@@ -1683,12 +1714,9 @@ where
             let start = Instant::now();
             let ctx = ExecuteSelectContext::AdHoc {
                 statement: original_stmt,
-                create_if_missing: self.migration_mode == MigrationMode::InRequestPath,
+                create_if_missing: settings.migration_mode == MigrationMode::InRequestPath,
             };
-            let res = self
-                .noria
-                .execute_select(ctx, self.ticket.clone(), event)
-                .await;
+            let res = noria.execute_select(ctx, state.ticket.clone(), event).await;
             event.readyset_duration = Some(start.elapsed());
             res
         };
@@ -1707,7 +1735,8 @@ where
                     i.execute_succeeded()
                 }
                 if status != original_status {
-                    self.query_status_cache
+                    state
+                        .query_status_cache
                         .update_query_status(view_request, status);
                 }
                 Ok(noria_ok.into())
@@ -1732,19 +1761,20 @@ where
                 let always = status.always;
 
                 if status != original_status {
-                    self.query_status_cache
+                    state
+                        .query_status_cache
                         .update_query_status(view_request, status);
                 }
 
                 // Try to execute on fallback if present, as long as query is not an `always`
                 // query.
-                match (always, self.upstream.as_mut()) {
+                match (always, upstream) {
                     (true, _) | (_, None) => Err(noria_err.into()),
                     (false, Some(fallback)) => {
                         event.destination = Some(QueryDestination::ReadysetThenUpstream);
                         let _t = event.start_upstream_timer();
                         fallback
-                            .query(&original_query)
+                            .query(original_query)
                             .await
                             .map(QueryResult::Upstream)
                     }
@@ -1759,35 +1789,243 @@ where
     /// during processing.
     fn noria_should_try_select(&self, q: &mut ViewCreateRequest) -> (bool, Option<QueryStatus>) {
         let mut status = None;
-        let should_try = if rewrite::process_query(
-            &mut q.statement,
-            self.noria.server_supports_pagination(),
-        )
-        .is_ok()
-        {
-            let s = self.query_status_cache.query_status(q);
-            let should_try = if self.proxy_state.should_proxy() {
-                s.always
+        let should_try =
+            if rewrite::process_query(&mut q.statement, self.noria.server_supports_pagination())
+                .is_ok()
+            {
+                let s = self.state.query_status_cache.query_status(q);
+                let should_try = if self.state.proxy_state.should_proxy() {
+                    s.always
+                } else {
+                    true
+                };
+                status = Some(s);
+                should_try
             } else {
-                true
+                warn!(statement = %Sensitive(&q.statement),
+                  "This statement could not be rewritten by ReadySet");
+                matches!(
+                    self.state.proxy_state,
+                    ProxyState::Never | ProxyState::Fallback
+                )
             };
-            status = Some(s);
-            should_try
-        } else {
-            warn!(statement = %Sensitive(&q.statement), "This statement could not be rewritten by ReadySet");
-            matches!(self.proxy_state, ProxyState::Never | ProxyState::Fallback)
-        };
 
         (should_try, status)
+    }
+
+    /// Handles a parsed set statement.
+    ///
+    /// If we have an upstream then we will pass valid set statements across to that upstream.
+    /// If no upstream is present we will ignore the statement
+    /// Disallowed set statements always produce an error
+    fn handle_set(
+        noria: &mut NoriaConnector,
+        upstream: Option<&mut &mut DB>,
+        settings: &BackendSettings,
+        state: &mut BackendState<DB>,
+        query: &str,
+        set: &SetStatement,
+        event: &mut QueryExecutionEvent,
+    ) -> Result<(), DB::Error> {
+        match Handler::handle_set_statement(set) {
+            SetBehavior::Unsupported => {
+                warn!(%set, "received unsupported SET statement");
+                match settings.unsupported_set_mode {
+                    UnsupportedSetMode::Error => {
+                        let e = ReadySetError::SetDisallowed {
+                            statement: query.to_string(),
+                        };
+                        if upstream.is_some() {
+                            event.set_noria_error(&e);
+                        }
+                        return Err(e.into());
+                    }
+                    UnsupportedSetMode::Proxy => {
+                        state.proxy_state = ProxyState::ProxyAlways;
+                    }
+                    UnsupportedSetMode::Allow => {}
+                }
+            }
+            SetBehavior::Proxy => { /* Do nothing (the caller will proxy for us) */ }
+            SetBehavior::SetAutocommit(on) => {
+                warn!(%set, "received unsupported SET statement");
+                match settings.unsupported_set_mode {
+                    UnsupportedSetMode::Error if !on => {
+                        let e = ReadySetError::SetDisallowed {
+                            statement: query.to_string(),
+                        };
+                        if upstream.is_some() {
+                            event.set_noria_error(&e);
+                        }
+                        return Err(e.into());
+                    }
+                    UnsupportedSetMode::Proxy => {
+                        state.proxy_state.set_autocommit(on);
+                    }
+                    _ => {}
+                }
+            }
+            SetBehavior::SetSearchPath(search_path) => {
+                trace!(?search_path, "Setting search_path");
+                noria.set_schema_search_path(search_path);
+            }
+        }
+
+        Ok(())
+    }
+
+    #[instrument(level = "trace", name = "query", skip_all)]
+    async fn query_adhoc_non_select<'a>(
+        noria: &'a mut NoriaConnector,
+        mut upstream: Option<&'a mut DB>,
+        query: &'a str,
+        event: &mut QueryExecutionEvent,
+        parse_result: SqlQuery,
+        settings: &BackendSettings,
+        state: &mut BackendState<DB>,
+    ) -> Result<QueryResult<'a, DB>, DB::Error> {
+        let parsed_query = &parse_result;
+
+        match &parse_result {
+            SqlQuery::Set(s) => {
+                Self::handle_set(noria, upstream.as_mut(), settings, state, query, s, event)?
+            }
+            SqlQuery::Use(UseStatement { database }) => {
+                noria.set_schema_search_path(vec![database.clone()])
+            }
+            _ => (),
+        }
+
+        let res = {
+            // Upstream reads are tried when noria reads produce an error. Upstream writes are done
+            // by default when the upstream connector is present.
+            if let Some(upstream) = upstream {
+                match parsed_query {
+                    SqlQuery::Select(_) => unreachable!("read path returns prior"),
+                    SqlQuery::Insert(InsertStatement { table: t, .. })
+                    | SqlQuery::Update(UpdateStatement { table: t, .. })
+                    | SqlQuery::Delete(DeleteStatement { table: t, .. }) => {
+                        event.sql_type = SqlQueryType::Write;
+                        let _t = event.start_upstream_timer();
+
+                        // Update ticket if RYW enabled
+                        let query_result = if cfg!(feature = "ryw") {
+                            if let Some(timestamp_service) = &mut state.timestamp_client {
+                                let (query_result, identifier) =
+                                    upstream.handle_ryw_write(query).await?;
+
+                                // TODO(andrew): Move table name to table index conversion to
+                                // timestamp service https://app.clubhouse.io/readysettech/story/331
+                                let index = noria.node_index_of(t.name.as_str()).await?;
+                                let affected_tables = vec![WriteKey::TableIndex(index)];
+
+                                let new_timestamp = timestamp_service
+                                    .append_write(WriteId::MySqlGtid(identifier), affected_tables)
+                                    .map_err(|e| internal_err!("{e}"))?;
+
+                                // TODO(andrew, justin): solidify error handling in client
+                                // https://app.clubhouse.io/readysettech/story/366
+                                let current_ticket = state.ticket.as_ref().ok_or_else(|| {
+                                    internal_err!("RYW enabled backends must have a current ticket")
+                                })?;
+
+                                state.ticket =
+                                    Some(Timestamp::join(current_ticket, &new_timestamp));
+                                Ok(query_result)
+                            } else {
+                                upstream.query(query).await
+                            }
+                        } else {
+                            upstream.query(query).await
+                        };
+
+                        query_result.map(QueryResult::Upstream)
+                    }
+
+                    // Table Create / Drop (RYW not supported)
+                    // TODO(andrew, justin): how are these types of writes handled w.r.t RYW?
+                    SqlQuery::CreateView(_)
+                    | SqlQuery::CreateTable(_)
+                    | SqlQuery::DropTable(_)
+                    | SqlQuery::DropView(_)
+                    | SqlQuery::AlterTable(_) => {
+                        event.sql_type = SqlQueryType::Other;
+                        upstream.query(query).await.map(QueryResult::Upstream)
+                    }
+                    SqlQuery::RenameTable(_) => {
+                        unsupported!("{} not yet supported", parsed_query.query_type());
+                    }
+                    SqlQuery::Set(_) | SqlQuery::CompoundSelect(_) | SqlQuery::Show(_) => {
+                        event.sql_type = SqlQueryType::Other;
+                        upstream.query(query).await.map(QueryResult::Upstream)
+                    }
+                    SqlQuery::StartTransaction(_)
+                    | SqlQuery::Commit(_)
+                    | SqlQuery::Rollback(_)
+                    | SqlQuery::Use(_) => {
+                        Self::handle_transaction_boundaries(
+                            Some(upstream),
+                            &mut state.proxy_state,
+                            parsed_query,
+                        )
+                        .await
+                    }
+                    SqlQuery::CreateCache(_)
+                    | SqlQuery::DropCache(_)
+                    | SqlQuery::DropAllCaches(_)
+                    | SqlQuery::Explain(_) => {
+                        unreachable!("path returns prior")
+                    }
+                }
+            } else {
+                // Interacting directly with ReadySet writer (No RYW support)
+                //
+                // TODO(andrew, justin): Do we want RYW support with the NoriaConnector?
+                // Currently, no. TODO: Implement event execution metrics for
+                // ReadySet without upstream.
+                event.destination = Some(QueryDestination::Readyset);
+                let start = Instant::now();
+
+                let res = match parsed_query {
+                    SqlQuery::Select(_) => unreachable!("read path returns prior"),
+                    // CREATE VIEW will still trigger migrations with epxlicit-migrations enabled
+                    SqlQuery::CreateView(q) => noria.handle_create_view(q).await,
+                    SqlQuery::CreateTable(q) => noria.handle_table_operation(q.clone()).await,
+                    SqlQuery::AlterTable(q) => noria.handle_table_operation(q.clone()).await,
+                    SqlQuery::DropTable(q) => noria.handle_table_operation(q.clone()).await,
+                    SqlQuery::DropView(q) => noria.handle_table_operation(q.clone()).await,
+                    SqlQuery::Insert(q) => noria.handle_insert(q).await,
+                    SqlQuery::Update(q) => noria.handle_update(q).await,
+                    SqlQuery::Delete(q) => noria.handle_delete(q).await,
+                    // Return a empty result we are allowing unsupported set statements. Commit
+                    // messages are dropped - we do not support transactions in noria standalone.
+                    // We return an empty result set instead of an error to support test
+                    // applications.
+                    SqlQuery::Set(_) | SqlQuery::Commit(_) | SqlQuery::Use(_) => {
+                        Ok(noria_connector::QueryResult::Empty)
+                    }
+                    _ => {
+                        error!("unsupported query");
+                        unsupported!("query type unsupported");
+                    }
+                };
+
+                event.readyset_duration = Some(start.elapsed());
+                event.noria_error = res.as_ref().err().cloned();
+                Ok(QueryResult::Noria(res?))
+            }
+        };
+
+        res
     }
 
     /// Executes `query` using the reader/writer belonging to the calling `Backend` struct.
     #[instrument_root(level = "info")]
     #[inline]
-    pub async fn query(&mut self, query: &str) -> Result<QueryResult<'_, DB>, DB::Error> {
+    pub async fn query<'a>(&'a mut self, query: &'a str) -> Result<QueryResult<'a, DB>, DB::Error> {
         let mut event = QueryExecutionEvent::new(EventType::Query);
         let query_log_sender = self.query_log_sender.clone();
-        let slowlog = self.slowlog;
+        let slowlog = self.settings.slowlog;
 
         let parse_result = {
             let _t = event.start_parse_timer();
@@ -1805,18 +2043,30 @@ where
                 if !matches!(e, ReadySetError::ReaderMissingKey) {
                     warn!(error = %e, "Error received from noria, sending query to fallback");
                 }
-                let fallback_res = self.query_fallback(query, &mut event).await;
+                let fallback_res =
+                    Self::query_fallback(self.upstream.as_mut(), query, &mut event).await;
                 if fallback_res.is_ok() {
-                    warn!(error = %e, "Query failed to parse but was successfuly parsed upon fallback, there is a gap in our parsing");
-                    self.query_status_cache.insert(query);
+                    warn!(error = %e,
+                          "Query failed to parse but was successfuly parsed upon fallback,
+                          there is a gap in our parsing");
+                    self.state.query_status_cache.insert(query);
                 }
                 fallback_res
             }
             // Check for COMMIT+ROLLBACK before we check whether we should proxy, since we need to
             // know when a COMMIT or ROLLBACK happens so we can leave `ProxyState::InTransaction`
             Ok(parsed_query @ (SqlQuery::Commit(_) | SqlQuery::Rollback(_))) => {
-                self.query_adhoc_non_select(query, &mut event, parsed_query).await
-            },
+                Self::query_adhoc_non_select(
+                    &mut self.noria,
+                    self.upstream.as_mut(),
+                    query,
+                    &mut event,
+                    parsed_query,
+                    &self.settings,
+                    &mut self.state,
+                )
+                .await
+            }
             // ReadySet extensions should never be proxied.
             Ok(ref parsed_query) if let Some(noria_extension) = self.query_noria_extensions(parsed_query, &mut event).await => {
                 noria_extension.map(Into::into).map_err(Into::into)
@@ -1824,13 +2074,23 @@ where
             // SET autocommit=1 needs to be handled explicitly or it will end up getting proxied in
             // most cases.
             Ok(SqlQuery::Set(s))
-                if Handler::handle_set_statement(&s) == SetBehavior::SetAutocommit(true) => {
-                    self.query_adhoc_non_select(query, &mut event, SqlQuery::Set(s)).await
-                }
+                if Handler::handle_set_statement(&s) == SetBehavior::SetAutocommit(true) =>
+            {
+                Self::query_adhoc_non_select(
+                    &mut self.noria,
+                    self.upstream.as_mut(),
+                    query,
+                    &mut event,
+                    SqlQuery::Set(s),
+                    &self.settings,
+                    &mut self.state,
+                )
+                .await
+            }
             Ok(ref parsed_query) if Handler::requires_fallback(parsed_query) => {
                 if self.has_fallback() {
                     // Query requires a fallback and we can send it to fallback
-                    self.query_fallback(query, &mut event).await
+                    Self::query_fallback(self.upstream.as_mut(), query, &mut event).await
                 } else {
                     // Query requires a fallback, but none is available
                     Handler::default_response(parsed_query)
@@ -1841,24 +2101,46 @@ where
             Ok(SqlQuery::Select(stmt)) => {
                 let mut view_request = ViewCreateRequest::new(
                     stmt.clone(),
-                    self.noria.schema_search_path().to_owned()
+                    self.noria.schema_search_path().to_owned(),
                 );
                 let (noria_should_try, status) = self.noria_should_try_select(&mut view_request);
                 if noria_should_try {
                     event.sql_type = SqlQueryType::Read;
-                    if self.query_log_ad_hoc_queries {
+                    if self.settings.query_log_ad_hoc_queries {
                         event.query = Some(Arc::new(SqlQuery::Select(stmt.clone())));
                     }
-
-                    self.query_adhoc_select(query, stmt, &view_request, status, &mut event).await
+                    Self::query_adhoc_select(
+                        &mut self.noria,
+                        self.upstream.as_mut(),
+                        &self.settings,
+                        &mut self.state,
+                        query,
+                        stmt,
+                        &view_request,
+                        status,
+                        &mut event,
+                    )
+                    .await
                 } else {
-                    self.query_fallback(query, &mut event).await
+                    Self::query_fallback(self.upstream.as_mut(), query, &mut event).await
                 }
             }
-            Ok(_) if self.proxy_state.should_proxy() => self.query_fallback(query, &mut event).await,
-            Ok(parsed_query) => self.query_adhoc_non_select(query, &mut event, parsed_query).await,
-        }
-        .map(|r| r.into_owned());
+            Ok(_) if self.state.proxy_state.should_proxy() => {
+                Self::query_fallback(self.upstream.as_mut(), query, &mut event).await
+            }
+            Ok(parsed_query) => {
+                Self::query_adhoc_non_select(
+                    &mut self.noria,
+                    self.upstream.as_mut(),
+                    query,
+                    &mut event,
+                    parsed_query,
+                    &self.settings,
+                    &mut self.state,
+                )
+                .await
+            }
+        };
 
         self.last_query = event.destination.map(|d| QueryInfo {
             destination: d,
@@ -1868,6 +2150,7 @@ where
                 .map(|e| e.to_string())
                 .unwrap_or_default(),
         });
+
         log_query(query_log_sender.as_ref(), event, slowlog);
 
         result
@@ -1890,15 +2173,15 @@ where
 
     // For debugging purposes
     pub fn ticket(&self) -> &Option<Timestamp> {
-        &self.ticket
+        &self.state.ticket
     }
 
     fn parse_query(&mut self, query: &str) -> ReadySetResult<SqlQuery> {
-        match self.parsed_query_cache.entry(query.to_owned()) {
+        match self.state.parsed_query_cache.entry(query.to_owned()) {
             Entry::Occupied(entry) => Ok(entry.get().clone()),
             Entry::Vacant(entry) => {
                 trace!("Parsing query");
-                match nom_sql::parse_query(self.dialect, query) {
+                match nom_sql::parse_query(self.settings.dialect, query) {
                     Ok(parsed_query) => Ok(entry.insert(parsed_query).clone()),
                     Err(_) => Err(ReadySetError::UnparseableQuery {
                         query: query.to_string(),
@@ -1908,236 +2191,8 @@ where
         }
     }
 
-    /// Handles a parsed set statement.
-    ///
-    /// If we have an upstream then we will pass valid set statements across to that upstream.
-    /// If no upstream is present we will ignore the statement
-    /// Disallowed set statements always produce an error
-    fn handle_set(
-        &mut self,
-        query: &str,
-        set: &SetStatement,
-        event: &mut QueryExecutionEvent,
-    ) -> Result<(), DB::Error> {
-        match Handler::handle_set_statement(set) {
-            SetBehavior::Unsupported => {
-                warn!(%set, "received unsupported SET statement");
-                match self.unsupported_set_mode {
-                    UnsupportedSetMode::Error => {
-                        let e = ReadySetError::SetDisallowed {
-                            statement: query.to_string(),
-                        };
-                        if self.has_fallback() {
-                            event.set_noria_error(&e);
-                        }
-                        return Err(e.into());
-                    }
-                    UnsupportedSetMode::Proxy => {
-                        self.proxy_state = ProxyState::ProxyAlways;
-                    }
-                    UnsupportedSetMode::Allow => {}
-                }
-            }
-            SetBehavior::Proxy => { /* Do nothing (the caller will proxy for us) */ }
-            SetBehavior::SetAutocommit(on) => {
-                warn!(%set, "received unsupported SET statement");
-                match self.unsupported_set_mode {
-                    UnsupportedSetMode::Error if !on => {
-                        let e = ReadySetError::SetDisallowed {
-                            statement: query.to_string(),
-                        };
-                        if self.has_fallback() {
-                            event.set_noria_error(&e);
-                        }
-                        return Err(e.into());
-                    }
-                    UnsupportedSetMode::Proxy => {
-                        self.proxy_state.set_autocommit(on);
-                    }
-                    _ => {}
-                }
-            }
-            SetBehavior::SetSearchPath(search_path) => {
-                trace!(?search_path, "Setting search_path");
-                self.noria.set_schema_search_path(search_path);
-            }
-        }
-
-        Ok(())
-    }
-
-    #[instrument(level = "trace", name = "query", skip_all)]
-    async fn query_adhoc_non_select<'a>(
-        &'a mut self,
-        query: &str,
-        event: &mut QueryExecutionEvent,
-        parse_result: SqlQuery,
-    ) -> Result<QueryResult<'a, DB>, DB::Error> {
-        let parsed_query = &parse_result;
-
-        match &parse_result {
-            SqlQuery::Set(s) => self.handle_set(query, s, event)?,
-            SqlQuery::Use(UseStatement { database }) => {
-                self.noria.set_schema_search_path(vec![database.clone()])
-            }
-            _ => (),
-        }
-
-        macro_rules! handle_ddl {
-            ($noria_method: ident ($stmt: expr)) => {
-                if let Some(upstream) = &mut self.upstream {
-                    self.last_query = Some(QueryInfo {
-                        destination: QueryDestination::Upstream,
-                        noria_error: String::new(),
-                    });
-                    let upstream_res = upstream.query(query).await;
-                    Ok(QueryResult::Upstream(upstream_res?))
-                } else {
-                    self.last_query = Some(QueryInfo {
-                        destination: QueryDestination::Readyset,
-                        noria_error: String::new(),
-                    });
-                    Ok(QueryResult::Noria(self.noria.$noria_method($stmt).await?))
-                }
-            };
-        }
-
-        let res = {
-            // Upstream reads are tried when noria reads produce an error. Upstream writes are done
-            // by default when the upstream connector is present.
-            if let Some(ref mut upstream) = self.upstream {
-                match parsed_query {
-                    SqlQuery::Select(_) => unreachable!("read path returns prior"),
-                    SqlQuery::Insert(InsertStatement { table: t, .. })
-                    | SqlQuery::Update(UpdateStatement { table: t, .. })
-                    | SqlQuery::Delete(DeleteStatement { table: t, .. }) => {
-                        event.sql_type = SqlQueryType::Write;
-                        event.destination = Some(QueryDestination::Upstream);
-
-                        let _t = event.start_upstream_timer();
-                        // Update ticket if RYW enabled
-                        let query_result = if cfg!(feature = "ryw") {
-                            if let Some(timestamp_service) = &mut self.timestamp_client {
-                                let (query_result, identifier) =
-                                    upstream.handle_ryw_write(query).await?;
-
-                                // TODO(andrew): Move table name to table index conversion to
-                                // timestamp service https://app.clubhouse.io/readysettech/story/331
-                                let index = self.noria.node_index_of(t.name.as_str()).await?;
-                                let affected_tables = vec![WriteKey::TableIndex(index)];
-
-                                let new_timestamp = timestamp_service
-                                    .append_write(WriteId::MySqlGtid(identifier), affected_tables)
-                                    .map_err(|e| internal_err!("{e}"))?;
-
-                                // TODO(andrew, justin): solidify error handling in client
-                                // https://app.clubhouse.io/readysettech/story/366
-                                let current_ticket = &self.ticket.as_ref().ok_or_else(|| {
-                                    internal_err!("RYW enabled backends must have a current ticket")
-                                })?;
-
-                                self.ticket = Some(Timestamp::join(current_ticket, &new_timestamp));
-                                Ok(query_result)
-                            } else {
-                                upstream.query(query).await
-                            }
-                        } else {
-                            upstream.query(query).await
-                        };
-
-                        self.last_query = Some(QueryInfo {
-                            destination: QueryDestination::Upstream,
-                            noria_error: String::new(),
-                        });
-                        Ok(QueryResult::Upstream(query_result?))
-                    }
-
-                    // Table Create / Drop (RYW not supported)
-                    // TODO(andrew, justin): how are these types of writes handled w.r.t RYW?
-                    // CREATE VIEW will still trigger migrations with explicit-migrations enabled
-                    SqlQuery::CreateView(stmt) => {
-                        handle_ddl!(handle_create_view(stmt))
-                    }
-                    SqlQuery::CreateTable(stmt) => {
-                        handle_ddl!(handle_table_operation(stmt.clone()))
-                    }
-                    SqlQuery::DropTable(stmt) => {
-                        handle_ddl!(handle_table_operation(stmt.clone()))
-                    }
-                    SqlQuery::DropView(stmt) => {
-                        handle_ddl!(handle_table_operation(stmt.clone()))
-                    }
-                    SqlQuery::AlterTable(stmt) => {
-                        handle_ddl!(handle_table_operation(stmt.clone()))
-                    }
-                    SqlQuery::RenameTable(_) => {
-                        unsupported!("{} not yet supported", parsed_query.query_type());
-                    }
-                    SqlQuery::Set(_) | SqlQuery::CompoundSelect(_) | SqlQuery::Show(_) => {
-                        let res = upstream.query(query).await.map(QueryResult::Upstream);
-                        self.last_query = Some(QueryInfo {
-                            destination: QueryDestination::Upstream,
-                            noria_error: String::new(),
-                        });
-                        res
-                    }
-                    SqlQuery::StartTransaction(_)
-                    | SqlQuery::Commit(_)
-                    | SqlQuery::Rollback(_)
-                    | SqlQuery::Use(_) => {
-                        let res = self.handle_transaction_boundaries(parsed_query).await;
-                        self.last_query = Some(QueryInfo {
-                            destination: QueryDestination::Upstream,
-                            noria_error: String::new(),
-                        });
-                        res
-                    }
-                    SqlQuery::CreateCache(_)
-                    | SqlQuery::DropCache(_)
-                    | SqlQuery::DropAllCaches(_)
-                    | SqlQuery::Explain(_) => {
-                        unreachable!("path returns prior")
-                    }
-                }
-            } else {
-                // Interacting directly with ReadySet writer (No RYW support)
-                //
-                // TODO(andrew, justin): Do we want RYW support with the NoriaConnector?
-                // Currently, no. TODO: Implement event execution metrics for
-                // ReadySet without upstream.
-                event.destination = Some(QueryDestination::Readyset);
-                let start = Instant::now();
-
-                let res = match parsed_query {
-                    SqlQuery::Select(_) => unreachable!("read path returns prior"),
-                    // CREATE VIEW will still trigger migrations with epxlicit-migrations enabled
-                    SqlQuery::CreateView(q) => self.noria.handle_create_view(q).await,
-                    SqlQuery::CreateTable(q) => self.noria.handle_table_operation(q.clone()).await,
-                    SqlQuery::AlterTable(q) => self.noria.handle_table_operation(q.clone()).await,
-                    SqlQuery::DropTable(q) => self.noria.handle_table_operation(q.clone()).await,
-                    SqlQuery::DropView(q) => self.noria.handle_table_operation(q.clone()).await,
-                    SqlQuery::Insert(q) => self.noria.handle_insert(q).await,
-                    SqlQuery::Update(q) => self.noria.handle_update(q).await,
-                    SqlQuery::Delete(q) => self.noria.handle_delete(q).await,
-                    // Return a empty result we are allowing unsupported set statements. Commit
-                    // messages are dropped - we do not support transactions in noria standalone.
-                    // We return an empty result set instead of an error to support test
-                    // applications.
-                    SqlQuery::Set(_) | SqlQuery::Commit(_) | SqlQuery::Use(_) => {
-                        Ok(noria_connector::QueryResult::Empty)
-                    }
-                    _ => {
-                        error!("unsupported query");
-                        unsupported!("query type unsupported");
-                    }
-                }?;
-                event.readyset_duration = Some(start.elapsed());
-
-                Ok(QueryResult::Noria(res))
-            }
-        };
-
-        res
+    pub fn does_require_authentication(&self) -> bool {
+        self.settings.require_authentication
     }
 }
 

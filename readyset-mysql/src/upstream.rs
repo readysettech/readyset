@@ -3,10 +3,12 @@ use std::convert::TryInto;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures_util::Stream;
 use mysql_async::consts::{CapabilityFlags, StatusFlags};
 use mysql_async::prelude::Queryable;
-use mysql_async::{Column, Conn, Opts, OptsBuilder, Row, TxOpts, UrlError};
+use mysql_async::{Column, Conn, Opts, OptsBuilder, ResultSetStream, Row, TxOpts, UrlError};
 use nom_sql::SqlIdentifier;
+use pin_project::pin_project;
 use readyset::ColumnSchema;
 use readyset_client::upstream_database::NoriaCompare;
 use readyset_client::{UpstreamDatabase, UpstreamPrepare};
@@ -23,17 +25,39 @@ fn dt_to_value_params(dt: &[DfValue]) -> Result<Vec<mysql_async::Value>, readyse
     dt.iter().map(|v| v.try_into()).collect()
 }
 
+#[pin_project(project = ReadResultStreamProj)]
 #[derive(Debug)]
-pub enum QueryResult {
+pub enum ReadResultStream<'a> {
+    Text(#[pin] ResultSetStream<'a, 'a, 'static, Row, mysql_async::TextProtocol>),
+    Binary(#[pin] ResultSetStream<'a, 'a, 'static, Row, mysql_async::BinaryProtocol>),
+}
+
+impl<'a> From<ResultSetStream<'a, 'a, 'static, Row, mysql_async::TextProtocol>>
+    for ReadResultStream<'a>
+{
+    fn from(s: ResultSetStream<'a, 'a, 'static, Row, mysql_async::TextProtocol>) -> Self {
+        ReadResultStream::Text(s)
+    }
+}
+
+impl<'a> From<ResultSetStream<'a, 'a, 'static, Row, mysql_async::BinaryProtocol>>
+    for ReadResultStream<'a>
+{
+    fn from(s: ResultSetStream<'a, 'a, 'static, Row, mysql_async::BinaryProtocol>) -> Self {
+        ReadResultStream::Binary(s)
+    }
+}
+
+#[derive(Debug)]
+pub enum QueryResult<'a> {
     WriteResult {
         num_rows_affected: u64,
         last_inserted_id: u64,
         status_flags: StatusFlags,
     },
     ReadResult {
-        data: Vec<Row>,
-        columns: Option<Arc<[Column]>>,
-        status_flags: StatusFlags,
+        stream: ReadResultStream<'a>,
+        columns: Arc<[Column]>,
     },
     Command {
         status_flags: StatusFlags,
@@ -78,6 +102,29 @@ fn schema_column_match(schema: &[ColumnSchema], columns: &[Column]) -> Result<()
     Ok(())
 }
 
+impl<'a> Stream for ReadResultStream<'a> {
+    type Item = Result<Row, mysql_async::Error>;
+
+    fn poll_next(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        match self.project() {
+            ReadResultStreamProj::Text(s) => s.poll_next(cx),
+            ReadResultStreamProj::Binary(s) => s.poll_next(cx),
+        }
+    }
+}
+
+impl<'a> ReadResultStream<'a> {
+    pub fn status_flags(&self) -> Option<StatusFlags> {
+        match self {
+            ReadResultStream::Text(s) => s.ok_packet().map(|o| o.status_flags()),
+            ReadResultStream::Binary(s) => s.ok_packet().map(|o| o.status_flags()),
+        }
+    }
+}
+
 impl NoriaCompare for StatementMeta {
     type Error = Error;
     fn compare(
@@ -92,10 +139,51 @@ impl NoriaCompare for StatementMeta {
     }
 }
 
+macro_rules! handle_query_result {
+    ($result: expr) => {{
+        let columns = ($result).columns().ok_or_else(|| {
+            ReadySetError::Internal("The mysql_async result was already consumed".to_string())
+        })?;
+
+        if columns.len() > 0 {
+            return Ok(QueryResult::ReadResult {
+                stream: $result
+                    .stream_and_drop()
+                    .await?
+                    .ok_or_else(|| {
+                        ReadySetError::Internal(
+                            "The mysql_async resultset was already consumed".to_string(),
+                        )
+                    })?
+                    .into(),
+                columns,
+            });
+        } else {
+            // Kinda sad that can't get status from conn, since it is mutably borrowed above
+            let resultset = $result.stream_and_drop::<Row>().await?.ok_or_else(|| {
+                ReadySetError::Internal("The mysql_async result has no resultsets".to_string())
+            })?;
+
+            return Ok(QueryResult::WriteResult {
+                num_rows_affected: resultset.affected_rows(),
+                last_inserted_id: resultset.last_insert_id().unwrap_or(1),
+                status_flags: resultset
+                    .ok_packet()
+                    .ok_or_else(|| {
+                        ReadySetError::Internal(
+                            "The mysql_async result has no ok packet".to_string(),
+                        )
+                    })?
+                    .status_flags(),
+            });
+        }
+    }};
+}
+
 #[async_trait]
 impl UpstreamDatabase for MySqlUpstream {
     type Config = ();
-    type QueryResult = QueryResult;
+    type QueryResult<'a> = QueryResult<'a>;
     type StatementMeta = StatementMeta;
     type Error = Error;
 
@@ -176,9 +264,13 @@ impl UpstreamDatabase for MySqlUpstream {
         })
     }
 
-    async fn execute(&mut self, id: u32, params: &[DfValue]) -> Result<Self::QueryResult, Error> {
+    async fn execute<'a>(
+        &'a mut self,
+        id: u32,
+        params: &[DfValue],
+    ) -> Result<Self::QueryResult<'a>, Error> {
         let params = dt_to_value_params(params)?;
-        let mut result = self
+        let result = self
             .conn
             .exec_iter(
                 self.prepared_statements.get(&id).ok_or(Error::ReadySet(
@@ -187,54 +279,22 @@ impl UpstreamDatabase for MySqlUpstream {
                 params,
             )
             .await?;
-        let columns = result.columns().ok_or_else(|| {
-            ReadySetError::Internal("The mysql_async result was already consumed".to_string())
-        })?;
-
-        if columns.len() > 0 {
-            Ok(QueryResult::ReadResult {
-                data: result.collect().await?,
-                columns: Some(columns),
-                status_flags: self.conn.status(),
-            })
-        } else {
-            Ok(QueryResult::WriteResult {
-                num_rows_affected: result.affected_rows(),
-                last_inserted_id: result.last_insert_id().unwrap_or(1),
-                status_flags: self.conn.status(),
-            })
-        }
+        handle_query_result!(result)
     }
 
-    async fn query<'a, S>(&'a mut self, query: S) -> Result<Self::QueryResult, Error>
+    async fn query<'a, S>(&'a mut self, query: S) -> Result<Self::QueryResult<'a>, Error>
     where
         S: AsRef<str> + Send + Sync + 'a,
     {
-        let mut result = self.conn.query_iter(query).await?;
-
-        let columns = result.columns().ok_or_else(|| {
-            ReadySetError::Internal("The mysql_async result was already consumed".to_string())
-        })?;
-        if columns.len() > 0 {
-            Ok(QueryResult::ReadResult {
-                data: result.collect().await?,
-                columns: Some(columns),
-                status_flags: self.conn.status(),
-            })
-        } else {
-            Ok(QueryResult::WriteResult {
-                num_rows_affected: result.affected_rows(),
-                last_inserted_id: result.last_insert_id().unwrap_or(1),
-                status_flags: self.conn.status(),
-            })
-        }
+        let result = self.conn.query_iter(query).await?;
+        handle_query_result!(result)
     }
 
     /// Executes the given query on the mysql backend.
     async fn handle_ryw_write<'a, S>(
         &'a mut self,
         query: S,
-    ) -> Result<(Self::QueryResult, String), Error>
+    ) -> Result<(Self::QueryResult<'a>, String), Error>
     where
         S: AsRef<str> + Send + Sync + 'a,
     {
@@ -263,7 +323,7 @@ impl UpstreamDatabase for MySqlUpstream {
         ))
     }
 
-    async fn start_tx(&mut self) -> Result<Self::QueryResult, Error> {
+    async fn start_tx<'a>(&'a mut self) -> Result<Self::QueryResult<'a>, Error> {
         self.conn.query_drop("START TRANSACTION").await?;
 
         Ok(QueryResult::Command {
@@ -271,7 +331,7 @@ impl UpstreamDatabase for MySqlUpstream {
         })
     }
 
-    async fn commit(&mut self) -> Result<Self::QueryResult, Error> {
+    async fn commit<'a>(&'a mut self) -> Result<Self::QueryResult<'a>, Error> {
         let result = self.conn.query_iter("COMMIT").await?;
         result.drop_result().await?;
 
@@ -280,7 +340,7 @@ impl UpstreamDatabase for MySqlUpstream {
         })
     }
 
-    async fn rollback(&mut self) -> Result<Self::QueryResult, Error> {
+    async fn rollback<'a>(&'a mut self) -> Result<Self::QueryResult<'a>, Error> {
         let result = self.conn.query_iter("ROLLBACK").await?;
         result.drop_result().await?;
 
