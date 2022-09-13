@@ -683,7 +683,7 @@ impl<'ast> Visitor<'ast> for AutoParametrizeVisitor {
 /// Replace all literals that are in positions we support parameters in the given query with
 /// parameters, and return the values for those parameters alongside the index in the parameter list
 /// where they appear as a tuple of (placeholder position, value).
-fn auto_parametrize_query(query: &mut SelectStatement) -> Vec<(usize, Literal)> {
+pub fn auto_parametrize_query(query: &mut SelectStatement) -> Vec<(usize, Literal)> {
     // Don't try to auto-parametrize equal-queries that already contain range params for now, since
     // we don't yet allow mixing range and equal parameters in the same query
     if query.where_clause.iter().any(|expr| {

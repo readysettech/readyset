@@ -55,9 +55,14 @@ readyset-client-metrics = { path = "../readyset-client-metrics" }
 [dev-dependencies]
 proptest = "1.0.0"
 test-strategy = "0.2.0"
+criterion = "0.3"
 
 [lib]
 path = "src/lib.rs"
+
+[[bench]]
+name = "rewrite"
+harness = false
 
 [features]
 ryw = []

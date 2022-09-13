@@ -3737,6 +3737,7 @@ dependencies = [
  "bincode",
  "bit-vec",
  "chrono",
+ "criterion",
  "dashmap",
  "dataflow-expression",
  "derive_more",
