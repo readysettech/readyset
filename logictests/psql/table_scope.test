@@ -1,3 +1,5 @@
+# 1. Unqualified CTE aliasees should take precedence over tables
+
 statement ok
 create table t1 (id integer primary key, value integer);
 
@@ -7,7 +9,6 @@ create table t2 (val text);
 statement ok
 insert into t1 (id, value) values (1, 1), (2, 2);
 
-# Unqualified CTE aliases take precedence over tables
 query II rowsort
 with t2 as (select * from t1) select * from t2
 ----
@@ -15,6 +16,8 @@ with t2 as (select * from t1) select * from t2
 1
 2
 2
+
+# 2. Newly created tables should get seen by existing queries
 
 skipif readyset
 statement ok
@@ -60,5 +63,51 @@ create cache from select x from t;
 
 query I nosort
 select x from t;
+----
+1
+
+# 3. That should also happen if we change the schema path *after* creating the query
+
+statement ok
+create table s2.t3 (x int);
+
+statement ok
+insert into s2.t3 (x) values (2);
+
+statement ok
+set search_path = s2;
+
+query I nosort
+select x from t3;
+----
+2
+
+statement ok
+set search_path = s1, s2;
+
+query I nosort
+select x from t3;
+----
+2
+
+statement ok
+create table s1.t3 (x int);
+
+statement ok
+insert into s1.t3 (x) values (1);
+
+# Let the query error out once to bust the view cache in the adapter backend (in
+# prod, this would go to fallback)
+onlyif readyset
+statement error
+select x from t3;
+
+# Recreate the query...
+onlyif readyset
+statement ok
+create cache from select x from t3;
+
+query I nosort
+select x from t3;
 ----
 1
