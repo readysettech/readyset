@@ -1,23 +1,31 @@
 #![feature(box_patterns)]
 
+use std::cmp::Ordering;
 use std::convert::{TryFrom, TryInto};
 use std::error::Error;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::net::IpAddr;
 use std::ops::{Add, Div, Mul, Sub};
+use std::sync::Arc;
 
+use bit_vec::BitVec;
 use bytes::BytesMut;
 use chrono::{self, DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, TimeZone};
 use enum_kinds::EnumKind;
+use eui48::{MacAddress, MacAddressFormat};
 use itertools::Itertools;
-use launchpad::arbitrary::arbitrary_duration;
+use launchpad::arbitrary::{arbitrary_decimal, arbitrary_duration};
+use mysql_time::MysqlTime;
 use ndarray::{ArrayD, IxDyn};
 use nom_sql::{Double, Float, Literal, SqlType};
 use proptest::prelude::{prop_oneof, Arbitrary};
 use readyset_errors::{internal, invalid_err, unsupported, ReadySetError, ReadySetResult};
+use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
+use rust_decimal::Decimal;
 use test_strategy::Arbitrary;
 use tokio_postgres::types::{to_sql_checked, FromSql, IsNull, Kind, ToSql, Type};
+use uuid::Uuid;
 
 mod array;
 mod r#enum;
@@ -604,17 +612,6 @@ impl Default for DfValue {
         DfValue::None
     }
 }
-
-use std::cmp::Ordering;
-use std::sync::Arc;
-
-use bit_vec::BitVec;
-use eui48::{MacAddress, MacAddressFormat};
-use launchpad::arbitrary::arbitrary_decimal;
-use mysql_time::MysqlTime;
-use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
-use rust_decimal::Decimal;
-use uuid::Uuid;
 
 impl PartialOrd for DfValue {
     fn partial_cmp(&self, other: &DfValue) -> Option<Ordering> {
