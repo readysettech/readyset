@@ -8820,7 +8820,6 @@ async fn read_from_dropped_query() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "Flaky test (ENG-1655)"]
 async fn double_create_table_with_multiple_modifications() {
     let mut g = start_simple_unsharded("double_create_table_add_column").await;
 
