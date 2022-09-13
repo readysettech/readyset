@@ -9,6 +9,7 @@
 #![deny(unreachable_pub)]
 
 pub mod backend;
+pub mod health_reporter;
 pub mod http_router;
 pub mod migration_handler;
 mod query_handler;

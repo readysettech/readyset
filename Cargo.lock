@@ -3757,6 +3757,7 @@ dependencies = [
  "mysql_common",
  "nom 7.1.1",
  "nom-sql",
+ "parking_lot 0.11.2",
  "proptest",
  "readyset",
  "readyset-client-metrics",
