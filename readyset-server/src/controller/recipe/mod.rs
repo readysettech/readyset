@@ -207,6 +207,21 @@ impl Recipe {
                             ))
                         }
                         _ => {
+                            let invalidate_queries = self
+                                .registry
+                                .queries_to_invalidate_for_table(&cts.table)
+                                .cloned()
+                                .collect::<Vec<_>>();
+
+                            for invalidate_query in invalidate_queries {
+                                info!(
+                                    table = %cts.table,
+                                    query = %invalidate_query,
+                                    "Created table invalidates previously-created query due to \
+                                     schema resolution; dropping query"
+                                );
+                                self.remove_expression(&invalidate_query, mig)?;
+                            }
                             self.inc.add_table(cts.clone(), mig)?;
                             self.registry.add_query(RecipeExpr::Table(cts))?;
                         }
@@ -253,6 +268,11 @@ impl Recipe {
                             always: ccqs.always,
                         };
                         let aliased = self.registry.add_query(expression)?;
+                        debug!(
+                            query = %name,
+                            tables = ?invalidating_tables,
+                            "Recording list of tables that, if created, would invalidate query"
+                        );
                         self.registry.insert_invalidating_tables(
                             name.clone(),
                             invalidating_tables.clone(),

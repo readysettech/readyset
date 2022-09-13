@@ -47,6 +47,17 @@ insert into s1.t (x) values (1);
 
 graphviz
 
+# Let the query error out once to bust the view cache in the adapter backend (in
+# prod, this would go to fallback)
+onlyif readyset
+statement error
+select x from t;
+
+# Recreate the query...
+onlyif readyset
+statement ok
+create cache from select x from t;
+
 query I nosort
 select x from t;
 ----

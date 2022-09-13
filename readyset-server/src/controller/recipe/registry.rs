@@ -249,7 +249,6 @@ impl ExprRegistry {
 
     /// Returns an iterator over a list of queries that should be invalidated as a result of a table
     /// with the given name being created.
-    #[allow(dead_code)] // TODO(grfn)
     pub(super) fn queries_to_invalidate_for_table(
         &self,
         table_name: &Relation,
