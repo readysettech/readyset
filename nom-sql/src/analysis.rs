@@ -408,6 +408,7 @@ pub struct Subexpressions<'a> {
 impl<'a> Iterator for Subexpressions<'a> {
     type Item = &'a Expr;
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         while let Some(subexprs) = self.subexpr_iterators.front_mut() {
             match subexprs.next() {
@@ -441,6 +442,7 @@ impl Expr {
     /// let subexprs = expr.immediate_subexpressions().collect::<Vec<_>>();
     /// assert_eq!(subexprs, vec![&Expr::Column("x".into())])
     /// ````
+    #[inline]
     pub fn immediate_subexpressions<'a>(&'a self) -> Box<dyn Iterator<Item = &'a Expr> + 'a> {
         match self {
             Expr::Literal(_)
@@ -483,6 +485,7 @@ impl Expr {
 
     /// Construct an iterator over all *recursive* subexpressions of the given Expr, excluding
     /// the expression itself. Iteration order is unspecified.
+    #[inline]
     pub fn recursive_subexpressions(&self) -> Subexpressions {
         let mut subexpr_iterators = VecDeque::with_capacity(1);
         subexpr_iterators.push_back(self.immediate_subexpressions());
