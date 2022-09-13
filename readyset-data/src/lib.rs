@@ -1911,12 +1911,12 @@ macro_rules! arithmetic_operation (
             }
 
 
-            (first, second) => panic!(
+            (first, second) => return Err(invalid_err!(
                 "can't {} a {:?} and {:?}",
                 stringify!($op),
-                first,
-                second,
-            ),
+                DfValueKind::from(first),
+                DfValueKind::from(second),
+            )),
         }
     );
 );
@@ -2420,14 +2420,6 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "can't + a TinyText(\"hi\") and Int(5)")]
-    fn add_invalid_types() {
-        let a: DfValue = "hi".try_into().unwrap();
-        let b: DfValue = 5.into();
-        let _ = &a + &b;
-    }
-
-    #[test]
     fn data_type_debug() {
         let tiny_text: DfValue = "hi".try_into().unwrap();
         let text: DfValue = "I contain ' and \"".try_into().unwrap();
@@ -2464,6 +2456,11 @@ mod tests {
             format!("{:?}", bits),
             "BitVector(000000000000100000100111010111000110010010000000)"
         );
+    }
+
+    #[test]
+    fn invalid_arithmetic_returns_error() {
+        (&DfValue::from(0) + &DfValue::from("abc")).unwrap_err();
     }
 
     #[test]
