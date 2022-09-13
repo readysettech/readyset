@@ -687,12 +687,14 @@ impl DeploymentBuilder {
             .await?;
 
             // Sleep to give the adapter time to startup.
-            sleep(Duration::from_millis(2000)).await;
-
-            mysql_adapters.push(AdapterHandle {
+            let handle = AdapterHandle {
                 conn_str: format!("mysql://127.0.0.1:{}", port),
                 process,
-            })
+            };
+
+            wait_for_adapter_startup(metrics_port, Duration::from_millis(2000)).await?;
+
+            mysql_adapters.push(handle);
         }
 
         let mut handle = DeploymentHandle {
@@ -720,6 +722,41 @@ impl DeploymentBuilder {
         self.start_with_seed::<String>(&[], Duration::from_secs(90))
             .await
     }
+}
+
+/// Waits for AdapterHandle to be healthy, up to the provided timeout.
+async fn wait_for_adapter_startup(metrics_port: u16, timeout: Duration) -> anyhow::Result<()> {
+    let health_check_url = format!("http://127.0.0.1:{}/health", metrics_port);
+    let poll_interval = timeout.checked_div(10).expect("timeout must be valid");
+
+    // Polls the health_check_url continuously until it returns OK.
+    async fn health_check_poller(
+        health_check_url: String,
+        poll_interval: Duration,
+    ) -> anyhow::Result<()> {
+        loop {
+            let r = hyper::Request::get(&health_check_url)
+                .body(hyper::Body::from(String::default()))
+                .unwrap();
+
+            let client = Client::new();
+            // If this http requests returns an error, the adapter http server may not be ready yet.
+            // If it returns something that isn't StatusCode::Ok, it is unhealthy and may eventually
+            // become healthy.
+            if let Ok(r) = client.request(r).await {
+                if r.status() == hyper::StatusCode::OK {
+                    break Ok(());
+                }
+            }
+            sleep(poll_interval).await;
+        }
+    }
+
+    tokio::time::timeout(
+        timeout,
+        health_check_poller(health_check_url, poll_interval),
+    )
+    .await?
 }
 
 /// A handle to a single server in the deployment.
@@ -922,6 +959,31 @@ impl DeploymentHandle {
         Ok(server_addr)
     }
 
+    /// Start a new readyset-mysql adapter instance in the deployment
+    pub async fn start_mysql_adapter(&mut self, wait_for_startup: bool) -> anyhow::Result<()> {
+        let port = get_next_good_port(Some(self.port));
+        let metrics_port = get_next_good_port(Some(port));
+        self.port = port;
+        let process = start_mysql_adapter(
+            self.upstream_mysql_addr.clone(),
+            port,
+            metrics_port,
+            self.adapter_start_params(),
+        )
+        .await?;
+
+        if wait_for_startup {
+            wait_for_adapter_startup(metrics_port, Duration::from_millis(2000)).await?;
+        }
+
+        self.mysql_adapters.push(AdapterHandle {
+            conn_str: format!("mysql://127.0.0.1:{}", port),
+            process,
+        });
+
+        Ok(())
+    }
+
     /// Waits for the back-end to return that it is ready to process queries.
     pub async fn backend_ready(&mut self, timeout: Duration) -> ReadySetResult<()> {
         let mut e = None;
@@ -988,10 +1050,14 @@ impl DeploymentHandle {
         // Drop any errors on failure to kill so we complete
         // cleanup.
         for h in &mut self.readyset_server_handles {
-            let _ = h.1.process.kill();
+            // Ignore the result: If the kill() errors, we still want to attempt cleaning up the
+            // resources below
+            let _ = h.1.process.kill().await;
         }
         for adapter_handle in &mut self.mysql_adapters {
-            let _ = adapter_handle.process.kill();
+            // Ignore the result: If the kill() errors, we still want to attempt cleaning up the
+            // resources below
+            let _ = adapter_handle.process.kill().await;
         }
 
         // Clean up the existing mysql state.
@@ -1027,6 +1093,12 @@ impl DeploymentHandle {
     /// exists Otherwise, `None` is returned.
     pub fn first_adapter_handle(&mut self) -> Option<&mut AdapterHandle> {
         self.adapter_handle(0)
+    }
+
+    /// Returns a mutable reference to the list of [`AdapterHandle`]s for the deployment.
+    /// index. May be empty if no adapters are running
+    pub fn adapter_handles(&mut self) -> &mut Vec<AdapterHandle> {
+        self.mysql_adapters.as_mut()
     }
 
     /// Returns a mutable reference to the [`AdapterHandle`] for the readyset-adapter at the given
@@ -1280,6 +1352,28 @@ mod tests {
         )
         .await
         .is_err());
+        deployment.teardown().await.unwrap();
+    }
+
+    /// Test that setting a failpoint triggers a panic on RPC.
+    #[tokio::test(flavor = "multi_thread")]
+    #[serial]
+    async fn start_adapter_running_deployment() {
+        let cluster_name = "ct_start_adapter_running_deployment";
+        let mut deployment = DeploymentBuilder::new(cluster_name)
+            .add_server(ServerParams::default())
+            .start()
+            .await
+            .unwrap();
+
+        assert!(deployment.adapter_handles().is_empty());
+
+        deployment
+            .start_mysql_adapter(false)
+            .await
+            .expect("failed to start adapter");
+
+        assert_eq!(1, deployment.adapter_handles().len());
         deployment.teardown().await.unwrap();
     }
 }
