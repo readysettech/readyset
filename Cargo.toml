@@ -6,6 +6,7 @@ eui48 = { git = "https://github.com/readysettech/eui48.git", branch = "master" }
 [workspace]
 members = [
     "array2",
+    "concrete-iter",
     "database-utils",
     "dataflow-expression",
     "dataflow-state",

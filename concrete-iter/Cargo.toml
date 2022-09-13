@@ -1,0 +1,14 @@
+[package]
+name = "concrete-iter"
+version = "0.1.0"
+publish = false
+authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+edition = "2021"
+
+[dependencies]
+syn = { version = "1.0.57", features = ["full", "parsing", "printing", "visit", "visit-mut", "extra-traits"] }
+quote = "1.0.8"
+proc-macro2 = "1"
+
+[lib]
+proc-macro = true
