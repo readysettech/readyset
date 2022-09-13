@@ -17,6 +17,7 @@ use crate::drop::{
     DropTableStatement, DropViewStatement,
 };
 use crate::explain::{explain_statement, ExplainStatement};
+use crate::expression::expression;
 use crate::insert::{insertion, InsertStatement};
 use crate::rename::{rename_table, RenameTableStatement};
 use crate::select::{selection, SelectStatement};
@@ -29,7 +30,7 @@ use crate::transaction::{
 use crate::update::{updating, UpdateStatement};
 use crate::use_statement::{use_statement, UseStatement};
 use crate::whitespace::whitespace0;
-use crate::{Dialect, DropAllCachesStatement, TableKey};
+use crate::{Dialect, DropAllCachesStatement, Expr, TableKey};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)]
@@ -200,6 +201,25 @@ where
     T: AsRef<str>,
 {
     parse_select_statement_bytes(dialect, input.as_ref().trim().as_bytes())
+}
+
+/// Parse an expr from a byte slice
+pub fn parse_expr_bytes<T>(dialect: Dialect, input: T) -> Result<Expr, &'static str>
+where
+    T: AsRef<[u8]>,
+{
+    match expression(dialect)(input.as_ref()) {
+        Ok((remaining, o)) if remaining.is_empty() => Ok(o),
+        _ => Err("failed to parse expr"),
+    }
+}
+
+/// Parse an expr from a string
+pub fn parse_expr<T>(dialect: Dialect, input: T) -> Result<Expr, &'static str>
+where
+    T: AsRef<str>,
+{
+    parse_expr_bytes(dialect, input.as_ref().trim().as_bytes())
 }
 
 /// Parse a create table statement from a byte slice
