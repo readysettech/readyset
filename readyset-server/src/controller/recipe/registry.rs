@@ -88,6 +88,7 @@ pub(super) struct ExprRegistry {
     /// A map from [`QueryID`] to the [`RecipeExpr`] associated with it.
     #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
     expressions: HashMap<QueryID, RecipeExpr>,
+
     /// The set of queries that depend on other queries.
     ///
     /// # Invariants
@@ -97,6 +98,11 @@ pub(super) struct ExprRegistry {
     /// - The values *must* be valid [`QueryID`]s (aka, present in `expressions`), and their
     ///   associated expression should be of [`RecipeExpr::Cache`] or [`RecipeExpr::View`] variant.
     dependencies: HashMap<QueryID, HashSet<QueryID>>,
+
+    /// Map from names of *nonexistent* tables, to a set of names for queries which should be
+    /// invalidated if those tables are ever created
+    table_to_invalidated_queries: HashMap<Relation, HashSet<Relation>>,
+
     /// Aliases assigned to each [`RecipeExpr`] stored.
     ///
     /// # Invariants
@@ -107,11 +113,7 @@ pub(super) struct ExprRegistry {
 impl ExprRegistry {
     /// Creates a new, empty [`ExprRegistry`].
     pub(super) fn new() -> Self {
-        Self {
-            expressions: HashMap::new(),
-            dependencies: HashMap::new(),
-            aliases: HashMap::new(),
-        }
+        Default::default()
     }
 
     /// Adds a [`RecipeExpr`] to the registry.
@@ -214,6 +216,49 @@ impl ExprRegistry {
     /// Returns the number of aliases being stored in the registry.
     pub(super) fn num_aliases(&self) -> usize {
         self.aliases.len()
+    }
+
+    /// Record a set of names for tables which, if ever created, should invalidate the query with
+    /// the given name.
+    ///
+    /// Returns an error if a query named `query_name` does not exist
+    #[allow(dead_code)] // TODO(grfn)
+    pub(super) fn insert_invalidating_tables<I>(
+        &mut self,
+        query_name: Relation,
+        invalidating_tables: I,
+    ) -> ReadySetResult<()>
+    where
+        I: IntoIterator<Item = Relation>,
+    {
+        if !self.aliases.contains_key(&query_name) {
+            return Err(ReadySetError::RecipeInvariantViolated(format!(
+                "Query {} does not exist",
+                query_name,
+            )));
+        }
+
+        for table in invalidating_tables {
+            self.table_to_invalidated_queries
+                .entry(table)
+                .or_default()
+                .insert(query_name.clone());
+        }
+
+        Ok(())
+    }
+
+    /// Returns an iterator over a list of queries that should be invalidated as a result of a table
+    /// with the given name being created.
+    #[allow(dead_code)] // TODO(grfn)
+    pub(super) fn queries_to_invalidate_for_table(
+        &self,
+        table_name: &Relation,
+    ) -> impl Iterator<Item = &Relation> {
+        self.table_to_invalidated_queries
+            .get(table_name)
+            .into_iter()
+            .flatten()
     }
 
     fn assign_alias(&mut self, alias: Relation, query_id: QueryID) -> ReadySetResult<()> {
@@ -644,6 +689,69 @@ mod tests {
                 })
                 .unwrap();
             assert!(registry.contains(&stmt))
+        }
+
+        #[test]
+        fn insert_invalidating_tables() {
+            let mut registry = setup();
+            registry
+                .insert_invalidating_tables(
+                    "test_query".into(),
+                    [
+                        Relation {
+                            schema: Some("s1".into()),
+                            name: "t1".into(),
+                        },
+                        Relation {
+                            schema: Some("s2".into()),
+                            name: "t2".into(),
+                        },
+                    ],
+                )
+                .unwrap();
+
+            registry
+                .add_query(RecipeExpr::Cache {
+                    name: "test_query2".into(),
+                    statement: parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table")
+                        .unwrap(),
+                    always: false,
+                })
+                .unwrap();
+
+            registry
+                .insert_invalidating_tables(
+                    "test_query2".into(),
+                    [Relation {
+                        schema: Some("s1".into()),
+                        name: "t1".into(),
+                    }],
+                )
+                .unwrap();
+
+            let result = registry
+                .queries_to_invalidate_for_table(&Relation {
+                    schema: Some("s1".into()),
+                    name: "t1".into(),
+                })
+                .collect::<HashSet<_>>();
+
+            assert_eq!(
+                result,
+                [
+                    &Relation::from("test_query"),
+                    &Relation::from("test_query2")
+                ]
+                .into()
+            );
+        }
+
+        #[test]
+        fn insert_invalidating_tables_with_nonexistent_query() {
+            let mut registry = setup();
+            registry
+                .insert_invalidating_tables("nonexistent_query".into(), [])
+                .unwrap_err();
         }
     }
 }
