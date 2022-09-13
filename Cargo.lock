@@ -2708,6 +2708,7 @@ dependencies = [
  "assert_approx_eq",
  "bincode",
  "bit-vec",
+ "criterion",
  "derive_more",
  "eui48",
  "hex",
@@ -3210,7 +3211,7 @@ dependencies = [
 [[package]]
 name = "postgres-protocol"
 version = "0.6.2"
-source = "git+https://github.com/readysettech/rust-postgres.git#278f240fac961c34f784b3cb9e2853b60e18bf90"
+source = "git+https://github.com/readysettech/rust-postgres.git#5f7dc45e766ca0a660bb5b7b7833862b92eb2087"
 dependencies = [
  "base64",
  "byteorder",
@@ -3227,7 +3228,7 @@ dependencies = [
 [[package]]
 name = "postgres-types"
 version = "0.2.2"
-source = "git+https://github.com/readysettech/rust-postgres.git#278f240fac961c34f784b3cb9e2853b60e18bf90"
+source = "git+https://github.com/readysettech/rust-postgres.git#5f7dc45e766ca0a660bb5b7b7833862b92eb2087"
 dependencies = [
  "bit-vec",
  "bytes 1.1.0",
@@ -5409,7 +5410,7 @@ dependencies = [
 [[package]]
 name = "tokio-postgres"
 version = "0.7.3"
-source = "git+https://github.com/readysettech/rust-postgres.git#278f240fac961c34f784b3cb9e2853b60e18bf90"
+source = "git+https://github.com/readysettech/rust-postgres.git#5f7dc45e766ca0a660bb5b7b7833862b92eb2087"
 dependencies = [
  "async-trait",
  "byteorder",
