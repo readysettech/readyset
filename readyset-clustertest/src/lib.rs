@@ -211,7 +211,7 @@ mod readyset_mysql;
 mod utils;
 
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::{Duration, Instant};
 
@@ -277,13 +277,13 @@ fn default_root_password() -> String {
     "noria".to_string()
 }
 
-/// Source of the noria binaries.
-pub(crate) struct NoriaBinarySource {
+/// Source of the readyset binaries.
+pub(crate) struct ReadySetBinarySource {
     /// Path to a built readyset-server on the local machine.
-    pub noria_server: PathBuf,
+    pub readyset_server: PathBuf,
     /// Optional path to readyset-mysql on the local machine. readyset-mysql
     /// may not be included in the build.
-    pub noria_mysql: Option<PathBuf>,
+    pub readyset_mysql: Option<PathBuf>,
 }
 
 /// Parameters for a single readyset-server instance.
@@ -293,10 +293,10 @@ pub struct ServerParams {
     /// The volume id of the server, passed in via `--volume-id`.
     volume_id: Option<String>,
     /// Prevent this server from running domains containing readers. Corresponds to the
-    /// `--no-readers` flag to the noria server binary
+    /// `--no-readers` flag to the readyset server binary
     no_readers: bool,
     /// Only allow domains containing readers to run on this server. Corresponds to the
-    /// `--reader-only` flag to the noria server binary
+    /// `--reader-only` flag to the readyset server binary
     reader_only: bool,
 }
 
@@ -320,6 +320,29 @@ impl ServerParams {
     }
 }
 
+#[must_use]
+#[derive(Clone)]
+pub struct ServerStartParams {
+    /// Absolute path to the readyset-server binary
+    readyset_server_path: PathBuf,
+    /// Name of the deployment.
+    deployment_name: String,
+    /// Number of shards for dataflow nodes.
+    shards: Option<usize>,
+    /// Number of workers to wait for before starting.
+    quorum: usize,
+    /// The authority connect string the server is configured to use.
+    authority_address: String,
+    /// The authority type the server is configured to use.
+    authority_type: String,
+    /// Replicator restart timeout in seconds.
+    replicator_restart_timeout_secs: Option<u64>,
+    /// Number of times to replicate reader domains.
+    reader_replicas: Option<usize>,
+    /// Whether or not to auto restart the server process.
+    auto_restart: bool,
+}
+
 /// Set of parameters defining an entire cluster's topology.
 #[must_use]
 pub struct DeploymentBuilder {
@@ -327,7 +350,7 @@ pub struct DeploymentBuilder {
     /// with this name.
     name: String,
     /// Source of the binaries.
-    noria_binaries: NoriaBinarySource,
+    readyset_binaries: ReadySetBinarySource,
     /// Number of shards for dataflow nodes.
     shards: Option<usize>,
     /// Number of workers to wait for before starting.
@@ -370,7 +393,7 @@ pub struct DeploymentBuilder {
     /// Optional password for the MySQL user.
     mysql_pass: Option<String>,
     /// Replicator restart timeout in seconds.
-    replicator_restart_timeout: Option<u64>,
+    replicator_restart_timeout_secs: Option<u64>,
     /// Number of times to replicate reader domains
     reader_replicas: Option<usize>,
     /// If true, will automatically restart the server/adapter processes
@@ -381,11 +404,11 @@ impl DeploymentBuilder {
     pub fn new(name: &str) -> Self {
         let env = envy::from_env::<Env>().unwrap();
 
-        let mut noria_server_path = env.binary_path.clone();
-        noria_server_path.push("readyset-server");
+        let mut readyset_server_path = env.binary_path.clone();
+        readyset_server_path.push("readyset-server");
 
-        let mut noria_mysql_path = env.binary_path;
-        noria_mysql_path.push("readyset-mysql");
+        let mut readyset_mysql_path = env.binary_path;
+        readyset_mysql_path.push("readyset-mysql");
 
         // Append the deployment name with a random number to prevent state collisions
         // on test repeats with failed teardowns.
@@ -394,9 +417,9 @@ impl DeploymentBuilder {
 
         Self {
             name,
-            noria_binaries: NoriaBinarySource {
-                noria_server: noria_server_path,
-                noria_mysql: Some(noria_mysql_path),
+            readyset_binaries: ReadySetBinarySource {
+                readyset_server: readyset_server_path,
+                readyset_mysql: Some(readyset_mysql_path),
             },
             shards: None,
             quorum: 1,
@@ -415,7 +438,7 @@ impl DeploymentBuilder {
             views_polling_interval: Duration::from_secs(300),
             mysql_user: None,
             mysql_pass: None,
-            replicator_restart_timeout: None,
+            replicator_restart_timeout_secs: None,
             reader_replicas: None,
             auto_restart: false,
         }
@@ -522,7 +545,7 @@ impl DeploymentBuilder {
 
     /// Sets the amount of time that the replicator should wait before restarting in seconds.
     pub fn replicator_restart_timeout(mut self, secs: u64) -> Self {
-        self.replicator_restart_timeout = Some(secs);
+        self.replicator_restart_timeout_secs = Some(secs);
         self
     }
 
@@ -536,6 +559,35 @@ impl DeploymentBuilder {
     pub fn auto_restart(mut self, auto_restart: bool) -> Self {
         self.auto_restart = auto_restart;
         self
+    }
+
+    pub fn adapter_start_params(&self) -> AdapterStartParams {
+        AdapterStartParams {
+            deployment_name: self.name.clone(),
+            readyset_mysql_path: self.readyset_binaries.readyset_mysql.clone().unwrap(),
+            authority_address: self.authority_address.clone(),
+            authority_type: self.authority.to_string(),
+            async_migration_interval: self.async_migration_interval,
+            dry_run_migration_interval: self.dry_run_migration_interval,
+            query_max_failure_seconds: self.query_max_failure_seconds,
+            fallback_recovery_seconds: self.fallback_recovery_seconds,
+            auto_restart: self.auto_restart,
+            views_polling_interval: self.views_polling_interval,
+        }
+    }
+
+    pub fn server_start_params(&self) -> ServerStartParams {
+        ServerStartParams {
+            readyset_server_path: self.readyset_binaries.readyset_server.clone(),
+            deployment_name: self.name.clone(),
+            shards: self.shards,
+            quorum: self.quorum,
+            authority_address: self.authority_address.clone(),
+            authority_type: self.authority.to_string(),
+            replicator_restart_timeout_secs: self.replicator_restart_timeout_secs,
+            reader_replicas: self.reader_replicas,
+            auto_restart: self.auto_restart,
+        }
     }
 
     /// Starts the local multi-process deployment after running a set of commands in the
@@ -596,18 +648,10 @@ impl DeploymentBuilder {
         for server in &self.servers {
             port = get_next_good_port(Some(port));
             let handle = start_server(
-                server,
-                &self.noria_binaries.noria_server,
-                &self.name,
-                self.shards,
-                self.quorum,
-                &self.authority_address,
-                &self.authority.to_string(),
                 port,
                 server_upstream.as_ref(),
-                self.replicator_restart_timeout,
-                self.reader_replicas,
-                self.auto_restart,
+                server,
+                &self.server_start_params(),
             )
             .await?;
 
@@ -632,23 +676,13 @@ impl DeploymentBuilder {
         // Start `self.mysql_adapters` MySQL adapter instances.
         let mut mysql_adapters = Vec::with_capacity(self.mysql_adapters);
         for _ in 0..self.mysql_adapters {
-            // TODO(justin): Turn this into a stateful object.
             port = get_next_good_port(Some(port));
             let metrics_port = get_next_good_port(Some(port));
             let process = start_mysql_adapter(
-                self.noria_binaries.noria_mysql.as_ref().unwrap(),
-                &self.name,
-                &self.authority_address,
-                &self.authority.to_string(),
+                server_upstream.clone(),
                 port,
                 metrics_port,
-                server_upstream.as_ref(),
-                self.async_migration_interval,
-                self.dry_run_migration_interval,
-                self.query_max_failure_seconds,
-                self.fallback_recovery_seconds,
-                self.views_polling_interval,
-                self.auto_restart,
+                &self.adapter_start_params(),
             )
             .await?;
 
@@ -665,19 +699,13 @@ impl DeploymentBuilder {
             handle,
             metrics,
             name: self.name.clone(),
-            authority_addr: self.authority_address,
-            authority: self.authority,
+            adapter_start_params: self.adapter_start_params(),
+            server_start_params: self.server_start_params(),
             upstream_mysql_addr,
-            noria_server_handles: handles,
+            readyset_server_handles: handles,
             shutdown: false,
-            noria_binaries: self.noria_binaries,
-            shards: self.shards,
-            quorum: self.quorum,
             port,
             mysql_adapters,
-            replicator_restart_timeout: self.replicator_restart_timeout,
-            reader_replicas: self.reader_replicas,
-            auto_restart: self.auto_restart,
         };
 
         handle.wait_for_workers(Duration::from_secs(90)).await?;
@@ -745,39 +773,37 @@ pub struct DeploymentHandle {
     handle: ControllerHandle,
     /// Metrics client for aggregating metrics across the deployment.
     metrics: MetricsClient,
-    /// Map from a noria server's address to a handle to the server.
-    noria_server_handles: HashMap<Url, ServerHandle>,
+    /// Map from a readyset server's address to a handle to the server.
+    readyset_server_handles: HashMap<Url, ServerHandle>,
+    /// Holds a list of handles to the mysql adapters for this deployment, if any
+    mysql_adapters: Vec<AdapterHandle>,
     /// The name of the deployment, cluster resources are prefixed
     /// by `name`.
     name: String,
-    /// The authority connect string for the deployment.
-    authority_addr: String,
-    /// The authority type for the deployment.
-    authority: AuthorityType,
+    /// The configured parameters with which to start new adapters: in the deployment.
+    adapter_start_params: AdapterStartParams,
+    /// The configured parameters with which to start new servers in the deployment.
+    server_start_params: ServerStartParams,
     /// The connection string of the upstream mysql database for the deployment.
     upstream_mysql_addr: Option<String>,
-    /// A handle to each noria server in the deployment.
+    /// A handle to each readyset server in the deployment.
     /// True if this deployment has already been torn down.
     shutdown: bool,
-    /// The paths to the binaries for the deployment.
-    noria_binaries: NoriaBinarySource,
-    /// Dataflow shards for new servers.
-    shards: Option<usize>,
-    /// Number of workers to wait for before starting.
-    quorum: usize,
     /// Next new server port.
     port: u16,
-    /// Holds a list of handles to the mysql adapters for this deployment, if any
-    mysql_adapters: Vec<AdapterHandle>,
-    /// Replicator restart timeout in seconds.
-    replicator_restart_timeout: Option<u64>,
-    /// Number of times to replicate reader domains
-    reader_replicas: Option<usize>,
-    /// Whether or not to restart the server/adapter if they are not running
-    auto_restart: bool,
 }
 
 impl DeploymentHandle {
+    /// Returns the [`ServerStartParams`] for the deployment
+    pub fn server_start_params(&mut self) -> &mut ServerStartParams {
+        &mut self.server_start_params
+    }
+
+    /// Returns the [`AdapterStartParams`] for the deployment
+    pub fn adapter_start_params(&mut self) -> &mut AdapterStartParams {
+        &mut self.adapter_start_params
+    }
+
     /// Returns a [`ControllerHandle`] that enables sending RPCs to the leader
     /// of the deployment.
     pub fn leader_handle(&mut self) -> &mut ControllerHandle {
@@ -879,22 +905,14 @@ impl DeploymentHandle {
         let port = get_next_good_port(Some(self.port));
         self.port = port;
         let handle = start_server(
-            &params,
-            &self.noria_binaries.noria_server,
-            &self.name,
-            self.shards,
-            self.quorum,
-            &self.authority_addr,
-            &self.authority.to_string(),
             port,
-            self.upstream_mysql_addr.as_ref(),
-            self.replicator_restart_timeout,
-            self.reader_replicas,
-            self.auto_restart,
+            self.upstream_mysql_addr.clone().as_ref(),
+            &params,
+            self.server_start_params(),
         )
         .await?;
         let server_addr = handle.addr.clone();
-        self.noria_server_handles
+        self.readyset_server_handles
             .insert(server_addr.clone(), handle);
 
         if wait_for_startup {
@@ -947,11 +965,11 @@ impl DeploymentHandle {
         server_addr: &Url,
         wait_for_removal: bool,
     ) -> anyhow::Result<()> {
-        if !self.noria_server_handles.contains_key(server_addr) {
+        if !self.readyset_server_handles.contains_key(server_addr) {
             return Err(anyhow!("Server handle does not exist in deployment"));
         }
 
-        let mut handle = self.noria_server_handles.remove(server_addr).unwrap();
+        let mut handle = self.readyset_server_handles.remove(server_addr).unwrap();
         handle.process.kill().await?;
 
         if wait_for_removal {
@@ -969,7 +987,7 @@ impl DeploymentHandle {
 
         // Drop any errors on failure to kill so we complete
         // cleanup.
-        for h in &mut self.noria_server_handles {
+        for h in &mut self.readyset_server_handles {
             let _ = h.1.process.kill();
         }
         for adapter_handle in &mut self.mysql_adapters {
@@ -990,19 +1008,19 @@ impl DeploymentHandle {
 
     /// Returns a vector of readyset-server controller addresses.
     pub fn server_addrs(&self) -> Vec<Url> {
-        self.noria_server_handles.keys().cloned().collect()
+        self.readyset_server_handles.keys().cloned().collect()
     }
 
     /// Returns a mutable map from readyset-server addresses to their
     /// [`ServerHandle`].
     pub fn server_handles(&mut self) -> &mut HashMap<Url, ServerHandle> {
-        &mut self.noria_server_handles
+        &mut self.readyset_server_handles
     }
 
     /// Returns the [`ServerHandle`] for a readyset-server if `url` is in the
     /// deployment. Otherwise, `None` is returned.
     pub fn server_handle(&mut self, url: &Url) -> Option<&mut ServerHandle> {
-        self.noria_server_handles.get_mut(url)
+        self.readyset_server_handles.get_mut(url)
     }
 
     /// Returns a mutable reference to the [`AdapterHandle`] for the first readyset-adapter if one
@@ -1037,30 +1055,52 @@ impl Drop for DeploymentHandle {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+pub struct AdapterStartParams {
+    /// Absolute path to the readyset-mysql binary.
+    readyset_mysql_path: PathBuf,
+    /// Name of the deployment.
+    deployment_name: String,
+    /// The authority connect string the adapter is configured to use.
+    authority_address: String,
+    /// The authority type the adapter is configured to use.
+    authority_type: String,
+    /// The interval at which to perform async migrations, if Some, else None indicates that async
+    /// migrations are not enabled.
+    async_migration_interval: Option<u64>,
+    /// Enables explicit migrations, and passes in an interval for running dry run migrations that
+    /// determine whether queries that weren't explicitly migrated would be supported by ReadySet.
+    /// Exposed via the `SHOW PROXIED QUERIES` command.
+    dry_run_migration_interval: Option<u64>,
+    /// The max time in seconds that a query may continuously fail until we enter a recovery
+    /// period. None if not enabled.
+    query_max_failure_seconds: Option<u64>,
+    /// The period in seconds that we enter into a fallback recovery mode for a given query, if
+    /// that query has continously failed for query_max_failure_seconds.
+    /// None if not enabled.
+    fallback_recovery_seconds: Option<u64>,
+    /// Whether or not to automatically restart the adapter process.
+    auto_restart: bool,
+    /// Specifies the polling interval for the adapter to request views from the Leader.
+    ///
+    /// Corresponds to [`readyset_client_adapter::Options::views_polling_interval`]
+    views_polling_interval: Duration,
+}
+
 async fn start_server(
-    server_params: &ServerParams,
-    noria_server_path: &Path,
-    deployment_name: &str,
-    shards: Option<usize>,
-    quorum: usize,
-    authority_addr: &str,
-    authority: &str,
     port: u16,
     mysql: Option<&String>,
-    replicator_restart_timeout: Option<u64>,
-    reader_replicas: Option<usize>,
-    auto_restart: bool,
+    server_params: &ServerParams,
+    server_start_params: &ServerStartParams,
 ) -> Result<ServerHandle> {
-    let mut builder = ReadysetServerBuilder::new(noria_server_path)
-        .deployment(deployment_name)
+    let mut builder = ReadysetServerBuilder::new(server_start_params.readyset_server_path.as_ref())
+        .deployment(server_start_params.deployment_name.as_str())
         .external_port(port)
-        .authority_addr(authority_addr)
-        .authority(authority)
-        .quorum(quorum)
-        .auto_restart(auto_restart);
+        .authority_addr(&server_start_params.authority_address)
+        .authority(&server_start_params.authority_type)
+        .quorum(server_start_params.quorum)
+        .auto_restart(server_start_params.auto_restart);
 
-    if let Some(shard) = shards {
+    if let Some(shard) = server_start_params.shards {
         builder = builder.shards(shard);
     }
 
@@ -1076,10 +1116,10 @@ async fn start_server(
     if let Some(mysql) = mysql {
         builder = builder.mysql(mysql);
     }
-    if let Some(t) = replicator_restart_timeout {
+    if let Some(t) = server_start_params.replicator_restart_timeout_secs {
         builder = builder.replicator_restart_timeout(t);
     }
-    if let Some(rs) = reader_replicas {
+    if let Some(rs) = server_start_params.reader_replicas {
         builder = builder.reader_replicas(rs);
     }
     let addr = Url::parse(&format!("http://127.0.0.1:{}", port)).unwrap();
@@ -1090,49 +1130,38 @@ async fn start_server(
     })
 }
 
-// TODO(justin): Wrap these parameters.
-#[allow(clippy::too_many_arguments)]
 async fn start_mysql_adapter(
-    noria_mysql_path: &Path,
-    deployment_name: &str,
-    authority_addr: &str,
-    authority: &str,
+    server_upstream: Option<String>,
     port: u16,
     metrics_port: u16,
-    mysql: Option<&String>,
-    async_migration_interval: Option<u64>,
-    dry_run_migration_interval: Option<u64>,
-    query_max_failure_seconds: Option<u64>,
-    fallback_recovery_seconds: Option<u64>,
-    views_polling_interval: Duration,
-    auto_restart: bool,
+    params: &AdapterStartParams,
 ) -> Result<ProcessHandle> {
-    let mut builder = AdapterBuilder::new(noria_mysql_path)
-        .deployment(deployment_name)
+    let mut builder = AdapterBuilder::new(params.readyset_mysql_path.as_ref())
+        .deployment(&params.deployment_name)
         .port(port)
         .metrics_port(metrics_port)
-        .authority_addr(authority_addr)
-        .authority(authority)
-        .auto_restart(auto_restart)
-        .views_polling_interval(views_polling_interval);
+        .authority_addr(params.authority_address.as_str())
+        .authority(params.authority_type.as_str())
+        .auto_restart(params.auto_restart)
+        .views_polling_interval(params.views_polling_interval);
 
-    if let Some(interval) = async_migration_interval {
+    if let Some(interval) = params.async_migration_interval {
         builder = builder.async_migrations(interval);
     }
 
-    if let Some(interval) = dry_run_migration_interval {
+    if let Some(interval) = params.dry_run_migration_interval {
         builder = builder.explicit_migrations(interval);
     }
 
-    if let Some(secs) = query_max_failure_seconds {
+    if let Some(secs) = params.query_max_failure_seconds {
         builder = builder.query_max_failure_seconds(secs);
     }
 
-    if let Some(secs) = fallback_recovery_seconds {
+    if let Some(secs) = params.fallback_recovery_seconds {
         builder = builder.fallback_recovery_seconds(secs);
     }
 
-    if let Some(mysql) = mysql {
+    if let Some(ref mysql) = server_upstream {
         builder = builder.mysql(mysql);
     }
 
