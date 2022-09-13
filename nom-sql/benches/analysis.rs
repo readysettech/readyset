@@ -2,7 +2,6 @@ use std::iter;
 
 use criterion::{black_box, criterion_group, criterion_main, Bencher, Criterion};
 use nom_sql::{parse_expr, Dialect, Expr};
-use pprof::criterion::{Output, PProfProfiler};
 
 fn recursive_subexpressions(c: &mut Criterion) {
     let run_benchmark = |b: &mut Bencher, src: &str| {
