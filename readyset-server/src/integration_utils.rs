@@ -142,13 +142,11 @@ pub async fn sleep() {
 /// must be called before the server is started, otherwise it will fail to
 /// register its metrics with the correct recorder, and none will be recorded
 pub fn register_metric_recorder() {
-    unsafe {
-        if get_global_recorder().is_none() {
-            let rec = CompositeMetricsRecorder::with_recorders(vec![MetricsRecorder::Noria(
-                NoriaMetricsRecorder::new(),
-            )]);
-            install_global_recorder(rec).unwrap();
-        }
+    if get_global_recorder().is_none() {
+        let rec = CompositeMetricsRecorder::with_recorders(vec![MetricsRecorder::Noria(
+            NoriaMetricsRecorder::new(),
+        )]);
+        install_global_recorder(rec).unwrap();
     }
 }
 
