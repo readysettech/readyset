@@ -222,7 +222,6 @@ impl ExprRegistry {
     /// the given name.
     ///
     /// Returns an error if a query named `query_name` does not exist
-    #[allow(dead_code)] // TODO(grfn)
     pub(super) fn insert_invalidating_tables<I>(
         &mut self,
         query_name: Relation,

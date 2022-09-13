@@ -183,7 +183,7 @@ impl Recipe {
         for change in changes {
             match change {
                 Change::CreateTable(mut cts) => {
-                    cts = self.inc.rewrite(cts, &schema_search_path)?;
+                    cts = self.inc.rewrite(cts, &schema_search_path, None)?;
                     match self.registry.get(&cts.table) {
                         Some(RecipeExpr::Table(current_cts)) => {
                             // Table already exists, so check if it has been changed.
@@ -213,7 +213,13 @@ impl Recipe {
                     }
                 }
                 Change::CreateView(mut stmt) => {
-                    stmt = self.inc.rewrite(stmt, &schema_search_path)?;
+                    stmt = self.inc.rewrite(
+                        stmt,
+                        &schema_search_path,
+                        None, /* Views in SQL resolve tables at creation time, so we don't
+                               * want to invalidate them if tables get created like we do
+                               * for queries */
+                    )?;
                     let expression = RecipeExpr::View(stmt.clone());
                     if !self.registry.add_query(expression)? {
                         // The expression is already present, and we successfully added
@@ -225,9 +231,15 @@ impl Recipe {
                     self.inc.add_view(stmt, mig)?;
                 }
                 Change::CreateCache(mut ccqs) => {
-                    let statement = match &ccqs.inner {
+                    let (statement, invalidating_tables) = match &ccqs.inner {
                         CacheInner::Statement(box stmt) => {
-                            self.inc.rewrite(stmt.clone(), &schema_search_path)?
+                            let mut invalidating_tables = vec![];
+                            let stmt = self.inc.rewrite(
+                                stmt.clone(),
+                                &schema_search_path,
+                                Some(&mut invalidating_tables),
+                            )?;
+                            (stmt, invalidating_tables)
                         }
                         CacheInner::Id(id) => {
                             error!("attempted to issue CREATE CACHE with an id: {}", id);
@@ -240,7 +252,12 @@ impl Recipe {
                             statement: statement.clone(),
                             always: ccqs.always,
                         };
-                        if !self.registry.add_query(expression)? {
+                        let aliased = self.registry.add_query(expression)?;
+                        self.registry.insert_invalidating_tables(
+                            name.clone(),
+                            invalidating_tables.clone(),
+                        )?;
+                        if !aliased {
                             // The expression is already present, and we successfully added
                             // a new alias for it.
                             continue;
@@ -249,10 +266,12 @@ impl Recipe {
 
                     let name = self.inc.add_query(ccqs.name, statement.clone(), mig)?;
                     self.registry.add_query(RecipeExpr::Cache {
-                        name,
+                        name: name.clone(),
                         statement,
                         always: ccqs.always,
                     })?;
+                    self.registry
+                        .insert_invalidating_tables(name.clone(), invalidating_tables)?;
                 }
                 // We process ALTER TABLE statements in the following way:
                 // 1. Create a copy of the table that is being altered. If it doesn't exist, then
@@ -536,7 +555,7 @@ impl Recipe {
     pub(crate) fn contains(&self, query: ViewCreateRequest) -> ReadySetResult<bool> {
         let statement = self
             .inc
-            .rewrite(query.statement, &query.schema_search_path)?;
+            .rewrite(query.statement, &query.schema_search_path, None)?;
         Ok(self.registry.contains(&statement))
     }
 }

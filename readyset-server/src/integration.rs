@@ -3492,10 +3492,11 @@ async fn finkelstein1982_queries() {
             let q = parse_query(Dialect::MySQL, q).unwrap();
             match q {
                 SqlQuery::CreateTable(stmt) => {
-                    inc.add_table(inc.rewrite(stmt, &[]).unwrap(), mig).unwrap();
+                    inc.add_table(inc.rewrite(stmt, &[], None).unwrap(), mig)
+                        .unwrap();
                 }
                 SqlQuery::Select(stmt) => {
-                    inc.add_query(None, inc.rewrite(stmt, &[]).unwrap(), mig)
+                    inc.add_query(None, inc.rewrite(stmt, &[], None).unwrap(), mig)
                         .unwrap();
                 }
                 _ => panic!("unexpected query type"),

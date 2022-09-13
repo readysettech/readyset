@@ -117,12 +117,20 @@ impl SqlIncorporator {
     }
 
     /// Rewrite the given SQL statement to normalize, validate, and desugar it, based on the stored
-    /// relations in `self`
+    /// relations in `self`.
+    ///
+    /// Can optionally provide a mutable reference to a list of names of non-existent tables which,
+    /// if created, should invalidate the query
     // TODO(grfn): This should really be happening as part of the `add_<whatever>` methods (it was,
     // before this was made pub(crate)) but since the recipe expression registry stores expressions
     // we need it happening earlier. We should move it back to its rightful place once we can get
     // rid of that.
-    pub(crate) fn rewrite<S>(&self, stmt: S, search_path: &[SqlIdentifier]) -> ReadySetResult<S>
+    pub(crate) fn rewrite<S>(
+        &self,
+        stmt: S,
+        search_path: &[SqlIdentifier],
+        invalidating_tables: Option<&mut Vec<Relation>>,
+    ) -> ReadySetResult<S>
     where
         S: Rewrite,
     {
@@ -130,7 +138,7 @@ impl SqlIncorporator {
             view_schemas: &self.view_schemas,
             base_schemas: &self.base_schemas,
             search_path,
-            invalidating_tables: None, // TODO
+            invalidating_tables,
         })
     }
 
@@ -675,6 +683,7 @@ impl SqlIncorporator {
                             query,
                             &[], /* Don't need a schema search path since we're only resolving
                                   * one (already qualified) table */
+                            None,
                         )?,
                         true,
                         false,
@@ -889,16 +898,13 @@ mod tests {
             // Must have a base node for type inference to work, so make one manually
             inc.add_table(
                 inc.rewrite(
-                    inc.rewrite(
-                        parse_create_table(
-                            Dialect::MySQL,
-                            "CREATE TABLE users (id int, name varchar(40));",
-                        )
-                        .unwrap(),
-                        &[],
+                    parse_create_table(
+                        Dialect::MySQL,
+                        "CREATE TABLE users (id int, name varchar(40));",
                     )
                     .unwrap(),
                     &[],
+                    None,
                 )
                 .unwrap(),
                 mig,
@@ -919,7 +925,8 @@ mod tests {
                     inc.rewrite(
                         parse_select_statement(Dialect::MySQL, "SELECT users.id from users;")
                             .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig
@@ -946,7 +953,8 @@ mod tests {
                             "CREATE TABLE users (id int, name varchar(40), age int);"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig
@@ -963,6 +971,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    None,
                 )
                 .unwrap(),
                 mig,
@@ -999,7 +1008,8 @@ mod tests {
                             "CREATE TABLE users (id int, name varchar(40), age int);"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig,
@@ -1016,6 +1026,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    None,
                 )
                 .unwrap(),
                 mig,
@@ -1053,7 +1064,8 @@ mod tests {
                             "CREATE TABLE users (id int, name varchar(40), age int);"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig,
@@ -1070,6 +1082,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    None,
                 )
                 .unwrap(),
                 mig,
@@ -1115,7 +1128,8 @@ mod tests {
                             "CREATE TABLE users (id int, name varchar(40));"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig,
@@ -1146,7 +1160,8 @@ mod tests {
                             "CREATE TABLE articles (id int, author int, title varchar(255));"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig,
@@ -1174,8 +1189,12 @@ mod tests {
                      WHERE users.id = articles.author;";
             let q = inc.add_query(
                 None,
-                inc.rewrite(parse_select_statement(Dialect::MySQL, q).unwrap(), &[])
-                    .unwrap(),
+                inc.rewrite(
+                    parse_select_statement(Dialect::MySQL, q).unwrap(),
+                    &[],
+                    None,
+                )
+                .unwrap(),
                 mig,
             );
             assert!(q.is_ok());
@@ -1210,7 +1229,8 @@ mod tests {
                             "CREATE TABLE users (id int, name varchar(40));"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig,
@@ -1242,6 +1262,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    None,
                 )
                 .unwrap(),
                 mig,
@@ -1274,7 +1295,8 @@ mod tests {
                             "CREATE TABLE votes (aid int, userid int);"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig
@@ -1341,7 +1363,8 @@ mod tests {
                             "CREATE TABLE users (id int, name varchar(40));"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig,
@@ -1356,6 +1379,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    None,
                 )
                 .unwrap(),
                 mig,
@@ -1373,6 +1397,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    None,
                 )
                 .unwrap(),
                 mig,
@@ -1400,7 +1425,8 @@ mod tests {
                             "CREATE TABLE users (id int, name varchar(40));"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig,
@@ -1432,6 +1458,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    None,
                 )
                 .unwrap(),
                 mig,
@@ -1448,6 +1475,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    None,
                 )
                 .unwrap(),
                 mig,
@@ -1466,6 +1494,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    None,
                 )
                 .unwrap(),
                 mig,
@@ -1493,7 +1522,8 @@ mod tests {
                             "CREATE TABLE users (id int, name varchar(40), address varchar(40));"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig,
@@ -1525,6 +1555,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    None,
                 )
                 .unwrap(),
                 mig,
@@ -1544,6 +1575,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    None,
                 )
                 .unwrap(),
                 mig,
@@ -1567,6 +1599,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    None,
                 )
                 .unwrap(),
                 mig,
@@ -1598,7 +1631,8 @@ mod tests {
                             "CREATE TABLE users (id int, name varchar(40), address varchar(40));"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig,
@@ -1612,6 +1646,7 @@ mod tests {
                 inc.rewrite(
                     parse_select_statement(Dialect::MySQL, "SELECT id, name FROM users;").unwrap(),
                     &[],
+                    None,
                 )
                 .unwrap(),
                 mig,
@@ -1645,6 +1680,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    None,
                 )
                 .unwrap(),
                 mig,
@@ -1679,6 +1715,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    None,
                 )
                 .unwrap(),
                 mig,
@@ -1723,7 +1760,8 @@ mod tests {
                             "CREATE TABLE users (id int, name varchar(40), address varchar(40));"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig,
@@ -1740,6 +1778,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    None,
                 )
                 .unwrap(),
                 mig,
@@ -1768,6 +1807,7 @@ mod tests {
                 inc.rewrite(
                     parse_select_statement(Dialect::MySQL, "SELECT id, name FROM users;").unwrap(),
                     &[],
+                    None,
                 )
                 .unwrap(),
                 mig,
@@ -1810,7 +1850,8 @@ mod tests {
                             "CREATE TABLE users (id int, name varchar(40), address varchar(40));"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig,
@@ -1827,6 +1868,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    None,
                 )
                 .unwrap(),
                 mig,
@@ -1860,6 +1902,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    None,
                 )
                 .unwrap(),
                 mig,
@@ -1903,7 +1946,8 @@ mod tests {
                             "CREATE TABLE votes (aid int, userid int);"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig
@@ -1934,6 +1978,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    None,
                 )
                 .unwrap(),
                 mig,
@@ -1976,7 +2021,8 @@ mod tests {
                             "CREATE TABLE votes (userid int, aid int);"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig
@@ -2007,6 +2053,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    None,
                 )
                 .unwrap(),
                 mig,
@@ -2049,7 +2096,8 @@ mod tests {
                             "CREATE TABLE votes (userid int, aid int);"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig
@@ -2081,6 +2129,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    None,
                 )
                 .unwrap(),
                 mig,
@@ -2124,7 +2173,8 @@ mod tests {
                             "CREATE TABLE votes (userid int, aid int, sign int);"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig,
@@ -2156,6 +2206,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    None,
                 )
                 .unwrap(),
                 mig,
@@ -2199,7 +2250,8 @@ mod tests {
                             "CREATE TABLE votes (userid int, aid int, sign int);"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig,
@@ -2231,6 +2283,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    None,
                 )
                 .unwrap(),
                 mig,
@@ -2272,7 +2325,8 @@ mod tests {
                             "CREATE TABLE votes (userid int, aid int, sign int);"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig,
@@ -2302,6 +2356,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    None,
                 )
                 .unwrap(),
                 mig,
@@ -2363,7 +2418,8 @@ mod tests {
                             "CREATE TABLE votes (userid int, aid int, sign int);"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig,
@@ -2393,6 +2449,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    None,
                 )
                 .unwrap(),
                 mig,
@@ -2423,7 +2480,8 @@ mod tests {
                             "CREATE TABLE votes (userid int, aid int, sign int);"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig,
@@ -2453,6 +2511,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    None,
                 )
                 .unwrap(),
                 mig,
@@ -2500,7 +2559,8 @@ mod tests {
                             "CREATE TABLE votes (story_id int, comment_id int, vote int);"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig,
@@ -2573,7 +2633,8 @@ mod tests {
                             "CREATE TABLE users (id int, name varchar(40));"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig,
@@ -2587,7 +2648,8 @@ mod tests {
                             "CREATE TABLE votes (aid int, uid int);"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig
@@ -2601,7 +2663,8 @@ mod tests {
                             "CREATE TABLE articles (aid int, title varchar(255), author int);"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig,
@@ -2616,8 +2679,12 @@ mod tests {
 
             let res = inc.add_query(
                 None,
-                inc.rewrite(parse_select_statement(Dialect::MySQL, q).unwrap(), &[])
-                    .unwrap(),
+                inc.rewrite(
+                    parse_select_statement(Dialect::MySQL, q).unwrap(),
+                    &[],
+                    None,
+                )
+                .unwrap(),
                 mig,
             );
             assert!(res.is_ok());
@@ -2668,7 +2735,8 @@ mod tests {
                             "CREATE TABLE users (id int, name varchar(40));"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig,
@@ -2682,7 +2750,8 @@ mod tests {
                             "CREATE TABLE votes (aid int, uid int);"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig
@@ -2696,7 +2765,8 @@ mod tests {
                             "CREATE TABLE articles (aid int, title varchar(255), author int);"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig,
@@ -2711,8 +2781,12 @@ mod tests {
 
             let res = inc.add_query(
                 None,
-                inc.rewrite(parse_select_statement(Dialect::MySQL, q).unwrap(), &[])
-                    .unwrap(),
+                inc.rewrite(
+                    parse_select_statement(Dialect::MySQL, q).unwrap(),
+                    &[],
+                    None,
+                )
+                .unwrap(),
                 mig,
             );
             assert!(res.is_ok());
@@ -2752,7 +2826,8 @@ mod tests {
                             "CREATE TABLE users (id int, name varchar(40));"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig,
@@ -2766,7 +2841,8 @@ mod tests {
                             "CREATE TABLE articles (id int, author int, title varchar(255));"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig,
@@ -2777,8 +2853,12 @@ mod tests {
                      WHERE users.id = articles.author;";
             let q = inc.add_query(
                 None,
-                inc.rewrite(parse_select_statement(Dialect::MySQL, q).unwrap(), &[])
-                    .unwrap(),
+                inc.rewrite(
+                    parse_select_statement(Dialect::MySQL, q).unwrap(),
+                    &[],
+                    None,
+                )
+                .unwrap(),
                 mig,
             );
             assert!(q.is_ok());
@@ -2831,7 +2911,8 @@ mod tests {
                             "CREATE TABLE friends (id int, friend int);"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig
@@ -2846,8 +2927,12 @@ mod tests {
 
             let res = inc.add_query(
                 None,
-                inc.rewrite(parse_select_statement(Dialect::MySQL, q).unwrap(), &[])
-                    .unwrap(),
+                inc.rewrite(
+                    parse_select_statement(Dialect::MySQL, q).unwrap(),
+                    &[],
+                    None,
+                )
+                .unwrap(),
                 mig,
             );
             assert!(res.is_ok(), "{}", res.as_ref().unwrap_err());
@@ -2883,7 +2968,8 @@ mod tests {
                             "CREATE TABLE users (id int, name varchar(40));"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig,
@@ -2896,6 +2982,7 @@ mod tests {
                     parse_select_statement(Dialect::MySQL, "SELECT users.name, 1 FROM users;")
                         .unwrap(),
                     &[],
+                    None,
                 )
                 .unwrap(),
                 mig,
@@ -2926,7 +3013,8 @@ mod tests {
                     inc.rewrite(
                         parse_create_table(Dialect::MySQL, "CREATE TABLE users (id int, age int);")
                             .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig
@@ -2942,6 +3030,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    None,
                 )
                 .unwrap(),
                 mig,
@@ -2977,7 +3066,8 @@ mod tests {
                             "CREATE TABLE users (id int, age int, name varchar(40));"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig,
@@ -2993,6 +3083,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    None,
                 )
                 .unwrap(),
                 mig,
@@ -3031,7 +3122,8 @@ mod tests {
                             "CREATE TABLE users (id int, name varchar(40));"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig,
@@ -3045,7 +3137,8 @@ mod tests {
                             "CREATE TABLE articles (id int, author int, title varchar(255));"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig,
@@ -3059,8 +3152,12 @@ mod tests {
             let name = inc
                 .add_query(
                     None,
-                    inc.rewrite(parse_select_statement(Dialect::MySQL, q).unwrap(), &[])
-                        .unwrap(),
+                    inc.rewrite(
+                        parse_select_statement(Dialect::MySQL, q).unwrap(),
+                        &[],
+                        None,
+                    )
+                    .unwrap(),
                     mig,
                 )
                 .unwrap();
@@ -3096,7 +3193,8 @@ mod tests {
                             "CREATE TABLE users (id int, name varchar(40));"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig,
@@ -3110,7 +3208,8 @@ mod tests {
                             "CREATE TABLE articles (id int, author int, title varchar(255));"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig,
@@ -3123,7 +3222,8 @@ mod tests {
                     None,
                     inc.rewrite(
                         parse_select_statement(Dialect::MySQL, "SELECT * FROM users;").unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig
@@ -3138,8 +3238,12 @@ mod tests {
                      ON (nested_users.id = articles.author);";
             let q = inc.add_query(
                 None,
-                inc.rewrite(parse_select_statement(Dialect::MySQL, q).unwrap(), &[])
-                    .unwrap(),
+                inc.rewrite(
+                    parse_select_statement(Dialect::MySQL, q).unwrap(),
+                    &[],
+                    None,
+                )
+                .unwrap(),
                 mig,
             );
             assert!(q.is_ok());
@@ -3175,7 +3279,8 @@ mod tests {
                             "CREATE TABLE users (id int, name varchar(40));"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig,
@@ -3227,7 +3332,8 @@ mod tests {
                             "CREATE TABLE users (id int, name varchar(40));"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig,
@@ -3259,6 +3365,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    None,
                 )
                 .unwrap(),
                 mig,
@@ -3276,6 +3383,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    None,
                 )
                 .unwrap(),
                 mig,
@@ -3301,6 +3409,7 @@ mod tests {
                     parse_create_table(Dialect::MySQL, "CREATE TABLE things (id int primary key);")
                         .unwrap(),
                     &[],
+                    None,
                 )
                 .unwrap(),
                 mig,
@@ -3318,6 +3427,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    None,
                 )
                 .unwrap(),
                 mig,
@@ -3345,7 +3455,8 @@ mod tests {
                             "CREATE TABLE users (id int, name varchar(40));"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig,
@@ -3361,6 +3472,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    None,
                 )
                 .unwrap(),
                 mig,
@@ -3378,6 +3490,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    None,
                 )
                 .unwrap(),
                 mig,
@@ -3391,6 +3504,7 @@ mod tests {
                 inc.rewrite(
                     parse_select_statement(Dialect::MySQL, "SELECT tq2.id FROM tq2;").unwrap(),
                     &[],
+                    None,
                 )
                 .unwrap(),
                 mig,
@@ -3420,7 +3534,8 @@ mod tests {
                             "CREATE TABLE t1 (a int, b float, c Text);"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig
@@ -3434,6 +3549,7 @@ mod tests {
                         parse_select_statement(Dialect::MySQL, "SELECT t1.a from t1 LIMIT 3")
                             .unwrap(),
                         &[],
+                        None,
                     )
                     .unwrap(),
                     mig,
@@ -3476,7 +3592,8 @@ mod tests {
                             "CREATE TABLE t1 (a int, b float, c Text);"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig
@@ -3493,6 +3610,7 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
+                        None,
                     )
                     .unwrap(),
                     mig,
@@ -3534,7 +3652,8 @@ mod tests {
                             "CREATE TABLE t1 (a int, b float, c Text, d Text);"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig,
@@ -3551,6 +3670,7 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
+                        None,
                     )
                     .unwrap(),
                     mig,
@@ -3605,7 +3725,8 @@ mod tests {
                             "CREATE TABLE t1 (a int, b float, c Text);"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig
@@ -3619,7 +3740,8 @@ mod tests {
                             "CREATE TABLE t2 (a int, b float, c Text);"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig
@@ -3636,6 +3758,7 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
+                        None,
                     )
                     .unwrap(),
                     mig,
@@ -3682,7 +3805,8 @@ mod tests {
                             "CREATE TABLE t1 (a int, b float, c Text);"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig
@@ -3696,7 +3820,8 @@ mod tests {
                             "CREATE TABLE t2 (a int, b float, c Text);"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig
@@ -3713,6 +3838,7 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
+                        None,
                     )
                     .unwrap(),
                     mig,
@@ -3752,7 +3878,8 @@ mod tests {
                             "CREATE TABLE t1 (a int, b float, c Text);"
                         )
                         .unwrap(),
-                        &[]
+                        &[],
+                        None
                     )
                     .unwrap(),
                     mig
@@ -3769,6 +3896,7 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
+                        None,
                     )
                     .unwrap(),
                     mig,
