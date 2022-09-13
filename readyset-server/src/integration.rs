@@ -8950,6 +8950,8 @@ async fn multiple_schemas_explicit() {
 
     eprintln!("{}", g.graphviz().await.unwrap());
 
+    sleep().await;
+
     let res = q.lookup(&[0.into()], true).await.unwrap().into_vec();
     assert_eq!(
         res,
