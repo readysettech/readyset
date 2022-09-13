@@ -6,7 +6,7 @@
 //! example:
 //!
 //! ```ignore
-//! cargo bench -p clustertest --features slow_bench
+//! cargo bench -p readyset-clustertest --features slow_bench
 //! ```
 
 #[cfg(not(feature = "slow_bench"))]
@@ -29,8 +29,8 @@ mod slow_bench {
     use std::cell::RefCell;
     use std::sync::Arc;
 
-    use clustertest::{DeploymentBuilder, ServerParams};
     use criterion::Criterion;
+    use readyset_clustertest::{DeploymentBuilder, ServerParams};
 
     pub fn leader_failover(c: &mut Criterion) {
         let rt = tokio::runtime::Runtime::new().unwrap();
