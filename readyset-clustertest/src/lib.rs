@@ -688,6 +688,7 @@ impl DeploymentBuilder {
 
             // Sleep to give the adapter time to startup.
             let handle = AdapterHandle {
+                metrics_port,
                 conn_str: format!("mysql://127.0.0.1:{}", port),
                 process,
             };
@@ -710,8 +711,12 @@ impl DeploymentBuilder {
             mysql_adapters,
         };
 
-        handle.wait_for_workers(Duration::from_secs(90)).await?;
-        handle.backend_ready(leader_timeout).await?;
+        // Skip waiting for workers/backend if we don't have any servers as part of this deployment
+        // yet.
+        if !self.servers.is_empty() {
+            handle.wait_for_workers(Duration::from_secs(90)).await?;
+            handle.backend_ready(leader_timeout).await?;
+        }
 
         Ok(handle)
     }
@@ -728,12 +733,13 @@ impl DeploymentBuilder {
 async fn wait_for_adapter_startup(metrics_port: u16, timeout: Duration) -> anyhow::Result<()> {
     let health_check_url = format!("http://127.0.0.1:{}/health", metrics_port);
     let poll_interval = timeout.checked_div(10).expect("timeout must be valid");
+    tracing::debug!(
+        ?poll_interval,
+        "Waiting for adapter on port {metrics_port} to startup"
+    );
 
     // Polls the health_check_url continuously until it returns OK.
-    async fn health_check_poller(
-        health_check_url: String,
-        poll_interval: Duration,
-    ) -> anyhow::Result<()> {
+    let health_check_poller = |health_check_url: String, poll_interval: Duration| async move {
         loop {
             let r = hyper::Request::get(&health_check_url)
                 .body(hyper::Body::from(String::default()))
@@ -748,9 +754,14 @@ async fn wait_for_adapter_startup(metrics_port: u16, timeout: Duration) -> anyho
                     break Ok(());
                 }
             }
+
+            tracing::debug!(
+                "Adapter on port {metrics_port} not ready. Sleeping for {:?}",
+                &poll_interval,
+            );
             sleep(poll_interval).await;
         }
-    }
+    };
 
     tokio::time::timeout(
         timeout,
@@ -798,10 +809,18 @@ impl ServerHandle {
 
 /// A handle to a mysql-adapter instance in the deployment.
 pub struct AdapterHandle {
+    /// The adapter http server port
+    pub metrics_port: u16,
     /// The mysql connection string of the adapter.
     pub conn_str: String,
     /// The local process the adapter is running in.
     pub process: ProcessHandle,
+}
+
+impl AdapterHandle {
+    pub async fn wait_for_startup(&self, timeout: Duration) -> anyhow::Result<()> {
+        wait_for_adapter_startup(self.metrics_port, timeout).await
+    }
 }
 
 /// A handle to a deployment created with `start_multi_process`.
@@ -903,6 +922,7 @@ impl DeploymentHandle {
         if self.expected_workers().await.is_empty() {
             return Ok(());
         }
+        tracing::debug!("Waiting {max_wait:?} for workers to be healthy");
 
         let start = Instant::now();
         loop {
@@ -977,6 +997,7 @@ impl DeploymentHandle {
         }
 
         self.mysql_adapters.push(AdapterHandle {
+            metrics_port,
             conn_str: format!("mysql://127.0.0.1:{}", port),
             process,
         });
@@ -986,6 +1007,7 @@ impl DeploymentHandle {
 
     /// Waits for the back-end to return that it is ready to process queries.
     pub async fn backend_ready(&mut self, timeout: Duration) -> ReadySetResult<()> {
+        tracing::debug!("Waiting {timeout:?} for backend to be ready to process queries");
         let mut e = None;
         let start = Instant::now();
         let check_leader_loop = async {
@@ -1294,6 +1316,12 @@ mod tests {
     }
 
     #[clustertest]
+    async fn clustertest_no_servers() {
+        let mut deployment = DeploymentBuilder::new("ct_empty").start().await.unwrap();
+        deployment.teardown().await.unwrap();
+    }
+
+    #[clustertest]
     async fn clustertest_minimal() {
         let mut deployment = DeploymentBuilder::new("ct_minimal")
             .with_servers(2, ServerParams::default())
@@ -1355,7 +1383,6 @@ mod tests {
         deployment.teardown().await.unwrap();
     }
 
-    /// Test that setting a failpoint triggers a panic on RPC.
     #[tokio::test(flavor = "multi_thread")]
     #[serial]
     async fn start_adapter_running_deployment() {

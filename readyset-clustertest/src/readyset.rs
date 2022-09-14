@@ -6,6 +6,8 @@ use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
 use serial_test::serial;
 
+use crate::readyset_mysql::PROPAGATION_DELAY_TIMEOUT;
+use crate::utils::{query_until_expected, EventuallyConsistentResults, QueryExecution};
 use crate::*;
 
 // Ignored as this test cannot issue RPCs after killing the worker as it
@@ -449,4 +451,73 @@ async fn server_auto_restarts() {
     sleep(Duration::from_secs(ProcessHandle::RESTART_INTERVAL_S * 2)).await;
     assert!(server_handle.process.check_alive().await);
     deployment.teardown().await.unwrap();
+}
+
+/// Performs a simple create table, insert, and query to verify that the deployment is healthy.
+async fn assert_deployment_health(dh: &mut DeploymentHandle) {
+    let mut adapter = dh.first_adapter().await;
+    let _ = adapter
+        .query_drop(
+            r"CREATE TABLE t1 (
+        uid INT NOT NULL,
+        value INT NOT NULL
+    );",
+        )
+        .await
+        .unwrap();
+    adapter
+        .query_drop(r"INSERT INTO t1 VALUES (1, 4);")
+        .await
+        .unwrap();
+
+    assert!(
+        query_until_expected(
+            &mut adapter,
+            QueryExecution::PrepareExecute("SELECT * FROM t1", ()),
+            &EventuallyConsistentResults::empty_or(&[(1, 4)]),
+            PROPAGATION_DELAY_TIMEOUT,
+        )
+        .await
+    );
+}
+
+#[clustertest]
+async fn server_ready_before_adapter() {
+    let mut deployment = DeploymentBuilder::new("ct_server_before_adapter")
+        .auto_restart(true)
+        .start()
+        .await
+        .unwrap();
+    deployment
+        .start_server(ServerParams::default().with_volume("v1"), true)
+        .await
+        .expect("server failed to become healthy");
+
+    deployment
+        .start_mysql_adapter(true)
+        .await
+        .expect("adapter failed to become healthy");
+
+    assert_deployment_health(&mut deployment).await;
+}
+
+#[clustertest]
+async fn adapter_ready_before_server() {
+    let mut deployment = DeploymentBuilder::new("ct_adapter_before_server")
+        .auto_restart(true)
+        .start()
+        .await
+        .unwrap();
+
+    deployment
+        .start_mysql_adapter(true)
+        .await
+        .expect("adapter failed to become healthy");
+
+    deployment
+        .start_server(ServerParams::default().with_volume("v1"), true)
+        .await
+        .expect("server failed to become healthy");
+
+    assert_deployment_health(&mut deployment).await;
 }
