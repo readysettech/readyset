@@ -33,10 +33,7 @@ impl<'ast> Visitor<'ast> for ConstantFoldVisitor {
                 *expr = Expr::Literal(res);
                 Ok(())
             }
-            Err(e) => {
-                eprintln!("{e}");
-                visit::walk_expr(self, expr)
-            }
+            Err(_) => visit::walk_expr(self, expr),
         }
     }
 }
