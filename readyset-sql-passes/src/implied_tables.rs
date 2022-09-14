@@ -6,7 +6,7 @@ use nom_sql::analysis::visit::{
     walk_group_by_clause, walk_order_clause, walk_select_statement, Visitor,
 };
 use nom_sql::{Column, FieldDefinitionExpr, Relation, SelectStatement, SqlIdentifier, SqlQuery};
-use readyset_errors::{internal, ReadySetError, ReadySetResult};
+use readyset_errors::{internal, invalid_err, ReadySetError, ReadySetResult};
 use tracing::warn;
 
 use crate::{outermost_table_exprs, util};
@@ -139,11 +139,29 @@ impl<'ast, 'schema> Visitor<'ast> for ExpandImpliedTablesVisitor<'schema> {
     }
 
     fn visit_column(&mut self, column: &'ast mut Column) -> Result<(), Self::Error> {
-        if column.table.is_some() {
+        if self.can_reference_aliases && self.aliases.contains(&column.name) {
             return Ok(());
         }
 
-        if !(self.can_reference_aliases && self.aliases.contains(&column.name)) {
+        if let Some(table) = &mut column.table {
+            if table.schema.is_some() {
+                return Ok(());
+            }
+
+            let matches = self
+                .tables
+                .iter()
+                .filter(|t| t.name == table.name)
+                .collect::<Vec<_>>();
+
+            if matches.len() > 1 {
+                return Err(invalid_err!("Table reference {table} is ambiguous"));
+            }
+
+            if let Some(t) = matches.first() {
+                table.schema = t.schema.clone();
+            }
+        } else {
             column.table = self.find_table(&column.name);
         }
 
@@ -404,5 +422,45 @@ Dialect::MySQL,
 
         let res = orig.expand_implied_tables(&schema).unwrap();
         assert_eq!(res, expected, "{} != {}", res, expected);
+    }
+
+    #[test]
+    fn non_schema_qualified_column() {
+        let orig = parse_query(Dialect::MySQL, "SELECT votes.id from s1.votes").unwrap();
+        let expected = parse_query(Dialect::MySQL, "SELECT s1.votes.id FROM s1.votes").unwrap();
+        let schema = [(
+            Relation {
+                schema: Some("s1".into()),
+                name: "votes".into(),
+            },
+            vec!["id".into()],
+        )]
+        .into();
+        let res = orig.expand_implied_tables(&schema).unwrap();
+
+        assert_eq!(res, expected, "\n{} != {}", res, expected);
+    }
+
+    #[test]
+    fn ambiguous_non_schema_qualified_table_reference() {
+        let orig = parse_query(Dialect::MySQL, "SELECT t.id from s1.t, s2.t").unwrap();
+        let schema = [
+            (
+                Relation {
+                    schema: Some("s1".into()),
+                    name: "t".into(),
+                },
+                vec!["id".into()],
+            ),
+            (
+                Relation {
+                    schema: Some("s2".into()),
+                    name: "t".into(),
+                },
+                vec!["id".into()],
+            ),
+        ]
+        .into();
+        orig.expand_implied_tables(&schema).unwrap_err();
     }
 }
