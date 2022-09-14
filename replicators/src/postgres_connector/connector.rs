@@ -161,7 +161,7 @@ impl PostgresWalConnector {
         Ok(())
     }
 
-    /// Waits and returns the next WAL event, while monotoring the connection
+    /// Waits and returns the next WAL event, while monitoring the connection
     /// handle for errors.
     async fn next_event(&mut self) -> Result<(WalEvent, i64), WalError> {
         let PostgresWalConnector {
@@ -174,7 +174,7 @@ impl PostgresWalConnector {
             select! {
                 ev = reader.next_event().fuse() => ev,
                 err = connection_handle.fuse() => match err.unwrap() { // This unwrap is ok, because it is on the handle
-                    Ok(_) => unreachable!(), // Unrechable because it runs in infinite loop unless errors
+                    Ok(_) => unreachable!(), // Unreachable because it runs in infinite loop unless errors
                     Err(err) => Err(WalError::ReadySetError(err.into())),
                 }
             }
@@ -214,7 +214,7 @@ impl PostgresWalConnector {
     }
 
     /// Creates a new `PUBLICATION name FOR ALL TABLES`, to be able to recieve WAL on that slot.
-    /// The user must have superuser priviliges for that to work.
+    /// The user must have superuser privileges for that to work.
     async fn create_publication(&mut self, name: &str) -> ReadySetResult<()> {
         let query = format!("CREATE PUBLICATION {} FOR ALL TABLES", name);
         self.simple_query(&query).await?;
@@ -348,7 +348,7 @@ impl PostgresWalConnector {
     }
 
     /// Perform a simple query that expects a singe row in response, check that the response is
-    /// indeed one row, and contains exatly `n_cols` columns, then return that row
+    /// indeed one row, and contains exactly `n_cols` columns, then return that row
     async fn one_row_query(
         &mut self,
         query: &str,
@@ -514,7 +514,7 @@ impl Connector for PostgresWalConnector {
                 WalEvent::Commit => {
                     if !actions.is_empty() {
                         // On commit we flush, because there is no knowing when the next commit is
-                        // comming
+                        // coming
                         return Ok((
                             ReplicationAction::TableAction {
                                 table: cur_table,

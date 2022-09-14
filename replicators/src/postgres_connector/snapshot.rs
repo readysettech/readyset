@@ -386,7 +386,7 @@ impl<'a> PostgresReplicator<'a> {
         trace!(?table_list, "Loaded table list");
         trace!(?view_list, "Loaded view list");
 
-        // For each table, retreive its structure
+        // For each table, retrieve its structure
         let mut tables = Vec::with_capacity(table_list.len());
         for table in table_list {
             let create_table = match table.get_table(&self.transaction).await {
@@ -499,7 +499,7 @@ impl<'a> PostgresReplicator<'a> {
         Ok(())
     }
 
-    /// Retreieve a list of tables of the specified kind in the specified schema
+    /// Retrieve a list of tables of the specified kind in the specified schema
     async fn get_table_list(&mut self, kind: TableKind) -> Result<Vec<TableEntry>, pgsql::Error> {
         let kind_code = match kind {
             TableKind::RegularTable => 'r',

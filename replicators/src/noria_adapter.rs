@@ -277,7 +277,7 @@ impl NoriaAdapter {
                 // replication events for offsets < the replication offset of that table, so we
                 // can do this "catching up" by just starting replication at
                 // the old offset. Note that at the very least we will
-                // always have the schema offset for the minumum.
+                // always have the schema offset for the minimum.
                 let pos: BinlogPosition = replication_offsets
                     .min_present_offset()?
                     .expect("Minimal offset must be present after snapshot")
@@ -320,10 +320,11 @@ impl NoriaAdapter {
 
         // At this point it is possible that we just finished replication, but
         // our schema and our tables are taken at different position in the binlog.
-        // Until our database has a consitent view of the database at a single point
+        // Until our database has a consistent view of the database at a single point
         // in time, it is not safe to issue any queries. We therefore advance the binlog
         // to the position of the most recent table we have, applying changes as needed.
-        // Only once binlog advanced to that point, can we send a ready signal to noria.
+        // Only once binlog advanced to that point, can we send a ready signal to
+        // ReadySet.
         match adapter.replication_offsets.max_offset()? {
             Some(max) if max > &current_pos => {
                 info!(start = %current_pos, end = %max, "Catching up");
@@ -357,8 +358,8 @@ impl NoriaAdapter {
             ReadySetError::ReplicationFailed("No database specified for replication".to_string())
         })?;
 
-        // Attempt to retreive the latest replication offset from noria, if none is present
-        // begin the snapshot process
+        // Attempt to retrieve the latest replication offset from ReadySet-server, if none is
+        // present begin the snapshot process
         let replication_offsets = noria.replication_offsets().await?;
         let pos = replication_offsets.max_offset()?.map(Into::into);
         let disable_replication_ssl_verification = config.disable_replication_ssl_verification;

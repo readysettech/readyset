@@ -352,7 +352,7 @@ impl MySqlReplicator {
     }
 
     /// This function replicates an entire MySQL database into a clean
-    /// noria deployment.
+    /// ReadySet deployment.
     ///
     /// # Arguments
     ///
@@ -367,7 +367,7 @@ impl MySqlReplicator {
     ) -> ReadySetResult<()> {
         let result = self.replicate_to_noria_with_table_locks(noria).await;
 
-        // Wait for all connections to finish, not strictly neccessary
+        // Wait for all connections to finish, not strictly necessary
         self.pool.disconnect().await?;
         result
     }

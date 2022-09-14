@@ -271,7 +271,7 @@ impl MySqlBinlogConnector {
                         .and_then(|v| v.get_value().ok())
                     {
                         Some(StatusVarVal::UpdatedDbNames(names)) if !names.is_empty() => {
-                            // IMPORTANTE: For some statements there can be more than one update db,
+                            // IMPORTANT: For some statements there can be more than one update db,
                             // for example `DROP TABLE db1.tbl, db2.table;` Will have `db1` and
                             // `db2` listed, however we only need the schema to filter out
                             // `CREATE TABLE` and `ALTER TABLE` and those always change only one DB.
@@ -514,7 +514,7 @@ fn binlog_val_to_noria_val(
     col_kind: mysql_common::constants::ColumnType,
     meta: &[u8],
 ) -> mysql::Result<DfValue> {
-    // Not all values are coereced to the value expected by ReadySet directly
+    // Not all values are coerced to the value expected by ReadySet directly
 
     use mysql_common::constants::ColumnType;
 
@@ -539,7 +539,8 @@ fn binlog_val_to_noria_val(
                 return Ok(DfValue::None);
             }
             let time = chrono::naive::NaiveDateTime::from_timestamp(epoch, 0);
-            Ok(time.try_into().unwrap()) // Can unwarp because we know maps derectly to noria type
+            // Can unwrap because we know it maps directly to [`DfValue`]
+            Ok(time.try_into().unwrap())
         }
         (ColumnType::MYSQL_TYPE_TIMESTAMP2, _) => {
             // When meta is anything else, `mysql_common` encodes this value as number of
@@ -549,7 +550,8 @@ fn binlog_val_to_noria_val(
             let secs = secs.parse::<i64>().unwrap();
             let usecs = usecs.parse::<u32>().unwrap();
             let time = chrono::naive::NaiveDateTime::from_timestamp(secs, usecs * 32);
-            Ok(time.try_into().unwrap()) // Can unwarp because we know maps derectly to noria type
+            // Can wrap because we know this maps directly to [`DfValue`]
+            Ok(time.try_into().unwrap())
         }
         _ => Ok(val
             .try_into()

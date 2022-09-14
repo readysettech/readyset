@@ -1,8 +1,8 @@
 //! This module implements 100% of the current Postgres end: (), time: (), reply: ()  end: (), time:
 //! (), reply: ()  WAL spec as defined in [Streaming Replication Protocol](https://www.postgresql.org/docs/current/protocol-replication.html)
 //! and [Logical Replication Message Formats](https://www.postgresql.org/docs/current/protocol-logicalrep-message-formats.html)
-//! every struct here maps percisely to the defenitions in the spec, and tryes to avoid
-//! abastractions that don't map exactly. The parsing is therefore very much straightforward.
+//! every struct here maps precisely to the definitions in the spec, and tries to avoid
+//! abstractions that don't map exactly. The parsing is therefore very much straightforward.
 
 use std::convert::{TryFrom, TryInto};
 
@@ -275,7 +275,7 @@ pub enum WalRecord {
         n_relations: i32,
         /// Option bits for TRUNCATE: 1 for CASCADE, 2 for RESTART IDENTITY
         options: i8,
-        /// ID of the relation corresponding to the ID in the relation message. Idenitifies the
+        /// ID of the relation corresponding to the ID in the relation message. Identifies the
         /// tables to truncate.
         relation_ids: Vec<i32>,
     },
@@ -470,7 +470,7 @@ impl WalRecord {
         })
     }
 
-    /// Finds the first occurance of a null, and splits the buffer at that position
+    /// Finds the first occurrence of a null, and splits the buffer at that position
     /// the returned value contains all the bytes up to the null, and the input buffer
     /// references all the bytes past the null
     fn consume_string(b: &mut Bytes) -> Result<Bytes, WalError> {
