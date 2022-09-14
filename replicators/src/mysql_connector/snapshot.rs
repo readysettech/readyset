@@ -27,6 +27,9 @@ const BATCH_SIZE: usize = 1000; // How many queries to buffer before pushing to 
 
 const MAX_SNAPSHOT_BATCH: usize = 8; // How many tables to snapshot at the same time
 
+/// A list of databases MySQL uses internally, they should not be replicated
+const MYSQL_INTERNAL_DBS: &[&str] = &["mysql", "information_schema", "performance_schema", "sys"];
+
 /// Pass the error forward while logging it
 fn log_err<E: Error>(err: E) -> E {
     error!(error = %err);
@@ -89,6 +92,37 @@ fn tx_opts() -> TxOpts {
 }
 
 impl MySqlReplicator {
+    /// Convert the inner `self.table_filter`, into an explict list of schemas and their tables, by
+    /// querying the database
+    async fn update_table_list<Q: Queryable>(&mut self, tx: &mut Q) -> ReadySetResult<()> {
+        if self.table_filter.for_all_schemas() {
+            // If the filter is set to replicate all schemas, we have to first get the list of all
+            // schemas from the database
+            let schemas = tx
+                .query_iter("SHOW SCHEMAS")
+                .await?
+                .collect::<String>()
+                .await?;
+
+            for db in schemas
+                .into_iter()
+                .filter(|s| !MYSQL_INTERNAL_DBS.contains(&s.as_str()))
+            {
+                self.table_filter.add_for_all_schema(db.into());
+            }
+        }
+
+        for (db, table_list) in self.table_filter.schemas_mut() {
+            if table_list.is_for_all_tables() {
+                // If the filter for this schema subscribes to all tables, we need to load actual
+                // table names
+                table_list.set(load_table_list(tx, TableKind::BaseTable, db).await?);
+            }
+        }
+
+        Ok(())
+    }
+
     /// Load all the `CREATE TABLE` statements for the tables in the MySQL database. Returns the the
     /// transaction that holds the DDL locks for the tables.
     ///
@@ -105,13 +139,7 @@ impl MySqlReplicator {
             .await
             .map_err(log_err);
 
-        for (db, table_list) in self.table_filter.schemas() {
-            if table_list.is_for_all_tables() {
-                // If filter for this schema subscribes for all tables, we need to load actual
-                // table names
-                table_list.set(load_table_list(&mut tx, TableKind::BaseTable, db).await?);
-            }
-        }
+        self.update_table_list(&mut tx).await?;
 
         // After we loaded the list of currently existing tables, we will acquire a metadata
         // lock on all of them to prevent DDL changes.
@@ -166,7 +194,7 @@ impl MySqlReplicator {
             .for_each(|(db, table)| self.table_filter.remove(&db, &table));
 
         // Process `CREATE VIEW` statements
-        for (db, _) in self.table_filter.schemas() {
+        for (db, _) in self.table_filter.schemas_mut() {
             for view in load_table_list(&mut tx, TableKind::View, db).await? {
                 let create_view = create_for_table(&mut tx, db, &view, TableKind::View).await?;
                 debug!(%create_view, "Extending recipe");

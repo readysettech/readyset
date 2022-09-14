@@ -366,7 +366,7 @@ impl NoriaAdapter {
         let table_filter = TableFilter::try_new(
             nom_sql::Dialect::PostgreSQL,
             config.replication_tables.take(),
-            Some("public"),
+            None,
         )?;
 
         let mut connector = Box::new(

@@ -20,7 +20,6 @@ const MAX_ATTEMPTS: usize = 40;
 
 // Postgres does not accept MySQL escapes, so rename the table before the query
 const PGSQL_RENAME: (&str, &str) = ("`groups`", "groups");
-const PGSQL_RENAME2: (&str, &str) = ("DATABASE", "SCHEMA");
 
 const CREATE_SCHEMA: &str = "
     DROP TABLE IF EXISTS `groups` CASCADE;
@@ -146,10 +145,10 @@ impl DbConnection {
 
             // Then drop and recreate the test db
             client
-                .query_drop(format!("DROP DATABASE IF EXISTS {test_db_name};"))
+                .query_drop(format!("DROP SCHEMA IF EXISTS {test_db_name};"))
                 .await?;
             client
-                .query_drop(format!("CREATE DATABASE {test_db_name};"))
+                .query_drop(format!("CREATE SCHEMA {test_db_name};"))
                 .await?;
 
             // Then switch to the test db
@@ -171,10 +170,10 @@ impl DbConnection {
                 tokio::spawn(conn);
 
                 no_db_client
-                    .simple_query(&format!("DROP DATABASE IF EXISTS {test_db_name}"))
+                    .simple_query(&format!("DROP SCHEMA IF EXISTS {test_db_name} CASCADE"))
                     .await?;
                 no_db_client
-                    .simple_query(&format!("CREATE DATABASE {test_db_name}"))
+                    .simple_query(&format!("CREATE SCHEMA {test_db_name}"))
                     .await?;
             }
 
@@ -195,7 +194,6 @@ impl DbConnection {
             }
             DbConnection::PostgreSQL(c, _) => {
                 let query = query.replace(PGSQL_RENAME.0, PGSQL_RENAME.1);
-                let query = query.replace(PGSQL_RENAME2.0, PGSQL_RENAME2.1);
                 c.simple_query(query.as_str()).await?;
             }
         }
@@ -495,6 +493,18 @@ async fn pgsql_replication_filter() -> ReadySetResult<()> {
 #[serial_test::serial]
 async fn mysql_replication_filter() -> ReadySetResult<()> {
     replication_filter_inner(&mysql_url()).await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn pgsql_replication_all_schemas() -> ReadySetResult<()> {
+    replication_all_schemas_inner(&pgsql_url()).await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn mysql_replication_all_schemas() -> ReadySetResult<()> {
+    replication_all_schemas_inner(&mysql_url()).await
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -866,25 +876,39 @@ async fn replication_skip_unparsable_inner(url: &str) -> ReadySetResult<()> {
 }
 
 async fn replication_filter_inner(url: &str) -> ReadySetResult<()> {
+    readyset_tracing::init_test_logging();
+
     let mut client = DbConnection::connect(url).await?;
 
-    let query = "
+    let cascade = if url.starts_with("postgresql") {
+        "CASCADE"
+    } else {
+        ""
+    };
+
+    let query = format!(
+        "
     DROP TABLE IF EXISTS t1 CASCADE; CREATE TABLE t1 (id int);
     DROP TABLE IF EXISTS t2 CASCADE; CREATE TABLE t2 (id int);
     DROP TABLE IF EXISTS t3 CASCADE; CREATE TABLE t3 (id int);
-    DROP DATABASE IF EXISTS noria2; CREATE DATABASE noria2; CREATE TABLE noria2.t4 (id int);
-    DROP DATABASE IF EXISTS noria3; CREATE DATABASE noria3;
+    DROP SCHEMA IF EXISTS noria2 {cascade}; CREATE SCHEMA noria2; CREATE TABLE noria2.t4 (id int);
+    DROP SCHEMA IF EXISTS noria3 {cascade}; CREATE SCHEMA noria3;
     DROP VIEW IF EXISTS t1_view; CREATE VIEW t1_view AS SELECT * FROM t1;
     DROP VIEW IF EXISTS t2_view; CREATE VIEW t2_view AS SELECT * FROM t2;
     DROP VIEW IF EXISTS t3_view; CREATE VIEW t3_view AS SELECT * FROM t3;
-    ";
+    "
+    );
 
-    client.query(query).await?;
+    client.query(&query).await?;
 
     let mut ctx = TestHandle::start_noria(
         url.to_string(),
         Some(Config {
-            replication_tables: Some("t3, t1, noria3.*, noria2.t4".to_string().into()),
+            replication_tables: Some(
+                "public.t3, public.t1, noria3.*, noria2.t4"
+                    .to_string()
+                    .into(),
+            ),
             ..Default::default()
         }),
     )
@@ -929,6 +953,79 @@ async fn replication_filter_inner(url: &str) -> ReadySetResult<()> {
         .view("t2")
         .await
         .expect_err("View should not exist, since viewed table does not exist");
+
+    ctx.assert_table_missing("public", "t5").await;
+    ctx.assert_table_exists("noria3", "t6").await;
+
+    ctx.stop().await;
+    client.stop().await;
+
+    Ok(())
+}
+
+async fn replication_all_schemas_inner(url: &str) -> ReadySetResult<()> {
+    readyset_tracing::init_test_logging();
+    let mut client = DbConnection::connect(url).await?;
+
+    let cascade = if url.starts_with("postgresql") {
+        "CASCADE"
+    } else {
+        ""
+    };
+
+    let query = format!(
+        "
+    DROP TABLE IF EXISTS t1 CASCADE; CREATE TABLE t1 (id int);
+    DROP TABLE IF EXISTS t2 CASCADE; CREATE TABLE t2 (id int);
+    DROP TABLE IF EXISTS t3 CASCADE; CREATE TABLE t3 (id int);
+    DROP SCHEMA IF EXISTS noria2 {cascade}; CREATE SCHEMA noria2; CREATE TABLE noria2.t4 (id int);
+    DROP SCHEMA IF EXISTS noria3 {cascade}; CREATE SCHEMA noria3;
+    "
+    );
+
+    client.query(&query).await?;
+
+    let mut ctx = TestHandle::start_noria(
+        url.to_string(),
+        Some(Config {
+            replication_tables: Some("*.*".to_string().into()),
+            ..Default::default()
+        }),
+    )
+    .await?;
+
+    ctx.ready_notify.as_ref().unwrap().notified().await;
+    ctx.assert_table_exists("public", "t1").await;
+    ctx.assert_table_exists("public", "t2").await;
+    ctx.assert_table_exists("public", "t3").await;
+    ctx.assert_table_exists("noria2", "t4").await;
+
+    client
+        .query(
+            "
+            CREATE TABLE noria2.t5 (id int);
+            CREATE TABLE noria3.t6 (id int);
+            INSERT INTO t1 VALUES (1),(2),(3);
+            INSERT INTO t2 VALUES (1),(2),(3);
+            INSERT INTO t3 VALUES (1),(2),(3);
+            INSERT INTO noria2.t4 VALUES (1),(2),(3);
+            ",
+        )
+        .await?;
+
+    ctx.noria
+        .extend_recipe(
+            ChangeList::from_str("CREATE VIEW public.t4_view AS SELECT * FROM noria2.t4;").unwrap(),
+        )
+        .await
+        .unwrap();
+
+    ctx.check_results(
+        "t4_view",
+        "replication_filter",
+        &[&[DfValue::Int(1)], &[DfValue::Int(2)], &[DfValue::Int(3)]],
+    )
+    .await?;
 
     ctx.assert_table_missing("public", "t5").await;
     ctx.assert_table_exists("noria3", "t6").await;

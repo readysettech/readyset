@@ -1,5 +1,4 @@
 use std::borrow::Borrow;
-use std::collections::btree_map::IterMut;
 use std::collections::{BTreeMap, BTreeSet};
 
 use launchpad::redacted::RedactedString;
@@ -16,7 +15,8 @@ pub(crate) struct TableFilter {
     /// database is usually small, and their names are short, so a small `BTreeMap` with inlined
     /// `SqlIdentifiers` would perform better than a `HashMap` where a hash is performed on every
     /// lookup.
-    tables: BTreeMap<SqlIdentifier, ReplicateTableSpec>,
+    /// If [`Option::None`], all tables in all schemas will be replicated.
+    tables: Option<BTreeMap<SqlIdentifier, ReplicateTableSpec>>,
 }
 
 #[derive(Debug, Clone)]
@@ -52,19 +52,23 @@ impl TableFilter {
 
         let replicated = match table_list {
             None => {
-                return match default_schema {
+                match default_schema {
                     Some(default) => {
                         // Will load all tables for the default schema
                         tables.insert(default, ReplicateTableSpec::AllTablesInSchema);
-                        return Ok(TableFilter { tables });
+                        return Ok(TableFilter {
+                            tables: Some(tables),
+                        });
                     }
-                    None => Err(ReadySetError::ReplicationFailed(
-                        "No tables and no default database specified for replication".to_string(),
-                    )),
+                    None => return Ok(TableFilter { tables: None }),
                 };
             }
             Some(t) => t,
         };
+
+        if replicated.as_str() == "*.*" {
+            return Ok(Self::for_all_tables());
+        }
 
         let replicate_list = match replicator_table_list(dialect)(replicated.as_bytes()) {
             Ok((rem, tables)) if rem.is_empty() => tables,
@@ -101,29 +105,51 @@ impl TableFilter {
             }
         }
 
-        Ok(TableFilter { tables })
+        Ok(TableFilter {
+            tables: Some(tables),
+        })
+    }
+
+    /// Create a new filter that will pass all tables
+    fn for_all_tables() -> Self {
+        TableFilter { tables: None }
     }
 
     /// Iterator over all schemas in this filter
-    pub(crate) fn schemas(&mut self) -> IterMut<'_, SqlIdentifier, ReplicateTableSpec> {
-        self.tables.iter_mut()
+    pub(crate) fn schemas_mut(
+        &mut self,
+    ) -> impl Iterator<Item = (&SqlIdentifier, &mut ReplicateTableSpec)> {
+        self.tables
+            .as_mut()
+            .map(|t| t.iter_mut())
+            .into_iter()
+            .flatten()
     }
 
-    /// Iterator over all the named tables in the filter along with their schema
+    /// Iterator over all of the (schema, table) tuples in the filter
     pub(crate) fn tables(&self) -> impl Iterator<Item = (&SqlIdentifier, &SqlIdentifier)> {
         self.tables
-            .iter()
-            .filter_map(|(db, spec)| match spec {
-                ReplicateTableSpec::AllTablesInSchema => None,
-                ReplicateTableSpec::Tables(tables) => Some(tables.iter().map(move |t| (db, t))),
+            .as_ref()
+            .map(|t| {
+                t.iter()
+                    .filter_map(|(db, spec)| match spec {
+                        ReplicateTableSpec::AllTablesInSchema => None,
+                        ReplicateTableSpec::Tables(tables) => {
+                            Some(tables.iter().map(move |t| (db, t)))
+                        }
+                    })
+                    .flatten()
             })
+            .into_iter()
             .flatten()
     }
 
     /// Remove the given table from the list of tables
     pub(crate) fn remove(&mut self, schema: &str, table: &str) {
-        if let Some(ReplicateTableSpec::Tables(tables)) = self.tables.get_mut(schema) {
-            tables.remove(table);
+        if let Some(tables) = self.tables.as_mut() {
+            if let Some(ReplicateTableSpec::Tables(tables)) = tables.get_mut(schema) {
+                tables.remove(table);
+            }
         }
     }
 
@@ -134,7 +160,12 @@ impl TableFilter {
         Q2: Ord + ?Sized,
         SqlIdentifier: Borrow<Q1> + Borrow<Q2>,
     {
-        if let Some(ns) = self.tables.get(schema) {
+        let tables = match self.tables.as_ref() {
+            Some(tables) => tables,
+            None => return true, // Empty filter processes all tables
+        };
+
+        if let Some(ns) = tables.get(schema) {
             match ns {
                 ReplicateTableSpec::AllTablesInSchema => true,
                 ReplicateTableSpec::Tables(tables) => tables.contains(table),
@@ -144,9 +175,25 @@ impl TableFilter {
         }
     }
 
-    /// Check if the given schema is mentioned at all in the filter
+    /// Check if the given schema is mentioned at all in the filter, or if the filter is for all
+    /// schemas
     pub(crate) fn contains_schema(&self, schema: &str) -> bool {
-        self.tables.contains_key(schema)
+        self.tables
+            .as_ref()
+            .map(|t| t.contains_key(schema))
+            .unwrap_or(true)
+    }
+
+    /// Check if the filter is for all schemas and tables
+    pub(crate) fn for_all_schemas(&self) -> bool {
+        self.tables.is_none()
+    }
+
+    /// Insert a new schema into the filter that replicates all tables
+    pub(crate) fn add_for_all_schema(&mut self, schema: SqlIdentifier) {
+        self.tables
+            .get_or_insert_with(BTreeMap::new)
+            .insert(schema, ReplicateTableSpec::AllTablesInSchema);
     }
 }
 
@@ -160,6 +207,25 @@ mod tests {
         // By default should only allow all tables from the default schema
         assert!(filter.contains("noria", "table"));
         assert!(!filter.contains("readyset", "table"));
+    }
+
+    #[test]
+    fn all_schemas_explicit() {
+        let filter = TableFilter::try_new(
+            nom_sql::Dialect::MySQL,
+            Some("*.*".to_string().into()),
+            Some("noria"),
+        )
+        .unwrap();
+        assert!(filter.contains("noria", "table"));
+        assert!(filter.contains("readyset", "table"));
+    }
+
+    #[test]
+    fn all_schemas_implicit() {
+        let filter = TableFilter::try_new(nom_sql::Dialect::MySQL, None, None).unwrap();
+        assert!(filter.contains("noria", "table"));
+        assert!(filter.contains("readyset", "table"));
     }
 
     #[test]
