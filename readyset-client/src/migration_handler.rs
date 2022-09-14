@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use launchpad::redacted::Sensitive;
-use metrics::counter;
+use metrics::{counter, register_counter};
 use readyset::recipe::changelist::{Change, ChangeList};
 use readyset::{ControllerHandle, ReadySetResult, ViewCreateRequest};
 use readyset_client_metrics::recorded;
@@ -88,12 +88,16 @@ where
     #[instrument(level = "warn", name = "migration_handler", skip(self))]
     pub async fn run(&mut self) -> ReadySetResult<()> {
         let mut interval = tokio::time::interval(self.min_poll_interval);
+        let success_counter = register_counter!(recorded::MIGRATION_HANDLER_SUCCESSES);
+        let failure_counter = register_counter!(recorded::MIGRATION_HANDLER_FAILURES);
+
         loop {
             select! {
                 _ = interval.tick() => {
                     let to_process = self.query_status_cache.pending_migration();
-                    let len = to_process.len();
                     let has_controller = self.controller.is_some();
+                    let mut successes = 0;
+                    let mut failures = 0;
                     for q in to_process {
                         match &q.0 {
                             Query::Parsed(req) => {
@@ -102,14 +106,17 @@ where
                                 } else {
                                     self.perform_migration(req).await
                                 }
+                                successes += 1;
                             }
                             Query::ParseFailed(_) => {
                                 error!("Should not be migrating query that failed to parse. Ignoring");
+                                failures += 1;
                             },
                         }
                     }
 
-                    counter!(recorded::MIGRATION_HANDLER_PROCESSED, len as u64);
+                    success_counter.increment(successes);
+                    failure_counter.increment(failures);
                 }
                 _ = self.shutdown_recv.recv() => {
                     info!("Migration handler shutting down after shut down signal received");
@@ -186,7 +193,6 @@ where
                     } = n
                     {
                         // Upstream is an Ok value as we check for the error above.
-                        #[allow(clippy::unwrap_used)]
                         if let Err(e) = upstream_result
                             .unwrap()
                             .unwrap()

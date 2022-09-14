@@ -595,7 +595,7 @@ where
                 );
 
                 migration_handler.run().await.map_err(move |e| {
-                    error!(error = %e, "Migration Handler failed");
+                    error!(error = %e, "Migration Handler failed, aborting the process due to service entering a degraded state");
                     std::process::abort()
                 })
             };

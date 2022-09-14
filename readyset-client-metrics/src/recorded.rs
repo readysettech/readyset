@@ -45,9 +45,11 @@ pub const QUERY_LOG_TOTAL_CACHE_MISSES: &str = "query-log.total_cache_misses";
 /// | query | The query text being executed. |
 pub const QUERY_LOG_QUERY_CACHE_MISSED: &str = "query-log.query_cache_missed";
 
-/// Counter: The total number of queries processing by the migration handler.  Incremented on each
-/// loop of the migration handler.
-pub const MIGRATION_HANDLER_PROCESSED: &str = "migration-handler.processed";
+/// Counter: The number of successful queries (dry runs/real) processed by the migration handler.
+pub const MIGRATION_HANDLER_SUCCESSES: &str = "migration-handler.successes";
+
+/// Counter: The number of failed queries (dry runs/real) processed by the migration handler.
+pub const MIGRATION_HANDLER_FAILURES: &str = "migration-handler.failures";
 
 /// Counter: The number of queries the migration handler has set to allowed.  Incremented on each
 /// loop of the migration handler.
