@@ -3864,11 +3864,13 @@ dependencies = [
  "readyset-client-metrics",
  "readyset-clustertest-macros",
  "readyset-data",
+ "readyset-tracing",
  "rust_decimal",
  "serde",
  "serial_test",
  "test-utils",
  "tokio",
+ "tracing",
  "url",
 ]
 
