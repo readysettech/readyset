@@ -120,7 +120,7 @@ struct Options {
     worker_options: WorkerOptions,
 
     /// Whether to disable telemetry reporting. Defaults to false.
-    #[clap(long)]
+    #[clap(long, env = "DISABLE_TELEMETRY")]
     disable_telemetry: bool,
 }
 

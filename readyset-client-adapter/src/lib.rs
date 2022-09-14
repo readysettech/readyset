@@ -343,7 +343,7 @@ pub struct Options {
     server_worker_options: readyset_server::WorkerOptions,
 
     /// Whether to disable telemetry reporting. Defaults to false.
-    #[clap(long)]
+    #[clap(long, env = "DISABLE_TELEMETRY")]
     disable_telemetry: bool,
 }
 
