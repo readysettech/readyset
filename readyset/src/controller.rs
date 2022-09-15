@@ -744,6 +744,7 @@ impl ControllerHandle {
     }
 
     #[cfg(feature = "failure_injection")]
+    /// Set a failpoint with provided name and action
     pub fn failpoint(
         &mut self,
         name: String,

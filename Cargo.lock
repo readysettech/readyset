@@ -3677,6 +3677,8 @@ dependencies = [
  "derive_more",
  "enum_dispatch",
  "eui48",
+ "fail",
+ "failpoint-macros",
  "futures",
  "futures-util",
  "hyper",

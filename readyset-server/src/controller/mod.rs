@@ -539,6 +539,7 @@ impl Controller {
                     }
                 }
                 req = authority_rx.recv() => {
+                    set_failpoint!("server-authority-inbound");
                     match req {
                         Some(req) => self.handle_authority_update(req).await?,
                         None => {

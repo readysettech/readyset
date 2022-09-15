@@ -131,6 +131,7 @@ use consulrs::api::ApiResponse;
 use consulrs::client::{ConsulClient, ConsulClientSettingsBuilder};
 use consulrs::error::ClientError;
 use consulrs::kv;
+use failpoint_macros::set_failpoint;
 use futures::future::join_all;
 use futures::stream::FuturesOrdered;
 use futures::TryStreamExt;
@@ -908,6 +909,10 @@ impl AuthorityControl for ConsulAuthority {
         &self,
         id: WorkerId,
     ) -> Result<AuthorityWorkerHeartbeatResponse, Error> {
+        set_failpoint!("server-authority-inbound", |_| Ok(
+            AuthorityWorkerHeartbeatResponse::Failed
+        ));
+
         Ok(
             match consulrs::session::renew(&self.consul, &id, None).await {
                 Ok(_) => AuthorityWorkerHeartbeatResponse::Alive,
@@ -924,6 +929,12 @@ impl AuthorityControl for ConsulAuthority {
     // deleting keys without a session.
     // TODO(justin): Combine this with worker data to prevent redundent calls.
     async fn get_workers(&self) -> Result<HashSet<WorkerId>, Error> {
+        set_failpoint!("server-authority-inbound", |_| bail!(
+            ConsulAuthorityError::RequestFailed(
+                "server-authority-inbound failure injected".to_string()
+            )
+        ));
+
         Ok(
             match kv::read(
                 &self.consul,
@@ -953,6 +964,12 @@ impl AuthorityControl for ConsulAuthority {
         &self,
         worker_ids: Vec<WorkerId>,
     ) -> Result<HashMap<WorkerId, WorkerDescriptor>, Error> {
+        set_failpoint!("server-authority-inbound", |_| bail!(
+            ConsulAuthorityError::RequestFailed(
+                "server-authority-inbound failure injected".to_string()
+            )
+        ));
+
         let mut worker_descriptors: HashMap<WorkerId, WorkerDescriptor> = HashMap::new();
 
         for w in worker_ids {
@@ -979,6 +996,12 @@ impl AuthorityControl for ConsulAuthority {
     // TODO(justin): Duplicate code with register_worker, abstract writing a serialized value
     // to a key + lock.
     async fn register_adapter(&self, endpoint: SocketAddr) -> Result<Option<AdapterId>, Error> {
+        set_failpoint!("server-authority-inbound", |_| bail!(
+            ConsulAuthorityError::RequestFailed(
+                "server-authority-inbound failure injected".to_string()
+            )
+        ));
+
         // Each adapter is associated with the key:
         // `ADAPTER_PREFIX`/<session>.
         let session = self.get_session()?;
@@ -998,6 +1021,11 @@ impl AuthorityControl for ConsulAuthority {
     }
 
     async fn get_adapters(&self) -> Result<HashSet<SocketAddr>, Error> {
+        set_failpoint!("server-authority-inbound", |_| bail!(
+            ConsulAuthorityError::RequestFailed(
+                "server-authority-inbound failure injected".to_string()
+            )
+        ));
         let adapter_ids: HashSet<AdapterId> = match kv::read(
             &self.consul,
             &self.prefix_with_deployment(ADAPTER_PREFIX),
