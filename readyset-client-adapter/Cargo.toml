@@ -10,6 +10,8 @@ anyhow = "1.0"
 async-trait = "0.1"
 clap = { version = "3.0", features = ["derive","env"] }
 futures-util = "0.3.0"
+fail = "0.5.0"
+failpoint-macros = { path = "../failpoint-macros" }
 maplit = "1.0.2"
 metrics = "0.19"
 metrics-exporter-prometheus = "0.10"
@@ -33,3 +35,6 @@ readyset-dataflow = { path = "../readyset-dataflow" }
 readyset-server = { path = "../readyset-server/" }
 readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter" }
 readyset-version = { path = "../readyset-version" }
+
+[features]
+failure_injection = ["fail/failpoints"]

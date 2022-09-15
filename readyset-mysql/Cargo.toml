@@ -11,6 +11,7 @@ tikv-jemallocator = "0.4"
 [dependencies]
 clap = { version = "3.0", features = ["derive","env"] }
 async-trait = "0.1.51"
+fail = "0.5.0"
 mysql-srv = { path = "../mysql-srv" }
 mysql_async = "0.29"
 lazy_static = "1.0"
@@ -24,6 +25,7 @@ readyset-data = { path = "../readyset-data" }
 readyset-client = { path = "../readyset-client" }
 readyset-client-adapter = { path = "../readyset-client-adapter" }
 readyset-version = { path = "../readyset-version" }
+failpoint-macros = { path = "../failpoint-macros" }
 nom-sql = { path = "../nom-sql" }
 tokio = "1.15"
 tracing = { version = "0.1", features = ["release_max_level_debug"] }
@@ -51,3 +53,5 @@ readyset-tracing = { path = "../readyset-tracing" }
 vertical_tests = []
 # Redact the display of strings marked sensitive from logs and error messages
 redact_sensitive = ["launchpad/redact_sensitive"]
+failure_injection = ["readyset-client-adapter/failure_injection", "fail/failpoints"]
+

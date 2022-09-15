@@ -12,6 +12,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::{anyhow, bail};
 use async_trait::async_trait;
 use clap::Parser;
+use failpoint_macros::set_failpoint;
 use futures_util::future::FutureExt;
 use futures_util::stream::StreamExt;
 use launchpad::futures::abort_on_panic;
@@ -742,6 +743,7 @@ where
             let query_status_cache = query_status_cache;
             let fut = async move {
                 let upstream_res = if let Some(upstream_db_url) = &upstream_db_url {
+                    set_failpoint!("adapter-upstream");
                     timeout(
                         UPSTREAM_CONNECTION_TIMEOUT,
                         H::UpstreamDatabase::connect(

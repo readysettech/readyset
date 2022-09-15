@@ -12,6 +12,7 @@ clap = { version = "3.0", features = ["derive","env"] }
 native-tls = "0.2.7"
 tokio = { version = "1.15", features = ["full"] }
 futures = { version = "0.3" }
+fail = "0.5.0"
 bytes = "1.0"
 chrono = "0.4"
 itertools = "0.10"
@@ -39,7 +40,11 @@ mysql-time = { path = "../mysql-time" }
 readyset-data = { path = "../readyset-data" }
 database-utils = { path = "../database-utils" }
 test-utils = { path = "../test-utils" }
+failpoint-macros = { path = "../failpoint-macros" }
 
 [dev-dependencies]
 readyset-server = { path = "../readyset-server" }
 serial_test = "0.5"
+
+[features]
+failure_injection = ["fail/failpoints"]

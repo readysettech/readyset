@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use clap::Parser;
 use database_utils::DatabaseURL;
+use failpoint_macros::set_failpoint;
 use futures::FutureExt;
 use launchpad::redacted::RedactedString;
 use launchpad::select;
@@ -692,6 +693,12 @@ impl NoriaAdapter {
         until: Option<ReplicationOffset>,
     ) -> ReadySetResult<()> {
         loop {
+            set_failpoint!("replication-upstream", |_| ReadySetResult::Err(
+                ReadySetError::ReplicationFailed(
+                    "replication-upstream failpoint injected".to_string()
+                )
+            ));
+
             if until.as_ref().map(|u| *position >= *u).unwrap_or(false) {
                 return Ok(());
             }
