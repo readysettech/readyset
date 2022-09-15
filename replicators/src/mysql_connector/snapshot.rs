@@ -2,6 +2,7 @@ use std::convert::{TryFrom, TryInto};
 use std::error::Error;
 use std::fmt::{self, Display};
 use std::future;
+use std::time::Instant;
 
 use futures::future::TryFutureExt;
 use futures::stream::FuturesUnordered;
@@ -296,6 +297,7 @@ impl MySqlReplicator {
     async fn replicate_table(
         mut dumper: TableDumper,
         mut table_mutator: readyset::Table,
+        snapshot_report_interval_secs: u16,
     ) -> ReadySetResult<()> {
         let mut cnt = 0;
 
@@ -317,6 +319,10 @@ impl MySqlReplicator {
             recorded::REPLICATOR_SNAPSHOT_PERCENT,
             "name" => table_mutator.table_name().to_string(),
         );
+
+        let start_time = Instant::now();
+        let mut last_report_time = start_time;
+        let snapshot_report_interval_secs = snapshot_report_interval_secs as u64;
 
         loop {
             let row = match row_stream.next().await {
@@ -344,10 +350,15 @@ impl MySqlReplicator {
                 })?;
             }
 
-            if cnt % 1_000_000 == 0 && nrows > 0 {
+            if snapshot_report_interval_secs != 0
+                && last_report_time.elapsed().as_secs() > snapshot_report_interval_secs
+            {
+                last_report_time = Instant::now();
+                let estimate =
+                    crate::estimate_remaining_time(start_time.elapsed(), cnt as f64, nrows as f64);
                 let progress_percent = (cnt as f64 / nrows as f64) * 100.;
                 let progress = format!("{:.2}%", progress_percent);
-                info!(rows_replicated = %cnt, %progress, "Replication progress");
+                info!(rows_replicated = %cnt, %progress, %estimate, "Snapshotting progress");
                 progress_percentage_metric.set(progress_percent);
             }
         }
@@ -379,9 +390,10 @@ impl MySqlReplicator {
         mut self,
         noria: &mut readyset::ReadySetHandle,
         db_schemas: &mut DatabaseSchemas,
+        snapshot_report_interval_secs: u16,
     ) -> ReadySetResult<()> {
         let result = self
-            .replicate_to_noria_with_table_locks(noria, db_schemas)
+            .replicate_to_noria_with_table_locks(noria, db_schemas, snapshot_report_interval_secs)
             .await;
 
         // Wait for all connections to finish, not strictly necessary
@@ -398,6 +410,7 @@ impl MySqlReplicator {
         &mut self,
         noria: &mut readyset::ReadySetHandle,
         db_schemas: &mut DatabaseSchemas,
+        snapshot_report_interval_secs: u16,
     ) -> ReadySetResult<()> {
         // NOTE: There are two ways to prevent DDL changes in MySQL:
         // `FLUSH TABLES WITH READ LOCK` or `LOCK INSTANCE FOR BACKUP`. Both are not
@@ -432,7 +445,8 @@ impl MySqlReplicator {
         // Replication offsets could change following a schema update, so get a new list
         let replication_offsets = noria.replication_offsets().await?;
 
-        self.dump_tables(noria, &replication_offsets).await
+        self.dump_tables(noria, &replication_offsets, snapshot_report_interval_secs)
+            .await
     }
 
     /// Spawns a new tokio task that replicates a given table to noria, returning
@@ -441,6 +455,7 @@ impl MySqlReplicator {
         &mut self,
         noria: &mut readyset::ReadySetHandle,
         table: Relation,
+        snapshot_report_interval_secs: u16,
     ) -> ReadySetResult<JoinHandle<(Relation, ReplicationOffset, ReadySetResult<()>)>> {
         let span = info_span!("replicating table", %table);
         span.in_scope(|| info!("Acquiring read lock"));
@@ -459,11 +474,11 @@ impl MySqlReplicator {
 
         let table_mutator = noria.table(table.clone()).instrument(span.clone()).await?;
 
-        Ok(tokio::spawn(async {
+        Ok(tokio::spawn(async move {
             (
                 table,
                 repl_offset,
-                Self::replicate_table(dumper, table_mutator)
+                Self::replicate_table(dumper, table_mutator, snapshot_report_interval_secs)
                     .instrument(span)
                     .await,
             )
@@ -475,6 +490,7 @@ impl MySqlReplicator {
         &mut self,
         noria: &mut readyset::ReadySetHandle,
         replication_offsets: &ReplicationOffsets,
+        snapshot_report_interval_secs: u16,
     ) -> ReadySetResult<()> {
         let mut replication_tasks = FuturesUnordered::new();
         let mut compacting_tasks = FuturesUnordered::new();
@@ -493,7 +509,10 @@ impl MySqlReplicator {
             if replication_offsets.has_table(&table) {
                 info!(%table, "Replication offset already exists for table, skipping snapshot");
             } else {
-                replication_tasks.push(self.dumper_task_for_table(noria, table).await?);
+                replication_tasks.push(
+                    self.dumper_task_for_table(noria, table, snapshot_report_interval_secs)
+                        .await?,
+                );
             }
 
             if replication_tasks.len() == MAX_SNAPSHOT_BATCH {
@@ -528,7 +547,10 @@ impl MySqlReplicator {
                 }
                 (table, _, Err(err)) => {
                     error!(%table, error = %err, "Replication failed, retrying");
-                    replication_tasks.push(self.dumper_task_for_table(noria, table).await?);
+                    replication_tasks.push(
+                        self.dumper_task_for_table(noria, table, snapshot_report_interval_secs)
+                            .await?,
+                    );
                 }
             }
 
@@ -538,7 +560,10 @@ impl MySqlReplicator {
                 if replication_offsets.has_table(&table) {
                     info!(%table, "Replication offset already exists for table, skipping snapshot");
                 } else {
-                    replication_tasks.push(self.dumper_task_for_table(noria, table).await?);
+                    replication_tasks.push(
+                        self.dumper_task_for_table(noria, table, snapshot_report_interval_secs)
+                            .await?,
+                    );
                 }
             }
         }

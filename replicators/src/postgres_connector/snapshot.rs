@@ -2,6 +2,7 @@ use std::convert::{TryFrom, TryInto};
 use std::error::Error;
 use std::fmt::{self, Display};
 use std::future;
+use std::time::Instant;
 
 use futures::stream::FuturesUnordered;
 use futures::{pin_mut, StreamExt, TryFutureExt};
@@ -258,6 +259,7 @@ impl TableDescription {
         &self,
         transaction: &'a pgsql::Transaction<'a>,
         mut noria_table: readyset::Table,
+        snapshot_report_interval_secs: u16,
     ) -> ReadySetResult<()> {
         let mut cnt = 0;
 
@@ -295,6 +297,9 @@ impl TableDescription {
             "schema" => self.schema()?.to_string(),
             "name" => self.name.name.to_string()
         );
+        let start_time = Instant::now();
+        let mut last_report_time = start_time;
+        let snapshot_report_interval_secs = snapshot_report_interval_secs as u64;
 
         while let Some(Ok(row)) = binary_rows.next().await {
             let noria_row = (0..type_map.len())
@@ -323,10 +328,15 @@ impl TableDescription {
                     })?;
             }
 
-            if cnt % 1_000_000 == 0 {
+            if snapshot_report_interval_secs != 0
+                && last_report_time.elapsed().as_secs() > snapshot_report_interval_secs
+            {
+                last_report_time = Instant::now();
+                let estimate =
+                    crate::estimate_remaining_time(start_time.elapsed(), cnt as f64, nrows as f64);
                 let progress_percent = (cnt as f64 / nrows as f64) * 100.;
                 let progress = format!("{:.2}%", progress_percent);
-                info!(rows_replicated = %cnt, %progress, "Snapshotting progress");
+                info!(rows_replicated = %cnt, %progress, %estimate, "Snapshotting progress");
                 progress_percentage_metric.set(progress_percent);
             }
         }
@@ -372,6 +382,7 @@ impl<'a> PostgresReplicator<'a> {
         &mut self,
         replication_slot: &CreatedSlot,
         create_schema: &mut CreateSchema,
+        snapshot_report_interval_secs: u16,
     ) -> ReadySetResult<()> {
         let wal_position = PostgresPosition::from(replication_slot.consistent_point).into();
         self.set_snapshot(&replication_slot.snapshot_name).await?;
@@ -471,7 +482,11 @@ impl<'a> PostgresReplicator<'a> {
             noria_table.set_snapshot_mode(true).await?;
 
             table
-                .dump(&self.transaction, noria_table)
+                .dump(
+                    &self.transaction,
+                    noria_table,
+                    snapshot_report_interval_secs,
+                )
                 .instrument(span.clone())
                 .await?;
         }

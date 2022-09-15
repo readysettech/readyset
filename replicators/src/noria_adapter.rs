@@ -82,10 +82,20 @@ pub struct Config {
     #[clap(long, env = "REPLICATION_TABLES")]
     #[serde(default)]
     pub replication_tables: Option<RedactedString>,
+
+    /// Sets the time (in seconds) between reports of progress snapshotting the database. A value
+    /// of 0 disables reporting.
+    #[clap(long, default_value = "30")]
+    #[serde(default = "default_snapshot_report_interval_secs")]
+    pub snapshot_report_interval_secs: u16,
 }
 
 fn default_replicator_restart_timeout() -> Duration {
     Config::default().replicator_restart_timeout
+}
+
+fn default_snapshot_report_interval_secs() -> u16 {
+    Config::default().snapshot_report_interval_secs
 }
 
 fn duration_from_seconds(i: &str) -> Result<Duration, ParseIntError> {
@@ -101,6 +111,7 @@ impl Default for Config {
             replication_server_id: Default::default(),
             replicator_restart_timeout: Duration::from_secs(30),
             replication_tables: Default::default(),
+            snapshot_report_interval_secs: 30,
         }
     }
 }
@@ -287,7 +298,11 @@ impl NoriaAdapter {
 
                 span.in_scope(|| info!("Starting snapshot"));
                 let snapshot_result = replicator
-                    .snapshot_to_noria(&mut noria, &mut db_schemas)
+                    .snapshot_to_noria(
+                        &mut noria,
+                        &mut db_schemas,
+                        config.snapshot_report_interval_secs,
+                    )
                     .instrument(span.clone())
                     .await;
 
@@ -414,6 +429,7 @@ impl NoriaAdapter {
         let replication_offsets = noria.replication_offsets().await?;
         let pos = replication_offsets.max_offset()?.map(Into::into);
         let disable_replication_ssl_verification = config.disable_replication_ssl_verification;
+        let snapshot_report_interval_secs = config.snapshot_report_interval_secs;
 
         let table_filter = TableFilter::try_new(
             nom_sql::Dialect::PostgreSQL,
@@ -478,7 +494,7 @@ impl NoriaAdapter {
                 PostgresReplicator::new(&mut client, &mut noria, table_filter.clone()).await?;
 
             select! {
-                snapshot_result = replicator.snapshot_to_noria(&replication_slot, &mut create_schema).fuse() =>  {
+                snapshot_result = replicator.snapshot_to_noria(&replication_slot, &mut create_schema, snapshot_report_interval_secs).fuse() =>  {
                     let status = if snapshot_result.is_err() {
                         SnapshotStatusTag::Failed.value()
                     } else {
