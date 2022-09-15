@@ -1,0 +1,33 @@
+statement ok
+create table t (id int primary key, value int, grp int);
+
+statement ok
+insert into t (id, value, grp) values (1, 0, 1), (2, 0, 1), (3, 0, 2), (4, 0, 2);
+
+query II rowsort
+select grp, sum(value) from t group by grp;
+----
+1
+0
+2
+0
+
+statement ok
+delete from t where id = 1;
+
+query II rowsort
+select grp, sum(value) from t group by grp;
+----
+1
+0
+2
+0
+
+statement ok
+delete from t where id = 2;
+
+query II rowsort
+select grp, sum(value) from t group by grp;
+----
+2
+0

@@ -1081,4 +1081,44 @@ mod tests {
         );
         assert_eq!(c.node().resolve(1), None);
     }
+
+    #[test]
+    fn sum_add_zero() {
+        let mut c = setup(Aggregation::Sum, true);
+        let out = c.narrow_one_row(vec!["grp".into(), 1.into()], true);
+        assert_eq!(
+            out,
+            vec![vec![
+                DfValue::from("grp"),
+                DfValue::try_from(1.0f64).unwrap(),
+                DfValue::from(1)
+            ]]
+            .into()
+        );
+
+        // Adding 0 to the group should still add 1 to the row count (the last column)
+        let out = c.narrow_one_row(vec!["grp".into(), 0.into()], true);
+        assert_eq!(
+            out,
+            vec![
+                (
+                    vec![
+                        DfValue::from("grp"),
+                        DfValue::try_from(1.0f64).unwrap(),
+                        DfValue::from(1)
+                    ],
+                    false
+                ),
+                (
+                    vec![
+                        DfValue::from("grp"),
+                        DfValue::try_from(1.0f64).unwrap(),
+                        DfValue::from(2)
+                    ],
+                    true
+                )
+            ]
+            .into()
+        );
+    }
 }

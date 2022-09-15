@@ -223,9 +223,22 @@ mod tests {
         let out = c.narrow_one_row(vec![key.into(), 7.into()], true);
         assert_record_change(key, 4.into(), 7.into(), out);
 
-        // No change if new value isn't the max.
+        // If new value isn't the max, just update the row count
         let rs = c.narrow_one_row(vec![key.into(), 2.into()], true);
-        assert!(rs.is_empty());
+        assert_eq!(
+            rs,
+            vec![
+                (
+                    vec![DfValue::from(key), DfValue::from(7), DfValue::from(2)],
+                    false
+                ),
+                (
+                    vec![DfValue::from(key), DfValue::from(7), DfValue::from(3)],
+                    true
+                )
+            ]
+            .into()
+        );
 
         // Insertion into a different group should be independent.
         let out = c.narrow_one_row(vec![2.into(), 3.into()], true);
@@ -233,7 +246,20 @@ mod tests {
 
         // Larger than last value, but not largest in group.
         let rs = c.narrow_one_row(vec![key.into(), 5.into()], true);
-        assert!(rs.is_empty());
+        assert_eq!(
+            rs,
+            vec![
+                (
+                    vec![DfValue::from(key), DfValue::from(7), DfValue::from(3)],
+                    false
+                ),
+                (
+                    vec![DfValue::from(key), DfValue::from(7), DfValue::from(4)],
+                    true
+                )
+            ]
+            .into()
+        );
 
         // One more new max.
         let out = c.narrow_one_row(vec![key.into(), 22.into()], true);
@@ -261,9 +287,22 @@ mod tests {
         let out = c.narrow_one_row(vec![key.into(), 7.into()], true);
         assert_record_change(key, 10.into(), 7.into(), out);
 
-        // No change if new value isn't the min.
+        // If new value isn't the min, just update the row count
         let rs = c.narrow_one_row(vec![key.into(), 9.into()], true);
-        assert!(rs.is_empty());
+        assert_eq!(
+            rs,
+            vec![
+                (
+                    vec![DfValue::from(key), DfValue::from(7), DfValue::from(2)],
+                    false
+                ),
+                (
+                    vec![DfValue::from(key), DfValue::from(7), DfValue::from(3)],
+                    true
+                ),
+            ]
+            .into()
+        );
 
         // Insertion into a different group should be independent.
         let out = c.narrow_one_row(vec![2.into(), 15.into()], true);
@@ -271,7 +310,20 @@ mod tests {
 
         // Smaller than last value, but not smallest in group.
         let rs = c.narrow_one_row(vec![key.into(), 8.into()], true);
-        assert!(rs.is_empty());
+        assert_eq!(
+            rs,
+            vec![
+                (
+                    vec![DfValue::from(key), DfValue::from(7), DfValue::from(3)],
+                    false
+                ),
+                (
+                    vec![DfValue::from(key), DfValue::from(7), DfValue::from(4)],
+                    true
+                ),
+            ]
+            .into()
+        );
 
         // Negative for old min should be fine if there is a positive for a smaller value.
         let u = vec![

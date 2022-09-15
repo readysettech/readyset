@@ -351,7 +351,7 @@ where
                 let rows_in_group_new = rows_in_group + pos_neg_delta;
 
                 match current {
-                    Some(ref current) if new == *current && rows_in_group_new > 0 => {
+                    Some(ref current) if new == *current && rows_in_group_new == rows_in_group => {
                         // no change
                     }
                     _ => {
