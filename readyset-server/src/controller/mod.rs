@@ -19,6 +19,8 @@ use readyset::consensus::{
     Authority, AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult,
     WorkerDescriptor, WorkerId, WorkerSchedulingConfig,
 };
+#[cfg(feature = "failure_injection")]
+use readyset::failpoints;
 use readyset::metrics::recorded;
 use readyset::ControllerDescriptor;
 use readyset_errors::{internal, internal_err, ReadySetError};
@@ -539,7 +541,7 @@ impl Controller {
                     }
                 }
                 req = authority_rx.recv() => {
-                    set_failpoint!("server-authority-inbound");
+                    set_failpoint!(failpoints::AUTHORITY);
                     match req {
                         Some(req) => self.handle_authority_update(req).await?,
                         None => {
@@ -888,7 +890,7 @@ async fn authority_inner(
 
     let mut last_leader_state = false;
     loop {
-        set_failpoint!("authority");
+        set_failpoint!(failpoints::AUTHORITY);
         leader_election_state
             .update_leader_state()
             .await

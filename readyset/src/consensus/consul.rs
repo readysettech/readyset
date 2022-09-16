@@ -146,6 +146,8 @@ use super::{
     AdapterId, AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult, LeaderPayload,
     WorkerDescriptor, WorkerId,
 };
+#[cfg(feature = "failure_injection")]
+use crate::failpoints;
 use crate::metrics::recorded;
 use crate::{ReadySetError, ReadySetResult};
 
@@ -909,9 +911,9 @@ impl AuthorityControl for ConsulAuthority {
         &self,
         id: WorkerId,
     ) -> Result<AuthorityWorkerHeartbeatResponse, Error> {
-        set_failpoint!("server-authority-inbound", |_| Ok(
-            AuthorityWorkerHeartbeatResponse::Failed
-        ));
+        set_failpoint!(failpoints::AUTHORITY, |_| {
+            Ok(AuthorityWorkerHeartbeatResponse::Failed)
+        });
 
         Ok(
             match consulrs::session::renew(&self.consul, &id, None).await {
@@ -929,10 +931,8 @@ impl AuthorityControl for ConsulAuthority {
     // deleting keys without a session.
     // TODO(justin): Combine this with worker data to prevent redundent calls.
     async fn get_workers(&self) -> Result<HashSet<WorkerId>, Error> {
-        set_failpoint!("server-authority-inbound", |_| bail!(
-            ConsulAuthorityError::RequestFailed(
-                "server-authority-inbound failure injected".to_string()
-            )
+        set_failpoint!(failpoints::AUTHORITY, |_| bail!(
+            ConsulAuthorityError::RequestFailed("authority->server failure injected".to_string())
         ));
 
         Ok(
@@ -964,10 +964,8 @@ impl AuthorityControl for ConsulAuthority {
         &self,
         worker_ids: Vec<WorkerId>,
     ) -> Result<HashMap<WorkerId, WorkerDescriptor>, Error> {
-        set_failpoint!("server-authority-inbound", |_| bail!(
-            ConsulAuthorityError::RequestFailed(
-                "server-authority-inbound failure injected".to_string()
-            )
+        set_failpoint!(failpoints::AUTHORITY, |_| bail!(
+            ConsulAuthorityError::RequestFailed("authority->server failure injected".to_string())
         ));
 
         let mut worker_descriptors: HashMap<WorkerId, WorkerDescriptor> = HashMap::new();
@@ -996,10 +994,8 @@ impl AuthorityControl for ConsulAuthority {
     // TODO(justin): Duplicate code with register_worker, abstract writing a serialized value
     // to a key + lock.
     async fn register_adapter(&self, endpoint: SocketAddr) -> Result<Option<AdapterId>, Error> {
-        set_failpoint!("server-authority-inbound", |_| bail!(
-            ConsulAuthorityError::RequestFailed(
-                "server-authority-inbound failure injected".to_string()
-            )
+        set_failpoint!(failpoints::AUTHORITY, |_| bail!(
+            ConsulAuthorityError::RequestFailed("authority->server failure injected".to_string())
         ));
 
         // Each adapter is associated with the key:
@@ -1021,10 +1017,8 @@ impl AuthorityControl for ConsulAuthority {
     }
 
     async fn get_adapters(&self) -> Result<HashSet<SocketAddr>, Error> {
-        set_failpoint!("server-authority-inbound", |_| bail!(
-            ConsulAuthorityError::RequestFailed(
-                "server-authority-inbound failure injected".to_string()
-            )
+        set_failpoint!(failpoints::AUTHORITY, |_| bail!(
+            ConsulAuthorityError::RequestFailed("authority->server failure injected".to_string())
         ));
         let adapter_ids: HashSet<AdapterId> = match kv::read(
             &self.consul,

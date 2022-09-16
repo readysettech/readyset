@@ -16,7 +16,7 @@ default = []
 generate_mysql_tests = ["default"]
 profiling = ["timekeeper/default"]
 bench = ["dataflow/bench"]
-failure_injection = ["fail/failpoints", "dataflow/failure_injection", "replicators/failure_injection"]
+failure_injection = ["fail/failpoints", "readyset/failure_injection", "dataflow/failure_injection", "replicators/failure_injection"]
 # Redact the display of strings marked sensitive from logs and error messages
 redact_sensitive = ["launchpad/redact_sensitive"]
 

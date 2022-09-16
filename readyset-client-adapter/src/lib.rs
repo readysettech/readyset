@@ -22,6 +22,8 @@ use metrics::SharedString;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use nom_sql::{Dialect, Relation, SqlQuery};
 use readyset::consensus::{AuthorityControl, AuthorityType, ConsulAuthority};
+#[cfg(feature = "failure_injection")]
+use readyset::failpoints;
 use readyset::metrics::recorded;
 use readyset::{ControllerHandle, ReadySetError, ViewCreateRequest};
 use readyset_client::backend::noria_connector::{NoriaConnector, ReadBehavior};
@@ -746,7 +748,7 @@ where
             let query_status_cache = query_status_cache;
             let fut = async move {
                 let upstream_res = if let Some(upstream_db_url) = &upstream_db_url {
-                    set_failpoint!("adapter-upstream");
+                    set_failpoint!(failpoints::UPSTREAM);
                     timeout(
                         UPSTREAM_CONNECTION_TIMEOUT,
                         H::UpstreamDatabase::connect(

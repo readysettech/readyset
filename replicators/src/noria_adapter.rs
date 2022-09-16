@@ -15,6 +15,8 @@ use metrics::{counter, histogram};
 use nom_sql::Relation;
 use readyset::consensus::Authority;
 use readyset::consistency::Timestamp;
+#[cfg(feature = "failure_injection")]
+use readyset::failpoints;
 use readyset::metrics::recorded::{self, SnapshotStatusTag};
 use readyset::recipe::changelist::{Change, ChangeList};
 use readyset::replication::{ReplicationOffset, ReplicationOffsets};
@@ -693,7 +695,7 @@ impl NoriaAdapter {
         until: Option<ReplicationOffset>,
     ) -> ReadySetResult<()> {
         loop {
-            set_failpoint!("replication-upstream", |_| ReadySetResult::Err(
+            set_failpoint!(failpoints::UPSTREAM, |_| ReadySetResult::Err(
                 ReadySetError::ReplicationFailed(
                     "replication-upstream failpoint injected".to_string()
                 )

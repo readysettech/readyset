@@ -39,7 +39,7 @@ slab = "0.4"
 pin-project = "1.0"
 futures-util = "0.3.0"
 futures = "0.3"
-mysql_common ={ version = "0.28.0", features = ["chrono"] }
+mysql_common = { version = "0.28.0", features = ["chrono"] }
 vec1 = { version = "1.6.0", features = ["serde"] }
 proptest = "1.0.0"
 derive_more = "0.99.11"

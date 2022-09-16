@@ -16,6 +16,8 @@ use futures_util::future::TryFutureExt;
 use futures_util::stream::{StreamExt, TryStreamExt};
 use pin_project::pin_project;
 use readyset::consistency::Timestamp;
+#[cfg(feature = "failure_injection")]
+use readyset::failpoints;
 use readyset::metrics::recorded;
 use readyset::results::ResultIterator;
 use readyset::{
@@ -367,7 +369,7 @@ pub(crate) async fn listen(
 ) {
     let mut stream = valve.wrap(TcpListenerStream::new(on)).into_stream();
     while let Some(stream) = stream.next().await {
-        set_failpoint!("read-query");
+        set_failpoint!(failpoints::READ_QUERY);
         if stream.is_err() {
             // io error from client: just ignore it
             continue;
