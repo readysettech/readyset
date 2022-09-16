@@ -15,10 +15,11 @@ use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
 use crate::case::case_when;
-use crate::common::{column_function, column_identifier_no_alias, type_identifier, ws_sep_comma};
+use crate::common::{column_function, column_identifier_no_alias, ws_sep_comma};
 use crate::literal::literal;
 use crate::select::nested_selection;
 use crate::set::{variable_scope_prefix, Variable};
+use crate::sql_type::type_identifier;
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Column, Dialect, Literal, SelectStatement, SqlType};
 

@@ -8,9 +8,9 @@ use itertools::Itertools;
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case, take_until};
 use nom::character::complete::{digit1, line_ending};
-use nom::combinator::{map, map_parser, map_res, opt};
+use nom::combinator::{map, map_res, opt};
 use nom::error::{ErrorKind, ParseError};
-use nom::multi::{fold_many0, separated_list0, separated_list1};
+use nom::multi::{separated_list0, separated_list1};
 use nom::sequence::{delimited, pair, preceded, separated_pair, terminated, tuple};
 use nom::{IResult, InputLength};
 use serde::{Deserialize, Serialize};
@@ -20,7 +20,7 @@ use crate::dialect::Dialect;
 use crate::expression::expression;
 use crate::table::Relation;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{literal, Expr, FunctionExpr, Literal, SqlIdentifier, SqlType};
+use crate::{literal, Expr, FunctionExpr, Literal, SqlIdentifier};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum IndexType {
@@ -313,39 +313,6 @@ impl Display for FieldReference {
         }
     }
 }
-
-fn digit_as_u16(len: &[u8]) -> IResult<&[u8], u16> {
-    match str::from_utf8(len) {
-        Ok(s) => match u16::from_str(s) {
-            Ok(v) => Ok((len, v)),
-            Err(_) => Err(nom::Err::Error(ParseError::from_error_kind(
-                len,
-                ErrorKind::LengthValue,
-            ))),
-        },
-        Err(_) => Err(nom::Err::Error(ParseError::from_error_kind(
-            len,
-            ErrorKind::LengthValue,
-        ))),
-    }
-}
-
-fn digit_as_u8(len: &[u8]) -> IResult<&[u8], u8> {
-    match str::from_utf8(len) {
-        Ok(s) => match u8::from_str(s) {
-            Ok(v) => Ok((len, v)),
-            Err(_) => Err(nom::Err::Error(ParseError::from_error_kind(
-                len,
-                ErrorKind::LengthValue,
-            ))),
-        },
-        Err(_) => Err(nom::Err::Error(ParseError::from_error_kind(
-            len,
-            ErrorKind::LengthValue,
-        ))),
-    }
-}
-
 pub(crate) fn opt_delimited<I: Clone, O1, O2, O3, E: ParseError<I>, F, G, H>(
     mut first: F,
     mut second: G,
@@ -367,321 +334,6 @@ where
                 delimited(first_, second_, third_)(inp)
             }
         }
-    }
-}
-
-fn precision_helper(i: &[u8]) -> IResult<&[u8], (u8, Option<u8>)> {
-    let (remaining_input, (m, d)) = tuple((
-        digit1,
-        opt(preceded(tag(","), preceded(whitespace0, digit1))),
-    ))(i)?;
-
-    let m = digit_as_u8(m)?.1;
-    // Manual map allowed for nom error propagation.
-    #[allow(clippy::manual_map)]
-    let d = match d {
-        None => None,
-        Some(v) => Some(digit_as_u8(v)?.1),
-    };
-
-    Ok((remaining_input, (m, d)))
-}
-
-pub fn precision(i: &[u8]) -> IResult<&[u8], (u8, Option<u8>)> {
-    delimited(tag("("), precision_helper, tag(")"))(i)
-}
-
-pub fn numeric_precision(i: &[u8]) -> IResult<&[u8], (u16, Option<u8>)> {
-    delimited(tag("("), numeric_precision_inner, tag(")"))(i)
-}
-
-pub fn numeric_precision_inner(i: &[u8]) -> IResult<&[u8], (u16, Option<u8>)> {
-    let (remaining_input, (m, _, d)) = tuple((
-        digit1,
-        whitespace0,
-        opt(preceded(tag(","), preceded(whitespace0, digit1))),
-    ))(i)?;
-
-    let m = digit_as_u16(m)?.1;
-    d.map(digit_as_u8)
-        .transpose()
-        .map(|v| (remaining_input, (m, v.map(|digit| digit.1))))
-}
-
-fn opt_signed(i: &[u8]) -> IResult<&[u8], Option<Sign>> {
-    opt(alt((
-        map(tag_no_case("unsigned"), |_| Sign::Unsigned),
-        map(tag_no_case("signed"), |_| Sign::Signed),
-    )))(i)
-}
-
-fn delim_digit(i: &[u8]) -> IResult<&[u8], &[u8]> {
-    delimited(tag("("), digit1, tag(")"))(i)
-}
-
-fn delim_u16(i: &[u8]) -> IResult<&[u8], u16> {
-    map_parser(delim_digit, digit_as_u16)(i)
-}
-
-fn int_type<'a, F, G>(
-    tag: &str,
-    mk_unsigned: F,
-    mk_signed: G,
-    i: &'a [u8],
-) -> IResult<&'a [u8], SqlType>
-where
-    F: Fn(Option<u16>) -> SqlType + 'static,
-    G: Fn(Option<u16>) -> SqlType + 'static,
-{
-    let (remaining_input, (_, len, _, signed)) =
-        tuple((tag_no_case(tag), opt(delim_u16), whitespace0, opt_signed))(i)?;
-
-    if let Some(Sign::Unsigned) = signed {
-        Ok((remaining_input, mk_unsigned(len)))
-    } else {
-        Ok((remaining_input, mk_signed(len)))
-    }
-}
-
-// TODO(malte): not strictly ok to treat DECIMAL and NUMERIC as identical; the
-// former has "at least" M precision, the latter "exactly".
-// See https://dev.mysql.com/doc/refman/5.7/en/precision-math-decimal-characteristics.html
-fn decimal_or_numeric(i: &[u8]) -> IResult<&[u8], SqlType> {
-    let (i, _) = alt((tag_no_case("decimal"), tag_no_case("numeric")))(i)?;
-    let (i, precision) = opt(precision)(i)?;
-    let (i, _) = whitespace0(i)?;
-    // Parse and drop sign
-    let (i, _) = opt_signed(i)?;
-
-    match precision {
-        None => Ok((i, SqlType::Decimal(32, 0))),
-        Some((m, None)) => Ok((i, SqlType::Decimal(m, 0))),
-        Some((m, Some(d))) => Ok((i, SqlType::Decimal(m, d))),
-    }
-}
-
-fn opt_without_time_zone(i: &[u8]) -> IResult<&[u8], ()> {
-    map(
-        opt(preceded(
-            whitespace1,
-            tuple((
-                tag_no_case("without"),
-                whitespace1,
-                tag_no_case("time"),
-                whitespace1,
-                tag_no_case("zone"),
-            )),
-        )),
-        |_| (),
-    )(i)
-}
-
-fn enum_type(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlType> {
-    move |i| {
-        let (i, _) = tag_no_case("enum")(i)?;
-        let (i, _) = whitespace0(i)?;
-        let (i, _) = tag("(")(i)?;
-        let (i, _) = whitespace0(i)?;
-        let (i, variants) = value_list(dialect)(i)?;
-        let (i, _) = whitespace0(i)?;
-        let (i, _) = tag(")")(i)?;
-        Ok((i, SqlType::from_enum_variants(variants)))
-    }
-}
-
-fn type_identifier_first_half(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlType> {
-    move |i| {
-        alt((
-            |i| int_type("tinyint", SqlType::UnsignedTinyInt, SqlType::TinyInt, i),
-            |i| int_type("smallint", SqlType::UnsignedSmallInt, SqlType::SmallInt, i),
-            |i| int_type("integer", SqlType::UnsignedInt, SqlType::Int, i),
-            |i| int_type("int", SqlType::UnsignedInt, SqlType::Int, i),
-            |i| int_type("bigint", SqlType::UnsignedBigInt, SqlType::BigInt, i),
-            map(alt((tag_no_case("boolean"), tag_no_case("bool"))), |_| {
-                SqlType::Bool
-            }),
-            map(preceded(tag_no_case("datetime"), opt(delim_u16)), |fsp| {
-                SqlType::DateTime(fsp)
-            }),
-            map(tag_no_case("date"), |_| SqlType::Date),
-            map(
-                tuple((
-                    tag_no_case("double"),
-                    opt(preceded(whitespace1, tag_no_case("precision"))),
-                    whitespace0,
-                    opt(precision),
-                    whitespace0,
-                    opt_signed,
-                )),
-                |_| SqlType::Double,
-            ),
-            map(
-                tuple((tag_no_case("numeric"), whitespace0, opt(numeric_precision))),
-                |t| SqlType::Numeric(t.2),
-            ),
-            enum_type(dialect),
-            map(
-                tuple((
-                    tag_no_case("float"),
-                    whitespace0,
-                    opt(precision),
-                    whitespace0,
-                    opt_signed,
-                )),
-                |_| SqlType::Float,
-            ),
-            map(
-                tuple((tag_no_case("real"), whitespace0, opt_signed)),
-                |_| SqlType::Real,
-            ),
-            map(tag_no_case("text"), |_| SqlType::Text),
-            map(
-                tuple((
-                    tag_no_case("timestamp"),
-                    opt(preceded(whitespace0, delim_digit)),
-                    preceded(
-                        whitespace1,
-                        tuple((
-                            tag_no_case("with"),
-                            whitespace1,
-                            tag_no_case("time"),
-                            whitespace1,
-                            tag_no_case("zone"),
-                        )),
-                    ),
-                )),
-                |_| SqlType::TimestampTz,
-            ),
-            map(tag_no_case("timestamptz"), |_| SqlType::TimestampTz),
-            map(
-                tuple((
-                    tag_no_case("timestamp"),
-                    opt(preceded(whitespace0, delim_digit)),
-                    opt_without_time_zone,
-                )),
-                |_| SqlType::Timestamp,
-            ),
-            map(
-                tuple((
-                    alt((
-                        // The alt expects the same type to be returned for both entries,
-                        // so both have to be tuples with same number of elements
-                        tuple((
-                            tag_no_case("varchar"),
-                            map(whitespace0, |_| "".as_bytes()),
-                            map(whitespace0, |_| "".as_bytes()),
-                        )),
-                        tuple((
-                            tag_no_case("character"),
-                            map(whitespace1, |_| "".as_bytes()),
-                            tag_no_case("varying"),
-                        )),
-                    )),
-                    opt(delim_u16),
-                    whitespace0,
-                    opt(tag_no_case("binary")),
-                )),
-                |t| SqlType::VarChar(t.1),
-            ),
-            map(
-                tuple((
-                    alt((tag_no_case("character"), tag_no_case("char"))),
-                    opt(delim_u16),
-                    whitespace0,
-                    opt(tag_no_case("binary")),
-                )),
-                |t| SqlType::Char(t.1),
-            ),
-        ))(i)
-    }
-}
-
-fn type_identifier_second_half(i: &[u8]) -> IResult<&[u8], SqlType> {
-    alt((
-        map(
-            terminated(tag_no_case("time"), opt_without_time_zone),
-            |_| SqlType::Time,
-        ),
-        decimal_or_numeric,
-        map(
-            tuple((tag_no_case("binary"), opt(delim_u16), whitespace0)),
-            |t| SqlType::Binary(t.1),
-        ),
-        map(tag_no_case("blob"), |_| SqlType::Blob),
-        map(tag_no_case("longblob"), |_| SqlType::LongBlob),
-        map(tag_no_case("mediumblob"), |_| SqlType::MediumBlob),
-        map(tag_no_case("mediumtext"), |_| SqlType::MediumText),
-        map(tag_no_case("longtext"), |_| SqlType::LongText),
-        map(tag_no_case("tinyblob"), |_| SqlType::TinyBlob),
-        map(tag_no_case("tinytext"), |_| SqlType::TinyText),
-        map(
-            tuple((tag_no_case("varbinary"), delim_u16, whitespace0)),
-            |t| SqlType::VarBinary(t.1),
-        ),
-        map(tag_no_case("bytea"), |_| SqlType::ByteArray),
-        map(tag_no_case("macaddr"), |_| SqlType::MacAddr),
-        map(tag_no_case("inet"), |_| SqlType::Inet),
-        map(tag_no_case("uuid"), |_| SqlType::Uuid),
-        map(tag_no_case("jsonb"), |_| SqlType::Jsonb),
-        map(tag_no_case("json"), |_| SqlType::Json),
-        map(
-            tuple((
-                alt((
-                    // The alt expects the same type to be returned for both entries,
-                    // so both have to be tuples with same number of elements
-                    map(tuple((tag_no_case("varbit"), whitespace0)), |_| ()),
-                    map(
-                        tuple((
-                            tag_no_case("bit"),
-                            whitespace1,
-                            tag_no_case("varying"),
-                            whitespace0,
-                        )),
-                        |_| (),
-                    ),
-                )),
-                opt(delim_u16),
-            )),
-            |t| SqlType::VarBit(t.1),
-        ),
-        map(tuple((tag_no_case("bit"), opt(delim_u16))), |t| {
-            SqlType::Bit(t.1)
-        }),
-        map(tag_no_case("serial"), |_| SqlType::Serial),
-        map(tag_no_case("bigserial"), |_| SqlType::BigSerial),
-    ))(i)
-}
-
-fn array_suffix(i: &[u8]) -> IResult<&[u8], ()> {
-    let (i, _) = tag("[")(i)?;
-    let (i, _) = opt(whitespace0)(i)?;
-    let (i, _len) = opt(digit1)(i)?;
-    let (i, _) = opt(whitespace0)(i)?;
-    let (i, _) = tag("]")(i)?;
-    Ok((i, ()))
-}
-
-fn type_identifier_no_arrays(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlType> {
-    move |i| {
-        alt((
-            type_identifier_first_half(dialect),
-            type_identifier_second_half,
-        ))(i)
-    }
-}
-
-// A SQL type specifier.
-pub fn type_identifier(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlType> {
-    move |i| {
-        // need to pull a bit of a trick here to properly recursive-descent arrays since they're a
-        // suffix. First, we parse the type, then we parse any number of `[]` or `[<n>]` suffixes,
-        // and use those to construct the multiple levels of `SqlType::Array`
-        let (i, ty) = type_identifier_no_arrays(dialect)(i)?;
-        fold_many0(
-            array_suffix,
-            move || ty.clone(),
-            |t, _| SqlType::Array(Box::new(t)),
-        )(i)
     }
 }
 
@@ -1024,6 +676,7 @@ pub fn field_reference_list(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::SqlType;
 
     fn test_opt_delimited_fn_call(i: &str) -> IResult<&[u8], &[u8]> {
         opt_delimited(tag("("), tag("abc"), tag(")"))(i.as_bytes())
@@ -1058,41 +711,6 @@ mod tests {
             IResult::Ok((")".as_bytes(), "abc".as_bytes()))
         );
         test_opt_delimited_fn_call("ab").unwrap_err();
-    }
-
-    #[test]
-    fn sql_types() {
-        let ok = [
-            "bool",
-            "integer(16)",
-            "datetime(16)",
-            "decimal(6,2) unsigned",
-            "numeric(2) unsigned",
-            "float unsigned",
-        ];
-
-        let res_ok: Vec<_> = ok
-            .iter()
-            .map(|t| type_identifier(Dialect::MySQL)(t.as_bytes()).unwrap().1)
-            .collect();
-
-        assert_eq!(
-            res_ok,
-            vec![
-                SqlType::Bool,
-                SqlType::Int(Some(16)),
-                SqlType::DateTime(Some(16)),
-                SqlType::Decimal(6, 2),
-                SqlType::Numeric(Some((2, None))),
-                SqlType::Float,
-            ]
-        );
-    }
-
-    #[test]
-    fn boolean_bool() {
-        let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"boolean");
-        assert_eq!(res, SqlType::Bool);
     }
 
     #[test]
@@ -1179,15 +797,6 @@ mod tests {
         assert_eq!(res, Ok((&b""[..], ())));
     }
 
-    #[test]
-    fn json_type() {
-        for dialect in [Dialect::MySQL, Dialect::PostgreSQL] {
-            let res = type_identifier(dialect)(b"json");
-            assert!(res.is_ok());
-            assert_eq!(res.unwrap().1, SqlType::Json);
-        }
-    }
-
     mod mysql {
         use super::*;
 
@@ -1226,14 +835,6 @@ mod tests {
                 };
                 assert_eq!(res, Ok((&b""[..], expected)));
             }
-        }
-
-        #[test]
-        fn double_with_lens() {
-            let qs = b"double(16,12)";
-            let res = type_identifier(Dialect::MySQL)(qs);
-            assert!(res.is_ok());
-            assert_eq!(res.unwrap().1, SqlType::Double);
         }
 
         #[test]
@@ -1302,212 +903,6 @@ mod tests {
                 };
                 assert_eq!(res, Ok((&b""[..], expected)));
             }
-        }
-
-        #[test]
-        fn numeric() {
-            let qs = b"NUMERIC";
-            let res = type_identifier(Dialect::PostgreSQL)(qs);
-            assert!(res.is_ok());
-            assert_eq!(res.unwrap().1, SqlType::Numeric(None));
-        }
-
-        #[test]
-        fn numeric_with_precision() {
-            let qs = b"NUMERIC(10)";
-            let res = type_identifier(Dialect::PostgreSQL)(qs);
-            assert!(res.is_ok());
-            assert_eq!(res.unwrap().1, SqlType::Numeric(Some((10, None))));
-        }
-
-        #[test]
-        fn numeric_with_precision_and_scale() {
-            let qs = b"NUMERIC(10, 20)";
-            let res = type_identifier(Dialect::PostgreSQL)(qs);
-            assert!(res.is_ok());
-            assert_eq!(res.unwrap().1, SqlType::Numeric(Some((10, Some(20)))));
-        }
-
-        #[test]
-        fn macaddr_type() {
-            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"macaddr");
-            assert_eq!(res, SqlType::MacAddr);
-        }
-
-        #[test]
-        fn inet_type() {
-            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"inet");
-            assert_eq!(res, SqlType::Inet);
-        }
-
-        #[test]
-        fn uuid_type() {
-            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"uuid");
-            assert_eq!(res, SqlType::Uuid);
-        }
-
-        #[test]
-        fn json_type() {
-            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"json");
-            assert_eq!(res, SqlType::Json);
-        }
-
-        #[test]
-        fn jsonb_type() {
-            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"jsonb");
-            assert_eq!(res, SqlType::Jsonb);
-        }
-
-        #[test]
-        fn bit_type() {
-            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"bit");
-            assert_eq!(res, SqlType::Bit(None));
-        }
-
-        #[test]
-        fn bit_with_size_type() {
-            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"bit(10)");
-            assert_eq!(res, SqlType::Bit(Some(10)));
-        }
-
-        #[test]
-        fn bit_varying_type() {
-            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"bit varying");
-            assert_eq!(res, SqlType::VarBit(None));
-        }
-
-        #[test]
-        fn bit_varying_with_size_type() {
-            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"bit varying(10)");
-            assert_eq!(res, SqlType::VarBit(Some(10)));
-        }
-
-        #[test]
-        fn timestamp_type() {
-            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"timestamp");
-            assert_eq!(res, SqlType::Timestamp);
-        }
-
-        #[test]
-        fn timestamp_with_prec_type() {
-            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"timestamp (5)");
-            assert_eq!(res, SqlType::Timestamp);
-        }
-
-        #[test]
-        fn timestamp_without_timezone_type() {
-            let res = test_parse!(
-                type_identifier(Dialect::PostgreSQL),
-                b"timestamp without time zone"
-            );
-            assert_eq!(res, SqlType::Timestamp);
-        }
-
-        #[test]
-        fn timestamp_with_prec_without_timezone_type() {
-            let res = test_parse!(
-                type_identifier(Dialect::PostgreSQL),
-                b"timestamp (5)   without time zone"
-            );
-            assert_eq!(res, SqlType::Timestamp);
-        }
-
-        #[test]
-        fn timestamp_tz_type() {
-            let res = test_parse!(
-                type_identifier(Dialect::PostgreSQL),
-                b"timestamp with time zone"
-            );
-            assert_eq!(res, SqlType::TimestampTz);
-        }
-
-        #[test]
-        fn timestamptz_type() {
-            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"timestamptz");
-            assert_eq!(res, SqlType::TimestampTz)
-        }
-
-        #[test]
-        fn timestamp_tz_with_prec_type() {
-            let res = test_parse!(
-                type_identifier(Dialect::PostgreSQL),
-                b"timestamp (5)    with time zone"
-            );
-            assert_eq!(res, SqlType::TimestampTz);
-        }
-
-        #[test]
-        fn serial_type() {
-            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"serial");
-            assert_eq!(res, SqlType::Serial);
-        }
-
-        #[test]
-        fn bigserial_type() {
-            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"bigserial");
-            assert_eq!(res, SqlType::BigSerial);
-        }
-
-        #[test]
-        fn varchar_without_length() {
-            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"varchar");
-            assert_eq!(res, SqlType::VarChar(None));
-        }
-
-        #[test]
-        fn character_varying() {
-            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"character varying");
-            assert_eq!(res, SqlType::VarChar(None));
-        }
-
-        #[test]
-        fn character_varying_with_length() {
-            let res = test_parse!(
-                type_identifier(Dialect::PostgreSQL),
-                b"character varying(20)"
-            );
-            assert_eq!(res, SqlType::VarChar(Some(20)));
-        }
-
-        #[test]
-        fn character_with_length() {
-            let qs = b"character(16)";
-            let res = type_identifier(Dialect::PostgreSQL)(qs);
-            assert!(res.is_ok());
-            assert_eq!(res.unwrap().1, SqlType::Char(Some(16)));
-        }
-
-        #[test]
-        fn time_without_time_zone() {
-            let res = test_parse!(
-                type_identifier(Dialect::PostgreSQL),
-                b"time without time zone"
-            );
-            assert_eq!(res, SqlType::Time);
-        }
-
-        #[test]
-        fn int_array() {
-            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"int[]");
-            assert_eq!(res, SqlType::Array(Box::new(SqlType::Int(None))));
-        }
-
-        #[test]
-        fn double_nested_array() {
-            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"text[][]");
-            assert_eq!(
-                res,
-                SqlType::Array(Box::new(SqlType::Array(Box::new(SqlType::Text))))
-            );
-        }
-
-        #[test]
-        fn arrays_with_length() {
-            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"float[4][5]");
-            assert_eq!(
-                res,
-                SqlType::Array(Box::new(SqlType::Array(Box::new(SqlType::Float))))
-            );
         }
 
         #[test]

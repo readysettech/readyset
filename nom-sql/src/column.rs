@@ -11,7 +11,8 @@ use nom::sequence::{delimited, preceded, terminated, tuple};
 use nom::IResult;
 use serde::{Deserialize, Serialize};
 
-use crate::common::{column_identifier_no_alias, parse_comment, type_identifier};
+use crate::common::{column_identifier_no_alias, parse_comment};
+use crate::sql_type::type_identifier;
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Dialect, Double, Literal, Relation, SqlIdentifier, SqlType};
 

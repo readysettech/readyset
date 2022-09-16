@@ -649,29 +649,9 @@ pub fn create_cached_query(
 mod tests {
     use super::*;
     use crate::column::Column;
-    use crate::common::type_identifier;
     use crate::create_table_options::{CharsetName, CollationName};
     use crate::table::Relation;
     use crate::{BinaryOperator, ColumnConstraint, Expr, Literal, SqlType, TableExpr};
-
-    #[test]
-    fn sql_types() {
-        let type0 = "bigint(20)";
-        let type1 = "varchar(255) binary";
-        let type2 = "bigint(20) unsigned";
-        let type3 = "bigint(20) signed";
-
-        let res = type_identifier(Dialect::MySQL)(type0.as_bytes());
-        assert_eq!(res.unwrap().1, SqlType::BigInt(Some(20)));
-        let res = type_identifier(Dialect::MySQL)(type1.as_bytes());
-        assert_eq!(res.unwrap().1, SqlType::VarChar(Some(255)));
-        let res = type_identifier(Dialect::MySQL)(type2.as_bytes());
-        assert_eq!(res.unwrap().1, SqlType::UnsignedBigInt(Some(20)));
-        let res = type_identifier(Dialect::MySQL)(type3.as_bytes());
-        assert_eq!(res.unwrap().1, SqlType::BigInt(Some(20)));
-        let res = type_identifier(Dialect::MySQL)(type2.as_bytes());
-        assert_eq!(res.unwrap().1, SqlType::UnsignedBigInt(Some(20)));
-    }
 
     #[test]
     fn field_spec() {
