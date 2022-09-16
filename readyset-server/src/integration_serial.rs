@@ -1,11 +1,7 @@
-//! Integration tests for ReadySet that create an in-process instance
-//! of the controller and readyset-server component. Tests in this file
-//! should all use #[serial] to ensure that they are run serially.
-//! These tests typically modify on process-level global objects, such
-//! as the metrics recorder, and may exhibit flaky behavior if run
-//! in parallel in the same process. Implement tests without this
-//! requirement in integration.rs, which supports running tests in
-//! parallel.
+//! Integration tests for ReadySet that create an in-process instance of the controller and
+//! readyset-server component. Tests in this file should all use rusty_fork_test! to ensure that
+//! they are run in isolation, to allow them to modify process-level global objects, such as the
+//! metrics recorder.
 
 use std::collections::HashMap;
 use std::convert::TryFrom;
@@ -19,14 +15,33 @@ use readyset::consensus::StandaloneAuthority;
 use readyset::get_metric;
 use readyset::metrics::{recorded, DumpedMetricValue, MetricsDump};
 use readyset_data::DfValue;
+use rusty_fork::rusty_fork_test;
 use serial_test::serial;
 
 use crate::integration_utils::*;
 use crate::{get_col, Builder};
 
-#[tokio::test(flavor = "multi_thread")]
-#[serial]
-async fn it_works_basic() {
+rusty_fork_test! {
+    #[test]
+    fn it_works_basic() {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(it_works_basic_impl());
+    }
+
+    #[test]
+    fn it_works_basic_standalone(){
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(it_works_basic_standalone_impl());
+    }
+}
+
+async fn it_works_basic_impl() {
     register_metric_recorder();
     let mut g = {
         let mut builder = Builder::for_tests();
@@ -188,9 +203,7 @@ async fn it_works_basic() {
     //assert_eq!(cq.lookup(&[id.clone()], true).await, Ok(vec![vec![1.into(), 6.into()]]));
 }
 
-#[tokio::test(flavor = "multi_thread")]
-#[serial]
-async fn it_works_basic_standalone() {
+async fn it_works_basic_standalone_impl() {
     let dir = tempfile::tempdir().unwrap();
     let dir_path = dir.path().to_str().unwrap();
 
