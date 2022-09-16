@@ -16,6 +16,7 @@ use tokio::net::TcpListener;
 use tokio_stream::wrappers::TcpListenerStream;
 use tower::Service;
 
+use crate::health_reporter::{AdapterHealthReporter, State};
 use crate::query_status_cache::{DeniedQuery, QueryStatusCache};
 
 /// Routes requests from an HTTP server to expose metrics data from the adapter.
@@ -29,6 +30,8 @@ pub struct NoriaAdapterHttpRouter {
     pub query_cache: &'static QueryStatusCache,
     /// A valve for the http stream to trigger closing.
     pub valve: Valve,
+    /// Used to retrieve the current health of the adapter.
+    pub health_reporter: AdapterHealthReporter,
 
     /// Used to retrieve the prometheus scrape's render as a String when servicing
     /// HTTP requests on /prometheus.
@@ -239,14 +242,28 @@ impl Service<Request<Body>> for NoriaAdapterHttpRouter {
                     Ok(res.unwrap())
                 })
             }
-            (&Method::GET, "/health") => Box::pin(async move {
-                let res = res
-                    .status(200)
-                    .header(CONTENT_TYPE, "text/plain")
-                    .body(hyper::Body::empty());
+            (&Method::GET, "/health") => {
+                let state = self.health_reporter.state();
+                Box::pin(async move {
+                    let res = match state {
+                        State::Initializing | State::Healthy => {
+                            // TODO: Add logic for time. For instance, if we have been initializing
+                            // for a long period of time, that should be communicated as unhealthy.
+                            res.status(200)
+                                .header(CONTENT_TYPE, "text/plain")
+                                .body(hyper::Body::empty())
+                        }
+                        _ => {
+                            // TODO: Add match for other states.
+                            res.status(500)
+                                .header(CONTENT_TYPE, "text/plain")
+                                .body(hyper::Body::empty())
+                        }
+                    };
 
-                Ok(res.unwrap())
-            }),
+                    Ok(res.unwrap())
+                })
+            }
             (&Method::GET, "/prometheus") => {
                 let body = self.prometheus_handle.as_ref().map(|x| x.render());
                 let res = res.header(CONTENT_TYPE, "text/plain");

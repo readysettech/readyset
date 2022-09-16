@@ -26,6 +26,7 @@ use readyset::metrics::recorded;
 use readyset::{ControllerHandle, ReadySetError, ViewCreateRequest};
 use readyset_client::backend::noria_connector::{NoriaConnector, ReadBehavior};
 use readyset_client::backend::MigrationMode;
+use readyset_client::health_reporter::AdapterHealthReporter;
 use readyset_client::http_router::NoriaAdapterHttpRouter;
 use readyset_client::migration_handler::MigrationHandler;
 use readyset_client::query_status_cache::{MigrationStyle, QueryStatusCache};
@@ -400,6 +401,7 @@ where
 
         let auto_increments: Arc<RwLock<HashMap<Relation, AtomicUsize>>> = Arc::default();
         let query_cache: Arc<RwLock<HashMap<ViewCreateRequest, Relation>>> = Arc::default();
+        let health_reporter = AdapterHealthReporter::new();
 
         let rs_connect = span!(Level::INFO, "Connecting to RS server");
         rs_connect.in_scope(|| info!(%options.authority_address, %options.deployment));
@@ -693,6 +695,7 @@ where
                 query_cache: query_status_cache,
                 valve,
                 prometheus_handle,
+                health_reporter,
             };
 
             let fut = async move {
