@@ -1564,6 +1564,22 @@ mod tests {
         }
 
         #[test]
+        fn employees_employees() {
+            test_parse!(
+                create_table(Dialect::MySQL),
+                b"CREATE TABLE employees (
+                    emp_no      INT             NOT NULL,
+                    birth_date  DATE            NOT NULL,
+                    first_name  VARCHAR(14)     NOT NULL,
+                    last_name   VARCHAR(16)     NOT NULL,
+                    gender      ENUM ('M','F')  NOT NULL,
+                    hire_date   DATE            NOT NULL,
+                    PRIMARY KEY (emp_no)
+                )"
+            );
+        }
+
+        #[test]
         fn employees_dept_manager() {
             test_parse!(
                 create_table(Dialect::MySQL),

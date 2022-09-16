@@ -476,6 +476,19 @@ fn opt_without_time_zone(i: &[u8]) -> IResult<&[u8], ()> {
     )(i)
 }
 
+fn enum_type(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlType> {
+    move |i| {
+        let (i, _) = tag_no_case("enum")(i)?;
+        let (i, _) = whitespace0(i)?;
+        let (i, _) = tag("(")(i)?;
+        let (i, _) = whitespace0(i)?;
+        let (i, variants) = value_list(dialect)(i)?;
+        let (i, _) = whitespace0(i)?;
+        let (i, _) = tag(")")(i)?;
+        Ok((i, SqlType::from_enum_variants(variants)))
+    }
+}
+
 fn type_identifier_first_half(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlType> {
     move |i| {
         alt((
@@ -506,16 +519,7 @@ fn type_identifier_first_half(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u
                 tuple((tag_no_case("numeric"), whitespace0, opt(numeric_precision))),
                 |t| SqlType::Numeric(t.2),
             ),
-            map(
-                terminated(
-                    preceded(
-                        tag_no_case("enum"),
-                        delimited(tag("("), value_list(dialect), tag(")")),
-                    ),
-                    whitespace0,
-                ),
-                SqlType::from_enum_variants,
-            ),
+            enum_type(dialect),
             map(
                 tuple((
                     tag_no_case("float"),
