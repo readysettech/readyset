@@ -470,6 +470,19 @@ impl DfValue {
         }
     }
 
+    /// Mutates the given DfType value to match its underlying database representation for the
+    /// given column schema.
+    pub fn maybe_coerce_for_table_op(&mut self, col_ty: &DfType) {
+        if let DfType::Sql(enum_ty @ SqlType::Enum(_)) = col_ty {
+            // There shouldn't be any cases where this coerce_to call returns an error, but if
+            // it does then a value of 0 is generally a safe bet for enum values that don't
+            // trigger the happy path:
+            *self = self
+                .coerce_to(enum_ty, &DfType::Unknown)
+                .unwrap_or(DfValue::Int(0));
+        }
+    }
+
     /// Returns Some(&self) if self is not [`DfValue::None`]
     ///
     /// # Examples

@@ -155,7 +155,7 @@ impl Node {
                             records: mut rs,
                             replication_offset,
                             set_snapshot_mode,
-                        } = b.process(addr, data, &*env.state, snapshot_mode)?;
+                        } = b.process(addr, &self.columns, data, &*env.state, snapshot_mode)?;
 
                         if let (Some(SetSnapshotMode::EnterSnapshotMode), Some(s)) = (
                             set_snapshot_mode,

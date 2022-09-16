@@ -9,12 +9,13 @@ use launchpad::Indices;
 use maplit::hashmap;
 use readyset::replication::ReplicationOffset;
 use readyset::{Modification, Operation, TableOperation};
-use readyset_data::DfValueKind;
+use readyset_data::{DfValue, DfValueKind};
 use readyset_errors::ReadySetResult;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 use vec_map::VecMap;
 
+use crate::node::Column;
 use crate::prelude::*;
 use crate::processing::LookupIndex;
 
@@ -204,6 +205,23 @@ fn key_of<'a>(key_cols: &'a [usize], r: &'a TableOperation) -> impl Iterator<Ite
         .filter_map(move |(i, col)| key_val(i, *col, r))
 }
 
+/// Coerce values in the table operation to the correct types for the underlying schema, if
+/// needed.
+///
+/// This is used to handle cases where certain types may have a different user-visible
+/// representation than their underlying database representation (for example, inserting enum
+/// values, which appear as strings to the user but must be stored as integers in the database).
+///
+/// Note that the actual type-specific logic is implemented as a [`DfValue`] method, so as to keep
+/// type logic out of the base node code.
+fn apply_table_op_coercions(op: &mut TableOperation, columns: &[Column]) {
+    if let TableOperation::Insert(vals) = op {
+        for (val, col) in vals.iter_mut().zip(columns) {
+            val.maybe_coerce_for_table_op(col.ty());
+        }
+    }
+}
+
 impl Base {
     pub(in crate::node) fn take(&self) -> Self {
         Clone::clone(self)
@@ -256,10 +274,15 @@ impl Base {
     pub(in crate::node) fn process(
         &mut self,
         our_index: LocalNodeIndex,
+        columns: &[Column],
         mut ops: Vec<TableOperation>,
         state: &StateMap,
         snapshot_mode: SnapshotMode,
     ) -> ReadySetResult<BaseWrite> {
+        for op in ops.iter_mut() {
+            apply_table_op_coercions(op, columns);
+        }
+
         let key_cols = match &self.primary_key {
             Some(key) if !ops.is_empty() => key.as_ref(),
             _ => return self.process_unkeyed(ops),
@@ -619,7 +642,7 @@ mod tests {
                 let mut m = n
                     .get_base_mut()
                     .unwrap()
-                    .process(local, u, &states, SnapshotMode::SnapshotModeDisabled)
+                    .process(local, &[], u, &states, SnapshotMode::SnapshotModeDisabled)
                     .unwrap()
                     .records;
                 node::materialize(&mut m, None, None, states.get_mut(local));
@@ -716,6 +739,7 @@ mod tests {
             assert_eq!(
                 b.process(
                     ni,
+                    &[],
                     vec![
                         TableOperation::Insert(vec![1.into(), 2.into(), 3.into()]),
                         TableOperation::DeleteRow {
@@ -761,6 +785,7 @@ mod tests {
             assert_eq!(
                 b.process(
                     ni,
+                    &[],
                     vec![
                         TableOperation::Insert(vec![1.into(), 2.into(), 3.into()]),
                         TableOperation::DeleteRow {
@@ -806,6 +831,7 @@ mod tests {
             assert_eq!(
                 b.process(
                     ni,
+                    &[],
                     vec![
                         TableOperation::Update {
                             key: vec![2.into()],
