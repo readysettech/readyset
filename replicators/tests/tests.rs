@@ -1164,6 +1164,78 @@ async fn resnapshot_inner(url: &str) -> ReadySetResult<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
+async fn mysql_enum_replication() -> ReadySetResult<()> {
+    let url = &mysql_url();
+    let mut client = DbConnection::connect(url).await?;
+    client
+        .query(
+            "
+            DROP TABLE IF EXISTS `enum_test` CASCADE;
+            DROP VIEW IF EXISTS enum_test_view;
+            CREATE TABLE `enum_test` (
+                id int NOT NULL PRIMARY KEY,
+                e enum('red', 'yellow', 'green')
+            );
+            CREATE VIEW enum_test_view AS SELECT * FROM `enum_test` ORDER BY id ASC",
+        )
+        .await?;
+
+    // Allow invalid values for enums
+    client.query("SET @@sql_mode := ''").await?;
+    client
+        .query(
+            "
+            INSERT INTO enum_test VALUES
+                (0, 'green'),
+                (1, 'yellow'),
+                (2, 'purple')",
+        )
+        .await?;
+
+    let mut ctx = TestHandle::start_noria(url.to_string(), None).await?;
+    ctx.ready_notify.as_ref().unwrap().notified().await;
+
+    ctx.check_results(
+        "enum_test_view",
+        "Snapshot",
+        &[
+            &[DfValue::Int(0), DfValue::Int(3)],
+            &[DfValue::Int(1), DfValue::Int(2)],
+            &[DfValue::Int(2), DfValue::Int(0)],
+        ],
+    )
+    .await?;
+
+    // Repeat, but this time using binlog replication
+    client
+        .query(
+            "
+            INSERT INTO enum_test VALUES
+                (3, 'red'),
+                (4, 'yellow')",
+        )
+        .await?;
+
+    ctx.check_results(
+        "enum_test_view",
+        "Replication",
+        &[
+            &[DfValue::Int(0), DfValue::Int(3)],
+            &[DfValue::Int(1), DfValue::Int(2)],
+            &[DfValue::Int(2), DfValue::Int(0)],
+            &[DfValue::Int(3), DfValue::Int(1)],
+            &[DfValue::Int(4), DfValue::Int(2)],
+        ],
+    )
+    .await?;
+
+    client.stop().await;
+    ctx.stop().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
 async fn postgresql_ddl_replicate_drop_table() {
     readyset_tracing::init_test_logging();
     let mut client = DbConnection::connect(&pgsql_url()).await.unwrap();
