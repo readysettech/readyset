@@ -34,8 +34,8 @@ impl PostLookupAggregateFunction {
     /// This forms a semigroup.
     pub fn apply(&self, val1: &DfValue, val2: &DfValue) -> ReadySetResult<DfValue> {
         match self {
-            PostLookupAggregateFunction::Sum => (val1 + val2),
-            PostLookupAggregateFunction::Product => (val1 * val2),
+            PostLookupAggregateFunction::Sum => val1 + val2,
+            PostLookupAggregateFunction::Product => val1 * val2,
             PostLookupAggregateFunction::GroupConcat { separator } => Ok(format!(
                 "{}{}{}",
                 String::try_from(val1)?,
