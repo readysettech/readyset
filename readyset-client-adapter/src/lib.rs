@@ -28,7 +28,7 @@ use readyset::metrics::recorded;
 use readyset::{ReadySetError, ReadySetHandle, ViewCreateRequest};
 use readyset_client::backend::noria_connector::{NoriaConnector, ReadBehavior};
 use readyset_client::backend::MigrationMode;
-use readyset_client::health_reporter::AdapterHealthReporter;
+use readyset_client::health_reporter::{AdapterHealthReporter, State as AdapterState};
 use readyset_client::http_router::NoriaAdapterHttpRouter;
 use readyset_client::migration_handler::MigrationHandler;
 use readyset_client::query_status_cache::{MigrationStyle, QueryStatusCache};
@@ -408,7 +408,7 @@ where
 
         let auto_increments: Arc<RwLock<HashMap<Relation, AtomicUsize>>> = Arc::default();
         let query_cache: Arc<RwLock<HashMap<ViewCreateRequest, Relation>>> = Arc::default();
-        let health_reporter = AdapterHealthReporter::new();
+        let mut health_reporter = AdapterHealthReporter::new();
 
         let rs_connect = span!(Level::INFO, "Connecting to RS server");
         rs_connect.in_scope(|| info!(%options.authority_address, %options.deployment));
@@ -556,7 +556,7 @@ where
                 query_cache: query_status_cache,
                 valve,
                 prometheus_handle,
-                health_reporter,
+                health_reporter: health_reporter.clone(),
                 failpoint_channel: tx,
             };
 
@@ -581,6 +581,7 @@ where
         };
 
         if let MigrationMode::OutOfBand = migration_mode {
+            set_failpoint!("adapter-out-of-band");
             let upstream_db_url = options.upstream_db_url.as_ref().map(|u| u.0.clone());
             let upstream_config = self.upstream_config.clone();
             let rh = rh.clone();
@@ -671,6 +672,7 @@ where
         // http endpoint.
         // For now we only support registering adapters over consul.
         if let AuthorityType::Consul = options.authority {
+            set_failpoint!("adapter-consul");
             rs_connect.in_scope(|| info!("Spawning Consul session task"));
             let connection = span!(Level::DEBUG, "consul_session", addr = ?authority_address);
             let fut = reconcile_endpoint_registration(
@@ -731,6 +733,8 @@ where
         } else {
             None
         };
+
+        health_reporter.set_state(AdapterState::Healthy);
 
         while let Some(Ok(s)) = rt.block_on(listener.next()) {
             let connection = span!(Level::DEBUG, "connection", addr = ?s.peer_addr().unwrap());
@@ -866,6 +870,7 @@ where
         }
 
         let rs_shutdown = span!(Level::INFO, "RS server Shutting down");
+        health_reporter.set_state(AdapterState::ShuttingDown);
         // Dropping the sender acts as a shutdown signal.
         drop(shutdown_sender);
 

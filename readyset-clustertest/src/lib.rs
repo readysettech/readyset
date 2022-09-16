@@ -749,7 +749,7 @@ async fn wait_for_adapter_startup(metrics_port: u16, timeout: Duration) -> anyho
 }
 
 /// Waits for adapters http router to come up.
-#[allow(dead_code)] // Will be used in future commit tests.
+#[allow(dead_code)] // Used in tests.
 async fn wait_for_adapter_router(
     metrics_port: u16,
     timeout: Duration,

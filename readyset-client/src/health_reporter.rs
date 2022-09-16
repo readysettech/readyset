@@ -1,3 +1,4 @@
+use std::fmt::Display;
 use std::sync::Arc;
 
 use chrono::Utc;
@@ -25,12 +26,22 @@ impl AdapterHealth {
 /// All known adapter states.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum State {
-    Initializing,
     Healthy,
     Unhealthy,
     ShuttingDown,
-    ShutDown,
     Unknown,
+}
+
+impl Display for State {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            State::Healthy => "healthy",
+            State::Unhealthy => "unhealthy",
+            State::ShuttingDown => "shutting down",
+            State::Unknown => "unknown",
+        };
+        write!(f, "{}", s)
+    }
 }
 
 /// The AdapterHealthReporter can be used to record the current state of the adapter, and is
@@ -49,7 +60,7 @@ impl Default for AdapterHealthReporter {
 impl AdapterHealthReporter {
     /// Returns a new AdapterHealthReporter with the Initializing state set.
     pub fn new() -> AdapterHealthReporter {
-        let health = AdapterHealth::new(State::Initializing);
+        let health = AdapterHealth::new(State::Unhealthy);
         AdapterHealthReporter {
             health: Arc::new(RwLock::new(health)),
         }
@@ -88,11 +99,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn reporter_starts_with_initializing() {
+    fn reporter_starts_with_unhealthy() {
         let reporter = AdapterHealthReporter::new();
 
         let got = reporter.state();
-        assert_eq!(got, State::Initializing);
+        assert_eq!(got, State::Unhealthy);
     }
 
     #[test]

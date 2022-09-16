@@ -281,22 +281,18 @@ impl Service<Request<Body>> for NoriaAdapterHttpRouter {
                 })
             }
             (&Method::GET, "/health") => {
-                let state = self.health_reporter.state();
+                let state = self.health_reporter.health().state;
                 Box::pin(async move {
+                    let body = format!("Adapter is in {} state", &state).into();
                     let res = match state {
-                        State::Initializing | State::Healthy => {
-                            // TODO: Add logic for time. For instance, if we have been initializing
-                            // for a long period of time, that should be communicated as unhealthy.
-                            res.status(200)
-                                .header(CONTENT_TYPE, "text/plain")
-                                .body(hyper::Body::empty())
-                        }
-                        _ => {
-                            // TODO: Add match for other states.
-                            res.status(500)
-                                .header(CONTENT_TYPE, "text/plain")
-                                .body(hyper::Body::empty())
-                        }
+                        State::Healthy | State::ShuttingDown => res
+                            .status(200)
+                            .header(CONTENT_TYPE, "text/plain")
+                            .body(body),
+                        _ => res
+                            .status(500)
+                            .header(CONTENT_TYPE, "text/plain")
+                            .body(body),
                     };
 
                     Ok(res.unwrap())
