@@ -39,6 +39,15 @@ rusty_fork_test! {
             .unwrap();
         rt.block_on(it_works_basic_standalone_impl());
     }
+
+    #[test]
+    fn test_metrics_client(){
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(test_metrics_client_impl());
+    }
 }
 
 async fn it_works_basic_impl() {
@@ -289,9 +298,7 @@ fn get_external_requests_count(metrics_dump: &MetricsDump) -> f64 {
 
 // FIXME(eta): this test is now slightly hacky after we started making more
 //             external requests as part of the RPC refactor.
-#[tokio::test(flavor = "multi_thread")]
-#[serial]
-async fn test_metrics_client() {
+async fn test_metrics_client_impl() {
     // Start a local instance of noria and connect the metrics client to it.
     // We assign it a different port than the rest of the tests to prevent
     // other tests impacting the metrics collected.
