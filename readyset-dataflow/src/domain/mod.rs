@@ -2050,22 +2050,15 @@ impl Domain {
                 w.swap();
 
                 // don't request keys that have been filled since the request was sent
-                let mut whoops = None;
-                keys.retain(|key| {
-                    !w.contains(key).unwrap_or_else(|e| {
-                        whoops = Some(e);
-                        true
+                let mut keys = keys
+                    .drain(..)
+                    .filter_map(|k| match k {
+                        key @ KeyComparison::Equal(_) if w.contains(&key) == Ok(true) => None,
+                        key @ KeyComparison::Equal(_) => Some(vec![key]),
+                        key @ KeyComparison::Range(_) => w.interval_difference(key),
                     })
-                });
-                if let Some(err) = whoops {
-                    internal!(
-                        "reader replay requested for {} reader",
-                        match err {
-                            reader_map::Error::NotPublished => "non-ready",
-                            reader_map::Error::Destroyed => "destroyed",
-                        }
-                    )
-                }
+                    .flatten()
+                    .collect();
 
                 let reader_index_type = r.index_type().ok_or_else(|| {
                     internal_err!("reader replay requested for non-indexed reader")

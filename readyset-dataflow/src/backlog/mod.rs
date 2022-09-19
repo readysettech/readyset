@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
+use std::ops::Bound;
 use std::sync::Arc;
 
 use ahash::RandomState;
@@ -250,6 +251,15 @@ impl WriteHandle {
         }
     }
 
+    pub(crate) fn interval_difference(&self, key: KeyComparison) -> Option<Vec<KeyComparison>> {
+        match self.handle.read().get_multi(&[key]) {
+            Err(LookupError::Miss(misses)) => {
+                Some(misses.into_iter().map(|c| c.into_owned()).collect())
+            }
+            _ => None,
+        }
+    }
+
     pub(super) fn contains_key(&self, key: &[DfValue]) -> reader_map::Result<bool> {
         self.handle.read().contains_key(key)
     }
@@ -343,21 +353,30 @@ impl WriteHandle {
         if let Some(len) = key.len() {
             invariant_eq!(len, self.index.len());
         }
-        match key {
-            KeyComparison::Equal(equal) => self.mut_with_key(equal.as_vec()).mark_filled()?,
-            KeyComparison::Range((start, end)) => {
-                let range = (
-                    start.as_ref().map(Vec1::as_vec),
-                    end.as_ref().map(Vec1::as_vec),
-                );
 
-                if self.handle.read().overlaps_range(&range).unwrap_or(false) {
-                    return Err(ReadySetError::RangeAlreadyFilled);
-                }
-
-                self.handle.insert_range(range)
+        #[allow(clippy::unreachable)] // Documented invariant.
+        let range = match (self.index.index_type, &key) {
+            (IndexType::HashMap, KeyComparison::Equal(equal)) => {
+                return self.mut_with_key(equal.as_vec()).mark_filled();
             }
+            (IndexType::HashMap, KeyComparison::Range(_)) => {
+                unreachable!("Range key with a HashMap index")
+            }
+            (IndexType::BTreeMap, KeyComparison::Equal(equal)) => (
+                Bound::Included(equal.as_vec()),
+                Bound::Included(equal.as_vec()),
+            ),
+            (IndexType::BTreeMap, KeyComparison::Range((start, end))) => (
+                start.as_ref().map(Vec1::as_vec),
+                end.as_ref().map(Vec1::as_vec),
+            ),
         };
+
+        if self.handle.read().overlaps_range(&range).unwrap_or(false) {
+            return Err(ReadySetError::RangeAlreadyFilled);
+        }
+
+        self.handle.insert_range(range);
         Ok(())
     }
 }
