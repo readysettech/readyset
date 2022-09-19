@@ -169,9 +169,17 @@ where
     /// Returns true if the map contains the specified range of keys.
     pub fn contains_range<R>(&self, range: &R) -> bool
     where
-        R: RangeBounds<K> + Clone,
+        R: RangeBounds<K>,
     {
         self.guard.data.contains_range(range)
+    }
+
+    /// Returns true if the map contains at least part of the specified range of keys.
+    pub fn overlaps_range<R>(&self, range: &R) -> bool
+    where
+        R: RangeBounds<K>,
+    {
+        self.guard.data.overlaps_range(range)
     }
 }
 

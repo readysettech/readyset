@@ -214,6 +214,19 @@ where
         self.interval_tree.covers_interval(range)
     }
 
+    /// Returns true if the map contains at least part of the given range
+    pub fn overlaps_range<R, Q>(&self, range: &R) -> bool
+    where
+        R: RangeBounds<Q>,
+        K: Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
+        self.interval_tree
+            .get_interval_overlaps(range)
+            .next()
+            .is_some()
+    }
+
     /// Insert `value` at `key`, returning the value that used to be there if any.
     pub fn insert(&mut self, key: K, value: V) -> Option<V>
     where

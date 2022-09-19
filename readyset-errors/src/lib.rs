@@ -560,6 +560,10 @@ pub enum ReadySetError {
     #[error("attempted to fill already-filled key")]
     KeyAlreadyFilled,
 
+    /// Attempted to fill a range, part of which has already been filled.
+    #[error("attempted to fill at least parially filled range")]
+    RangeAlreadyFilled,
+
     /// Tried to look up non-existent column.
     #[error("Could not look up non-existent column {column} in {node}")]
     NonExistentColumn {

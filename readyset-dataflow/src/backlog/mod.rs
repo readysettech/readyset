@@ -345,10 +345,18 @@ impl WriteHandle {
         }
         match key {
             KeyComparison::Equal(equal) => self.mut_with_key(equal.as_vec()).mark_filled()?,
-            KeyComparison::Range((start, end)) => self.handle.insert_range((
-                start.as_ref().map(Vec1::as_vec),
-                end.as_ref().map(Vec1::as_vec),
-            )),
+            KeyComparison::Range((start, end)) => {
+                let range = (
+                    start.as_ref().map(Vec1::as_vec),
+                    end.as_ref().map(Vec1::as_vec),
+                );
+
+                if self.handle.read().overlaps_range(&range).unwrap_or(false) {
+                    return Err(ReadySetError::RangeAlreadyFilled);
+                }
+
+                self.handle.insert_range(range)
+            }
         };
         Ok(())
     }

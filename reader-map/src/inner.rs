@@ -169,10 +169,21 @@ impl<K, V, S> Data<K, V, S> {
     pub(crate) fn contains_range<R>(&self, range: &R) -> bool
     where
         R: RangeBounds<K>,
-        K: Ord + Clone,
+        K: Ord,
     {
         match self {
             Self::BTreeMap { map, .. } => map.contains_range(range),
+            Self::HashMap { .. } => panic!("contains_range called on a HashMap reader_map"),
+        }
+    }
+
+    pub(crate) fn overlaps_range<R>(&self, range: &R) -> bool
+    where
+        R: RangeBounds<K>,
+        K: Ord,
+    {
+        match self {
+            Self::BTreeMap { map, .. } => map.overlaps_range(range),
             Self::HashMap { .. } => panic!("contains_range called on a HashMap reader_map"),
         }
     }

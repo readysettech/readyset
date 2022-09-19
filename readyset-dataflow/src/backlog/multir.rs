@@ -278,6 +278,32 @@ impl Handle {
         }
     }
 
+    /// Returns Ok(true) if this handle partially contains the given key range, Ok(false) if all of
+    /// the keys miss, or an error if the underlying reader map is not able to accept reads
+    pub(super) fn overlaps_range<R>(&self, range: &R) -> reader_map::Result<bool>
+    where
+        R: RangeBounds<Vec<DfValue>>,
+    {
+        match *self {
+            Handle::Single(ref h) => {
+                let map = h.enter()?;
+                let start_bound = range.start_bound().map(|v| {
+                    assert!(v.len() == 1);
+                    &v[0]
+                });
+                let end_bound = range.end_bound().map(|v| {
+                    assert!(v.len() == 1);
+                    &v[0]
+                });
+                Ok(map.overlaps_range(&(start_bound, end_bound)))
+            }
+            Handle::Many(ref h) => {
+                let map = h.enter()?;
+                Ok(map.overlaps_range(&(range.start_bound(), range.end_bound())))
+            }
+        }
+    }
+
     /// Returns true if the corresponding write handle has been dropped
     pub(super) fn was_dropped(&self) -> bool {
         match self {
