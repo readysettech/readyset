@@ -344,6 +344,7 @@ mod tests {
             let view = RecipeExpr::View(CreateViewStatement {
                 name: view_name.clone(),
                 fields: vec![],
+                or_replace: false,
                 definition: Box::new(SelectSpecification::Simple(
                     parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table;").unwrap(),
                 )),
@@ -375,6 +376,7 @@ mod tests {
             let view = RecipeExpr::View(CreateViewStatement {
                 name: "test_view".into(),
                 fields: vec![],
+                or_replace: false,
                 definition: Box::new(SelectSpecification::Simple(
                     parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table;").unwrap(),
                 )),
@@ -443,6 +445,7 @@ mod tests {
                 .add_query(RecipeExpr::View(CreateViewStatement {
                     name: "test_view".into(),
                     fields: vec![],
+                    or_replace: false,
                     definition: Box::new(view.clone()),
                 }))
                 .unwrap();
@@ -451,6 +454,7 @@ mod tests {
                 .add_query(RecipeExpr::View(CreateViewStatement {
                     name: "test_view_alias".into(),
                     fields: vec![],
+                    or_replace: false,
                     definition: Box::new(view),
                 }))
                 .unwrap();
@@ -509,6 +513,7 @@ mod tests {
             let view = RecipeExpr::View(CreateViewStatement {
                 name: view_name.clone(),
                 fields: vec![],
+                or_replace: false,
                 definition: Box::new(SelectSpecification::Simple(
                     parse_select_statement(Dialect::MySQL, "SELECT DISTINCT * FROM test_table;")
                         .unwrap(),
@@ -546,6 +551,7 @@ mod tests {
             let view = RecipeExpr::View(CreateViewStatement {
                 name: view_name.clone(),
                 fields: vec![],
+                or_replace: false,
                 definition: Box::new(SelectSpecification::Simple(select.clone())),
             });
             let num_expressions = registry.expressions.len();

@@ -107,6 +107,7 @@ impl fmt::Display for SelectSpecification {
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct CreateViewStatement {
     pub name: Relation,
+    pub or_replace: bool,
     pub fields: Vec<Column>,
     pub definition: Box<SelectSpecification>,
 }
@@ -558,6 +559,13 @@ pub fn create_view_params(i: &[u8]) -> IResult<&[u8], ()> {
     )(i)
 }
 
+fn or_replace(i: &[u8]) -> IResult<&[u8], ()> {
+    let (i, _) = tag_no_case("or")(i)?;
+    let (i, _) = whitespace1(i)?;
+    let (i, _) = tag_no_case("replace")(i)?;
+    Ok((i, ()))
+}
+
 // Parse rule for a SQL CREATE VIEW query.
 pub fn view_creation(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CreateViewStatement> {
     /*
@@ -577,6 +585,7 @@ pub fn view_creation(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Creat
     move |i| {
         let (i, _) = tag_no_case("create")(i)?;
         let (i, _) = whitespace1(i)?;
+        let (i, or_replace) = map(opt(terminated(or_replace, whitespace1)), |or| or.is_some())(i)?;
         let (i, _) = opt(create_view_params)(i)?;
         let (i, _) = tag_no_case("view")(i)?;
         let (i, _) = whitespace1(i)?;
@@ -599,6 +608,7 @@ pub fn view_creation(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Creat
             i,
             CreateViewStatement {
                 name,
+                or_replace,
                 fields,
                 definition,
             },
@@ -790,6 +800,7 @@ mod tests {
             res.unwrap().1,
             CreateViewStatement {
                 name: "v".into(),
+                or_replace: false,
                 fields: vec![],
                 definition: Box::new(SelectSpecification::Compound(CompoundSelectStatement {
                     selects: vec![
@@ -1261,6 +1272,7 @@ mod tests {
                 res.unwrap().1,
                 CreateViewStatement {
                     name: "v".into(),
+                    or_replace: false,
                     fields: vec![],
                     definition: Box::new(SelectSpecification::Simple(SelectStatement {
                         tables: vec![TableExpr::from(Relation::from("users"))],
@@ -1573,6 +1585,18 @@ mod tests {
                 )"
             );
         }
+
+        #[test]
+        fn employees_dept_empt_latest_date() {
+            test_parse!(
+                view_creation(Dialect::MySQL),
+                b"CREATE OR REPLACE ALGORITHM=UNDEFINED DEFINER=`root`@`%` SQL SECURITY DEFINER \
+                  VIEW `dept_emp_latest_date` AS \
+                  SELECT emp_no, MAX(from_date) AS from_date, MAX(to_date) AS to_date \
+                  FROM dept_emp \
+                  GROUP BY emp_no"
+            );
+        }
     }
 
     mod postgres {
@@ -1748,6 +1772,7 @@ mod tests {
                 res.unwrap().1,
                 CreateViewStatement {
                     name: "v".into(),
+                    or_replace: false,
                     fields: vec![],
                     definition: Box::new(SelectSpecification::Simple(SelectStatement {
                         tables: vec![TableExpr::from(Relation::from("users"))],
