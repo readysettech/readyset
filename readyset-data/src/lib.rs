@@ -3630,6 +3630,39 @@ mod tests {
                 let result = dv.coerce_to(&enum_ty, &DfType::Unknown).unwrap();
                 assert_eq!(0, <u32>::try_from(result).unwrap());
             }
+
+            // Test coercion from enum to text types with length limits
+
+            let enum_df_ty = DfType::Sql(enum_ty);
+            let result = DfValue::Int(2)
+                .coerce_to(&SqlType::Char(Some(3)), &enum_df_ty)
+                .unwrap();
+            assert_eq!("yel", result.to_string());
+
+            let result = DfValue::Int(2)
+                .coerce_to(&SqlType::VarChar(Some(3)), &enum_df_ty)
+                .unwrap();
+            assert_eq!("yel", result.to_string());
+
+            let result = DfValue::Int(2)
+                .coerce_to(&SqlType::Char(Some(10)), &enum_df_ty)
+                .unwrap();
+            assert_eq!("yellow    ", result.to_string());
+
+            let no_change_tys = [
+                SqlType::VarChar(Some(10)),
+                SqlType::Char(None),
+                SqlType::VarChar(None),
+                SqlType::Text,
+                SqlType::TinyText,
+                SqlType::MediumText,
+                SqlType::LongText,
+            ];
+
+            for to_ty in no_change_tys {
+                let result = DfValue::Int(2).coerce_to(&to_ty, &enum_df_ty).unwrap();
+                assert_eq!("yellow", result.to_string());
+            }
         }
     }
 }

@@ -16,12 +16,26 @@ pub(crate) fn coerce_enum(
     if to_ty.is_any_text() {
         let idx = usize::try_from(enum_value).unwrap_or(0);
 
-        // TODO Enforce length limits for Char/VarChar if applicable
-
         if idx == 0 {
             Ok(DfValue::from(""))
         } else if let Some(Literal::String(s)) = enum_elements.get(idx - 1) {
-            Ok(DfValue::from(s.as_str()))
+            // This match is solely here to accomodate for different length specifications in
+            // char/varchar types. When Nikolai's apply_str_limit function is finished and merged,
+            // we should be able to replace this logic with a simple call to that function:
+            match to_ty {
+                SqlType::Char(Some(l)) if *l as usize > s.len() => {
+                    // Char, but len is greater than current string, have to pad with whitespace
+                    let mut new_string = String::with_capacity(*l as usize);
+                    new_string += s;
+                    new_string.extend(std::iter::repeat(' ').take(*l as usize - s.len()));
+                    Ok(DfValue::from(new_string))
+                }
+                SqlType::Char(Some(l)) | SqlType::VarChar(Some(l)) if (*l as usize) < s.len() => {
+                    // Len is less than current string, have to truncate
+                    Ok(DfValue::from(&s[..*l as usize]))
+                }
+                _ => Ok(DfValue::from(s.as_str())),
+            }
         } else {
             Ok(DfValue::from("")) // must be out of bounds of enum_elements
         }
