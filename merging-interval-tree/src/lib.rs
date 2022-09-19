@@ -361,24 +361,6 @@ impl<T> Endpoint<T> {
             Endpoint::UpperUnbounded => Bound::Unbounded,
         }
     }
-
-    /// Convert the [`Endpoint`] to a complementary [`Bound`].
-    fn as_complement_bound<B>(&self) -> Bound<&B>
-    where
-        T: Borrow<B>,
-        B: ?Sized,
-    {
-        match self {
-            Endpoint::LowerUnbounded => Bound::Unbounded,
-            Endpoint::UpperExclusive(v) | Endpoint::LowerExclusive(v) => {
-                Bound::Included((**v).borrow())
-            }
-            Endpoint::UpperInclusive(v) | Endpoint::LowerInclusive(v) => {
-                Bound::Excluded((**v).borrow())
-            }
-            Endpoint::UpperUnbounded => Bound::Unbounded,
-        }
-    }
 }
 
 /// Panics if the range is empty or decreasing, otherwse returns the bounds of the range.
@@ -761,21 +743,19 @@ where
         let (lower_bound, upper_bound) = check_range(range);
 
         let lo = match &lower_bound {
-            Bound::Included(v) => {
-                BorrowedEndpoint::LowerInclusive(OwnedOrBorrowed::Ref(v.borrow()))
-            }
-            Bound::Excluded(v) => {
-                BorrowedEndpoint::LowerExclusive(OwnedOrBorrowed::Ref(v.borrow()))
-            }
-            Bound::Unbounded => BorrowedEndpoint::LowerUnbounded,
+            Bound::Included(v) => Bound::Included(BorrowedEndpoint::UpperExclusive(
+                OwnedOrBorrowed::Ref(v.borrow()),
+            )),
+            Bound::Excluded(v) => Bound::Excluded(BorrowedEndpoint::UpperInclusive(
+                OwnedOrBorrowed::Ref(v.borrow()),
+            )),
+            Bound::Unbounded => Bound::Excluded(BorrowedEndpoint::LowerUnbounded),
         };
 
         IntervalDiffIter {
             lower_bound: Some(lower_bound),
             upper_bound: Some(upper_bound),
-            inner: self
-                .bound_set
-                .range((Bound::Excluded(lo), Bound::Unbounded)),
+            inner: self.bound_set.range((lo, Bound::Unbounded)),
         }
     }
 
@@ -886,16 +866,24 @@ where
         match cur_upper {
             Bound::Unbounded => match other_bound {
                 Bound::Unbounded => None,
-                _ => Some(other_bound),
+                Bound::Included(oth) => Some(Bound::Excluded(oth)),
+                Bound::Excluded(oth) => Some(Bound::Included(oth)),
             },
             Bound::Included(cur) => match other_bound {
-                Bound::Included(oth) if oth.cmp(cur).is_le() => Some(other_bound),
-                Bound::Excluded(oth) if oth.cmp(cur).is_lt() => Some(other_bound),
+                Bound::Included(oth) if oth.cmp(cur).is_lt() => Some(Bound::Excluded(oth)),
+                Bound::Excluded(oth) if oth.cmp(cur).is_lt() => Some(Bound::Included(oth)),
+                Bound::Excluded(oth) if oth.cmp(cur).is_eq() => Some(Bound::Included(cur)),
+                Bound::Included(oth) if oth.cmp(cur).is_eq() => {
+                    self.upper_bound.take().map(|b| match b {
+                        Bound::Included(b) => Bound::Excluded(b),
+                        _ => unreachable!("Checked in match"),
+                    })
+                }
                 _ => self.upper_bound.take(),
             },
             Bound::Excluded(cur) => match other_bound {
-                Bound::Included(oth) if oth.cmp(cur).is_lt() => Some(other_bound),
-                Bound::Excluded(oth) if oth.cmp(cur).is_lt() => Some(other_bound),
+                Bound::Included(oth) if oth.cmp(cur).is_lt() => Some(Bound::Excluded(oth)),
+                Bound::Excluded(oth) if oth.cmp(cur).is_lt() => Some(Bound::Included(oth)),
                 _ => self.upper_bound.take(),
             },
         }
@@ -949,15 +937,15 @@ where
                 // This basically means that the range from the initial lower bound till here was
                 // not covered, and will be the first returned difference
                 let lo = self.lower_bound.take().expect("First iteration");
-                let hi = self.max_bound(lim.as_complement_bound())?;
+                let hi = self.max_bound(lim.as_bound())?;
                 Some((lo, hi))
             }
             Some(lim) => {
                 // If the iterator got here it has to be an upper limit, so the iterator will return
                 // it, together with the next lower limit, or failing that the maximum upper limit.
-                let lo = self.max_bound(lim.as_complement_bound())?;
+                let lo = self.max_bound(lim.as_bound())?;
                 let hi = if let Some(lo) = self.inner.next() {
-                    self.max_bound(lo.as_complement_bound())
+                    self.max_bound(lo.as_bound())
                 } else {
                     self.upper_bound.take()
                 }?;
@@ -1397,6 +1385,73 @@ mod tests {
 
         let mut intervals = tree.get_interval_difference(&(Excluded(1), Unbounded));
         assert!(intervals.next().is_none());
+    }
+
+    #[test]
+    fn range_diff4() {
+        use Bound::*;
+
+        let mut tree: IntervalTreeSet<usize> = Default::default();
+        tree.insert_interval((Included(200), Included(900)));
+
+        let intervals = tree.get_interval_difference(&(Included(100), Included(200)));
+        assert_eq!(
+            intervals.collect::<Vec<_>>(),
+            vec![(Included(&100), Excluded(&200)),]
+        );
+    }
+
+    #[test]
+    fn range_diff5() {
+        use Bound::*;
+
+        let mut tree: IntervalTreeSet<usize> = Default::default();
+        tree.insert_interval((Unbounded, Excluded(200)));
+        tree.insert_interval((Included(300), Included(400)));
+
+        let intervals = tree.get_interval_difference(&(Included(250), Included(300)));
+        assert_eq!(
+            intervals.collect::<Vec<_>>(),
+            vec![(Included(&250), Excluded(&300))]
+        );
+    }
+
+    #[test]
+    fn range_diff6() {
+        use Bound::*;
+
+        let mut tree: IntervalTreeSet<usize> = Default::default();
+
+        tree.insert_interval((Included(25797), Included(25929)));
+        tree.insert_interval((Included(25969), Included(26023)));
+
+        let intervals = tree.get_interval_difference(&(Excluded(25929), Included(25969)));
+        assert_eq!(
+            intervals.collect::<Vec<_>>(),
+            vec![(Excluded(&25929), Excluded(&25969))],
+        );
+    }
+
+    #[test]
+    fn range_diff7() {
+        use Bound::*;
+
+        let mut tree: IntervalTreeSet<usize> = Default::default();
+
+        tree.insert_interval((Excluded(19), Excluded(21)));
+        tree.remove_point(&20);
+
+        assert!(!tree.contains_point(&20));
+
+        let intervals = tree.get_interval_difference(&(Included(20), Included(20)));
+        assert_eq!(
+            intervals.collect::<Vec<_>>(),
+            vec![(Included(&20), Included(&20))],
+        );
+        assert!(tree
+            .get_interval_overlaps(&(Included(20), Included(20)))
+            .next()
+            .is_none());
     }
 
     #[proptest]
