@@ -575,31 +575,28 @@ pub fn view_creation(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Creat
     // SELECT * FROM employees
 
     move |i| {
-        let (remaining_input, (_, _, _, _, _, name, _, _, _, def, _)) = tuple((
-            tag_no_case("create"),
-            whitespace1,
-            opt(create_view_params),
-            tag_no_case("view"),
-            whitespace1,
-            table_reference(dialect),
-            whitespace1,
-            tag_no_case("as"),
-            whitespace1,
-            alt((
-                map(
-                    nested_compound_selection(dialect),
-                    SelectSpecification::Compound,
-                ),
-                map(nested_selection(dialect), SelectSpecification::Simple),
-            )),
-            statement_terminator,
+        let (i, _) = tag_no_case("create")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = opt(create_view_params)(i)?;
+        let (i, _) = tag_no_case("view")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, name) = table_reference(dialect)(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("as")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, def) = alt((
+            map(
+                nested_compound_selection(dialect),
+                SelectSpecification::Compound,
+            ),
+            map(nested_selection(dialect), SelectSpecification::Simple),
         ))(i)?;
+        let (i, _) = statement_terminator(i)?;
 
         let fields = vec![]; // TODO(malte): support
         let definition = Box::new(def);
-
         Ok((
-            remaining_input,
+            i,
             CreateViewStatement {
                 name,
                 fields,
