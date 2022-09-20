@@ -52,6 +52,7 @@ timestamp-service = {path= "../timestamp-service/"}
 dataflow-expression = { path = "../dataflow-expression" }
 readyset-tracing = { path = "../readyset-tracing" }
 readyset-client-metrics = { path = "../readyset-client-metrics" }
+readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter" }
 
 [dev-dependencies]
 proptest = "1.0.0"

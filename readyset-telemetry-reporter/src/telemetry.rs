@@ -32,6 +32,9 @@ pub enum TelemetryEvent {
 
     /// The server exited successfully
     ServerStop,
+
+    /// ReadySet failed to parse a query that upstream was able to
+    QueryParseFailed,
 }
 
 /// ReadySet-specific telemetry. Provide only the fields you need.
@@ -53,6 +56,7 @@ pub struct Telemetry {
     db_backend: Option<String>,
     adapter_version: Option<String>,
     server_version: Option<String>,
+    query_id: Option<String>,
 }
 
 impl TelemetryBuilder {

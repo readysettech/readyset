@@ -732,6 +732,7 @@ where
                 })
                 .migration_mode(migration_mode)
                 .query_max_failure_seconds(options.query_max_failure_seconds)
+                .telemetry_sender(telemetry_sender.clone())
                 .fallback_recovery_seconds(options.fallback_recovery_seconds);
 
             // Initialize the reader layer for the adapter.

@@ -94,6 +94,7 @@ use readyset_client_metrics::{
 use readyset_data::DfValue;
 use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
 use readyset_errors::{internal, internal_err, unsupported, ReadySetResult};
+use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 use readyset_tracing::instrument_root;
 use timestamp_service::client::{TimestampClient, WriteId, WriteKey};
 use tokio::sync::mpsc::UnboundedSender;
@@ -265,6 +266,7 @@ pub struct BackendBuilder {
     migration_mode: MigrationMode,
     query_max_failure_seconds: u64,
     fallback_recovery_seconds: u64,
+    telemetry_sender: Option<TelemetrySender>,
 }
 
 impl Default for BackendBuilder {
@@ -284,6 +286,7 @@ impl Default for BackendBuilder {
             migration_mode: MigrationMode::InRequestPath,
             query_max_failure_seconds: (i64::MAX / 1000) as u64,
             fallback_recovery_seconds: 0,
+            telemetry_sender: None,
         }
     }
 }
@@ -333,6 +336,7 @@ impl BackendBuilder {
                 query_log_ad_hoc_queries: self.query_log_ad_hoc_queries,
                 fallback_recovery_duration: Duration::new(self.fallback_recovery_seconds, 0),
             },
+            telemetry_sender: self.telemetry_sender,
             _query_handler: PhantomData,
         }
     }
@@ -405,6 +409,11 @@ impl BackendBuilder {
 
     pub fn fallback_recovery_seconds(mut self, secs: u64) -> Self {
         self.fallback_recovery_seconds = secs;
+        self
+    }
+
+    pub fn telemetry_sender(mut self, telemetry_sender: TelemetrySender) -> Self {
+        self.telemetry_sender = Some(telemetry_sender);
         self
     }
 }
@@ -486,6 +495,9 @@ where
     state: BackendState<DB>,
     /// The settings with which the [`Backend`] was started
     settings: BackendSettings,
+
+    /// Provides the ability to send [`TelemetryEvent`]s to Segment
+    telemetry_sender: Option<TelemetrySender>,
 
     _query_handler: PhantomData<Handler>,
 }
@@ -961,14 +973,15 @@ where
         {
             None
         } else {
-            let should_do_noria =
-                self.state
-                    .query_status_cache
-                    .query_migration_state(&ViewCreateRequest::new(
-                        rewritten.clone(),
-                        self.noria.schema_search_path().to_owned(),
-                    ))
-                    != MigrationState::Unsupported;
+            let should_do_noria = self
+                .state
+                .query_status_cache
+                .query_migration_state(&ViewCreateRequest::new(
+                    rewritten.clone(),
+                    self.noria.schema_search_path().to_owned(),
+                ))
+                .1
+                != MigrationState::Unsupported;
             Some((rewritten, should_do_noria))
         }
     }
@@ -1067,7 +1080,8 @@ where
                     Some(Arc::new(SqlQuery::Select(stmt))),
                     self.state
                         .query_status_cache
-                        .query_migration_state(&request),
+                        .query_migration_state(&request)
+                        .1,
                     Some(request),
                     always,
                 )
@@ -1306,12 +1320,16 @@ where
         if cached_statement.migration_state.is_pending() {
             // We got a statement with a pending migration, we want to check if migration is
             // finished by now
-            let new_migration_state = self.state.query_status_cache.query_migration_state(
-                cached_statement
-                    .view_request
-                    .as_ref()
-                    .expect("Pending must have view_request set"),
-            );
+            let new_migration_state = self
+                .state
+                .query_status_cache
+                .query_migration_state(
+                    cached_statement
+                        .view_request
+                        .as_ref()
+                        .expect("Pending must have view_request set"),
+                )
+                .1;
 
             if new_migration_state == MigrationState::Successful {
                 // Attempt to prepare on ReadySet
@@ -2047,6 +2065,24 @@ where
                     Self::query_fallback(self.upstream.as_mut(), query, &mut event).await;
                 if fallback_res.is_ok() {
                     self.state.query_status_cache.insert(query);
+
+                    let (id, _) = self.state.query_status_cache.insert(query);
+                    if let Some(ref telemetry_sender) = self.telemetry_sender {
+                        if let Err(e) = telemetry_sender
+                            .send_event_with_payload(
+                                TelemetryEvent::QueryParseFailed,
+                                TelemetryBuilder::new()
+                                    .server_version(option_env!("CARGO_PKG_VERSION").unwrap_or_default())
+                                    .query_id(id)
+                                    .build(),
+                            )
+                            .await
+                        {
+                            warn!(error = %e, "Failed to send parse failed metric");
+                        }
+                    } else {
+                        trace!("No telemetry sender. not sending metric for {query}");
+                    }
                 }
                 fallback_res
             }

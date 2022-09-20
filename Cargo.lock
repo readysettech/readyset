@@ -3766,6 +3766,7 @@ dependencies = [
  "readyset-data",
  "readyset-errors",
  "readyset-server",
+ "readyset-telemetry-reporter",
  "readyset-tracing",
  "regex",
  "rust_decimal",

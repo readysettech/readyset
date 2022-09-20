@@ -376,6 +376,8 @@ pub struct DeniedQuery {
     pub status: QueryStatus,
 }
 
+pub type QueryId = String;
+
 /// A metadata cache for all queries that have been processed by this
 /// adapter. Thread-safe.
 #[derive(Debug)]
@@ -416,22 +418,22 @@ impl QueryStatusCache {
     /// queries that failed to parse have status MigrationState::Unsupported. Inserts into the
     /// statuses and ids hash maps.
     /// Only queries that are valid SQL should be inserted.
-    /// Returns the MigrationState of the inserted Query
+    /// Returns the QueryId and the MigrationState of the inserted Query
     /// self.statuses.insert() should not be called directly
-    pub fn insert<Q>(&self, q: Q) -> MigrationState
+    pub fn insert<Q>(&self, q: Q) -> (QueryId, MigrationState)
     where
         Q: Into<Query>,
     {
         let q = q.into();
         let status = QueryStatus::default_for_query(&q);
         let migration_state = status.migration_state;
-        self.insert_with_status(q, status);
-        migration_state
+        let id = self.insert_with_status(q, status);
+        (id, migration_state)
     }
 
     /// Inserts a query into the status cache with the provided QueryStatus
     /// Only queries that are valid SQL should be inserted.
-    pub fn insert_with_status<Q>(&self, q: Q, status: QueryStatus)
+    pub fn insert_with_status<Q>(&self, q: Q, status: QueryStatus) -> QueryId
     where
         Q: Into<Query>,
     {
@@ -447,9 +449,15 @@ impl QueryStatusCache {
                 status
             }
         };
+        let id = hash_to_query_id(hash(&q));
+        debug_assert!(
+            id.len() <= format!("q_{}", u64::MAX).len(),
+            "query id should be small enough that cloning isn't slow"
+        );
 
-        self.ids.insert(hash_to_query_id(hash(&q)), q.clone());
+        self.ids.insert(id.clone(), q.clone());
         self.statuses.insert(q, status);
+        id
     }
 
     pub fn with_style(style: MigrationStyle) -> QueryStatusCache {
@@ -460,17 +468,26 @@ impl QueryStatusCache {
         }
     }
 
-    /// This function returns the query migration state of a query. If the query does not exist
-    /// within the query status cache, an entry is created and the query is set to
+    /// This function returns the id and query migration state of a query. If the query does not
+    /// exist within the query status cache, an entry is created and the query is set to
     /// PendingMigration.
-    pub fn query_migration_state<Q>(&self, q: &Q) -> MigrationState
+    pub fn query_migration_state<Q>(&self, q: &Q) -> (String, MigrationState)
     where
         Q: Into<Query> + Hash + Eq + Clone,
         Query: Borrow<Q>,
     {
         let query_state = self.statuses.get(q).map(|m| m.migration_state);
+        let id = hash_to_query_id(hash(&q));
+
         match query_state {
-            Some(s) => s,
+            Some(s) => {
+                debug_assert!(
+                    *self.ids.get(&id).expect("query not found") == q.clone().into(),
+                    "mismatch between calculated and cached id/query"
+                );
+
+                (id, s)
+            }
             None => self.insert(q.clone()),
         }
     }
@@ -485,7 +502,7 @@ impl QueryStatusCache {
     {
         match self.statuses.get(q).map(|s| s.clone()) {
             Some(s) => s,
-            None => QueryStatus::with_migration_state(self.insert(q.clone())),
+            None => QueryStatus::with_migration_state(self.insert(q.clone()).1),
         }
     }
 
@@ -841,7 +858,14 @@ mod tests {
         let cache = QueryStatusCache::new();
         let query = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
 
-        assert_eq!(cache.query_migration_state(&query), MigrationState::Pending);
+        assert_eq!(
+            cache.query_migration_state(&query).0,
+            hash_to_query_id(hash(&Into::<Query>::into(query.clone())))
+        );
+        assert_eq!(
+            cache.query_migration_state(&query).1,
+            MigrationState::Pending
+        );
         assert_eq!(cache.pending_migration().len(), 1);
         assert_eq!(cache.allow_list().len(), 0);
         assert_eq!(cache.deny_list().len(), 0);
@@ -857,7 +881,10 @@ mod tests {
         let cache = QueryStatusCache::new();
         let query = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
 
-        assert_eq!(cache.query_migration_state(&query), MigrationState::Pending);
+        assert_eq!(
+            cache.query_migration_state(&query).1,
+            MigrationState::Pending
+        );
         assert_eq!(cache.pending_migration().len(), 1);
         assert_eq!(cache.allow_list().len(), 0);
         assert_eq!(cache.deny_list().len(), 0);
@@ -873,7 +900,10 @@ mod tests {
         let cache = QueryStatusCache::with_style(MigrationStyle::Explicit);
         let query = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
 
-        assert_eq!(cache.query_migration_state(&query), MigrationState::Pending);
+        assert_eq!(
+            cache.query_migration_state(&query).1,
+            MigrationState::Pending
+        );
         assert_eq!(cache.pending_migration().len(), 1);
         assert_eq!(cache.allow_list().len(), 0);
         assert_eq!(cache.deny_list().len(), 1);
