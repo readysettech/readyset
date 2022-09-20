@@ -2046,9 +2046,6 @@ where
                 let fallback_res =
                     Self::query_fallback(self.upstream.as_mut(), query, &mut event).await;
                 if fallback_res.is_ok() {
-                    warn!(error = %e,
-                          "Query failed to parse but was successfuly parsed upon fallback,
-                          there is a gap in our parsing");
                     self.state.query_status_cache.insert(query);
                 }
                 fallback_res
