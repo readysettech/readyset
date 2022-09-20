@@ -395,8 +395,11 @@ where
                 rw.end_row().await?;
             }
 
-            let status_flags = stream.status_flags().expect("No errors");
-            rw.set_status_flags(status_flags).finish().await
+            if let Some(status_flags) = stream.status_flags() {
+                rw = rw.set_status_flags(status_flags)
+            }
+
+            rw.finish().await
         }
     }
 }
