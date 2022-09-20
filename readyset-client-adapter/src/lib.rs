@@ -372,6 +372,7 @@ where
 
         let telemetry_sender =
             TelemetryInitializer::init(options.disable_telemetry, std::env::var("RS_API_KEY").ok());
+
         let _ = rt
             .block_on(async {
                 telemetry_sender

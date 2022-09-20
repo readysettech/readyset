@@ -25,21 +25,27 @@ impl TelemetryInitializer {
     /// Initializes a background task and returns a TelemetrySender handle
     pub fn init(disable_telemetry: bool, api_key: Option<String>) -> TelemetrySender {
         if disable_telemetry {
-            TelemetrySender::new_no_op()
-        } else {
-            match api_key {
-                Some(api_key) => {
-                    let (tx, rx) = channel(TELMETRY_CHANNEL_LEN); // Arbitrary number of metrics to allow in queue before dropping them
-                    let (shutdown_tx, shutdown_rx) = oneshot::channel();
-                    let sender = TelemetrySender::new(tx, shutdown_tx);
-                    tokio::spawn(TelemetryReporter::run(rx, Some(api_key), shutdown_rx));
-                    sender
-                }
-                None => {
-                    tracing::warn!("Failed to initialize telemetry reporter");
-                    TelemetrySender::new_no_op()
-                }
+            return TelemetrySender::new_no_op();
+        }
+
+        match api_key {
+            Some(api_key) => {
+                let (tx, rx) = channel(TELMETRY_CHANNEL_LEN); // Arbitrary number of metrics to allow in queue before dropping them
+                let (shutdown_tx, shutdown_rx) = oneshot::channel();
+                let sender = TelemetrySender::new(tx, shutdown_tx);
+
+                // If the reporter fails to initialize, sends will return errors, which can be
+                // either be ignored (similar to no_op behavior) or handled at the time they are
+                // sent.
+                tokio::spawn(async move {
+                    let mut reporter = TelemetryReporter::try_new(rx, Some(api_key), shutdown_rx)
+                        .expect("failed to create reporter");
+                    reporter.run().await;
+                });
+
+                sender
             }
+            None => TelemetrySender::new_no_op(),
         }
     }
 }

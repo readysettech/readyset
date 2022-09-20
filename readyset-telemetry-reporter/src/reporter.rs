@@ -3,7 +3,6 @@
 //! [`TelemetryEvent`]s sent from [`TelemetryReporter`]s. When it receives one, it forwards the
 //! request to Segment.
 
-use std::fmt::Display;
 use std::time::Duration;
 
 use backoff::ExponentialBackoffBuilder;
@@ -70,9 +69,28 @@ pub struct TelemetryReporter {
     /// Per-session generated ID
     /// https://segment.com/docs/connections/spec/identify/#anonymous-id
     anonymous_id: String,
+    /// Will shut down the run loop upon receiving a signal
+    shutdown_rx: oneshot::Receiver<()>,
 }
 
 impl TelemetryReporter {
+    pub fn try_new(
+        rx: Receiver<(TelemetryEvent, Telemetry)>,
+        api_key: Option<String>,
+        shutdown_rx: oneshot::Receiver<()>,
+    ) -> Result<Self> {
+        Ok(Self {
+            rx,
+            client: SEGMENT_WRITE_KEY
+                .as_ref()
+                .map(|k| make_client(k).ok())
+                .unwrap(),
+            user_id: api_key,
+            anonymous_id: Uuid::new_v4().to_string(),
+            shutdown_rx,
+        })
+    }
+
     fn build_request(
         &self,
         client: &Client,
@@ -135,37 +153,22 @@ impl TelemetryReporter {
         }
     }
 
-    pub async fn run<K>(
-        rx: Receiver<(TelemetryEvent, Telemetry)>,
-        api_key: Option<K>,
-        mut shutdown: oneshot::Receiver<()>,
-    ) where
-        K: Display,
-        for<'a> K: PartialEq<&'a str>,
-    {
-        let mut poller = Self {
-            rx,
-            client: SEGMENT_WRITE_KEY.as_ref().map(|k| make_client(k)),
-            user_id: api_key.map(|k| k.to_string()),
-            anonymous_id: Uuid::new_v4().to_string(),
-        };
-
+    pub async fn run(&mut self) {
         loop {
             tokio::select! {
-                _ = &mut shutdown => {
+                _ = &mut self.shutdown_rx => {
                     tracing::info!("shutting down telemetry reporter");
                     return;
                 }
-                Some((event, telemetry)) = poller.rx.recv() => {
-                    poller.send_event(event, &telemetry).await;
+                Some((event, telemetry)) = self.rx.recv() => {
+                    self.send_event(event, &telemetry).await;
                 }
             }
         }
     }
 }
 
-// TODO(luke): remove panics
-fn make_client(write_key: &str) -> Client {
+fn make_client(write_key: &str) -> Result<Client> {
     let mut headers = HeaderMap::new();
 
     // Authenticate using HTTP Basic Auth
@@ -175,19 +178,17 @@ fn make_client(write_key: &str) -> Client {
         // Append a colon and encode as base64
         let write_key = base64::encode(format!("{write_key}:"));
         let mut authorization = HeaderValue::from_str(&format!("Basic {write_key}"))
-            .map_err(Error::InvalidAPIKeyHeader)
-            .expect("invalid api key header");
+            .map_err(Error::InvalidAPIKeyHeader)?;
         authorization.set_sensitive(true);
         authorization
     });
 
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
-    Client::builder()
+    Ok(Client::builder()
         .default_headers(headers)
         .user_agent(APP_USER_AGENT)
-        .build()
-        .expect("Failed to make client")
+        .build()?)
 }
 
 pub async fn handle_resp(resp: Response) -> Result<()> {
