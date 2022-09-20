@@ -48,7 +48,7 @@ impl TryFrom<Value> for ps::Value {
             }
             (ref ty, DfValue::Int(v)) if type_is_oid(ty) => Ok(ps::Value::Oid(v.try_into()?)),
 
-            (Type::FLOAT4, DfValue::Float(f)) => Ok(ps::Value::Float(f)),
+            (Type::FLOAT4 | Type::FLOAT8, DfValue::Float(f)) => Ok(ps::Value::Float(f)),
             (Type::FLOAT8, DfValue::Double(f)) => Ok(ps::Value::Double(f)),
             (Type::NUMERIC, DfValue::Double(f)) => Ok(ps::Value::Numeric(
                 <Decimal>::try_from(f).map_err(|e| ps::Error::InternalError(e.to_string()))?,
