@@ -4305,6 +4305,7 @@ dependencies = [
  "base64",
  "derive_builder 0.11.2",
  "lazy_static",
+ "readyset-tracing",
  "readyset-version",
  "reqwest",
  "serde",
@@ -4312,6 +4313,7 @@ dependencies = [
  "serde_with_macros 2.0.0",
  "thiserror",
  "tokio",
+ "tracing",
  "uuid",
 ]
 

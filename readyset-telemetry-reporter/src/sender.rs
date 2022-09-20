@@ -47,8 +47,7 @@ impl TelemetrySender {
                 .await
                 .map_err(|e| Error::Sender(e.to_string()))
         } else {
-            // TODO: hook up tracing
-            // tracing::trace!("Ignoring ({event:?} {payload:?}) in no-op mode");
+            tracing::trace!("Ignoring ({event:?} {payload:?}) in no-op mode");
             Ok(())
         }
     }

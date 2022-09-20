@@ -36,8 +36,7 @@ impl TelemetryInitializer {
                     sender
                 }
                 None => {
-                    // TODO: add tracing
-                    // warn!("Failed to initialize telemetry reporter");
+                    tracing::warn!("Failed to initialize telemetry reporter");
                     TelemetrySender::new_no_op()
                 }
             }

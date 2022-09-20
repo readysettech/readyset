@@ -131,7 +131,7 @@ impl TelemetryReporter {
         .await;
 
         if res.is_err() {
-            // TODO: add tracing, warn here about dropped metric
+            tracing::warn!(?res, ?event, ?payload, "failed to send telemetry");
         }
     }
 
@@ -153,7 +153,7 @@ impl TelemetryReporter {
         loop {
             tokio::select! {
                 _ = &mut shutdown => {
-                    // TODO(luke): hook up tracing
+                    tracing::info!("shutting down telemetry reporter");
                     return;
                 }
                 Some((event, telemetry)) = poller.rx.recv() => {

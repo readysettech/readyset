@@ -15,6 +15,8 @@ serde_json = "1.0"
 serde_with_macros = "2.0.0"
 thiserror = "1.0"
 tokio = { version = "1.18", features = ["macros", "time"] }
+tracing = { version = "0.1", features = ["release_max_level_debug"] }
+readyset-tracing = { path = "../readyset-tracing" }
 uuid = { version = "0.8", features = [ "v4" ] }
 
 readyset-version = { path = "../readyset-version" }
