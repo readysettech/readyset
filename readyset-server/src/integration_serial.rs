@@ -16,7 +16,6 @@ use readyset::get_metric;
 use readyset::metrics::{recorded, DumpedMetricValue, MetricsDump};
 use readyset_data::DfValue;
 use rusty_fork::rusty_fork_test;
-use serial_test::serial;
 
 use crate::integration_utils::*;
 use crate::{get_col, Builder};

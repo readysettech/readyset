@@ -48,6 +48,7 @@ pub enum TelemetryEvent {
     build_fn(private, name = "fallible_build"),
     setter(into, strip_option)
 )]
+#[derive(Debug)]
 pub struct Telemetry {
     db_backend: Option<String>,
     adapter_version: Option<String>,

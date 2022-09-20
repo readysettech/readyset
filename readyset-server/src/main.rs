@@ -12,9 +12,9 @@ use readyset_server::metrics::{
     install_global_recorder, CompositeMetricsRecorder, MetricsRecorder,
 };
 use readyset_server::{resolve_addr, Builder, NoriaMetricsRecorder, WorkerOptions};
-use readyset_telemetry_reporter::{TelemetryEvent, TelemetryReporter};
+use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer};
 use readyset_version::COMMIT_ID;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 #[cfg(not(target_env = "msvc"))]
 #[global_allocator]
@@ -137,15 +137,8 @@ fn main() -> anyhow::Result<()> {
 
     info!(commit_hash = %COMMIT_ID);
 
-    // Create a telemetry reporter instance
-    let telemetry = if opts.disable_telemetry {
-        TelemetryReporter::new_no_op()
-    } else {
-        TelemetryReporter::new(std::env::var("RS_API_KEY").ok()).unwrap_or_else(|e| {
-            warn!("Failed to initialize telemetry reporter: {e}");
-            TelemetryReporter::new_no_op()
-        })
-    };
+    let telemetry_sender =
+        TelemetryInitializer::init(opts.disable_telemetry, std::env::var("RS_API_KEY").ok());
 
     let external_addr = if opts.use_aws_external_address {
         Either::Left(get_aws_private_ip())
@@ -180,7 +173,7 @@ fn main() -> anyhow::Result<()> {
 
     let mut builder = Builder::from_worker_options(opts.worker_options, &opts.deployment);
     builder.set_listen_addr(opts.address);
-    builder.set_telemetry_reporter(telemetry.clone());
+    builder.set_telemetry_sender(telemetry_sender.clone());
 
     if opts.cannot_become_leader {
         builder.cannot_become_leader();
@@ -209,7 +202,7 @@ fn main() -> anyhow::Result<()> {
     })?;
     rt.block_on(handle.wait_done());
 
-    let _ = rt.block_on(telemetry.send_event(TelemetryEvent::ServerStop));
+    let _ = rt.block_on(telemetry_sender.send_event(TelemetryEvent::ServerStop));
 
     drop(rt);
     Ok(())

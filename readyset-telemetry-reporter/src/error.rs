@@ -5,7 +5,7 @@ use tokio::time::error::Elapsed;
 
 /// Errors that can occur when reporting telemetry payloads
 #[derive(Debug, Error)]
-pub enum Error {
+pub enum ReporterError {
     #[error("Invalid API key: {0}")]
     InvalidAPIKeyHeader(InvalidHeaderValue),
 
@@ -27,3 +27,17 @@ pub enum Error {
     #[error("Error serializing telemetry payload: {0}")]
     Json(#[from] serde_json::Error),
 }
+
+/// Result type alias for the telemetry reporter
+pub type ReporterResult<T> = std::result::Result<T, ReporterError>;
+
+/// Errors that can occur when sending telemetry payloads from the sender to the reporter
+
+#[derive(Debug, Error)]
+pub enum SenderError {
+    #[error("Error sending telemetry event {0}")]
+    Sender(String),
+}
+
+/// Result type alias for the telemetry reporter
+pub type SenderResult<T> = std::result::Result<T, SenderError>;

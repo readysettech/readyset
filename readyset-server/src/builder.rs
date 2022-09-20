@@ -8,7 +8,7 @@ use readyset::consensus::{
     Authority, LocalAuthority, LocalAuthorityStore, NodeTypeSchedulingRestriction,
     WorkerSchedulingConfig,
 };
-use readyset_telemetry_reporter::TelemetryReporter;
+use readyset_telemetry_reporter::TelemetrySender;
 
 use crate::controller::replication::ReplicationStrategy;
 use crate::handle::Handle;
@@ -24,7 +24,7 @@ pub struct Builder {
     external_addr: SocketAddr,
     leader_eligible: bool,
     domain_scheduling_config: WorkerSchedulingConfig,
-    telemetry: TelemetryReporter,
+    telemetry: TelemetrySender,
 }
 
 impl Default for Builder {
@@ -38,7 +38,7 @@ impl Default for Builder {
             memory_check_frequency: None,
             leader_eligible: true,
             domain_scheduling_config: Default::default(),
-            telemetry: TelemetryReporter::new_no_op(),
+            telemetry: TelemetrySender::new_no_op(),
         }
     }
 }
@@ -284,7 +284,7 @@ impl Builder {
     }
 
     /// Assigns a telemetry reporter to this ReadySet server
-    pub fn set_telemetry_reporter(&mut self, value: TelemetryReporter) {
+    pub fn set_telemetry_sender(&mut self, value: TelemetrySender) {
         self.telemetry = value;
     }
 

@@ -39,7 +39,7 @@ use readyset_client_metrics::QueryExecutionEvent;
 use readyset_dataflow::Readers;
 use readyset_server::metrics::{CompositeMetricsRecorder, MetricsRecorder};
 use readyset_server::worker::readers::{retry_misses, Ack, BlockingRead, ReadRequestHandler};
-use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetryReporter};
+use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetryInitializer};
 use readyset_version::COMMIT_ID;
 use stream_cancel::Valve;
 use tokio::net::UdpSocket;
@@ -370,24 +370,21 @@ where
         ));
         info!(commit_hash = %COMMIT_ID);
 
-        // Create a telemetry reporter instance and send startup telemetry message
-        let telemetry = if options.disable_telemetry {
-            TelemetryReporter::new_no_op()
-        } else {
-            TelemetryReporter::new(std::env::var("RS_API_KEY").ok()).unwrap_or_else(|e| {
-                warn!("Failed to initialize telemetry reporter: {e}");
-                TelemetryReporter::new_no_op()
+        let telemetry_sender =
+            TelemetryInitializer::init(options.disable_telemetry, std::env::var("RS_API_KEY").ok());
+        let _ = rt
+            .block_on(async {
+                telemetry_sender
+                    .send_event_with_payload(
+                        TelemetryEvent::AdapterStart,
+                        TelemetryBuilder::new()
+                            .adapter_version(option_env!("CARGO_PKG_VERSION").unwrap_or_default())
+                            .db_backend(format!("{:?}", &self.database_type).to_lowercase())
+                            .build(),
+                    )
+                    .await
             })
-        };
-        let _ = rt.block_on(
-            telemetry.send_event_with_payload(
-                TelemetryEvent::AdapterStart,
-                &TelemetryBuilder::new()
-                    .adapter_version(option_env!("CARGO_PKG_VERSION").unwrap_or_default())
-                    .db_backend(format!("{:?}", &self.database_type).to_lowercase())
-                    .build(),
-            ),
-        );
+            .map_err(|error| warn!(%error, "Failed to initialize telemetry sender"));
 
         if options.allow_unsupported_set {
             warn!(
@@ -662,7 +659,7 @@ where
                 builder.set_replication_url(upstream_db_url.clone().into());
             }
 
-            builder.set_telemetry_reporter(telemetry.clone());
+            builder.set_telemetry_sender(telemetry_sender.clone());
 
             let server_handle = rt.block_on(async move {
                 let authority = Arc::new(authority.to_authority(&auth_address, &deployment).await);
@@ -848,10 +845,10 @@ where
 
         // Send shutdown telemetry events
         if _handle.is_some() {
-            let _ = rt.block_on(telemetry.send_event(TelemetryEvent::ServerStop));
+            let _ = rt.block_on(telemetry_sender.send_event(TelemetryEvent::ServerStop));
         }
 
-        let _ = rt.block_on(telemetry.send_event(TelemetryEvent::AdapterStop));
+        let _ = rt.block_on(telemetry_sender.send_event(TelemetryEvent::AdapterStop));
 
         // We use `shutdown_timeout` instead of `shutdown_background` in case any
         // blocking IO is ongoing.

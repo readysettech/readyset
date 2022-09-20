@@ -56,7 +56,7 @@ use futures_util::future::{Either, TryFutureExt};
 use launchpad::futures::abort_on_panic;
 use readyset::consensus::{Authority, WorkerSchedulingConfig};
 use readyset::{ControllerDescriptor, WorkerDescriptor};
-use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetryReporter};
+use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 use stream_cancel::{Trigger, Valve};
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -231,7 +231,7 @@ pub async fn start_instance_inner(
     reader_addr: SocketAddr,
     valve: Valve,
     trigger: Trigger,
-    telemetry: TelemetryReporter,
+    telemetry_sender: TelemetrySender,
 ) -> Result<Handle, anyhow::Error> {
     let (worker_tx, worker_rx) = tokio::sync::mpsc::channel(16);
     let (controller_tx, controller_rx) = tokio::sync::mpsc::channel(16);
@@ -280,10 +280,10 @@ pub async fn start_instance_inner(
     )
     .await?;
 
-    let _ = telemetry
+    let _ = telemetry_sender
         .send_event_with_payload(
             TelemetryEvent::ServerStart,
-            &TelemetryBuilder::new()
+            TelemetryBuilder::new()
                 .server_version(option_env!("CARGO_PKG_VERSION").unwrap_or_default())
                 .build(),
         )
@@ -303,7 +303,7 @@ pub(super) async fn start_instance(
     memory_check_frequency: Option<time::Duration>,
     domain_scheduling_config: WorkerSchedulingConfig,
     leader_eligible: bool,
-    telemetry: TelemetryReporter,
+    telemetry_sender: TelemetrySender,
 ) -> Result<Handle, anyhow::Error> {
     let (trigger, valve) = Valve::new();
     let Config {
@@ -336,7 +336,7 @@ pub(super) async fn start_instance(
         reader_addr,
         valve,
         trigger,
-        telemetry,
+        telemetry_sender,
     )
     .await
 }
