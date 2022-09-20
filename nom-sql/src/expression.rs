@@ -19,7 +19,7 @@ use crate::common::{column_function, column_identifier_no_alias, ws_sep_comma};
 use crate::literal::literal;
 use crate::select::nested_selection;
 use crate::set::{variable_scope_prefix, Variable};
-use crate::sql_type::type_identifier;
+use crate::sql_type::{mysql_int_cast_targets, type_identifier};
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Column, Dialect, Literal, SelectStatement, SqlType};
 
@@ -798,7 +798,16 @@ fn cast(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
         let (i, _) = tag_no_case("as")(i)?;
         let (i, _) = whitespace1(i)?;
 
-        let (i, ty) = type_identifier(dialect)(i)?;
+        let (i, ty) = if dialect == Dialect::MySQL {
+            // Note that MySQL actually doesn't support every valid type identifier in CASTs; it
+            // somewhat arbitrarily restrictive in what it accepts. However, it's not necessarily
+            // harmful to allow casting to any type in ReadySet, and it's easier to allow it than
+            // it is to restrict which types are allowed in this function, so we accept any valid
+            // type here (along with MySQL-specific CAST targets via mysql_int_cast_targets()).
+            alt((type_identifier(dialect), mysql_int_cast_targets()))(i)?
+        } else {
+            type_identifier(dialect)(i)?
+        };
 
         let (i, _) = char(')')(i)?;
 
@@ -980,6 +989,22 @@ mod tests {
                         ty: SqlType::Double,
                         postgres_style: true,
                     }),
+                }
+            );
+        }
+
+        #[test]
+        fn mysql_cast() {
+            let res = expression(Dialect::MySQL)(br#"CAST(-128 AS UNSIGNED)"#);
+            assert_eq!(
+                res.unwrap().1,
+                Expr::Cast {
+                    expr: Box::new(Expr::UnaryOp {
+                        op: UnaryOperator::Neg,
+                        rhs: Box::new(Expr::Literal(Literal::UnsignedInteger(128))),
+                    }),
+                    ty: SqlType::UnsignedBigInt(None),
+                    postgres_style: false
                 }
             );
         }

@@ -4,20 +4,17 @@ CREATE TABLE ids(id TEXT)
 statement ok
 INSERT INTO ids (id) VALUES ("200"), ("200")
 
-invert_no_upstream
 query I nosort
 SELECT CAST(id as UNSIGNED) FROM ids;
 ----
 200
 200
 
-invert_no_upstream
 query I nosort
 SELECT SUM(CAST(id as UNSIGNED)) FROM ids;
 ----
 400
 
-invert_no_upstream
 query I nosort
 SELECT CAST(GROUP_CONCAT(id SEPARATOR '') as UNSIGNED) FROM ids;
 ----

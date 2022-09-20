@@ -624,6 +624,31 @@ pub fn type_identifier(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Sql
     }
 }
 
+/// For CASTs to integer types, MySQL does not support its own standard type names, and instead
+/// only supports a handful of CAST-specific keywords; this function returns a parser for them.
+pub fn mysql_int_cast_targets() -> impl Fn(&[u8]) -> IResult<&[u8], SqlType> {
+    move |i| {
+        alt((
+            map(
+                tuple((
+                    tag_no_case("signed"),
+                    whitespace0,
+                    opt(tag_no_case("integer")),
+                )),
+                |_| SqlType::BigInt(None),
+            ),
+            map(
+                tuple((
+                    tag_no_case("unsigned"),
+                    whitespace0,
+                    opt(tag_no_case("integer")),
+                )),
+                |_| SqlType::UnsignedBigInt(None),
+            ),
+        ))(i)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
