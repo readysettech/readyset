@@ -133,6 +133,9 @@ ReadySet adapter, main configuration envionment variables.
       fieldPath: status.podIP
 - name: LOG_FORMAT
   value: {{ .config.logFormat | quote }}
+# Identify this as a Helm deployment to TelemetryReporter
+- name: DEPLOYMENT_ENV
+  value: {{ .config.deploymentEnv | quote }}
 {{- end -}}
 
 {{/*

@@ -60,17 +60,44 @@ fn telemetry_url(path: &str) -> Url {
     Url::parse(TELEMETRY_BASE_URL).unwrap().join(path).unwrap()
 }
 
+#[derive(Debug, Clone, Default)]
+enum DeploymentEnv {
+    #[default]
+    Unknown,
+
+    InstallerCompose,
+    Eks,
+    Helm,
+}
+
+impl From<String> for DeploymentEnv {
+    fn from(s: String) -> Self {
+        match s.as_str() {
+            "InstallerCompose" => DeploymentEnv::InstallerCompose,
+            "Eks" => DeploymentEnv::Eks,
+            "Helm" => DeploymentEnv::Helm,
+            _ => DeploymentEnv::Unknown,
+        }
+    }
+}
+
 pub struct TelemetryReporter {
     client: Option<Client>,
+
     rx: Receiver<(TelemetryEvent, Telemetry)>,
+
     /// https://segment.com/docs/connections/spec/identify/#user-id
     user_id: Option<String>,
 
     /// Per-session generated ID
     /// https://segment.com/docs/connections/spec/identify/#anonymous-id
     anonymous_id: String,
+
     /// Will shut down the run loop upon receiving a signal
     shutdown_rx: oneshot::Receiver<()>,
+
+    /// Deployment environment, e.g. container orchestrator framework, if any
+    deployment_env: DeploymentEnv,
 }
 
 impl TelemetryReporter {
@@ -88,6 +115,7 @@ impl TelemetryReporter {
             user_id: api_key,
             anonymous_id: Uuid::new_v4().to_string(),
             shutdown_rx,
+            deployment_env: std::env::var("DEPLOYMENT_ENV").unwrap_or_default().into(),
         })
     }
 
@@ -104,6 +132,7 @@ impl TelemetryReporter {
             properties: Properties {
                 telemetry,
                 commit_id: COMMIT_ID,
+                deployment_env: &format!("{:?}", &self.deployment_env),
             },
         })
     }

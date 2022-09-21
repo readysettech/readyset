@@ -80,6 +80,7 @@ pub struct Properties<'a> {
 
     // Properties auto-populated by the reporter
     pub commit_id: &'a str,
+    pub deployment_env: &'a str,
 }
 
 /// Top-level wrapper for ReadySet-specifc Segment Track message
