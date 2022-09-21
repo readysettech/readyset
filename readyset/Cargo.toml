@@ -92,6 +92,7 @@ readyset-tracing = { path = "../readyset-tracing" }
 array2 = { path = "../array2" }
 tournament-kway = { path = "../tournament-kway" }
 nom-sql = { path = "../nom-sql" }
+readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter" }
 
 [dev-dependencies]
 serial_test = "0.5.1"

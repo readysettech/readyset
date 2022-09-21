@@ -22,6 +22,7 @@ use readyset::recipe::changelist::{Change, ChangeList};
 use readyset::replication::{ReplicationOffset, ReplicationOffsets};
 use readyset::{ReadySetError, ReadySetHandle, ReadySetResult, Table, TableOperation};
 use readyset_errors::{internal_err, invalid_err};
+use readyset_telemetry_reporter::TelemetrySender;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 use tracing::{debug, error, info, info_span, trace, warn, Instrument};
@@ -164,15 +165,20 @@ pub struct NoriaAdapter {
 }
 
 impl NoriaAdapter {
-    pub async fn start_with_authority(authority: Authority, config: Config) -> ReadySetResult<!> {
+    pub async fn start_with_authority(
+        authority: Authority,
+        telemetry_sender: TelemetrySender,
+        config: Config,
+    ) -> ReadySetResult<!> {
         let noria = readyset::ReadySetHandle::new(authority).await;
-        NoriaAdapter::start(noria, config, None).await
+        NoriaAdapter::start(noria, config, None, telemetry_sender).await
     }
 
     pub async fn start(
         noria: ReadySetHandle,
         mut config: Config,
         mut notify: Option<Arc<Notify>>,
+        telemetry_sender: TelemetrySender,
     ) -> ReadySetResult<!> {
         let mut resnapshot = false;
         let url: DatabaseURL = config
@@ -186,14 +192,28 @@ impl NoriaAdapter {
             DatabaseURL::MySQL(options) => {
                 let noria = noria.clone();
                 let config = config.clone();
-                NoriaAdapter::start_inner_mysql(options, noria, config, &mut notify, resnapshot)
-                    .await
+                NoriaAdapter::start_inner_mysql(
+                    options,
+                    noria,
+                    config,
+                    &mut notify,
+                    resnapshot,
+                    &telemetry_sender,
+                )
+                .await
             }
             DatabaseURL::PostgreSQL(options) => {
                 let noria = noria.clone();
                 let config = config.clone();
-                NoriaAdapter::start_inner_postgres(options, noria, config, &mut notify, resnapshot)
-                    .await
+                NoriaAdapter::start_inner_postgres(
+                    options,
+                    noria,
+                    config,
+                    &mut notify,
+                    resnapshot,
+                    &telemetry_sender,
+                )
+                .await
             }
         } {
             match err {
@@ -220,8 +240,12 @@ impl NoriaAdapter {
         mut config: Config,
         ready_notify: &mut Option<Arc<Notify>>,
         resnapshot: bool,
+        _telemetry_sender: &TelemetrySender,
     ) -> ReadySetResult<!> {
         use crate::mysql_connector::BinlogPosition;
+
+        // TODO(luke): Query schema here and report to segment
+
         // Load the replication offset for all tables and the schema from ReadySet
         let mut replication_offsets = noria.replication_offsets().await?;
 
@@ -356,6 +380,7 @@ impl NoriaAdapter {
         mut config: Config,
         ready_notify: &mut Option<Arc<Notify>>,
         resnapshot: bool,
+        _telemetry_sender: &TelemetrySender,
     ) -> ReadySetResult<!> {
         let dbname = pgsql_opts.get_dbname().ok_or_else(|| {
             ReadySetError::ReplicationFailed("No database specified for replication".to_string())
@@ -385,6 +410,7 @@ impl NoriaAdapter {
         );
 
         info!("Connected to PostgreSQL");
+        // TODO(luke): Query schemas and report to segment here.
 
         let replication_slot = if let Some(slot) = &connector.replication_slot {
             Some(slot.clone())

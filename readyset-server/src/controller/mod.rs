@@ -24,6 +24,7 @@ use readyset::failpoints;
 use readyset::metrics::recorded;
 use readyset::ControllerDescriptor;
 use readyset_errors::{internal, internal_err, ReadySetError};
+use readyset_telemetry_reporter::TelemetrySender;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use stream_cancel::Valve;
@@ -301,6 +302,9 @@ pub struct Controller {
     /// Channel that the replication task, if it exists, can use to propagate updates back to
     /// the parent controller.
     replication_error_channel: ReplicationErrorChannel,
+
+    /// Provides the ability to report metrics to Segment
+    telemetry_sender: TelemetrySender,
 }
 
 impl Controller {
@@ -312,6 +316,7 @@ impl Controller {
         our_descriptor: ControllerDescriptor,
         shutoff_valve: Valve,
         worker_descriptor: WorkerDescriptor,
+        telemetry_sender: TelemetrySender,
         config: Config,
     ) -> Self {
         Self {
@@ -330,6 +335,7 @@ impl Controller {
             authority_task: None,
             write_processing_task: None,
             dry_run_task: None,
+            telemetry_sender,
         }
     }
 
@@ -410,6 +416,7 @@ impl Controller {
                     .start(
                         self.leader_ready_notification.clone(),
                         self.replication_error_channel.sender(),
+                        self.telemetry_sender.clone(),
                     )
                     .await;
 

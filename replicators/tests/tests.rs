@@ -12,6 +12,7 @@ use readyset::recipe::changelist::ChangeList;
 use readyset::{ReadySetError, ReadySetHandle, ReadySetResult};
 use readyset_data::{DfValue, TinyText};
 use readyset_server::Builder;
+use readyset_telemetry_reporter::TelemetrySender;
 use replicators::{Config, NoriaAdapter};
 use test_utils::slow;
 use tracing::{error, trace};
@@ -275,6 +276,7 @@ impl TestHandle {
                     ..config.unwrap_or_default()
                 },
                 ready_notify.clone(),
+                TelemetrySender::new_no_op(),
             )
             .await
             {

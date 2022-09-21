@@ -149,6 +149,7 @@ async fn start_controller(
     domain_scheduling_config: WorkerSchedulingConfig,
     leader_eligible: bool,
     valve: Valve,
+    telemetry_sender: TelemetrySender,
 ) -> Result<ControllerDescriptor, anyhow::Error> {
     let our_descriptor = ControllerDescriptor {
         controller_uri: http_uri.clone(),
@@ -170,6 +171,7 @@ async fn start_controller(
         our_descriptor.clone(),
         valve,
         worker_descriptor,
+        telemetry_sender,
         config,
     );
 
@@ -277,6 +279,7 @@ pub async fn start_instance_inner(
         domain_scheduling_config,
         leader_eligible,
         valve,
+        telemetry_sender.clone(),
     )
     .await?;
 

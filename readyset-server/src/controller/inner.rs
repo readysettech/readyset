@@ -20,6 +20,7 @@ use readyset::replication::ReplicationOffset;
 use readyset::status::{ReadySetStatus, SnapshotStatus};
 use readyset::WorkerDescriptor;
 use readyset_errors::{ReadySetError, ReadySetResult};
+use readyset_telemetry_reporter::TelemetrySender;
 use reqwest::Url;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::Notify;
@@ -65,10 +66,11 @@ impl Leader {
         &mut self,
         ready_notification: Arc<Notify>,
         replication_error: UnboundedSender<ReadySetError>,
+        telemetry_sender: TelemetrySender,
     ) {
         // When the controller becomes the leader, we need to read updates
         // from the binlog.
-        self.start_replication_task(ready_notification, replication_error)
+        self.start_replication_task(ready_notification, replication_error, telemetry_sender)
             .await;
     }
 
@@ -93,6 +95,7 @@ impl Leader {
         &mut self,
         ready_notification: Arc<Notify>,
         replication_error: UnboundedSender<ReadySetError>,
+        telemetry_sender: TelemetrySender,
     ) {
         if self.replicator_config.replication_url.is_none() {
             ready_notification.notify_one();
@@ -112,6 +115,7 @@ impl Leader {
                     noria,
                     config.clone(),
                     Some(ready_notification.clone()),
+                    telemetry_sender.clone(),
                 )
                 .await
                 {
