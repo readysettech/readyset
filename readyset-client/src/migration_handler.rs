@@ -11,7 +11,7 @@ use std::time::Instant;
 use launchpad::redacted::Sensitive;
 use metrics::{counter, register_counter};
 use readyset::recipe::changelist::{Change, ChangeList};
-use readyset::{ControllerHandle, ReadySetResult, ViewCreateRequest};
+use readyset::{ReadySetHandle, ReadySetResult, ViewCreateRequest};
 use readyset_client_metrics::recorded;
 use tokio::select;
 use tracing::{error, info, instrument, warn};
@@ -26,7 +26,7 @@ pub struct MigrationHandler<DB> {
     noria: NoriaConnector,
 
     /// The noria connector used to query if we are configured to run in dry_run mode.
-    controller: Option<ControllerHandle>,
+    controller: Option<ReadySetHandle>,
 
     /// Connector used to issue prepares to the upstream db.
     upstream: Option<DB>,
@@ -65,7 +65,7 @@ where
     pub fn new(
         noria: NoriaConnector,
         upstream: Option<DB>,
-        controller: Option<ControllerHandle>,
+        controller: Option<ReadySetHandle>,
         query_status_cache: &'static QueryStatusCache,
         validate_queries: bool,
         min_poll_interval: std::time::Duration,

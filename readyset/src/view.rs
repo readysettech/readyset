@@ -956,7 +956,7 @@ impl ViewBuilder {
 
 /// A `View` is used to query previously defined external views.
 ///
-/// Note that if you create multiple `View` handles from a single `ControllerHandle`, they may
+/// Note that if you create multiple `View` handles from a single `ReadySetHandle`, they may
 /// share connections to the Soup workers.
 #[derive(Clone)]
 pub struct View {

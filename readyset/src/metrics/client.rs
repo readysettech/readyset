@@ -2,7 +2,7 @@ use readyset_errors::{rpc_err, ReadySetError, ReadySetResult};
 use url::Url;
 
 use crate::metrics::MetricsDump;
-use crate::ControllerHandle;
+use crate::ReadySetHandle;
 
 /// A metrics dump tagged with the address it was received from.
 #[derive(Debug)]
@@ -17,14 +17,14 @@ pub struct TaggedMetricsDump {
 /// The MetricsClient handles operations to the metrics collection framework across
 /// a ReadySet deployment.
 pub struct MetricsClient {
-    controller: ControllerHandle,
+    controller: ReadySetHandle,
     client: reqwest::Client,
 }
 
 impl MetricsClient {
     /// Instantiates a new metrics client connected to the deployment associated with
     /// `controller`.
-    pub fn new(controller: ControllerHandle) -> ReadySetResult<Self> {
+    pub fn new(controller: ReadySetHandle) -> ReadySetResult<Self> {
         Ok(MetricsClient {
             controller,
             client: reqwest::Client::new(),

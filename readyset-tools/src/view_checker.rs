@@ -1,7 +1,7 @@
 #![warn(clippy::panic)]
 use clap::Parser;
 use readyset::consensus::AuthorityType;
-use readyset::ControllerHandle;
+use readyset::ReadySetHandle;
 
 #[derive(Parser)]
 #[clap(name = "view_checker")]
@@ -26,7 +26,7 @@ impl ViewChecker {
             .to_authority(&self.authority_address, &self.deployment)
             .await;
 
-        let mut handle: ControllerHandle = ControllerHandle::new(authority).await;
+        let mut handle: ReadySetHandle = ReadySetHandle::new(authority).await;
         handle.ready().await.unwrap();
 
         println!("Waiting for noria");

@@ -14,7 +14,7 @@ use readyset_client::backend::noria_connector::{NoriaConnector, ReadBehavior};
 use readyset_client::backend::{BackendBuilder, MigrationMode, UnsupportedSetMode};
 use readyset_client::query_status_cache::QueryStatusCache;
 use readyset_client::{Backend, QueryHandler, UpstreamDatabase};
-use readyset_server::{Builder, ControllerHandle, Handle, LocalAuthority};
+use readyset_server::{Builder, Handle, LocalAuthority, ReadySetHandle};
 use tokio::net::{TcpListener, TcpStream};
 
 #[cfg(feature = "mysql")]
@@ -188,9 +188,9 @@ where
                 Default::default()
             };
 
-            let ch = ControllerHandle::new(authority).await;
+            let rh = ReadySetHandle::new(authority).await;
             let noria = NoriaConnector::new(
-                ch,
+                rh,
                 auto_increments,
                 query_cache,
                 read_behavior,

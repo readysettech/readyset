@@ -105,8 +105,8 @@ impl Leader {
         let config = self.replicator_config.clone();
         self.replicator_task = Some(tokio::spawn(async move {
             loop {
-                let noria: readyset::ControllerHandle =
-                    readyset::ControllerHandle::new(Arc::clone(&authority)).await;
+                let noria: readyset::ReadySetHandle =
+                    readyset::ReadySetHandle::new(Arc::clone(&authority)).await;
 
                 match replicators::NoriaAdapter::start(
                     noria,

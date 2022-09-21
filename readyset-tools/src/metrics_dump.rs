@@ -5,7 +5,7 @@
 use clap::Parser;
 use readyset::consensus::AuthorityType;
 use readyset::metrics::client::MetricsClient;
-use readyset::ControllerHandle;
+use readyset::ReadySetHandle;
 
 #[derive(Parser)]
 #[clap(name = "metrics_dump")]
@@ -27,7 +27,7 @@ impl MetricsDump {
             .to_authority(&self.authority_address, &self.deployment)
             .await;
 
-        let mut handle: ControllerHandle = ControllerHandle::new(authority).await;
+        let mut handle: ReadySetHandle = ReadySetHandle::new(authority).await;
         handle.ready().await.unwrap();
 
         let mut client = MetricsClient::new(handle).unwrap();

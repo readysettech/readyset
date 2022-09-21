@@ -12,13 +12,13 @@ use tower::ServiceExt;
 use tower_service::Service;
 
 use crate::controller::ControllerRequest;
-use crate::ControllerHandle;
+use crate::ReadySetHandle;
 
 // this alias is needed to work around -> impl Trait capturing _all_ lifetimes by default
 // the A parameter is needed so it gets captured into the impl Trait
 type RpcFuture<'a, R: 'a> = impl Future<Output = ReadySetResult<R>> + 'a;
 
-impl ControllerHandle {
+impl ReadySetHandle {
     /// Perform a raw RPC request to the HTTP `path` provided, providing a request body `r`.
     #[doc(hidden)]
     pub fn rpc<'a, Q, R>(
@@ -33,7 +33,7 @@ impl ControllerHandle {
     {
         // Needed b/c of https://github.com/rust-lang/rust/issues/65442
         async fn rpc_inner<R>(
-            ch: &mut ControllerHandle,
+            ch: &mut ReadySetHandle,
             req: ControllerRequest,
             path: &'static str,
         ) -> ReadySetResult<R>

@@ -5,7 +5,7 @@ use std::str::FromStr;
 use anyhow::anyhow;
 use clap::Parser;
 use readyset::consensus::AuthorityType;
-use readyset::ControllerHandle;
+use readyset::ReadySetHandle;
 
 #[derive(Parser)]
 #[clap(name = "controller_request")]
@@ -42,7 +42,7 @@ impl FromStr for Request {
 }
 
 impl Request {
-    async fn issue_and_print(&self, mut handle: ControllerHandle) -> anyhow::Result<()> {
+    async fn issue_and_print(&self, mut handle: ReadySetHandle) -> anyhow::Result<()> {
         match self {
             Request::HealthyWorkers => {
                 let res = handle.healthy_workers().await?;
@@ -65,7 +65,7 @@ impl ControllerRequest {
             .to_authority(&self.authority_address, &self.deployment)
             .await;
 
-        let mut handle: ControllerHandle = ControllerHandle::new(authority).await;
+        let mut handle: ReadySetHandle = ReadySetHandle::new(authority).await;
         handle.ready().await.unwrap();
 
         self.endpoint.issue_and_print(handle).await?;

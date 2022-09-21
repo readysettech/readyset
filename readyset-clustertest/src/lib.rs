@@ -186,7 +186,7 @@
 //!      [`DeploymentHandle::kill_server`] may be called to
 //!      remove a server from the deployment, this is done by sending the kill
 //!      command to the process running the server.
-//!   3. Sending controller RPCs via the [`ControllerHandle`] returned by
+//!   3. Sending controller RPCs via the [`ReadySetHandle`] returned by
 //!      [`DeploymentHandle::leader_handle`].
 //!   4. Querying metrics via the [`MetricsClient`] returned by
 //!      [`DeploymentHandle::metrics`].
@@ -217,7 +217,7 @@ use std::time::{Duration, Instant};
 
 use ::readyset::consensus::AuthorityType;
 use ::readyset::metrics::client::MetricsClient;
-use ::readyset::{ControllerHandle, ReadySetResult};
+use ::readyset::{ReadySetHandle, ReadySetResult};
 use anyhow::{anyhow, Result};
 use futures::executor;
 use hyper::Client;
@@ -662,7 +662,7 @@ impl DeploymentBuilder {
             .authority
             .to_authority(&self.authority_address, &self.name)
             .await;
-        let handle = ControllerHandle::new(authority).await;
+        let handle = ReadySetHandle::new(authority).await;
 
         // Duplicate the authority and handle creation as the metrics client
         // owns its own handle.
@@ -670,7 +670,7 @@ impl DeploymentBuilder {
             .authority
             .to_authority(&self.authority_address, &self.name)
             .await;
-        let metrics_handle = ControllerHandle::new(metrics_authority).await;
+        let metrics_handle = ReadySetHandle::new(metrics_authority).await;
         let metrics = MetricsClient::new(metrics_handle).unwrap();
 
         // Start `self.mysql_adapters` MySQL adapter instances.
@@ -826,7 +826,7 @@ impl AdapterHandle {
 /// A handle to a deployment created with `start_multi_process`.
 pub struct DeploymentHandle {
     /// A handle to the current controller of the deployment.
-    handle: ControllerHandle,
+    handle: ReadySetHandle,
     /// Metrics client for aggregating metrics across the deployment.
     metrics: MetricsClient,
     /// Map from a readyset server's address to a handle to the server.
@@ -860,9 +860,9 @@ impl DeploymentHandle {
         &mut self.adapter_start_params
     }
 
-    /// Returns a [`ControllerHandle`] that enables sending RPCs to the leader
+    /// Returns a [`ReadySetHandle`] that enables sending RPCs to the leader
     /// of the deployment.
-    pub fn leader_handle(&mut self) -> &mut ControllerHandle {
+    pub fn leader_handle(&mut self) -> &mut ReadySetHandle {
         &mut self.handle
     }
 

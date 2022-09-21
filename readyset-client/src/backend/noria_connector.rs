@@ -17,8 +17,8 @@ use readyset::internal::LocalNodeIndex;
 use readyset::recipe::changelist::{Change, ChangeList};
 use readyset::results::{ResultIterator, Results};
 use readyset::{
-    ColumnSchema, ControllerHandle, KeyColumnIdx, KeyComparison, ReadQuery, ReaderAddress,
-    ReadySetError, ReadySetResult, SchemaType, Table, TableOperation, View, ViewCreateRequest,
+    ColumnSchema, KeyColumnIdx, KeyComparison, ReadQuery, ReaderAddress, ReadySetError,
+    ReadySetHandle, ReadySetResult, SchemaType, Table, TableOperation, View, ViewCreateRequest,
     ViewPlaceholder, ViewQuery, ViewSchema,
 };
 use readyset_data::{DfType, DfValue};
@@ -82,7 +82,7 @@ impl NoriaBackend {
 }
 
 pub struct NoriaBackendInner {
-    noria: ControllerHandle,
+    noria: ReadySetHandle,
     tables: BTreeMap<Relation, Table>,
     views: BTreeMap<Relation, View>,
     /// The server can handle (non-parameterized) LIMITs and (parameterized) OFFSETs in the
@@ -100,7 +100,7 @@ macro_rules! noria_await {
 }
 
 impl NoriaBackendInner {
-    async fn new(mut ch: ControllerHandle) -> ReadySetResult<Self> {
+    async fn new(mut ch: ReadySetHandle) -> ReadySetResult<Self> {
         let server_supports_pagination = ch.supports_pagination().await?;
         debug!(supported = %server_supports_pagination, "Check backend pagination support");
 
@@ -455,7 +455,7 @@ pub(crate) enum ExecuteSelectContext<'ctx> {
 
 impl NoriaConnector {
     pub async fn new(
-        ch: ControllerHandle,
+        ch: ReadySetHandle,
         auto_increments: Arc<RwLock<HashMap<Relation, atomic::AtomicUsize>>>,
         query_cache: Arc<RwLock<HashMap<ViewCreateRequest, Relation>>>,
         read_behavior: ReadBehavior,
@@ -473,7 +473,7 @@ impl NoriaConnector {
     }
 
     pub async fn new_with_local_reads(
-        ch: ControllerHandle,
+        ch: ReadySetHandle,
         auto_increments: Arc<RwLock<HashMap<Relation, atomic::AtomicUsize>>>,
         query_cache: Arc<RwLock<HashMap<ViewCreateRequest, Relation>>>,
         read_behavior: ReadBehavior,

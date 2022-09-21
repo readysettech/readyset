@@ -36,7 +36,7 @@
 //!             .await
 //!             .unwrap(),
 //!     );
-//!     let mut db = ControllerHandle::new(zk_auth).await;
+//!     let mut db = ReadySetHandle::new(zk_auth).await;
 //!
 //!     // if this is the first time we interact with ReadySet, we must give it the schema
 //!     db.extend_recipe(
@@ -113,15 +113,15 @@
 //!
 //! Reads work quite differently in ReadySet compared to traditional relational databases. In
 //! particular, a query, or _view_, must be _registered_ before it can be executed, much like SQL
-//! prepared statements. Use [`ControllerHandle::extend_recipe`] to register new base tables and
+//! prepared statements. Use [`ReadySetHandle::extend_recipe`] to register new base tables and
 //! views. Once a view has been registered, you can get a handle that lets you execute the
-//! corresponding query by passing the view's name to [`ControllerHandle::view`]. The returned
+//! corresponding query by passing the view's name to [`ReadySetHandle::view`]. The returned
 //! [`View`] can be used to query the view with different values for its declared parameters
 //! (values in place of `?` in the query) through [`View::lookup`] and [`View::multi_lookup`].
 //!
 //! Writes are fairly similar to those in relational databases. To add a new table, you extend the
-//! recipe (using [`ControllerHandle::extend_recipe`]) with a `CREATE TABLE` statement, and then
-//! use [`ControllerHandle::table`] to get a handle to the new base table. Base tables support
+//! recipe (using [`ReadySetHandle::extend_recipe`]) with a `CREATE TABLE` statement, and then
+//! use [`ReadySetHandle::table`] to get a handle to the new base table. Base tables support
 //! similar operations as SQL tables, such as [`Table::insert`], [`Table::update`],
 //! [`Table::delete`], and also more esoteric operations like [`Table::insert_or_update`].
 //!
@@ -281,7 +281,7 @@ use crate::internal::*;
 
 /// The prelude contains most of the types needed in everyday operation.
 pub mod prelude {
-    pub use super::{ControllerHandle, Table, View};
+    pub use super::{ReadySetHandle, Table, View};
 }
 
 /// Wrapper types for ReadySet query results.
@@ -353,7 +353,7 @@ impl<T> From<T> for Tagged<T> {
 use url::Url;
 
 pub use crate::consensus::WorkerDescriptor;
-pub use crate::controller::{ControllerDescriptor, ControllerHandle};
+pub use crate::controller::{ControllerDescriptor, ReadySetHandle};
 pub use crate::table::{Modification, Operation, Table, TableOperation, TableRequest};
 #[doc(hidden)]
 pub use crate::table::{PacketData, PacketPayload, PacketTrace};

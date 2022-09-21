@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use readyset::ControllerHandle;
+use readyset::ReadySetHandle;
 use tokio::select;
 use tracing::{debug, info, instrument, trace, warn};
 
@@ -8,7 +8,7 @@ use crate::query_status_cache::{MigrationState, QueryStatusCache};
 
 pub struct ViewsSynchronizer {
     /// The noria connector used to query
-    controller: ControllerHandle,
+    controller: ReadySetHandle,
     /// The query status cache is updated according to which queries exist in noria
     query_status_cache: &'static QueryStatusCache,
     /// The interval between subsequent pollings of the Leader for migrated queries
@@ -19,7 +19,7 @@ pub struct ViewsSynchronizer {
 
 impl ViewsSynchronizer {
     pub fn new(
-        controller: ControllerHandle,
+        controller: ReadySetHandle,
         query_status_cache: &'static QueryStatusCache,
         poll_interval: std::time::Duration,
         shutdown_recv: tokio::sync::broadcast::Receiver<()>,

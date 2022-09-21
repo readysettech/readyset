@@ -16,7 +16,7 @@ use itertools::Itertools;
 use mysql_srv::MysqlIntermediary;
 use nom_sql::{Dialect, Relation};
 use readyset::consensus::{Authority, LocalAuthorityStore};
-use readyset::{ControllerHandle, ViewCreateRequest};
+use readyset::{ReadySetHandle, ViewCreateRequest};
 use readyset_client::backend::noria_connector::ReadBehavior;
 use readyset_client::backend::{BackendBuilder, NoriaConnector};
 use readyset_client::query_status_cache::QueryStatusCache;
@@ -240,7 +240,7 @@ impl TestScript {
         &self,
         opts: &RunOptions,
         conn: &mut DatabaseConnection,
-        mut noria: Option<ControllerHandle>,
+        mut noria: Option<ReadySetHandle>,
     ) -> anyhow::Result<()> {
         let mut prev_was_statement = false;
 
@@ -514,13 +514,13 @@ impl TestScript {
         };
         let addr = listener.local_addr().unwrap();
 
-        let ch = ControllerHandle::new(authority).await;
+        let rh = ReadySetHandle::new(authority).await;
 
         let task = tokio::spawn(async move {
             let (s, _) = listener.accept().await.unwrap();
 
             let noria = NoriaConnector::new(
-                ch,
+                rh,
                 auto_increments,
                 query_cache,
                 ReadBehavior::Blocking,

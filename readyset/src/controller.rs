@@ -181,18 +181,16 @@ impl Service<ControllerRequest> for Controller {
 /// you add and remove queries, retrieve handles for inserting or querying the underlying data, and
 /// to perform meta-operations such as fetching the dataflow's GraphViz visualization.
 ///
-/// To establish a new connection to ReadySet, use `ControllerHandle::new`, and pass in the
+/// To establish a new connection to ReadySet, use `ReadySetHandle::new`, and pass in the
 /// appropriate `Authority`.
 ///
 /// Note that whatever Tokio Runtime you use to execute the `Future` that resolves into the
-/// `ControllerHandle` will also be the one that executes all your reads and writes through `View`
+/// `ReadySetHandle` will also be the one that executes all your reads and writes through `View`
 /// and `Table`. Make sure that that `Runtime` stays alive, and continues to be driven, otherwise
 /// none of your operations will ever complete! Furthermore, you *must* use the `Runtime` to
-/// execute any futures returned from `ControllerHandle` (that is, you cannot just call `.wait()`
+/// execute any futures returned from `ReadySetHandle` (that is, you cannot just call `.wait()`
 /// on them).
-// TODO: this should be renamed to ReadySetHandle, or maybe just Connection, since it also provides
-// reads and writes, which aren't controller actions!
-pub struct ControllerHandle {
+pub struct ReadySetHandle {
     handle: Buffer<Controller, ControllerRequest>,
     domains: Arc<Mutex<HashMap<(SocketAddr, usize), TableRpc>>>,
     views: Arc<Mutex<HashMap<(SocketAddr, usize), ViewRpc>>>,
@@ -201,9 +199,9 @@ pub struct ControllerHandle {
     migration_timeout: Option<Duration>,
 }
 
-impl Clone for ControllerHandle {
+impl Clone for ReadySetHandle {
     fn clone(&self) -> Self {
-        ControllerHandle {
+        ReadySetHandle {
             handle: self.handle.clone(),
             domains: self.domains.clone(),
             views: self.views.clone(),
@@ -214,14 +212,14 @@ impl Clone for ControllerHandle {
     }
 }
 
-/// The size of the [`Buffer`][0] to use for requests to the [`ControllerHandle`].
+/// The size of the [`Buffer`][0] to use for requests to the [`ReadySetHandle`].
 ///
 /// Experimentation has shown that if this is set to 1, requests from a `clone()`d
-/// [`ControllerHandle`] stall, but besides that we don't know much abbout what this value should be
+/// [`ReadySetHandle`] stall, but besides that we don't know much abbout what this value should be
 /// set to. Number of cores, perhaps?
 const CONTROLLER_BUFFER_SIZE: usize = 8;
 
-impl ControllerHandle {
+impl ReadySetHandle {
     #[doc(hidden)]
     pub fn make(
         authority: Arc<Authority>,
@@ -232,7 +230,7 @@ impl ControllerHandle {
         let tracer = tracing::dispatcher::get_default(|d| d.clone());
         let mut http_connector = HttpConnector::new();
         http_connector.set_connect_timeout(request_timeout);
-        ControllerHandle {
+        ReadySetHandle {
             views: Default::default(),
             domains: Default::default(),
             handle: Buffer::new(
@@ -255,14 +253,14 @@ impl ControllerHandle {
         }
     }
 
-    /// Check that the `ControllerHandle` can accept another request.
+    /// Check that the `ReadySetHandle` can accept another request.
     ///
     /// Note that this method _must_ return `Poll::Ready` before any other methods that return
-    /// a `Future` on `ControllerHandle` can be called.
+    /// a `Future` on `ReadySetHandle` can be called.
     pub fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<ReadySetResult<()>> {
         self.handle
             .poll_ready(cx)
-            .map_err(rpc_err!("ControllerHandle::poll_ready"))
+            .map_err(rpc_err!("ReadySetHandle::poll_ready"))
     }
 
     /// A future that resolves when the controller can accept more messages.
@@ -273,14 +271,14 @@ impl ControllerHandle {
         future::poll_fn(move |cx| self.poll_ready(cx)).await
     }
 
-    /// Create a [`ControllerHandle`] that bootstraps a connection to ReadySet via the configuration
+    /// Create a [`ReadySetHandle`] that bootstraps a connection to ReadySet via the configuration
     /// stored in the given `authority`. Assigns the authority no timeouts for requests and
     /// migrations.
     pub async fn new<I: Into<Arc<Authority>>>(authority: I) -> Self {
         Self::make(authority.into(), None, None)
     }
 
-    /// Create a [`ControllerHandle`] that bootstraps a connection to ReadySet via the configuration
+    /// Create a [`ReadySetHandle`] that bootstraps a connection to ReadySet via the configuration
     /// stored in the given `authority`. Assigns a timeout to requests to ReadySet, `timeout`.
     pub async fn with_timeouts<I: Into<Arc<Authority>>>(
         authority: I,
@@ -298,10 +296,10 @@ impl ControllerHandle {
             .handle
             .ready()
             .await
-            .map_err(rpc_err!("ControllerHandle::tables"))?
+            .map_err(rpc_err!("ReadySetHandle::tables"))?
             .call(ControllerRequest::new("tables", &(), None)?)
             .await
-            .map_err(rpc_err!("ControllerHandle::tables"))?;
+            .map_err(rpc_err!("ReadySetHandle::tables"))?;
 
         Ok(bincode::deserialize(&body)?)
     }
@@ -317,10 +315,10 @@ impl ControllerHandle {
             .handle
             .ready()
             .await
-            .map_err(rpc_err!("ControllerHandle::views"))?
+            .map_err(rpc_err!("ReadySetHandle::views"))?
             .call(ControllerRequest::new("views", &(), self.request_timeout)?)
             .await
-            .map_err(rpc_err!("ControllerHandle::views"))?;
+            .map_err(rpc_err!("ReadySetHandle::views"))?;
 
         Ok(bincode::deserialize(&body)?)
     }
@@ -335,14 +333,14 @@ impl ControllerHandle {
             .handle
             .ready()
             .await
-            .map_err(rpc_err!("ControllerHandle::verbose_views"))?
+            .map_err(rpc_err!("ReadySetHandle::verbose_views"))?
             .call(ControllerRequest::new(
                 "verbose_views",
                 &(),
                 self.request_timeout,
             )?)
             .await
-            .map_err(rpc_err!("ControllerHandle::verbose_views"))?;
+            .map_err(rpc_err!("ReadySetHandle::verbose_views"))?;
 
         Ok(bincode::deserialize(&body)?)
     }
@@ -415,17 +413,17 @@ impl ControllerHandle {
             .handle
             .ready()
             .await
-            .map_err(rpc_err!("ControllerHandle::view_builder"))?
+            .map_err(rpc_err!("ReadySetHandle::view_builder"))?
             .call(ControllerRequest::new(
                 "view_builder",
                 &view_request,
                 self.request_timeout,
             )?)
             .await
-            .map_err(rpc_err!("ControllerHandle::view_builder"))?;
+            .map_err(rpc_err!("ReadySetHandle::view_builder"))?;
 
         match bincode::deserialize::<ReadySetResult<Option<ViewBuilder>>>(&body)?
-            .map_err(|e| rpc_err_no_downcast("ControllerHandle::view_builder", e))?
+            .map_err(|e| rpc_err_no_downcast("ReadySetHandle::view_builder", e))?
         {
             Some(vb) => Ok(vb),
             None => match view_request.filter {
@@ -501,14 +499,14 @@ impl ControllerHandle {
                 .handle
                 .ready()
                 .await
-                .map_err(rpc_err!("ControllerHandle::table"))?
+                .map_err(rpc_err!("ReadySetHandle::table"))?
                 .call(req)
                 .await
-                .map_err(rpc_err!("ControllerHandle::table"))?;
+                .map_err(rpc_err!("ReadySetHandle::table"))?;
 
             Ok(
                 bincode::deserialize::<ReadySetResult<Option<TableBuilder>>>(&body)?
-                    .map_err(|e| rpc_err_no_downcast("ControllerHandle::table", e))?
+                    .map_err(|e| rpc_err_no_downcast("ReadySetHandle::table", e))?
                     .map(|tb| tb.build(domains)),
             )
         }

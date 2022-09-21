@@ -16,7 +16,7 @@ use crate::ControllerDescriptor;
 pub struct Handle {
     /// Has a valid controller handle on `new` and is set to None if the
     /// controller has been shutdown.
-    pub c: Option<ControllerHandle>,
+    pub c: Option<ReadySetHandle>,
     #[allow(dead_code)]
     event_tx: Option<Sender<HandleRequest>>,
     kill: Option<Trigger>,
@@ -24,7 +24,7 @@ pub struct Handle {
 }
 
 impl Deref for Handle {
-    type Target = ControllerHandle;
+    type Target = ReadySetHandle;
     fn deref(&self) -> &Self::Target {
         self.c.as_ref().unwrap()
     }
@@ -43,7 +43,7 @@ impl Handle {
         kill: Trigger,
         descriptor: ControllerDescriptor,
     ) -> Self {
-        let c = ControllerHandle::make(authority, None, None);
+        let c = ReadySetHandle::make(authority, None, None);
         Handle {
             c: Some(c),
             event_tx: Some(event_tx),

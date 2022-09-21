@@ -25,7 +25,7 @@ const BATCH_SIZE: usize = 1024; // How many queries to buffer before pushing to 
 pub struct PostgresReplicator<'a> {
     /// This is the underlying (regular) PostgreSQL transaction
     pub(crate) transaction: pgsql::Transaction<'a>,
-    pub(crate) noria: &'a mut readyset::ControllerHandle,
+    pub(crate) noria: &'a mut readyset::ReadySetHandle,
     /// Filters out tables we are not interested in
     pub(crate) table_filter: TableFilter,
 }
@@ -347,7 +347,7 @@ impl TableDescription {
 impl<'a> PostgresReplicator<'a> {
     pub(crate) async fn new(
         client: &'a mut pgsql::Client,
-        noria: &'a mut readyset::ControllerHandle,
+        noria: &'a mut readyset::ReadySetHandle,
         table_filter: TableFilter,
     ) -> ReadySetResult<PostgresReplicator<'a>> {
         let transaction = client

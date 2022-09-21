@@ -25,7 +25,7 @@ use readyset::consensus::{AuthorityControl, AuthorityType, ConsulAuthority};
 #[cfg(feature = "failure_injection")]
 use readyset::failpoints;
 use readyset::metrics::recorded;
-use readyset::{ControllerHandle, ReadySetError, ViewCreateRequest};
+use readyset::{ReadySetError, ReadySetHandle, ViewCreateRequest};
 use readyset_client::backend::noria_connector::{NoriaConnector, ReadBehavior};
 use readyset_client::backend::MigrationMode;
 use readyset_client::health_reporter::AdapterHealthReporter;
@@ -411,13 +411,13 @@ where
         let deployment = options.deployment.clone();
         let migration_request_timeout = options.migration_request_timeout_ms;
         let controller_request_timeout = options.controller_request_timeout_ms;
-        let ch = rt.block_on(async {
+        let rh = rt.block_on(async {
             let authority = authority
                 .to_authority(&authority_address, &deployment)
                 .await;
 
-            Ok::<ControllerHandle, ReadySetError>(
-                ControllerHandle::with_timeouts(
+            Ok::<ReadySetHandle, ReadySetError>(
+                ReadySetHandle::with_timeouts(
                     authority,
                     Some(Duration::from_millis(controller_request_timeout)),
                     Some(Duration::from_millis(migration_request_timeout)),
@@ -427,7 +427,7 @@ where
             )
         })?;
 
-        rs_connect.in_scope(|| info!("ControllerHandle created"));
+        rs_connect.in_scope(|| info!("ReadySetHandle created"));
 
         let ctrlc = tokio::signal::ctrl_c();
         let mut sigterm = {
@@ -535,7 +535,7 @@ where
         if let MigrationMode::OutOfBand = migration_mode {
             let upstream_db_url = options.upstream_db_url.as_ref().map(|u| u.0.clone());
             let upstream_config = self.upstream_config.clone();
-            let ch = ch.clone();
+            let rh = rh.clone();
             let (auto_increments, query_cache) = (auto_increments.clone(), query_cache.clone());
             let shutdown_recv = shutdown_sender.subscribe();
             let loop_interval = options.migration_task_interval;
@@ -569,7 +569,7 @@ where
                 //TODO(DAN): allow compatibility with async and explicit migrations
                 let noria =
                     NoriaConnector::new(
-                        ch.clone(),
+                        rh.clone(),
                         auto_increments.clone(),
                         query_cache.clone(),
                         noria_read_behavior,
@@ -580,7 +580,7 @@ where
                     }))
                     .await;
 
-                let controller_handle = dry_run.then(|| ch.clone());
+                let controller_handle = dry_run.then(|| rh.clone());
                 let mut migration_handler = MigrationHandler::new(
                     noria,
                     upstream,
@@ -603,12 +603,12 @@ where
 
         if options.explicit_migrations {
             rs_connect.in_scope(|| info!("Spawning explicit migrations task"));
-            let ch = ch.clone();
+            let rh = rh.clone();
             let loop_interval = options.views_polling_interval;
             let shutdown_recv = shutdown_sender.subscribe();
             let fut = async move {
                 let mut views_synchronizer = ViewsSynchronizer::new(
-                    ch,
+                    rh,
                     query_status_cache,
                     std::time::Duration::from_secs(loop_interval),
                     shutdown_recv,
@@ -713,7 +713,7 @@ where
             connection.in_scope(|| info!("Accepted new connection"));
 
             // bunch of stuff to move into the async block below
-            let ch = ch.clone();
+            let rh = rh.clone();
             let (auto_increments, query_cache) = (auto_increments.clone(), query_cache.clone());
             let mut connection_handler = self.connection_handler.clone();
             let upstream_db_url = options.upstream_db_url.clone();
@@ -786,7 +786,7 @@ where
                         match schema_search_path_res {
                             Ok(ssp) => {
                                 let noria = NoriaConnector::new_with_local_reads(
-                                    ch.clone(),
+                                    rh.clone(),
                                     auto_increments.clone(),
                                     query_cache.clone(),
                                     noria_read_behavior,
@@ -843,7 +843,7 @@ where
         drop(router_handle);
 
         rs_shutdown.in_scope(|| info!("Dropping controller handle"));
-        drop(ch);
+        drop(rh);
 
         // Send shutdown telemetry events
         if _handle.is_some() {

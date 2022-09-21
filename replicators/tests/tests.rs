@@ -9,7 +9,7 @@ use mysql_time::MysqlTime;
 use nom_sql::Relation;
 use readyset::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use readyset::recipe::changelist::ChangeList;
-use readyset::{ControllerHandle, ReadySetError, ReadySetResult};
+use readyset::{ReadySetError, ReadySetHandle, ReadySetResult};
 use readyset_data::{DfValue, TinyText};
 use readyset_server::Builder;
 use replicators::{Config, NoriaAdapter};
@@ -245,8 +245,8 @@ impl TestHandle {
         Ok(handle)
     }
 
-    async fn controller(&self) -> ControllerHandle {
-        ControllerHandle::new(Arc::clone(&self.authority)).await
+    async fn controller(&self) -> ReadySetHandle {
+        ReadySetHandle::new(Arc::clone(&self.authority)).await
     }
 
     async fn stop(mut self) {
@@ -263,7 +263,7 @@ impl TestHandle {
 
     async fn start_repl(&mut self, config: Option<Config>) -> ReadySetResult<()> {
         let runtime = tokio::runtime::Runtime::new().unwrap();
-        let controller = ControllerHandle::new(Arc::clone(&self.authority)).await;
+        let controller = ReadySetHandle::new(Arc::clone(&self.authority)).await;
 
         let url = self.url.clone().into();
         let ready_notify = self.ready_notify.clone();

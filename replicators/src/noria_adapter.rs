@@ -20,7 +20,7 @@ use readyset::failpoints;
 use readyset::metrics::recorded::{self, SnapshotStatusTag};
 use readyset::recipe::changelist::{Change, ChangeList};
 use readyset::replication::{ReplicationOffset, ReplicationOffsets};
-use readyset::{ControllerHandle, ReadySetError, ReadySetResult, Table, TableOperation};
+use readyset::{ReadySetError, ReadySetHandle, ReadySetResult, Table, TableOperation};
 use readyset_errors::{internal_err, invalid_err};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
@@ -143,7 +143,7 @@ pub(crate) trait Connector {
 /// An adapter that converts database events into ReadySet API calls
 pub struct NoriaAdapter {
     /// The ReadySet API handle
-    noria: ControllerHandle,
+    noria: ReadySetHandle,
     /// The binlog reader
     connector: Box<dyn Connector + Send + Sync>,
     /// A map of cached table mutators
@@ -165,12 +165,12 @@ pub struct NoriaAdapter {
 
 impl NoriaAdapter {
     pub async fn start_with_authority(authority: Authority, config: Config) -> ReadySetResult<!> {
-        let noria = readyset::ControllerHandle::new(authority).await;
+        let noria = readyset::ReadySetHandle::new(authority).await;
         NoriaAdapter::start(noria, config, None).await
     }
 
     pub async fn start(
-        noria: ControllerHandle,
+        noria: ReadySetHandle,
         mut config: Config,
         mut notify: Option<Arc<Notify>>,
     ) -> ReadySetResult<!> {
@@ -216,7 +216,7 @@ impl NoriaAdapter {
     /// * Adapter keeps reading binlog from the next position keeping ReadySet up to date
     async fn start_inner_mysql(
         mysql_options: mysql::Opts,
-        mut noria: ControllerHandle,
+        mut noria: ReadySetHandle,
         mut config: Config,
         ready_notify: &mut Option<Arc<Notify>>,
         resnapshot: bool,
@@ -352,7 +352,7 @@ impl NoriaAdapter {
 
     async fn start_inner_postgres(
         pgsql_opts: pgsql::Config,
-        mut noria: ControllerHandle,
+        mut noria: ReadySetHandle,
         mut config: Config,
         ready_notify: &mut Option<Arc<Notify>>,
         resnapshot: bool,

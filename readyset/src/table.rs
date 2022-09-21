@@ -342,7 +342,7 @@ impl TableBuilder {
 
 /// A `Table` is used to perform writes, deletes, and other operations to data in base tables.
 ///
-/// If you create multiple `Table` handles from a single `ControllerHandle`, they may share
+/// If you create multiple `Table` handles from a single `ReadySetHandle`, they may share
 /// connections to the Soup workers. For this reason, `Table` is *not* `Send` or `Sync`. To get a
 /// handle that can be sent to a different thread (i.e., one with its own dedicated connections),
 /// call `Table::into_exclusive`.

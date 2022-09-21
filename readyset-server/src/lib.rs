@@ -244,7 +244,7 @@
 //!         .await
 //!         .unwrap(),
 //! );
-//! let mut db = readyset_server::ControllerHandle::new(zk_auth).await;
+//! let mut db = readyset_server::ReadySetHandle::new(zk_auth).await;
 //! let mut article = db.table("article").await.unwrap();
 //! article
 //!     .insert(vec![
@@ -313,7 +313,7 @@
 //!         .await
 //!         .unwrap(),
 //! );
-//! let mut db = readyset_server::ControllerHandle::new(zk_auth).await;
+//! let mut db = readyset_server::ReadySetHandle::new(zk_auth).await;
 //! let mut vote = db.table("vote").await.unwrap();
 //! vote.insert(vec![readyset_data::DfValue::from(1000), 1.into()])
 //!     .await

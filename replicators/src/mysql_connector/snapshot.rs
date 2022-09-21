@@ -130,7 +130,7 @@ impl MySqlReplicator {
     /// over any tables that fail to install
     async fn load_recipe_with_meta_lock(
         &mut self,
-        noria: &mut readyset::ControllerHandle,
+        noria: &mut readyset::ReadySetHandle,
     ) -> ReadySetResult<Transaction<'static>> {
         let mut tx = self.pool.start_transaction(tx_opts()).await?;
 
@@ -363,7 +363,7 @@ impl MySqlReplicator {
     ///   in addition to the rows
     pub(crate) async fn snapshot_to_noria(
         mut self,
-        noria: &mut readyset::ControllerHandle,
+        noria: &mut readyset::ReadySetHandle,
     ) -> ReadySetResult<()> {
         let result = self.replicate_to_noria_with_table_locks(noria).await;
 
@@ -379,7 +379,7 @@ impl MySqlReplicator {
     /// offset.
     async fn replicate_to_noria_with_table_locks(
         &mut self,
-        noria: &mut readyset::ControllerHandle,
+        noria: &mut readyset::ReadySetHandle,
     ) -> ReadySetResult<()> {
         // NOTE: There are two ways to prevent DDL changes in MySQL:
         // `FLUSH TABLES WITH READ LOCK` or `LOCK INSTANCE FOR BACKUP`. Both are not
@@ -421,7 +421,7 @@ impl MySqlReplicator {
     /// the join handle
     async fn dumper_task_for_table(
         &mut self,
-        noria: &mut readyset::ControllerHandle,
+        noria: &mut readyset::ReadySetHandle,
         table: Relation,
     ) -> ReadySetResult<JoinHandle<(Relation, ReplicationOffset, ReadySetResult<()>)>> {
         let span = info_span!("replicating table", %table);
@@ -455,7 +455,7 @@ impl MySqlReplicator {
     /// Copy all base tables into noria
     async fn dump_tables(
         &mut self,
-        noria: &mut readyset::ControllerHandle,
+        noria: &mut readyset::ReadySetHandle,
         replication_offsets: &ReplicationOffsets,
     ) -> ReadySetResult<()> {
         let mut replication_tasks = FuturesUnordered::new();
