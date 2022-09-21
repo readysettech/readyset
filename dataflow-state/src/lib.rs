@@ -35,8 +35,6 @@ pub struct EvictBytesResult<'a> {
     pub index: &'a Index,
     /// The keys that were evicted
     pub keys_evicted: Vec<Vec<DfValue>>,
-    /// The rows that were evicted
-    pub rows_evicted: Rows,
     /// The number of bytes removed from the state
     pub bytes_freed: u64,
 }
@@ -45,8 +43,6 @@ pub struct EvictBytesResult<'a> {
 pub struct EvictKeysResult<'a> {
     /// The index that was evicted from
     pub index: &'a Index,
-    /// The rows that were evicted
-    pub rows_evicted: Rows,
     /// The number of bytes removed from the state
     pub bytes_freed: u64,
 }

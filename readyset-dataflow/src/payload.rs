@@ -321,8 +321,6 @@ pub enum DomainRequest {
         node: LocalNodeIndex,
         /// The generated index itself
         index: Index,
-        /// A reference to the columns that the given columns are generated from
-        generated_from: Vec1<ColumnRef<LocalNodeIndex>>,
         /// The Tag for the replay path that will be making upqueries *to* this generated index
         tag: Tag,
     },

@@ -300,7 +300,6 @@ impl State for MemoryState {
         let state_index = rng.gen_range(0, self.state.len());
         let mut bytes_freed = 0u64;
         let mut keys_evicted = Vec::new();
-        let mut rows_evicted = Rows::default();
 
         while bytes_freed < bytes as u64 {
             let evicted = self.state[state_index].evict_random(&mut rng);
@@ -324,7 +323,6 @@ impl State for MemoryState {
             }
             bytes_freed += base_row_bytes(&keys);
             keys_evicted.push(keys);
-            rows_evicted.extend(rows);
         }
 
         if bytes_freed == 0 {
@@ -335,7 +333,6 @@ impl State for MemoryState {
         return Some(EvictBytesResult {
             index: self.state[state_index].index(),
             keys_evicted,
-            rows_evicted,
             bytes_freed,
         });
     }
@@ -366,7 +363,6 @@ impl State for MemoryState {
 
             EvictKeysResult {
                 index: self.state[state_index].index(),
-                rows_evicted,
                 bytes_freed,
             }
         })

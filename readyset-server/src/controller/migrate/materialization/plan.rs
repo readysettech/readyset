@@ -518,11 +518,6 @@ impl<'a> Plan<'a> {
                                     "telling domain about generated columns",
                                 );
 
-                                let generated_from = generated_from.mapped(|cr| ColumnRef {
-                                    node: self.graph[cr.node].local_addr(),
-                                    columns: cr.columns,
-                                });
-
                                 #[allow(clippy::indexing_slicing)]
                                 // replay paths contain valid nodes
                                 self.dmp.add_message(
@@ -530,7 +525,6 @@ impl<'a> Plan<'a> {
                                     DomainRequest::GeneratedColumns {
                                         node: self.graph[first.0].local_addr(),
                                         index: index.clone(),
-                                        generated_from,
                                         tag,
                                     },
                                 )?;

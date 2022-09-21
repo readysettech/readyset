@@ -11,9 +11,7 @@ use std::sync::Arc;
 use std::{cell, cmp, mem, time};
 
 use ahash::RandomState;
-use dataflow_state::{
-    EvictBytesResult, EvictKeysResult, MaterializedNodeState, RangeLookupResult, Rows,
-};
+use dataflow_state::{EvictBytesResult, MaterializedNodeState, RangeLookupResult};
 use failpoint_macros::failpoint;
 use futures_util::future::FutureExt;
 use futures_util::stream::StreamExt;
@@ -2073,19 +2071,10 @@ impl Domain {
                 self.replay_completed = false;
                 Ok(Some(bincode::serialize(&ret)?))
             }
-            DomainRequest::GeneratedColumns {
-                node,
-                index,
-                generated_from,
-                tag,
-            } => {
+            DomainRequest::GeneratedColumns { node, index, tag } => {
                 // Record that these columns are generated...
-                self.replay_paths.insert_generated_columns(
-                    node,
-                    index.columns.clone(),
-                    generated_from,
-                    tag,
-                );
+                self.replay_paths
+                    .insert_generated_columns(node, index.columns.clone(), tag);
                 // ...and also make sure we use that tag to index those columns in this node, so we
                 // know what hole to fill when we've satisfied replays to those columns
                 self.state
@@ -3535,7 +3524,6 @@ impl Domain {
         fn trigger_downstream_evictions(
             index: &Index,
             keys: &[KeyComparison],
-            rows_evicted: Rows,
             node: LocalNodeIndex,
             ex: &mut dyn Executor,
             not_ready: &HashSet<LocalNodeIndex>,
@@ -3547,13 +3535,9 @@ impl Domain {
             nodes: &DomainNodes,
             remapped_keys: &RemappedKeys,
         ) -> Result<(), ReadySetError> {
-            for (tag, path, keys) in replay_paths.downstream_dependent_paths(
-                node,
-                index,
-                keys,
-                rows_evicted,
-                remapped_keys,
-            ) {
+            for (tag, path, keys) in
+                replay_paths.downstream_dependent_paths(node, index, keys, remapped_keys)
+            {
                 walk_path(
                     &path.path[..],
                     &keys,
@@ -3596,16 +3580,13 @@ impl Domain {
                             "Evicting keys"
                         );
                         #[allow(clippy::indexing_slicing)] // nodes in replay paths must exist
-                        if let Some(EvictKeysResult { rows_evicted, .. }) =
-                            state[dest.node].evict_keys(tag, &keys)
-                        {
+                        if state[dest.node].evict_keys(tag, &keys).is_some() {
                             #[allow(clippy::unwrap_used)]
                             // we can only evict from partial replay paths, so we must have a
                             // partial key
                             trigger_downstream_evictions(
                                 dest.partial_index.as_ref().unwrap(),
                                 &keys,
-                                rows_evicted,
                                 dest.node,
                                 ex,
                                 not_ready,
@@ -3750,8 +3731,8 @@ impl Domain {
                     } else if let Some(EvictBytesResult {
                         index,
                         keys_evicted,
-                        rows_evicted,
                         bytes_freed,
+                        ..
                     }) = self.state[node].evict_bytes(num_bytes as usize)
                     {
                         let keys = keys_evicted
@@ -3768,7 +3749,6 @@ impl Domain {
                             trigger_downstream_evictions(
                                 &index,
                                 &keys[..],
-                                rows_evicted,
                                 node,
                                 ex,
                                 &self.not_ready,
@@ -3844,13 +3824,10 @@ impl Domain {
 
                         trace!(local = %target, ?keys, ?tag, "Evicting keys");
                         #[allow(clippy::indexing_slicing)] // came from replay paths
-                        if let Some(EvictKeysResult { rows_evicted, .. }) =
-                            self.state[target].evict_keys(tag, &keys)
-                        {
+                        if self.state[target].evict_keys(tag, &keys).is_some() {
                             trigger_downstream_evictions(
                                 &index,
                                 &keys[..],
-                                rows_evicted,
                                 target,
                                 ex,
                                 &self.not_ready,

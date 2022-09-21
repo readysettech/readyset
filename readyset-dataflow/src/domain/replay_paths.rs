@@ -1,14 +1,11 @@
 use std::borrow::{Borrow, Cow};
-use std::collections::{btree_map, BTreeMap, HashMap, HashSet};
+use std::collections::{btree_map, BTreeMap, HashMap};
 use std::hash::Hash;
 use std::{iter, ops};
 
-use dataflow_state::Rows;
 use itertools::Either;
-use launchpad::Indices;
 use readyset::internal::LocalNodeIndex;
 use readyset::KeyComparison;
-use tracing::trace;
 use vec1::Vec1;
 
 use super::{RemappedKeys, TriggerEndpoint};
@@ -84,8 +81,6 @@ struct GeneratedColumns {
     /// The downstream tag for a replay path which will attempt to query an index on these
     /// generated columns
     downstream_tag: Tag,
-    /// The set of columns which these columns are generated from
-    generated_from: Vec1<ColumnRef<LocalNodeIndex>>,
 }
 
 /// Data structure containing all the information about the replay paths that go through a single
@@ -164,15 +159,13 @@ impl ReplayPaths {
         })
     }
 
-    /// Construct an iterator over all downstream paths and keys which "depend on" the given keys
-    /// and rows in the given index, and hence need to be evicted after those keys and rows are
-    /// evicted.
+    /// Construct an iterator over all downstream paths and keys which "depend on" the given keys in
+    /// the given index, and hence need to be evicted after those keys are evicted.
     pub(super) fn downstream_dependent_paths<'a>(
         &'a self,
         node: LocalNodeIndex,
         index: &'a Index,
         keys: &'a [KeyComparison],
-        rows: Rows,
         remapped_keys: &'a RemappedKeys,
     ) -> impl Iterator<Item = (Tag, &'a ReplayPath, Cow<'a, [KeyComparison]>)> + 'a {
         // TODO: this is a linear walk of replay paths -- we should make that not linear
@@ -197,43 +190,6 @@ impl ReplayPaths {
                             Either::Left(downstream.map(move |(tag, keys)| {
                                 (tag, self.get(tag).unwrap(), Cow::Borrowed(keys))
                             }))
-                        } else if self
-                            .generated_columns
-                            .get(node)
-                            .and_then(|gc| gc.get(&key.columns))
-                            .into_iter()
-                            .any(|gcs| {
-                                gcs.iter().any(|gc| {
-                                    gc.downstream_tag == *tag
-                                        && gc.generated_from.iter().any(|cr| {
-                                            cr.node == node && cr.columns == index.columns
-                                        })
-                                })
-                            })
-                        {
-                            // If the key we evicted from generates a key, use the column
-                            // indices in the generated key to build up a new set of keys to
-                            // evict downstream. Conceptually, this is because a generated key
-                            // means that key "depends on" the key we just evicted
-                            trace!(
-                                ?tag,
-                                ?key,
-                                "Rewriting keys to evict through generated columns"
-                            );
-                            let keys = Cow::Owned(
-                                rows.set_iter()
-                                    .map(|(r, _)| {
-                                        r.cloned_indices(key.columns.iter().copied())
-                                            .unwrap()
-                                            .try_into()
-                                            .unwrap()
-                                    })
-                                    .collect::<HashSet<_>>()
-                                    .into_iter()
-                                    .collect(),
-                            );
-
-                            Either::Right(Either::Left(iter::once((*tag, path, keys))))
                         } else if key == index {
                             // TODO: what if the key is the same, but with the columns in another
                             // order?
@@ -381,7 +337,6 @@ impl ReplayPaths {
         &mut self,
         node: LocalNodeIndex,
         columns: Vec<usize>,
-        generated_from: Vec1<ColumnRef<LocalNodeIndex>>,
         tag: Tag,
     ) {
         self.generated_columns
@@ -391,7 +346,6 @@ impl ReplayPaths {
             .or_default()
             .push(GeneratedColumns {
                 downstream_tag: tag,
-                generated_from,
             });
     }
 }
@@ -474,70 +428,5 @@ mod tests {
         );
 
         assert_eq!(resolved_tags, Some(&vec![Tag::new(1)]));
-    }
-
-    mod downstream_dependent_paths {
-        use dataflow_state::Row;
-
-        use super::*;
-
-        #[test]
-        fn generated_from_self() {
-            // Node l0 generates columns [0, 1] from columns [0] in itself
-            let mut paths = ReplayPaths::default();
-            paths
-                .insert(ReplayPathSpec {
-                    tag: Tag::new(1),
-                    source: Some(LocalNodeIndex::make(0)),
-                    source_index: Some(Index::hash_map(vec![0, 1])),
-                    path: vec1![ReplayPathSegment {
-                        node: LocalNodeIndex::make(1),
-                        force_tag_to: None,
-                        partial_index: Some(Index::hash_map(vec![0, 1])),
-                        is_target: false
-                    }],
-                    partial_unicast_sharder: None,
-                    notify_done: false,
-                    trigger: TriggerEndpoint::Start(Index::hash_map(vec![0, 1])),
-                })
-                .unwrap();
-            paths.insert_generated_columns(
-                LocalNodeIndex::make(0),
-                vec![0, 1],
-                vec1![ColumnRef {
-                    node: LocalNodeIndex::make(0),
-                    columns: vec1![0]
-                }],
-                Tag::new(1),
-            );
-
-            // We just evicted [Equal([1])] from columns [0], resulting in {[1, "a"]}
-            let index = Index::hash_map(vec![0]);
-            let evicted_keys = [KeyComparison::Equal(vec1![DfValue::from(1)])];
-            let remapped_keys = Default::default();
-            let res = paths
-                .downstream_dependent_paths(
-                    LocalNodeIndex::make(0),
-                    &index,
-                    &evicted_keys,
-                    vec![Row::from(vec![DfValue::from(1), DfValue::from("a")])]
-                        .into_iter()
-                        .collect(),
-                    &remapped_keys,
-                )
-                .collect::<Vec<_>>();
-
-            // Now, we should evict Equal([1, "a"]) in the downstream path
-            assert_eq!(res.len(), 1);
-            let (tag, _path, keys) = res.first().unwrap();
-            assert_eq!(*tag, Tag::new(1));
-            assert_eq!(
-                *keys,
-                vec![KeyComparison::Equal(vec1![
-                    DfValue::from(1),
-                    DfValue::from("a")
-                ])]
-            )
-        }
     }
 }
