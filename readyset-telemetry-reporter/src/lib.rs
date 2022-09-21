@@ -23,7 +23,7 @@ pub struct TelemetryInitializer {}
 
 impl TelemetryInitializer {
     /// Initializes a background task and returns a TelemetrySender handle
-    pub fn init(disable_telemetry: bool, api_key: Option<String>) -> TelemetrySender {
+    pub async fn init(disable_telemetry: bool, api_key: Option<String>) -> TelemetrySender {
         if disable_telemetry {
             return TelemetrySender::new_no_op();
         }

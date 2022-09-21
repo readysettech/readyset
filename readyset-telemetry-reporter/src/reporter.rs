@@ -241,7 +241,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn validate_request() {
         std::env::set_var("RS_SEGMENT_WRITE_KEY", "write_key");
-        let telemetry_sender = TelemetryInitializer::init(false, Some("api-key".to_string()));
+        let telemetry_sender = TelemetryInitializer::init(false, Some("api-key".to_string())).await;
 
         let (event, _telemetry): (TelemetryEvent, Telemetry) =
             (TelemetryEvent::InstallerRun, Default::default());

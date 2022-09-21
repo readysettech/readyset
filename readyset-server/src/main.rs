@@ -137,8 +137,10 @@ fn main() -> anyhow::Result<()> {
 
     info!(commit_hash = %COMMIT_ID);
 
-    let telemetry_sender =
-        TelemetryInitializer::init(opts.disable_telemetry, std::env::var("RS_API_KEY").ok());
+    let telemetry_sender = rt.block_on(TelemetryInitializer::init(
+        opts.disable_telemetry,
+        std::env::var("RS_API_KEY").ok(),
+    ));
 
     let external_addr = if opts.use_aws_external_address {
         Either::Left(get_aws_private_ip())

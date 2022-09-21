@@ -370,8 +370,10 @@ where
         ));
         info!(commit_hash = %COMMIT_ID);
 
-        let telemetry_sender =
-            TelemetryInitializer::init(options.disable_telemetry, std::env::var("RS_API_KEY").ok());
+        let telemetry_sender = rt.block_on(async {
+            TelemetryInitializer::init(options.disable_telemetry, std::env::var("RS_API_KEY").ok())
+                .await
+        });
 
         let _ = rt
             .block_on(async {
