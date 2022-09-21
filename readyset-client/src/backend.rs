@@ -1658,6 +1658,19 @@ where
                         }
                     },
                 };
+
+                // Log a telemetry event
+                if let Some(ref telemetry_sender) = self.telemetry_sender {
+                    if let Err(e) = telemetry_sender
+                        .send_event(TelemetryEvent::CreateCache)
+                        .await
+                    {
+                        warn!(error = %e, "Failed to send CREATE CACHE metric");
+                    }
+                } else {
+                    trace!("No telemetry sender. not sending metric for CREATE CACHE");
+                }
+
                 self.create_cached_query(name.as_ref(), stmt, search_path, *always)
                     .await
             }

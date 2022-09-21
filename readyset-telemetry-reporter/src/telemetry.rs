@@ -35,6 +35,9 @@ pub enum TelemetryEvent {
 
     /// ReadySet failed to parse a query that upstream was able to
     QueryParseFailed,
+
+    /// CREATE CACHE statement was executed
+    CreateCache,
 }
 
 /// ReadySet-specific telemetry. Provide only the fields you need.
