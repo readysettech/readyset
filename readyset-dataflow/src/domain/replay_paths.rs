@@ -1,16 +1,17 @@
 use std::borrow::{Borrow, Cow};
 use std::collections::{btree_map, BTreeMap, HashMap, HashSet};
 use std::hash::Hash;
-use std::ops;
+use std::{iter, ops};
 
 use dataflow_state::Rows;
+use itertools::Either;
 use launchpad::Indices;
 use readyset::internal::LocalNodeIndex;
 use readyset::KeyComparison;
 use tracing::trace;
 use vec1::Vec1;
 
-use super::TriggerEndpoint;
+use super::{RemappedKeys, TriggerEndpoint};
 use crate::prelude::*;
 use crate::NodeMap;
 
@@ -125,7 +126,7 @@ pub(super) struct ReplayPaths {
 impl ReplayPaths {
     /// Look up the replay path with the given tag in the set of replay paths, and return a
     /// reference to it if it exists.
-    pub(super) fn get(&mut self, tag: Tag) -> Option<&ReplayPath> {
+    pub(super) fn get(&self, tag: Tag) -> Option<&ReplayPath> {
         self.by_tag.get(&tag)
     }
 
@@ -172,15 +173,31 @@ impl ReplayPaths {
         index: &'a Index,
         keys: &'a [KeyComparison],
         rows: Rows,
+        remapped_keys: &'a RemappedKeys,
     ) -> impl Iterator<Item = (Tag, &'a ReplayPath, Cow<'a, [KeyComparison]>)> + 'a {
         // TODO: this is a linear walk of replay paths -- we should make that not linear
         self.by_tag
             .iter()
             .filter(move |(_, path)| path.source == Some(node))
-            .filter_map(move |(tag, path)| {
-                let keys = match &path.trigger {
+            .flat_map(move |(tag, path)| {
+                match &path.trigger {
                     TriggerEndpoint::Local(key) | TriggerEndpoint::Start(key) => {
-                        if self
+                        let maybe_downstream_keys = path.target_node().and_then(|target| {
+                            path.target_index.as_ref().and_then(|target_index| {
+                                remapped_keys.get(
+                                    path.last_segment().node,
+                                    target,
+                                    &target_index.columns,
+                                    keys,
+                                )
+                            })
+                        });
+
+                        if let Some(downstream) = maybe_downstream_keys {
+                            Either::Left(downstream.map(move |(tag, keys)| {
+                                (tag, self.get(tag).unwrap(), Cow::Borrowed(keys))
+                            }))
+                        } else if self
                             .generated_columns
                             .get(node)
                             .and_then(|gc| gc.get(&key.columns))
@@ -203,7 +220,7 @@ impl ReplayPaths {
                                 ?key,
                                 "Rewriting keys to evict through generated columns"
                             );
-                            Cow::Owned(
+                            let keys = Cow::Owned(
                                 rows.set_iter()
                                     .map(|(r, _)| {
                                         r.cloned_indices(key.columns.iter().copied())
@@ -214,19 +231,23 @@ impl ReplayPaths {
                                     .collect::<HashSet<_>>()
                                     .into_iter()
                                     .collect(),
-                            )
+                            );
+
+                            Either::Right(Either::Left(iter::once((*tag, path, keys))))
                         } else if key == index {
                             // TODO: what if the key is the same, but with the columns in another
                             // order?
-                            Cow::Borrowed(keys)
+                            Either::Right(Either::Left(iter::once((
+                                *tag,
+                                path,
+                                Cow::Borrowed(keys),
+                            ))))
                         } else {
-                            return None;
+                            Either::Right(Either::Right(iter::empty()))
                         }
                     }
-                    _ => return None,
-                };
-
-                Some((*tag, path, keys))
+                    _ => Either::Right(Either::Right(iter::empty())),
+                }
             })
     }
 
@@ -493,6 +514,7 @@ mod tests {
             // We just evicted [Equal([1])] from columns [0], resulting in {[1, "a"]}
             let index = Index::hash_map(vec![0]);
             let evicted_keys = [KeyComparison::Equal(vec1![DfValue::from(1)])];
+            let remapped_keys = Default::default();
             let res = paths
                 .downstream_dependent_paths(
                     LocalNodeIndex::make(0),
@@ -501,6 +523,7 @@ mod tests {
                     vec![Row::from(vec![DfValue::from(1), DfValue::from("a")])]
                         .into_iter()
                         .collect(),
+                    &remapped_keys,
                 )
                 .collect::<Vec<_>>();
 

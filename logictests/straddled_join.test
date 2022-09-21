@@ -1,0 +1,47 @@
+statement ok
+create table t1 (id int, k int);
+
+statement ok
+create table t2 (id int);
+
+statement ok
+create table t3 (id int, k int);
+
+statement ok
+insert into t1 (id, k) values (1, 1), (2, 1);
+
+statement ok
+insert into t2 (id) values (1), (2);
+
+statement ok
+insert into t3 (id, k) values (1, 1);
+
+query I nosort
+select t1.id
+from t1
+join t2 on t1.id = t2.id
+join t3 on t2.id = t3.id
+where t1.k = ?
+and t3.k = ?;
+? = 1
+? = 1
+----
+1
+
+graphviz
+
+statement ok
+insert into t3 (id, k) values (2, 1);
+
+query I rowsort
+select t1.id
+from t1
+join t2 on t1.id = t2.id
+join t3 on t2.id = t3.id
+where t1.k = ?
+and t3.k = ?;
+? = 1
+? = 1
+----
+1
+2

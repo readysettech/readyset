@@ -431,6 +431,7 @@ impl DomainBuilder {
             metrics: domain_metrics::DomainMetrics::new(address),
 
             eviction_kind: self.config.eviction_kind,
+            remapped_keys: Default::default(),
         }
     }
 }
@@ -440,6 +441,113 @@ struct TimedPurge {
     time: time::Instant,
     view: LocalNodeIndex,
     keys: HashSet<KeyComparison>,
+}
+
+/// Mapping, for nodes which [generate columns][], from *upstream* keys, to downstream keys which
+/// have remapped to those upstream keys.
+///
+/// Used when we receive an eviction for those upstream keys, to rewrite that eviction into an
+/// eviction for the downstream keys.
+///
+/// # Internals
+///
+/// The internals of this type are reasonably complicated, and best illustrated by an example.
+///
+/// Consider we have some join, `n3`, with two parents `n1` and `n2`, and which is indexed on
+/// columns `[1, 2]`, where column `1` maps to column `1` in `n1`, and column `2` maps to column `1`
+/// in `n2` (a [straddled join][]). Now let's say we get some upquery on `[1, 2] = ["a", "b"]` for
+/// that join.  That upquery would get remapped to a pair of upqueries on the parents, `[1] = ["a"]`
+/// on `n1` and `[1] = ["b"]` on `n2`. We then perform both of those upqueries, and then once both
+/// have finished we perform the join and return the results.
+///
+/// Now let's say `n3` gets an eviction for `[1] = ["a"]` from `n1`. We don't have an index on only
+/// column `[1]` in `n3`, so we need to find a way of *mapping* that eviction into an eviction on
+/// `[1, 2] = ["a", "b"]`. In that case, this data structure would look something like:
+///
+/// ```notrust
+/// {
+///     n3: { // The node we're processing through
+///         n1: { // The node we got an eviction from
+///             [1]: { // The column indices in the eviction
+///                 ["a"]: { // The upstream key for the eviction
+///                     { Tag(some tag): [["a", "b"]] } // The downstream eviction(s) to rewrite to
+///                 }
+///             }
+///         }
+///     }
+/// }
+/// ```
+///
+/// Which is sufficient information to remap our upstream eviction to a downstream one
+///
+/// [generate columns]: http://docs/dataflow/replay_paths.html#generated-columns
+/// [straddled join]: http://docs/dataflow/replay_paths.html#straddled-joins
+#[derive(Debug, Clone, Default)]
+#[allow(clippy::type_complexity)]
+struct RemappedKeys(
+    // Strap in, this is a heck of a type.
+    // This is a mapping:
+    //
+    // from nodes which generate columns...
+    NodeMap<
+        // ...to nodes which are the source of those columns (which might be the same node)...
+        NodeMap<
+            // ...to the column indices within the source node which those columns are generated
+            // from...
+            HashMap<
+                Vec<usize>,
+                // ...to the upstream keys which have been remapped to...
+                HashMap<
+                    Vec<KeyComparison>,
+                    // ...to the downstream tags and key comparisons which have remapped to those
+                    // keys.
+                    HashMap<Tag, Vec<KeyComparison>>,
+                >,
+            >,
+        >,
+    >,
+);
+
+impl RemappedKeys {
+    /// Record that some downstream key was rewritten by `miss_in` into an `upstream_miss`.
+    fn insert(
+        &mut self,
+        miss_in: LocalNodeIndex,
+        upstream_miss: ColumnMiss,
+        downstream_key: KeyComparison,
+        downstream_tag: Tag,
+    ) {
+        self.0
+            .entry(miss_in)
+            .or_default()
+            .entry(upstream_miss.node)
+            .or_default()
+            .entry(upstream_miss.column_indices.into_vec())
+            .or_default()
+            .entry(upstream_miss.missed_keys.into_vec())
+            .or_default()
+            .entry(downstream_tag)
+            .or_default()
+            .push(downstream_key)
+    }
+
+    /// If `node` rewrites some of its downstream keys into upstream upqueries to `column` in a
+    /// `target` node, look up the set of downstream tags and keys which have been rewritten to
+    /// `keys`.
+    fn get(
+        &self,
+        node: LocalNodeIndex,
+        target: LocalNodeIndex,
+        columns: &[usize],
+        keys: &[KeyComparison],
+    ) -> Option<impl Iterator<Item = (Tag, &[KeyComparison])>> {
+        self.0
+            .get(node)
+            .and_then(|m| m.get(target))
+            .and_then(|m| m.get(columns))
+            .and_then(|m| m.get(keys))
+            .map(|m| m.iter().map(|(t, ks)| (*t, ks.as_slice())))
+    }
 }
 
 pub struct Domain {
@@ -476,6 +584,8 @@ pub struct Domain {
 
     mode: DomainMode,
     waiting: NodeMap<Waiting>,
+
+    remapped_keys: RemappedKeys,
 
     /// Replay paths that go through this domain
     replay_paths: ReplayPaths,
@@ -676,6 +786,16 @@ impl Domain {
                 // If these columns were generated, ask the node to remap them for us
                 let misses = self.nodes[miss_in].borrow_mut().handle_upquery(miss)?;
                 trace!(?misses, "Remapped misses on generated columns");
+
+                for upstream_miss in &misses {
+                    self.remapped_keys.insert(
+                        miss_in,
+                        upstream_miss.clone(),
+                        replay_key.clone(),
+                        needed_for,
+                    )
+                }
+
                 invariant!(
                     !misses.is_empty(),
                     "columns {:?} in {} are generated, but could not remap an upquery",
@@ -3425,10 +3545,15 @@ impl Domain {
             state: &mut StateMap,
             reader_write_handles: &mut NodeMap<backlog::WriteHandle>,
             nodes: &DomainNodes,
+            remapped_keys: &RemappedKeys,
         ) -> Result<(), ReadySetError> {
-            for (tag, path, keys) in
-                replay_paths.downstream_dependent_paths(node, index, keys, rows_evicted)
-            {
+            for (tag, path, keys) in replay_paths.downstream_dependent_paths(
+                node,
+                index,
+                keys,
+                rows_evicted,
+                remapped_keys,
+            ) {
                 walk_path(
                     &path.path[..],
                     &keys,
@@ -3440,48 +3565,64 @@ impl Domain {
                     ex,
                 )?;
 
-                if let TriggerEndpoint::Local(_) = path.trigger {
-                    #[allow(clippy::indexing_slicing)] // tag came from replay_paths
-                    let target = replay_paths[tag].last_segment();
-                    #[allow(clippy::indexing_slicing)] // nodes in replay paths must exist
-                    if nodes[target.node].borrow().is_reader() {
-                        // already evicted from in walk_path
-                        continue;
-                    }
-                    if !state.contains_key(target.node) {
-                        // this is probably because
-                        if !not_ready.contains(&target.node) {
-                            debug!(
-                                node = target.node.id(),
-                                "got eviction for ready but stateless node"
-                            )
-                        }
-                        continue;
-                    }
+                match path.trigger {
+                    TriggerEndpoint::Local(_) => {
+                        #[allow(clippy::indexing_slicing)] // tag came from replay_paths
+                        let replay_path = &replay_paths[tag];
 
-                    trace!(local = %target.node, ?keys, ?tag, "Evicting keys");
-                    #[allow(clippy::indexing_slicing)] // nodes in replay paths must exist
-                    if let Some(EvictKeysResult { rows_evicted, .. }) =
-                        state[target.node].evict_keys(tag, &keys)
-                    {
-                        #[allow(clippy::unwrap_used)]
-                        // we can only evict from partial replay paths, so we must have a
-                        // partial key
-                        trigger_downstream_evictions(
-                            target.partial_index.as_ref().unwrap(),
-                            &keys,
-                            rows_evicted,
-                            target.node,
-                            ex,
-                            not_ready,
-                            replay_paths,
-                            shard,
-                            replica,
-                            state,
-                            reader_write_handles,
-                            nodes,
-                        )?;
+                        let dest = replay_path.last_segment();
+
+                        #[allow(clippy::indexing_slicing)] // nodes in replay paths must exist
+                        if nodes[dest.node].borrow().is_reader() {
+                            // already evicted from in walk_path
+                            continue;
+                        }
+                        if !state.contains_key(dest.node) {
+                            // this is probably because
+                            if !not_ready.contains(&dest.node) {
+                                debug!(
+                                    node = dest.node.id(),
+                                    "got eviction for ready but stateless node"
+                                )
+                            }
+                            continue;
+                        }
+
+                        trace!(
+                            local = %dest.node,
+                            ?keys,
+                            ?tag,
+                            target = ?(replay_path.target_node(), &replay_path.target_index),
+                            "Evicting keys"
+                        );
+                        #[allow(clippy::indexing_slicing)] // nodes in replay paths must exist
+                        if let Some(EvictKeysResult { rows_evicted, .. }) =
+                            state[dest.node].evict_keys(tag, &keys)
+                        {
+                            #[allow(clippy::unwrap_used)]
+                            // we can only evict from partial replay paths, so we must have a
+                            // partial key
+                            trigger_downstream_evictions(
+                                dest.partial_index.as_ref().unwrap(),
+                                &keys,
+                                rows_evicted,
+                                dest.node,
+                                ex,
+                                not_ready,
+                                replay_paths,
+                                shard,
+                                replica,
+                                state,
+                                reader_write_handles,
+                                nodes,
+                                remapped_keys,
+                            )?;
+                        }
                     }
+                    TriggerEndpoint::Start(_) => {
+                        state[path.source.unwrap()].evict_keys(tag, &keys);
+                    }
+                    _ => (),
                 }
             }
             Ok(())
@@ -3637,6 +3778,7 @@ impl Domain {
                                 &mut self.state,
                                 &mut self.reader_write_handles,
                                 &self.nodes,
+                                &self.remapped_keys,
                             )?;
                         }
                     } else {
@@ -3718,6 +3860,7 @@ impl Domain {
                                 &mut self.state,
                                 &mut self.reader_write_handles,
                                 &self.nodes,
+                                &self.remapped_keys,
                             )?;
                         }
                     }
