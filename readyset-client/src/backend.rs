@@ -1676,9 +1676,37 @@ where
             }
             SqlQuery::DropCache(DropCacheStatement { name }) => self.drop_cached_query(name).await,
             SqlQuery::DropAllCaches(_) => self.drop_all_caches().await,
-            SqlQuery::Show(ShowStatement::CachedQueries) => self.noria.verbose_views().await,
+            SqlQuery::Show(ShowStatement::CachedQueries) => {
+                // Log a telemetry event
+                if let Some(ref telemetry_sender) = self.telemetry_sender {
+                    if let Err(e) = telemetry_sender
+                        .send_event(TelemetryEvent::CreateCache)
+                        .await
+                    {
+                        warn!(error = %e, "Failed to send SHOW CACHES metric");
+                    }
+                } else {
+                    trace!("No telemetry sender. not sending metric for SHOW CACHES");
+                }
+
+                self.noria.verbose_views().await
+            }
             SqlQuery::Show(ShowStatement::ReadySetStatus) => self.noria.readyset_status().await,
-            SqlQuery::Show(ShowStatement::ProxiedQueries) => self.show_proxied_queries().await,
+            SqlQuery::Show(ShowStatement::ProxiedQueries) => {
+                // Log a telemetry event
+                if let Some(ref telemetry_sender) = self.telemetry_sender {
+                    if let Err(e) = telemetry_sender
+                        .send_event(TelemetryEvent::CreateCache)
+                        .await
+                    {
+                        warn!(error = %e, "Failed to send SHOW PROXIED QUERIES metric");
+                    }
+                } else {
+                    trace!("No telemetry sender. not sending metric for SHOW PROXIED QUERIES");
+                }
+
+                self.show_proxied_queries().await
+            }
             _ => {
                 drop(_t);
                 // Clear readyset timer, since it was not a readyset request

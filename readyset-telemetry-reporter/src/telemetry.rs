@@ -38,6 +38,12 @@ pub enum TelemetryEvent {
 
     /// CREATE CACHE statement was executed
     CreateCache,
+
+    /// SHOW CACHES statement was executed
+    ShowCaches,
+
+    /// SHOW PROXIED QUERIES statement was executed
+    ShowProxiedQueries,
 }
 
 /// ReadySet-specific telemetry. Provide only the fields you need.
