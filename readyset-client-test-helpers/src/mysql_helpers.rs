@@ -4,11 +4,8 @@ use std::fmt::Display;
 use async_trait::async_trait;
 use mysql_async::prelude::Queryable;
 use mysql_srv::MysqlIntermediary;
-use readyset_client::backend::noria_connector::ReadBehavior;
-use readyset_client::backend::{BackendBuilder, MigrationMode, QueryInfo, UnsupportedSetMode};
-use readyset_client::query_status_cache::QueryStatusCache;
+use readyset_client::backend::QueryInfo;
 use readyset_mysql::{Backend, MySqlQueryHandler, MySqlUpstream};
-use readyset_server::Handle;
 use tokio::net::TcpStream;
 
 use crate::Adapter;
@@ -91,53 +88,4 @@ impl Adapter for MySQLAdapter {
             .await
             .unwrap()
     }
-}
-
-// Initializes a ReadySet worker and starts processing MySQL queries against it.
-// If `partial` is `false`, disables partial queries.
-pub async fn setup(partial: bool) -> (mysql_async::Opts, Handle) {
-    crate::setup::<MySQLAdapter>(
-        BackendBuilder::new().require_authentication(false),
-        false,
-        partial,
-        true,
-        ReadBehavior::Blocking,
-    )
-    .await
-}
-
-pub async fn setup_with_read_behavior(read_behavior: ReadBehavior) -> (mysql_async::Opts, Handle) {
-    crate::setup::<MySQLAdapter>(
-        BackendBuilder::new().require_authentication(false),
-        false,
-        true,
-        true,
-        read_behavior,
-    )
-    .await
-}
-
-pub async fn query_cache_setup(
-    query_status_cache: &'static QueryStatusCache,
-    fallback: bool,
-    migration_mode: MigrationMode,
-    set_mode: UnsupportedSetMode,
-) -> (mysql_async::Opts, Handle) {
-    crate::setup_inner::<MySQLAdapter>(
-        BackendBuilder::new()
-            .require_authentication(false)
-            .unsupported_set_mode(set_mode),
-        if fallback {
-            Some(MySQLAdapter::url())
-        } else {
-            None
-        },
-        true,
-        true,
-        query_status_cache,
-        migration_mode,
-        true, // recreate database.
-        ReadBehavior::Blocking,
-    )
-    .await
 }

@@ -1,20 +1,16 @@
-use readyset_client::backend::noria_connector::ReadBehavior;
 use readyset_client::backend::BackendBuilder;
 use readyset_client_test_helpers::psql_helpers::PostgreSQLAdapter;
+use readyset_client_test_helpers::TestBuilder;
 use readyset_server::Handle;
 
 mod common;
 use common::connect;
 
 async fn setup() -> (tokio_postgres::Config, Handle) {
-    readyset_client_test_helpers::setup::<PostgreSQLAdapter>(
-        BackendBuilder::new().require_authentication(false),
-        true,
-        true,
-        true,
-        ReadBehavior::Blocking,
-    )
-    .await
+    TestBuilder::new(BackendBuilder::new().require_authentication(false))
+        .fallback(true)
+        .build::<PostgreSQLAdapter>()
+        .await
 }
 
 mod types {

@@ -2,10 +2,30 @@ use mysql_async::prelude::*;
 use mysql_async::{Conn, Result, Row, Statement};
 use readyset_client::backend::{MigrationMode, QueryInfo, UnsupportedSetMode};
 use readyset_client::query_status_cache::QueryStatusCache;
+use readyset_client::BackendBuilder;
 use readyset_client_metrics::QueryDestination;
-use readyset_client_test_helpers::mysql_helpers::{last_query_info, query_cache_setup};
-use readyset_client_test_helpers::sleep;
+use readyset_client_test_helpers::mysql_helpers::{last_query_info, MySQLAdapter};
+use readyset_client_test_helpers::{sleep, TestBuilder};
+use readyset_server::Handle;
 use serial_test::serial;
+
+pub async fn setup(
+    query_status_cache: &'static QueryStatusCache,
+    fallback: bool,
+    migration_mode: MigrationMode,
+    set_mode: UnsupportedSetMode,
+) -> (mysql_async::Opts, Handle) {
+    TestBuilder::new(
+        BackendBuilder::default()
+            .require_authentication(false)
+            .unsupported_set_mode(set_mode),
+    )
+    .fallback(fallback)
+    .query_status_cache(query_status_cache)
+    .migration_mode(migration_mode)
+    .build::<MySQLAdapter>()
+    .await
+}
 
 // With in_request_path migration and fallback, an supported query should execute on ReadySet
 // and be marked allowed on completion, an unsupported query should execute on ReadySet
@@ -14,8 +34,8 @@ use serial_test::serial;
 #[serial]
 async fn in_request_path_query_with_fallback() {
     let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
-    let (opts, _handle) = query_cache_setup(
-        query_status_cache.clone(),
+    let (opts, _handle) = setup(
+        query_status_cache,
         true, // fallback enabled
         MigrationMode::InRequestPath,
         UnsupportedSetMode::Error,
@@ -60,8 +80,8 @@ async fn in_request_path_query_with_fallback() {
 #[serial]
 async fn in_request_path_query_without_fallback() {
     let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
-    let (opts, _handle) = query_cache_setup(
-        query_status_cache.clone(),
+    let (opts, _handle) = setup(
+        query_status_cache,
         false, // fallback disabled
         MigrationMode::InRequestPath,
         UnsupportedSetMode::Error,
@@ -91,8 +111,8 @@ async fn in_request_path_query_without_fallback() {
 #[serial]
 async fn out_of_band_query_with_fallback() {
     let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
-    let (opts, _handle) = query_cache_setup(
-        query_status_cache.clone(),
+    let (opts, _handle) = setup(
+        query_status_cache,
         true, // fallback enabled
         MigrationMode::OutOfBand,
         UnsupportedSetMode::Error,
@@ -139,8 +159,8 @@ async fn out_of_band_query_with_fallback() {
 #[serial]
 async fn autocommit_state_query() {
     let _query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
-    let (opts, _handle) = query_cache_setup(
-        _query_status_cache.clone(),
+    let (opts, _handle) = setup(
+        _query_status_cache,
         true, // fallback enabled
         MigrationMode::OutOfBand,
         UnsupportedSetMode::Proxy,
@@ -255,8 +275,8 @@ async fn autocommit_state_query() {
 #[serial]
 async fn autocommit_prepare_execute() {
     let _query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
-    let (opts, _handle) = query_cache_setup(
-        _query_status_cache.clone(),
+    let (opts, _handle) = setup(
+        _query_status_cache,
         true, // fallback enabled
         MigrationMode::OutOfBand,
         UnsupportedSetMode::Proxy,
@@ -340,8 +360,8 @@ async fn autocommit_prepare_execute() {
 #[serial]
 async fn in_request_path_prep_exec_with_fallback() {
     let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
-    let (opts, _handle) = query_cache_setup(
-        query_status_cache.clone(),
+    let (opts, _handle) = setup(
+        query_status_cache,
         true, // fallback enabled
         MigrationMode::InRequestPath,
         UnsupportedSetMode::Error,
@@ -418,8 +438,8 @@ async fn in_request_path_prep_exec_with_fallback() {
 #[serial]
 async fn in_request_path_prep_without_fallback() {
     let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
-    let (opts, _handle) = query_cache_setup(
-        query_status_cache.clone(),
+    let (opts, _handle) = setup(
+        query_status_cache,
         false, // fallback disabled
         MigrationMode::InRequestPath,
         UnsupportedSetMode::Error,
@@ -449,8 +469,8 @@ async fn in_request_path_prep_without_fallback() {
 #[serial]
 async fn out_of_band_prep_exec_with_fallback() {
     let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
-    let (opts, _handle) = query_cache_setup(
-        query_status_cache.clone(),
+    let (opts, _handle) = setup(
+        query_status_cache,
         true, // fallback enabled
         MigrationMode::OutOfBand,
         UnsupportedSetMode::Error,
@@ -545,8 +565,8 @@ async fn out_of_band_prep_exec_with_fallback() {
 #[serial]
 async fn in_request_path_rewritten_query_without_fallback() {
     let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
-    let (opts, _handle) = query_cache_setup(
-        query_status_cache.clone(),
+    let (opts, _handle) = setup(
+        query_status_cache,
         false, // fallback disabled
         MigrationMode::InRequestPath,
         UnsupportedSetMode::Error,
@@ -578,8 +598,8 @@ async fn in_request_path_rewritten_query_without_fallback() {
 #[serial]
 async fn out_of_band_rewritten_query_without_fallback() {
     let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
-    let (opts, _handle) = query_cache_setup(
-        query_status_cache.clone(),
+    let (opts, _handle) = setup(
+        query_status_cache,
         false, // fallback disabled
         MigrationMode::OutOfBand,
         UnsupportedSetMode::Error,
@@ -606,7 +626,7 @@ async fn out_of_band_rewritten_query_without_fallback() {
 #[tokio::test(flavor = "multi_thread")]
 async fn drop_all_caches() {
     let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
-    let (opts, _handle) = query_cache_setup(
+    let (opts, _handle) = setup(
         query_status_cache,
         false, // fallback disabled
         MigrationMode::OutOfBand,

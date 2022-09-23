@@ -1,14 +1,19 @@
 use chrono::{NaiveDate, NaiveDateTime};
-use readyset_client_test_helpers::psql_helpers::{setup, setup_w_fallback};
-use readyset_client_test_helpers::{self, sleep};
+use readyset_client_test_helpers::psql_helpers::PostgreSQLAdapter;
+use readyset_client_test_helpers::{self, sleep, TestBuilder};
+use readyset_server::Handle;
 use tokio_postgres::SimpleQueryMessage;
 
 mod common;
 use common::connect;
 
+async fn setup() -> (tokio_postgres::Config, Handle) {
+    TestBuilder::default().build::<PostgreSQLAdapter>().await
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn delete_basic() {
-    let (opts, _handle) = setup(true).await;
+    let (opts, _handle) = setup().await;
     let conn = connect(opts).await;
     conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY)")
         .await
@@ -45,7 +50,7 @@ async fn delete_basic() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn delete_only_constraint() {
-    let (opts, _handle) = setup(true).await;
+    let (opts, _handle) = setup().await;
     let conn = connect(opts).await;
     // Note that this doesn't have `id int PRIMARY KEY` like the other tests:
     conn.simple_query("CREATE TABLE Cats (id int, name VARCHAR(255), PRIMARY KEY(id))")
@@ -77,7 +82,7 @@ async fn delete_only_constraint() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn delete_multiple() {
-    let (opts, _handle) = setup(true).await;
+    let (opts, _handle) = setup().await;
     let conn = connect(opts).await;
     conn.simple_query("CREATE TABLE Cats (id int, PRIMARY KEY(id))")
         .await
@@ -122,7 +127,7 @@ async fn delete_multiple() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn delete_bogus() {
-    let (opts, _handle) = setup(true).await;
+    let (opts, _handle) = setup().await;
     let conn = connect(opts).await;
     conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY)")
         .await
@@ -143,7 +148,7 @@ async fn delete_bogus() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn delete_bogus_valid_and() {
-    let (opts, _handle) = setup(true).await;
+    let (opts, _handle) = setup().await;
     let conn = connect(opts).await;
     conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY)")
         .await
@@ -181,7 +186,7 @@ async fn delete_bogus_valid_and() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn delete_bogus_valid_or() {
-    let (opts, _handle) = setup(true).await;
+    let (opts, _handle) = setup().await;
     let conn = connect(opts).await;
     conn.simple_query("CREATE TABLE Cats (id int, PRIMARY KEY(id))")
         .await
@@ -219,7 +224,7 @@ async fn delete_bogus_valid_or() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn delete_other_column() {
-    let (opts, _handle) = setup(true).await;
+    let (opts, _handle) = setup().await;
     let conn = connect(opts).await;
     conn.simple_query("CREATE TABLE Cats (id int, name VARCHAR(255), PRIMARY KEY(id))")
         .await
@@ -235,7 +240,7 @@ async fn delete_other_column() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn delete_no_keys() {
-    let (opts, _handle) = setup(true).await;
+    let (opts, _handle) = setup().await;
     let conn = connect(opts).await;
     conn.simple_query("CREATE TABLE Cats (id int, name VARCHAR(255), PRIMARY KEY(id))")
         .await
@@ -250,7 +255,7 @@ async fn delete_no_keys() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn delete_compound_primary_key() {
-    let (opts, _handle) = setup(true).await;
+    let (opts, _handle) = setup().await;
     let conn = connect(opts).await;
     conn.simple_query(
         "CREATE TABLE Vote (aid int, uid int, reason VARCHAR(255), PRIMARY KEY(aid, uid))",
@@ -299,7 +304,7 @@ async fn delete_compound_primary_key() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn update_basic() {
-    let (opts, _handle) = setup(true).await;
+    let (opts, _handle) = setup().await;
     let conn = connect(opts).await;
     conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255))")
         .await
@@ -330,7 +335,7 @@ async fn update_basic() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn update_basic_prepared() {
-    let (opts, _handle) = setup(true).await;
+    let (opts, _handle) = setup().await;
     let conn = connect(opts).await;
     conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255))")
         .await
@@ -383,7 +388,7 @@ async fn update_basic_prepared() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn update_compound_primary_key() {
-    let (opts, _handle) = setup(true).await;
+    let (opts, _handle) = setup().await;
     let conn = connect(opts).await;
     conn.simple_query(
         "CREATE TABLE Vote (aid int, uid int, reason VARCHAR(255), PRIMARY KEY(aid, uid))",
@@ -435,7 +440,7 @@ async fn update_compound_primary_key() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn update_only_constraint() {
-    let (opts, _handle) = setup(true).await;
+    let (opts, _handle) = setup().await;
     let conn = connect(opts).await;
     // Note that this doesn't have `id int PRIMARY KEY` like the other tests:
     conn.simple_query("CREATE TABLE Cats (id int, name VARCHAR(255), PRIMARY KEY(id))")
@@ -467,7 +472,7 @@ async fn update_only_constraint() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn update_pkey() {
-    let (opts, _handle) = setup(true).await;
+    let (opts, _handle) = setup().await;
     let conn = connect(opts).await;
     conn.simple_query("CREATE TABLE Cats (id int, name VARCHAR(255), PRIMARY KEY(id))")
         .await
@@ -507,7 +512,7 @@ async fn update_pkey() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn update_separate() {
-    let (opts, _handle) = setup(true).await;
+    let (opts, _handle) = setup().await;
     let conn = connect(opts).await;
     conn.simple_query("CREATE TABLE Cats (id int, name VARCHAR(255), PRIMARY KEY(id))")
         .await
@@ -550,7 +555,7 @@ async fn update_separate() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn update_no_keys() {
-    let (opts, _handle) = setup(true).await;
+    let (opts, _handle) = setup().await;
     let conn = connect(opts).await;
     conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255))")
         .await
@@ -563,7 +568,7 @@ async fn update_no_keys() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn update_other_column() {
-    let (opts, _handle) = setup(true).await;
+    let (opts, _handle) = setup().await;
     let conn = connect(opts).await;
     conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255))")
         .await
@@ -576,7 +581,7 @@ async fn update_other_column() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn update_bogus() {
-    let (opts, _handle) = setup(true).await;
+    let (opts, _handle) = setup().await;
     let conn = connect(opts).await;
     conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255))")
         .await
@@ -594,7 +599,7 @@ async fn update_bogus() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn select_collapse_where_in() {
-    let (opts, _handle) = setup(true).await;
+    let (opts, _handle) = setup().await;
     let conn = connect(opts).await;
     conn.simple_query("CREATE TABLE Cats (id int, name VARCHAR(255), PRIMARY KEY(id))")
         .await
@@ -698,7 +703,7 @@ async fn select_collapse_where_in() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn basic_select() {
-    let (opts, _handle) = setup(true).await;
+    let (opts, _handle) = setup().await;
     let conn = connect(opts).await;
     conn.simple_query("CREATE TABLE test (x int, y int)")
         .await
@@ -730,7 +735,7 @@ async fn basic_select() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn strings() {
-    let (opts, _handle) = setup(true).await;
+    let (opts, _handle) = setup().await;
     let conn = connect(opts).await;
     conn.simple_query("CREATE TABLE test (x TEXT)")
         .await
@@ -760,7 +765,7 @@ async fn strings() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn prepared_select() {
-    let (opts, _handle) = setup(true).await;
+    let (opts, _handle) = setup().await;
     let conn = connect(opts).await;
     conn.simple_query("CREATE TABLE test (x int, y int)")
         .await
@@ -785,7 +790,7 @@ async fn prepared_select() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn select_quoting_names() {
-    let (opts, _handle) = setup(true).await;
+    let (opts, _handle) = setup().await;
     let conn = connect(opts).await;
     conn.simple_query("CREATE TABLE test (x INT, y INT)")
         .await
@@ -817,7 +822,7 @@ async fn select_quoting_names() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn create_view() {
-    let (opts, _handle) = setup(true).await;
+    let (opts, _handle) = setup().await;
     let conn = connect(opts).await;
     conn.simple_query("CREATE TABLE test (x int, y int)")
         .await
@@ -854,7 +859,7 @@ async fn create_view() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn absurdly_simple_select() {
-    let (opts, _handle) = setup(true).await;
+    let (opts, _handle) = setup().await;
     let conn = connect(opts).await;
     conn.simple_query("CREATE TABLE test (x int, y int)")
         .await
@@ -883,7 +888,7 @@ async fn absurdly_simple_select() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn order_by_basic() {
-    let (opts, _handle) = setup(true).await;
+    let (opts, _handle) = setup().await;
     let conn = connect(opts).await;
     conn.simple_query("CREATE TABLE test (x int, y int)")
         .await
@@ -938,7 +943,7 @@ async fn order_by_basic() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn order_by_limit_basic() {
-    let (opts, _handle) = setup(true).await;
+    let (opts, _handle) = setup().await;
     let conn = connect(opts).await;
     conn.simple_query("CREATE TABLE test (x int, y int)")
         .await
@@ -977,7 +982,7 @@ async fn order_by_limit_basic() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn write_timestamps() {
-    let (opts, _handle) = setup(true).await;
+    let (opts, _handle) = setup().await;
     let conn = connect(opts).await;
     conn.simple_query("CREATE TABLE posts (id int primary key, created_at TIMESTAMP)")
         .await
@@ -1033,70 +1038,8 @@ async fn write_timestamps() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn delete_case_sensitive() {
-    for (opts, _handle) in [setup(true).await, setup_w_fallback().await] {
-        let conn = connect(opts).await;
-        conn.simple_query(r#"CREATE TABLE "Cats" (id int PRIMARY KEY, "ID" int)"#)
-            .await
-            .unwrap();
-        sleep().await;
-
-        assert!(conn
-            .simple_query(r#"INSERT INTO cats (id) VALUES (1)"#)
-            .await
-            .is_err());
-
-        assert!(conn
-            .simple_query(r#"INSERT INTO "cats" (id) VALUES (1)"#)
-            .await
-            .is_err());
-
-        assert!(conn
-            .simple_query(r#"INSERT INTO Cats (id) VALUES (1)"#)
-            .await
-            .is_err());
-
-        assert!(conn
-            .simple_query(r#"INSERT INTO "Cats" (id, "Id") VALUES (1, 2)"#)
-            .await
-            .is_err());
-
-        conn.simple_query(r#"INSERT INTO "Cats" (iD, "ID") VALUES (1, 2)"#)
-            .await
-            .unwrap();
-
-        sleep().await;
-
-        let row = conn
-            .query_opt(
-                r#"SELECT "Cats".id FROM "Cats" WHERE "Cats".id = 1 and "Cats"."ID" = 2"#,
-                &[],
-            )
-            .await
-            .unwrap();
-        assert!(row.is_some());
-
-        {
-            let res = conn
-                .simple_query(r#"DELETE FROM "Cats" WHERE "Cats".Id = 1"#)
-                .await
-                .unwrap();
-            let deleted = res.first().unwrap();
-            assert!(matches!(deleted, SimpleQueryMessage::CommandComplete(1)));
-            sleep().await;
-        }
-
-        let row = conn
-            .query_opt(r#"SELECT "Cats".id FROM "Cats" WHERE "Cats".id = 1"#, &[])
-            .await
-            .unwrap();
-        assert!(row.is_none());
-    }
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn delete_case_insensitive() {
-    let (opts, _handle) = setup(true).await;
+    let (opts, _handle) = setup().await;
     let conn = connect(opts).await;
     conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY)")
         .await
@@ -1133,7 +1076,7 @@ async fn delete_case_insensitive() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn explain_graphviz() {
-    let (opts, _handle) = setup(true).await;
+    let (opts, _handle) = setup().await;
     let conn = connect(opts).await;
     let res = conn.simple_query("EXPLAIN GRAPHVIZ").await.unwrap();
     let row = match res.first().unwrap() {
@@ -1147,7 +1090,7 @@ async fn explain_graphviz() {
 #[ignore]
 #[tokio::test(flavor = "multi_thread")]
 async fn unordered_params_are_unsupported() {
-    let (opts, _handle) = setup(true).await;
+    let (opts, _handle) = setup().await;
     let conn = connect(opts).await;
     conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY, val int, name VARCHAR(255))")
         .await
@@ -1188,7 +1131,7 @@ async fn unordered_params_are_unsupported() {
 #[ignore]
 #[tokio::test(flavor = "multi_thread")]
 async fn reusing_params_is_unsupported() {
-    let (opts, _handle) = setup(true).await;
+    let (opts, _handle) = setup().await;
     let conn = connect(opts).await;
     conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY, val int, name VARCHAR(255))")
         .await
@@ -1213,7 +1156,7 @@ async fn reusing_params_is_unsupported() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn placeholder_numbering_does_not_break_postgres() {
-    let (opts, _handle) = setup(true).await;
+    let (opts, _handle) = setup().await;
     let conn = connect(opts).await;
     conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY, val int, name VARCHAR(255))")
         .await
@@ -1244,7 +1187,7 @@ async fn placeholder_numbering_does_not_break_postgres() {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore] // remove ignore when ENG-929 is fixed
 async fn placeholder_numbering_does_not_break_postgres_ignore() {
-    let (opts, _handle) = setup(true).await;
+    let (opts, _handle) = setup().await;
     let conn = connect(opts).await;
     conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY, val int, name VARCHAR(255))")
         .await
@@ -1276,14 +1219,14 @@ async fn placeholder_numbering_does_not_break_postgres_ignore() {
 /// integration test.
 #[tokio::test(flavor = "multi_thread")]
 async fn show_readyset_status() {
-    let (opts, _handle) = setup(true).await;
+    let (opts, _handle) = setup().await;
     let conn = connect(opts).await;
     assert!(conn.simple_query("SHOW READYSET STATUS;").await.is_ok())
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn schema_qualifier() {
-    let (opts, _handle) = setup(true).await;
+    let (opts, _handle) = setup().await;
     let conn = connect(opts).await;
     conn.simple_query("CREATE TABLE public.t (a int)")
         .await
@@ -1296,7 +1239,7 @@ async fn schema_qualifier() {
 #[tokio::test(flavor = "multi_thread")]
 async fn schema_search_path() {
     readyset_tracing::init_test_logging();
-    let (opts, _handle) = setup(true).await;
+    let (opts, _handle) = setup().await;
     let conn = connect(opts).await;
     conn.simple_query("CREATE TABLE s1.t (a int)")
         .await
@@ -1324,7 +1267,7 @@ async fn schema_search_path() {
 #[tokio::test(flavor = "multi_thread")]
 async fn same_query_different_search_path() {
     readyset_tracing::init_test_logging();
-    let (opts, _handle) = setup(true).await;
+    let (opts, _handle) = setup().await;
     let conn = connect(opts).await;
     conn.simple_query("CREATE TABLE s1.t (a int)")
         .await

@@ -1,38 +1,13 @@
 use std::env;
 
 use async_trait::async_trait;
-use readyset_client::backend::noria_connector::ReadBehavior;
-use readyset_client::backend::BackendBuilder;
 use readyset_client::Backend;
 use readyset_psql::{PostgreSqlQueryHandler, PostgreSqlUpstream};
-use readyset_server::Handle;
 use tokio::net::TcpStream;
 use tokio_postgres::NoTls;
 use tracing::error;
 
 use crate::{sleep, Adapter};
-
-pub async fn setup_w_fallback_with(
-    backend_builder: BackendBuilder,
-) -> (tokio_postgres::Config, Handle) {
-    crate::setup::<PostgreSQLAdapter>(backend_builder, true, true, true, ReadBehavior::Blocking)
-        .await
-}
-
-pub async fn setup_w_fallback() -> (tokio_postgres::Config, Handle) {
-    setup_w_fallback_with(BackendBuilder::new().require_authentication(false)).await
-}
-
-pub async fn setup(partial: bool) -> (tokio_postgres::Config, Handle) {
-    crate::setup::<PostgreSQLAdapter>(
-        BackendBuilder::new().require_authentication(false),
-        false,
-        partial,
-        true,
-        ReadBehavior::Blocking,
-    )
-    .await
-}
 
 pub fn upstream_config() -> tokio_postgres::Config {
     let mut config = tokio_postgres::Config::new();

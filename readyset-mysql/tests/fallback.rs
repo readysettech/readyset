@@ -1,24 +1,19 @@
 use launchpad::hash::hash;
 use mysql_async::prelude::*;
-use readyset_client::backend::noria_connector::ReadBehavior;
 use readyset_client::backend::UnsupportedSetMode;
 use readyset_client::query_status_cache::hash_to_query_id;
 use readyset_client::BackendBuilder;
 use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::mysql_helpers::{last_query_info, MySQLAdapter};
-use readyset_client_test_helpers::{self, sleep};
+use readyset_client_test_helpers::{self, sleep, TestBuilder};
 use readyset_server::Handle;
 use serial_test::serial;
 
 async fn setup_with(backend_builder: BackendBuilder) -> (mysql_async::Opts, Handle) {
-    readyset_client_test_helpers::setup::<MySQLAdapter>(
-        backend_builder,
-        true,
-        true,
-        true,
-        ReadBehavior::Blocking,
-    )
-    .await
+    TestBuilder::new(backend_builder)
+        .fallback(true)
+        .build::<MySQLAdapter>()
+        .await
 }
 
 async fn setup() -> (mysql_async::Opts, Handle) {

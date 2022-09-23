@@ -38,6 +38,8 @@ use paste::paste;
 use proptest::prelude::*;
 use proptest::sample::select;
 use proptest::test_runner::TestCaseResult;
+use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
+use readyset_client_test_helpers::TestBuilder;
 use readyset_data::DfValue;
 use test_strategy::proptest;
 
@@ -595,7 +597,7 @@ impl Operations {
         )
         .await
         .unwrap();
-        let (opts, _handle) = readyset_client_test_helpers::mysql_helpers::setup(true).await;
+        let (opts, _handle) = TestBuilder::default().build::<MySQLAdapter>().await;
         let mut noria = mysql_async::Conn::new(opts).await.unwrap();
 
         for table in tables.values() {
