@@ -7,7 +7,6 @@ use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::mysql_helpers::{last_query_info, MySQLAdapter};
 use readyset_client_test_helpers::{sleep, TestBuilder};
 use readyset_server::Handle;
-use serial_test::serial;
 
 pub async fn setup(
     query_status_cache: &'static QueryStatusCache,
@@ -31,7 +30,6 @@ pub async fn setup(
 // and be marked allowed on completion, an unsupported query should execute on ReadySet
 // and then fallback, and be marked denied.
 #[tokio::test(flavor = "multi_thread")]
-#[serial]
 async fn in_request_path_query_with_fallback() {
     let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
     let (opts, _handle) = setup(
@@ -77,7 +75,6 @@ async fn in_request_path_query_with_fallback() {
 // and be marked allowed on completion, an unsupported query should execute on ReadySet
 // and then fallback, and be marked denied.
 #[tokio::test(flavor = "multi_thread")]
-#[serial]
 async fn in_request_path_query_without_fallback() {
     let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
     let (opts, _handle) = setup(
@@ -108,7 +105,6 @@ async fn in_request_path_query_without_fallback() {
 // allow list. Performing an explicit migration allows the query to be added to
 // the allow list on next exeution.
 #[tokio::test(flavor = "multi_thread")]
-#[serial]
 async fn out_of_band_query_with_fallback() {
     let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
     let (opts, _handle) = setup(
@@ -156,7 +152,6 @@ async fn out_of_band_query_with_fallback() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial]
 async fn autocommit_state_query() {
     let _query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
     let (opts, _handle) = setup(
@@ -272,7 +267,6 @@ async fn autocommit_state_query() {
 // after.
 // For that reason this test uses standard query_drop in the before case.
 #[tokio::test(flavor = "multi_thread")]
-#[serial]
 async fn autocommit_prepare_execute() {
     let _query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
     let (opts, _handle) = setup(
@@ -357,7 +351,6 @@ async fn autocommit_prepare_execute() {
 // and be marked allowed on completion, an unsupported query should execute on ReadySet
 // and then fallback, and be marked denied.
 #[tokio::test(flavor = "multi_thread")]
-#[serial]
 async fn in_request_path_prep_exec_with_fallback() {
     let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
     let (opts, _handle) = setup(
@@ -435,7 +428,6 @@ async fn in_request_path_prep_exec_with_fallback() {
 // and be marked allowed on completion, an unsupported query should execute on ReadySet
 // and then fallback, and be marked denied.
 #[tokio::test(flavor = "multi_thread")]
-#[serial]
 async fn in_request_path_prep_without_fallback() {
     let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
     let (opts, _handle) = setup(
@@ -466,7 +458,6 @@ async fn in_request_path_prep_without_fallback() {
 // allow list. Performing an explicit migration allows the query to be added to
 // the allow list on next exeution.
 #[tokio::test(flavor = "multi_thread")]
-#[serial]
 async fn out_of_band_prep_exec_with_fallback() {
     let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
     let (opts, _handle) = setup(
@@ -562,7 +553,6 @@ async fn out_of_band_prep_exec_with_fallback() {
 // entry in the query status cache. Otherwise we would have more than one entry
 // in the allow list.
 #[tokio::test(flavor = "multi_thread")]
-#[serial]
 async fn in_request_path_rewritten_query_without_fallback() {
     let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
     let (opts, _handle) = setup(
@@ -595,7 +585,6 @@ async fn in_request_path_rewritten_query_without_fallback() {
 // cached as the same query in the query status cache. Otherwise, the second
 // query will fail as being disallowed.
 #[tokio::test(flavor = "multi_thread")]
-#[serial]
 async fn out_of_band_rewritten_query_without_fallback() {
     let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
     let (opts, _handle) = setup(

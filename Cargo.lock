@@ -3839,6 +3839,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
+ "database-utils",
  "mysql-srv",
  "mysql_async",
  "nom-sql",

@@ -6,9 +6,9 @@ use readyset_server::Handle;
 mod common;
 use common::connect;
 
-async fn setup() -> (tokio_postgres::Config, Handle) {
+async fn setup(db_name: &str) -> (tokio_postgres::Config, Handle) {
     TestBuilder::new(BackendBuilder::new().require_authentication(false))
-        .fallback(true)
+        .fallback_db(db_name.to_owned())
         .build::<PostgreSQLAdapter>()
         .await
 }
@@ -35,19 +35,19 @@ mod types {
 
     use super::*;
 
-    async fn test_type_roundtrip<T, V>(type_name: T, val: V)
+    async fn test_type_roundtrip<T, V>(test_name: &str, type_name: T, val: V)
     where
         T: Display,
         V: ToSql + Sync + PartialEq,
         for<'a> V: FromSql<'a>,
     {
-        let (config, _handle) = setup().await;
+        let (config, _handle) = setup(test_name).await;
         let client = connect(config).await;
 
         sleep().await;
 
         client
-            .simple_query(&format!("CREATE TABLE t (x {})", type_name))
+            .simple_query(&format!("CREATE TABLE IF NOT EXISTS t (x {})", type_name))
             .await
             .unwrap();
 
@@ -99,7 +99,6 @@ mod types {
                 cases: 5,
                 ..ProptestConfig::default()
             })]
-            #[serial_test::serial]
             $(#[$meta])*
             fn $test_name($(#[$strategy])* val: $rust_type) {
                 readyset_tracing::init_test_logging();
@@ -107,7 +106,7 @@ mod types {
                     .enable_all()
                     .build()
                     .unwrap();
-                rt.block_on(test_type_roundtrip($pg_type_name, val));
+                rt.block_on(test_type_roundtrip(stringify!($test_name), $pg_type_name, val));
             }
         };
     }
@@ -148,13 +147,12 @@ mod types {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial_test::serial]
     async fn regclass() {
-        let (config, _handle) = setup().await;
+        let (config, _handle) = setup("regclass").await;
         let client = connect(config).await;
 
         client
-            .simple_query("CREATE TABLE t (id int primary key)")
+            .simple_query("CREATE TABLE IF NOT EXISTS t (id int primary key)")
             .await
             .unwrap();
 
@@ -166,7 +164,6 @@ mod types {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial_test::serial]
     async fn regproc() {
         let (upstream, upstream_conn) = upstream_config()
             .dbname("postgres")
@@ -181,7 +178,7 @@ mod types {
             .unwrap()
             .get(0);
 
-        let (config, _handle) = setup().await;
+        let (config, _handle) = setup("regproc").await;
         let client = connect(config).await;
 
         let typinput: DfValue = client
