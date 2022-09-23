@@ -14,6 +14,7 @@ pub use self::create::{
     CacheInner, CreateCacheStatement, CreateTableStatement, CreateViewStatement,
     SelectSpecification,
 };
+pub use self::create_table_options::CreateTableOption;
 pub use self::delete::DeleteStatement;
 pub use self::dialect::Dialect;
 pub use self::drop::{

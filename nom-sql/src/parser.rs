@@ -247,6 +247,28 @@ where
     parse_create_table_bytes(dialect, input.as_ref().trim().as_bytes())
 }
 
+/// Parse a create view statement from a string
+pub fn parse_create_view<T>(dialect: Dialect, input: T) -> Result<CreateViewStatement, &'static str>
+where
+    T: AsRef<str>,
+{
+    parse_create_view_bytes(dialect, input.as_ref().trim().as_bytes())
+}
+
+/// Parse a create table statement from a byte slice
+pub fn parse_create_view_bytes<T>(
+    dialect: Dialect,
+    input: T,
+) -> Result<CreateViewStatement, &'static str>
+where
+    T: AsRef<[u8]>,
+{
+    match view_creation(dialect)(input.as_ref()) {
+        Ok((remaining, o)) if remaining.is_empty() => Ok(o),
+        _ => Err("failed to parse query"),
+    }
+}
+
 /// Parse an alter table statement from a byte slice
 pub fn parse_alter_table_bytes<T>(
     dialect: Dialect,

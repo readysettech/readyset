@@ -57,9 +57,9 @@ pub fn show(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], ShowStatement>
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct Tables {
-    full: bool,
-    from_db: Option<String>,
-    filter: Option<FilterPredicate>,
+    pub full: bool,
+    pub from_db: Option<String>,
+    pub filter: Option<FilterPredicate>,
 }
 
 impl fmt::Display for Tables {
