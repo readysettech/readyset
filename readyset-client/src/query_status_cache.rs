@@ -10,11 +10,10 @@ use std::time::{Duration, Instant};
 use dashmap::DashMap;
 use launchpad::hash::hash;
 use readyset::ViewCreateRequest;
+use readyset_sql_passes::anonymize::anonymize_literals;
 use serde::ser::SerializeSeq;
 use serde::{Serialize, Serializer};
 use tracing::error;
-
-use crate::rewrite::anonymize_literals;
 
 #[derive(Debug, Clone, Eq)]
 /// A Query that was made against readyset, which could have either been parsed successfully or

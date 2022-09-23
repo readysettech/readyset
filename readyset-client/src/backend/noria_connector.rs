@@ -27,6 +27,7 @@ use readyset_errors::{
     internal, internal_err, invariant_eq, table_err, unsupported, unsupported_err,
 };
 use readyset_server::worker::readers::{CallResult, ReadRequestHandler};
+use readyset_sql_passes::anonymize::anonymize_literals;
 use tracing::{debug, error, info, instrument, trace};
 use vec1::vec1;
 
@@ -564,7 +565,7 @@ impl NoriaConnector {
         let data = views
             .into_iter()
             .map(|(n, (mut q, always))| {
-                rewrite::anonymize_literals(&mut q);
+                anonymize_literals(&mut q);
                 vec![
                     DfValue::from(n.to_string()),
                     DfValue::from(q.to_string()),

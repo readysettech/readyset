@@ -519,27 +519,6 @@ pub fn number_placeholders(query: &mut SelectStatement) -> ReadySetResult<()> {
     Ok(())
 }
 
-/// This pass replaces every instance of `Literal`, except Placeholders, in the AST with
-/// `Literal::String("<anonymized>")`
-struct AnonymizeLiteralsVisitor;
-impl<'ast> Visitor<'ast> for AnonymizeLiteralsVisitor {
-    type Error = !;
-    fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
-        if !matches!(literal, Literal::Placeholder(_)) {
-            *literal = Literal::String("<anonymized>".to_owned());
-        }
-        Ok(())
-    }
-}
-
-/// Replaces every instance of `Literal` in the AST with `Literal::String("<anonymized>")`
-pub fn anonymize_literals(query: &mut SelectStatement) {
-    #[allow(clippy::unwrap_used)] // error is !, which can never be returned
-    AnonymizeLiteralsVisitor
-        .visit_select_statement(query)
-        .unwrap();
-}
-
 #[derive(Default)]
 struct AutoParametrizeVisitor {
     out: Vec<(usize, Literal)>,
@@ -1046,59 +1025,6 @@ mod tests {
         }
     }
 
-    mod anonymize {
-        use readyset::ViewCreateRequest;
-
-        use super::*;
-        use crate::query_status_cache::Query;
-
-        #[test]
-        fn simple_query() {
-            let query: Query = ViewCreateRequest::new(
-                parse_select_statement(
-                    "SELECT id + 3 FROM users WHERE credit_card_number = \"look at this PII\"",
-                ),
-                vec![],
-            )
-            .into();
-            let expected = parse_select_statement(
-                "SELECT id + \"<anonymized>\" FROM users WHERE credit_card_number = \"<anonymized>\""
-            ).to_string();
-            let query = query.to_anonymized_string();
-            assert_eq!(query, expected);
-        }
-
-        #[test]
-        fn partially_rewritten() {
-            let mut query = parse_select_statement(
-                "SELECT id + 3 FROM users WHERE credit_card_number = \"look at this PII\"",
-            );
-            let expected = parse_select_statement(
-                "SELECT id + \"<anonymized>\" FROM users WHERE credit_card_number = $1",
-            );
-            process_query(&mut query, false).expect("Should be able to rewrite query");
-            anonymize_literals(&mut query);
-            assert_eq!(query, expected);
-        }
-
-        #[test]
-        fn fully_rewritten() {
-            let mut query = parse_select_statement(
-                "SELECT id FROM users WHERE credit_card_number = \"look at this PII\" AND id = 3",
-            );
-            let expected = parse_select_statement(
-                "SELECT id FROM users WHERE credit_card_number = $1 AND id = $2",
-            );
-            process_query(&mut query, false).expect("Should be able to rewrite query");
-            assert_eq!(query.to_string(), expected.to_string());
-            anonymize_literals(&mut query);
-            assert_eq!(
-                query, expected,
-                "Anonymization shouldn't have caused any changes"
-            );
-        }
-    }
-
     mod parametrize {
         use super::*;
 
@@ -1332,6 +1258,29 @@ mod tests {
                     .collect(),
                 query,
             )
+        }
+        #[test]
+        fn rewrite_literals() {
+            let mut query = parse_select_statement(
+                "SELECT id FROM users WHERE credit_card_number = \"look at this PII\" AND id = 3",
+            );
+            let expected = parse_select_statement(
+                "SELECT id FROM users WHERE credit_card_number = $1 AND id = $2",
+            );
+
+            process_query(&mut query, false).expect("Should be able to rewrite query");
+            assert_eq!(query.to_string(), expected.to_string());
+        }
+
+        #[test]
+        fn single_literal() {
+            let mut query = parse_select_statement(
+                "SELECT id + 3 FROM users WHERE credit_card_number = \"look at this PII\"",
+            );
+            let expected =
+                parse_select_statement("SELECT id + 3 FROM users WHERE credit_card_number = $1");
+            process_query(&mut query, false).expect("Should be able to rewrite query");
+            assert_eq!(query, expected);
         }
 
         #[test]

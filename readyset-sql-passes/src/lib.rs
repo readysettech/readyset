@@ -1,6 +1,7 @@
 #![feature(box_patterns, result_flattening, never_type, exhaustive_patterns)]
 
 pub mod alias_removal;
+pub mod anonymize;
 mod count_star_rewrite;
 mod create_table_columns;
 mod detect_problematic_self_joins;
