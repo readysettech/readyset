@@ -322,7 +322,7 @@ pub(crate) fn insert_statement_parameter_columns(query: &InsertStatement) -> Vec
         .iter()
         .flat_map(|d| {
             d.iter().enumerate().filter_map(|(i, v)| match *v {
-                Literal::Placeholder(_) => Some(&query.fields.as_ref().unwrap()[i]),
+                Expr::Literal(Literal::Placeholder(_)) => Some(&query.fields.as_ref().unwrap()[i]),
                 _ => None,
             })
         })

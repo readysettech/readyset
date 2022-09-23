@@ -10,7 +10,7 @@ use itertools::Itertools;
 use launchpad::redacted::Sensitive;
 use nom_sql::{
     self, BinaryOperator, ColumnConstraint, DeleteStatement, Expr, InsertStatement, Relation,
-    SqlIdentifier, SqlQuery, SqlType, UpdateStatement,
+    SqlIdentifier, SqlQuery, SqlType, UnaryOperator, UpdateStatement,
 };
 use readyset::consistency::Timestamp;
 use readyset::internal::LocalNodeIndex;
@@ -623,7 +623,19 @@ impl NoriaConnector {
             .iter()
             .map(|row| {
                 row.iter()
-                    .map(DfValue::try_from)
+                    .map(|expr| match expr {
+                        Expr::Literal(lit) => DfValue::try_from(lit),
+                        // Ad-hoc handle unary negation (for logictests, to allow them to insert
+                        // negative values)
+                        Expr::UnaryOp {
+                            op: UnaryOperator::Neg,
+                            rhs: box Expr::Literal(lit),
+                        } => {
+                            let val = DfValue::try_from(lit)?;
+                            &val * &(-1).into()
+                        }
+                        _ => unsupported!("Only literal values are supported in expressions"),
+                    })
                     .collect::<Result<Vec<_>, _>>()
             })
             .collect::<Result<Vec<_>, _>>()?;

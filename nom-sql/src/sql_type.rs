@@ -8,7 +8,7 @@ use nom::bytes::complete::{tag, tag_no_case};
 use nom::character::complete::digit1;
 use nom::combinator::{map, map_parser, opt};
 use nom::error::{ErrorKind, ParseError};
-use nom::multi::fold_many0;
+use nom::multi::{fold_many0, separated_list0};
 use nom::sequence::{delimited, preceded, terminated, tuple};
 use nom::IResult;
 use proptest::strategy::Strategy;
@@ -17,9 +17,9 @@ use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 use triomphe::ThinArc;
 
-use crate::common::{value_list, Sign};
+use crate::common::{ws_sep_comma, Sign};
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, Literal};
+use crate::{literal, Dialect, Literal};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize, Arbitrary)]
 pub enum SqlType {
@@ -421,7 +421,7 @@ fn enum_type(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlType> {
         let (i, _) = whitespace0(i)?;
         let (i, _) = tag("(")(i)?;
         let (i, _) = whitespace0(i)?;
-        let (i, variants) = value_list(dialect)(i)?;
+        let (i, variants) = separated_list0(ws_sep_comma, literal(dialect))(i)?;
         let (i, _) = whitespace0(i)?;
         let (i, _) = tag(")")(i)?;
         Ok((i, SqlType::from_enum_variants(variants)))

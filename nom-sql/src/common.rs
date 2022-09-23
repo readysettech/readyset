@@ -20,7 +20,7 @@ use crate::dialect::Dialect;
 use crate::expression::expression;
 use crate::table::Relation;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{literal, Expr, FunctionExpr, Literal, SqlIdentifier};
+use crate::{Expr, FunctionExpr, Literal, SqlIdentifier};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum IndexType {
@@ -617,8 +617,8 @@ pub fn field_definition_expr(
 }
 
 // Parse a list of values (e.g., for INSERT syntax).
-pub fn value_list(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Literal>> {
-    move |i| separated_list0(ws_sep_comma, literal(dialect))(i)
+pub fn value_list(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Expr>> {
+    move |i| separated_list0(ws_sep_comma, expression(dialect))(i)
 }
 
 pub(crate) fn if_not_exists(i: &[u8]) -> IResult<&[u8], bool> {

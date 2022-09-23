@@ -498,7 +498,10 @@ mod tests {
             let expected = SqlQuery::Insert(InsertStatement {
                 table: Relation::from("users"),
                 fields: None,
-                data: vec![vec![42_u32.into(), "test".into()]],
+                data: vec![vec![
+                    Expr::Literal(42_u32.into()),
+                    Expr::Literal("test".into()),
+                ]],
                 ignore: false,
                 on_duplicate: None,
             });
@@ -569,7 +572,10 @@ mod tests {
             let expected = SqlQuery::Insert(InsertStatement {
                 table: Relation::from("users"),
                 fields: None,
-                data: vec![vec![42_u32.into(), "test".into()]],
+                data: vec![vec![
+                    Expr::Literal(42_u32.into()),
+                    Expr::Literal("test".into()),
+                ]],
                 ignore: false,
                 on_duplicate: None,
             });

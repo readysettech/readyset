@@ -136,12 +136,8 @@ impl Session {
         let mut query = query.clone();
         match &mut query {
             SqlQuery::Insert(q) => q.data.iter_mut().for_each(|row| {
-                row.iter_mut().for_each(|v| {
-                    values.push(mem::replace(
-                        v,
-                        Literal::Placeholder(ItemPlaceholder::QuestionMark),
-                    ))
-                })
+                row.iter_mut()
+                    .for_each(|v| values.extend(v.replace_literals()))
             }),
             SqlQuery::Update(q) => {
                 for (_, v) in q.fields.iter_mut() {

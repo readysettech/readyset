@@ -815,7 +815,7 @@ pub fn walk_insert_statement<'a, V: Visitor<'a>>(
 
     for row in &mut insert_statement.data {
         for val in row {
-            visitor.visit_literal(val)?;
+            visitor.visit_expr(val)?;
         }
     }
 

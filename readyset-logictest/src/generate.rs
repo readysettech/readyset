@@ -285,7 +285,9 @@ impl Seed {
                         .map(|mut row| {
                             columns
                                 .iter()
-                                .map(|col| row.remove(col).unwrap().try_into().unwrap())
+                                .map(|col| {
+                                    Expr::Literal(row.remove(col).unwrap().try_into().unwrap())
+                                })
                                 .collect()
                         })
                         .collect(),
