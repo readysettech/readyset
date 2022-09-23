@@ -60,22 +60,12 @@ fn telemetry_url(path: &str) -> Url {
     Url::parse(TELEMETRY_BASE_URL).unwrap().join(path).unwrap()
 }
 
-#[derive(Debug, Clone, Default)]
-enum DeploymentEnv {
-    #[default]
-    Unknown,
-
-    InstallerCompose,
-    Eks,
-    Helm,
-}
-
 impl From<String> for DeploymentEnv {
     fn from(s: String) -> Self {
         match s.as_str() {
-            "InstallerCompose" => DeploymentEnv::InstallerCompose,
-            "Eks" => DeploymentEnv::Eks,
-            "Helm" => DeploymentEnv::Helm,
+            "installer_compose" => DeploymentEnv::InstallerCompose,
+            "eks" => DeploymentEnv::Eks,
+            "helm" => DeploymentEnv::Helm,
             _ => DeploymentEnv::Unknown,
         }
     }
@@ -132,7 +122,7 @@ impl TelemetryReporter {
             properties: Properties {
                 telemetry,
                 commit_id: COMMIT_ID,
-                deployment_env: &format!("{:?}", &self.deployment_env),
+                deployment_env: self.deployment_env,
             },
         })
     }

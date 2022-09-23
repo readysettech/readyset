@@ -52,6 +52,17 @@ pub enum TelemetryEvent {
     UpstreamConnected,
 }
 
+#[derive(Clone, Copy, Default, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeploymentEnv {
+    #[default]
+    Unknown,
+
+    InstallerCompose,
+    Eks,
+    Helm,
+}
+
 /// ReadySet-specific telemetry. Provide only the fields you need.
 ///
 /// We need to keep publicly documented exactly what telemetry ReadySet gathers from its users.
@@ -95,7 +106,7 @@ pub struct Properties<'a> {
 
     // Properties auto-populated by the reporter
     pub commit_id: &'a str,
-    pub deployment_env: &'a str,
+    pub deployment_env: DeploymentEnv,
 }
 
 /// Top-level wrapper for ReadySet-specifc Segment Track message

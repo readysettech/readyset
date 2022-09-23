@@ -126,7 +126,7 @@ readyset:
       authorityType: "consul"
 
       # -- Deployment environment. Identifies this as a Helm deployment.
-      deploymentEnv: "Helm"
+      deploymentEnv: "helm"
 
     # -- Secrets shared amongst ReadySet containers deployed in this chart.
     # @default -- Truncated due to length.
