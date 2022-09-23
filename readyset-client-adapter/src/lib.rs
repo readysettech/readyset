@@ -736,6 +736,7 @@ where
                 .query_max_failure_seconds(options.query_max_failure_seconds)
                 .telemetry_sender(telemetry_sender.clone())
                 .fallback_recovery_seconds(options.fallback_recovery_seconds);
+            let telemetry_sender = telemetry_sender.clone();
 
             // Initialize the reader layer for the adapter.
             let r = (options.standalone || options.embedded_readers).then(|| {
@@ -769,6 +770,13 @@ where
 
                 match upstream_res {
                     Ok(mut upstream) => {
+                        if let Err(e) = telemetry_sender
+                            .send_event(TelemetryEvent::UpstreamConnected)
+                            .await
+                        {
+                            warn!(error = %e, "Failed to send upstream connected metric");
+                        }
+
                         // Query the upstream for its currently-configured schema search path
                         //
                         // NOTE: when we start tracking all configuration parameters, this should be

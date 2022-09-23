@@ -47,6 +47,9 @@ pub enum TelemetryEvent {
 
     /// The replicator completed a snapshot operation
     SnapshotComplete,
+
+    /// The adapter connected to the upstream database
+    UpstreamConnected,
 }
 
 /// ReadySet-specific telemetry. Provide only the fields you need.
