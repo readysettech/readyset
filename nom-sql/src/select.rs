@@ -1705,7 +1705,10 @@ mod tests {
                         FieldDefinitionExpr::from(
                             Expr::Literal(Literal::String("foo".to_owned()),)
                         ),
-                        FieldDefinitionExpr::from(Expr::Literal(Literal::CurrentTime,)),
+                        FieldDefinitionExpr::from(Expr::Call(FunctionExpr::Call {
+                            name: "CURRENT_TIME".into(),
+                            arguments: vec![]
+                        })),
                     ],
                     ..Default::default()
                 }
@@ -1834,7 +1837,10 @@ mod tests {
                         FieldDefinitionExpr::from(
                             Expr::Literal(Literal::String("foo".to_owned()),)
                         ),
-                        FieldDefinitionExpr::from(Expr::Literal(Literal::CurrentTime,)),
+                        FieldDefinitionExpr::from(Expr::Call(FunctionExpr::Call {
+                            name: "CURRENT_TIME".into(),
+                            arguments: vec![]
+                        })),
                     ],
                     ..Default::default()
                 }

@@ -1006,30 +1006,6 @@ impl<'a> TryFrom<&'a Literal> for DfValue {
             Literal::Integer(i) => Ok((*i).into()),
             Literal::UnsignedInteger(i) => Ok((*i).into()),
             Literal::String(s) => Ok(s.as_str().into()),
-            Literal::CurrentTimestamp | Literal::CurrentTime => {
-                let ts = time::OffsetDateTime::now_utc();
-                if let Some(dt) =
-                    NaiveDate::from_ymd_opt(ts.year(), ts.month() as u32, ts.day() as u32)
-                {
-                    Ok(DfValue::TimestampTz(
-                        dt.and_hms_nano(
-                            ts.hour() as u32,
-                            ts.minute() as u32,
-                            ts.second() as u32,
-                            ts.nanosecond(),
-                        )
-                        .into(),
-                    ))
-                } else {
-                    Ok(DfValue::None)
-                }
-            }
-            Literal::CurrentDate => {
-                let ts = time::OffsetDateTime::now_utc();
-                let nd = NaiveDate::from_ymd(ts.year(), ts.month() as u32, ts.day() as u32)
-                    .and_hms(0, 0, 0);
-                Ok(DfValue::TimestampTz(nd.into()))
-            }
             Literal::Float(ref float) => Ok(DfValue::Float(float.value)),
             Literal::Double(ref double) => Ok(DfValue::Double(double.value)),
             Literal::Numeric(i, s) => Decimal::try_from_i128_with_scale(*i, *s)

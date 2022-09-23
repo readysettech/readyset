@@ -389,7 +389,45 @@ fn delim_fx_args(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Expr>
     }
 }
 
-pub fn column_function(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FunctionExpr> {
+fn function_call_without_parens(i: &[u8]) -> IResult<&[u8], FunctionExpr> {
+    // Some functions can be called without parentheses, in both mysql and postgres
+    let (i, name) = map(
+        alt((
+            tag_no_case("now"),
+            tag_no_case("current_date"),
+            tag_no_case("current_timestamp"),
+            tag_no_case("current_time"),
+            tag_no_case("localtimestamp"),
+            tag_no_case("localtime"),
+        )),
+        |n: &[u8]| String::from_utf8(n.to_vec()).expect("Only constant string literals"),
+    )(i)?;
+
+    Ok((
+        i,
+        FunctionExpr::Call {
+            name,
+            arguments: vec![],
+        },
+    ))
+}
+
+fn function_call(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FunctionExpr> {
+    move |i| {
+        let (i, name) = dialect.function_identifier()(i)?;
+        let (i, _) = whitespace0(i)?;
+        let (i, arguments) = delim_fx_args(dialect)(i)?;
+        Ok((
+            i,
+            FunctionExpr::Call {
+                name: name.into(),
+                arguments,
+            },
+        ))
+    }
+}
+
+pub fn function_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FunctionExpr> {
     move |i| {
         alt((
             map(tag_no_case("count(*)"), |_| FunctionExpr::CountStar),
@@ -436,17 +474,8 @@ pub fn column_function(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Fun
                     }
                 },
             ),
-            map(
-                tuple((
-                    dialect.function_identifier(),
-                    whitespace0,
-                    delim_fx_args(dialect),
-                )),
-                |(name, _, arguments)| FunctionExpr::Call {
-                    name: name.to_string(),
-                    arguments,
-                },
-            ),
+            function_call(dialect),
+            function_call_without_parens,
         ))(i)
     }
 }
@@ -720,7 +749,7 @@ mod tests {
             expr: Box::new(Expr::Column(Column::from("x"))),
             separator: ", ".to_owned(),
         };
-        let res = column_function(Dialect::MySQL)(qs);
+        let res = function_expr(Dialect::MySQL)(qs);
         assert_eq!(res.unwrap().1, expected);
     }
 
@@ -733,7 +762,7 @@ mod tests {
             "coalesce(a, b,c)".as_bytes(),
         ];
         for q in qlist.iter() {
-            let res = column_function(Dialect::MySQL)(q);
+            let res = function_expr(Dialect::MySQL)(q);
             let expected = FunctionExpr::Call {
                 name: "coalesce".to_string(),
                 arguments: vec![
@@ -748,7 +777,7 @@ mod tests {
 
     #[test]
     fn nested_function_call() {
-        let res = test_parse!(column_function(Dialect::MySQL), b"max(min(foo))");
+        let res = test_parse!(function_expr(Dialect::MySQL), b"max(min(foo))");
         assert_eq!(
             res,
             FunctionExpr::Max(Box::new(Expr::Call(FunctionExpr::Min(Box::new(
@@ -759,7 +788,7 @@ mod tests {
 
     #[test]
     fn nested_cast() {
-        let res = test_parse!(column_function(Dialect::MySQL), b"max(cast(foo as int))");
+        let res = test_parse!(function_expr(Dialect::MySQL), b"max(cast(foo as int))");
         assert_eq!(
             res,
             FunctionExpr::Max(Box::new(Expr::Cast {
@@ -772,7 +801,7 @@ mod tests {
 
     #[test]
     fn generic_function_with_int_literal() {
-        let (_, res) = column_function(Dialect::MySQL)(b"ifnull(x, 0)").unwrap();
+        let (_, res) = function_expr(Dialect::MySQL)(b"ifnull(x, 0)").unwrap();
         assert_eq!(
             res,
             FunctionExpr::Call {
@@ -824,7 +853,7 @@ mod tests {
                 "coalesce(\"a\", b,c)".as_bytes(),
             ];
             for q in qlist.iter() {
-                let res = column_function(Dialect::MySQL)(q);
+                let res = function_expr(Dialect::MySQL)(q);
                 let expected = FunctionExpr::Call {
                     name: "coalesce".to_string(),
                     arguments: vec![
@@ -863,6 +892,18 @@ mod tests {
             assert_eq!(res1, expected);
             assert_eq!(res2, expected);
         }
+
+        #[test]
+        fn call_now_without_parens() {
+            let res = test_parse!(function_expr(Dialect::MySQL), b"NOW");
+            assert_eq!(
+                res,
+                FunctionExpr::Call {
+                    name: "NOW".into(),
+                    arguments: vec![]
+                }
+            );
+        }
     }
 
     mod postgres {
@@ -892,7 +933,7 @@ mod tests {
                 "coalesce('a', b,c)".as_bytes(),
             ];
             for q in qlist.iter() {
-                let res = column_function(Dialect::PostgreSQL)(q);
+                let res = function_expr(Dialect::PostgreSQL)(q);
                 let expected = FunctionExpr::Call {
                     name: "coalesce".to_string(),
                     arguments: vec![

@@ -359,17 +359,11 @@ mod tests {
         }
 
         #[test]
-        #[ignore] // TODO
         fn default_now() {
             let (_, res1) =
                 column_specification(Dialect::PostgreSQL)(b"c timestamp NOT NULL DEFAULT NOW()")
                     .unwrap();
 
-            let (_, res2) =
-                column_specification(Dialect::PostgreSQL)(b"c timestamp NOT NULL DEFAULT NOW")
-                    .unwrap();
-
-            assert_eq!(res1, res2);
             assert_eq!(
                 res1,
                 ColumnSpecification {
@@ -381,7 +375,10 @@ mod tests {
                     comment: None,
                     constraints: vec![
                         ColumnConstraint::NotNull,
-                        ColumnConstraint::DefaultValue(Expr::Literal(Literal::CurrentTimestamp)),
+                        ColumnConstraint::DefaultValue(Expr::Call(FunctionExpr::Call {
+                            name: "NOW".into(),
+                            arguments: vec![]
+                        })),
                     ]
                 }
             );

@@ -14,7 +14,7 @@ use std::{cmp, vec};
 
 use anyhow::{anyhow, bail};
 use bit_vec::BitVec;
-use chrono::{NaiveDate, NaiveTime, Utc};
+use chrono::{NaiveDate, NaiveTime};
 use derive_more::{From, TryInto};
 use itertools::Itertools;
 use mysql_common::chrono::NaiveDateTime;
@@ -283,9 +283,6 @@ impl TryFrom<Literal> for Value {
             Literal::Blob(v) => {
                 Value::Text(String::from_utf8(v).map_err(|e| ValueConversionError(e.to_string()))?)
             }
-            Literal::CurrentTime => Value::Time(Utc::now().naive_utc().time().into()),
-            Literal::CurrentDate => Value::Date(Utc::now().naive_utc()),
-            Literal::CurrentTimestamp => Value::Date(Utc::now().naive_utc()),
             Literal::ByteArray(b) => Value::ByteArray(b),
             Literal::BitVector(b) => Value::BitVector(BitVec::from_bytes(b.as_slice())),
             Literal::Array(_) => {

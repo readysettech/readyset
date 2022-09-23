@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
 use crate::case::case_when;
-use crate::common::{column_function, column_identifier_no_alias, ws_sep_comma};
+use crate::common::{column_identifier_no_alias, function_expr, ws_sep_comma};
 use crate::literal::literal;
 use crate::select::nested_selection;
 use crate::set::{variable_scope_prefix, Variable};
@@ -677,7 +677,7 @@ where
 fn in_lhs(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
     move |i| {
         alt((
-            map(column_function(dialect), Expr::Call),
+            map(function_expr(dialect), Expr::Call),
             map(literal(dialect), Expr::Literal),
             case_when(dialect),
             map(column_identifier_no_alias(dialect), Expr::Column),
@@ -728,7 +728,7 @@ fn between_operand(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
     move |i| {
         alt((
             parenthesized_expr(dialect),
-            map(column_function(dialect), Expr::Call),
+            map(function_expr(dialect), Expr::Call),
             map(literal(dialect), Expr::Literal),
             case_when(dialect),
             map(column_identifier_no_alias(dialect), Expr::Column),
@@ -867,7 +867,7 @@ pub(crate) fn simple_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], 
             exists_expr(dialect),
             between_expr(dialect),
             in_expr(dialect),
-            map(column_function(dialect), Expr::Call),
+            map(function_expr(dialect), Expr::Call),
             map(literal(dialect), Expr::Literal),
             case_when(dialect),
             map(column_identifier_no_alias(dialect), Expr::Column),

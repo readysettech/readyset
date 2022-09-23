@@ -159,7 +159,7 @@ mod tests {
         use crate::column::Column;
         use crate::literal::ItemPlaceholder;
         use crate::table::Relation;
-        use crate::BinaryOperator;
+        use crate::{BinaryOperator, FunctionExpr};
 
         #[test]
         fn simple_insert() {
@@ -183,11 +183,13 @@ mod tests {
 
         #[test]
         fn complex_insert() {
-            let qstring = "INSERT INTO users VALUES (42, 'test', 'test', CURRENT_TIMESTAMP);";
+            let res = test_parse!(
+                insertion(Dialect::MySQL),
+                b"INSERT INTO users VALUES (42, 'test', 'test', CURRENT_TIMESTAMP);"
+            );
 
-            let res = insertion(Dialect::MySQL)(qstring.as_bytes());
             assert_eq!(
-                res.unwrap().1,
+                res,
                 InsertStatement {
                     table: Relation::from("users"),
                     fields: None,
@@ -195,7 +197,10 @@ mod tests {
                         Expr::Literal(42_u32.into()),
                         Expr::Literal("test".into()),
                         Expr::Literal("test".into()),
-                        Expr::Literal(Literal::CurrentTimestamp),
+                        Expr::Call(FunctionExpr::Call {
+                            name: "CURRENT_TIMESTAMP".into(),
+                            arguments: vec![]
+                        }),
                     ],],
                     on_duplicate: None,
                     ignore: false
@@ -349,7 +354,7 @@ mod tests {
         use super::*;
         use crate::column::Column;
         use crate::table::Relation;
-        use crate::BinaryOperator;
+        use crate::{BinaryOperator, FunctionExpr};
 
         #[test]
         fn simple_insert() {
@@ -385,7 +390,10 @@ mod tests {
                         Expr::Literal(42_u32.into()),
                         Expr::Literal("test".into()),
                         Expr::Literal("test".into()),
-                        Expr::Literal(Literal::CurrentTimestamp),
+                        Expr::Call(FunctionExpr::Call {
+                            name: "CURRENT_TIMESTAMP".into(),
+                            arguments: vec![],
+                        }),
                     ],],
                     on_duplicate: None,
                     ignore: false,

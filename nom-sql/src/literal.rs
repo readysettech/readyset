@@ -111,9 +111,6 @@ pub enum Literal {
     String(String),
     #[weight(0)]
     Blob(Vec<u8>),
-    CurrentTime,
-    CurrentDate,
-    CurrentTimestamp,
     // Even though `ByteArray` has the same inner representation as `Blob`,
     // we want to distinguish them, so then we can avoid doing a trial-and-error
     // to try to determine to which DfValue it corresponds to.
@@ -206,9 +203,6 @@ impl Display for Literal {
                     .collect::<Vec<String>>()
                     .join(" ")
             ),
-            Literal::CurrentTime => write!(f, "CURRENT_TIME"),
-            Literal::CurrentDate => write!(f, "CURRENT_DATE"),
-            Literal::CurrentTimestamp => write!(f, "CURRENT_TIMESTAMP"),
             Literal::ByteArray(b) => {
                 write!(f, "E'\\x{}'", b.iter().map(|v| format!("{:x}", v)).join(""))
             }
@@ -479,11 +473,6 @@ fn simple_literal(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Literal>
                 Literal::BitVector(bits.to_bytes())
             }),
             map(tag_no_case("null"), |_| Literal::Null),
-            map(tag_no_case("current_timestamp"), |_| {
-                Literal::CurrentTimestamp
-            }),
-            map(tag_no_case("current_date"), |_| Literal::CurrentDate),
-            map(tag_no_case("current_time"), |_| Literal::CurrentTime),
         ))(i)
     }
 }
