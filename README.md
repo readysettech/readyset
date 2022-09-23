@@ -34,7 +34,7 @@ From there, you can monitor the performance of your queries using the ReadySet d
 
 ## Getting Started
 
-### Deploy ReadySet
+### Try ReadySet in 5 mins
 The ReadySet orchestrator is a command line tool that uses Docker Compose to spin up a ReadySet instance on your local machine. The following command downloads and runs the ReadySet orchestrator:
 
 ```
