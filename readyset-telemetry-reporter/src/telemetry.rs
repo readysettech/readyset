@@ -44,6 +44,9 @@ pub enum TelemetryEvent {
 
     /// SHOW PROXIED QUERIES statement was executed
     ShowProxiedQueries,
+
+    /// The replicator completed a snapshot operation
+    SnapshotComplete,
 }
 
 /// ReadySet-specific telemetry. Provide only the fields you need.

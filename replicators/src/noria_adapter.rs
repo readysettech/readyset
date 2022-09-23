@@ -22,7 +22,7 @@ use readyset::recipe::changelist::{Change, ChangeList};
 use readyset::replication::{ReplicationOffset, ReplicationOffsets};
 use readyset::{ReadySetError, ReadySetHandle, ReadySetResult, Table, TableOperation};
 use readyset_errors::{internal_err, invalid_err};
-use readyset_telemetry_reporter::TelemetrySender;
+use readyset_telemetry_reporter::{TelemetryEvent, TelemetrySender};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 use tracing::{debug, error, info, info_span, trace, warn, Instrument};
@@ -240,7 +240,7 @@ impl NoriaAdapter {
         mut config: Config,
         ready_notify: &mut Option<Arc<Notify>>,
         resnapshot: bool,
-        _telemetry_sender: &TelemetrySender,
+        telemetry_sender: &TelemetrySender,
     ) -> ReadySetResult<!> {
         use crate::mysql_connector::BinlogPosition;
 
@@ -368,6 +368,9 @@ impl NoriaAdapter {
         if let Some(notify) = ready_notify.take() {
             notify.notify_one();
         }
+        let _ = telemetry_sender
+            .send_event(TelemetryEvent::SnapshotComplete)
+            .await;
 
         adapter.main_loop(&mut current_pos, None).await?;
 
@@ -380,7 +383,7 @@ impl NoriaAdapter {
         mut config: Config,
         ready_notify: &mut Option<Arc<Notify>>,
         resnapshot: bool,
-        _telemetry_sender: &TelemetrySender,
+        telemetry_sender: &TelemetrySender,
     ) -> ReadySetResult<!> {
         let dbname = pgsql_opts.get_dbname().ok_or_else(|| {
             ReadySetError::ReplicationFailed("No database specified for replication".to_string())
@@ -482,6 +485,9 @@ impl NoriaAdapter {
         if let Some(notify) = ready_notify.take() {
             notify.notify_one();
         }
+        let _ = telemetry_sender
+            .send_event(TelemetryEvent::SnapshotComplete)
+            .await;
 
         connector
             .start_replication(REPLICATION_SLOT, PUBLICATION_NAME)
