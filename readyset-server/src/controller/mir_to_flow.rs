@@ -403,7 +403,7 @@ fn adapt_base_node(
     for a in add.iter() {
         let mut default_value = DfValue::None;
         for c in &a.constraints {
-            if let ColumnConstraint::DefaultValue(dv) = c {
+            if let ColumnConstraint::DefaultValue(Expr::Literal(dv)) = c {
                 default_value = dv.try_into()?;
                 break;
             }
@@ -469,7 +469,7 @@ fn make_base_node(
         .iter()
         .map(|&(ref cs, _)| {
             for c in &cs.constraints {
-                if let ColumnConstraint::DefaultValue(ref dv) = *c {
+                if let ColumnConstraint::DefaultValue(Expr::Literal(ref dv)) = *c {
                     return dv.try_into();
                 }
             }

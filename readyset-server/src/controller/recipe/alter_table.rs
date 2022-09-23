@@ -1,6 +1,6 @@
 use nom_sql::{
     AlterColumnOperation, AlterTableDefinition, AlterTableStatement, ColumnConstraint,
-    CreateTableStatement, TableKey,
+    CreateTableStatement, Expr, TableKey,
 };
 use readyset_errors::{unsupported, ReadySetError, ReadySetResult};
 
@@ -61,11 +61,11 @@ pub(super) fn rewrite_table_definition(
                                 .find(|c| matches!(c, ColumnConstraint::DefaultValue(_)))
                             {
                                 Some(ColumnConstraint::DefaultValue(ref mut def)) => {
-                                    *def = lit.clone();
+                                    *def = Expr::Literal(lit.clone());
                                 }
-                                _ => col
-                                    .constraints
-                                    .push(ColumnConstraint::DefaultValue(lit.clone())),
+                                _ => col.constraints.push(ColumnConstraint::DefaultValue(
+                                    Expr::Literal(lit.clone()),
+                                )),
                             }
                         }
                         AlterColumnOperation::DropColumnDefault => {
@@ -316,7 +316,10 @@ mod tests {
         let constraint = &column_spec.constraints[1];
         match constraint {
             ColumnConstraint::DefaultValue(ref val) => {
-                assert_eq!(val.clone(), Literal::String("default_name".to_string()));
+                assert_eq!(
+                    val.clone(),
+                    Expr::Literal(Literal::String("default_name".to_string()))
+                );
             }
             _ => panic!("expected DefaultValue"),
         }

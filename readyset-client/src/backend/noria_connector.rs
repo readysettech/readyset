@@ -9,7 +9,7 @@ use dataflow_expression::Expr as DfExpr;
 use itertools::Itertools;
 use launchpad::redacted::Sensitive;
 use nom_sql::{
-    self, BinaryOperator, ColumnConstraint, DeleteStatement, InsertStatement, Relation,
+    self, BinaryOperator, ColumnConstraint, DeleteStatement, Expr, InsertStatement, Relation,
     SqlIdentifier, SqlQuery, SqlType, UpdateStatement,
 };
 use readyset::consistency::Timestamp;
@@ -1128,18 +1128,21 @@ impl NoriaConnector {
 
             // handle default values
             trace!("insert::default values");
-            let mut default_value_columns: Vec<_> = schema
-                .fields
-                .iter()
-                .filter_map(|c| {
-                    for cc in &c.constraints {
-                        if let ColumnConstraint::DefaultValue(ref v) = *cc {
-                            return Some((c.column.clone(), v.clone()));
+            let mut default_value_columns = vec![];
+            for c in &schema.fields {
+                for cc in &c.constraints {
+                    if let ColumnConstraint::DefaultValue(ref def) = *cc {
+                        match def {
+                            Expr::Literal(v) => {
+                                default_value_columns.push((c.column.clone(), v.clone()))
+                            }
+                            _ => {
+                                unsupported!("Only literal values are supported in default values")
+                            }
                         }
                     }
-                    None
-                })
-                .collect();
+                }
+            }
 
             trace!("insert::construct ops");
 

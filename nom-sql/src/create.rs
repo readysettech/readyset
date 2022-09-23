@@ -1474,7 +1474,9 @@ mod tests {
                             SqlType::Int(Some(5)),
                             vec![
                                 ColumnConstraint::NotNull,
-                                ColumnConstraint::DefaultValue(Literal::String(String::from("0"))),
+                                ColumnConstraint::DefaultValue(Expr::Literal(Literal::String(
+                                    String::from("0")
+                                ))),
                             ],
                         ),
                         ColumnSpecification::with_constraints(
@@ -1482,7 +1484,9 @@ mod tests {
                             SqlType::VarChar(Some(40)),
                             vec![
                                 ColumnConstraint::NotNull,
-                                ColumnConstraint::DefaultValue(Literal::String(String::from(""))),
+                                ColumnConstraint::DefaultValue(Expr::Literal(Literal::String(
+                                    String::from("")
+                                ))),
                             ],
                         ),
                     ],
@@ -1881,7 +1885,9 @@ mod tests {
                             SqlType::Int(Some(5)),
                             vec![
                                 ColumnConstraint::NotNull,
-                                ColumnConstraint::DefaultValue(Literal::String(String::from("0"))),
+                                ColumnConstraint::DefaultValue(Expr::Literal(Literal::String(
+                                    String::from("0")
+                                ))),
                             ],
                         ),
                         ColumnSpecification::with_constraints(
@@ -1889,7 +1895,9 @@ mod tests {
                             SqlType::VarChar(Some(40)),
                             vec![
                                 ColumnConstraint::NotNull,
-                                ColumnConstraint::DefaultValue(Literal::String(String::from(""))),
+                                ColumnConstraint::DefaultValue(Expr::Literal(Literal::String(
+                                    String::from("")
+                                ))),
                             ],
                         ),
                     ],
@@ -2021,7 +2029,7 @@ mod tests {
                         SqlType::VarChar(Some(150)),
                         vec![
                             ColumnConstraint::Collation("utf8mb4_unicode_ci".into()),
-                            ColumnConstraint::DefaultValue(Literal::Null),
+                            ColumnConstraint::DefaultValue(Expr::Literal(Literal::Null)),
                         ]
                     ),
                     ColumnSpecification::with_constraints(
@@ -2029,7 +2037,7 @@ mod tests {
                         SqlType::VarChar(Some(45)),
                         vec![
                             ColumnConstraint::Collation("utf8mb4_unicode_ci".into()),
-                            ColumnConstraint::DefaultValue(Literal::Null),
+                            ColumnConstraint::DefaultValue(Expr::Literal(Literal::Null)),
                         ]
                     ),
                     ColumnSpecification::with_constraints(
@@ -2037,7 +2045,7 @@ mod tests {
                         SqlType::VarChar(Some(255)),
                         vec![
                             ColumnConstraint::Collation("utf8mb4_unicode_ci".into()),
-                            ColumnConstraint::DefaultValue(Literal::Null),
+                            ColumnConstraint::DefaultValue(Expr::Literal(Literal::Null)),
                         ]
                     ),
                 ],

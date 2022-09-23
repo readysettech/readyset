@@ -727,7 +727,7 @@ pub fn walk_column_constraint<'a, V: Visitor<'a>>(
     column_constraint: &'a mut ColumnConstraint,
 ) -> Result<(), V::Error> {
     match column_constraint {
-        ColumnConstraint::DefaultValue(lit) => visitor.visit_literal(lit),
+        ColumnConstraint::DefaultValue(expr) => visitor.visit_expr(expr),
         ColumnConstraint::Null
         | ColumnConstraint::NotNull
         | ColumnConstraint::CharacterSet(_)
