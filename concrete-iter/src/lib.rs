@@ -13,8 +13,8 @@ use syn::visit::{self, Visit};
 use syn::visit_mut::{self, VisitMut};
 use syn::{
     parse_macro_input, parse_quote, parse_quote_spanned, Arm, Expr, GenericArgument, GenericParam,
-    Ident, ItemEnum, ItemFn, ItemImpl, Path, PathArguments, ReturnType, Type, TypeParam,
-    TypeParamBound, Variant,
+    Ident, ItemEnum, ItemFn, ItemImpl, Lifetime, LifetimeDef, Path, PathArguments, ReturnType,
+    Type, TypeParam, TypeParamBound, Variant,
 };
 
 /// Try to sniff out the `T` in `impl Iterator<Item = T> + ...`.
@@ -142,16 +142,41 @@ fn generate_enum(num_variants: usize) -> ItemEnum {
     }
 }
 
+/// Collect all the named lifetimes in `ty`
+fn find_lifetimes(ty: &Type) -> Vec<Lifetime> {
+    #[derive(Default)]
+    struct LifetimeVisitor {
+        out: Vec<Lifetime>,
+    }
+
+    impl<'ast> Visit<'ast> for LifetimeVisitor {
+        fn visit_lifetime(&mut self, i: &'ast Lifetime) {
+            self.out.push(i.clone());
+        }
+    }
+
+    let mut visitor = LifetimeVisitor::default();
+    visitor.visit_type(ty);
+    visitor.out
+}
+
 /// Generate an `impl Iterator` for the enum type, with the given number of variants and `Item`
 /// type.
-fn generate_iterator_impl(num_variants: usize, item_ty: Type) -> ItemImpl {
+fn generate_iterator_impl(
+    num_variants: usize,
+    item_ty: Type,
+    lifetime_params: Vec<Lifetime>,
+) -> ItemImpl {
     let type_param_names = (0..num_variants)
         .map(|idx| Ident::new(&format!("T{idx}"), Span::mixed_site()))
         .collect::<Vec<_>>();
 
-    let generic_param_bounds: Punctuated<_, Comma> = type_param_names
-        .iter()
-        .map(|tn| -> GenericParam { parse_quote!(#tn : ::std::iter::Iterator<Item = #item_ty>) })
+    let generic_param_bounds: Punctuated<_, Comma> = lifetime_params
+        .into_iter()
+        .map(|lt| GenericParam::from(LifetimeDef::new(lt)))
+        .chain(type_param_names.iter().map(|tn| -> GenericParam {
+            parse_quote!(#tn : ::std::iter::Iterator<Item = #item_ty>)
+        }))
         .collect();
 
     let generic_param_args: Punctuated<_, Comma> = type_param_names
@@ -239,6 +264,43 @@ fn generate_iterator_impl(num_variants: usize, item_ty: Type) -> ItemImpl {
 ///     [4, 5, 6].into()
 /// );
 /// ```
+///
+/// If your iterator returns references to `self`, lifetimes must be explicitly specified (lifetime
+/// elision is not yet supported):
+///
+/// ```
+/// # use std::collections::HashSet;
+/// # use std::iter;
+/// # use concrete_iter::concrete_iter;
+/// enum MyEnum {
+///     LotsOfVals(Vec<String>),
+///     SetOfVals(HashSet<String>),
+/// }
+///
+/// impl MyEnum {
+///     #[concrete_iter]
+///     pub fn vals<'a>(&'a self) -> impl Iterator<Item = &'a str> {
+///         match *self {
+///             Self::LotsOfVals(ref vs) => concrete_iter!(vs.iter().map(|s| s.as_str())),
+///             Self::SetOfVals(ref vs) => concrete_iter!(vs.iter().map(|s| s.as_str())),
+///         }
+///     }
+/// }
+///
+/// assert_eq!(
+///     MyEnum::LotsOfVals(vec!["a".into(), "b".into(), "c".into()])
+///         .vals()
+///         .collect::<Vec<_>>(),
+///     vec!["a", "b", "c"]
+/// );
+///
+/// assert_eq!(
+///     MyEnum::SetOfVals(["a".into(), "b".into(), "c".into()].into())
+///         .vals()
+///         .collect::<HashSet<_>>(),
+///     ["a", "b", "c"].into()
+/// );
+/// ```
 #[proc_macro_attribute]
 pub fn concrete_iter(_args: TokenStream, item: TokenStream) -> TokenStream {
     let mut item = parse_macro_input!(item as ItemFn);
@@ -254,7 +316,8 @@ pub fn concrete_iter(_args: TokenStream, item: TokenStream) -> TokenStream {
 
     expand_concrete_iter(&mut item);
     let enum_defn = generate_enum(num_variants);
-    let iterator_impl = generate_iterator_impl(num_variants, item_ty);
+    let lifetime_params = find_lifetimes(&item_ty);
+    let iterator_impl = generate_iterator_impl(num_variants, item_ty, lifetime_params);
 
     let orig_body = *item.block;
     let body = parse_quote! {{
