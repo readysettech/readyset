@@ -159,15 +159,15 @@ impl ReplayPaths {
         })
     }
 
-    /// Construct an iterator over all downstream paths and keys which "depend on" the given keys in
-    /// the given index, and hence need to be evicted after those keys are evicted.
+    /// Return a list of all downstream paths and keys which "depend on" the given keys in the given
+    /// index, and hence need to be evicted after those keys are evicted.
     pub(super) fn downstream_dependent_paths<'a>(
         &'a self,
         node: LocalNodeIndex,
         index: &'a Index,
         keys: &'a [KeyComparison],
-        remapped_keys: &'a RemappedKeys,
-    ) -> impl Iterator<Item = (Tag, &'a ReplayPath, Cow<'a, [KeyComparison]>)> + 'a {
+        remapped_keys: &mut RemappedKeys,
+    ) -> Vec<(Tag, &'a ReplayPath, Cow<'a, [KeyComparison]>)> {
         // TODO: this is a linear walk of replay paths -- we should make that not linear
         self.by_tag
             .iter()
@@ -177,7 +177,7 @@ impl ReplayPaths {
                     TriggerEndpoint::Local(key) | TriggerEndpoint::Start(key) => {
                         let maybe_downstream_keys = path.target_node().and_then(|target| {
                             path.target_index.as_ref().and_then(|target_index| {
-                                remapped_keys.get(
+                                remapped_keys.remove(
                                     path.last_segment().node,
                                     target,
                                     &target_index.columns,
@@ -188,7 +188,7 @@ impl ReplayPaths {
 
                         if let Some(downstream) = maybe_downstream_keys {
                             Either::Left(downstream.map(move |(tag, keys)| {
-                                (tag, self.get(tag).unwrap(), Cow::Borrowed(keys))
+                                (tag, self.get(tag).unwrap(), Cow::Owned(keys))
                             }))
                         } else if key == index {
                             // TODO: what if the key is the same, but with the columns in another
@@ -205,6 +205,7 @@ impl ReplayPaths {
                     _ => Either::Right(Either::Right(iter::empty())),
                 }
             })
+            .collect()
     }
 
     /// If the given set of columns in the given node are generated, return the tag for the replay

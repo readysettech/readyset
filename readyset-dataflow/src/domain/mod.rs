@@ -532,19 +532,22 @@ impl RemappedKeys {
     /// If `node` rewrites some of its downstream keys into upstream upqueries to `column` in a
     /// `target` node, look up the set of downstream tags and keys which have been rewritten to
     /// `keys`.
-    fn get(
-        &self,
+    fn remove(
+        &mut self,
         node: LocalNodeIndex,
         target: LocalNodeIndex,
         columns: &[usize],
         keys: &[KeyComparison],
-    ) -> Option<impl Iterator<Item = (Tag, &[KeyComparison])>> {
+    ) -> Option<impl Iterator<Item = (Tag, Vec<KeyComparison>)>> {
+        // NOTE: we consciously don't remove nested maps here; the idea is that the only thing
+        // that's actually a large state-space is the keys, which are the leaves, so we can leave
+        // empty maps in up to the keys if we want (and that greatly simplifies this method)
         self.0
-            .get(node)
-            .and_then(|m| m.get(target))
-            .and_then(|m| m.get(columns))
-            .and_then(|m| m.get(keys))
-            .map(|m| m.iter().map(|(t, ks)| (*t, ks.as_slice())))
+            .get_mut(node)
+            .and_then(|m| m.get_mut(target))
+            .and_then(|m| m.get_mut(columns))
+            .and_then(|m| m.remove(keys))
+            .map(|m| m.into_iter())
     }
 }
 
@@ -3533,7 +3536,7 @@ impl Domain {
             state: &mut StateMap,
             reader_write_handles: &mut NodeMap<backlog::WriteHandle>,
             nodes: &DomainNodes,
-            remapped_keys: &RemappedKeys,
+            remapped_keys: &mut RemappedKeys,
         ) -> Result<(), ReadySetError> {
             for (tag, path, keys) in
                 replay_paths.downstream_dependent_paths(node, index, keys, remapped_keys)
@@ -3758,7 +3761,7 @@ impl Domain {
                                 &mut self.state,
                                 &mut self.reader_write_handles,
                                 &self.nodes,
-                                &self.remapped_keys,
+                                &mut self.remapped_keys,
                             )?;
                         }
                     } else {
@@ -3837,7 +3840,7 @@ impl Domain {
                                 &mut self.state,
                                 &mut self.reader_write_handles,
                                 &self.nodes,
-                                &self.remapped_keys,
+                                &mut self.remapped_keys,
                             )?;
                         }
                     }
