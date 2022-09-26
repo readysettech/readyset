@@ -208,6 +208,8 @@ async fn proxy_unsupported_sets() {
         .await
         .unwrap();
 
+    sleep().await;
+
     conn.query_drop("SET @@SESSION.SQL_MODE = 'ANSI_QUOTES';")
         .await
         .unwrap();
@@ -245,6 +247,8 @@ async fn proxy_unsupported_sets_prep_exec() {
         .await
         .unwrap();
 
+    sleep().await;
+
     conn.query_drop("SET @@SESSION.SQL_MODE = 'ANSI_QUOTES';")
         .await
         .unwrap();
@@ -270,6 +274,7 @@ async fn prepare_in_tx_select_out() {
     conn.query_drop("INSERT INTO t (x) values (1)")
         .await
         .unwrap();
+    sleep().await;
     let mut tx = conn
         .start_transaction(mysql_async::TxOpts::new())
         .await
@@ -296,6 +301,7 @@ async fn prep_and_select_in_tx() {
     conn.query_drop("INSERT INTO t (x) values (1)")
         .await
         .unwrap();
+    sleep().await;
     let mut tx = conn
         .start_transaction(mysql_async::TxOpts::new())
         .await
@@ -323,6 +329,7 @@ async fn prep_then_select_in_tx() {
     conn.query_drop("INSERT INTO t (x) values (1)")
         .await
         .unwrap();
+    sleep().await;
     let prepared = conn.prep("SELECT * FROM t").await.unwrap();
     let mut tx = conn
         .start_transaction(mysql_async::TxOpts::new())
@@ -350,6 +357,7 @@ async fn prep_then_always_select_in_tx() {
     conn.query_drop("INSERT INTO t (x) values (1)")
         .await
         .unwrap();
+    sleep().await;
     let prepared = conn.prep("SELECT x FROM t").await.unwrap();
     conn.query_drop("CREATE CACHE ALWAYS test_always FROM SELECT x FROM t;")
         .await
@@ -380,6 +388,8 @@ async fn always_should_bypass_tx() {
     conn.query_drop("INSERT INTO t (x) values (1)")
         .await
         .unwrap();
+    sleep().await;
+
     conn.query_drop("CREATE CACHE ALWAYS test_always FROM SELECT x FROM t;")
         .await
         .unwrap();
@@ -410,6 +420,9 @@ async fn prep_select() {
     conn.query_drop("INSERT INTO t (x) values (1)")
         .await
         .unwrap();
+
+    sleep().await;
+
     let prepared = conn.prep("SELECT * FROM t").await.unwrap();
     let _: Option<i64> = conn.exec_first(prepared, ()).await.unwrap();
     assert_eq!(
@@ -431,6 +444,8 @@ async fn set_then_prep_and_select() {
     conn.query_drop("INSERT INTO t (x) values (1)")
         .await
         .unwrap();
+    sleep().await;
+
     conn.query_drop("set @foo = 5").await.unwrap();
     let prepared = conn.prep("SELECT * FROM t").await.unwrap();
     let _: Option<i64> = conn.exec_first(prepared, ()).await.unwrap();
@@ -477,6 +492,8 @@ async fn always_should_never_proxy_exec() {
     conn.query_drop("INSERT INTO t (x) values (1)")
         .await
         .unwrap();
+    sleep().await;
+
     conn.query_drop("CREATE CACHE ALWAYS FROM SELECT * FROM t")
         .await
         .unwrap();
@@ -508,6 +525,8 @@ async fn prep_then_set_then_select_proxy() {
     conn.query_drop("INSERT INTO t (x) values (1)")
         .await
         .unwrap();
+    sleep().await;
+
     conn.query_drop("set @foo = 5").await.unwrap();
     let prepared = conn.prep("SELECT * FROM t").await.unwrap();
     let _: Option<i64> = conn.exec_first(prepared, ()).await.unwrap();
@@ -531,6 +550,7 @@ async fn proxy_mode_should_allow_commands() {
     conn.query_drop("INSERT INTO t (x) values (1)")
         .await
         .unwrap();
+    sleep().await;
 
     conn.query_drop("SET @@SESSION.SQL_MODE = 'ANSI_QUOTES';")
         .await
@@ -565,6 +585,8 @@ async fn drop_then_recreate_table_with_query() {
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
 
     conn.query_drop("CREATE TABLE t (x int)").await.unwrap();
+    sleep().await;
+
     conn.query_drop("CREATE CACHE q FROM SELECT x FROM t")
         .await
         .unwrap();
@@ -593,6 +615,8 @@ async fn transaction_proxies() {
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
 
     conn.query_drop("CREATE TABLE t (x int)").await.unwrap();
+    sleep().await;
+
     conn.query_drop("CREATE CACHE FROM SELECT * FROM t")
         .await
         .unwrap();
@@ -624,6 +648,7 @@ async fn valid_sql_parsing_failed_shows_proxied() {
     // complicated way of testing this needs to be devised
     let q = "CREATE TABLE t1 (id polygon);".to_string();
     let _ = conn.query_drop(q.clone()).await;
+
     let proxied_queries = conn
         .query::<(String, String, String), _>("SHOW PROXIED QUERIES;")
         .await
