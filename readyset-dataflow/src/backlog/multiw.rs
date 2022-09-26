@@ -90,30 +90,17 @@ impl Handle {
     /// Evict keys that were selected by the assigned eviction strategy from the state, and return
     /// the number of bytes freed. The amount of keys evicted will be ceil(len() * ratio)
     pub fn evict(&mut self, ratio: f64) -> u64 {
-        let mut mem_freed = 0u64;
-
-        // Each row's state is composed of: The key, the bytes required to hold the Row
-        // data structure, and the set of Values in the row (DfValues).
+        let base_value_size = self.base_value_size() as u64;
         match *self {
-            Handle::Single(ref mut h) => {
-                let base_value_size = h.base_value_size() as u64;
-                h.evict_keys(ratio).for_each(|r| {
-                    mem_freed += r.1.iter().map(|r| r.deep_size_of() as u64).sum::<u64>()
-                        + r.0.deep_size_of()
-                        + base_value_size;
-                })
-            }
-            Handle::Many(ref mut h) => {
-                let base_value_size = h.base_value_size() as u64;
-                h.evict_keys(ratio).for_each(|r| {
-                    mem_freed += r.1.iter().map(|r| r.deep_size_of() as u64).sum::<u64>()
-                        + r.0.iter().map(|r| r.deep_size_of() as u64).sum::<u64>()
-                        + base_value_size
-                })
-            }
+            Handle::Single(ref mut h) => h.evict_keys(ratio, |k, v| {
+                // Each row's state is composed of: The key, the set of Values in the row (DfValues)
+                // and the bytes required to hold the Row data structure.
+                k.deep_size_of() + v.iter().map(|r| r.deep_size_of()).sum::<u64>() + base_value_size
+            }),
+            Handle::Many(ref mut h) => h.evict_keys(ratio, |k, v| {
+                k.deep_size_of() + v.iter().map(|r| r.deep_size_of()).sum::<u64>() + base_value_size
+            }),
         }
-
-        mem_freed
     }
 
     pub fn refresh(&mut self) {

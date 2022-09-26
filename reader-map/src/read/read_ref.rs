@@ -9,6 +9,7 @@ use left_right::ReadGuard;
 
 use crate::inner::{Inner, Miss};
 use crate::values::Values;
+use crate::EvictionStrategy;
 // To make [`WriteHandle`] and friends work.
 #[cfg(doc)]
 use crate::WriteHandle;
@@ -77,7 +78,10 @@ where
         Q: Ord + ToOwned<Owned = K> + ?Sized,
         K: Borrow<Q>,
     {
-        self.guard.data.range(range).map(|iter| RangeIter { iter })
+        self.guard.data.range(range).map(|iter| RangeIter {
+            iter,
+            eviction_strategy: &self.guard.eviction_strategy,
+        })
     }
 
     /// Iterate over all keys in the map.
@@ -280,6 +284,7 @@ where
     V: Eq + Hash,
 {
     iter: btree_map::Range<'rg, K, Values<V>>,
+    eviction_strategy: &'rg EvictionStrategy,
 }
 
 impl<'rg, K, V> fmt::Debug for RangeIter<'rg, K, V>
@@ -300,7 +305,9 @@ where
 {
     type Item = (&'rg K, &'rg Values<V>);
     fn next(&mut self) -> Option<Self::Item> {
-        self.iter.next()
+        let next = self.iter.next()?;
+        self.eviction_strategy.on_read(next.1.eviction_meta());
+        Some(next)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {

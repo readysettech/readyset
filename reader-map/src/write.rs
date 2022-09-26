@@ -5,6 +5,7 @@ use std::ops::{Bound, RangeBounds};
 
 use left_right::Absorb;
 use partial_map::InsertionOrder;
+use readyset::internal::IndexType;
 
 use crate::eviction::EvictionMeta;
 use crate::inner::Inner;
@@ -232,13 +233,13 @@ where
     ///
     /// This method immediately calls [`publish`](Self::publish) to ensure that the keys and values
     /// it returns match the elements that will be emptied on the next call to
-    /// [`publish`](Self::publish).
-    /// The values will only be submitted for eviction once the returned iterator has been consumed,
-    /// and a following call to publish is made.
-    pub fn evict_keys<'a>(
-        &'a mut self,
-        ratio: f64,
-    ) -> impl Iterator<Item = (&'a K, &'a crate::values::Values<V>)> {
+    /// [`publish`](Self::publish). The values will be submitted for eviction, but the result will
+    /// only be visible to all readers after a following call to publish is made. The method returns
+    /// the amount of memory freed, computed using the provided closure on each (K,V) pair.
+    pub fn evict_keys<'a, F>(&'a mut self, ratio: f64, mut mem_cnt: F) -> u64
+    where
+        F: FnMut(&K, &Values<V>) -> u64,
+    {
         self.publish();
 
         let inner = self
@@ -252,14 +253,46 @@ where
             unsafe { std::mem::transmute::<&Inner<K, V, M, T, S, I>, _>(inner.as_ref()) };
 
         let nkeys_to_evict = ((inner.data.len() as f64 * ratio) as usize).min(inner.data.len());
-        let kvs = inner
-            .eviction_strategy
-            .pick_keys_to_evict(&inner.data, nkeys_to_evict);
 
-        kvs.map(move |(k, v)| {
-            self.add_op(Operation::RemoveEntry(k.clone()));
-            (k, v)
-        })
+        let mut mem_freed = 0;
+
+        match inner.data.index_type() {
+            IndexType::BTreeMap => {
+                let mut range_iterator = inner
+                    .eviction_strategy
+                    .pick_ranges_to_evict(&inner.data, nkeys_to_evict);
+
+                while let Some(subrange_iter) = range_iterator.next_range() {
+                    let mut subrange_iter = subrange_iter.map(|(k, v)| {
+                        mem_freed += mem_cnt(k, v);
+                        (k, v)
+                    });
+
+                    let (start, _) = subrange_iter.next().expect("Subrange can't be empty");
+                    let end = match subrange_iter.last() {
+                        None => start,
+                        Some((end, _)) => end,
+                    };
+
+                    self.add_op(Operation::RemoveRange((
+                        Bound::Included(start.clone()),
+                        Bound::Included(end.clone()),
+                    )));
+                }
+            }
+            IndexType::HashMap => {
+                let kvs = inner
+                    .eviction_strategy
+                    .pick_keys_to_evict(&inner.data, nkeys_to_evict);
+
+                for (k, v) in kvs {
+                    self.add_op(Operation::RemoveEntry(k.clone()));
+                    mem_freed += mem_cnt(k, v);
+                }
+            }
+        }
+
+        mem_freed
     }
 }
 

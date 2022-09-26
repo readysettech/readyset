@@ -77,6 +77,67 @@ pub struct LRUEviction(Arc<AtomicU64>);
 #[derive(Clone, Default, Debug)]
 pub struct GenerationalEviction(Arc<AtomicU64>);
 
+/// An iterator of sorts over [`EvictRangeGroup`] that groups together consecutive runs of evicted
+/// keys in a BTreeMap map. Does not actually implement iterator as that would require a lending
+/// iterator trait, which is not yet available (and the crate doesn't fit here well)
+pub struct EvictRangeIter<K, I, F>
+where
+    F: FnMut(u64) -> bool,
+    I: Iterator<Item = (u64, K)>,
+{
+    iter: I,
+    group_by: F,
+    next: Option<K>,
+}
+
+/// An iterator over a group of (K, Values) to be evicted from the map
+pub struct EvictRangeGroup<'a, K, I, F>
+where
+    F: FnMut(u64) -> bool,
+    I: Iterator<Item = (u64, K)>,
+{
+    inner: &'a mut EvictRangeIter<K, I, F>,
+}
+
+impl<K, I, F> EvictRangeIter<K, I, F>
+where
+    F: FnMut(u64) -> bool,
+    I: Iterator<Item = (u64, K)>,
+{
+    /// Return the next consective range of keys to be evicted, the first and the last items in the
+    /// group are the range bounds.
+    pub fn next_range(&mut self) -> Option<EvictRangeGroup<'_, K, I, F>> {
+        loop {
+            // When out of elements to peek, we are done
+            let next_key = self.iter.next()?;
+            if (self.group_by)(next_key.0) {
+                // If predicate is true, we reached the next range
+                self.next = Some(next_key.1);
+                break;
+            }
+        }
+
+        Some(EvictRangeGroup { inner: self })
+    }
+}
+
+impl<'a, K, I, F> Iterator for EvictRangeGroup<'a, K, I, F>
+where
+    F: FnMut(u64) -> bool,
+    I: Iterator<Item = (u64, K)>,
+{
+    type Item = K;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let next = match self.inner.next.take() {
+            Some(v) => return Some(v),
+            None => self.inner.iter.next()?,
+        };
+
+        (self.inner.group_by)(next.0).then_some(next.1)
+    }
+}
+
 impl EvictionMeta {
     pub fn value(&self) -> u64 {
         self.0.load(Relaxed)
@@ -138,6 +199,59 @@ impl EvictionStrategy {
             }
         }
     }
+
+    /// Returns a [`EvictRangeIter`] that iterates over groups of consecutive keys the strategy
+    /// would suggest to evict. The first and last element of each group would form a range that
+    /// should be evicted.
+    pub(crate) fn pick_ranges_to_evict<'a, K, V, S>(
+        &self,
+        data: &'a Data<K, V, S>,
+        nkeys: usize,
+    ) -> EvictRangeIter<
+        (&'a K, &'a Values<V>),
+        impl Iterator<Item = (u64, (&'a K, &'a Values<V>))>,
+        impl FnMut(u64) -> bool,
+    >
+    where
+        K: Ord + Clone,
+        S: std::hash::BuildHasher,
+    {
+        let mut lru_f = None;
+        let mut gen_f = None;
+        let mut rand_f = None;
+        let iter = match self {
+            EvictionStrategy::LeastRecentlyUsed(lru) => {
+                let (iter, group_by) = lru.pick_ranges_to_evict(data, nkeys);
+                lru_f = Some(group_by);
+                Either::Left(iter)
+            }
+            EvictionStrategy::Generational(gen) => {
+                let (iter, group_by) = gen.pick_ranges_to_evict(data, nkeys);
+                gen_f = Some(group_by);
+                Either::Right(Either::Left(iter))
+            }
+            EvictionStrategy::Random(rand) => {
+                let (iter, group_by) = rand.pick_ranges_to_evict(data, nkeys);
+                rand_f = Some(group_by);
+                Either::Right(Either::Right(iter))
+            }
+        };
+
+        EvictRangeIter {
+            iter,
+            group_by: move |val| {
+                // This freak show is because we don't have an Either equivalent for Fn
+                if let Some(f) = lru_f.as_mut() {
+                    f(val)
+                } else if let Some(f) = gen_f.as_mut() {
+                    f(val)
+                } else {
+                    (rand_f.as_mut().unwrap())(val)
+                }
+            },
+            next: None,
+        }
+    }
 }
 
 impl LRUEviction {
@@ -188,6 +302,39 @@ impl LRUEviction {
             .zip(data.iter())
             .filter_map(move |(ctr, kv)| (ctr <= cutoff).then_some(kv))
     }
+
+    fn pick_ranges_to_evict<'a, K, V, S>(
+        &self,
+        data: &'a Data<K, V, S>,
+        nkeys: usize,
+    ) -> (
+        impl Iterator<Item = (u64, (&'a K, &'a Values<V>))>,
+        impl FnMut(u64) -> bool,
+    )
+    where
+        K: Ord + Clone,
+        S: std::hash::BuildHasher,
+    {
+        // First we collect all the meta values into a single vector
+        let mut ctrs = data
+            .iter()
+            .map(|(_, v)| v.eviction_meta().value())
+            .collect::<Vec<_>>();
+
+        let ctrs_save = ctrs.clone(); // Save the counters before sorting them to avoid atomic loads for the second time
+
+        // We then find the value of the counter with the nkey'th value
+        let cutoff = if nkeys >= ctrs.len() {
+            u64::MAX
+        } else {
+            let (_, val, _) = ctrs.select_nth_unstable(nkeys);
+            *val
+        };
+
+        (ctrs_save.into_iter().zip(data.iter()), move |ctr| {
+            ctr <= cutoff
+        })
+    }
 }
 
 impl RandomEviction {
@@ -204,6 +351,30 @@ impl RandomEviction {
         let mut rng = rand::thread_rng();
         // We return the iterator over the keys whose counter value is lower than that
         data.iter().filter(move |_| rng.gen_bool(ratio))
+    }
+
+    fn pick_ranges_to_evict<'a, K, V, S>(
+        &self,
+        data: &'a Data<K, V, S>,
+        nkeys: usize,
+    ) -> (
+        impl Iterator<Item = (u64, (&'a K, &'a Values<V>))>,
+        impl FnMut(u64) -> bool,
+    )
+    where
+        K: Ord + Clone,
+        S: std::hash::BuildHasher,
+    {
+        // Picking a random range to evict is kinda useless really, there is very little chance it
+        // will be able to form proper ranges, unless ratio is high, but oh well, don't use random
+        // for ranges I suppose.
+        let ratio = nkeys as f64 / data.len() as f64;
+        let mut rng = rand::thread_rng();
+        // We return the iterator over the keys whose counter value is lower than that
+        (
+            std::iter::repeat_with(move || rng.gen_bool(ratio) as u64).zip(data.iter()),
+            move |v| v == 1,
+        )
     }
 }
 
@@ -248,7 +419,7 @@ impl GenerationalEviction {
         // `bucket[1]` for previous etc. We need to free a total of `nkeys`. We start from the
         // highest bucket, attempting to free an entire generation where possible. Finally if
         // we don't have sufficient keys from freeing entire generations, we will parially evict
-        // another genration at random to get the required amount of keys
+        // another generation at random to get the required amount of keys
 
         // Everything before full_gen_to_evict, will be evicted fully
         // Everything *in* last_gen_to_evict, will be evicted randomly
@@ -278,5 +449,64 @@ impl GenerationalEviction {
                 g if g == last_gen_to_evict => rng.gen_bool(rand_ratio).then_some(kv),
                 _ => None,
             })
+    }
+
+    fn pick_ranges_to_evict<'a, K, V, S>(
+        &self,
+        data: &'a Data<K, V, S>,
+        mut nkeys: usize,
+    ) -> (
+        impl Iterator<Item = (u64, (&'a K, &'a Values<V>))>,
+        impl FnMut(u64) -> bool,
+    )
+    where
+        K: Ord + Clone,
+        S: std::hash::BuildHasher,
+    {
+        let current_gen = self.0.fetch_add(1, Relaxed);
+
+        let mut buckets = [0usize; NUM_GENERATIONS];
+
+        // Load the atomic values just once
+        let ctrs = data
+            .iter()
+            .map(|(_, v)| v.eviction_meta().value())
+            .collect::<Vec<_>>();
+
+        // We first count how many values are there to evict for each generation (up to
+        // NUM_GENERATIONS generations back)
+        ctrs.iter().for_each(|gen| {
+            let bucket = ((current_gen - *gen) as usize).min(buckets.len() - 1);
+            buckets[bucket] += 1;
+        });
+
+        // At this point at `bucket[0]` we have the count for keys in the current generation
+        // `bucket[1]` for previous etc. We need to free a total of `nkeys`. We start from the
+        // highest bucket, attempting to free an entire generation where possible. Finally if
+        // we don't have sufficient keys from freeing entire generations, we will parially evict
+        // another generation to get the required amount of keys.
+
+        // Everything before full_gen_to_evict, will be evicted fully
+        // Remaining keys *in* last_gen_to_evict, will be evicted as needed
+        let mut last_bucket_to_evict = buckets.len();
+        for cnt in buckets.iter().rev() {
+            last_bucket_to_evict -= 1;
+            if *cnt <= nkeys {
+                nkeys -= *cnt;
+            } else {
+                break;
+            }
+        }
+
+        // After the loop is finished, `nkeys` is the number of keys we have left
+        // to evict from the current bucket (`last_bucket_to_evict`). We will evict as
+        // many keys from that bucket as a single range.
+        let last_gen_to_evict = current_gen - last_bucket_to_evict as u64;
+
+        (ctrs.into_iter().zip(data.iter()), move |gen| match gen {
+            g if g < last_gen_to_evict => true,
+            g if g == last_gen_to_evict && nkeys > 0 => true,
+            _ => false,
+        })
     }
 }

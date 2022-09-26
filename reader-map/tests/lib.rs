@@ -2,9 +2,12 @@ use std::collections::hash_map::RandomState;
 use std::hash::Hash;
 use std::ops::Bound;
 
+use partial_map::InsertionOrder;
 use reader_map::handles::{ReadHandle, WriteHandle};
+use reader_map::refs::Miss;
 use reader_map::Error::*;
 use reader_map::{DefaultInsertionOrder, Options};
+use readyset::internal::IndexType;
 
 macro_rules! assert_match {
     ($x:expr, $p:pat) => {
@@ -960,6 +963,24 @@ fn contains_key_respects_ranges() {
     }
 }
 
+/// A helper method that calls eviction, and also collects the list of keys that got evicted and
+/// returns them
+fn evict<K, V, I>(w: &mut WriteHandle<K, V, I>, ratio: f64) -> Vec<K>
+where
+    K: Ord + Hash + Clone,
+    V: Ord + Clone,
+    I: InsertionOrder<V>,
+{
+    let mut evicted = Vec::new();
+
+    w.evict_keys(ratio, |k, _| {
+        evicted.push(k.clone());
+        0
+    });
+
+    evicted
+}
+
 #[test]
 fn eviction_lru() {
     let x = ('x', 42);
@@ -1011,9 +1032,9 @@ fn eviction_lru() {
 
     // Check that if we evict one third of the keys, the evicted key would be z, which we used the
     // longest time ago
-    let to_evict = w.evict_keys(0.33).collect::<Vec<_>>();
+    let to_evict = evict(&mut w, 0.33);
     assert_eq!(to_evict.len(), 1);
-    assert_eq!(to_evict[0].0, &'z');
+    assert_eq!(to_evict[0], 'z');
 
     w.publish();
     assert!(r.get(&z.0).unwrap().is_none());
@@ -1022,9 +1043,9 @@ fn eviction_lru() {
 
     // Check that if we evict the remaining half of the keys, the evicted key would be y, which we
     // used the longest time ago
-    let to_evict = w.evict_keys(0.49).collect::<Vec<_>>();
+    let to_evict = evict(&mut w, 0.49);
     assert_eq!(to_evict.len(), 1);
-    assert_eq!(to_evict[0].0, &'y');
+    assert_eq!(to_evict[0], 'y');
 
     w.publish();
     assert!(r.get(&y.0).unwrap().is_none());
@@ -1036,7 +1057,7 @@ fn eviction_lru() {
 
     w.publish();
 
-    let to_evict = w.evict_keys(1.).collect::<Vec<_>>();
+    let to_evict = evict(&mut w, 1.);
     assert_eq!(to_evict.len(), 3);
     w.publish();
     assert_eq!(w.len(), 0);
@@ -1071,7 +1092,7 @@ fn eviction_generational() {
     assert_match!(r.first(&y.0).unwrap().as_deref(), Some(('y', 43)));
     assert_match!(r.first(&z.0).unwrap().as_deref(), Some(('z', 44)));
 
-    let to_evict = w.evict_keys(0.0).collect::<Vec<_>>();
+    let to_evict = evict(&mut w, 0.);
     assert_eq!(to_evict.len(), 0);
 
     w.insert(a.0, a);
@@ -1085,11 +1106,11 @@ fn eviction_generational() {
     assert_eq!(r.get(&x.0).unwrap().unwrap().eviction_meta().value(), 1);
 
     // Evict 2 of the 6 keys (1/3rd), those should be y and z
-    let to_evict = w.evict_keys(0.34).collect::<Vec<_>>();
+    let to_evict = evict(&mut w, 0.34);
     assert_eq!(to_evict.len(), 2);
 
-    assert!(to_evict.iter().any(|(k, _)| **k == 'y'));
-    assert!(to_evict.iter().any(|(k, _)| **k == 'z'));
+    assert!(to_evict.contains(&'y'));
+    assert!(to_evict.contains(&'z'));
 
     w.insert(y.0, y);
     w.insert(z.0, z);
@@ -1098,12 +1119,12 @@ fn eviction_generational() {
     assert_eq!(r.get(&x.0).unwrap().unwrap().eviction_meta().value(), 2);
 
     // Evict 4 of the 6 keys (1/2rd), those should be a, b and c
-    let to_evict = w.evict_keys(0.5).collect::<Vec<_>>();
+    let to_evict = evict(&mut w, 0.5);
     assert_eq!(to_evict.len(), 3);
 
-    assert!(to_evict.iter().any(|(k, _)| **k == 'a'));
-    assert!(to_evict.iter().any(|(k, _)| **k == 'b'));
-    assert!(to_evict.iter().any(|(k, _)| **k == 'c'));
+    assert!(to_evict.contains(&'a'));
+    assert!(to_evict.contains(&'b'));
+    assert!(to_evict.contains(&'c'));
 }
 
 #[test]
@@ -1117,7 +1138,7 @@ fn eviction_random() {
     let removed = loop {
         // Since random eviction is non deterministric it may very well not evict anything on the
         // first try
-        let removed: Vec<_> = w.evict_keys(0.5).map(|(&k, _)| k).collect();
+        let removed = evict(&mut w, 0.5);
         if !removed.is_empty() {
             break removed;
         }
@@ -1134,4 +1155,104 @@ fn eviction_random() {
         // Check that everything that was not removed is still present
         assert!(removed.contains(k) || r.contains_key(k));
     }
+}
+
+#[test]
+fn eviction_range_lru() -> reader_map::Result<()> {
+    let (mut w, r) = reader_map::Options::default()
+        .with_index_type(IndexType::BTreeMap)
+        .with_eviction_strategy(reader_map::EvictionStrategy::new_lru())
+        .construct();
+
+    w.insert_range('a'..='z');
+    for (v, k) in ('a'..='z').enumerate() {
+        w.insert(k, (k, v));
+    }
+
+    w.publish();
+
+    let mut meta_cnt = 0;
+    for (_, v) in r.enter()?.range(&(&'q'..=&'z')).unwrap() {
+        assert_eq!(v.eviction_meta().value(), meta_cnt);
+        meta_cnt += 1;
+    }
+
+    for (_, v) in r.enter()?.range(&(&'k'..=&'s')).unwrap() {
+        assert_eq!(v.eviction_meta().value(), meta_cnt);
+        meta_cnt += 1;
+    }
+
+    for (_, v) in r.enter()?.range(&(&'a'..=&'m')).unwrap() {
+        assert_eq!(v.eviction_meta().value(), meta_cnt);
+        meta_cnt += 1;
+    }
+
+    for (_, v) in r.enter()?.range(&(&'x'..=&'z')).unwrap() {
+        assert_eq!(v.eviction_meta().value(), meta_cnt);
+        meta_cnt += 1;
+    }
+
+    // Currently there are 26 letters in the map, in reverse order the least recently read are:
+    // x,y,z
+    // a,b,c,d,e,f,g,h,i,j,k,l,m
+    // n,o,p,q,r,s
+    // t,u,v,w
+    // If we evict 8 letters (0.3 of the alphabet), those letters should then be: t,u,v,w and
+    // n,o,p,q, and the associated ranges evicted should be (t..=w), (n..=q)
+    let to_evict = evict(&mut w, 0.30);
+    assert_eq!(to_evict, ['n', 'o', 'p', 'q', 't', 'u', 'v', 'w']);
+    w.publish();
+    let Miss(misses) = r.enter()?.range(&(&'a'..=&'z')).unwrap_err();
+    assert_eq!(
+        misses,
+        [
+            (Bound::Included('n'), Bound::Included('q')),
+            (Bound::Included('t'), Bound::Included('w'))
+        ]
+    );
+    // Now we have 18 letters, lets evict 9 more (0.5), those should be: r,s,a,b,c,d,e,f,g and we
+    // would also evict the ranges (a..=g), (r..=s), sadly at this point we still don't merge the
+    // previously evicted t..=w with r..=s
+    let to_evict = evict(&mut w, 0.49);
+    assert_eq!(to_evict, ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'r', 's']);
+    w.publish();
+    let Miss(misses) = r.enter()?.range(&(&'a'..=&'z')).unwrap_err();
+    assert_eq!(
+        misses,
+        [
+            (Bound::Included('a'), Bound::Included('g')),
+            (Bound::Included('n'), Bound::Included('q')),
+            (Bound::Included('r'), Bound::Included('s')),
+            (Bound::Included('t'), Bound::Included('w'))
+        ]
+    );
+
+    // Now all we have are 9 letters in order of least recently read
+    // x,y,z
+    // h,i,j,k,l,m
+    // Let's read i,j,k and then evict 6:
+    for (_, v) in r.enter()?.range(&(&'i'..=&'k')).unwrap() {
+        assert_eq!(v.eviction_meta().value(), meta_cnt);
+        meta_cnt += 1;
+    }
+
+    let to_evict = evict(&mut w, 0.6);
+    assert_eq!(to_evict, ['h', 'l', 'm', 'x', 'y', 'z']);
+    w.publish();
+    let Miss(misses) = r.enter()?.range(&(&'a'..=&'z')).unwrap_err();
+    assert_eq!(
+        misses,
+        [
+            (Bound::Included('a'), Bound::Included('g')),
+            (Bound::Included('h'), Bound::Included('h')),
+            (Bound::Included('l'), Bound::Included('z'))
+        ]
+    );
+
+    for (_, v) in r.enter()?.range(&(&'i'..=&'k')).unwrap() {
+        assert_eq!(v.eviction_meta().value(), meta_cnt);
+        meta_cnt += 1;
+    }
+
+    Ok(())
 }
