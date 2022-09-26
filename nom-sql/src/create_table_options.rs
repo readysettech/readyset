@@ -264,10 +264,10 @@ fn create_option_comment(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], C
     move |i| {
         map(
             map_res(
-                alt((create_option_equals_pair(
-                    tag_no_case("comment"),
-                    dialect.string_literal(),
-                ),)),
+                alt((
+                    create_option_equals_pair(tag_no_case("comment"), dialect.string_literal()),
+                    create_option_spaced_pair(tag_no_case("comment"), dialect.string_literal()),
+                )),
                 String::from_utf8,
             ),
             CreateTableOption::Comment,
@@ -420,6 +420,22 @@ mod tests {
                 CreateTableOption::Engine(None),
                 CreateTableOption::Other,
             ],
+        );
+    }
+
+    #[test]
+    fn create_table_option_comment_spaced() {
+        should_parse_all(
+            "COMMENT 'foobar'",
+            vec![CreateTableOption::Comment("foobar".to_string())],
+        );
+    }
+
+    #[test]
+    fn create_table_option_comment_equals() {
+        should_parse_all(
+            "COMMENT='foobar'",
+            vec![CreateTableOption::Comment("foobar".to_string())],
         );
     }
 }
