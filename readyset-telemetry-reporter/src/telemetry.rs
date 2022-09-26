@@ -39,6 +39,9 @@ pub enum TelemetryEvent {
     /// CREATE CACHE statement was executed
     CreateCache,
 
+    /// A create statement for a schema was obtained
+    Schema,
+
     /// SHOW CACHES statement was executed
     ShowCaches,
 
@@ -83,6 +86,7 @@ pub struct Telemetry {
     adapter_version: Option<String>,
     server_version: Option<String>,
     query_id: Option<String>,
+    schema: Option<String>,
 }
 
 impl TelemetryBuilder {

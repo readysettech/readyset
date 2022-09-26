@@ -18,6 +18,7 @@ use tracing::{debug, error, info, info_span, trace, Instrument};
 
 use super::connector::CreatedSlot;
 use super::PostgresPosition;
+use crate::db_util::CreateSchema;
 use crate::table_filter::TableFilter;
 
 const BATCH_SIZE: usize = 1024; // How many queries to buffer before pushing to ReadySet
@@ -370,6 +371,7 @@ impl<'a> PostgresReplicator<'a> {
     pub(crate) async fn snapshot_to_noria(
         &mut self,
         replication_slot: &CreatedSlot,
+        create_schema: &mut CreateSchema,
     ) -> ReadySetResult<()> {
         let wal_position = PostgresPosition::from(replication_slot.consistent_point).into();
         self.set_snapshot(&replication_slot.snapshot_name).await?;
@@ -398,6 +400,8 @@ impl<'a> PostgresReplicator<'a> {
             };
 
             debug!(%create_table, "Extending recipe");
+            create_schema.add_table_create(create_table.name.to_string(), create_table.to_string());
+
             match future::ready(create_table.to_string().try_into())
                 .and_then(|changelist| self.noria.extend_recipe_no_leader_ready(changelist))
                 .await
@@ -410,7 +414,10 @@ impl<'a> PostgresReplicator<'a> {
         }
 
         for view in view_list {
+            let view_name = view.name.clone();
             let create_view = view.get_create_view(&self.transaction).await?;
+            create_schema.add_view_create(view_name, create_view.clone());
+
             // Postgres returns a postgres style CREATE statement, but ReadySet only accepts MySQL
             // style
             let view = match nom_sql::parse_query(Dialect::PostgreSQL, &create_view) {

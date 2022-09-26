@@ -8,7 +8,7 @@ use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use itertools::Itertools;
 use metrics::register_gauge;
-use mysql::prelude::*;
+use mysql::prelude::Queryable;
 use mysql::{Transaction, TxOpts};
 use mysql_async as mysql;
 use nom_sql::Relation;
@@ -21,6 +21,7 @@ use tracing::{debug, error, info, info_span, warn};
 use tracing_futures::Instrument;
 
 use super::BinlogPosition;
+use crate::db_util::DatabaseSchemas;
 use crate::table_filter::TableFilter;
 
 const BATCH_SIZE: usize = 1000; // How many queries to buffer before pushing to ReadySet
@@ -28,7 +29,8 @@ const BATCH_SIZE: usize = 1000; // How many queries to buffer before pushing to 
 const MAX_SNAPSHOT_BATCH: usize = 8; // How many tables to snapshot at the same time
 
 /// A list of databases MySQL uses internally, they should not be replicated
-const MYSQL_INTERNAL_DBS: &[&str] = &["mysql", "information_schema", "performance_schema", "sys"];
+pub const MYSQL_INTERNAL_DBS: &[&str] =
+    &["mysql", "information_schema", "performance_schema", "sys"];
 
 /// Pass the error forward while logging it
 fn log_err<E: Error>(err: E) -> E {
@@ -36,7 +38,7 @@ fn log_err<E: Error>(err: E) -> E {
     err
 }
 
-enum TableKind {
+pub enum TableKind {
     BaseTable,
     View,
 }
@@ -49,7 +51,7 @@ pub(crate) struct MySqlReplicator {
 }
 
 /// Get the list of tables defined in the database
-async fn load_table_list<Q: Queryable>(
+pub async fn load_table_list<Q: Queryable>(
     q: &mut Q,
     kind: TableKind,
     db: &str,
@@ -60,7 +62,7 @@ async fn load_table_list<Q: Queryable>(
 }
 
 /// Get the `CREATE TABLE` or `CREATE VIEW` statement for the named table
-async fn create_for_table<Q: Queryable>(
+pub async fn create_for_table<Q: Queryable>(
     q: &mut Q,
     db: &str,
     table_name: &str,
@@ -131,6 +133,7 @@ impl MySqlReplicator {
     async fn load_recipe_with_meta_lock(
         &mut self,
         noria: &mut readyset::ReadySetHandle,
+        db_schemas: &mut DatabaseSchemas,
     ) -> ReadySetResult<Transaction<'static>> {
         let mut tx = self.pool.start_transaction(tx_opts()).await?;
 
@@ -173,6 +176,12 @@ impl MySqlReplicator {
         for (db, table) in self.table_filter.tables() {
             let create_table = create_for_table(&mut tx, db, table, TableKind::BaseTable).await?;
             debug!(%create_table, "Extending recipe");
+            db_schemas.extend_create_schema_for_table(
+                db.to_string(),
+                table.to_string(),
+                create_table.clone(),
+                nom_sql::Dialect::MySQL,
+            );
             if let Err(err) = future::ready(ChangeList::try_from(create_table))
                 .and_then(|changelist| async {
                     noria
@@ -197,7 +206,12 @@ impl MySqlReplicator {
         for (db, _) in self.table_filter.schemas_mut() {
             for view in load_table_list(&mut tx, TableKind::View, db).await? {
                 let create_view = create_for_table(&mut tx, db, &view, TableKind::View).await?;
-                debug!(%create_view, "Extending recipe");
+                db_schemas.extend_create_schema_for_view(
+                    db.to_string(),
+                    view.to_string(),
+                    create_view.clone(),
+                    nom_sql::Dialect::MySQL,
+                );
                 if let Err(err) = future::ready(ChangeList::try_from(create_view))
                     .and_then(|changelist| async {
                         noria
@@ -364,8 +378,11 @@ impl MySqlReplicator {
     pub(crate) async fn snapshot_to_noria(
         mut self,
         noria: &mut readyset::ReadySetHandle,
+        db_schemas: &mut DatabaseSchemas,
     ) -> ReadySetResult<()> {
-        let result = self.replicate_to_noria_with_table_locks(noria).await;
+        let result = self
+            .replicate_to_noria_with_table_locks(noria, db_schemas)
+            .await;
 
         // Wait for all connections to finish, not strictly necessary
         self.pool.disconnect().await?;
@@ -380,6 +397,7 @@ impl MySqlReplicator {
     async fn replicate_to_noria_with_table_locks(
         &mut self,
         noria: &mut readyset::ReadySetHandle,
+        db_schemas: &mut DatabaseSchemas,
     ) -> ReadySetResult<()> {
         // NOTE: There are two ways to prevent DDL changes in MySQL:
         // `FLUSH TABLES WITH READ LOCK` or `LOCK INSTANCE FOR BACKUP`. Both are not
@@ -407,7 +425,7 @@ impl MySqlReplicator {
         };
 
         let _meta_lock = self
-            .load_recipe_with_meta_lock(noria)
+            .load_recipe_with_meta_lock(noria, db_schemas)
             .await
             .map_err(log_err)?;
 
@@ -595,7 +613,7 @@ fn value_to_value(val: &mysql::Value) -> mysql_common::value::Value {
 }
 
 impl TableKind {
-    fn kind(&self) -> &str {
+    pub fn kind(&self) -> &str {
         match self {
             TableKind::BaseTable => "TABLE",
             TableKind::View => "VIEW",

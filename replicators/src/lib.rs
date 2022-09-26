@@ -1,5 +1,5 @@
 #![feature(never_type, hash_raw_entry, drain_filter)]
-
+pub(crate) mod db_util;
 pub(crate) mod mysql_connector;
 pub(crate) mod noria_adapter;
 pub(crate) mod postgres_connector;

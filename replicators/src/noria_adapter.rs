@@ -28,6 +28,7 @@ use tokio::sync::Notify;
 use tracing::{debug, error, info, info_span, trace, warn, Instrument};
 use {mysql_async as mysql, tokio_postgres as pgsql};
 
+use crate::db_util::{CreateSchema, DatabaseSchemas};
 use crate::mysql_connector::{MySqlBinlogConnector, MySqlReplicator};
 use crate::postgres_connector::{
     PostgresReplicator, PostgresWalConnector, PUBLICATION_NAME, REPLICATION_SLOT,
@@ -244,8 +245,6 @@ impl NoriaAdapter {
     ) -> ReadySetResult<!> {
         use crate::mysql_connector::BinlogPosition;
 
-        // TODO(luke): Query schema here and report to segment
-
         // Load the replication offset for all tables and the schema from ReadySet
         let mut replication_offsets = noria.replication_offsets().await?;
 
@@ -255,8 +254,12 @@ impl NoriaAdapter {
             mysql_options.db_name(),
         )?;
 
+        let mut db_schemas = DatabaseSchemas::new();
+        let mut report_schemas = false;
+
         let pos = match (replication_offsets.max_offset()?, resnapshot) {
             (None, _) | (_, true) => {
+                report_schemas = true;
                 let span = info_span!("taking database snapshot");
                 let replicator_options = mysql_options.clone();
                 let pool = mysql::Pool::new(replicator_options);
@@ -275,7 +278,7 @@ impl NoriaAdapter {
 
                 span.in_scope(|| info!("Starting snapshot"));
                 let snapshot_result = replicator
-                    .snapshot_to_noria(&mut noria)
+                    .snapshot_to_noria(&mut noria, &mut db_schemas)
                     .instrument(span.clone())
                     .await;
 
@@ -316,6 +319,7 @@ impl NoriaAdapter {
                     recorded::REPLICATOR_SNAPSHOT_DURATION,
                     snapshot_start.elapsed().as_micros() as f64
                 );
+
                 pos
             }
             (Some(pos), _) => pos.clone().into(),
@@ -368,9 +372,13 @@ impl NoriaAdapter {
         if let Some(notify) = ready_notify.take() {
             notify.notify_one();
         }
+
         let _ = telemetry_sender
             .send_event(TelemetryEvent::SnapshotComplete)
             .await;
+        if report_schemas {
+            db_schemas.send_schemas(telemetry_sender).await;
+        }
 
         adapter.main_loop(&mut current_pos, None).await?;
 
@@ -413,7 +421,6 @@ impl NoriaAdapter {
         );
 
         info!("Connected to PostgreSQL");
-        // TODO(luke): Query schemas and report to segment here.
 
         let replication_slot = if let Some(slot) = &connector.replication_slot {
             Some(slot.clone())
@@ -432,7 +439,11 @@ impl NoriaAdapter {
             None
         };
 
+        let mut create_schema = CreateSchema::new(dbname.to_string(), nom_sql::Dialect::PostgreSQL);
+        let mut report_schemas = false;
+
         if let Some(replication_slot) = replication_slot {
+            report_schemas = true;
             let snapshot_start = Instant::now();
             // If snapshot name exists, it means we need to make a snapshot to noria
             let mut builder = native_tls::TlsConnector::builder();
@@ -452,7 +463,7 @@ impl NoriaAdapter {
                 PostgresReplicator::new(&mut client, &mut noria, table_filter.clone()).await?;
 
             select! {
-                snapshot_result = replicator.snapshot_to_noria(&replication_slot).fuse() =>  {
+                snapshot_result = replicator.snapshot_to_noria(&replication_slot, &mut create_schema).fuse() =>  {
                     let status = if snapshot_result.is_err() {
                         SnapshotStatusTag::Failed.value()
                     } else {
@@ -488,6 +499,9 @@ impl NoriaAdapter {
         let _ = telemetry_sender
             .send_event(TelemetryEvent::SnapshotComplete)
             .await;
+        if report_schemas {
+            create_schema.send_schemas(telemetry_sender).await;
+        }
 
         connector
             .start_replication(REPLICATION_SLOT, PUBLICATION_NAME)
