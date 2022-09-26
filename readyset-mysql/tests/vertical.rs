@@ -39,7 +39,7 @@ use proptest::prelude::*;
 use proptest::sample::select;
 use proptest::test_runner::TestCaseResult;
 use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
-use readyset_client_test_helpers::{unique_db_name, TestBuilder};
+use readyset_client_test_helpers::TestBuilder;
 use readyset_data::DfValue;
 use test_strategy::proptest;
 
@@ -581,8 +581,7 @@ impl Operations {
 
 impl Operations {
     async fn run(self, query: &str, tables: &HashMap<&str, Table>) -> TestCaseResult {
-        let db_name = unique_db_name();
-        readyset_client_test_helpers::mysql_helpers::recreate_database(&db_name).await;
+        readyset_client_test_helpers::mysql_helpers::recreate_database("vertical").await;
         let mut mysql = mysql_async::Conn::new(
             mysql_async::OptsBuilder::default()
                 .user(Some("root"))
@@ -594,7 +593,7 @@ impl Operations {
                         .parse()
                         .unwrap(),
                 )
-                .db_name(Some(db_name)),
+                .db_name(Some("vertical")),
         )
         .await
         .unwrap();
@@ -648,6 +647,7 @@ macro_rules! vertical_tests {
         }
 
         #[proptest]
+        #[serial_test::serial]
         #[cfg_attr(not(feature = "vertical_tests"), ignore)]
         $(#[$meta])*
         fn $name(

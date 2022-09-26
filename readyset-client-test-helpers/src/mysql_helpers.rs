@@ -68,19 +68,16 @@ impl Adapter for MySQLAdapter {
 
     const DIALECT: nom_sql::Dialect = nom_sql::Dialect::MySQL;
 
-    fn connection_opts_with_port(db: &str, port: u16) -> Self::ConnectionOpts {
-        mysql_async::OptsBuilder::default()
-            .tcp_port(port)
-            .db_name(Some(db))
-            .into()
+    fn connection_opts_with_port(port: u16) -> Self::ConnectionOpts {
+        mysql_async::OptsBuilder::default().tcp_port(port).into()
     }
 
-    fn upstream_url(db_name: &str) -> String {
-        MySQLAdapter::url_with_db(&db_name)
+    fn url() -> String {
+        MySQLAdapter::url_with_db("noria")
     }
 
-    async fn recreate_database(db_name: &str) {
-        recreate_database(db_name).await;
+    async fn recreate_database() {
+        recreate_database("noria").await;
     }
 
     async fn run_backend(

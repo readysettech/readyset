@@ -4,6 +4,7 @@ use readyset_client::BackendBuilder;
 use readyset_client_test_helpers::psql_helpers::PostgreSQLAdapter;
 use readyset_client_test_helpers::{sleep, TestBuilder};
 use readyset_server::Handle;
+use serial_test::serial;
 
 mod common;
 use common::connect;
@@ -17,6 +18,7 @@ async fn setup() -> (tokio_postgres::Config, Handle) {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[serial]
 async fn create_table() {
     let (config, _handle) = setup().await;
     let client = connect(config).await;
@@ -44,6 +46,7 @@ async fn create_table() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[serial]
 async fn delete_case_sensitive() {
     for (opts, _handle) in [
         TestBuilder::default().build::<PostgreSQLAdapter>().await,
@@ -109,6 +112,7 @@ async fn delete_case_sensitive() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[serial]
 async fn unsupported_query_ad_hoc() {
     let (config, _handle) = setup().await;
     let client = connect(config).await;
@@ -128,6 +132,7 @@ async fn unsupported_query_ad_hoc() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[serial]
 #[ignore] // needs proper detection of reads vs writes through fallback
 async fn prepare_execute_fallback() {
     let (config, _handle) = setup().await;
@@ -157,6 +162,7 @@ async fn prepare_execute_fallback() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[serial]
 async fn proxy_unsupported_sets() {
     let (config, _handle) = TestBuilder::new(
         BackendBuilder::new()
