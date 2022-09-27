@@ -1,4 +1,5 @@
 use std::convert::TryFrom;
+use std::time::Duration;
 
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use mysql_async::prelude::Queryable;
@@ -1701,7 +1702,9 @@ async fn test_show_proxied_queries_telemetry() {
         .is_none());
 
     conn.query_drop("SHOW PROXIED QUERIES").await.unwrap();
-    reporter.run_once().await;
+    reporter
+        .run_once(&mut tokio::time::interval(Duration::from_nanos(1)))
+        .await;
 
     assert_eq!(
         1,
@@ -1722,7 +1725,9 @@ async fn test_show_caches_queries_telemetry() {
     assert!(reporter.check_event(TelemetryEvent::ShowCaches).is_none());
 
     conn.query_drop("SHOW CACHES").await.unwrap();
-    reporter.run_once().await;
+    reporter
+        .run_once(&mut tokio::time::interval(Duration::from_nanos(1)))
+        .await;
 
     assert_eq!(
         1,

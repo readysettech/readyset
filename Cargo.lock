@@ -4306,6 +4306,7 @@ dependencies = [
 name = "readyset-telemetry-reporter"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "backoff",
  "base64",
  "derive_builder 0.11.2",
