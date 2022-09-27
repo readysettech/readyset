@@ -233,19 +233,46 @@ mod tests {
     }
 
     async fn get_last_ddl(client: &Context, dbname: &str) -> anyhow::Result<DdlEvent> {
-        let ddl: Vec<u8> = client
+        use crate::postgres_connector::wal_reader::{
+            DDL_REPLICATION_LOG_SCHEMA, DDL_REPLICATION_LOG_TABLE,
+        };
+
+        let version: u32 = client
+            .client
+            .query_one("SHOW server_version_num", &[])
+            .await?
+            .get::<_, String>(0)
+            .parse()
+            .unwrap();
+
+        let ddl: Vec<u8> = if version >= 140000 {
+            // If Postgres version is 14 and up we replicate using pg_logical messages
+            client
             .query_one(
                 format!(
                     "SELECT substring(data, 24)
                      FROM pg_logical_slot_get_binary_changes('{dbname}',
                      NULL, NULL, 'proto_version', '1', 'publication_names', '{dbname}', 'messages', 'true')
                      OFFSET 1 LIMIT 1;"
-                )
-                .as_str(),
+                ).as_str(),
                 &[],
             )
             .await?
-            .get(0);
+            .get(0)
+        } else {
+            // If Postgres version is 13 or below we replicate by updating a row in a special table
+            let ddl_text: String = client
+                .query_one(
+                    format!(
+                        "SELECT ddl FROM {DDL_REPLICATION_LOG_SCHEMA}.{DDL_REPLICATION_LOG_TABLE}"
+                    )
+                    .as_str(),
+                    &[],
+                )
+                .await?
+                .get(0);
+            ddl_text.into()
+        };
         Ok(serde_json::from_slice(&ddl)?)
     }
 

@@ -266,17 +266,30 @@ impl PostgresWalConnector {
         slot: &str,
         publication: &str,
     ) -> ReadySetResult<()> {
+        let version: u32 = self
+            .one_row_query("SHOW server_version_num", 1)
+            .await?
+            .get(0)
+            .unwrap()
+            .parse()
+            .unwrap_or(0);
+
         let inner_client = self.client.inner();
+        let wal_position = self.next_position.unwrap_or_default();
+        let messages_support = if version >= 140000 {
+            ", \"messages\" 'true'"
+        } else {
+            ""
+        };
+
+        debug!("Postgres version {version}");
 
         let query = format!(
-            "START_REPLICATION SLOT {} LOGICAL {} (
+            "START_REPLICATION SLOT {slot} LOGICAL {wal_position} (
                 \"proto_version\" '1',
-                \"publication_names\" '{}',
-                \"messages\" 'true'
+                \"publication_names\" '{publication}'
+                {messages_support}
             )",
-            slot,
-            self.next_position.unwrap_or_default(),
-            publication
         );
 
         let query = pgsql::simple_query::encode(inner_client, &query).unwrap();

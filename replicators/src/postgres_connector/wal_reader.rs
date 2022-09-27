@@ -15,6 +15,11 @@ use tracing::{debug, error, trace};
 
 use super::ddl_replication::DdlEvent;
 use super::wal::{self, RelationMapping, WalData, WalError, WalRecord};
+use crate::postgres_connector::wal::TupleEntry;
+
+/// The names of the schema table that DDL replication logs will be written to
+pub(crate) const DDL_REPLICATION_LOG_SCHEMA: &str = "readyset";
+pub(crate) const DDL_REPLICATION_LOG_TABLE: &str = "ddl_replication_log";
 
 struct Relation {
     schema: String,
@@ -161,58 +166,83 @@ impl WalReader {
                     old_tuple,
                     new_tuple,
                 } => {
-                    if let Some(Relation {
+                    let Relation {
                         schema,
                         table,
                         mapping,
-                    }) = relations.get(&relation_id)
-                    {
-                        // We only ever going to have a `key_tuple` *OR* `old_tuple` *OR* neither
-                        if let Some(old_tuple) = old_tuple {
-                            // This happens when there is no key defined for the table and `REPLICA
-                            // IDENTITY` is set to `FULL`
-                            return Ok((
-                                WalEvent::UpdateRow {
-                                    schema: schema.clone(),
-                                    table: table.clone(),
-                                    old_tuple: old_tuple.into_noria_vec(mapping, false)?,
-                                    new_tuple: new_tuple.into_noria_vec(mapping, false)?,
-                                },
-                                end,
-                            ));
-                        } else if let Some(key_tuple) = key_tuple {
-                            // This happens when the update is modifying the key column
-                            return Ok((
-                                WalEvent::UpdateByKey {
-                                    schema: schema.clone(),
-                                    table: table.clone(),
-                                    key: key_tuple.into_noria_vec(mapping, true)?,
-                                    set: new_tuple
-                                        .into_noria_vec(mapping, false)?
-                                        .into_iter()
-                                        .map(readyset::Modification::Set)
-                                        .collect(),
-                                },
-                                end,
-                            ));
-                        } else {
-                            // This happens when the update is not modifying the key column and
-                            // therefore it is possible to extract the
-                            // key value from the tuple as is
-                            return Ok((
-                                WalEvent::UpdateByKey {
-                                    schema: schema.clone(),
-                                    table: table.clone(),
-                                    key: new_tuple.clone().into_noria_vec(mapping, true)?,
-                                    set: new_tuple
-                                        .into_noria_vec(mapping, false)?
-                                        .into_iter()
-                                        .map(readyset::Modification::Set)
-                                        .collect(),
-                                },
-                                end,
-                            ));
-                        }
+                    } = match relations.get(&relation_id) {
+                        None => continue,
+                        Some(relation) => relation,
+                    };
+
+                    if schema == DDL_REPLICATION_LOG_SCHEMA && table == DDL_REPLICATION_LOG_TABLE {
+                        // This is a special update message for the DDL replication table, convert
+                        // that to the same format as if it were a message record
+                        let ddl_data = match new_tuple.cols.get(0) {
+                            Some(TupleEntry::Text(data)) => data,
+                            _ => {
+                                error!("Error fetching DDL event from update record");
+                                continue;
+                            }
+                        };
+
+                        let ddl_event = match serde_json::from_slice(ddl_data) {
+                            Err(err) => {
+                                error!(
+                                    ?err,
+                                    "Error parsing DDL event, table or view will not be used"
+                                );
+                                continue;
+                            }
+                            Ok(ddl_event) => ddl_event,
+                        };
+                        return Ok((WalEvent::DdlEvent { ddl_event }, end));
+                    }
+                    // We only ever going to have a `key_tuple` *OR* `old_tuple` *OR* neither
+                    if let Some(old_tuple) = old_tuple {
+                        // This happens when there is no key defined for the table and `REPLICA
+                        // IDENTITY` is set to `FULL`
+                        return Ok((
+                            WalEvent::UpdateRow {
+                                schema: schema.clone(),
+                                table: table.clone(),
+                                old_tuple: old_tuple.into_noria_vec(mapping, false)?,
+                                new_tuple: new_tuple.into_noria_vec(mapping, false)?,
+                            },
+                            end,
+                        ));
+                    } else if let Some(key_tuple) = key_tuple {
+                        // This happens when the update is modifying the key column
+                        return Ok((
+                            WalEvent::UpdateByKey {
+                                schema: schema.clone(),
+                                table: table.clone(),
+                                key: key_tuple.into_noria_vec(mapping, true)?,
+                                set: new_tuple
+                                    .into_noria_vec(mapping, false)?
+                                    .into_iter()
+                                    .map(readyset::Modification::Set)
+                                    .collect(),
+                            },
+                            end,
+                        ));
+                    } else {
+                        // This happens when the update is not modifying the key column and
+                        // therefore it is possible to extract the
+                        // key value from the tuple as is
+                        return Ok((
+                            WalEvent::UpdateByKey {
+                                schema: schema.clone(),
+                                table: table.clone(),
+                                key: new_tuple.clone().into_noria_vec(mapping, true)?,
+                                set: new_tuple
+                                    .into_noria_vec(mapping, false)?
+                                    .into_iter()
+                                    .map(readyset::Modification::Set)
+                                    .collect(),
+                            },
+                            end,
+                        ));
                     }
                 }
                 WalRecord::Delete {

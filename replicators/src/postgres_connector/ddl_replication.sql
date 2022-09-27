@@ -1,6 +1,24 @@
 CREATE SCHEMA IF NOT EXISTS readyset;
 
+CREATE OR REPLACE FUNCTION readyset.is_pre14()
+RETURNS boolean
+LANGUAGE plpgsql
+AS $$
+    DECLARE ver integer;
+BEGIN
+    SELECT current_setting('server_version_num') INTO ver;
+    RETURN ver < 140000;
+END $$;
 ----
+
+DO $$
+BEGIN
+IF readyset.is_pre14() THEN
+    CREATE TABLE IF NOT EXISTS readyset.ddl_replication_log AS
+    WITH t (ddl) AS (VALUES ('')) SELECT * FROM t;
+    ALTER TABLE readyset.ddl_replication_log REPLICA IDENTITY FULL;
+END IF;
+END $$;
 
 CREATE OR REPLACE FUNCTION readyset.replicate_create_table()
 RETURNS event_trigger
@@ -63,7 +81,11 @@ BEGIN
     FROM pg_event_trigger_ddl_commands() object
     WHERE object.object_type = 'table';
 
-    PERFORM pg_logical_emit_message(true, 'readyset', create_message);
+    IF readyset.is_pre14() THEN
+        UPDATE readyset.ddl_replication_log SET "ddl" = create_message;
+    ELSE
+        PERFORM pg_logical_emit_message(true, 'readyset', create_message);
+    END IF;
 END $$;
 
 
@@ -92,7 +114,11 @@ BEGIN
     FROM pg_event_trigger_ddl_commands() object
     WHERE object.object_type = 'table';
 
-    PERFORM pg_logical_emit_message(true, 'readyset', alter_message);
+    IF readyset.is_pre14() THEN
+        UPDATE readyset.ddl_replication_log SET "ddl" = alter_message;
+    ELSE
+        PERFORM pg_logical_emit_message(true, 'readyset', alter_message);
+    END IF;
 END $$;
 
 ----
@@ -124,7 +150,11 @@ BEGIN
          AND cls.relname = v.viewname
     WHERE object.object_type = 'view';
 
-    PERFORM pg_logical_emit_message(true, 'readyset', create_message);
+    IF readyset.is_pre14() THEN
+        UPDATE readyset.ddl_replication_log SET "ddl" = create_message;
+    ELSE
+        PERFORM pg_logical_emit_message(true, 'readyset', create_message);
+    END IF;
 END $$;
 
 ----
@@ -149,7 +179,11 @@ BEGIN
     FROM pg_event_trigger_dropped_objects()
     WHERE object_type IN ('table', 'view');
 
-    PERFORM pg_logical_emit_message(true, 'readyset', drop_message);
+    IF readyset.is_pre14() THEN
+        UPDATE readyset.ddl_replication_log SET "ddl" = drop_message;
+    ELSE
+        PERFORM pg_logical_emit_message(true, 'readyset', drop_message);
+    END IF;
 END $$;
 
 ----
