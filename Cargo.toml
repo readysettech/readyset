@@ -48,7 +48,8 @@ members = [
     "replicators",
     "test-utils",
     "timestamp-service",
-    "tournament-kway"
+    "tournament-kway",
+    "health-reporter"
 ]
 resolver = "2"
 

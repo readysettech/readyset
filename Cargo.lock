@@ -1700,6 +1700,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "health-reporter"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "parking_lot 0.11.2",
+]
+
+[[package]]
 name = "heck"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3751,6 +3759,7 @@ dependencies = [
  "futures",
  "futures-executor",
  "futures-util",
+ "health-reporter",
  "hyper",
  "itertools",
  "launchpad",
@@ -3800,6 +3809,7 @@ dependencies = [
  "fail",
  "failpoint-macros",
  "futures-util",
+ "health-reporter",
  "launchpad",
  "maplit",
  "metrics",

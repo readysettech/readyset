@@ -7,6 +7,7 @@ use std::task::{Context, Poll};
 
 use anyhow::anyhow;
 use futures::TryFutureExt;
+use health_reporter::{HealthReporter as AdapterHealthReporter, State};
 use hyper::header::CONTENT_TYPE;
 use hyper::service::make_service_fn;
 use hyper::{self, Body, Method, Request, Response};
@@ -18,7 +19,6 @@ use tokio::sync::mpsc::Sender;
 use tokio_stream::wrappers::TcpListenerStream;
 use tower::Service;
 
-use crate::health_reporter::{AdapterHealthReporter, State};
 use crate::query_status_cache::{DeniedQuery, QueryStatusCache};
 
 /// Routes requests from an HTTP server to expose metrics data from the adapter.

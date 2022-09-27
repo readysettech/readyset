@@ -36,6 +36,7 @@ readyset-server = { path = "../readyset-server/" }
 readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter" }
 readyset-sql-passes = { path = "../readyset-sql-passes" }
 readyset-version = { path = "../readyset-version" }
+health-reporter = { path = "../health-reporter" }
 
 [features]
 failure_injection = ["fail/failpoints"]
