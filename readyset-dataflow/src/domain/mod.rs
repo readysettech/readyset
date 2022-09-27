@@ -788,13 +788,25 @@ impl Domain {
                 let misses = self.nodes[miss_in].borrow_mut().handle_upquery(miss)?;
                 trace!(?misses, "Remapped misses on generated columns");
 
+                // Record that we remapped these keys, so that any evictions on the upstream keys
+                // can be translated into the original keys
                 for upstream_miss in &misses {
-                    self.remapped_keys.insert(
-                        miss_in,
-                        upstream_miss.clone(),
-                        replay_key.clone(),
-                        needed_for,
-                    )
+                    if self
+                        .state
+                        .get(upstream_miss.node)
+                        .iter()
+                        // If the node we missed in is fully materialized, we don't need to record
+                        // the remaps, since we're guaranteed not to get any evictions on the
+                        // upstream keys
+                        .any(|state| state.is_partial())
+                    {
+                        self.remapped_keys.insert(
+                            miss_in,
+                            upstream_miss.clone(),
+                            replay_key.clone(),
+                            needed_for,
+                        )
+                    }
                 }
 
                 invariant!(
