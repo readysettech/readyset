@@ -12,6 +12,7 @@ use futures::FutureExt;
 use launchpad::redacted::RedactedString;
 use launchpad::select;
 use metrics::{counter, histogram};
+use mysql::prelude::Queryable;
 use nom_sql::Relation;
 use readyset::consensus::Authority;
 use readyset::consistency::Timestamp;
@@ -22,7 +23,7 @@ use readyset::recipe::changelist::{Change, ChangeList};
 use readyset::replication::{ReplicationOffset, ReplicationOffsets};
 use readyset::{ReadySetError, ReadySetHandle, ReadySetResult, Table, TableOperation};
 use readyset_errors::{internal_err, invalid_err};
-use readyset_telemetry_reporter::{TelemetryEvent, TelemetrySender};
+use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 use tracing::{debug, error, info, info_span, trace, warn, Instrument};
@@ -255,14 +256,22 @@ impl NoriaAdapter {
         )?;
 
         let mut db_schemas = DatabaseSchemas::new();
-        let mut report_schemas = false;
 
         let pos = match (replication_offsets.max_offset()?, resnapshot) {
             (None, _) | (_, true) => {
-                report_schemas = true;
                 let span = info_span!("taking database snapshot");
                 let replicator_options = mysql_options.clone();
                 let pool = mysql::Pool::new(replicator_options);
+
+                // Query mysql server version
+                let db_version = pool
+                    .get_conn()
+                    .await?
+                    .query_first("SELECT @@version")
+                    .await
+                    .ok()
+                    .flatten()
+                    .unwrap_or_else(|| "unknown".to_owned());
 
                 let replicator = MySqlReplicator {
                     pool,
@@ -320,6 +329,16 @@ impl NoriaAdapter {
                     snapshot_start.elapsed().as_micros() as f64
                 );
 
+                // Send snapshot complete and redacted schemas telemetry events
+                let _ = telemetry_sender.send_event_with_payload(
+                    TelemetryEvent::SnapshotComplete,
+                    TelemetryBuilder::new()
+                        .db_backend("mysql")
+                        .db_version(db_version)
+                        .build(),
+                );
+                db_schemas.send_schemas(telemetry_sender).await;
+
                 pos
             }
             (Some(pos), _) => pos.clone().into(),
@@ -371,11 +390,6 @@ impl NoriaAdapter {
         // Let waiters know that the initial snapshotting is complete.
         if let Some(notify) = ready_notify.take() {
             notify.notify_one();
-        }
-
-        let _ = telemetry_sender.send_event(TelemetryEvent::SnapshotComplete);
-        if report_schemas {
-            db_schemas.send_schemas(telemetry_sender).await;
         }
 
         adapter.main_loop(&mut current_pos, None).await?;
@@ -438,10 +452,8 @@ impl NoriaAdapter {
         };
 
         let mut create_schema = CreateSchema::new(dbname.to_string(), nom_sql::Dialect::PostgreSQL);
-        let mut report_schemas = false;
 
         if let Some(replication_slot) = replication_slot {
-            report_schemas = true;
             let snapshot_start = Instant::now();
             // If snapshot name exists, it means we need to make a snapshot to noria
             let mut builder = native_tls::TlsConnector::builder();
@@ -456,6 +468,11 @@ impl NoriaAdapter {
                 .await?;
 
             let connection_handle = tokio::spawn(connection);
+            let db_version = client
+                .query_one("SELECT version()", &[])
+                .await
+                .and_then(|row| row.try_get::<_, String>(0))
+                .unwrap_or_else(|_| "unknown".to_owned());
 
             let mut replicator =
                 PostgresReplicator::new(&mut client, &mut noria, table_filter.clone()).await?;
@@ -488,15 +505,20 @@ impl NoriaAdapter {
             if replication_slot.slot_name == RESNAPSHOT_SLOT {
                 let _ = connector.drop_replication_slot(RESNAPSHOT_SLOT).await;
             }
+
+            let _ = telemetry_sender.send_event_with_payload(
+                TelemetryEvent::SnapshotComplete,
+                TelemetryBuilder::new()
+                    .db_backend("psql")
+                    .db_version(db_version)
+                    .build(),
+            );
+            create_schema.send_schemas(telemetry_sender).await;
         }
 
         // Let waiters know that the initial snapshotting is complete.
         if let Some(notify) = ready_notify.take() {
             notify.notify_one();
-        }
-        let _ = telemetry_sender.send_event(TelemetryEvent::SnapshotComplete);
-        if report_schemas {
-            create_schema.send_schemas(telemetry_sender).await;
         }
 
         connector
