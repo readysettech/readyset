@@ -178,7 +178,7 @@ impl DbConnection {
                     .await?;
             }
 
-            let (client, conn) = tokio_postgres::connect(&pgsql_url(), tokio_postgres::NoTls)
+            let (client, conn) = tokio_postgres::connect(url, tokio_postgres::NoTls)
                 .await
                 .unwrap();
             let connection_handle = tokio::spawn(async move { conn.await.map_err(Into::into) });
@@ -405,6 +405,14 @@ fn pgsql_url() -> String {
     )
 }
 
+fn pgsql13_url() -> String {
+    format!(
+        "postgresql://postgres:noria@{}:{}/noria",
+        env::var("PGHOST13").unwrap_or_else(|_| "127.0.0.1".into()),
+        env::var("PGPORT13").unwrap_or_else(|_| "5433".into()),
+    )
+}
+
 fn mysql_url() -> String {
     format!(
         "mysql://root:noria@{}:{}/public",
@@ -519,6 +527,54 @@ async fn pgsql_replication_resnapshot() -> ReadySetResult<()> {
 #[serial_test::serial]
 async fn mysql_replication_resnapshot() -> ReadySetResult<()> {
     resnapshot_inner(&mysql_url()).await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn psql14_ddl_replicate_drop_table() {
+    postgresql_ddl_replicate_drop_table_internal(&pgsql_url()).await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn psql13_ddl_replicate_drop_table() {
+    postgresql_ddl_replicate_drop_table_internal(&pgsql13_url()).await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn psql14_ddl_replicate_create_table() {
+    postgresql_ddl_replicate_create_table_internal(&pgsql_url()).await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn psql13_ddl_replicate_create_table() {
+    postgresql_ddl_replicate_create_table_internal(&pgsql13_url()).await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn psql14_ddl_replicate_drop_view() {
+    postgresql_ddl_replicate_drop_view_internal(&pgsql_url()).await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn psql13_ddl_replicate_drop_view() {
+    postgresql_ddl_replicate_drop_view_internal(&pgsql13_url()).await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn psql14_ddl_replicate_create_view() {
+    postgresql_ddl_replicate_create_view_internal(&pgsql_url()).await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn psql13_ddl_replicate_create_view() {
+    postgresql_ddl_replicate_create_view_internal(&pgsql13_url()).await
 }
 
 /// This test checks that when writes and replication happen in parallel
@@ -1236,16 +1292,16 @@ async fn mysql_enum_replication() -> ReadySetResult<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
-async fn postgresql_ddl_replicate_drop_table() {
+async fn postgresql_ddl_replicate_drop_table_internal(url: &str) {
     readyset_tracing::init_test_logging();
-    let mut client = DbConnection::connect(&pgsql_url()).await.unwrap();
+    let mut client = DbConnection::connect(url).await.unwrap();
     client
         .query("DROP TABLE IF EXISTS t1 CASCADE; CREATE TABLE t1 (id int);")
         .await
         .unwrap();
-    let mut ctx = TestHandle::start_noria(pgsql_url(), None).await.unwrap();
+    let mut ctx = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
     ctx.ready_notify.as_ref().unwrap().notified().await;
     ctx.noria
         .table(Relation {
@@ -1277,16 +1333,16 @@ async fn postgresql_ddl_replicate_drop_table() {
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
-async fn postgresql_ddl_replicate_create_table() {
+async fn postgresql_ddl_replicate_create_table_internal(url: &str) {
     readyset_tracing::init_test_logging();
-    let mut client = DbConnection::connect(&pgsql_url()).await.unwrap();
+    let mut client = DbConnection::connect(url).await.unwrap();
     client
         .query("DROP TABLE IF EXISTS t2 CASCADE")
         .await
         .unwrap();
-    let mut ctx = TestHandle::start_noria(pgsql_url(), None).await.unwrap();
+    let mut ctx = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
     ctx.ready_notify.as_ref().unwrap().notified().await;
 
     trace!("Creating table");
@@ -1302,11 +1358,9 @@ async fn postgresql_ddl_replicate_create_table() {
         .is_ok());
 }
 
-#[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
-async fn postgresql_ddl_replicate_drop_view() {
+async fn postgresql_ddl_replicate_drop_view_internal(url: &str) {
     readyset_tracing::init_test_logging();
-    let mut client = DbConnection::connect(&pgsql_url()).await.unwrap();
+    let mut client = DbConnection::connect(url).await.unwrap();
     client
         .query(
             "DROP TABLE IF EXISTS t2 CASCADE; CREATE TABLE t2 (id int);
@@ -1314,7 +1368,9 @@ async fn postgresql_ddl_replicate_drop_view() {
         )
         .await
         .unwrap();
-    let mut ctx = TestHandle::start_noria(pgsql_url(), None).await.unwrap();
+    let mut ctx = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
     ctx.ready_notify.as_ref().unwrap().notified().await;
     ctx.noria
         .table(Relation {
@@ -1343,11 +1399,9 @@ async fn postgresql_ddl_replicate_drop_view() {
     };
 }
 
-#[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
-async fn postgresql_ddl_replicate_create_view() {
+async fn postgresql_ddl_replicate_create_view_internal(url: &str) {
     readyset_tracing::init_test_logging();
-    let mut client = DbConnection::connect(&pgsql_url()).await.unwrap();
+    let mut client = DbConnection::connect(url).await.unwrap();
     client
         .query(
             "DROP TABLE IF EXISTS t2 CASCADE; CREATE TABLE t2 (id int);
@@ -1355,7 +1409,9 @@ async fn postgresql_ddl_replicate_create_view() {
         )
         .await
         .unwrap();
-    let mut ctx = TestHandle::start_noria(pgsql_url(), None).await.unwrap();
+    let mut ctx = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
     ctx.ready_notify.as_ref().unwrap().notified().await;
     ctx.noria
         .table(Relation {
