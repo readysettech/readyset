@@ -2,6 +2,7 @@ use std::future::Future;
 use std::io;
 use std::net::SocketAddr;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use anyhow::anyhow;
@@ -13,6 +14,7 @@ use metrics_exporter_prometheus::PrometheusHandle;
 use readyset_client_metrics::recorded;
 use stream_cancel::Valve;
 use tokio::net::TcpListener;
+use tokio::sync::mpsc::Sender;
 use tokio_stream::wrappers::TcpListenerStream;
 use tower::Service;
 
@@ -32,6 +34,11 @@ pub struct NoriaAdapterHttpRouter {
     pub valve: Valve,
     /// Used to retrieve the current health of the adapter.
     pub health_reporter: AdapterHealthReporter,
+    /// Used to communicate externally that a failpoint request has been received and successfully
+    /// handled.
+    /// Most commonly used to block on further startup action if --wait-for-failpoint is supplied
+    /// to the adapter.
+    pub failpoint_channel: Option<Arc<Sender<()>>>,
 
     /// Used to retrieve the prometheus scrape's render as a String when servicing
     /// HTTP requests on /prometheus.
@@ -204,6 +211,37 @@ impl Service<Request<Body>> for NoriaAdapterHttpRouter {
         metrics::increment_counter!(recorded::ADAPTER_EXTERNAL_REQUESTS);
 
         match (req.method(), req.uri().path()) {
+            #[cfg(feature = "failure_injection")]
+            (&Method::GET, "/failpoint") => {
+                let tx = self.failpoint_channel.clone();
+                Box::pin(async move {
+                    let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
+                    let contents = match bincode::deserialize(&body) {
+                        Err(_) => {
+                            return Ok(res
+                                .status(400)
+                                .header(CONTENT_TYPE, "text/plain")
+                                .body(hyper::Body::from(
+                                    "body cannot be deserialized into failpoint name and action",
+                                ))
+                                .unwrap());
+                        }
+                        Ok(contents) => contents,
+                    };
+                    let (name, action): (String, String) = contents;
+                    let resp = res
+                        .status(200)
+                        .header(CONTENT_TYPE, "text/plain")
+                        .body(hyper::Body::from(
+                            ::bincode::serialize(&fail::cfg(name, &action)).unwrap(),
+                        ))
+                        .unwrap();
+                    if let Some(tx) = tx {
+                        let _ = tx.send(()).await;
+                    }
+                    Ok(resp)
+                })
+            }
             (&Method::GET, "/allow-list") => {
                 let query_cache = self.query_cache;
                 Box::pin(async move {

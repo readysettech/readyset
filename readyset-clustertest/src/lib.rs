@@ -211,6 +211,7 @@ mod readyset_mysql;
 mod utils;
 
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::{Duration, Instant};
@@ -398,6 +399,9 @@ pub struct DeploymentBuilder {
     reader_replicas: Option<usize>,
     /// If true, will automatically restart the server/adapter processes
     auto_restart: bool,
+    /// If true, will tell the adapter to wait to receive a failpoint request. Useful for testing
+    /// failpoint that are introduced during the adapters startup process.
+    wait_for_failpoint: bool,
 }
 
 impl DeploymentBuilder {
@@ -441,6 +445,7 @@ impl DeploymentBuilder {
             replicator_restart_timeout_secs: None,
             reader_replicas: None,
             auto_restart: false,
+            wait_for_failpoint: false,
         }
     }
 
@@ -561,6 +566,13 @@ impl DeploymentBuilder {
         self
     }
 
+    /// Sets whether the adapter should wait for an incoming failpoint request before proceeding
+    /// with the rest of the adapter startup process.
+    pub fn wait_for_failpoint(mut self, wait_for_failpoint: bool) -> Self {
+        self.wait_for_failpoint = wait_for_failpoint;
+        self
+    }
+
     pub fn adapter_start_params(&self) -> AdapterStartParams {
         AdapterStartParams {
             deployment_name: self.name.clone(),
@@ -573,6 +585,7 @@ impl DeploymentBuilder {
             fallback_recovery_seconds: self.fallback_recovery_seconds,
             auto_restart: self.auto_restart,
             views_polling_interval: self.views_polling_interval,
+            wait_for_failpoint: self.wait_for_failpoint,
         }
     }
 
@@ -731,28 +744,43 @@ impl DeploymentBuilder {
 
 /// Waits for AdapterHandle to be healthy, up to the provided timeout.
 async fn wait_for_adapter_startup(metrics_port: u16, timeout: Duration) -> anyhow::Result<()> {
-    let health_check_url = format!("http://127.0.0.1:{}/health", metrics_port);
     let poll_interval = timeout.checked_div(10).expect("timeout must be valid");
-    tracing::debug!(
-        ?poll_interval,
-        "Waiting for adapter on port {metrics_port} to startup"
-    );
+    wait_for_adapter_poller(adapter_is_healthy, metrics_port, timeout, poll_interval).await
+}
+
+/// Waits for adapters http router to come up.
+#[allow(dead_code)] // Will be used in future commit tests.
+async fn wait_for_adapter_router(
+    metrics_port: u16,
+    timeout: Duration,
+    poll_interval: Duration,
+) -> anyhow::Result<()> {
+    wait_for_adapter_poller(
+        adapter_http_router_is_up,
+        metrics_port,
+        timeout,
+        poll_interval,
+    )
+    .await
+}
+
+async fn wait_for_adapter_poller<F, Fut>(
+    port_poll: F,
+    metrics_port: u16,
+    timeout: Duration,
+    poll_interval: Duration,
+) -> anyhow::Result<()>
+where
+    F: Fn(u16) -> Fut,
+    Fut: Future<Output = bool>,
+{
+    tracing::debug!(?poll_interval, "Waiting for adapter on port {metrics_port}");
 
     // Polls the health_check_url continuously until it returns OK.
-    let health_check_poller = |health_check_url: String, poll_interval: Duration| async move {
+    let health_check_poller = |poll_interval: Duration| async move {
         loop {
-            let r = hyper::Request::get(&health_check_url)
-                .body(hyper::Body::from(String::default()))
-                .unwrap();
-
-            let client = Client::new();
-            // If this http requests returns an error, the adapter http server may not be ready yet.
-            // If it returns something that isn't StatusCode::Ok, it is unhealthy and may eventually
-            // become healthy.
-            if let Ok(r) = client.request(r).await {
-                if r.status() == hyper::StatusCode::OK {
-                    break Ok(());
-                }
+            if port_poll(metrics_port).await {
+                break Ok(());
             }
 
             tracing::debug!(
@@ -763,11 +791,38 @@ async fn wait_for_adapter_startup(metrics_port: u16, timeout: Duration) -> anyho
         }
     };
 
-    tokio::time::timeout(
-        timeout,
-        health_check_poller(health_check_url, poll_interval),
-    )
-    .await?
+    tokio::time::timeout(timeout, health_check_poller(poll_interval)).await?
+}
+
+async fn adapter_is_healthy(metrics_port: u16) -> bool {
+    let health_check_url = format!("http://127.0.0.1:{}/health", metrics_port);
+    let r = hyper::Request::get(&health_check_url)
+        .body(hyper::Body::from(String::default()))
+        .unwrap();
+
+    let client = Client::new();
+    // If this http requests returns an error, the adapter http server may not be ready yet.
+    // If it returns something that isn't StatusCode::Ok, it is unhealthy and may eventually
+    // become healthy.
+    if let Ok(r) = client.request(r).await {
+        if r.status() == hyper::StatusCode::OK {
+            return true;
+        }
+    }
+
+    false
+}
+
+async fn adapter_http_router_is_up(metrics_port: u16) -> bool {
+    let health_check_url = format!("http://127.0.0.1:{}/health", metrics_port);
+    let r = hyper::Request::get(&health_check_url)
+        .body(hyper::Body::from(String::default()))
+        .unwrap();
+
+    let client = Client::new();
+    // If we get an ok it means we got a response of some kind from the health endpoint, which
+    // means the http router is up.
+    client.request(r).await.is_ok()
 }
 
 /// A handle to a single server in the deployment.
@@ -820,6 +875,26 @@ pub struct AdapterHandle {
 impl AdapterHandle {
     pub async fn wait_for_startup(&self, timeout: Duration) -> anyhow::Result<()> {
         wait_for_adapter_startup(self.metrics_port, timeout).await
+    }
+
+    pub async fn set_failpoint(&mut self, name: &str, action: &str) {
+        if !adapter_http_router_is_up(self.metrics_port).await {
+            return;
+        }
+        let data = bincode::serialize(&(name, action)).unwrap();
+        let failpoint_url = format!("http://127.0.0.1:{}/failpoint", self.metrics_port);
+        let r = hyper::Request::get(failpoint_url)
+            .body(hyper::Body::from(data))
+            .unwrap();
+
+        let client = Client::new();
+        // This invariant should already be enforced by checking we get any kind of response from
+        // the metrics health endpoint above, indicating that we have an http router ready to
+        // receive fail point requests.
+        if let Ok(r) = client.request(r).await {
+            let status = r.status();
+            assert!(status == hyper::StatusCode::OK);
+        }
     }
 }
 
@@ -1178,6 +1253,10 @@ pub struct AdapterStartParams {
     ///
     /// Corresponds to [`readyset_client_adapter::Options::views_polling_interval`]
     views_polling_interval: Duration,
+    /// If true, will have the adapter wait for an incoming failpoint request before proceeding
+    /// with the rest of the startup process. Useful for testing failpoints placed within the
+    /// adapter startup flow.
+    wait_for_failpoint: bool,
 }
 
 async fn start_server(
@@ -1257,6 +1336,10 @@ async fn start_mysql_adapter(
 
     if let Some(ref mysql) = server_upstream {
         builder = builder.mysql(mysql);
+    }
+
+    if params.wait_for_failpoint {
+        builder = builder.wait_for_failpoint();
     }
 
     builder.start().await

@@ -3747,6 +3747,7 @@ dependencies = [
  "dashmap",
  "dataflow-expression",
  "derive_more",
+ "fail",
  "futures",
  "futures-executor",
  "futures-util",

@@ -345,6 +345,11 @@ pub struct Options {
     /// Whether to disable telemetry reporting. Defaults to false.
     #[clap(long, env = "DISABLE_TELEMETRY")]
     disable_telemetry: bool,
+
+    /// Whether we should wait for a failpoint request to the adapters http router, which may
+    /// impact startup.
+    #[clap(long, hide = true)]
+    wait_for_failpoint: bool,
 }
 
 impl<H> NoriaAdapter<H>
@@ -534,6 +539,47 @@ where
         };
         rs_connect.in_scope(|| info!(?migration_mode));
 
+        // Spawn a task for handling this adapter's HTTP request server.
+        // This step is done as the last thing before accepting connections because it is used as
+        // the health check for the service.
+        let router_handle = {
+            rs_connect.in_scope(|| info!("Spawning HTTP request server task"));
+            let (handle, valve) = Valve::new();
+            let (tx, rx) = if options.wait_for_failpoint {
+                let (tx, rx) = tokio::sync::mpsc::channel(1);
+                (Some(Arc::new(tx)), Some(rx))
+            } else {
+                (None, None)
+            };
+            let http_server = NoriaAdapterHttpRouter {
+                listen_addr: options.metrics_address,
+                query_cache: query_status_cache,
+                valve,
+                prometheus_handle,
+                health_reporter,
+                failpoint_channel: tx,
+            };
+
+            let fut = async move {
+                let http_listener = http_server.create_listener().await.unwrap();
+                NoriaAdapterHttpRouter::route_requests(http_server, http_listener).await
+            };
+
+            rt.handle().spawn(fut);
+
+            // If we previously setup a failpoint channel because wait_for_failpoint was enabled,
+            // then we should wait to hear from the http router that a failpoint request was
+            // handled.
+            if let Some(mut rx) = rx {
+                let fut = async move {
+                    let _ = rx.recv().await;
+                };
+                rt.block_on(fut);
+            }
+
+            handle
+        };
+
         if let MigrationMode::OutOfBand = migration_mode {
             let upstream_db_url = options.upstream_db_url.as_ref().map(|u| u.0.clone());
             let upstream_config = self.upstream_config.clone();
@@ -684,30 +730,6 @@ where
             Some(server_handle)
         } else {
             None
-        };
-
-        // Spawn a task for handling this adapter's HTTP request server.
-        // This step is done as the last thing before accepting connections because it is used as
-        // the health check for the service.
-        let router_handle = {
-            rs_connect.in_scope(|| info!("Spawning HTTP request server task"));
-            let (handle, valve) = Valve::new();
-            let http_server = NoriaAdapterHttpRouter {
-                listen_addr: options.metrics_address,
-                query_cache: query_status_cache,
-                valve,
-                prometheus_handle,
-                health_reporter,
-            };
-
-            let fut = async move {
-                let http_listener = http_server.create_listener().await.unwrap();
-                NoriaAdapterHttpRouter::route_requests(http_server, http_listener).await
-            };
-
-            rt.handle().spawn(fut);
-
-            handle
         };
 
         while let Some(Ok(s)) = rt.block_on(listener.next()) {

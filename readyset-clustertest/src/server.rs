@@ -266,6 +266,11 @@ impl AdapterBuilder {
         )
     }
 
+    pub fn wait_for_failpoint(mut self) -> Self {
+        self.args.push("--wait-for-failpoint".to_string());
+        self
+    }
+
     pub fn query_max_failure_seconds(self, secs: u64) -> Self {
         self.push_arg("--query-max-failure-seconds", &secs.to_string())
     }
