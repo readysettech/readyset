@@ -96,12 +96,14 @@ impl TelemetryReporter {
         api_key: Option<String>,
         shutdown_rx: oneshot::Receiver<()>,
     ) -> Result<Self> {
+        let client = match SEGMENT_WRITE_KEY.as_ref() {
+            Some(k) => Result::Ok(Some(make_client(k)?)),
+            None => Ok(None),
+        }?;
+
         Ok(Self {
             rx,
-            client: SEGMENT_WRITE_KEY
-                .as_ref()
-                .map(|k| make_client(k).ok())
-                .unwrap(),
+            client,
             user_id: api_key,
             anonymous_id: Uuid::new_v4().to_string(),
             shutdown_rx,
@@ -161,6 +163,7 @@ impl TelemetryReporter {
                         | Error::Unauthorized
                         | Error::HTTPError { .. }
                         | Error::Timeout(_)
+                        | Error::Client(_)
                         | Error::Json(_)) => backoff::Error::Permanent(e),
                     })
             }),
@@ -219,6 +222,66 @@ pub async fn handle_resp(resp: Response) -> Result<()> {
             status,
             body: resp.text().await?,
         }),
+    }
+}
+
+#[cfg(any(test, feature = "test-util"))]
+pub mod test_util {
+    //! TestUtils
+    //!
+    //! Provides a way to test the events that were sent to a TelemetryReporter without sending them
+    //! to Segment. events Exposed if the `test-util` feature is enabledj
+
+    use std::collections::HashMap;
+
+    use tokio::sync::mpsc::Receiver;
+
+    use crate::{Telemetry, TelemetryEvent, TelemetryReporter};
+
+    pub struct TestTelemetryReporter {
+        rx: Receiver<(TelemetryEvent, Telemetry)>,
+
+        // Received Events
+        received_events: HashMap<TelemetryEvent, Vec<Telemetry>>,
+    }
+
+    impl TestTelemetryReporter {
+        pub fn from_reporter(real_reporter: TelemetryReporter) -> Self {
+            Self {
+                rx: real_reporter.rx,
+                received_events: HashMap::new(),
+            }
+        }
+
+        pub fn received_events(&self) -> &HashMap<TelemetryEvent, Vec<Telemetry>> {
+            &self.received_events
+        }
+
+        pub fn check_event(&self, event: TelemetryEvent) -> Option<&Vec<Telemetry>> {
+            self.received_events.get(&event)
+        }
+
+        pub async fn run(&mut self) {
+            loop {
+                self.run_once().await;
+            }
+        }
+
+        pub async fn run_once(&mut self) {
+            tokio::select! {
+                Some((event, telemetry)) = self.rx.recv() => {
+                    tracing::debug!(?event, ?telemetry, "TelemetryEvent received");
+                    let entry = self.received_events.entry(event).or_insert_with(|| vec![]);
+                    entry.push(telemetry);
+                }
+            }
+        }
+    }
+
+    impl From<TelemetryReporter> for TestTelemetryReporter {
+        fn from(real_reporter: TelemetryReporter) -> Self {
+            TestTelemetryReporter::from_reporter(real_reporter)
+        }
     }
 }
 

@@ -1680,7 +1680,7 @@ where
                 // Log a telemetry event
                 if let Some(ref telemetry_sender) = self.telemetry_sender {
                     if let Err(e) = telemetry_sender
-                        .send_event(TelemetryEvent::CreateCache)
+                        .send_event(TelemetryEvent::ShowCaches)
                         .await
                     {
                         warn!(error = %e, "Failed to send SHOW CACHES metric");
@@ -1696,7 +1696,7 @@ where
                 // Log a telemetry event
                 if let Some(ref telemetry_sender) = self.telemetry_sender {
                     if let Err(e) = telemetry_sender
-                        .send_event(TelemetryEvent::CreateCache)
+                        .send_event(TelemetryEvent::ShowProxiedQueries)
                         .await
                     {
                         warn!(error = %e, "Failed to send SHOW PROXIED QUERIES metric");

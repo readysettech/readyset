@@ -39,6 +39,7 @@ launchpad = { path = "../launchpad" }
 [dev-dependencies]
 readyset-client-test-helpers = { path = "../readyset-client-test-helpers", features = ["mysql"] }
 readyset-client-metrics = { path = "../readyset-client-metrics" }
+readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter", features = ["test-util"] }
 readyset-server = { path = "../readyset-server" }
 chrono = "0.4.19"
 maplit = "1.0.2"

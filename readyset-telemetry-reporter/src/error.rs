@@ -26,6 +26,9 @@ pub enum ReporterError {
 
     #[error("Error serializing telemetry payload: {0}")]
     Json(#[from] serde_json::Error),
+
+    #[error("Error making client: {0}")]
+    Client(String),
 }
 
 /// Result type alias for the telemetry reporter

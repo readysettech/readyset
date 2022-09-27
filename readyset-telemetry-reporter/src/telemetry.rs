@@ -3,7 +3,7 @@ use serde::Serialize;
 use serde_with_macros::skip_serializing_none;
 
 /// Segment Track event types
-#[derive(Debug, Serialize, Clone, Copy)]
+#[derive(Debug, Serialize, Clone, Copy, Hash, Eq, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum TelemetryEvent {
     /// The installer was run. Sent as soon as we have a valid API token

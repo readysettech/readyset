@@ -1,18 +1,38 @@
 use std::convert::TryFrom;
 
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
-use mysql_async::prelude::*;
+use mysql_async::prelude::Queryable;
 use readyset::status::ReadySetStatus;
 use readyset_client::backend::noria_connector::ReadBehavior;
 use readyset_client::backend::QueryInfo;
+use readyset_client::BackendBuilder;
 use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::mysql_helpers::{last_query_info, MySQLAdapter};
 use readyset_client_test_helpers::{sleep, TestBuilder};
 use readyset_errors::ReadySetError;
 use readyset_server::Handle;
+use readyset_telemetry_reporter::test_util::TestTelemetryReporter;
+use readyset_telemetry_reporter::{TelemetryEvent, TelemetryReporter, TelemetrySender};
+use tokio::sync::mpsc::channel;
+use tokio::sync::oneshot;
 
 async fn setup() -> (mysql_async::Opts, Handle) {
     TestBuilder::default().build::<MySQLAdapter>().await
+}
+
+async fn setup_telemetry() -> (TestTelemetryReporter, mysql_async::Opts, Handle) {
+    let (tx, rx) = channel(1);
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let telemetry_sender = TelemetrySender::new(tx, shutdown_tx);
+    let reporter = TestTelemetryReporter::from(
+        TelemetryReporter::try_new(rx, Some("TestAPIKey".to_string()), shutdown_rx).unwrap(),
+    );
+
+    let backend = BackendBuilder::new()
+        .require_authentication(false)
+        .telemetry_sender(telemetry_sender.clone());
+    let (opts, handle) = TestBuilder::new(backend).build::<MySQLAdapter>().await;
+    (reporter, opts, handle)
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1665,4 +1685,48 @@ async fn switch_database_with_use() {
     conn.query_drop("USE s2;").await.unwrap();
     conn.query_drop("SELECT b FROM t").await.unwrap();
     conn.query_drop("SELECT c FROM t2").await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_show_proxied_queries_telemetry() {
+    readyset_tracing::init_test_logging();
+    let (mut reporter, opts, _handle) = setup_telemetry().await;
+
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+
+    assert!(reporter
+        .check_event(TelemetryEvent::ShowProxiedQueries)
+        .is_none());
+
+    conn.query_drop("SHOW PROXIED QUERIES").await.unwrap();
+    reporter.run_once().await;
+
+    assert_eq!(
+        1,
+        reporter
+            .check_event(TelemetryEvent::ShowProxiedQueries)
+            .expect("should be some")
+            .len()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_show_caches_queries_telemetry() {
+    readyset_tracing::init_test_logging();
+    let (mut reporter, opts, _handle) = setup_telemetry().await;
+
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+
+    assert!(reporter.check_event(TelemetryEvent::ShowCaches).is_none());
+
+    conn.query_drop("SHOW CACHES").await.unwrap();
+    reporter.run_once().await;
+
+    assert_eq!(
+        1,
+        reporter
+            .check_event(TelemetryEvent::ShowCaches)
+            .expect("should be some")
+            .len()
+    );
 }
