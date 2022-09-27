@@ -8,9 +8,11 @@ use std::sync::{atomic, Arc, RwLock};
 use dataflow_expression::Expr as DfExpr;
 use itertools::Itertools;
 use launchpad::redacted::Sensitive;
+use nom_sql::analysis::visit::Visitor;
 use nom_sql::{
     self, BinaryOperator, ColumnConstraint, DeleteStatement, Dialect, Expr, InsertStatement,
-    Relation, SqlIdentifier, SqlQuery, SqlType, UnaryOperator, UpdateStatement,
+    Literal, Relation, SelectStatement, SqlIdentifier, SqlQuery, SqlType, UnaryOperator,
+    UpdateStatement,
 };
 use readyset::consistency::Timestamp;
 use readyset::internal::LocalNodeIndex;
@@ -450,6 +452,7 @@ pub(crate) enum ExecuteSelectContext<'ctx> {
     },
     AdHoc {
         statement: nom_sql::SelectStatement,
+        query: &'ctx str,
         create_if_missing: bool,
     },
 }
@@ -1438,8 +1441,10 @@ impl NoriaConnector {
             }
             ExecuteSelectContext::AdHoc {
                 mut statement,
+                query,
                 create_if_missing,
             } => {
+                verify_no_placeholders(&mut statement, query)?;
                 let processed_query_params =
                     rewrite::process_query(&mut statement, self.server_supports_pagination())?;
                 let name = self.get_view(&statement, false, create_if_missing).await?;
@@ -1498,6 +1503,34 @@ impl NoriaConnector {
             self.inner.get_mut().await?.noria.extend_recipe(changelist)
         )?;
         Ok(QueryResult::Empty)
+    }
+}
+
+/// Verifies that there are no placeholder parameters in the given SELECT statement (i.e. ? or $N),
+/// returning `Ok(())` if none are found, or an `InvalidQuery` error if there are any placeholders
+/// present in the statement.
+fn verify_no_placeholders(statement: &mut SelectStatement, query: &str) -> ReadySetResult<()> {
+    struct PlaceholderFoundVisitor;
+
+    impl<'ast> Visitor<'ast> for PlaceholderFoundVisitor {
+        type Error = ();
+
+        fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
+            if matches!(literal, Literal::Placeholder(_)) {
+                Err(())
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    if PlaceholderFoundVisitor
+        .visit_select_statement(statement)
+        .is_err()
+    {
+        Err(ReadySetError::InvalidQuery(query.to_string()))
+    } else {
+        Ok(())
     }
 }
 
@@ -1824,6 +1857,8 @@ async fn do_read<'a>(
 
 #[cfg(test)]
 mod tests {
+    use nom_sql::Dialect;
+
     use super::*;
 
     mod view_cache {
@@ -2182,6 +2217,32 @@ mod tests {
                 ]
                 .into()]
             );
+        }
+    }
+
+    #[test]
+    fn placeholder_verification_good() {
+        let query = "SELECT n FROM t WHERE c = 123;";
+        let parsed_query = nom_sql::parse_query(Dialect::MySQL, query).unwrap();
+
+        match parsed_query {
+            SqlQuery::Select(mut select) => {
+                assert!(verify_no_placeholders(&mut select, query).is_ok())
+            }
+            _ => panic!(),
+        }
+    }
+
+    #[test]
+    fn placeholder_verification_bad() {
+        let query = "SELECT n FROM t WHERE c = ?;";
+        let parsed_query = nom_sql::parse_query(Dialect::MySQL, query).unwrap();
+
+        match parsed_query {
+            SqlQuery::Select(mut select) => {
+                assert!(verify_no_placeholders(&mut select, query).is_err())
+            }
+            _ => panic!(),
         }
     }
 }

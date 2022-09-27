@@ -1773,6 +1773,7 @@ where
             let start = Instant::now();
             let ctx = ExecuteSelectContext::AdHoc {
                 statement: original_stmt,
+                query: original_query,
                 create_if_missing: settings.migration_mode == MigrationMode::InRequestPath,
             };
             let res = noria.execute_select(ctx, state.ticket.clone(), event).await;
