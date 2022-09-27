@@ -536,13 +536,6 @@ impl<'a> IngredientLookupResult<'a> {
         }
     }
 
-    /// Returns `true` if self is [`Miss`].
-    ///
-    /// [`Miss`]: IngredientLookupResult::Miss
-    pub(crate) fn is_miss(&self) -> bool {
-        matches!(self, Self::Miss)
-    }
-
     /// Returns the contained [`Records`] value, consuming `self`.
     ///
     /// # Panics

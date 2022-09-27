@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
-use std::mem;
 
 use itertools::Itertools;
 use launchpad::intervals::into_bound_endpoint;
@@ -61,12 +60,6 @@ pub struct Join {
     generated_column_buffer: HashMap<(Vec<usize>, Side), Records>,
 
     kind: JoinType,
-}
-
-enum Preprocessed {
-    Left,
-    Right,
-    Neither,
 }
 
 impl Join {
@@ -150,64 +143,14 @@ impl Join {
         self.on.iter().map(|(_, r)| *r).collect()
     }
 
-    fn generate_row(
-        &self,
-        left: &[DfValue],
-        right: &[DfValue],
-        reusing: Preprocessed,
-    ) -> Vec<DfValue> {
+    fn generate_row(&self, left: &[DfValue], right: &[DfValue]) -> Vec<DfValue> {
         self.emit
             .iter()
-            .enumerate()
-            .map(|(i, &(side, col))| match side {
-                Side::Left => {
-                    if let Preprocessed::Left = reusing {
-                        left[i].clone()
-                    } else {
-                        left[col].clone()
-                    }
-                }
-                Side::Right => {
-                    if let Preprocessed::Right = reusing {
-                        right[i].clone()
-                    } else {
-                        right[col].clone()
-                    }
-                }
+            .map(|&(side, col)| match side {
+                Side::Left => left[col].clone(),
+                Side::Right => right[col].clone(),
             })
             .collect()
-    }
-
-    fn regenerate_row(
-        &self,
-        mut reuse: Vec<DfValue>,
-        other: &[DfValue],
-        reusing_left: bool,
-        other_prepreprocessed: bool,
-    ) -> Vec<DfValue> {
-        let emit = if reusing_left {
-            &self.in_place_left_emit
-        } else {
-            &self.in_place_right_emit
-        };
-        reuse.resize(emit.len(), DfValue::None);
-        for (i, &(side, c)) in emit.iter().enumerate() {
-            let from_left = side == Side::Left;
-            if (from_left == reusing_left) && i != c {
-                reuse.swap(i, c);
-            }
-        }
-        for (i, &(side, c)) in emit.iter().enumerate() {
-            let from_left = side == Side::Left;
-            if from_left != reusing_left {
-                if other_prepreprocessed {
-                    reuse[i] = other[i].clone();
-                } else {
-                    reuse[i] = other[c].clone();
-                }
-            }
-        }
-        reuse
     }
 
     fn handle_replay_for_generated(
@@ -230,11 +173,7 @@ impl Join {
                 .iter()
                 .filter(|r| rec.indices(from_key.clone()) == r.indices(other_key.clone()))
             {
-                ret.push(Record::Positive(self.generate_row(
-                    &rec,
-                    other_rec.row(),
-                    Preprocessed::Neither,
-                )))
+                ret.push(Record::Positive(self.generate_row(&rec, other_rec.row())))
             }
         }
         Ok(ret.into())
@@ -317,23 +256,16 @@ impl Ingredient for Join {
         let mut misses = Vec::new();
         let mut lookups = Vec::new();
 
-        let other = if from == *self.left {
-            *self.right
-        } else {
-            *self.left
-        };
+        let from_left = from == *self.left;
 
-        let mut from_key = vec![];
-        let mut other_key = vec![];
-        for (left_key, right_key) in &self.on {
-            if from == *self.left {
-                from_key.push(*left_key);
-                other_key.push(*right_key);
-            } else {
-                from_key.push(*right_key);
-                other_key.push(*left_key);
-            }
-        }
+        let other = if from_left { *self.right } else { *self.left };
+
+        let (from_key, other_key): (Vec<usize>, Vec<usize>) = if from_left {
+            self.on.iter().copied().unzip()
+        } else {
+            let (other_key, from_key) = self.on.iter().copied().unzip();
+            (from_key, other_key)
+        };
 
         let orkc = replay.key();
 
@@ -417,17 +349,25 @@ impl Ingredient for Join {
             });
         }
 
-        let mut rs: Vec<_> = rs.into();
-
         let mut ret: Vec<Record> = Vec::with_capacity(rs.len());
-        let mut at = 0;
-        while at != rs.len() {
-            let mut old_right_count = None;
-            let mut new_right_count = None;
-            let prev_join_key = rs[at]
-                .indices(from_key.clone())
-                .map_err(|_| ReadySetError::InvalidRecordLength)?;
 
+        let grouped_records = rs
+            .into_iter()
+            .group_by(|rec| from_key.iter().map(|i| rec[*i].clone()).collect::<Vec<_>>());
+
+        let is_replay = replay_key_cols.is_some();
+
+        // Only do a lookup into a weak index if we're processing regular updates,
+        // not if we're processing a replay, since regular updates should represent
+        // all rows that won't hit holes downstream but replays need to have *all*
+        // rows
+        let lookup_mode = if is_replay {
+            LookupMode::Strict
+        } else {
+            LookupMode::Weak
+        };
+
+        for (join_key, group) in grouped_records.into_iter() {
             // [note: null-join-keys]
             // The semantics of NULL in SQL are tri-state - while obviously `1 = 1`, it is *not* the
             // case that `null = null`. Usually this is irrelevant for lookups into state since it's
@@ -436,24 +376,21 @@ impl Ingredient for Join {
             // lookups - two NULL join keys should *not* match each other in the semantics of the
             // join, even though they *would* match normally due to the semantics of the DfValue
             // type.
-            let nulls = prev_join_key.iter().any(|dt| dt.is_none());
+            let nulls = join_key.iter().any(|v| v.is_none());
 
-            if from == *self.right && self.kind == JoinType::Left {
+            // The difference between a left join and an inner join, is that for the former we must
+            // emit rows with nulls even if we later get no match in the other side.
+
+            let mut new_right_count = None;
+
+            if self.kind == JoinType::Left && !from_left {
                 let rc = self.lookup(
                     *self.right,
                     &self.on_right(),
-                    &KeyType::from(prev_join_key.clone()),
+                    &KeyType::from(join_key.iter()),
                     nodes,
                     state,
-                    // Only do a lookup into a weak index if we're processing regular updates,
-                    // not if we're processing a replay, since regular updates should represent
-                    // all rows that won't hit holes downstream but replays need to have *all*
-                    // rows
-                    if replay_key_cols.is_some() {
-                        LookupMode::Strict
-                    } else {
-                        LookupMode::Weak
-                    },
+                    lookup_mode,
                 )?;
 
                 match rc {
@@ -462,18 +399,14 @@ impl Ingredient for Join {
                             lookups.push(Lookup {
                                 on: *self.right,
                                 cols: self.on_right(),
-                                key: prev_join_key
+                                key: join_key
                                     .clone()
-                                    .into_iter()
-                                    .cloned()
-                                    .collect::<Vec<_>>()
                                     .try_into()
                                     .map_err(|_| internal_err!("Empty join key"))?,
                             });
                         }
 
                         let rc = rc.count();
-                        old_right_count = Some(rc);
                         new_right_count = Some(rc);
                     }
                     IngredientLookupResult::Miss => {
@@ -486,259 +419,86 @@ impl Ingredient for Join {
                         // will hit this case, since a=1 is not in right. the correct thing to
                         // do here is to replay a=1 first, and *then* replay b=4 again
                         // (possibly several times over for each a).
-                        at = rs[at..]
-                            .iter()
-                            .position(|r| {
-                                r.indices(from_key.clone())
-                                    .into_iter()
-                                    .any(|k| k != prev_join_key)
-                            })
-                            .map(|p| at + p)
-                            .unwrap_or_else(|| rs.len());
                         continue;
                     }
                 }
             }
 
-            // get rows from the other side
-            let mut other_rows = if nulls {
-                // see [note: null-join-keys]
-                IngredientLookupResult::empty()
-            } else {
-                self.lookup(
+            let mut other_lookup = match nulls {
+                true => IngredientLookupResult::empty(),
+                false => self.lookup(
                     other,
                     &other_key,
-                    &KeyType::from(prev_join_key.clone()),
+                    &KeyType::from(join_key.iter()),
                     nodes,
                     state,
-                    // Only do a lookup into a weak index if we're processing regular updates,
-                    // not if we're processing a replay, since regular updates should represent
-                    // all rows that won't hit holes downstream but replays need to have *all*
-                    // rows
-                    if replay_key_cols.is_some() {
-                        LookupMode::Strict
-                    } else {
-                        LookupMode::Weak
-                    },
-                )?
+                    lookup_mode,
+                )?,
             };
 
-            if other_rows.is_miss() {
-                // we missed in the other side!
-                let from = at;
-                at = rs[at..]
-                    .iter()
-                    .position(|r| {
-                        r.indices(from_key.clone())
-                            .into_iter()
-                            .any(|k| k != prev_join_key)
-                    })
-                    .map(|p| at + p)
-                    .unwrap_or_else(|| rs.len());
+            let other_records = match other_lookup.take() {
+                IngredientLookupResult::Records(recs) => recs,
+                IngredientLookupResult::Miss => {
+                    misses.extend(group.map(|record| {
+                        Miss::builder()
+                            .on(other)
+                            .lookup_idx(other_key.clone())
+                            .lookup_key(from_key.clone())
+                            .replay(replay)
+                            .replay_key_cols(replay_key_cols.as_deref())
+                            .record(record.into_row())
+                            .build()
+                    }));
+                    continue;
+                }
+            };
 
-                // NOTE: we're stealing data here!
-                let mut records = (from..at).map(|i| mem::take(&mut *rs[i]));
-
-                misses.extend((from..at).map(|_| {
-                    Miss::builder()
-                        .on(other)
-                        .lookup_idx(other_key.clone())
-                        .lookup_key(from_key.clone())
-                        .replay(replay)
-                        .replay_key_cols(replay_key_cols.as_deref())
-                        .record(records.next().unwrap())
-                        .build()
-                }));
-                continue;
-            }
-
-            if replay_key_cols.is_some() && !nulls {
+            if is_replay && !nulls {
                 lookups.push(Lookup {
                     on: other,
                     cols: other_key.clone(),
-                    key: prev_join_key
-                        .clone()
-                        .into_iter()
-                        .cloned()
-                        .collect::<Vec<_>>()
+                    key: join_key
                         .try_into()
                         .map_err(|_| internal_err!("Empty join key"))?,
                 });
             }
 
-            let start = at;
-            let mut make_null = None;
-            if self.kind == JoinType::Left && from == *self.right {
-                // If records are being received from the right, we need to find the number of
-                // records that existed *before* this batch of records was processed so we know
-                // whether or not to generate +/- NULL rows.
-                if let Some(mut old_rc) = old_right_count {
-                    while at != rs.len()
-                        && rs[at]
-                            .indices(from_key.clone())
-                            .map_err(|_| ReadySetError::InvalidRecordLength)?
-                            == prev_join_key
-                    {
-                        if rs[at].is_positive() {
-                            old_rc -= 1
-                        } else {
-                            old_rc += 1
-                        }
-                        at += 1;
-                    }
+            let other_rows = other_records.collect::<Result<Vec<_>, _>>()?;
 
-                    // emit null rows if necessary for left join
-                    let new_rc = new_right_count.unwrap();
-                    if new_rc == 0 && old_rc != 0 {
-                        // all lefts for this key must emit + NULLs
-                        make_null = Some(true);
-                    } else if new_rc != 0 && old_rc == 0 {
-                        // all lefts for this key must emit - NULLs
-                        make_null = Some(false);
-                    }
-                } else {
-                    // we got a right, but missed in right; clearly, a replay is needed
-                    let start = at;
-                    at = rs[at..]
-                        .iter()
-                        .position(|r| {
-                            r.indices(from_key.clone())
-                                .into_iter()
-                                .any(|k| k != prev_join_key)
-                        })
-                        .map(|p| at + p)
-                        .unwrap_or_else(|| rs.len());
-
-                    // NOTE: we're stealing data here!
-                    let mut records = (start..at).map(|i| mem::take(&mut *rs[i]));
-
-                    misses.extend((start..at).map(|_| {
-                        Miss::builder()
-                            .on(from)
-                            .lookup_idx(self.on_right())
-                            .lookup_key(from_key.clone())
-                            .replay(replay)
-                            .record(records.next().unwrap())
-                            .build()
-                    }));
-                    continue;
-                }
-            }
-
-            if start == at {
-                // we didn't find the end above, so find it now
-                at = rs[at..]
-                    .iter()
-                    .position(|r| {
-                        r.indices(from_key.clone())
-                            .into_iter()
-                            .any(|k| k != prev_join_key)
-                    })
-                    .map(|p| at + p)
-                    .unwrap_or_else(|| rs.len());
-            }
-
-            let mut other_rows_count = 0;
-            for r in &mut rs[start..at] {
-                // put something bogus in rs (which will be discarded anyway) so we can take r.
-                let r = mem::replace(r, Record::Positive(Vec::new()));
+            let mut rc_diff = 0isize;
+            for r in group {
                 let (row, positive) = r.extract();
 
-                if let IngredientLookupResult::Records(other_rows) = other_rows.take() {
-                    // we have yet to iterate through other_rows
-                    let mut other_rows = other_rows.peekable();
-                    if other_rows.peek().is_none() {
-                        if self.kind == JoinType::Left && from == *self.left {
-                            // left join, got a thing from left, no rows in right == NULL
-                            ret.push((self.generate_null(&row), positive).into());
-                        }
-                        continue;
-                    }
+                rc_diff += if positive { 1 } else { -1 };
 
-                    // we're going to pull a little trick here so that the *last* time we use
-                    // `row`, we re-use its memory instead of allocating a new Vec. we do this by
-                    // (ab)using .peek() to terminate the loop one iteration early.
-                    other_rows_count += 1;
-                    let mut other = other_rows.next().unwrap()?;
-                    while other_rows.peek().is_some() {
-                        if let Some(false) = make_null {
-                            // we need to generate a -NULL for all these lefts
-                            ret.push((self.generate_null(&other), false).into());
-                        }
-                        if from == *self.left {
-                            ret.push(
-                                (
-                                    self.generate_row(&row, &other, Preprocessed::Neither),
-                                    positive,
-                                )
-                                    .into(),
-                            );
-                        } else {
-                            ret.push(
-                                (
-                                    self.generate_row(&other, &row, Preprocessed::Neither),
-                                    positive,
-                                )
-                                    .into(),
-                            );
-                        }
-                        if let Some(true) = make_null {
-                            // we need to generate a +NULL for all these lefts
-                            ret.push((self.generate_null(&other), true).into());
-                        }
-                        other = other_rows.next().unwrap()?;
-                        other_rows_count += 1;
-                    }
-
-                    if let Some(false) = make_null {
-                        // we need to generate a -NULL for the last left too
-                        ret.push((self.generate_null(&other), false).into());
-                    }
-                    ret.push(
-                        (
-                            self.regenerate_row(row, &other, from == *self.left, false),
-                            positive,
-                        )
-                            .into(),
-                    );
-                    if let Some(true) = make_null {
-                        // we need to generate a +NULL for the last left too
-                        ret.push((self.generate_null(&other), true).into());
-                    }
-                } else if other_rows_count == 0 {
-                    if self.kind == JoinType::Left && from == *self.left {
+                if other_rows.is_empty() {
+                    if self.kind == JoinType::Left && from_left {
                         // left join, got a thing from left, no rows in right == NULL
                         ret.push((self.generate_null(&row), positive).into());
                     }
                 } else {
-                    // we no longer have access to `other_rows`
-                    // *but* the values are all in ret[-other_rows_count:]!
-                    let start = ret.len() - other_rows_count;
-                    let end = ret.len();
-                    // we again use the trick above where the last row we produce reuses `row`
-                    for i in start..(end - 1) {
+                    for other in other_rows.iter() {
                         if from == *self.left {
-                            let r = (
-                                self.generate_row(&row, &ret[i], Preprocessed::Right),
-                                positive,
-                            )
-                                .into();
-                            ret.push(r);
+                            ret.push((self.generate_row(&row, other), positive).into());
                         } else {
-                            let r = (
-                                self.generate_row(&ret[i], &row, Preprocessed::Left),
-                                positive,
-                            )
-                                .into();
-                            ret.push(r);
+                            ret.push((self.generate_row(other, &row), positive).into());
                         }
                     }
-                    let r = (
-                        self.regenerate_row(row, &ret[end - 1], from == *self.left, true),
-                        positive,
-                    )
-                        .into();
-                    ret.push(r);
+                }
+            }
+
+            // For a left join with updates from the right side, we also have to emit/delete NULL
+            // rows if row count changed to/from zero
+            if let Some(new_rc) = new_right_count {
+                let old_rc = new_rc as isize - rc_diff;
+                if new_rc == 0 && old_rc != 0 {
+                    for other in other_rows.iter() {
+                        ret.push((self.generate_null(other), true).into());
+                    }
+                } else if new_rc != 0 && old_rc == 0 {
+                    for other in other_rows.iter() {
+                        ret.push((self.generate_null(other), false).into());
+                    }
                 }
             }
         }
@@ -1053,8 +813,8 @@ mod tests {
             rs,
             vec![
                 (
-                    vec![3.into(), "c".try_into().unwrap(), DfValue::None],
-                    false
+                    vec![3.into(), "c".try_into().unwrap(), "w".try_into().unwrap()],
+                    true
                 ),
                 (
                     vec![3.into(), "c".try_into().unwrap(), "w".try_into().unwrap()],
@@ -1065,8 +825,8 @@ mod tests {
                     false
                 ),
                 (
-                    vec![3.into(), "c".try_into().unwrap(), "w".try_into().unwrap()],
-                    true
+                    vec![3.into(), "c".try_into().unwrap(), DfValue::None],
+                    false
                 ),
             ]
             .into()
@@ -1411,10 +1171,6 @@ mod tests {
                 rs,
                 vec![
                     (
-                        vec![3.into(), 4.into(), "c".try_into().unwrap(), DfValue::None],
-                        false
-                    ),
-                    (
                         vec![
                             3.into(),
                             4.into(),
@@ -1422,6 +1178,10 @@ mod tests {
                             "w".try_into().unwrap()
                         ],
                         true
+                    ),
+                    (
+                        vec![3.into(), 4.into(), "c".try_into().unwrap(), DfValue::None],
+                        false
                     )
                 ]
                 .into()
