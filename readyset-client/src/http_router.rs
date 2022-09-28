@@ -12,14 +12,16 @@ use hyper::header::CONTENT_TYPE;
 use hyper::service::make_service_fn;
 use hyper::{self, Body, Method, Request, Response};
 use metrics_exporter_prometheus::PrometheusHandle;
+use readyset::query::DeniedQuery;
 use readyset_client_metrics::recorded;
+use readyset_sql_passes::anonymize::Anonymizer;
 use stream_cancel::Valve;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::Sender;
 use tokio_stream::wrappers::TcpListenerStream;
 use tower::Service;
 
-use crate::query_status_cache::{DeniedQuery, QueryStatusCache};
+use crate::query_status_cache::QueryStatusCache;
 
 /// Routes requests from an HTTP server to expose metrics data from the adapter.
 /// To see the supported http requests and their respective routing, see
@@ -262,10 +264,13 @@ impl Service<Request<Body>> for NoriaAdapterHttpRouter {
             (&Method::GET, "/deny-list") => {
                 let query_cache = self.query_cache;
                 Box::pin(async move {
+                    let mut anonymizer = Anonymizer::new();
                     let deny_list = query_cache
                         .deny_list()
                         .into_iter()
-                        .map(|DeniedQuery { query, .. }| query.to_anonymized_string())
+                        .map(|DeniedQuery { query, .. }| {
+                            query.to_anonymized_string(&mut anonymizer)
+                        })
                         .collect::<Vec<_>>();
                     let res = match serde_json::to_string(&deny_list) {
                         Ok(json) => res

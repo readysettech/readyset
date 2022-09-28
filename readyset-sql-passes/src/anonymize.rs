@@ -42,6 +42,19 @@ impl Anonymize for String {
         *self = sql_id.to_string();
     }
 }
+impl Anonymize for SelectStatement {
+    fn anonymize(&mut self, anonymizer: &mut Anonymizer) {
+        let Ok(()) = AnonymizeVisitor { anonymizer }.visit_select_statement(self);
+    }
+}
+
+impl Anonymize for [SqlIdentifier] {
+    fn anonymize(&mut self, anonymizer: &mut Anonymizer) {
+        for sql_id in self.iter_mut() {
+            anonymizer.replace(sql_id);
+        }
+    }
+}
 
 /// This pass replaces every instance of `Literal`, except Placeholders, in the AST with
 /// `Literal::String("<anonymized>")`
@@ -94,6 +107,26 @@ impl Anonymizer {
                 *s = anon_s;
             }
         }
+    }
+
+    pub fn anonymize_create_table(&mut self, stmt: &mut CreateTableStatement) {
+        let Ok(()) = AnonymizeVisitor { anonymizer: self }.visit_create_table_statement(stmt);
+    }
+
+    pub fn anonymize_create_view(&mut self, stmt: &mut CreateViewStatement) {
+        let Ok(()) = AnonymizeVisitor { anonymizer: self }.visit_create_view_statement(stmt);
+    }
+
+    // This converts any SqlIdentifier::TinyText to SqlIdentifier::Text for now, as anonymized
+    // schemas are not expected to care as much about performance.
+    pub fn anonymize_sql_identifier(&mut self, sql_ident: &mut SqlIdentifier) {
+        self.replace(sql_ident);
+    }
+
+    pub fn anonymize_string(&mut self, string: &mut String) {
+        let mut sql_id: SqlIdentifier = SqlIdentifier::from(string.as_str());
+        self.replace(&mut sql_id);
+        *string = sql_id.to_string();
     }
 }
 

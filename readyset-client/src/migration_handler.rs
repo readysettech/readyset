@@ -10,6 +10,7 @@ use std::time::Instant;
 
 use launchpad::redacted::Sensitive;
 use metrics::{counter, register_counter};
+use readyset::query::{MigrationState, Query};
 use readyset::recipe::changelist::{Change, ChangeList};
 use readyset::{ReadySetHandle, ReadySetResult, ViewCreateRequest};
 use readyset_client_metrics::recorded;
@@ -17,7 +18,7 @@ use tokio::select;
 use tracing::{error, info, instrument, warn};
 
 use crate::backend::{noria_connector, NoriaConnector};
-use crate::query_status_cache::{MigrationState, Query, QueryStatusCache};
+use crate::query_status_cache::QueryStatusCache;
 use crate::upstream_database::{IsFatalError, NoriaCompare};
 use crate::{utils, UpstreamDatabase};
 

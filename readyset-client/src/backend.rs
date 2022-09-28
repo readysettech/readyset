@@ -86,6 +86,7 @@ use nom_sql::{
     SqlQuery, UpdateStatement, UseStatement,
 };
 use readyset::consistency::Timestamp;
+use readyset::query::*;
 use readyset::results::Results;
 use readyset::{ColumnSchema, ViewCreateRequest};
 use readyset_client_metrics::{
@@ -102,10 +103,7 @@ use tracing::{error, instrument, trace, warn};
 
 use crate::backend::noria_connector::ExecuteSelectContext;
 use crate::query_handler::SetBehavior;
-use crate::query_status_cache::{
-    DeniedQuery, ExecutionInfo, ExecutionState, MigrationState, Query, QueryStatus,
-    QueryStatusCache,
-};
+use crate::query_status_cache::QueryStatusCache;
 use crate::upstream_database::NoriaCompare;
 pub use crate::upstream_database::UpstreamPrepare;
 use crate::{rewrite, QueryHandler, UpstreamDatabase};
@@ -1605,7 +1603,7 @@ where
 
                 vec![
                     DfValue::from(id),
-                    DfValue::from(query.to_anonymized_string()),
+                    DfValue::from(query.to_string()),
                     DfValue::from(s),
                 ]
             })

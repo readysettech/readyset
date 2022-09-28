@@ -1,12 +1,12 @@
 use std::time::Duration;
 
 use ::readyset::metrics::{recorded, DumpedMetricValue};
+use ::readyset::query::hash_to_query_id;
 use ::readyset::{get_metric, ViewCreateRequest};
 use launchpad::eventually;
 use launchpad::hash::hash;
 use mysql_async::prelude::Queryable;
 use readyset_client::backend::QueryInfo;
-use readyset_client::query_status_cache::hash_to_query_id;
 use readyset_client_metrics::QueryDestination;
 use serial_test::serial;
 use test_utils::slow;

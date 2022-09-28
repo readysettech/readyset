@@ -1,4 +1,5 @@
 use derive_builder::Builder;
+use readyset::query::DeniedQuery;
 use serde::Serialize;
 use serde_with_macros::skip_serializing_none;
 
@@ -53,6 +54,9 @@ pub enum TelemetryEvent {
 
     /// The adapter connected to the upstream database
     UpstreamConnected,
+
+    /// A new query was run that is proxied (not cached)
+    ProxiedQuery,
 }
 
 #[derive(Clone, Copy, Default, Serialize)]
@@ -87,6 +91,7 @@ pub struct Telemetry {
     server_version: Option<String>,
     query_id: Option<String>,
     schema: Option<String>,
+    proxied_query: Option<DeniedQuery>,
 }
 
 impl TelemetryBuilder {

@@ -1,10 +1,11 @@
 use std::sync::Arc;
 
+use readyset::query::MigrationState;
 use readyset::ReadySetHandle;
 use tokio::select;
 use tracing::{debug, info, instrument, trace, warn};
 
-use crate::query_status_cache::{MigrationState, QueryStatusCache};
+use crate::query_status_cache::QueryStatusCache;
 
 pub struct ViewsSynchronizer {
     /// The noria connector used to query

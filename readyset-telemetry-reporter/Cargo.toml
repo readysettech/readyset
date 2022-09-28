@@ -21,6 +21,7 @@ readyset-tracing = { path = "../readyset-tracing" }
 uuid = { version = "0.8", features = [ "v4" ] }
 
 readyset-version = { path = "../readyset-version" }
+readyset = { path = "../readyset" }
 
 [dev_dependencies]
 tokio = { version = "1.18", features = ["macros", "time", "test-util"] }

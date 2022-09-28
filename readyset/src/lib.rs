@@ -244,6 +244,7 @@ pub mod failpoints;
 pub mod consistency;
 mod controller;
 pub mod metrics;
+pub mod query;
 pub mod status;
 mod table;
 mod view;
