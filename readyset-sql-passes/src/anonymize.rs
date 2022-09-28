@@ -13,6 +13,36 @@ use nom_sql::{
     SqlIdentifier,
 };
 
+pub trait Anonymize {
+    fn anonymize(&mut self, anonymizer: &mut Anonymizer);
+}
+
+impl Anonymize for CreateTableStatement {
+    fn anonymize(&mut self, anonymizer: &mut Anonymizer) {
+        let Ok(()) = AnonymizeVisitor { anonymizer }.visit_create_table_statement(self);
+    }
+}
+
+impl Anonymize for CreateViewStatement {
+    fn anonymize(&mut self, anonymizer: &mut Anonymizer) {
+        let Ok(()) = AnonymizeVisitor { anonymizer }.visit_create_view_statement(self);
+    }
+}
+
+impl Anonymize for SqlIdentifier {
+    fn anonymize(&mut self, anonymizer: &mut Anonymizer) {
+        anonymizer.replace(self);
+    }
+}
+
+impl Anonymize for String {
+    fn anonymize(&mut self, anonymizer: &mut Anonymizer) {
+        let mut sql_id: SqlIdentifier = SqlIdentifier::from(self.as_str());
+        anonymizer.replace(&mut sql_id);
+        *self = sql_id.to_string();
+    }
+}
+
 /// This pass replaces every instance of `Literal`, except Placeholders, in the AST with
 /// `Literal::String("<anonymized>")`
 struct AnonymizeLiteralsVisitor;
@@ -65,28 +95,6 @@ impl Anonymizer {
             }
         }
     }
-
-    /// Replaces every instance of `Literal` in the AST with `Literal::String("<anonymized>")`
-    pub fn anonymize_create_table(&mut self, stmt: &mut CreateTableStatement) {
-        let Ok(()) = AnonymizeVisitor { anonymizer: self }.visit_create_table_statement(stmt);
-    }
-
-    /// Replaces every instance of `Literal` in the AST with `Literal::String("<anonymized>")`
-    pub fn anonymize_create_view(&mut self, stmt: &mut CreateViewStatement) {
-        let Ok(()) = AnonymizeVisitor { anonymizer: self }.visit_create_view_statement(stmt);
-    }
-
-    // This converts any SqlIdentifier::TinyText to SqlIdentifier::Text for now, as anonymized
-    // schemas are not expected to care as much about performance.
-    pub fn anonymize_sql_identifier(&mut self, sql_ident: &mut SqlIdentifier) {
-        self.replace(sql_ident);
-    }
-
-    pub fn anonymize_string(&mut self, string: &mut String) {
-        let mut sql_id: SqlIdentifier = SqlIdentifier::from(string.as_str());
-        self.replace(&mut sql_id);
-        *string = sql_id.to_string();
-    }
 }
 
 impl Default for Anonymizer {
@@ -101,11 +109,11 @@ struct AnonymizeVisitor<'a> {
 
 impl AnonymizeVisitor<'_> {
     pub fn anonymize_string(&mut self, string: &mut String) {
-        self.anonymizer.anonymize_string(string)
+        string.anonymize(self.anonymizer);
     }
 
     pub fn anonymize_sql_identifier(&mut self, sql_ident: &mut SqlIdentifier) {
-        self.anonymizer.anonymize_sql_identifier(sql_ident)
+        sql_ident.anonymize(self.anonymizer);
     }
 
     fn anonymize_relation(&mut self, relation: &mut nom_sql::Relation) {
@@ -189,7 +197,7 @@ impl<'ast> Visitor<'ast> for AnonymizeVisitor<'_> {
     }
 
     fn visit_column(&mut self, column: &'ast mut nom_sql::Column) -> Result<(), Self::Error> {
-        self.anonymizer.anonymize_sql_identifier(&mut column.name);
+        column.name.anonymize(self.anonymizer);
         walk_column(self, column)
     }
 
@@ -324,7 +332,7 @@ mod tests {
         ) COMMENT='<anonymized>'",
         );
 
-        anonymizer.anonymize_create_table(&mut stmt);
+        stmt.anonymize(&mut anonymizer);
 
         assert_eq!(stmt, expected);
     }
@@ -339,7 +347,7 @@ mod tests {
             "CREATE VIEW anon_id_0 AS SELECT * FROM anon_id_1 WHERE anon_id_2 = \"<anonymized>\";",
         );
 
-        anonymizer.anonymize_create_view(&mut create_view);
+        create_view.anonymize(&mut anonymizer);
 
         assert_eq!(create_view, expected);
     }

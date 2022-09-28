@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use nom_sql::Dialect;
-use readyset_sql_passes::anonymize::Anonymizer;
+use readyset_sql_passes::anonymize::{Anonymize, Anonymizer};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 
 #[derive(Debug)]
@@ -101,14 +101,14 @@ impl CreateSchema {
     }
 
     fn anonymize_name(&mut self, anonymizer: &mut Anonymizer) {
-        anonymizer.anonymize_string(&mut self.name);
+        self.name.anonymize(anonymizer);
     }
 
     fn anonymize_tables(&mut self, anonymizer: &mut Anonymizer) {
         for (_, table) in self.table_creates.iter_mut() {
             *table = match nom_sql::parse_create_table(self.dialect, table.clone()) {
                 Ok(mut parsed_table) => {
-                    anonymizer.anonymize_create_table(&mut parsed_table);
+                    parsed_table.anonymize(anonymizer);
                     parsed_table.to_string()
                 }
                 // If we fail to parse, fully anonymize the statement.
@@ -121,7 +121,7 @@ impl CreateSchema {
         for (_, view) in self.view_creates.iter_mut() {
             *view = match nom_sql::parse_create_view(self.dialect, view.clone()) {
                 Ok(mut parsed_view) => {
-                    anonymizer.anonymize_create_view(&mut parsed_view);
+                    parsed_view.anonymize(anonymizer);
                     parsed_view.to_string()
                 }
                 // If we fail to parse, fully anonymize the statement.
