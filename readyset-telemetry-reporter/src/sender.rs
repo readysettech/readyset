@@ -38,6 +38,7 @@ impl TelemetrySender {
     /// If this reporter was initialized with an API key equal to [`HARDCODED_API_KEY`], this
     /// function is a no-op.
     pub fn send_event_with_payload(&self, event: TelemetryEvent, payload: Telemetry) -> Result<()> {
+        tracing::debug!("sending {event:?} with payload {payload:?}");
         if let Some(tx) = self.tx.as_ref() {
             tx.try_send((event, payload))
                 .map_err(|e| Error::Sender(e.to_string()))

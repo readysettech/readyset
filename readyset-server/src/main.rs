@@ -140,6 +140,7 @@ fn main() -> anyhow::Result<()> {
     let telemetry_sender = rt.block_on(TelemetryInitializer::init(
         opts.disable_telemetry,
         std::env::var("RS_API_KEY").ok(),
+        vec![],
     ));
 
     let external_addr = if opts.use_aws_external_address {

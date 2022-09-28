@@ -79,7 +79,7 @@ pub trait PeriodicReport: Send + Sync {
     async fn report(&self) -> Result<Vec<(TelemetryEvent, Telemetry)>>;
 }
 
-type PeriodicReporter = Arc<dyn PeriodicReport>;
+pub type PeriodicReporter = Arc<dyn PeriodicReport>;
 
 pub struct TelemetryReporter {
     client: Option<Client>,
@@ -319,6 +319,7 @@ pub mod test_util {
         }
 
         pub async fn run_once(&mut self, interval: &mut Interval) {
+            tracing::debug!("reporter running once");
             tokio::select! {
                 Some((event, telemetry)) = self.rx.recv() => {
                     tracing::debug!(?event, ?telemetry, "TelemetryEvent received");
@@ -343,6 +344,12 @@ pub mod test_util {
                     }
                 }
             }
+        }
+
+        pub async fn register_periodic_reporter(&mut self, periodic_reporter: PeriodicReporter) {
+            tracing::debug!("registering periodic reporter");
+            let mut periodic_reporters = self.periodic_reporters.lock().await;
+            periodic_reporters.push(periodic_reporter);
         }
     }
 
@@ -375,7 +382,8 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn validate_request() {
         std::env::set_var("RS_SEGMENT_WRITE_KEY", "write_key");
-        let telemetry_sender = TelemetryInitializer::init(false, Some("api-key".to_string())).await;
+        let telemetry_sender =
+            TelemetryInitializer::init(false, Some("api-key".to_string()), vec![]).await;
 
         let (event, _telemetry): (TelemetryEvent, Telemetry) =
             (TelemetryEvent::InstallerRun, Default::default());

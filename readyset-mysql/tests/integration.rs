@@ -1,11 +1,14 @@
 use std::convert::TryFrom;
+use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use mysql_async::prelude::Queryable;
 use readyset::status::ReadySetStatus;
 use readyset_client::backend::noria_connector::ReadBehavior;
-use readyset_client::backend::QueryInfo;
+use readyset_client::backend::{MigrationMode, QueryInfo};
+use readyset_client::proxied_queries_reporter::ProxiedQueriesReporter;
+use readyset_client::query_status_cache::{MigrationStyle, QueryStatusCache};
 use readyset_client::BackendBuilder;
 use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::mysql_helpers::{last_query_info, MySQLAdapter};
@@ -22,7 +25,7 @@ async fn setup() -> (mysql_async::Opts, Handle) {
 }
 
 async fn setup_telemetry() -> (TestTelemetryReporter, mysql_async::Opts, Handle) {
-    let (tx, rx) = channel(1);
+    let (tx, rx) = channel(1024);
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
     let telemetry_sender = TelemetrySender::new(tx, shutdown_tx);
     let reporter = TestTelemetryReporter::from(TelemetryReporter::new(
@@ -33,6 +36,7 @@ async fn setup_telemetry() -> (TestTelemetryReporter, mysql_async::Opts, Handle)
 
     let backend = BackendBuilder::new()
         .require_authentication(false)
+        .migration_mode(MigrationMode::OutOfBand)
         .telemetry_sender(telemetry_sender.clone());
     let (opts, handle) = TestBuilder::new(backend).build::<MySQLAdapter>().await;
     (reporter, opts, handle)
@@ -1735,5 +1739,76 @@ async fn test_show_caches_queries_telemetry() {
             .check_event(TelemetryEvent::ShowCaches)
             .expect("should be some")
             .len()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_proxied_queries_telemetry() {
+    readyset_tracing::init_test_logging();
+    // This variation on setup_telemetry sets up a periodic reporter for proxied queries.
+    let (mut reporter, opts, _handle) = {
+        let (tx, rx) = channel(1024);
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let telemetry_sender = TelemetrySender::new(tx, shutdown_tx);
+        let query_status_cache = Box::leak(Box::new(QueryStatusCache::with_style(
+            MigrationStyle::Explicit,
+        )));
+
+        let proxied_queries_reporter = Arc::new(ProxiedQueriesReporter::new(query_status_cache));
+        let mut reporter = TestTelemetryReporter::from(TelemetryReporter::new(
+            rx,
+            Some("TestAPIKey".to_string()),
+            shutdown_rx,
+        ));
+        reporter
+            .register_periodic_reporter(proxied_queries_reporter)
+            .await;
+
+        let backend = BackendBuilder::new()
+            .require_authentication(false)
+            .migration_mode(MigrationMode::OutOfBand)
+            .telemetry_sender(telemetry_sender.clone());
+
+        let (opts, handle) = TestBuilder::new(backend)
+            .query_status_cache(query_status_cache)
+            .migration_mode(MigrationMode::OutOfBand)
+            .fallback(true)
+            .build::<MySQLAdapter>()
+            .await;
+        (reporter, opts, handle)
+    };
+
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    assert!(reporter.check_event(TelemetryEvent::ProxiedQuery).is_none());
+
+    conn.query_drop("CREATE TABLE t1 (a int)").await.unwrap();
+    sleep().await;
+
+    // Since explicit migration mode is on, this will be proxied.
+    let q = "SELECT * from t1";
+    conn.query_drop(q).await.unwrap();
+    sleep().await;
+    assert_eq!(
+        last_query_info(&mut conn).await.destination,
+        QueryDestination::Upstream
+    );
+
+    let mut interval = tokio::time::interval(Duration::from_millis(1));
+
+    // Run once to get the new event, and once to run the periodic reporter
+    reporter.run_once(&mut interval).await;
+    tokio::time::sleep(Duration::from_millis(5)).await;
+    reporter.run_once(&mut interval).await;
+    tokio::time::sleep(Duration::from_millis(5)).await;
+
+    let telemetry = reporter
+        .check_event(TelemetryEvent::ProxiedQuery)
+        .expect("should be some")
+        .first()
+        .expect("should have 1 element");
+
+    assert_eq!(
+        telemetry.proxied_query,
+        Some("SELECT * FROM `anon_id_0`".to_string())
     );
 }

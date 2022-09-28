@@ -31,6 +31,7 @@ use readyset_client::backend::noria_connector::{NoriaConnector, ReadBehavior};
 use readyset_client::backend::MigrationMode;
 use readyset_client::http_router::NoriaAdapterHttpRouter;
 use readyset_client::migration_handler::MigrationHandler;
+use readyset_client::proxied_queries_reporter::ProxiedQueriesReporter;
 use readyset_client::query_status_cache::{MigrationStyle, QueryStatusCache};
 use readyset_client::views_synchronizer::ViewsSynchronizer;
 use readyset_client::{Backend, BackendBuilder, QueryHandler, UpstreamDatabase};
@@ -376,8 +377,12 @@ where
         info!(commit_hash = %COMMIT_ID);
 
         let telemetry_sender = rt.block_on(async {
-            TelemetryInitializer::init(options.disable_telemetry, std::env::var("RS_API_KEY").ok())
-                .await
+            TelemetryInitializer::init(
+                options.disable_telemetry,
+                std::env::var("RS_API_KEY").ok(),
+                vec![],
+            )
+            .await
         });
 
         let _ = telemetry_sender
@@ -527,6 +532,29 @@ where
 
         let query_status_cache: &'static _ =
             Box::leak(Box::new(QueryStatusCache::with_style(migration_style)));
+
+        let telemetry_sender = rt.block_on(async {
+            let proxied_queries_reporter =
+                Arc::new(ProxiedQueriesReporter::new(query_status_cache));
+            TelemetryInitializer::init(
+                options.disable_telemetry,
+                std::env::var("RS_API_KEY").ok(),
+                vec![proxied_queries_reporter],
+            )
+            .await
+        });
+
+        let _ = rt
+            .block_on(async {
+                telemetry_sender.send_event_with_payload(
+                    TelemetryEvent::AdapterStart,
+                    TelemetryBuilder::new()
+                        .adapter_version(option_env!("CARGO_PKG_VERSION").unwrap_or_default())
+                        .db_backend(format!("{:?}", &self.database_type).to_lowercase())
+                        .build(),
+                )
+            })
+            .map_err(|error| warn!(%error, "Failed to initialize telemetry sender"));
 
         let migration_mode = if options.async_migrations || options.explicit_migrations {
             MigrationMode::OutOfBand

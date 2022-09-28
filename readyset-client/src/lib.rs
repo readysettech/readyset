@@ -11,6 +11,7 @@
 pub mod backend;
 pub mod http_router;
 pub mod migration_handler;
+pub mod proxied_queries_reporter;
 mod query_handler;
 pub mod query_status_cache;
 pub mod rewrite;

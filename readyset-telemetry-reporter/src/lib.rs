@@ -5,6 +5,7 @@
 //! more advanced API token validation, integration with `metrics`, etc.
 
 mod error;
+pub use error::*;
 
 mod reporter;
 pub use reporter::*;
@@ -23,7 +24,11 @@ pub struct TelemetryInitializer {}
 
 impl TelemetryInitializer {
     /// Initializes a background task and returns a TelemetrySender handle
-    pub async fn init(disable_telemetry: bool, api_key: Option<String>) -> TelemetrySender {
+    pub async fn init(
+        disable_telemetry: bool,
+        api_key: Option<String>,
+        periodic_reporters: Vec<PeriodicReporter>,
+    ) -> TelemetrySender {
         if disable_telemetry {
             return TelemetrySender::new_no_op();
         }
@@ -32,7 +37,13 @@ impl TelemetryInitializer {
         let sender = TelemetrySender::new(tx, shutdown_tx);
 
         tokio::spawn(async move {
-            TelemetryReporter::new(rx, api_key, shutdown_rx).run().await;
+            let mut telemetry_reporter = TelemetryReporter::new(rx, api_key, shutdown_rx);
+            for reporter in periodic_reporters {
+                telemetry_reporter
+                    .register_periodic_reporter(reporter)
+                    .await;
+            }
+            telemetry_reporter.run().await;
         });
 
         sender

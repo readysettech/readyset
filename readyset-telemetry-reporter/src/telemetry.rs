@@ -1,5 +1,4 @@
 use derive_builder::Builder;
-use readyset::query::DeniedQuery;
 use serde::Serialize;
 use serde_with_macros::skip_serializing_none;
 
@@ -86,12 +85,12 @@ pub enum DeploymentEnv {
 )]
 #[derive(Debug)]
 pub struct Telemetry {
-    db_backend: Option<String>,
-    adapter_version: Option<String>,
-    server_version: Option<String>,
-    query_id: Option<String>,
-    schema: Option<String>,
-    proxied_query: Option<DeniedQuery>,
+    pub db_backend: Option<String>,
+    pub adapter_version: Option<String>,
+    pub server_version: Option<String>,
+    pub query_id: Option<String>,
+    pub schema: Option<String>,
+    pub proxied_query: Option<String>,
 }
 
 impl TelemetryBuilder {
