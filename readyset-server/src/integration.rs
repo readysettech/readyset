@@ -8273,6 +8273,8 @@ async fn reroutes_count() {
     m.insert(vec![1.into(), 3.into()]).await.unwrap();
     m.insert(vec![2.into(), 1.into()]).await.unwrap();
 
+    sleep().await;
+
     let r1 = g1.lookup(&[1i64.into()], true).await.unwrap();
     let r2 = g2.lookup(&[0i64.into()], true).await.unwrap();
     assert_eq!(r1.into_vec(), vec![vec![DfValue::Int(2)]]);
