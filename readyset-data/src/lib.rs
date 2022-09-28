@@ -480,10 +480,7 @@ impl DfValue {
             DfValue::TimestampTz(tz) => tz.coerce_to(to_ty),
             DfValue::Int(v) => handle_enum_or_coerce_int!(v, to_ty, from_ty),
             DfValue::UnsignedInt(v) => handle_enum_or_coerce_int!(v, to_ty, from_ty),
-
-            // We can coerce f32 as f64, because casting to the latter doesn't increase precision
-            // and therfore is equivalent
-            DfValue::Float(f) => float::coerce_f64(*f as f64, to_ty, from_ty),
+            DfValue::Float(f) => float::coerce_f64(f64::from(*f), to_ty, from_ty),
             DfValue::Double(f) => float::coerce_f64(*f, to_ty, from_ty),
             DfValue::Numeric(d) => float::coerce_decimal(d.as_ref(), to_ty, from_ty),
             DfValue::Time(ts) if to_ty.is_any_text() => Ok(ts.to_string().into()),
