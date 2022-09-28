@@ -380,18 +380,14 @@ where
                 .await
         });
 
-        let _ = rt
-            .block_on(async {
-                telemetry_sender
-                    .send_event_with_payload(
-                        TelemetryEvent::AdapterStart,
-                        TelemetryBuilder::new()
-                            .adapter_version(option_env!("CARGO_PKG_VERSION").unwrap_or_default())
-                            .db_backend(format!("{:?}", &self.database_type).to_lowercase())
-                            .build(),
-                    )
-                    .await
-            })
+        let _ = telemetry_sender
+            .send_event_with_payload(
+                TelemetryEvent::AdapterStart,
+                TelemetryBuilder::new()
+                    .adapter_version(option_env!("CARGO_PKG_VERSION").unwrap_or_default())
+                    .db_backend(format!("{:?}", &self.database_type).to_lowercase())
+                    .build(),
+            )
             .map_err(|error| warn!(%error, "Failed to initialize telemetry sender"));
 
         if options.allow_unsupported_set {
@@ -796,9 +792,8 @@ where
 
                 match upstream_res {
                     Ok(mut upstream) => {
-                        if let Err(e) = telemetry_sender
-                            .send_event(TelemetryEvent::UpstreamConnected)
-                            .await
+                        if let Err(e) =
+                            telemetry_sender.send_event(TelemetryEvent::UpstreamConnected)
                         {
                             warn!(error = %e, "Failed to send upstream connected metric");
                         }
@@ -884,10 +879,10 @@ where
 
         // Send shutdown telemetry events
         if _handle.is_some() {
-            let _ = rt.block_on(telemetry_sender.send_event(TelemetryEvent::ServerStop));
+            let _ = telemetry_sender.send_event(TelemetryEvent::ServerStop);
         }
 
-        let _ = rt.block_on(telemetry_sender.send_event(TelemetryEvent::AdapterStop));
+        let _ = telemetry_sender.send_event(TelemetryEvent::AdapterStop);
 
         // We use `shutdown_timeout` instead of `shutdown_background` in case any
         // blocking IO is ongoing.

@@ -382,7 +382,7 @@ mod tests {
 
         // TODO(luke): We don't have a good way to inspect the event was received correctly in unit
         // tests currently
-        assert!(telemetry_sender.send_event(event).await.is_ok());
+        assert!(telemetry_sender.send_event(event).is_ok());
 
         // Allow the event to propagate to the run loop
         tokio::time::sleep(Duration::from_secs(2)).await;
@@ -391,7 +391,7 @@ mod tests {
 
         tokio::time::sleep(Duration::from_secs(2)).await;
 
-        assert!(telemetry_sender.send_event(event).await.is_err());
+        assert!(telemetry_sender.send_event(event).is_err());
     }
 
     #[tokio::test(start_paused = true)]

@@ -131,13 +131,10 @@ impl CreateSchema {
     }
 
     pub async fn send_create(create: String, telemetry_sender: &TelemetrySender) {
-        match telemetry_sender
-            .send_event_with_payload(
-                TelemetryEvent::Schema,
-                TelemetryBuilder::new().schema(create).build(),
-            )
-            .await
-        {
+        match telemetry_sender.send_event_with_payload(
+            TelemetryEvent::Schema,
+            TelemetryBuilder::new().schema(create).build(),
+        ) {
             Ok(_) => {}
             Err(_) => tracing::warn!("Failed to send create schema telemetry"),
         }

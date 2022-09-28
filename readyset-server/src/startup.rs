@@ -283,14 +283,12 @@ pub async fn start_instance_inner(
     )
     .await?;
 
-    let _ = telemetry_sender
-        .send_event_with_payload(
-            TelemetryEvent::ServerStart,
-            TelemetryBuilder::new()
-                .server_version(option_env!("CARGO_PKG_VERSION").unwrap_or_default())
-                .build(),
-        )
-        .await;
+    let _ = telemetry_sender.send_event_with_payload(
+        TelemetryEvent::ServerStart,
+        TelemetryBuilder::new()
+            .server_version(option_env!("CARGO_PKG_VERSION").unwrap_or_default())
+            .build(),
+    );
 
     Ok(Handle::new(authority, handle_tx, trigger, our_descriptor))
 }

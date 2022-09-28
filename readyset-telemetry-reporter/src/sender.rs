@@ -37,14 +37,9 @@ impl TelemetrySender {
     ///
     /// If this reporter was initialized with an API key equal to [`HARDCODED_API_KEY`], this
     /// function is a no-op.
-    pub async fn send_event_with_payload(
-        &self,
-        event: TelemetryEvent,
-        payload: Telemetry,
-    ) -> Result<()> {
+    pub fn send_event_with_payload(&self, event: TelemetryEvent, payload: Telemetry) -> Result<()> {
         if let Some(tx) = self.tx.as_ref() {
-            tx.send((event, payload))
-                .await
+            tx.try_send((event, payload))
                 .map_err(|e| Error::Sender(e.to_string()))
         } else {
             tracing::trace!("Ignoring ({event:?} {payload:?}) in no-op mode");
@@ -52,9 +47,8 @@ impl TelemetrySender {
         }
     }
 
-    pub async fn send_event(&self, event: TelemetryEvent) -> Result<()> {
+    pub fn send_event(&self, event: TelemetryEvent) -> Result<()> {
         self.send_event_with_payload(event, TelemetryBuilder::new().build())
-            .await
     }
 
     pub async fn shutdown(&self) {

@@ -1659,10 +1659,7 @@ where
 
                 // Log a telemetry event
                 if let Some(ref telemetry_sender) = self.telemetry_sender {
-                    if let Err(e) = telemetry_sender
-                        .send_event(TelemetryEvent::CreateCache)
-                        .await
-                    {
+                    if let Err(e) = telemetry_sender.send_event(TelemetryEvent::CreateCache) {
                         warn!(error = %e, "Failed to send CREATE CACHE metric");
                     }
                 } else {
@@ -1677,10 +1674,7 @@ where
             SqlQuery::Show(ShowStatement::CachedQueries) => {
                 // Log a telemetry event
                 if let Some(ref telemetry_sender) = self.telemetry_sender {
-                    if let Err(e) = telemetry_sender
-                        .send_event(TelemetryEvent::ShowCaches)
-                        .await
-                    {
+                    if let Err(e) = telemetry_sender.send_event(TelemetryEvent::ShowCaches) {
                         warn!(error = %e, "Failed to send SHOW CACHES metric");
                     }
                 } else {
@@ -1693,9 +1687,7 @@ where
             SqlQuery::Show(ShowStatement::ProxiedQueries) => {
                 // Log a telemetry event
                 if let Some(ref telemetry_sender) = self.telemetry_sender {
-                    if let Err(e) = telemetry_sender
-                        .send_event(TelemetryEvent::ShowProxiedQueries)
-                        .await
+                    if let Err(e) = telemetry_sender.send_event(TelemetryEvent::ShowProxiedQueries)
                     {
                         warn!(error = %e, "Failed to send SHOW PROXIED QUERIES metric");
                     }
@@ -2116,7 +2108,6 @@ where
                                     .query_id(id)
                                     .build(),
                             )
-                            .await
                         {
                             warn!(error = %e, "Failed to send parse failed metric");
                         }

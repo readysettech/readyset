@@ -373,9 +373,7 @@ impl NoriaAdapter {
             notify.notify_one();
         }
 
-        let _ = telemetry_sender
-            .send_event(TelemetryEvent::SnapshotComplete)
-            .await;
+        let _ = telemetry_sender.send_event(TelemetryEvent::SnapshotComplete);
         if report_schemas {
             db_schemas.send_schemas(telemetry_sender).await;
         }
@@ -496,9 +494,7 @@ impl NoriaAdapter {
         if let Some(notify) = ready_notify.take() {
             notify.notify_one();
         }
-        let _ = telemetry_sender
-            .send_event(TelemetryEvent::SnapshotComplete)
-            .await;
+        let _ = telemetry_sender.send_event(TelemetryEvent::SnapshotComplete);
         if report_schemas {
             create_schema.send_schemas(telemetry_sender).await;
         }

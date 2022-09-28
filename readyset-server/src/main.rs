@@ -204,7 +204,9 @@ fn main() -> anyhow::Result<()> {
     })?;
     rt.block_on(handle.wait_done());
 
-    let _ = rt.block_on(telemetry_sender.send_event(TelemetryEvent::ServerStop));
+    // TODO(Alex) we don't wait for the telemetry reporter to handle this message before dropping
+    // the runtime
+    let _ = telemetry_sender.send_event(TelemetryEvent::ServerStop);
 
     drop(rt);
     Ok(())
