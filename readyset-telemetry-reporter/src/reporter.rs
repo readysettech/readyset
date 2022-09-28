@@ -91,24 +91,19 @@ pub struct TelemetryReporter {
 }
 
 impl TelemetryReporter {
-    pub fn try_new(
+    pub fn new(
         rx: Receiver<(TelemetryEvent, Telemetry)>,
         api_key: Option<String>,
         shutdown_rx: oneshot::Receiver<()>,
-    ) -> Result<Self> {
-        let client = match SEGMENT_WRITE_KEY.as_ref() {
-            Some(k) => Result::Ok(Some(make_client(k)?)),
-            None => Ok(None),
-        }?;
-
-        Ok(Self {
+    ) -> Self {
+        Self {
             rx,
-            client,
+            client: SEGMENT_WRITE_KEY.as_ref().and_then(|k| make_client(k).ok()),
             user_id: api_key,
             anonymous_id: Uuid::new_v4().to_string(),
             shutdown_rx,
             deployment_env: std::env::var("DEPLOYMENT_ENV").unwrap_or_default().into(),
-        })
+        }
     }
 
     fn build_request(

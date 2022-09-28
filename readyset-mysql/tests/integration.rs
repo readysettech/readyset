@@ -24,9 +24,11 @@ async fn setup_telemetry() -> (TestTelemetryReporter, mysql_async::Opts, Handle)
     let (tx, rx) = channel(1);
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
     let telemetry_sender = TelemetrySender::new(tx, shutdown_tx);
-    let reporter = TestTelemetryReporter::from(
-        TelemetryReporter::try_new(rx, Some("TestAPIKey".to_string()), shutdown_rx).unwrap(),
-    );
+    let reporter = TestTelemetryReporter::from(TelemetryReporter::new(
+        rx,
+        Some("TestAPIKey".to_string()),
+        shutdown_rx,
+    ));
 
     let backend = BackendBuilder::new()
         .require_authentication(false)

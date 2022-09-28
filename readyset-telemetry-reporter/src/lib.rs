@@ -31,13 +31,8 @@ impl TelemetryInitializer {
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let sender = TelemetrySender::new(tx, shutdown_tx);
 
-        // If the reporter fails to initialize, sends will return errors, which can be
-        // either be ignored (similar to no_op behavior) or handled at the time they are
-        // sent.
         tokio::spawn(async move {
-            let mut reporter = TelemetryReporter::try_new(rx, api_key, shutdown_rx)
-                .expect("failed to create reporter");
-            reporter.run().await;
+            TelemetryReporter::new(rx, api_key, shutdown_rx).run().await;
         });
 
         sender
