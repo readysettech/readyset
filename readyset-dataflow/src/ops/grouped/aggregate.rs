@@ -49,7 +49,9 @@ impl Aggregation {
                     DfType::DEFAULT_NUMERIC
                 }
             }
-            Aggregation::GroupConcat { .. } => DfType::Text,
+            Aggregation::GroupConcat { .. } => DfType::Text {
+                collation: Default::default(), /* TODO */
+            },
         };
 
         Ok(GroupedOperator::new(
@@ -148,7 +150,7 @@ impl Aggregator {
             DfType::BigInt => Ok(DfValue::Int(Default::default())),
             DfType::Double => Ok(DfValue::Double(Default::default())),
             DfType::Numeric { .. } => Ok(DfValue::Numeric(Default::default())),
-            DfType::Text => Ok(DfValue::from("")),
+            DfType::Text { .. } => Ok(DfValue::from("" /* TODO(grfn): Use collation here */)),
             _ => internal!(),
         }
     }
@@ -267,8 +269,8 @@ impl GroupedOperation for Aggregator {
         self.over
     }
 
-    fn output_col_type(&self) -> &DfType {
-        &self.out_ty
+    fn output_col_type(&self) -> DfType {
+        self.out_ty.clone()
     }
 
     fn empty_value(&self) -> Option<DfValue> {

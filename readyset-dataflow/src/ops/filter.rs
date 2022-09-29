@@ -147,7 +147,12 @@ mod tests {
             Filter::new(
                 s.as_global(),
                 filters.unwrap_or_else(|| Op {
-                    left: Box::new(column_with_type(1, DfType::Text)),
+                    left: Box::new(column_with_type(
+                        1,
+                        DfType::Text {
+                            collation: Default::default(),
+                        },
+                    )),
                     op: BinaryOperator::Equal,
                     right: Box::new(make_literal(DfValue::from("a"))),
                     ty: DfType::Bool,
@@ -199,7 +204,12 @@ mod tests {
                 }),
                 op: BinaryOperator::And,
                 right: Box::new(Op {
-                    left: Box::new(column_with_type(1, DfType::Text)),
+                    left: Box::new(column_with_type(
+                        1,
+                        DfType::Text {
+                            collation: Default::default(),
+                        },
+                    )),
                     op: BinaryOperator::Equal,
                     right: Box::new(make_literal(DfValue::from("a"))),
                     ty: DfType::Bool,
@@ -268,7 +278,12 @@ mod tests {
                 }),
                 op: BinaryOperator::And,
                 right: Box::new(Op {
-                    left: Box::new(column_with_type(1, DfType::Text)),
+                    left: Box::new(column_with_type(
+                        1,
+                        DfType::Text {
+                            collation: Default::default(),
+                        },
+                    )),
                     op: BinaryOperator::NotEqual,
                     right: Box::new(make_literal(DfValue::from("a"))),
                     ty: DfType::Bool,
@@ -299,9 +314,19 @@ mod tests {
         let mut g = setup(
             false,
             Some(Op {
-                left: Box::new(column_with_type(0, DfType::Text)),
+                left: Box::new(column_with_type(
+                    0,
+                    DfType::Text {
+                        collation: Default::default(),
+                    },
+                )),
                 op: BinaryOperator::Equal,
-                right: Box::new(column_with_type(1, DfType::Text)),
+                right: Box::new(column_with_type(
+                    1,
+                    DfType::Text {
+                        collation: Default::default(),
+                    },
+                )),
                 ty: DfType::Bool,
             }),
         );

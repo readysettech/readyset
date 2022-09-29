@@ -4981,12 +4981,16 @@ async fn post_read_ilike() {
             filter: Some(DfExpr::Op {
                 left: Box::new(DfExpr::Column {
                     index: 0,
-                    ty: DfType::Text,
+                    ty: DfType::Text {
+                        collation: Default::default(),
+                    },
                 }),
                 op: BinaryOperator::ILike,
                 right: Box::new(DfExpr::Literal {
                     val: "%a%".into(),
-                    ty: DfType::Text,
+                    ty: DfType::Text {
+                        collation: Default::default(),
+                    },
                 }),
                 ty: DfType::Bool,
             }),

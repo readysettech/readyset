@@ -2066,12 +2066,16 @@ mod tests {
                 Some(DfExpr::Op {
                     left: Box::new(DfExpr::Column {
                         index: 1,
-                        ty: DfType::Text
+                        ty: DfType::Text {
+                            collation: Default::default()
+                        }
                     }),
                     op: BinaryOperator::ILike,
                     right: Box::new(DfExpr::Literal {
                         val: DfValue::from("%a%"),
-                        ty: DfType::Text
+                        ty: DfType::Text {
+                            collation: Default::default()
+                        }
                     }),
                     ty: DfType::Bool,
                 })
@@ -2170,12 +2174,16 @@ mod tests {
                 Some(DfExpr::Op {
                     left: Box::new(DfExpr::Column {
                         index: 1,
-                        ty: DfType::Text
+                        ty: DfType::Text {
+                            collation: Default::default()
+                        }
                     }),
                     op: BinaryOperator::Greater,
                     right: Box::new(DfExpr::Literal {
                         val: "a".into(),
-                        ty: DfType::Text
+                        ty: DfType::Text {
+                            collation: Default::default()
+                        }
                     }),
                     ty: DfType::Bool
                 })

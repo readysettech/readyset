@@ -6,6 +6,8 @@ use nom_sql::{Dialect, EnumType, Literal, SqlType};
 // use readyset_errors::{internal, ReadySetError};
 use serde::{Deserialize, Serialize};
 
+use crate::collation::Collation;
+
 /// Dataflow runtime representation of [`SqlType`].
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, EnumKind)]
 #[enum_kind(DfTypeKind)]
@@ -90,7 +92,7 @@ pub enum DfType {
     /// column properties (which vary between SQL types and dialects), we treat all `*text` types
     /// and bare `varchar` as having unlimited length. We are allowed to do so because the upstream
     /// database validates data size for us.
-    Text,
+    Text { collation: Collation },
 
     /// `CHAR(n)`: fixed-length character string.
     // FIXME(ENG-1839): Should have `Option<u16>` to determine how `cast` is done for MySQL. The
@@ -247,7 +249,9 @@ impl DfType {
             // Character string types.
             //
             // `varchar` by itself is an error in MySQL but synonymous with `text` in PostgreSQL.
-            Text | TinyText | MediumText | LongText | VarChar(None) => Self::Text,
+            Text | TinyText | MediumText | LongText | VarChar(None) => Self::Text {
+                collation: Default::default(),
+            },
             VarChar(Some(len)) => Self::VarChar(len),
             Char(len) => Self::Char(len.unwrap_or(1), dialect),
 
@@ -309,7 +313,7 @@ impl DfType {
 
             Self::Char(n, _) => Char(Some(n)),
             Self::VarChar(n) => VarChar(Some(n)),
-            Self::Text => Text,
+            Self::Text { .. } => Text,
 
             Self::Binary(n) => Binary(Some(n)),
             Self::VarBinary(n) => VarBinary(n),
@@ -372,7 +376,7 @@ impl DfType {
             | UnsignedBigInt
             | Double
             | Numeric { .. }
-            | Text
+            | Text { .. }
             | VarChar(_)
             | Bit(_)
             | VarBit(_)
@@ -522,7 +526,7 @@ impl fmt::Display for DfType {
             | Self::UnsignedBigInt
             | Self::Float(_)
             | Self::Double
-            | Self::Text
+            | Self::Text { ..}
             // XXX: Should we take into account PostgreSQL and use "ByteArray" or "ByteA"?
             | Self::Blob(_)
             | Self::VarBit(None)
@@ -558,7 +562,13 @@ mod tests {
 
     #[test]
     fn innermost_array_type() {
-        for ty in [DfType::Text, DfType::Bool, DfType::Double] {
+        for ty in [
+            DfType::Text {
+                collation: Default::default(),
+            },
+            DfType::Bool,
+            DfType::Double,
+        ] {
             for dimen in 0..=5 {
                 let arr = ty.clone().nest_in_array(dimen);
                 assert_eq!(arr.innermost_array_type(), &ty);
@@ -598,7 +608,12 @@ mod tests {
                 },
                 Some(SqlType::Numeric(Some((42, Some(42))))),
             ),
-            (DfType::Text, Some(SqlType::Text)),
+            (
+                DfType::Text {
+                    collation: Default::default(),
+                },
+                Some(SqlType::Text),
+            ),
             (
                 DfType::Char(len, Dialect::MySQL),
                 Some(SqlType::Char(Some(len))),

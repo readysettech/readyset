@@ -203,8 +203,10 @@ impl GroupedOperation for GroupConcat {
         self.source_col
     }
 
-    fn output_col_type(&self) -> &DfType {
-        &DfType::Text
+    fn output_col_type(&self) -> DfType {
+        DfType::Text {
+            collation: Default::default(), /* TODO */
+        }
     }
 
     fn empty_value(&self) -> Option<DfValue> {

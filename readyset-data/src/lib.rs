@@ -28,6 +28,7 @@ use tokio_postgres::types::{to_sql_checked, FromSql, IsNull, Kind, ToSql, Type};
 use uuid::Uuid;
 
 mod array;
+pub mod collation;
 mod r#enum;
 mod float;
 mod integer;
@@ -37,6 +38,7 @@ mod timestamp;
 mod r#type;
 
 pub use crate::array::Array;
+pub use crate::collation::Collation;
 pub use crate::r#type::DfType;
 pub use crate::text::{Text, TinyText};
 pub use crate::timestamp::{TimestampTz, TIMESTAMP_FORMAT, TIMESTAMP_PARSE_FORMAT};
@@ -373,7 +375,9 @@ impl DfValue {
             Self::UnsignedInt(_) => UnsignedBigInt,
             Self::Float(_) => Float(dialect),
             Self::Double(_) => Double,
-            Self::Text(_) | Self::TinyText(_) => Text,
+            Self::Text(_) | Self::TinyText(_) => Text {
+                collation: Default::default(), /* TODO */
+            },
             Self::TimestampTz(ts) => {
                 let fsp = u16::from(ts.get_microsecond_precision());
                 if ts.has_timezone() {

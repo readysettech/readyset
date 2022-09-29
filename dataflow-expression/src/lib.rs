@@ -127,14 +127,18 @@ impl BuiltinFunction {
                 Ok((
                     Self::JsonTypeof(next_arg()?),
                     // Always returns text containing the JSON type.
-                    DfType::Text,
+                    DfType::Text {
+                        collation: Default::default(),
+                    },
                 ))
             }
             "jsonb_typeof" => {
                 Ok((
                     Self::JsonbTypeof(next_arg()?),
                     // Always returns text containing the JSON type.
-                    DfType::Text,
+                    DfType::Text {
+                        collation: Default::default(),
+                    },
                 ))
             }
             "coalesce" => {

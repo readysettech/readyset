@@ -161,9 +161,9 @@ impl GroupedOperation for ExtremumOperator {
         self.over
     }
 
-    fn output_col_type(&self) -> &DfType {
+    fn output_col_type(&self) -> DfType {
         // Type of extremum relies on col type.
-        &DfType::Unknown
+        DfType::Unknown
     }
 }
 

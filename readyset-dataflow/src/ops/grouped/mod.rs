@@ -79,7 +79,7 @@ pub trait GroupedOperation: fmt::Debug + Clone {
     /// over column (e.g. SUM can be either int or float).
     ///
     /// Other operators like Count (int) and Concat (text) always have the same column type.
-    fn output_col_type(&self) -> &DfType;
+    fn output_col_type(&self) -> DfType;
 
     /// Returns the empty value for this aggregate, if any. Groups that have the empty value in
     /// their output column will be omitted from results
@@ -126,7 +126,7 @@ impl<T: GroupedOperation> GroupedOperator<T> {
         self.inner.over_column()
     }
 
-    pub fn output_col_type(&self) -> &DfType {
+    pub fn output_col_type(&self) -> DfType {
         self.inner.output_col_type()
     }
 }
