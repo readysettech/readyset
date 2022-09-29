@@ -46,6 +46,7 @@ readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter" }
 
 [dev-dependencies]
 readyset-server = { path = "../readyset-server" }
+readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter", features = ["test-util"] }
 serial_test = "0.5"
 
 [features]

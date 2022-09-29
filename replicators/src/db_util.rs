@@ -106,26 +106,33 @@ impl CreateSchema {
 
     fn anonymize_tables(&mut self, anonymizer: &mut Anonymizer) {
         for (_, table) in self.table_creates.iter_mut() {
+            tracing::trace!("create table: {table:?}");
+            if let Dialect::PostgreSQL = self.dialect {
+                // HACK: strip out the backticks from these since they aren't valid in PostgreSQL
+                // until we handle formatting by dialect correctly
+                strip_backticks(table);
+            }
             *table = match nom_sql::parse_create_table(self.dialect, table.clone()) {
                 Ok(mut parsed_table) => {
                     parsed_table.anonymize(anonymizer);
                     parsed_table.to_string()
                 }
                 // If we fail to parse, fully anonymize the statement.
-                Err(_) => "<anonymized>".to_string(),
+                Err(_) => "<anonymized: create table failed to parse>".to_string(),
             }
         }
     }
 
     fn anonymize_views(&mut self, anonymizer: &mut Anonymizer) {
         for (_, view) in self.view_creates.iter_mut() {
+            tracing::trace!("create view: {view:?}");
             *view = match nom_sql::parse_create_view(self.dialect, view.clone()) {
                 Ok(mut parsed_view) => {
                     parsed_view.anonymize(anonymizer);
                     parsed_view.to_string()
                 }
                 // If we fail to parse, fully anonymize the statement.
-                Err(_) => "<anonymized>".to_string(),
+                Err(_) => "<anonymized: create view failed to parse>".to_string(),
             }
         }
     }
@@ -158,6 +165,10 @@ impl ToString for CreateSchema {
     fn to_string(&self) -> String {
         format!("{self:?}")
     }
+}
+
+fn strip_backticks(table: &mut String) {
+    table.remove_matches("`");
 }
 
 #[cfg(test)]
@@ -250,7 +261,10 @@ mod tests {
         create_schema.add_table_create("Users".to_string(), users_create_table);
         create_schema.anonymize();
         for (_, table_create) in create_schema.table_creates {
-            assert_eq!("<anonymized>".to_string(), table_create);
+            assert_eq!(
+                "<anonymized: create table failed to parse>".to_string(),
+                table_create
+            );
         }
     }
 
@@ -263,7 +277,10 @@ mod tests {
         create_schema.add_view_create("foobar".to_string(), view_create);
         create_schema.anonymize();
         for (_, view_create) in create_schema.view_creates {
-            assert_eq!("<anonymized>".to_string(), view_create);
+            assert_eq!(
+                "<anonymized: create view failed to parse>".to_string(),
+                view_create
+            );
         }
     }
 }

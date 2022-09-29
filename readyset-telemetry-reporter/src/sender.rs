@@ -40,10 +40,11 @@ impl TelemetrySender {
     pub fn send_event_with_payload(&self, event: TelemetryEvent, payload: Telemetry) -> Result<()> {
         tracing::debug!("sending {event:?} with payload {payload:?}");
         if let Some(tx) = self.tx.as_ref() {
+            tracing::trace!(?event, ?payload, "sending telemetry");
             tx.try_send((event, payload))
                 .map_err(|e| Error::Sender(e.to_string()))
         } else {
-            tracing::trace!("Ignoring ({event:?} {payload:?}) in no-op mode");
+            tracing::debug!("Ignoring ({event:?} {payload:?}) in no-op mode");
             Ok(())
         }
     }

@@ -2,6 +2,7 @@ use std::env;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use launchpad::eventually;
 use mysql_async::prelude::Queryable;
@@ -12,9 +13,12 @@ use readyset::recipe::changelist::ChangeList;
 use readyset::{ReadySetError, ReadySetHandle, ReadySetResult};
 use readyset_data::{DfValue, TinyText};
 use readyset_server::Builder;
-use readyset_telemetry_reporter::TelemetrySender;
+use readyset_telemetry_reporter::test_util::TestTelemetryReporter;
+use readyset_telemetry_reporter::{TelemetryEvent, TelemetryReporter, TelemetrySender};
 use replicators::{Config, NoriaAdapter};
 use test_utils::slow;
+use tokio::sync::mpsc::channel;
+use tokio::sync::oneshot;
 use tracing::{error, trace};
 
 const MAX_ATTEMPTS: usize = 40;
@@ -214,23 +218,32 @@ impl DbConnection {
 
 impl TestHandle {
     async fn start_noria(url: String, config: Option<Config>) -> ReadySetResult<TestHandle> {
+        Self::start_noria_with_builder(url, config, Builder::for_tests()).await
+    }
+
+    async fn start_noria_with_builder(
+        url: String,
+        config: Option<Config>,
+        builder: Builder,
+    ) -> ReadySetResult<TestHandle> {
         let authority_store = Arc::new(LocalAuthorityStore::new());
         let authority = Arc::new(Authority::from(LocalAuthority::new_with_store(
             authority_store,
         )));
-        TestHandle::start_with_authority(url, authority, config).await
+        TestHandle::start_with_authority(url, authority, config, builder).await
     }
 
     async fn start_with_authority(
         url: String,
         authority: Arc<Authority>,
         config: Option<Config>,
+        mut builder: Builder,
     ) -> ReadySetResult<TestHandle> {
         readyset_tracing::init_test_logging();
-        let mut builder = Builder::for_tests();
         let mut persistence = readyset_server::PersistenceParameters::default();
         persistence.mode = readyset_server::DurabilityMode::DeleteOnExit;
         builder.set_persistence(persistence);
+        let telemetry_sender = builder.telemetry.clone();
         let noria = builder.start(Arc::clone(&authority)).await.unwrap();
 
         let mut handle = TestHandle {
@@ -241,7 +254,7 @@ impl TestHandle {
             ready_notify: Some(Default::default()),
         };
 
-        handle.start_repl(config).await?;
+        handle.start_repl(config, telemetry_sender).await?;
 
         Ok(handle)
     }
@@ -262,7 +275,11 @@ impl TestHandle {
         }
     }
 
-    async fn start_repl(&mut self, config: Option<Config>) -> ReadySetResult<()> {
+    async fn start_repl(
+        &mut self,
+        config: Option<Config>,
+        telemetry_sender: TelemetrySender,
+    ) -> ReadySetResult<()> {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let controller = ReadySetHandle::new(Arc::clone(&self.authority)).await;
 
@@ -276,7 +293,7 @@ impl TestHandle {
                     ..config.unwrap_or_default()
                 },
                 ready_notify.clone(),
-                TelemetrySender::new_no_op(),
+                telemetry_sender,
             )
             .await
             {
@@ -387,7 +404,7 @@ async fn replication_test_inner(url: &str) -> ReadySetResult<()> {
         .await?;
 
     // Resume replication
-    ctx.start_repl(None).await?;
+    ctx.start_repl(None, TelemetrySender::new_no_op()).await?;
     ctx.check_results("noria_view", "Reconnect", RECONNECT_RESULT)
         .await?;
 
@@ -1435,4 +1452,70 @@ async fn postgresql_ddl_replicate_create_view_internal(url: &str) {
         })
         .await
         .is_ok());
+}
+
+fn setup_telemetry() -> (TelemetrySender, TestTelemetryReporter) {
+    let (tx, rx) = channel(128);
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let telemetry_sender = TelemetrySender::new(tx, shutdown_tx);
+    let reporter = TestTelemetryReporter::from(TelemetryReporter::new(
+        rx,
+        Some("TestAPIKey".to_string()),
+        shutdown_rx,
+    ));
+    (telemetry_sender, reporter)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn snapshot_telemetry_mysql() -> ReadySetResult<()> {
+    snapshot_telemetry_inner(&mysql_url()).await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn snapshot_telemetry_postgresql() -> ReadySetResult<()> {
+    snapshot_telemetry_inner(&pgsql_url()).await
+}
+
+async fn snapshot_telemetry_inner(url: &String) -> ReadySetResult<()> {
+    readyset_tracing::init_test_logging();
+    let mut client = DbConnection::connect(url).await?;
+    client.query(CREATE_SCHEMA).await?;
+    client.query(POPULATE_SCHEMA).await?;
+
+    let (sender, mut reporter) = setup_telemetry();
+    let mut builder = Builder::for_tests();
+    builder.set_telemetry_sender(sender);
+    let mut ctx = TestHandle::start_noria_with_builder(url.to_string(), None, builder).await?;
+    ctx.ready_notify.as_ref().unwrap().notified().await;
+
+    ctx.check_results("noria_view", "Snapshot", SNAPSHOT_RESULT)
+        .await?;
+
+    reporter.run_timeout(Duration::from_millis(20)).await;
+
+    assert_eq!(
+        1,
+        reporter
+            .check_event(TelemetryEvent::SnapshotComplete)
+            .expect("should be some")
+            .len()
+    );
+
+    let schemas = reporter
+        .check_event(TelemetryEvent::Schema)
+        .expect("should be some")
+        .into_iter()
+        .map(|t| t.schema.clone().expect("should be some"))
+        .collect::<Vec<_>>();
+    let schema_str = format!("{:?}", schemas);
+
+    // Mysql has 1 create table and 1 create view -- postgres has 2 of each. Just assert that we
+    // see at least one of each create type:
+
+    assert!(schema_str.contains("CREATE TABLE"));
+    assert!(schema_str.contains("CREATE VIEW"));
+
+    Ok(())
 }

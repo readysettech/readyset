@@ -302,13 +302,13 @@ pub mod test_util {
     use crate::{Telemetry, TelemetryEvent, TelemetryReporter};
 
     pub struct TestTelemetryReporter {
-        rx: Receiver<(TelemetryEvent, Telemetry)>,
+        pub rx: Receiver<(TelemetryEvent, Telemetry)>,
 
         // Received Events
-        received_events: HashMap<TelemetryEvent, Vec<Telemetry>>,
+        pub received_events: HashMap<TelemetryEvent, Vec<Telemetry>>,
 
         /// Zero or many periodic reporters that can collect and send metrics periodically
-        periodic_reporters: Arc<Mutex<Vec<PeriodicReporter>>>,
+        pub periodic_reporters: Arc<Mutex<Vec<PeriodicReporter>>>,
     }
 
     impl TestTelemetryReporter {
@@ -372,6 +372,11 @@ pub mod test_util {
             tracing::debug!("registering periodic reporter");
             let mut periodic_reporters = self.periodic_reporters.lock().await;
             periodic_reporters.push(periodic_reporter);
+        }
+
+        // runs until timeout is reached. Suppresses error if timeout is reached
+        pub async fn run_timeout(&mut self, timeout: Duration) {
+            let _ = tokio::time::timeout(timeout, self.run()).await;
         }
     }
 

@@ -1,4 +1,4 @@
-#![feature(never_type, hash_raw_entry, drain_filter)]
+#![feature(never_type, hash_raw_entry, drain_filter, string_remove_matches)]
 pub(crate) mod db_util;
 pub(crate) mod mysql_connector;
 pub(crate) mod noria_adapter;
