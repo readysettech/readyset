@@ -8,6 +8,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use backoff::ExponentialBackoffBuilder;
+use blake2::digest::{Update, VariableOutput};
+use blake2::Blake2bVar;
 use lazy_static::lazy_static;
 use readyset_version::COMMIT_ID;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
@@ -111,10 +113,20 @@ impl TelemetryReporter {
         api_key: Option<String>,
         shutdown_rx: oneshot::Receiver<()>,
     ) -> Self {
+        // If the api_key is set, use that as the user_id.
+        // If not, try to get a machine uid. If that works, anonymize it by hashing it with blake2b,
+        // a cryptographically secure hashing library, and use that as the id, otherwise, no
+        // id will be set
+        // NOTE: The machine id may not be unique across all users, since there may be many virtual
+        // machines or corporate images that have the same machine id. Still, this is a decent
+        // heuristic for unique users
+
+        let user_id = api_key.or_else(|| machine_uid::get().ok().map(blake2b_string));
+
         Self {
             rx,
             client: SEGMENT_WRITE_KEY.as_ref().and_then(|k| make_client(k).ok()),
-            user_id: api_key,
+            user_id,
             anonymous_id: Uuid::new_v4().to_string(),
             shutdown_rx,
             deployment_env: std::env::var("DEPLOYMENT_ENV").unwrap_or_default().into(),
@@ -227,6 +239,16 @@ impl TelemetryReporter {
         let mut periodic_reporters = self.periodic_reporters.lock().await;
         periodic_reporters.push(periodic_reporter);
     }
+}
+
+fn blake2b_string(user_id: String) -> String {
+    let mut hasher = Blake2bVar::new(8).expect("8 is a valid output size for Blake2bVar");
+    hasher.update(user_id.as_bytes());
+    let mut buf = [0u8; 8];
+    hasher
+        .finalize_variable(&mut buf)
+        .expect("8 is a valid output size for Blake2bVar");
+    hex::encode(&buf)
 }
 
 fn make_client(write_key: &str) -> Result<Client> {
@@ -407,8 +429,7 @@ mod tests {
         let (_tx, rx) = channel(1);
         let (_shutdown_tx, shutdown_rx) = oneshot::channel();
         let mut reporter = TestTelemetryReporter::from_reporter({
-            let mut reporter =
-                TelemetryReporter::new(rx, Some("TestAPIKey".to_string()), shutdown_rx);
+            let mut reporter = TelemetryReporter::new(rx, None, shutdown_rx);
             let test_periodic_reporter: PeriodicReporter = Arc::new(TestPeriodicReporter {});
             reporter
                 .register_periodic_reporter(test_periodic_reporter)
