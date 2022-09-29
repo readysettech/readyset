@@ -1079,6 +1079,7 @@ async fn handle_controller_request(
 mod tests {
     use std::str::FromStr;
 
+    use launchpad::eventually;
     use nom_sql::{parse_select_statement, Dialect};
     use readyset::recipe::changelist::ChangeList;
     use readyset::replication::ReplicationOffset;
@@ -1195,12 +1196,12 @@ mod tests {
             .await
             .unwrap();
 
-        let key_counts = noria.node_sizes().await.unwrap();
-
         let mut table = noria.table("key_count_test").await.unwrap();
         // The table only contains the local index, so we use `tables()` to get the global index
         let table_idx = noria.tables().await.unwrap()[&"key_count_test".into()];
         let view_idx = *noria.view("q1").await.unwrap().node();
+
+        let key_counts = noria.node_sizes().await.unwrap();
 
         assert_eq!(
             key_counts[&table_idx].key_count,
@@ -1210,13 +1211,12 @@ mod tests {
 
         table.insert(vec![1.into(), "abc".into()]).await.unwrap();
 
-        let key_counts = noria.node_sizes().await.unwrap();
+        eventually! {
+            let key_counts = noria.node_sizes().await.unwrap();
 
-        assert_eq!(
-            key_counts[&table_idx].key_count,
-            KeyCount::EstimatedRowCount(1)
-        );
-        assert_eq!(key_counts[&view_idx].key_count, KeyCount::ExactKeyCount(1));
+            key_counts[&table_idx].key_count == KeyCount::EstimatedRowCount(1) &&
+                key_counts[&view_idx].key_count == KeyCount::ExactKeyCount(1)
+        }
     }
 
     #[tokio::test(flavor = "multi_thread")]
