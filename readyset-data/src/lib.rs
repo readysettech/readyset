@@ -2443,45 +2443,6 @@ mod tests {
     }
 
     #[test]
-    fn data_type_debug() {
-        let tiny_text: DfValue = "hi".try_into().unwrap();
-        let text: DfValue = "I contain ' and \"".try_into().unwrap();
-        let float_from_real: DfValue = DfValue::try_from(-0.05_f32).unwrap();
-        let float = DfValue::Float(-0.05);
-        let double_from_real: DfValue = DfValue::try_from(-0.05_f64).unwrap();
-        let double = DfValue::Double(-0.05);
-        let numeric = DfValue::from(Decimal::new(-5, 2)); // -0.05
-        let timestamp_tz = DfValue::from(
-            FixedOffset::west(18_000)
-                .from_utc_datetime(&NaiveDateTime::from_timestamp(0, 42_000_000)),
-        );
-        let int = DfValue::Int(5);
-        let bytes = DfValue::ByteArray(Arc::new(vec![0, 8, 39, 92, 100, 128]));
-        // bits = 000000000000100000100111010111000110010010000000
-        let bits = DfValue::BitVector(Arc::new(BitVec::from_bytes(&[0, 8, 39, 92, 100, 128])));
-        assert_eq!(format!("{:?}", tiny_text), "TinyText(\"hi\")");
-        assert_eq!(format!("{:?}", text), "Text(\"I contain ' and \\\"\")");
-        assert_eq!(format!("{:?}", float_from_real), "Float(-0.05)");
-        assert_eq!(format!("{:?}", float), "Float(-0.05)");
-        assert_eq!(format!("{:?}", double_from_real), "Double(-0.05)");
-        assert_eq!(format!("{:?}", double), "Double(-0.05)");
-        assert_eq!(format!("{:?}", numeric), "Numeric(-0.05)");
-        assert_eq!(
-            format!("{:?}", timestamp_tz),
-            "TimestampTz(1969-12-31T19:00:00.042-05:00)"
-        );
-        assert_eq!(format!("{:?}", int), "Int(5)");
-        assert_eq!(
-            format!("{:?}", bytes),
-            "ByteArray([0, 8, 39, 92, 100, 128])"
-        );
-        assert_eq!(
-            format!("{:?}", bits),
-            "BitVector(000000000000100000100111010111000110010010000000)"
-        );
-    }
-
-    #[test]
     fn invalid_arithmetic_returns_error() {
         (&DfValue::from(0) + &DfValue::from("abc")).unwrap_err();
     }
