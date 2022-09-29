@@ -10,14 +10,49 @@ use std::sync::atomic::Ordering::Relaxed;
 use nom_sql::{Literal, SqlType};
 use readyset_errors::{ReadySetError, ReadySetResult};
 
-use crate::{Array, DfType, DfValue};
+use crate::{Array, Collation, DfType, DfValue};
 
 const TINYTEXT_WIDTH: usize = 14;
+
+/// A nibble of [`Collation`], and a nibble of length (since length can never be greater than
+/// [`TINYTEXT_WIDTH`])
+#[repr(transparent)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+struct LenAndCollation(u8);
+
+impl LenAndCollation {
+    #[inline(always)]
+    const fn new(len: u8, collation: Collation) -> Self {
+        debug_assert!(len < 16);
+        Self(len | ((collation as u8) << 4))
+    }
+
+    #[inline(always)]
+    fn from_len(len: u8) -> Self {
+        Self::new(len, Collation::default())
+    }
+
+    #[inline(always)]
+    const fn len(self) -> u8 {
+        self.0 & 0b00001111
+    }
+
+    #[inline(always)]
+    fn collation(self) -> Collation {
+        Collation::from_repr(self.0 >> 4).expect("Internal invariant maintained")
+    }
+
+    #[inline(always)]
+    fn set_collation(&mut self, collation: Collation) {
+        self.0 &= 0b00001111; // zero out the collation first
+        self.0 |= (collation as u8) << 4;
+    }
+}
 
 /// An optimized storage for very short strings
 #[derive(Clone, PartialEq, Eq)]
 pub struct TinyText {
-    len: u8,
+    len_and_collation: LenAndCollation,
     t: [u8; TINYTEXT_WIDTH],
 }
 
@@ -27,6 +62,11 @@ pub struct TinyText {
 pub struct Text(triomphe::ThinArc<AtomicBool, u8>);
 
 impl TinyText {
+    #[allow(clippy::len_without_is_empty)]
+    pub const fn len(&self) -> u8 {
+        self.len_and_collation.len()
+    }
+
     /// Extracts a string slice containing the entire `TinyText`.
     #[inline]
     pub fn as_str(&self) -> &str {
@@ -37,7 +77,7 @@ impl TinyText {
     /// Extract the underlying slice
     #[inline]
     pub fn as_bytes(&self) -> &[u8] {
-        &self.t[..self.len as usize]
+        &self.t[..self.len() as usize]
     }
 
     /// A convenience method to create constant ASCII `TinyText`
@@ -56,7 +96,10 @@ impl TinyText {
             i += 1;
         }
 
-        TinyText { len: i as u8, t }
+        TinyText {
+            len_and_collation: LenAndCollation::new(i as u8, Collation::Utf8),
+            t,
+        }
     }
 
     /// Create a new `TinyText` by copying a byte slice.
@@ -80,9 +123,28 @@ impl TinyText {
         let mut t: [u8; TINYTEXT_WIDTH] = unsafe { std::mem::MaybeUninit::zeroed().assume_init() };
         t[..v.len()].copy_from_slice(v);
         Ok(TinyText {
-            len: v.len() as _,
+            len_and_collation: LenAndCollation::from_len(v.len() as _),
             t,
         })
+    }
+
+    /// Set the collation on this [`TinyText`]
+    #[inline]
+    pub fn set_collation(&mut self, collation: Collation) {
+        self.len_and_collation.set_collation(collation);
+    }
+
+    /// Returns a version of `self` with the given collation
+    #[inline]
+    pub fn with_collation(mut self, collation: Collation) -> Self {
+        self.set_collation(collation);
+        self
+    }
+
+    /// Returns the configured collation for this [`TinyText`].
+    #[inline]
+    pub fn collation(&self) -> Collation {
+        self.len_and_collation.collation()
     }
 }
 
@@ -102,7 +164,7 @@ impl TryFrom<&str> for TinyText {
         let mut t: [u8; TINYTEXT_WIDTH] = unsafe { std::mem::MaybeUninit::zeroed().assume_init() };
         t[..s.len()].copy_from_slice(s.as_bytes());
         Ok(TinyText {
-            len: s.len() as _,
+            len_and_collation: LenAndCollation::from_len(s.len() as _),
             t,
         })
     }
@@ -461,24 +523,51 @@ impl TextCoerce for Text {
 
 #[cfg(test)]
 mod tests {
-    use std::convert::TryInto;
-
-    use proptest::proptest;
+    use test_strategy::proptest;
 
     use super::*;
+    use crate::Collation;
 
-    proptest! {
-        #[test]
-        fn tiny_str_round_trip(s in "[a-bA-B0-9]{0,14}") {
-            let tt: TinyText = s.as_str().try_into().unwrap();
-            assert_eq!(tt.as_str(), s);
+    mod len_and_collation {
+        use super::*;
+
+        #[proptest]
+        fn len_round_trip(mut len: u8) {
+            len &= 0b00001111;
+            let lc = LenAndCollation::from_len(len);
+            assert_eq!(lc.len(), len);
         }
 
-        #[test]
-        fn text_str_round_trip(s: String) {
-            let t: Text = s.as_str().into();
-            assert_eq!(t.as_str(), s);
+        #[proptest]
+        fn collation_round_trip(mut len: u8, collation: Collation) {
+            len &= 0b00001111;
+            let lc = LenAndCollation::new(len, collation);
+            assert_eq!(lc.len(), len);
+            assert_eq!(lc.collation(), collation);
         }
+
+        #[proptest]
+        fn set_collation_round_trip(mut len: u8, collation: Collation) {
+            len &= 0b00001111;
+            let mut lc = LenAndCollation::from_len(len);
+            assert_eq!(lc.len(), len);
+
+            lc.set_collation(collation);
+            assert_eq!(lc.len(), len);
+            assert_eq!(lc.collation(), collation);
+        }
+    }
+
+    #[proptest]
+    fn tiny_str_round_trip(#[strategy("[a-bA-B0-9]{0,14}")] s: String) {
+        let tt: TinyText = s.as_str().try_into().unwrap();
+        assert_eq!(tt.as_str(), s);
+    }
+
+    #[proptest]
+    fn text_str_round_trip(s: String) {
+        let t: Text = s.as_str().into();
+        assert_eq!(t.as_str(), s);
     }
 
     #[test]
