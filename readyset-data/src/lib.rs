@@ -213,20 +213,6 @@ impl DfValue {
         }
     }
 
-    /// Clone the value contained within this `DfValue`.
-    ///
-    /// This method crucially does not cause cache-line conflicts with the underlying data-store
-    /// (i.e., the owner of `self`), at the cost of requiring additional allocation and copying.
-    #[must_use]
-    pub fn deep_clone(&self) -> Self {
-        match *self {
-            DfValue::Text(ref text) => DfValue::Text(text.as_str().into()),
-            DfValue::ByteArray(ref bytes) => DfValue::ByteArray(Arc::new(bytes.as_ref().clone())),
-            DfValue::BitVector(ref bits) => DfValue::from(bits.as_ref().clone()),
-            ref dt => dt.clone(),
-        }
-    }
-
     /// Checks if this value is `DfValue::None`.
     pub fn is_none(&self) -> bool {
         matches!(*self, DfValue::None)
