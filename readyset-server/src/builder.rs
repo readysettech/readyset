@@ -26,6 +26,7 @@ pub struct Builder {
     domain_scheduling_config: WorkerSchedulingConfig,
     /// The telelemetry sender
     pub telemetry: TelemetrySender,
+    wait_for_failpoint: bool,
 }
 
 impl Default for Builder {
@@ -40,6 +41,7 @@ impl Default for Builder {
             leader_eligible: true,
             domain_scheduling_config: Default::default(),
             telemetry: TelemetrySender::new_no_op(),
+            wait_for_failpoint: false,
         }
     }
 }
@@ -289,6 +291,12 @@ impl Builder {
         self.telemetry = value;
     }
 
+    /// Sets whether the server should wait to receive a failpoint request before proceeding it's
+    /// startup.
+    pub fn set_wait_for_failpoint(&mut self, value: bool) {
+        self.wait_for_failpoint = value;
+    }
+
     /// Start a server instance and return a handle to it.
     pub fn start(
         self,
@@ -303,6 +311,7 @@ impl Builder {
             domain_scheduling_config,
             leader_eligible,
             telemetry,
+            wait_for_failpoint,
         } = self;
 
         let config = config.clone();
@@ -317,6 +326,7 @@ impl Builder {
             domain_scheduling_config,
             leader_eligible,
             telemetry,
+            wait_for_failpoint,
         )
     }
 
@@ -338,6 +348,7 @@ impl Builder {
             domain_scheduling_config,
             leader_eligible,
             telemetry,
+            wait_for_failpoint,
         } = self;
 
         let config = config.clone();
@@ -356,6 +367,7 @@ impl Builder {
             valve,
             trigger,
             telemetry,
+            wait_for_failpoint,
         )
     }
 

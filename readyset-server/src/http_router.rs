@@ -43,6 +43,10 @@ pub struct NoriaServerHttpRouter {
     pub authority: Arc<Authority>,
     /// A valve for the http stream to trigger closing.
     pub valve: Valve,
+    /// Used to communicate externally that a failpoint request has been received and successfully
+    /// handled.
+    /// Most commonly used to block on further startup action if --wait-for-failpoint is supplied.
+    pub failpoint_channel: Option<Arc<Sender<()>>>,
 }
 
 impl NoriaServerHttpRouter {
@@ -99,6 +103,37 @@ impl Service<Request<Body>> for NoriaServerHttpRouter {
         metrics::increment_counter!(recorded::SERVER_EXTERNAL_REQUESTS);
 
         match (req.method(), req.uri().path()) {
+            #[cfg(feature = "failure_injection")]
+            (&Method::GET, "/failpoint") => {
+                let tx = self.failpoint_channel.clone();
+                Box::pin(async move {
+                    let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
+                    let contents = match bincode::deserialize(&body) {
+                        Err(_) => {
+                            return Ok(res
+                                .status(400)
+                                .header(CONTENT_TYPE, "text/plain")
+                                .body(hyper::Body::from(
+                                    "body cannot be deserialized into failpoint name and action",
+                                ))
+                                .unwrap());
+                        }
+                        Ok(contents) => contents,
+                    };
+                    let (name, action): (String, String) = contents;
+                    let resp = res
+                        .status(200)
+                        .header(CONTENT_TYPE, "text/plain")
+                        .body(hyper::Body::from(
+                            ::bincode::serialize(&fail::cfg(name, &action)).unwrap(),
+                        ))
+                        .unwrap();
+                    if let Some(tx) = tx {
+                        let _ = tx.send(()).await;
+                    }
+                    Ok(resp)
+                })
+            }
             (&Method::GET, "/graph.html") => {
                 let res = res
                     .header(CONTENT_TYPE, "text/html")

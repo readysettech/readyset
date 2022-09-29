@@ -196,6 +196,7 @@ async fn start_request_router(
     controller_tx: Sender<ControllerRequest>,
     abort_on_task_failure: bool,
     valve: Valve,
+    failpoint_channel: Option<Arc<Sender<()>>>,
 ) -> Result<Url, anyhow::Error> {
     let http_server = NoriaServerHttpRouter {
         listen_addr,
@@ -204,6 +205,7 @@ async fn start_request_router(
         worker_tx: worker_tx.clone(),
         controller_tx,
         authority: authority.clone(),
+        failpoint_channel,
     };
 
     let http_listener = http_server.create_listener().await?;
@@ -218,6 +220,33 @@ async fn start_request_router(
 
     Ok(http_uri)
 }
+
+#[cfg(feature = "failure_injection")]
+fn maybe_create_failpoint_chann(
+    wait_for_failpoint: bool,
+) -> (Option<Arc<Sender<()>>>, Option<Receiver<()>>) {
+    if wait_for_failpoint {
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        (Some(Arc::new(tx)), Some(rx))
+    } else {
+        (None, None)
+    }
+}
+
+#[cfg(not(feature = "failure_injection"))]
+fn maybe_create_failpoint_chann(_: bool) -> (Option<Arc<Sender<()>>>, Option<Receiver<()>>) {
+    (None, None)
+}
+
+#[cfg(feature = "failure_injection")]
+async fn maybe_wait_for_failpoint(mut rx: Option<Receiver<()>>) {
+    if let Some(mut rx) = rx.take() {
+        let _ = rx.recv().await;
+    }
+}
+
+#[cfg(not(feature = "failure_injection"))]
+async fn maybe_wait_for_failpoint(_: Option<Receiver<()>>) {}
 
 /// Creates the instance, with an existing set of readers and a valve to cancel the intsance.
 pub async fn start_instance_inner(
@@ -234,6 +263,7 @@ pub async fn start_instance_inner(
     valve: Valve,
     trigger: Trigger,
     telemetry_sender: TelemetrySender,
+    wait_for_failpoint: bool,
 ) -> Result<Handle, anyhow::Error> {
     let (worker_tx, worker_rx) = tokio::sync::mpsc::channel(16);
     let (controller_tx, controller_rx) = tokio::sync::mpsc::channel(16);
@@ -244,6 +274,7 @@ pub async fn start_instance_inner(
         ..
     } = config;
 
+    let (tx, rx) = maybe_create_failpoint_chann(wait_for_failpoint);
     let http_uri = start_request_router(
         authority.clone(),
         listen_addr,
@@ -252,8 +283,14 @@ pub async fn start_instance_inner(
         controller_tx,
         abort_on_task_failure,
         valve.clone(),
+        tx,
     )
     .await?;
+
+    // If we previously setup a failpoint channel because wait_for_failpoint was enabled,
+    // then we should wait to hear from the http router that a failpoint request was
+    // handled.
+    maybe_wait_for_failpoint(rx).await;
 
     start_worker(
         worker_rx,
@@ -305,6 +342,7 @@ pub(super) async fn start_instance(
     domain_scheduling_config: WorkerSchedulingConfig,
     leader_eligible: bool,
     telemetry_sender: TelemetrySender,
+    wait_for_failpoint: bool,
 ) -> Result<Handle, anyhow::Error> {
     let (trigger, valve) = Valve::new();
     let Config {
@@ -338,6 +376,7 @@ pub(super) async fn start_instance(
         valve,
         trigger,
         telemetry_sender,
+        wait_for_failpoint,
     )
     .await
 }

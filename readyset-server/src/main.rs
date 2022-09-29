@@ -118,6 +118,11 @@ struct Options {
     /// Whether to disable telemetry reporting. Defaults to false.
     #[clap(long, env = "DISABLE_TELEMETRY")]
     disable_telemetry: bool,
+
+    /// Whether we should wait for a failpoint request to the servers http router, which may
+    /// impact startup.
+    #[clap(long, hide = true)]
+    wait_for_failpoint: bool,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -177,6 +182,7 @@ fn main() -> anyhow::Result<()> {
     let mut builder = Builder::from_worker_options(opts.worker_options, &opts.deployment);
     builder.set_listen_addr(opts.address);
     builder.set_telemetry_sender(telemetry_sender.clone());
+    builder.set_wait_for_failpoint(opts.wait_for_failpoint);
 
     if opts.cannot_become_leader {
         builder.cannot_become_leader();
