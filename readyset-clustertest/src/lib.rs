@@ -342,6 +342,9 @@ pub struct ServerStartParams {
     reader_replicas: Option<usize>,
     /// Whether or not to auto restart the server process.
     auto_restart: bool,
+    /// Whether the server should wait to receive a failpoint request before proceeding with the
+    /// rest of it's startup.
+    wait_for_failpoint: bool,
 }
 
 /// Set of parameters defining an entire cluster's topology.
@@ -399,9 +402,16 @@ pub struct DeploymentBuilder {
     reader_replicas: Option<usize>,
     /// If true, will automatically restart the server/adapter processes
     auto_restart: bool,
-    /// If true, will tell the adapter to wait to receive a failpoint request. Useful for testing
-    /// failpoint that are introduced during the adapters startup process.
-    wait_for_failpoint: bool,
+    /// Sets whether the adapter, server, both, or neither should wait to receive a failpoint
+    /// request before proceeding with the rest of the startup process.
+    wait_for_failpoint: FailpointDestination,
+}
+
+pub enum FailpointDestination {
+    Adapter,
+    Server,
+    Both,
+    None,
 }
 
 impl DeploymentBuilder {
@@ -445,7 +455,7 @@ impl DeploymentBuilder {
             replicator_restart_timeout_secs: None,
             reader_replicas: None,
             auto_restart: false,
-            wait_for_failpoint: false,
+            wait_for_failpoint: FailpointDestination::None,
         }
     }
 
@@ -566,14 +576,24 @@ impl DeploymentBuilder {
         self
     }
 
-    /// Sets whether the adapter should wait for an incoming failpoint request before proceeding
-    /// with the rest of the adapter startup process.
-    pub fn wait_for_failpoint(mut self, wait_for_failpoint: bool) -> Self {
-        self.wait_for_failpoint = wait_for_failpoint;
+    /// Sets whether the adapter, server, both, or neither should wait for an incoming failpoint
+    /// request before proceeding with the rest of the startup process.
+    pub fn wait_for_failpoint(mut self, wait_for_failpoint: FailpointDestination) -> Self {
+        match (&self.wait_for_failpoint, &wait_for_failpoint) {
+            (&FailpointDestination::Adapter, &FailpointDestination::Server)
+            | (&FailpointDestination::Server, &FailpointDestination::Adapter) => {
+                self.wait_for_failpoint = FailpointDestination::Both
+            }
+            _ => self.wait_for_failpoint = wait_for_failpoint,
+        };
         self
     }
 
     pub fn adapter_start_params(&self) -> AdapterStartParams {
+        let wait_for_failpoint = matches!(
+            self.wait_for_failpoint,
+            FailpointDestination::Adapter | FailpointDestination::Both
+        );
         AdapterStartParams {
             deployment_name: self.name.clone(),
             readyset_mysql_path: self.readyset_binaries.readyset_mysql.clone().unwrap(),
@@ -585,11 +605,15 @@ impl DeploymentBuilder {
             fallback_recovery_seconds: self.fallback_recovery_seconds,
             auto_restart: self.auto_restart,
             views_polling_interval: self.views_polling_interval,
-            wait_for_failpoint: self.wait_for_failpoint,
+            wait_for_failpoint,
         }
     }
 
     pub fn server_start_params(&self) -> ServerStartParams {
+        let wait_for_failpoint = matches!(
+            self.wait_for_failpoint,
+            FailpointDestination::Server | FailpointDestination::Both
+        );
         ServerStartParams {
             readyset_server_path: self.readyset_binaries.readyset_server.clone(),
             deployment_name: self.name.clone(),
@@ -600,6 +624,7 @@ impl DeploymentBuilder {
             replicator_restart_timeout_secs: self.replicator_restart_timeout_secs,
             reader_replicas: self.reader_replicas,
             auto_restart: self.auto_restart,
+            wait_for_failpoint,
         }
     }
 
@@ -745,7 +770,14 @@ impl DeploymentBuilder {
 /// Waits for AdapterHandle to be healthy, up to the provided timeout.
 async fn wait_for_adapter_startup(metrics_port: u16, timeout: Duration) -> anyhow::Result<()> {
     let poll_interval = timeout.checked_div(10).expect("timeout must be valid");
-    wait_for_adapter_poller(adapter_is_healthy, metrics_port, timeout, poll_interval).await
+    wait_for_poller(
+        endpoint_reports_healthy,
+        metrics_port,
+        timeout,
+        poll_interval,
+        "adapter",
+    )
+    .await
 }
 
 /// Waits for adapters http router to come up.
@@ -755,26 +787,48 @@ async fn wait_for_adapter_router(
     timeout: Duration,
     poll_interval: Duration,
 ) -> anyhow::Result<()> {
-    wait_for_adapter_poller(
-        adapter_http_router_is_up,
+    wait_for_poller(
+        http_router_is_up,
         metrics_port,
         timeout,
         poll_interval,
+        "adapter",
     )
     .await
 }
 
-async fn wait_for_adapter_poller<F, Fut>(
+/// Waits for servers http router to come up.
+#[allow(dead_code)] // Used in tests.
+async fn wait_for_server_router(
+    port: u16,
+    timeout: Duration,
+    poll_interval: Duration,
+) -> anyhow::Result<()> {
+    wait_for_poller(http_router_is_up, port, timeout, poll_interval, "server").await
+}
+
+/// Waits for server to come up as healthy.
+#[allow(dead_code)] // Used in tests.
+async fn wait_for_server_startup(port: u16, timeout: Duration) -> anyhow::Result<()> {
+    let poll_interval = timeout.checked_div(10).expect("timeout must be valid");
+    wait_for_poller(http_router_is_up, port, timeout, poll_interval, "server").await
+}
+
+async fn wait_for_poller<F, Fut>(
     port_poll: F,
     metrics_port: u16,
     timeout: Duration,
     poll_interval: Duration,
+    destination: &str,
 ) -> anyhow::Result<()>
 where
     F: Fn(u16) -> Fut,
     Fut: Future<Output = bool>,
 {
-    tracing::debug!(?poll_interval, "Waiting for adapter on port {metrics_port}");
+    tracing::debug!(
+        ?poll_interval,
+        "Waiting for {destination} on port {metrics_port}"
+    );
 
     // Polls the health_check_url continuously until it returns OK.
     let health_check_poller = |poll_interval: Duration| async move {
@@ -784,7 +838,7 @@ where
             }
 
             tracing::debug!(
-                "Adapter on port {metrics_port} not ready. Sleeping for {:?}",
+                "{destination} on port {metrics_port} not ready. Sleeping for {:?}",
                 &poll_interval,
             );
             sleep(poll_interval).await;
@@ -794,8 +848,8 @@ where
     tokio::time::timeout(timeout, health_check_poller(poll_interval)).await?
 }
 
-async fn adapter_is_healthy(metrics_port: u16) -> bool {
-    let health_check_url = format!("http://127.0.0.1:{}/health", metrics_port);
+async fn endpoint_reports_healthy(port: u16) -> bool {
+    let health_check_url = format!("http://127.0.0.1:{}/health", port);
     let r = hyper::Request::get(&health_check_url)
         .body(hyper::Body::from(String::default()))
         .unwrap();
@@ -813,8 +867,8 @@ async fn adapter_is_healthy(metrics_port: u16) -> bool {
     false
 }
 
-async fn adapter_http_router_is_up(metrics_port: u16) -> bool {
-    let health_check_url = format!("http://127.0.0.1:{}/health", metrics_port);
+async fn http_router_is_up(port: u16) -> bool {
+    let health_check_url = format!("http://127.0.0.1:{}/health", port);
     let r = hyper::Request::get(&health_check_url)
         .body(hyper::Body::from(String::default()))
         .unwrap();
@@ -841,7 +895,7 @@ impl ServerHandle {
     }
 
     pub async fn set_failpoint(&mut self, name: &str, action: &str) {
-        if !self.check_alive().await {
+        if !http_router_is_up(self.addr.port().unwrap()).await {
             return;
         }
 
@@ -878,7 +932,7 @@ impl AdapterHandle {
     }
 
     pub async fn set_failpoint(&mut self, name: &str, action: &str) {
-        if !adapter_http_router_is_up(self.metrics_port).await {
+        if !http_router_is_up(self.metrics_port).await {
             return;
         }
         let data = bincode::serialize(&(name, action)).unwrap();
@@ -1294,6 +1348,9 @@ async fn start_server(
     }
     if let Some(rs) = server_start_params.reader_replicas {
         builder = builder.reader_replicas(rs);
+    }
+    if server_start_params.wait_for_failpoint {
+        builder = builder.wait_for_failpoint();
     }
     let addr = Url::parse(&format!("http://127.0.0.1:{}", port)).unwrap();
     Ok(ServerHandle {

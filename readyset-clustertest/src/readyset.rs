@@ -525,7 +525,7 @@ async fn adapter_ready_before_server() {
 #[clustertest]
 async fn adapter_reports_unhealthy_consul_down() {
     let mut deployment = DeploymentBuilder::new("ct_adapter_reports_unhealthy_consul_down")
-        .wait_for_failpoint(true)
+        .wait_for_failpoint(FailpointDestination::Adapter)
         .auto_restart(true)
         .start()
         .await
@@ -550,7 +550,7 @@ async fn adapter_reports_unhealthy_consul_down() {
 
     let _ = wait_for_adapter_startup(adapter_handle.metrics_port, timeout).await;
 
-    assert!(!adapter_is_healthy(adapter_handle.metrics_port).await);
+    assert!(!endpoint_reports_healthy(adapter_handle.metrics_port).await);
 
     adapter_handle.set_failpoint("adapter-consul", "off").await;
 
@@ -558,5 +558,61 @@ async fn adapter_reports_unhealthy_consul_down() {
         .await
         .unwrap();
 
-    assert!(adapter_is_healthy(adapter_handle.metrics_port).await);
+    assert!(endpoint_reports_healthy(adapter_handle.metrics_port).await);
+}
+
+// Given a failpoint name, will assert that pausing that failpoint and then resuming it for the
+// server will result in first unhealthy status, and then healthy status.
+async fn assert_server_failpoint_pause_resume(deployment_name: &str, failpoint: &str) {
+    let mut deployment = DeploymentBuilder::new(deployment_name)
+        .wait_for_failpoint(FailpointDestination::Server)
+        .auto_restart(false)
+        .start()
+        .await
+        .unwrap();
+
+    deployment
+        .start_server(ServerParams::default().with_volume("v1"), false)
+        .await
+        .expect("server failed to become healthy");
+
+    let r1_addr = deployment.server_addrs()[0].clone();
+    let server_handle = deployment
+        .server_handles()
+        .get_mut(&r1_addr)
+        .expect("server handle expected to exist");
+
+    let port = server_handle.addr.port().unwrap();
+
+    let timeout = Duration::new(2, 0);
+    let poll_interval = timeout.checked_div(100).unwrap();
+    wait_for_server_router(port, timeout, poll_interval)
+        .await
+        .unwrap();
+
+    server_handle.set_failpoint(failpoint, "pause").await;
+
+    let _ = wait_for_server_startup(port, timeout).await;
+
+    assert!(!endpoint_reports_healthy(port).await);
+
+    server_handle.set_failpoint(failpoint, "off").await;
+
+    // Server must become healthy for this to not panic on unwrap within the supplied timeout.
+    wait_for_server_startup(port, timeout).await.unwrap();
+}
+
+#[clustertest]
+async fn server_reports_unhealthy_worker_down() {
+    assert_server_failpoint_pause_resume("ct_server_reports_unhealthy_worker_down", "start-worker")
+        .await
+}
+
+#[clustertest]
+async fn server_reports_unhealthy_controller_down() {
+    assert_server_failpoint_pause_resume(
+        "ct_server_reports_unhealthy_controller_down",
+        "start-controller",
+    )
+    .await
 }

@@ -4262,6 +4262,7 @@ dependencies = [
  "futures-executor",
  "futures-sink",
  "futures-util",
+ "health-reporter",
  "hyper",
  "include_dir",
  "itertools",

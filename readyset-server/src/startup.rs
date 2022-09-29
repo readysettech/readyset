@@ -52,7 +52,9 @@ use std::sync::{Arc, Mutex};
 use std::{process, time};
 
 use dataflow::Readers;
+use failpoint_macros::set_failpoint;
 use futures_util::future::{Either, TryFutureExt};
+use health_reporter::{HealthReporter, State as ServerState};
 use launchpad::futures::abort_on_panic;
 use readyset::consensus::{Authority, WorkerSchedulingConfig};
 use readyset::{ControllerDescriptor, WorkerDescriptor};
@@ -115,6 +117,7 @@ async fn start_worker(
     memory_check_frequency: Option<time::Duration>,
     valve: Valve,
 ) -> Result<(), anyhow::Error> {
+    set_failpoint!("start-worker");
     let worker = Worker {
         election_state: None,
         // this initial duration doesn't matter; it gets set upon worker registration
@@ -151,6 +154,7 @@ async fn start_controller(
     valve: Valve,
     telemetry_sender: TelemetrySender,
 ) -> Result<ControllerDescriptor, anyhow::Error> {
+    set_failpoint!("start-controller");
     let our_descriptor = ControllerDescriptor {
         controller_uri: http_uri.clone(),
         nonce: rand::random(),
@@ -196,6 +200,7 @@ async fn start_request_router(
     controller_tx: Sender<ControllerRequest>,
     abort_on_task_failure: bool,
     valve: Valve,
+    health_reporter: HealthReporter,
     failpoint_channel: Option<Arc<Sender<()>>>,
 ) -> Result<Url, anyhow::Error> {
     let http_server = NoriaServerHttpRouter {
@@ -205,6 +210,7 @@ async fn start_request_router(
         worker_tx: worker_tx.clone(),
         controller_tx,
         authority: authority.clone(),
+        health_reporter: health_reporter.clone(),
         failpoint_channel,
     };
 
@@ -275,6 +281,7 @@ pub async fn start_instance_inner(
     } = config;
 
     let (tx, rx) = maybe_create_failpoint_chann(wait_for_failpoint);
+    let mut health_reporter = HealthReporter::new();
     let http_uri = start_request_router(
         authority.clone(),
         listen_addr,
@@ -283,6 +290,7 @@ pub async fn start_instance_inner(
         controller_tx,
         abort_on_task_failure,
         valve.clone(),
+        health_reporter.clone(),
         tx,
     )
     .await?;
@@ -326,6 +334,8 @@ pub async fn start_instance_inner(
             .server_version(option_env!("CARGO_PKG_VERSION").unwrap_or_default())
             .build(),
     );
+
+    health_reporter.set_state(ServerState::Healthy);
 
     Ok(Handle::new(authority, handle_tx, trigger, our_descriptor))
 }

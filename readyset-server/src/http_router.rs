@@ -7,6 +7,7 @@ use std::task::{Context, Poll};
 
 use anyhow::anyhow;
 use futures::TryFutureExt;
+use health_reporter::{HealthReporter, State};
 use hyper::header::CONTENT_TYPE;
 use hyper::service::make_service_fn;
 use hyper::{self, Body, Method, Request, Response, StatusCode};
@@ -43,6 +44,8 @@ pub struct NoriaServerHttpRouter {
     pub authority: Arc<Authority>,
     /// A valve for the http stream to trigger closing.
     pub valve: Valve,
+    /// Used to record and report the servers current health.
+    pub health_reporter: HealthReporter,
     /// Used to communicate externally that a failpoint request has been received and successfully
     /// handled.
     /// Most commonly used to block on further startup action if --wait-for-failpoint is supplied.
@@ -166,6 +169,24 @@ impl Service<Request<Body>> for NoriaServerHttpRouter {
                         .body(hyper::Body::from("Prometheus metrics were not enabled. To fix this, run Noria with --prometheus-metrics".to_string())),
                 };
                 Box::pin(async move { Ok(res.unwrap()) })
+            }
+            (&Method::GET, "/health") => {
+                let state = self.health_reporter.health().state;
+                Box::pin(async move {
+                    let body = format!("Server is in {} state", &state).into();
+                    let res = match state {
+                        State::Healthy | State::ShuttingDown => res
+                            .status(200)
+                            .header(CONTENT_TYPE, "text/plain")
+                            .body(body),
+                        _ => res
+                            .status(500)
+                            .header(CONTENT_TYPE, "text/plain")
+                            .body(body),
+                    };
+
+                    Ok(res.unwrap())
+                })
             }
             (&Method::POST, "/metrics_dump") => {
                 let render = get_global_recorder().and_then(|r| r.render(RecorderType::Noria));

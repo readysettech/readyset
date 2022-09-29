@@ -183,6 +183,10 @@ impl ReadysetServerBuilder {
         self.auto_restart = auto_restart;
         self
     }
+
+    pub fn wait_for_failpoint(self) -> Self {
+        self.push_arg("--wait-for-failpoint")
+    }
 }
 
 /// Manages running a readyset-mysql binary with the correct arguments.
