@@ -161,6 +161,28 @@ impl DfValue {
         DfValue::from(Vec::<DfValue>::new())
     }
 
+    /// Construct a new `DfValue` from the given string value and [`Collation`]
+    #[inline]
+    pub fn from_str_and_collation(s: &str, collation: Collation) -> Self {
+        if let Ok(mut tt) = TinyText::try_from(s) {
+            tt.set_collation(collation);
+            Self::TinyText(tt)
+        } else {
+            Self::Text(Text::from_str_with_collation(s, collation))
+        }
+    }
+
+    /// If this [`DfValue`] represents a string value, return the collation of that string value,
+    /// otherwise return None
+    #[inline]
+    pub fn collation(&self) -> Option<Collation> {
+        match self {
+            DfValue::Text(t) => Some(t.collation()),
+            DfValue::TinyText(tt) => Some(tt.collation()),
+            _ => None,
+        }
+    }
+
     /// Generates the minimum DfValue corresponding to the type of a given DfValue.
     pub fn min_value(other: &Self) -> Self {
         match other {
@@ -1549,11 +1571,7 @@ impl TryFrom<DfValue> for String {
 
 impl<'a> From<&'a str> for DfValue {
     fn from(s: &'a str) -> Self {
-        if let Ok(tt) = TinyText::try_from(s) {
-            DfValue::TinyText(tt)
-        } else {
-            DfValue::Text(s.into())
-        }
+        Self::from_str_and_collation(s, Default::default())
     }
 }
 

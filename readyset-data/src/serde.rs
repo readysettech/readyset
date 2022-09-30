@@ -6,13 +6,13 @@ use bit_vec::BitVec;
 use chrono::NaiveDateTime;
 use mysql_time::MySqlTime;
 use rust_decimal::Decimal;
-use serde::de::{EnumAccess, VariantAccess, Visitor};
+use serde::de::{DeserializeSeed, EnumAccess, VariantAccess, Visitor};
 use serde::{Deserialize, Deserializer};
 use serde_bytes::{ByteBuf, Bytes};
 use strum::VariantNames;
 use strum_macros::{EnumString, EnumVariantNames, FromRepr};
 
-use crate::{DfValue, Text, TimestampTz, TinyText};
+use crate::{Collation, DfValue, Text, TimestampTz, TinyText};
 
 #[derive(EnumVariantNames, EnumString, FromRepr, Clone, Copy)]
 enum Variant {
@@ -62,12 +62,16 @@ impl serde::ser::Serialize for DfValue {
             DfValue::UnsignedInt(v) => serialize_variant(serializer, Variant::Int, &i128::from(*v)),
             DfValue::Float(f) => serialize_variant(serializer, Variant::Float, &f.to_bits()),
             DfValue::Double(f) => serialize_variant(serializer, Variant::Double, &f.to_bits()),
-            DfValue::Text(v) => {
-                serialize_variant(serializer, Variant::Text, Bytes::new(v.as_bytes()))
-            }
-            DfValue::TinyText(v) => {
-                serialize_variant(serializer, Variant::Text, Bytes::new(v.as_bytes()))
-            }
+            DfValue::Text(v) => serialize_variant(
+                serializer,
+                Variant::Text,
+                &(v.collation(), Bytes::new(v.as_bytes())),
+            ),
+            DfValue::TinyText(v) => serialize_variant(
+                serializer,
+                Variant::Text,
+                &(v.collation(), Bytes::new(v.as_bytes())),
+            ),
             DfValue::Time(v) => serialize_variant(serializer, Variant::Time, &v),
             DfValue::ByteArray(a) => {
                 serialize_variant(serializer, Variant::ByteArray, Bytes::new(a.as_ref()))
@@ -231,43 +235,110 @@ impl<'de: 'a, 'a> Deserialize<'de> for TextOrTinyText {
     where
         D: Deserializer<'de>,
     {
-        struct TextVisitor;
+        // Once we grab the collation out of the first element, we need to pass that in *to the
+        // construction* of the Text in the second element - this is the hoop we have to jump
+        // through to make serde deserializers stateful
+        struct FoundCollation(Collation);
 
-        impl<'de> Visitor<'de> for TextVisitor {
+        impl<'de> DeserializeSeed<'de> for FoundCollation {
             type Value = TextOrTinyText;
 
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("a byte array")
-            }
-
-            fn visit_seq<V>(self, mut visitor: V) -> Result<Self::Value, V::Error>
+            fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
             where
-                V: serde::de::SeqAccess<'de>,
+                D: Deserializer<'de>,
             {
-                let len = std::cmp::min(visitor.size_hint().unwrap_or(0), 4096);
-                let mut bytes = Vec::with_capacity(len);
+                struct TextVisitor(Collation);
 
-                while let Some(b) = visitor.next_element()? {
-                    bytes.push(b);
+                impl<'de> Visitor<'de> for TextVisitor {
+                    type Value = TextOrTinyText;
+
+                    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                        formatter.write_str("a byte array")
+                    }
+
+                    fn visit_seq<V>(self, mut visitor: V) -> Result<Self::Value, V::Error>
+                    where
+                        V: serde::de::SeqAccess<'de>,
+                    {
+                        let len = std::cmp::min(visitor.size_hint().unwrap_or(0), 4096);
+                        let mut bytes = Vec::with_capacity(len);
+
+                        while let Some(b) = visitor.next_element()? {
+                            bytes.push(b);
+                        }
+
+                        match TinyText::from_slice(&bytes) {
+                            Ok(mut tt) => {
+                                tt.set_collation(self.0);
+                                Ok(TextOrTinyText::TinyText(tt))
+                            }
+                            _ => Ok(TextOrTinyText::Text(Text::from_slice_with_collation(
+                                &bytes, self.0,
+                            ))),
+                        }
+                    }
+
+                    fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+                    where
+                        E: serde::de::Error,
+                    {
+                        match TinyText::from_slice(v) {
+                            Ok(mut tt) => {
+                                tt.set_collation(self.0);
+                                Ok(TextOrTinyText::TinyText(tt))
+                            }
+                            _ => Ok(TextOrTinyText::Text(Text::from_slice_with_collation(
+                                v, self.0,
+                            ))),
+                        }
+                    }
                 }
 
-                match TinyText::from_slice(&bytes) {
-                    Ok(tt) => Ok(TextOrTinyText::TinyText(tt)),
-                    _ => Ok(TextOrTinyText::Text(Text::from_slice(&bytes))),
-                }
-            }
-
-            fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                match TinyText::from_slice(v) {
-                    Ok(tt) => Ok(TextOrTinyText::TinyText(tt)),
-                    _ => Ok(TextOrTinyText::Text(Text::from_slice(v))),
-                }
+                deserializer.deserialize_bytes(TextVisitor(self.0))
             }
         }
 
-        deserializer.deserialize_bytes(TextVisitor)
+        struct TupleVisitor;
+
+        impl<'de> Visitor<'de> for TupleVisitor {
+            type Value = TextOrTinyText;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a tuple of (collation, text)")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::SeqAccess<'de>,
+            {
+                let collation = seq
+                    .next_element::<Collation>()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
+
+                seq.next_element_seed(FoundCollation(collation))?
+                    .ok_or_else(|| serde::de::Error::invalid_length(1, &self))
+            }
+        }
+
+        deserializer.deserialize_tuple(2, TupleVisitor)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use test_strategy::proptest;
+
+    use super::*;
+
+    #[proptest]
+    fn text_serialize_bincode_round_trip(s: String, collation: Collation) {
+        let input = DfValue::from_str_and_collation(&s, collation);
+        let serialized = bincode::serialize(&input).unwrap();
+        let rt = bincode::deserialize::<DfValue>(&serialized).unwrap();
+        assert_eq!(
+            <&str>::try_from(&rt).unwrap(),
+            <&str>::try_from(&input).unwrap()
+        );
+        assert_eq!(rt.collation(), input.collation());
     }
 }
