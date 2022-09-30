@@ -50,6 +50,7 @@ pub enum SqlType {
     MediumText,
     LongText,
     Text,
+    Citext,
     Date,
     DateTime(#[strategy(proptest::option::of(1..=6u16))] Option<u16>),
     // FIXME(ENG-1832): Parse subsecond digit count.
@@ -191,6 +192,7 @@ impl fmt::Display for SqlType {
             SqlType::MediumText => write!(f, "MEDIUMTEXT"),
             SqlType::LongText => write!(f, "LONGTEXT"),
             SqlType::Text => write!(f, "TEXT"),
+            SqlType::Citext => write!(f, "CITEXT"),
             SqlType::Date => write!(f, "DATE"),
             SqlType::DateTime(subsecond_digits) => write_with_len(f, "DATETIME", subsecond_digits),
             SqlType::Time => write!(f, "TIME"),
@@ -450,7 +452,10 @@ fn enum_type(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlType> {
     }
 }
 
-fn type_identifier_first_half(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlType> {
+// `alt` has an upper limit on the number of items it supports in tuples, so we have to split out
+// the parsing for types into 3 separate functions
+// (see https://github.com/Geal/nom/pull/1556)
+fn type_identifier_part1(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlType> {
     move |i| {
         alt((
             |i| int_type("tinyint", SqlType::UnsignedTinyInt, SqlType::TinyInt, i),
@@ -558,7 +563,7 @@ fn type_identifier_first_half(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u
     }
 }
 
-fn type_identifier_second_half(i: &[u8]) -> IResult<&[u8], SqlType> {
+fn type_identifier_part2(i: &[u8]) -> IResult<&[u8], SqlType> {
     alt((
         map(
             terminated(tag_no_case("time"), opt_without_time_zone),
@@ -614,6 +619,10 @@ fn type_identifier_second_half(i: &[u8]) -> IResult<&[u8], SqlType> {
     ))(i)
 }
 
+fn type_identifier_part3(i: &[u8]) -> IResult<&[u8], SqlType> {
+    alt((map(tag_no_case("citext"), |_| SqlType::Citext),))(i)
+}
+
 fn array_suffix(i: &[u8]) -> IResult<&[u8], ()> {
     let (i, _) = tag("[")(i)?;
     let (i, _) = opt(whitespace0)(i)?;
@@ -626,8 +635,9 @@ fn array_suffix(i: &[u8]) -> IResult<&[u8], ()> {
 fn type_identifier_no_arrays(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlType> {
     move |i| {
         alt((
-            type_identifier_first_half(dialect),
-            type_identifier_second_half,
+            type_identifier_part1(dialect),
+            type_identifier_part2,
+            type_identifier_part3,
         ))(i)
     }
 }
@@ -972,6 +982,12 @@ mod tests {
                 res,
                 SqlType::Array(Box::new(SqlType::Array(Box::new(SqlType::Float))))
             );
+        }
+
+        #[test]
+        fn citext() {
+            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"citext");
+            assert_eq!(res, SqlType::Citext);
         }
     }
 }

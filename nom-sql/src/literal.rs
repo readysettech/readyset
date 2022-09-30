@@ -258,7 +258,8 @@ impl Literal {
             | SqlType::TinyText
             | SqlType::MediumText
             | SqlType::LongText
-            | SqlType::Text => any::<String>().prop_map(Self::String).boxed(),
+            | SqlType::Text
+            | SqlType::Citext => any::<String>().prop_map(Self::String).boxed(),
             SqlType::Int(_) => any::<i32>().prop_map(|i| Self::Integer(i as _)).boxed(),
             SqlType::UnsignedInt(_) => any::<u32>()
                 .prop_map(|i| Self::UnsignedInteger(i as _))

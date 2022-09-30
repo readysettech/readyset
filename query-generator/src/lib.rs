@@ -124,7 +124,8 @@ fn value_of_type(typ: &SqlType) -> DfValue {
         | SqlType::LongText
         | SqlType::Text
         | SqlType::Binary(_)
-        | SqlType::VarBinary(_) => "a".into(),
+        | SqlType::VarBinary(_)
+        | SqlType::Citext => "a".into(),
         SqlType::ByteArray => {
             // Zero is an interesting value, because it can only occur for
             // byte arrays, since character strings don't allow zero
@@ -189,6 +190,7 @@ fn random_value_of_type(typ: &SqlType) -> DfValue {
         }
         SqlType::Blob
         | SqlType::Text
+        | SqlType::Citext
         | SqlType::Char(None)
         | SqlType::VarChar(None)
         | SqlType::Binary(None) => {
@@ -331,6 +333,7 @@ fn unique_value_of_type(typ: &SqlType, idx: u32) -> DfValue {
         | SqlType::MediumText
         | SqlType::LongText
         | SqlType::Text
+        | SqlType::Citext
         | SqlType::Binary(_)
         | SqlType::VarBinary(_) => idx.to_string().into(),
         SqlType::Int(_) => (idx as i32).into(),

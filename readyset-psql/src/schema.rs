@@ -75,6 +75,7 @@ pub fn type_to_pgsql(col_type: &SqlType) -> Result<pgsql::types::Type, Error> {
         SqlType::Float => Ok(Type::FLOAT8),
         SqlType::Double => Ok(Type::FLOAT8),
         SqlType::Text => Ok(Type::TEXT),
+        SqlType::Citext => Ok(Type::TEXT), // TODO: is this right?
         SqlType::Timestamp => Ok(Type::TIMESTAMP),
         SqlType::TimestampTz => Ok(Type::TIMESTAMPTZ),
         SqlType::Json => Ok(Type::JSON),
@@ -117,6 +118,7 @@ pub fn type_to_pgsql(col_type: &SqlType) -> Result<pgsql::types::Type, Error> {
         SqlType::Array(box SqlType::Real) => Ok(Type::FLOAT4_ARRAY),
         SqlType::Array(box SqlType::Double) => Ok(Type::FLOAT8_ARRAY),
         SqlType::Array(box SqlType::Text) => Ok(Type::TEXT_ARRAY),
+        SqlType::Array(box SqlType::Citext) => Ok(Type::TEXT_ARRAY),
         SqlType::Array(box SqlType::Timestamp) => Ok(Type::TIMESTAMP_ARRAY),
         SqlType::Array(box SqlType::TimestampTz) => Ok(Type::TIMESTAMPTZ_ARRAY),
         SqlType::Array(box SqlType::Json) => Ok(Type::JSON_ARRAY),

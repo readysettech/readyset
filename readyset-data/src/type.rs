@@ -279,6 +279,7 @@ impl DfType {
             Uuid => Self::Uuid,
             MacAddr => Self::MacAddr,
             Inet => Self::Inet,
+            Citext => Self::Text(Collation::Citext),
         }
     }
 
@@ -317,7 +318,8 @@ impl DfType {
 
             Self::Char(n, ..) => Char(Some(n)),
             Self::VarChar(n, ..) => VarChar(Some(n)),
-            Self::Text { .. } => Text,
+            Self::Text(Collation::Utf8) => Text,
+            Self::Text(Collation::Citext) => Citext,
 
             Self::Binary(n) => Binary(Some(n)),
             Self::VarBinary(n) => VarBinary(n),
