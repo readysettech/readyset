@@ -1,4 +1,4 @@
-#![feature(box_patterns)]
+#![feature(box_patterns, iter_order_by)]
 
 use std::cmp::Ordering;
 use std::convert::{TryFrom, TryInto};

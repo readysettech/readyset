@@ -34,6 +34,12 @@ pub enum Collation {
     /// corresponds to the *default* behavior of rust's [`String`] type.
     #[default]
     Utf8,
+
+    /// The CITEXT collation.
+    ///
+    /// This collation corresponds to the behavior of the [PostgreSQL CITEXT type][] with the
+    /// locale set to `en_US.utf8`.
+    Citext,
 }
 
 impl Collation {
@@ -42,12 +48,21 @@ impl Collation {
     where
         H: Hasher,
     {
-        s.hash(state)
+        match self {
+            Collation::Utf8 => s.hash(state),
+            Collation::Citext => s.to_lowercase().hash(state),
+        }
     }
 
     /// Compare the given strings according to this collation
     pub(crate) fn compare_strs(self, s1: &str, s2: &str) -> Ordering {
-        s1.cmp(s2)
+        match self {
+            Collation::Utf8 => s1.cmp(s2),
+            Collation::Citext => s1
+                .chars()
+                .map(|c| c.to_lowercase())
+                .cmp_by(s2.chars().map(|c| c.to_lowercase()), |c1, c2| c1.cmp(c2)),
+        }
     }
 }
 
@@ -79,5 +94,27 @@ mod tests {
 
             assert_eq!(h1, h2);
         }
+    }
+
+    #[test]
+    fn citext_compare() {
+        #[track_caller]
+        fn citext_strings_equal(s1: &str, s2: &str) {
+            assert_eq!(Collation::Citext.compare_strs(s1, s2), Ordering::Equal)
+        }
+
+        #[track_caller]
+        fn citext_strings_inequal(s1: &str, s2: &str) {
+            assert_ne!(Collation::Citext.compare_strs(s1, s2), Ordering::Equal)
+        }
+
+        citext_strings_equal("abcdef", "abcdef");
+        citext_strings_equal("ABcDeF", "abCdEf");
+        citext_strings_inequal("ABcDeFf", "abCdEf");
+        citext_strings_equal("aÄbø", "aäbØ");
+        citext_strings_inequal("ß", "ss");
+
+        // LATIN CAPITAL LETTER I WITH OGONEK, which has some interesting casing rules
+        citext_strings_equal("Į", "į");
     }
 }
