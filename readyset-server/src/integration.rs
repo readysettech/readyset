@@ -30,7 +30,7 @@ use readyset::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use readyset::consistency::Timestamp;
 use readyset::internal::LocalNodeIndex;
 use readyset::{KeyComparison, Modification, SchemaType, ViewPlaceholder, ViewQuery};
-use readyset_data::{DfType, DfValue};
+use readyset_data::{Collation, DfType, DfValue};
 use readyset_errors::ReadySetError::{MigrationPlanFailed, RpcFailed, SelectQueryCreationFailed};
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
@@ -4981,16 +4981,12 @@ async fn post_read_ilike() {
             filter: Some(DfExpr::Op {
                 left: Box::new(DfExpr::Column {
                     index: 0,
-                    ty: DfType::Text {
-                        collation: Default::default(),
-                    },
+                    ty: DfType::Text(Collation::default()),
                 }),
                 op: BinaryOperator::ILike,
                 right: Box::new(DfExpr::Literal {
                     val: "%a%".into(),
-                    ty: DfType::Text {
-                        collation: Default::default(),
-                    },
+                    ty: DfType::Text(Collation::default()),
                 }),
                 ty: DfType::Bool,
             }),

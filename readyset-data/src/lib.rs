@@ -28,7 +28,7 @@ use tokio_postgres::types::{to_sql_checked, FromSql, IsNull, Kind, ToSql, Type};
 use uuid::Uuid;
 
 mod array;
-pub mod collation;
+mod collation;
 mod r#enum;
 mod float;
 mod integer;
@@ -375,9 +375,7 @@ impl DfValue {
             Self::UnsignedInt(_) => UnsignedBigInt,
             Self::Float(_) => Float(dialect),
             Self::Double(_) => Double,
-            Self::Text(_) | Self::TinyText(_) => Text {
-                collation: Default::default(), /* TODO */
-            },
+            Self::Text(_) | Self::TinyText(_) => DfType::Text(/* TODO */ Collation::default()),
             Self::TimestampTz(ts) => {
                 let fsp = u16::from(ts.get_microsecond_precision());
                 if ts.has_timezone() {

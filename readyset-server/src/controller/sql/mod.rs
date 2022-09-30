@@ -820,7 +820,7 @@ impl SqlIncorporator {
 mod tests {
     use dataflow::prelude::*;
     use nom_sql::{parse_create_table, parse_select_statement, Column, Dialect, Relation};
-    use readyset_data::DfType;
+    use readyset_data::{Collation, DfType};
 
     use super::SqlIncorporator;
     use crate::controller::Migration;
@@ -3559,9 +3559,7 @@ mod tests {
             let g = &mig.dataflow_state.ingredients;
             g.node_indices().for_each(|idx| {
                 if matches!(g[idx].as_internal(), Some(NodeOperator::TopK(_))) {
-                    let text = DfType::Text {
-                        collation: Default::default(),
-                    };
+                    let text = DfType::Text(Collation::default());
                     let truth = vec![
                         &DfType::Int,                   // a
                         &DfType::Float(Dialect::MySQL), // b
@@ -3623,9 +3621,7 @@ mod tests {
             let g = &mig.dataflow_state.ingredients;
             g.node_indices().for_each(|idx| {
                 if matches!(g[idx].as_internal(), Some(NodeOperator::Filter(_))) {
-                    let text = DfType::Text {
-                        collation: Default::default(),
-                    };
+                    let text = DfType::Text(Collation::default());
                     let truth = vec![
                         &DfType::Int,                   // a
                         &DfType::Float(Dialect::MySQL), // b
@@ -3700,9 +3696,7 @@ mod tests {
                     let types = g[idx].columns().iter().map(|c| c.ty()).collect::<Vec<_>>();
                     assert_eq!(truth, types);
                 } else if matches!(g[idx].as_internal(), Some(NodeOperator::Concat(_))) {
-                    let text = DfType::Text {
-                        collation: Default::default(),
-                    };
+                    let text = DfType::Text(Collation::default());
                     let truth = vec![
                         &DfType::BigInt, // bogokey
                         &text,           // group_concat()
@@ -3777,9 +3771,7 @@ mod tests {
             let g = &mig.dataflow_state.ingredients;
             g.node_indices().for_each(|idx| {
                 if matches!(g[idx].as_internal(), Some(NodeOperator::Join(_))) {
-                    let text = DfType::Text {
-                        collation: Default::default(),
-                    };
+                    let text = DfType::Text(Collation::default());
                     let truth = vec![
                         &DfType::Int,                   // t1.a
                         &DfType::Float(Dialect::MySQL), // t1.b
@@ -3933,10 +3925,10 @@ mod tests {
             ));
 
             let truth = vec![
-                &DfType::Int,                     // t1.a
-                &DfType::Char(1, Dialect::MySQL), // cast(t1.b as char)
-                &DfType::Int,                     // t1.a + 1
-                &DfType::BigInt,                  // bogokey
+                &DfType::Int,                                      // t1.a
+                &DfType::Char(1, Collation::Utf8, Dialect::MySQL), // cast(t1.b as char)
+                &DfType::Int,                                      // t1.a + 1
+                &DfType::BigInt,                                   // bogokey
             ];
             let types = g[project_leaf_node]
                 .columns()
@@ -3946,10 +3938,10 @@ mod tests {
             assert_eq!(truth, types);
 
             let truth = vec![
-                &DfType::Char(1, Dialect::MySQL), // cast(t1.b as char)
-                &DfType::Int,                     // t1.a
-                &DfType::Int,                     // t1.a + 1
-                &DfType::BigInt,                  // bogokey
+                &DfType::Char(1, Collation::Utf8, Dialect::MySQL), // cast(t1.b as char)
+                &DfType::Int,                                      // t1.a
+                &DfType::Int,                                      // t1.a + 1
+                &DfType::BigInt,                                   // bogokey
             ];
             let types = g[project_reorder_node]
                 .columns()

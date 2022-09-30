@@ -1858,6 +1858,7 @@ async fn do_read<'a>(
 #[cfg(test)]
 mod tests {
     use nom_sql::Dialect;
+    use readyset_data::Collation;
 
     use super::*;
 
@@ -2066,16 +2067,12 @@ mod tests {
                 Some(DfExpr::Op {
                     left: Box::new(DfExpr::Column {
                         index: 1,
-                        ty: DfType::Text {
-                            collation: Default::default()
-                        }
+                        ty: DfType::Text(Collation::default())
                     }),
                     op: BinaryOperator::ILike,
                     right: Box::new(DfExpr::Literal {
                         val: DfValue::from("%a%"),
-                        ty: DfType::Text {
-                            collation: Default::default()
-                        }
+                        ty: DfType::Text(Collation::default())
                     }),
                     ty: DfType::Bool,
                 })
@@ -2174,16 +2171,12 @@ mod tests {
                 Some(DfExpr::Op {
                     left: Box::new(DfExpr::Column {
                         index: 1,
-                        ty: DfType::Text {
-                            collation: Default::default()
-                        }
+                        ty: DfType::Text(Collation::default())
                     }),
                     op: BinaryOperator::Greater,
                     right: Box::new(DfExpr::Literal {
                         val: "a".into(),
-                        ty: DfType::Text {
-                            collation: Default::default()
-                        }
+                        ty: DfType::Text(Collation::default())
                     }),
                     ty: DfType::Bool
                 })

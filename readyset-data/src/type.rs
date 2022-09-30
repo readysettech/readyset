@@ -6,7 +6,7 @@ use nom_sql::{Dialect, EnumType, Literal, SqlType};
 // use readyset_errors::{internal, ReadySetError};
 use serde::{Deserialize, Serialize};
 
-use crate::collation::Collation;
+use crate::Collation;
 
 /// Dataflow runtime representation of [`SqlType`].
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, EnumKind)]
@@ -92,15 +92,15 @@ pub enum DfType {
     /// column properties (which vary between SQL types and dialects), we treat all `*text` types
     /// and bare `varchar` as having unlimited length. We are allowed to do so because the upstream
     /// database validates data size for us.
-    Text { collation: Collation },
+    Text(Collation),
 
     /// `CHAR(n)`: fixed-length character string.
     // FIXME(ENG-1839): Should have `Option<u16>` to determine how `cast` is done for MySQL. The
     // dialect field provides context for semantics.
-    Char(u16, Dialect),
+    Char(u16, Collation, Dialect),
 
     /// `VARCHAR(n)`/`CHAR VARYING(n)`: max-length character string.
-    VarChar(u16),
+    VarChar(u16, Collation),
 
     /// [MySQL `blob`](https://dev.mysql.com/doc/refman/8.0/en/blob.html) or
     /// [PostgreSQL `bytea`](https://www.postgresql.org/docs/current/datatype-binary.html).
@@ -249,11 +249,11 @@ impl DfType {
             // Character string types.
             //
             // `varchar` by itself is an error in MySQL but synonymous with `text` in PostgreSQL.
-            Text | TinyText | MediumText | LongText | VarChar(None) => Self::Text {
-                collation: Default::default(),
-            },
-            VarChar(Some(len)) => Self::VarChar(len),
-            Char(len) => Self::Char(len.unwrap_or(1), dialect),
+            Text | TinyText | MediumText | LongText | VarChar(None) => {
+                Self::Text(Collation::default())
+            }
+            VarChar(Some(len)) => Self::VarChar(len, Collation::default()),
+            Char(len) => Self::Char(len.unwrap_or(1), Collation::default(), dialect),
 
             Blob | TinyBlob | MediumBlob | LongBlob | ByteArray => Self::Blob(dialect),
             VarBinary(len) => Self::VarBinary(len),
@@ -311,8 +311,8 @@ impl DfType {
 
             Self::Numeric { prec, scale } => Numeric(Some((prec, Some(scale)))),
 
-            Self::Char(n, _) => Char(Some(n)),
-            Self::VarChar(n) => VarChar(Some(n)),
+            Self::Char(n, ..) => Char(Some(n)),
+            Self::VarChar(n, ..) => VarChar(Some(n)),
             Self::Text { .. } => Text,
 
             Self::Binary(n) => Binary(Some(n)),
@@ -362,7 +362,7 @@ impl DfType {
             Binary(_) | VarBinary(_) | Date => Some(Dialect::MySQL),
             Array(_) | TimestampTz(_) | Jsonb | Inet | Uuid | MacAddr => Some(Dialect::PostgreSQL),
 
-            Float(d) | Enum(_, d) | Char(_, d) | Blob(d) | Json(d) => Some(d),
+            Float(d) | Enum(.., d) | Char(.., d) | Blob(d) | Json(d) => Some(d),
 
             Unknown
             | Bool
@@ -377,7 +377,7 @@ impl DfType {
             | Double
             | Numeric { .. }
             | Text { .. }
-            | VarChar(_)
+            | VarChar { .. }
             | Bit(_)
             | VarBit(_)
             | DateTime(_)
@@ -526,7 +526,7 @@ impl fmt::Display for DfType {
             | Self::UnsignedBigInt
             | Self::Float(_)
             | Self::Double
-            | Self::Text { ..}
+            | Self::Text { .. }
             // XXX: Should we take into account PostgreSQL and use "ByteArray" or "ByteA"?
             | Self::Blob(_)
             | Self::VarBit(None)
@@ -539,8 +539,8 @@ impl fmt::Display for DfType {
 
             Self::Array(ref ty) => write!(f, "{ty}[]"),
 
-            Self::Char(n, _)
-            | Self::VarChar(n)
+            Self::Char(n, ..)
+            | Self::VarChar(n, ..)
             | Self::Binary(n)
             | Self::VarBinary(n)
             | Self::Bit(n)
@@ -563,9 +563,7 @@ mod tests {
     #[test]
     fn innermost_array_type() {
         for ty in [
-            DfType::Text {
-                collation: Default::default(),
-            },
+            DfType::Text(Collation::default()),
             DfType::Bool,
             DfType::Double,
         ] {
@@ -608,21 +606,19 @@ mod tests {
                 },
                 Some(SqlType::Numeric(Some((42, Some(42))))),
             ),
+            (DfType::Text(Collation::default()), Some(SqlType::Text)),
             (
-                DfType::Text {
-                    collation: Default::default(),
-                },
-                Some(SqlType::Text),
-            ),
-            (
-                DfType::Char(len, Dialect::MySQL),
+                DfType::Char(len, Collation::default(), Dialect::MySQL),
                 Some(SqlType::Char(Some(len))),
             ),
             (
-                DfType::Char(len, Dialect::PostgreSQL),
+                DfType::Char(len, Collation::default(), Dialect::PostgreSQL),
                 Some(SqlType::Char(Some(len))),
             ),
-            (DfType::VarChar(len), Some(SqlType::VarChar(Some(len)))),
+            (
+                DfType::VarChar(len, Collation::default()),
+                Some(SqlType::VarChar(Some(len))),
+            ),
             (DfType::Blob(Dialect::MySQL), Some(SqlType::Blob)),
             (DfType::Blob(Dialect::PostgreSQL), Some(SqlType::ByteArray)),
             (DfType::Binary(len), Some(SqlType::Binary(Some(len)))),

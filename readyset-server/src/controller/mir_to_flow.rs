@@ -27,7 +27,7 @@ use nom_sql::{
 use petgraph::graph::NodeIndex;
 use readyset::internal::{Index, IndexType};
 use readyset::ViewPlaceholder;
-use readyset_data::DfType;
+use readyset_data::{Collation, DfType};
 use readyset_errors::{
     internal, internal_err, invariant, invariant_eq, unsupported, ReadySetError, ReadySetResult,
 };
@@ -649,9 +649,7 @@ fn make_grouped_node(
         // aggregation before we pattern match for a generic aggregation.
         GroupedNodeType::Aggregation(Aggregation::GroupConcat { separator: sep }) => {
             let gc = GroupConcat::new(parent_na, over_col_indx, group_col_indx, sep)?;
-            let agg_col = make_agg_col(DfType::Text {
-                collation: Default::default(), /* TODO */
-            });
+            let agg_col = make_agg_col(DfType::Text(/* TODO */ Collation::default()));
             cols.push(agg_col);
             set_names(&column_names(columns), &mut cols)?;
             mig.add_ingredient(name, cols, gc)

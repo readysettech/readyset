@@ -7,7 +7,7 @@ use std::fmt::Write;
 
 use common::DfValue;
 use launchpad::Indices;
-use readyset_data::DfType;
+use readyset_data::{Collation, DfType};
 use readyset_errors::invariant_eq;
 use serde::{Deserialize, Serialize};
 
@@ -204,9 +204,7 @@ impl GroupedOperation for GroupConcat {
     }
 
     fn output_col_type(&self) -> DfType {
-        DfType::Text {
-            collation: Default::default(), /* TODO */
-        }
+        DfType::Text(/* TODO */ Collation::default())
     }
 
     fn empty_value(&self) -> Option<DfValue> {

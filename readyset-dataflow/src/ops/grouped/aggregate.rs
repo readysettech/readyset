@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
 pub use nom_sql::{BinaryOperator, Literal, SqlType};
-use readyset_data::DfType;
+use readyset_data::{Collation, DfType};
 use readyset_errors::{invariant, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
@@ -49,9 +49,7 @@ impl Aggregation {
                     DfType::DEFAULT_NUMERIC
                 }
             }
-            Aggregation::GroupConcat { .. } => DfType::Text {
-                collation: Default::default(), /* TODO */
-            },
+            Aggregation::GroupConcat { .. } => DfType::Text(/* TODO */ Collation::default()),
         };
 
         Ok(GroupedOperator::new(

@@ -13,7 +13,7 @@ use launchpad::redacted::Sensitive;
 use nom_sql::{
     BinaryOperator, Column, Dialect, Expr as AstExpr, FunctionExpr, InValue, SqlType, UnaryOperator,
 };
-use readyset_data::{DfType, DfValue};
+use readyset_data::{Collation, DfType, DfValue};
 use readyset_errors::{internal, unsupported, ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
@@ -127,18 +127,14 @@ impl BuiltinFunction {
                 Ok((
                     Self::JsonTypeof(next_arg()?),
                     // Always returns text containing the JSON type.
-                    DfType::Text {
-                        collation: Default::default(),
-                    },
+                    DfType::Text(Collation::default()),
                 ))
             }
             "jsonb_typeof" => {
                 Ok((
                     Self::JsonbTypeof(next_arg()?),
                     // Always returns text containing the JSON type.
-                    DfType::Text {
-                        collation: Default::default(),
-                    },
+                    DfType::Text(Collation::default()),
                 ))
             }
             "coalesce" => {
