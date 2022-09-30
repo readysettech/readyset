@@ -450,13 +450,13 @@ mod tests {
             Ok(DfValue::Int(1))
         );
 
-        assert!(DfValue::Float(-128.9039)
+        DfValue::Float(-128.9039)
             .coerce_to(&SqlType::TinyInt(None), &DfType::Unknown)
-            .is_err());
+            .unwrap_err();
 
-        assert!(DfValue::Float(127.9039)
+        DfValue::Float(127.9039)
             .coerce_to(&SqlType::TinyInt(None), &DfType::Unknown)
-            .is_err());
+            .unwrap_err();
 
         assert_eq!(
             DfValue::Float(-128.4039).coerce_to(&SqlType::TinyInt(None), &DfType::Unknown),
@@ -484,32 +484,32 @@ mod tests {
             Ok(DfValue::UnsignedInt(255))
         );
 
-        assert!(DfValue::Float(255.5)
+        DfValue::Float(255.5)
             .coerce_to(&SqlType::UnsignedTinyInt(None), &DfType::Unknown)
-            .is_err());
+            .unwrap_err();
 
         assert_eq!(
             DfValue::Float(65535.49).coerce_to(&SqlType::UnsignedSmallInt(None), &DfType::Unknown),
             Ok(DfValue::UnsignedInt(65535))
         );
 
-        assert!(DfValue::Float(65535.5)
+        DfValue::Float(65535.5)
             .coerce_to(&SqlType::UnsignedSmallInt(None), &DfType::Unknown)
-            .is_err());
+            .unwrap_err();
 
         assert_eq!(
             DfValue::Double(4294967295.49).coerce_to(&SqlType::UnsignedInt(None), &DfType::Unknown),
             Ok(DfValue::UnsignedInt(4294967295))
         );
 
-        assert!(DfValue::Double(4294967295.5)
+        DfValue::Double(4294967295.5)
             .coerce_to(&SqlType::UnsignedInt(None), &DfType::Unknown)
-            .is_err());
+            .unwrap_err();
 
         // Since u64 max is not accurately representable as a doulbe, there are no exact conversions
-        assert!(DfValue::Double(18446744073709551613.49)
+        DfValue::Double(18446744073709551613.49)
             .coerce_to(&SqlType::UnsignedBigInt(None), &DfType::Unknown)
-            .is_err());
+            .unwrap_err();
 
         assert_eq!(
             DfValue::Double(17946744073709551610.49)

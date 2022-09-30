@@ -694,18 +694,18 @@ mod tests {
                 .unwrap(),
             DfValue::Int(50),
         );
-        assert!(DfValue::from("500")
+        DfValue::from("500")
             .coerce_to(&SqlType::TinyInt(None), &DfType::Unknown)
-            .is_err());
+            .unwrap_err();
         assert_eq!(
             DfValue::from("-500")
                 .coerce_to(&SqlType::Int(None), &DfType::Unknown)
                 .unwrap(),
             DfValue::Int(-500),
         );
-        assert!(DfValue::from("-500")
+        DfValue::from("-500")
             .coerce_to(&SqlType::UnsignedInt(None), &DfType::Unknown)
-            .is_err());
+            .unwrap_err();
 
         // TEXT to FLOAT
         assert_eq!(

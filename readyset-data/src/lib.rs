@@ -2724,7 +2724,7 @@ mod tests {
             )
         }
         fn _data_type_conversion_test_eq_i32_panic(d: &DfValue) {
-            assert!(std::panic::catch_unwind(|| i32::try_from(d).unwrap()).is_err())
+            i32::try_from(d).unwrap_err();
         }
         fn _data_type_conversion_test_eq_i64(d: &DfValue) {
             assert_eq!(
@@ -2733,7 +2733,7 @@ mod tests {
             )
         }
         fn _data_type_conversion_test_eq_i64_panic(d: &DfValue) {
-            assert!(std::panic::catch_unwind(|| i64::try_from(d).unwrap()).is_err())
+            i64::try_from(d).unwrap_err();
         }
         fn _data_type_conversion_test_eq_u32(d: &DfValue) {
             assert_eq!(
@@ -2742,7 +2742,7 @@ mod tests {
             )
         }
         fn _data_type_conversion_test_eq_u32_panic(d: &DfValue) {
-            assert!(std::panic::catch_unwind(|| u32::try_from(d).unwrap()).is_err())
+            u32::try_from(d).unwrap_err();
         }
         fn _data_type_conversion_test_eq_u64(d: &DfValue) {
             assert_eq!(
@@ -2751,7 +2751,7 @@ mod tests {
             )
         }
         fn _data_type_conversion_test_eq_u64_panic(d: &DfValue) {
-            assert!(std::panic::catch_unwind(|| u64::try_from(d).unwrap()).is_err())
+            u64::try_from(d).unwrap_err();
         }
         fn _data_type_conversion_test_eq_i128(d: &DfValue) {
             assert_eq!(
@@ -2760,7 +2760,7 @@ mod tests {
             )
         }
         fn _data_type_conversion_test_eq_i128_panic(d: &DfValue) {
-            assert!(std::panic::catch_unwind(|| i128::try_from(d).unwrap()).is_err())
+            i128::try_from(d).unwrap_err();
         }
 
         _data_type_conversion_test_eq_i32_panic(&bigint_i64_min);
@@ -2846,7 +2846,7 @@ mod tests {
 
         let data_type = DfValue::from_sql(&original_type, &original_data)?;
         assert!(matches!(data_type, DfValue::PassThrough(_)));
-        let decode_type = original_type.clone();
+        let decode_type = original_type;
         let mut received_data = BytesMut::new();
         data_type.to_sql(&decode_type, &mut received_data)?;
         assert_eq!(
@@ -3367,10 +3367,10 @@ mod tests {
 
             let input = DfValue::from("not a json");
             let result = input.coerce_to(&SqlType::Json, &DfType::Unknown);
-            assert!(result.is_err());
+            result.unwrap_err();
 
             let result = input.coerce_to(&SqlType::Jsonb, &DfType::Unknown);
-            assert!(result.is_err());
+            result.unwrap_err();
         }
 
         #[test]
@@ -3411,28 +3411,28 @@ mod tests {
                 DfValue::from(20070523i64)
                     .coerce_to(&SqlType::Date, &DfType::Unknown)
                     .unwrap(),
-                DfValue::from(NaiveDate::from_ymd(2007, 05, 23))
+                DfValue::from(NaiveDate::from_ymd(2007, 5, 23))
             );
 
             assert_eq!(
                 DfValue::from(70523u64)
                     .coerce_to(&SqlType::Date, &DfType::Unknown)
                     .unwrap(),
-                DfValue::from(NaiveDate::from_ymd(2007, 05, 23))
+                DfValue::from(NaiveDate::from_ymd(2007, 5, 23))
             );
 
             assert_eq!(
                 DfValue::from(19830905132800i64)
                     .coerce_to(&SqlType::Timestamp, &DfType::Unknown)
                     .unwrap(),
-                DfValue::from(NaiveDate::from_ymd(1983, 09, 05).and_hms(13, 28, 00))
+                DfValue::from(NaiveDate::from_ymd(1983, 9, 5).and_hms(13, 28, 00))
             );
 
             assert_eq!(
                 DfValue::from(830905132800u64)
                     .coerce_to(&SqlType::DateTime(None), &DfType::Unknown)
                     .unwrap(),
-                DfValue::from(NaiveDate::from_ymd(1983, 09, 05).and_hms(13, 28, 00))
+                DfValue::from(NaiveDate::from_ymd(1983, 9, 5).and_hms(13, 28, 00))
             );
 
             assert_eq!(
