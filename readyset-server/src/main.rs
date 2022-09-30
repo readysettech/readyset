@@ -201,13 +201,19 @@ fn main() -> anyhow::Result<()> {
             process::exit(1)
         });
         builder.set_external_addr(SocketAddr::from((external_addr, external_port)));
-        builder.start(Arc::new(authority)).await
-    })?;
-    rt.block_on(handle.wait_done());
+        let res = builder.start(Arc::new(authority)).await;
+        let _ = telemetry_sender.send_event(TelemetryEvent::ServerStop);
 
-    // TODO(Alex) we don't wait for the telemetry reporter to handle this message before dropping
-    // the runtime
-    let _ = telemetry_sender.send_event(TelemetryEvent::ServerStop);
+        let shutdown_timeout = std::time::Duration::from_secs(5);
+
+        match telemetry_sender.graceful_shutdown(shutdown_timeout).await {
+            Ok(_) => info!("TelemetrySender shutdown gracefully"),
+            Err(e) => info!(error=%e, "TelemetrySender did not shut down gracefully"),
+        }
+        res
+    })?;
+
+    rt.block_on(handle.wait_done());
 
     drop(rt);
     Ok(())

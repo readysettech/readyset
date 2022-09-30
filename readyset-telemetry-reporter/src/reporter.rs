@@ -5,6 +5,8 @@
 //! request to Segment.
 #[cfg(any(test, feature = "test-util"))]
 use std::collections::HashMap;
+#[cfg(any(test, feature = "test-util"))]
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -32,6 +34,10 @@ const APP_USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PK
 
 /// URL to report telemetry to
 const TELEMETRY_BASE_URL: &str = "https://api.segment.io/v1/";
+
+#[cfg(any(test, feature = "test-util"))]
+/// Test utility to enable and disable events from being received by the reporter
+static mut RECEIVE_EVENTS: AtomicBool = AtomicBool::new(true);
 
 /// Silently succeed if the client is None.
 macro_rules! client {
@@ -100,6 +106,9 @@ pub struct TelemetryReporter {
     /// Will shut down the run loop upon receiving a signal
     shutdown_rx: oneshot::Receiver<()>,
 
+    /// Acknowledge that we shutdown gracefully
+    shutdown_ack_tx: Option<oneshot::Sender<()>>,
+
     /// Deployment environment, e.g. container orchestrator framework, if any
     deployment_env: DeploymentEnv,
 
@@ -117,6 +126,7 @@ impl TelemetryReporter {
         rx: Receiver<(TelemetryEvent, Telemetry)>,
         api_key: Option<String>,
         shutdown_rx: oneshot::Receiver<()>,
+        shutdown_ack_tx: oneshot::Sender<()>,
     ) -> Self {
         // If the api_key is set, use that as the user_id.
         // If not, try to get a machine uid. If that works, anonymize it by hashing it with blake2b,
@@ -134,6 +144,7 @@ impl TelemetryReporter {
             user_id,
             anonymous_id: Uuid::new_v4().to_string(),
             shutdown_rx,
+            shutdown_ack_tx: Some(shutdown_ack_tx),
             deployment_env: std::env::var("DEPLOYMENT_ENV").unwrap_or_default().into(),
             periodic_reporters: Arc::new(Mutex::new(vec![])),
             #[cfg(any(test, feature = "test-util"))]
@@ -233,11 +244,22 @@ impl TelemetryReporter {
         tokio::select! {
             biased;
             _ = &mut self.shutdown_rx => {
-                tracing::info!("shutting down telemetry reporter");
+                tracing::info!("shutting down telemetry reporter. will attempt to drain in-flight metrics");
+                while let Ok((event, telemetry)) = self.rx.try_recv() {
+                    tracing::debug!(?event, ?telemetry, "TelemetryEvent received");
+                    self.process_event(event, &telemetry).await;
+                }
+
+                if let Some(shutdown_ack_tx) = self.shutdown_ack_tx.take() {
+                    let _ = shutdown_ack_tx.send(());
+                } else {
+                    tracing::trace!("unable to acknowledge shutdown");
+                };
+
                 self.rx.close();
                 return false;
             }
-            Some((event, telemetry)) = self.rx.recv() => {
+            Some((event, telemetry)) = Self::maybe_recv_event(&mut self.rx) => {
                 self.process_event(event, &telemetry).await;
             }
             _ = interval.tick() => {
@@ -254,6 +276,26 @@ impl TelemetryReporter {
             }
         }
         true
+    }
+
+    #[cfg(not(any(test, feature = "test-util")))]
+    async fn maybe_recv_event(
+        rx: &mut Receiver<(TelemetryEvent, Telemetry)>,
+    ) -> Option<(TelemetryEvent, Telemetry)> {
+        rx.recv().await
+    }
+
+    #[cfg(any(test, feature = "test-util"))]
+    async fn maybe_recv_event(
+        rx: &mut Receiver<(TelemetryEvent, Telemetry)>,
+    ) -> Option<(TelemetryEvent, Telemetry)> {
+        unsafe {
+            if RECEIVE_EVENTS.load(Ordering::SeqCst) {
+                rx.recv().await
+            } else {
+                None
+            }
+        }
     }
 
     #[cfg(any(test, feature = "test-util"))]
@@ -286,6 +328,20 @@ impl TelemetryReporter {
     #[cfg(any(test, feature = "test-util"))]
     pub async fn run_timeout(&mut self, timeout: Duration) {
         let _ = tokio::time::timeout(timeout, self.run()).await;
+    }
+
+    #[cfg(any(test, feature = "test-util"))]
+    pub fn disable_event_recv() {
+        unsafe {
+            RECEIVE_EVENTS.store(false, Ordering::SeqCst);
+        }
+    }
+
+    #[cfg(any(test, feature = "test-util"))]
+    pub fn enable_event_recv() {
+        unsafe {
+            RECEIVE_EVENTS.store(true, Ordering::SeqCst);
+        }
     }
 }
 
@@ -394,6 +450,28 @@ mod tests {
             1,
             reporter
                 .check_event(TelemetryEvent::QueryParseFailed)
+                .await
+                .len()
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_shutdown_drain() {
+        // Tests that the TelemetryReporter will drain any incoming requests
+        let (sender, mut reporter) = TelemetryInitializer::test_init().await;
+        TelemetryReporter::disable_event_recv();
+        sender
+            .send_event(TelemetryEvent::InstallerRun)
+            .expect("failed to send event");
+        sender.shutdown().await;
+
+        let mut interval = tokio::time::interval(Duration::from_secs(1));
+        reporter.run_once(&mut interval).await;
+
+        assert_eq!(
+            1,
+            reporter
+                .check_event(TelemetryEvent::InstallerRun)
                 .await
                 .len()
         );

@@ -34,10 +34,12 @@ impl TelemetryInitializer {
         }
         let (tx, rx) = channel(TELMETRY_CHANNEL_LEN); // Arbitrary number of metrics to allow in queue before dropping them
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
-        let sender = TelemetrySender::new(tx, shutdown_tx);
+        let (shutdown_ack_tx, shutdown_ack_rx) = oneshot::channel();
+        let sender = TelemetrySender::new(tx, shutdown_tx, shutdown_ack_rx);
 
         tokio::spawn(async move {
-            let mut telemetry_reporter = TelemetryReporter::new(rx, api_key, shutdown_rx);
+            let mut telemetry_reporter =
+                TelemetryReporter::new(rx, api_key, shutdown_rx, shutdown_ack_tx);
             for reporter in periodic_reporters {
                 telemetry_reporter
                     .register_periodic_reporter(reporter)
@@ -54,9 +56,11 @@ impl TelemetryInitializer {
         readyset_tracing::init_test_logging();
         let (tx, rx) = channel(TELMETRY_CHANNEL_LEN); // Arbitrary number of metrics to allow in queue before dropping them
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
-        let sender = TelemetrySender::new(tx, shutdown_tx);
+        let (shutdown_ack_tx, shutdown_ack_rx) = oneshot::channel();
+        let sender = TelemetrySender::new(tx, shutdown_tx, shutdown_ack_rx);
 
-        let reporter = TelemetryReporter::new(rx, Some("api-key".into()), shutdown_rx);
+        let reporter =
+            TelemetryReporter::new(rx, Some("api-key".into()), shutdown_rx, shutdown_ack_tx);
 
         (sender, reporter)
     }
