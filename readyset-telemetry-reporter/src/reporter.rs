@@ -1,8 +1,10 @@
+#![cfg_attr(any(test, feature = "test-util"), allow(dead_code, unused_imports))]
 //! TelemetryReporter
 //! The Telemetry Reporter acts asynchronously by spawning a background task that listens for
 //! [`TelemetryEvent`]s sent from [`TelemetryReporter`]s. When it receives one, it forwards the
 //! request to Segment.
-
+#[cfg(any(test, feature = "test-util"))]
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -103,6 +105,9 @@ pub struct TelemetryReporter {
 
     /// Zero or many periodic reporters that can collect and send metrics periodically
     periodic_reporters: Arc<Mutex<Vec<PeriodicReporter>>>,
+
+    #[cfg(any(test, feature = "test-util"))]
+    received_events: Arc<Mutex<HashMap<TelemetryEvent, Vec<Telemetry>>>>,
 }
 
 impl TelemetryReporter {
@@ -131,6 +136,8 @@ impl TelemetryReporter {
             shutdown_rx,
             deployment_env: std::env::var("DEPLOYMENT_ENV").unwrap_or_default().into(),
             periodic_reporters: Arc::new(Mutex::new(vec![])),
+            #[cfg(any(test, feature = "test-util"))]
+            received_events: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -199,6 +206,18 @@ impl TelemetryReporter {
         }
     }
 
+    #[cfg(not(any(test, feature = "test-util")))]
+    async fn process_event(&self, event: TelemetryEvent, payload: &Telemetry) {
+        self.send_event(event, payload).await;
+    }
+
+    #[cfg(any(test, feature = "test-util"))]
+    async fn process_event(&self, event: TelemetryEvent, payload: &Telemetry) {
+        let mut received_events = self.received_events.lock().await;
+        let entry = received_events.entry(event).or_insert_with(|| vec![]);
+        entry.push((*payload).clone());
+    }
+
     pub async fn run(&mut self) {
         let mut interval = tokio::time::interval(Self::PERIODIC_REPORT_INTERVAL);
         loop {
@@ -210,13 +229,16 @@ impl TelemetryReporter {
 
     /// Returns true if we are still running, false if we should shut down
     async fn run_once(&mut self, interval: &mut Interval) -> bool {
+        tracing::trace!("TelemetryReporter run_once");
         tokio::select! {
+            biased;
             _ = &mut self.shutdown_rx => {
                 tracing::info!("shutting down telemetry reporter");
+                self.rx.close();
                 return false;
             }
             Some((event, telemetry)) = self.rx.recv() => {
-                self.send_event(event, &telemetry).await;
+                self.process_event(event, &telemetry).await;
             }
             _ = interval.tick() => {
                 tracing::debug!("starting periodic report");
@@ -225,7 +247,7 @@ impl TelemetryReporter {
                 for reporter in periodic_reporters.iter() {
                     if let Ok(report) = reporter.report().await {
                         for (event, telemetry) in report {
-                            self.send_event(event, &telemetry).await;
+                            self.process_event(event, &telemetry).await;
                         }
                     }
                 }
@@ -234,10 +256,36 @@ impl TelemetryReporter {
         true
     }
 
+    #[cfg(any(test, feature = "test-util"))]
+    pub async fn test_run_once(&mut self, interval: &mut Interval) -> bool {
+        self.run_once(interval).await
+    }
+
     pub async fn register_periodic_reporter(&mut self, periodic_reporter: PeriodicReporter) {
         tracing::debug!("registering periodic reporter");
         let mut periodic_reporters = self.periodic_reporters.lock().await;
         periodic_reporters.push(periodic_reporter);
+    }
+
+    #[cfg(any(test, feature = "test-util"))]
+    pub async fn received_events(&self) -> HashMap<TelemetryEvent, Vec<Telemetry>> {
+        self.received_events.lock().await.clone()
+    }
+
+    #[cfg(any(test, feature = "test-util"))]
+    pub async fn check_event(&self, event: TelemetryEvent) -> Vec<Telemetry> {
+        self.received_events
+            .lock()
+            .await
+            .get_mut(&event)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Does a run() until the provided timeout is reached. Suppresses any errors if we timed out.
+    #[cfg(any(test, feature = "test-util"))]
+    pub async fn run_timeout(&mut self, timeout: Duration) {
+        let _ = tokio::time::timeout(timeout, self.run()).await;
     }
 }
 
@@ -286,112 +334,10 @@ pub async fn handle_resp(resp: Response) -> Result<()> {
     }
 }
 
-#[cfg(any(test, feature = "test-util"))]
-pub mod test_util {
-    //! TestUtils
-    //!
-    //! Provides a way to test the events that were sent to a TelemetryReporter without sending them
-    //! to Segment. events Exposed if the `test-util` feature is enabledj
-
-    use std::collections::HashMap;
-
-    use tokio::sync::mpsc::Receiver;
-    use tokio::time::Interval;
-
-    use super::*;
-    use crate::{Telemetry, TelemetryEvent, TelemetryReporter};
-
-    pub struct TestTelemetryReporter {
-        pub rx: Receiver<(TelemetryEvent, Telemetry)>,
-
-        // Received Events
-        pub received_events: HashMap<TelemetryEvent, Vec<Telemetry>>,
-
-        /// Zero or many periodic reporters that can collect and send metrics periodically
-        pub periodic_reporters: Arc<Mutex<Vec<PeriodicReporter>>>,
-    }
-
-    impl TestTelemetryReporter {
-        pub fn from_reporter(real_reporter: TelemetryReporter) -> Self {
-            Self {
-                rx: real_reporter.rx,
-                received_events: HashMap::new(),
-                periodic_reporters: real_reporter.periodic_reporters.clone(),
-            }
-        }
-
-        pub fn received_events(&self) -> &HashMap<TelemetryEvent, Vec<Telemetry>> {
-            &self.received_events
-        }
-
-        pub fn check_event(&self, event: TelemetryEvent) -> Option<&Vec<Telemetry>> {
-            self.received_events.get(&event)
-        }
-
-        pub async fn run(&mut self) {
-            let mut interval = tokio::time::interval(TelemetryReporter::PERIODIC_REPORT_INTERVAL);
-            loop {
-                self.run_once(&mut interval).await;
-            }
-        }
-
-        fn add_event(&mut self, event: TelemetryEvent, telemetry: Telemetry) {
-            let entry = self.received_events.entry(event).or_insert_with(|| vec![]);
-            entry.push(telemetry);
-        }
-
-        pub async fn run_once(&mut self, interval: &mut Interval) {
-            tracing::debug!("reporter running once");
-            tokio::select! {
-                Some((event, telemetry)) = self.rx.recv() => {
-                    tracing::debug!(?event, ?telemetry, "TelemetryEvent received");
-                    self.add_event(event, telemetry);
-                },
-                _ = interval.tick() => {
-                    tracing::debug!("starting periodic report");
-                    let periodic_reporters = self.periodic_reporters.lock().await;
-                    // collect in a vec to prevent double mutable borrow of self
-                    let mut events_to_add = vec![];
-                    for reporter in periodic_reporters.iter() {
-                        if let Ok(report) = reporter.report().await {
-                            for (event, telemetry) in report {
-                                events_to_add.push((event, telemetry));
-                            }
-                        }
-                    }
-                    drop(periodic_reporters);
-
-                    for (event, telemetry) in events_to_add {
-                        self.add_event(event, telemetry);
-                    }
-                }
-            }
-        }
-
-        pub async fn register_periodic_reporter(&mut self, periodic_reporter: PeriodicReporter) {
-            tracing::debug!("registering periodic reporter");
-            let mut periodic_reporters = self.periodic_reporters.lock().await;
-            periodic_reporters.push(periodic_reporter);
-        }
-
-        // runs until timeout is reached. Suppresses error if timeout is reached
-        pub async fn run_timeout(&mut self, timeout: Duration) {
-            let _ = tokio::time::timeout(timeout, self.run()).await;
-        }
-    }
-
-    impl From<TelemetryReporter> for TestTelemetryReporter {
-        fn from(real_reporter: TelemetryReporter) -> Self {
-            TestTelemetryReporter::from_reporter(real_reporter)
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
 
     use super::*;
-    use crate::test_util::TestTelemetryReporter;
     use crate::*;
 
     struct TestPeriodicReporter {}
@@ -409,38 +355,37 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn validate_request() {
         std::env::set_var("RS_SEGMENT_WRITE_KEY", "write_key");
-        let telemetry_sender =
-            TelemetryInitializer::init(false, Some("api-key".to_string()), vec![]).await;
+        let (telemetry_sender, mut telemetry_reporter) = TelemetryInitializer::test_init().await;
 
-        let (event, _telemetry): (TelemetryEvent, Telemetry) =
+        let (event, telemetry): (TelemetryEvent, Telemetry) =
             (TelemetryEvent::InstallerRun, Default::default());
 
-        // TODO(luke): We don't have a good way to inspect the event was received correctly in unit
-        // tests currently
         assert!(telemetry_sender.send_event(event).is_ok());
 
-        // Allow the event to propagate to the run loop
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        let mut interval = tokio::time::interval(Duration::from_millis(10));
+        telemetry_reporter.run_once(&mut interval).await;
+        assert_eq!(
+            telemetry,
+            *telemetry_reporter
+                .check_event(TelemetryEvent::InstallerRun)
+                .await
+                .first()
+                .unwrap()
+        );
 
         telemetry_sender.shutdown().await;
-
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        telemetry_reporter.run_once(&mut interval).await;
 
         assert!(telemetry_sender.send_event(event).is_err());
     }
 
     #[tokio::test(start_paused = true)]
     async fn test_periodic_reporter() {
-        let (_tx, rx) = channel(1);
-        let (_shutdown_tx, shutdown_rx) = oneshot::channel();
-        let mut reporter = TestTelemetryReporter::from_reporter({
-            let mut reporter = TelemetryReporter::new(rx, None, shutdown_rx);
-            let test_periodic_reporter: PeriodicReporter = Arc::new(TestPeriodicReporter {});
-            reporter
-                .register_periodic_reporter(test_periodic_reporter)
-                .await;
-            reporter
-        });
+        let test_periodic_reporter: PeriodicReporter = Arc::new(TestPeriodicReporter {});
+        let (_sender, mut reporter) = TelemetryInitializer::test_init().await;
+        reporter
+            .register_periodic_reporter(test_periodic_reporter)
+            .await;
 
         let mut interval = tokio::time::interval(Duration::from_nanos(1));
         reporter.run_once(&mut interval).await;
@@ -449,7 +394,7 @@ mod tests {
             1,
             reporter
                 .check_event(TelemetryEvent::QueryParseFailed)
-                .expect("should be some")
+                .await
                 .len()
         );
     }

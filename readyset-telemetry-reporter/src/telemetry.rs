@@ -84,6 +84,7 @@ pub enum DeploymentEnv {
     setter(into, strip_option)
 )]
 #[derive(Debug)]
+#[cfg_attr(any(test, feature = "test-util"), derive(Clone, Eq, PartialEq))]
 pub struct Telemetry {
     pub db_backend: Option<String>,
     pub adapter_version: Option<String>,

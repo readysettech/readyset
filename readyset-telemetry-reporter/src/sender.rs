@@ -12,6 +12,7 @@ use crate::telemetry::{TelemetryBuilder, TelemetryEvent, *};
 pub struct TelemetrySender {
     tx: Option<Sender<(TelemetryEvent, Telemetry)>>,
     shutdown_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
+    no_op: bool,
 }
 
 impl TelemetrySender {
@@ -20,6 +21,7 @@ impl TelemetrySender {
         Self {
             tx: Some(tx),
             shutdown_tx: Arc::new(Mutex::new(Some(shutdown_tx))),
+            no_op: false,
         }
     }
 
@@ -28,6 +30,7 @@ impl TelemetrySender {
         Self {
             tx: None,
             shutdown_tx: Arc::new(Mutex::new(None)),
+            no_op: true,
         }
     }
 
@@ -39,13 +42,16 @@ impl TelemetrySender {
     /// function is a no-op.
     pub fn send_event_with_payload(&self, event: TelemetryEvent, payload: Telemetry) -> Result<()> {
         tracing::debug!("sending {event:?} with payload {payload:?}");
-        if let Some(tx) = self.tx.as_ref() {
-            tracing::trace!(?event, ?payload, "sending telemetry");
-            tx.try_send((event, payload))
-                .map_err(|e| Error::Sender(e.to_string()))
-        } else {
+        if self.no_op {
             tracing::debug!("Ignoring ({event:?} {payload:?}) in no-op mode");
-            Ok(())
+            return Ok(());
+        }
+
+        match self.tx.as_ref() {
+            Some(tx) => tx
+                .try_send((event, payload))
+                .map_err(|e| Error::Sender(e.to_string())),
+            None => Err(Error::Sender("sender missing tx".into())),
         }
     }
 
@@ -53,10 +59,13 @@ impl TelemetrySender {
         self.send_event_with_payload(event, TelemetryBuilder::new().build())
     }
 
+    /// Any event sent after shutdown() is sent will fail
     pub async fn shutdown(&self) {
         let tx = self.shutdown_tx.lock().await.take();
         if let Some(tx) = tx {
             tx.send(()).expect("failed to shut down");
+        } else {
+            tracing::warn!("Received shutdown signal but dont have a sender");
         }
     }
 }

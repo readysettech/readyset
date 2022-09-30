@@ -48,4 +48,16 @@ impl TelemetryInitializer {
 
         sender
     }
+
+    #[cfg(any(test, feature = "test-util"))]
+    pub async fn test_init() -> (TelemetrySender, TelemetryReporter) {
+        readyset_tracing::init_test_logging();
+        let (tx, rx) = channel(TELMETRY_CHANNEL_LEN); // Arbitrary number of metrics to allow in queue before dropping them
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let sender = TelemetrySender::new(tx, shutdown_tx);
+
+        let reporter = TelemetryReporter::new(rx, Some("api-key".into()), shutdown_rx);
+
+        (sender, reporter)
+    }
 }

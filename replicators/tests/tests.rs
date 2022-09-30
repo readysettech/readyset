@@ -13,12 +13,9 @@ use readyset::recipe::changelist::ChangeList;
 use readyset::{ReadySetError, ReadySetHandle, ReadySetResult};
 use readyset_data::{DfValue, TinyText};
 use readyset_server::Builder;
-use readyset_telemetry_reporter::test_util::TestTelemetryReporter;
-use readyset_telemetry_reporter::{TelemetryEvent, TelemetryReporter, TelemetrySender};
+use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer, TelemetrySender};
 use replicators::{Config, NoriaAdapter};
 use test_utils::slow;
-use tokio::sync::mpsc::channel;
-use tokio::sync::oneshot;
 use tracing::{error, trace};
 
 const MAX_ATTEMPTS: usize = 40;
@@ -1454,18 +1451,6 @@ async fn postgresql_ddl_replicate_create_view_internal(url: &str) {
         .is_ok());
 }
 
-fn setup_telemetry() -> (TelemetrySender, TestTelemetryReporter) {
-    let (tx, rx) = channel(128);
-    let (shutdown_tx, shutdown_rx) = oneshot::channel();
-    let telemetry_sender = TelemetrySender::new(tx, shutdown_tx);
-    let reporter = TestTelemetryReporter::from(TelemetryReporter::new(
-        rx,
-        Some("TestAPIKey".to_string()),
-        shutdown_rx,
-    ));
-    (telemetry_sender, reporter)
-}
-
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
 async fn snapshot_telemetry_mysql() -> ReadySetResult<()> {
@@ -1484,7 +1469,7 @@ async fn snapshot_telemetry_inner(url: &String) -> ReadySetResult<()> {
     client.query(CREATE_SCHEMA).await?;
     client.query(POPULATE_SCHEMA).await?;
 
-    let (sender, mut reporter) = setup_telemetry();
+    let (sender, mut reporter) = TelemetryInitializer::test_init().await;
     let mut builder = Builder::for_tests();
     builder.set_telemetry_sender(sender);
     let mut ctx = TestHandle::start_noria_with_builder(url.to_string(), None, builder).await?;
@@ -1499,13 +1484,13 @@ async fn snapshot_telemetry_inner(url: &String) -> ReadySetResult<()> {
         1,
         reporter
             .check_event(TelemetryEvent::SnapshotComplete)
-            .expect("should be some")
+            .await
             .len()
     );
 
     let schemas = reporter
         .check_event(TelemetryEvent::Schema)
-        .expect("should be some")
+        .await
         .into_iter()
         .map(|t| t.schema.clone().expect("should be some"))
         .collect::<Vec<_>>();

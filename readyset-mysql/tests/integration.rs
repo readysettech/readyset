@@ -15,29 +15,19 @@ use readyset_client_test_helpers::mysql_helpers::{last_query_info, MySQLAdapter}
 use readyset_client_test_helpers::{sleep, TestBuilder};
 use readyset_errors::ReadySetError;
 use readyset_server::Handle;
-use readyset_telemetry_reporter::test_util::TestTelemetryReporter;
-use readyset_telemetry_reporter::{TelemetryEvent, TelemetryReporter, TelemetrySender};
-use tokio::sync::mpsc::channel;
-use tokio::sync::oneshot;
+use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer, TelemetryReporter};
 
 async fn setup() -> (mysql_async::Opts, Handle) {
     TestBuilder::default().build::<MySQLAdapter>().await
 }
 
-async fn setup_telemetry() -> (TestTelemetryReporter, mysql_async::Opts, Handle) {
-    let (tx, rx) = channel(1024);
-    let (shutdown_tx, shutdown_rx) = oneshot::channel();
-    let telemetry_sender = TelemetrySender::new(tx, shutdown_tx);
-    let reporter = TestTelemetryReporter::from(TelemetryReporter::new(
-        rx,
-        Some("TestAPIKey".to_string()),
-        shutdown_rx,
-    ));
+async fn setup_telemetry() -> (TelemetryReporter, mysql_async::Opts, Handle) {
+    let (sender, reporter) = TelemetryInitializer::test_init().await;
 
     let backend = BackendBuilder::new()
         .require_authentication(false)
         .migration_mode(MigrationMode::OutOfBand)
-        .telemetry_sender(telemetry_sender.clone());
+        .telemetry_sender(sender);
     let (opts, handle) = TestBuilder::new(backend).build::<MySQLAdapter>().await;
     (reporter, opts, handle)
 }
@@ -1703,18 +1693,19 @@ async fn test_show_proxied_queries_telemetry() {
 
     assert!(reporter
         .check_event(TelemetryEvent::ShowProxiedQueries)
-        .is_none());
+        .await
+        .is_empty());
 
     conn.query_drop("SHOW PROXIED QUERIES").await.unwrap();
     reporter
-        .run_once(&mut tokio::time::interval(Duration::from_nanos(1)))
+        .test_run_once(&mut tokio::time::interval(Duration::from_nanos(1)))
         .await;
 
     assert_eq!(
         1,
         reporter
             .check_event(TelemetryEvent::ShowProxiedQueries)
-            .expect("should be some")
+            .await
             .len()
     );
 }
@@ -1726,19 +1717,19 @@ async fn test_show_caches_queries_telemetry() {
 
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
 
-    assert!(reporter.check_event(TelemetryEvent::ShowCaches).is_none());
+    assert!(reporter
+        .check_event(TelemetryEvent::ShowCaches)
+        .await
+        .is_empty());
 
     conn.query_drop("SHOW CACHES").await.unwrap();
     reporter
-        .run_once(&mut tokio::time::interval(Duration::from_nanos(1)))
+        .test_run_once(&mut tokio::time::interval(Duration::from_nanos(1)))
         .await;
 
     assert_eq!(
         1,
-        reporter
-            .check_event(TelemetryEvent::ShowCaches)
-            .expect("should be some")
-            .len()
+        reporter.check_event(TelemetryEvent::ShowCaches).await.len()
     );
 }
 
@@ -1747,19 +1738,11 @@ async fn test_proxied_queries_telemetry() {
     readyset_tracing::init_test_logging();
     // This variation on setup_telemetry sets up a periodic reporter for proxied queries.
     let (mut reporter, opts, _handle) = {
-        let (tx, rx) = channel(1024);
-        let (shutdown_tx, shutdown_rx) = oneshot::channel();
-        let telemetry_sender = TelemetrySender::new(tx, shutdown_tx);
         let query_status_cache = Box::leak(Box::new(QueryStatusCache::with_style(
             MigrationStyle::Explicit,
         )));
-
         let proxied_queries_reporter = Arc::new(ProxiedQueriesReporter::new(query_status_cache));
-        let mut reporter = TestTelemetryReporter::from(TelemetryReporter::new(
-            rx,
-            Some("TestAPIKey".to_string()),
-            shutdown_rx,
-        ));
+        let (telemetry_sender, mut reporter) = TelemetryInitializer::test_init().await;
         reporter
             .register_periodic_reporter(proxied_queries_reporter)
             .await;
@@ -1779,7 +1762,10 @@ async fn test_proxied_queries_telemetry() {
     };
 
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
-    assert!(reporter.check_event(TelemetryEvent::ProxiedQuery).is_none());
+    assert!(reporter
+        .check_event(TelemetryEvent::ProxiedQuery)
+        .await
+        .is_empty());
 
     conn.query_drop("CREATE TABLE t1 (a int)").await.unwrap();
     sleep().await;
@@ -1796,15 +1782,16 @@ async fn test_proxied_queries_telemetry() {
     let mut interval = tokio::time::interval(Duration::from_millis(1));
 
     // Run once to get the new event, and once to run the periodic reporter
-    reporter.run_once(&mut interval).await;
+    reporter.test_run_once(&mut interval).await;
     tokio::time::sleep(Duration::from_millis(5)).await;
-    reporter.run_once(&mut interval).await;
+    reporter.test_run_once(&mut interval).await;
     tokio::time::sleep(Duration::from_millis(5)).await;
 
     let telemetry = reporter
         .check_event(TelemetryEvent::ProxiedQuery)
-        .expect("should be some")
+        .await
         .first()
+        .cloned()
         .expect("should have 1 element");
 
     assert_eq!(
