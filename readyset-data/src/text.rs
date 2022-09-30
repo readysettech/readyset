@@ -56,10 +56,17 @@ pub struct TinyText {
     t: [u8; TINYTEXT_WIDTH],
 }
 
+#[derive(Debug)]
+struct TextHeader {
+    valid: AtomicBool,
+    collation: Collation,
+}
+
 /// A thin pointer over an Arc<[u8]> with lazy UTF-8 validation
-#[repr(transparent)]
 #[derive(Clone)]
-pub struct Text(triomphe::ThinArc<AtomicBool, u8>);
+pub struct Text {
+    inner: triomphe::ThinArc<TextHeader, u8>,
+}
 
 impl TinyText {
     #[allow(clippy::len_without_is_empty)]
@@ -174,32 +181,76 @@ impl Text {
     /// Returns the underlying byte slice
     #[inline]
     pub fn as_bytes(&self) -> &[u8] {
-        &self.0.slice
+        &self.inner.slice
     }
 
     /// Returns the underlying byte slice as an `str`
     #[inline]
     pub fn as_str(&self) -> &str {
         // Check if already validated
-        if self.0.header.header.load(Relaxed) {
+        if self.inner.header.header.valid.load(Relaxed) {
             // SAFETY: Safe because we checked validation flag
             unsafe { std::str::from_utf8_unchecked(self.as_bytes()) }
         } else {
             let validated = std::str::from_utf8(self.as_bytes()).expect("Must always be UTF8");
-            self.0.header.header.store(true, Relaxed);
+            self.inner.header.header.valid.store(true, Relaxed);
             validated
         }
     }
 
-    /// Create a new `Text` by copying a byte slice. It does not check if the
-    /// slice contains valid UTF-8 text, and may panic later if `as_str` is
-    /// called later if it does not.
+    /// Create a new `Text` by copying a byte slice.
+    ///
+    /// This function does not check if the slice contains valid UTF-8 text, and may panic later if
+    /// `as_str` is called and it does not.
     #[inline]
-    pub fn from_slice_unchecked(v: &[u8]) -> Self {
-        Self(triomphe::ThinArc::from_header_and_slice(
-            AtomicBool::new(false),
-            v,
-        ))
+    pub fn from_slice(v: &[u8]) -> Self {
+        Self::from_slice_with_collation(v, Default::default())
+    }
+
+    /// Create a new `Text` with the given collation by copying a byte slice
+    ///
+    /// This function does not check if the slice contains valid UTF-8 text, and may panic later if
+    /// `as_str` is called and it does not.
+    #[inline]
+    pub fn from_slice_with_collation(v: &[u8], collation: Collation) -> Self {
+        // SAFETY: passing `false` to `valid`, which means we will validate later (eg during
+        // `as_str`)
+        unsafe { Self::new(false, collation, v) }
+    }
+
+    /// Create a new `Text` with the given collation by copying a str
+    #[inline]
+    pub fn from_str_with_collation(s: &str, collation: Collation) -> Self {
+        // SAFETY: `s` is guaranteed to contain valid UTF-8
+        unsafe { Self::new(true, collation, s.as_bytes()) }
+    }
+
+    /// Create a new `Text` by copying a byte slice, which must contain valid UTF-8
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that the argument passed to this function contains valid UTF-8
+    #[inline]
+    pub unsafe fn from_slice_unchecked(v: &[u8]) -> Self {
+        Self::new(true, Default::default(), v)
+    }
+
+    /// SAFETY: If `header.valid` is true, `v` must contain valid UTF-8
+    unsafe fn new(valid: bool, collation: Collation, v: &[u8]) -> Self {
+        Self {
+            inner: triomphe::ThinArc::from_header_and_slice(
+                TextHeader {
+                    valid: AtomicBool::new(valid),
+                    collation,
+                },
+                v,
+            ),
+        }
+    }
+
+    /// Return the configured collation on this [`Text`] value
+    pub fn collation(&self) -> Collation {
+        self.inner.header.header.collation
     }
 }
 
@@ -213,10 +264,8 @@ impl TryFrom<&[u8]> for Text {
 
 impl From<&str> for Text {
     fn from(t: &str) -> Self {
-        Self(triomphe::ThinArc::from_header_and_slice(
-            AtomicBool::new(true),
-            t.as_bytes(),
-        ))
+        // SAFETY: `t` is guaranteed to contain valid UTF-8
+        unsafe { Self::new(true, Default::default(), t.as_bytes()) }
     }
 }
 
@@ -570,11 +619,17 @@ mod tests {
         assert_eq!(t.as_str(), s);
     }
 
+    #[proptest]
+    fn text_collation_round_trip(s: String, c: Collation) {
+        let t = Text::from_str_with_collation(&s, c);
+        assert_eq!(t.collation(), c);
+    }
+
     #[test]
     #[should_panic]
     fn text_panics_non_utf8() {
         let s = [255, 255, 255, 255];
-        let t = Text::from_slice_unchecked(&s);
+        let t = Text::from_slice(&s);
         t.as_str();
     }
 
