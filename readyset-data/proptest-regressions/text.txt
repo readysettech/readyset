@@ -5,3 +5,6 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc c776e8d1e47ae3efeff66cd6f9c8f07035a5293c1ba25f94ea90135b65317f36 # shrinks to s = "0"
+cc 3053d6df201552ab1d15947f098d60f4f0fcb0e8d47180ad23e62a61705e3301 # shrinks to input = _CoerceValueToCitextArgs { input: TimestampTz(0000-01-01T00:00:00+00:00) }
+cc 4d06afd89174c6568a332d274ed5d2efe5ecf3677d85d0a24fb67720198297f1 # shrinks to input = _CoerceValueToCitextArgs { input: Array(Array { lower_bounds: [-741023, -1940159305], contents: [[BitVector(), BitVector(0001001001010100001110110001001110010011001100000001101000001011010010011100011101000001000100101101011111000100010001101011100100110100101100011100010000011001000101010010011111001101)]], shape=[1, 2], strides=[2, 1], layout=CFcf (0xf), dynamic ndim=2 }) }
+cc 187131f5058d234b68e9031bbb3d639198f413faaf732a9170a1a38484948a56 # shrinks to input = _CoerceValueToCitextArgs { input: None }

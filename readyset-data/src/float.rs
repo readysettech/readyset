@@ -100,7 +100,7 @@ pub(crate) fn coerce_f64(val: f64, to_ty: &DfType, from_ty: &DfType) -> ReadySet
             Ok(r#enum::apply_enum_limits(val as usize, elements).into())
         }
 
-        DfType::Text { .. } => Ok(val.to_string().into()),
+        DfType::Text(collation) => Ok(DfValue::from_str_and_collation(&val.to_string(), collation)),
 
         DfType::VarChar(l, ..) => {
             let mut val = val.to_string();
@@ -204,7 +204,7 @@ pub(crate) fn coerce_decimal(
             Ok(r#enum::apply_enum_limits(usize::try_from(*val).unwrap_or(0), elements).into())
         }
 
-        DfType::Text { .. } => Ok(val.to_string().into()),
+        DfType::Text(collation) => Ok(DfValue::from_str_and_collation(&val.to_string(), collation)),
 
         DfType::VarChar(l, ..) => {
             let mut val = val.to_string();

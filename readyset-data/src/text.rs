@@ -369,7 +369,9 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
         match *to_ty {
             DfType::Bool => Ok(DfValue::from(!str.is_empty())),
 
-            DfType::Text { .. } => Ok(self.clone().into()),
+            DfType::Text(collation) => {
+                Ok(DfValue::from_str_and_collation(self.try_str()?, collation))
+            }
 
             DfType::VarChar(l, ..) if l as usize >= str.len() => {
                 // VarChar, but length is sufficient to store current string
@@ -579,6 +581,7 @@ impl TextCoerce for Text {
 #[cfg(test)]
 mod tests {
     use nom_sql::Dialect;
+    use proptest::prop_assume;
     use test_strategy::proptest;
 
     use super::*;
@@ -835,5 +838,14 @@ mod tests {
                 .unwrap(),
             DfValue::UnsignedInt(0)
         );
+    }
+
+    #[proptest]
+    fn coerce_value_to_citext(input: DfValue) {
+        let result = input.coerce_to(&DfType::Text(Collation::Citext), &DfType::Unknown);
+        prop_assume!(result.is_ok());
+        prop_assume!(result.as_ref().unwrap().collation().is_some());
+
+        assert_eq!(result.unwrap().collation(), Some(Collation::Citext));
     }
 }

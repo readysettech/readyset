@@ -506,7 +506,10 @@ impl DfValue {
             DfValue::None => Ok(DfValue::None),
             DfValue::Array(arr) => match to_ty {
                 DfType::Array(t) => Ok(DfValue::from(arr.coerce_to(t, from_ty)?)),
-                DfType::Text { .. } => Ok(DfValue::from(arr.to_string())),
+                DfType::Text(collation) => Ok(DfValue::from_str_and_collation(
+                    &arr.to_string(),
+                    *collation,
+                )),
                 _ => Err(mk_err()),
             },
             _ if is_clone_coercible() => Ok(self.clone()),
@@ -518,7 +521,13 @@ impl DfValue {
             DfValue::Float(f) => float::coerce_f64(f64::from(*f), to_ty, from_ty),
             DfValue::Double(f) => float::coerce_f64(*f, to_ty, from_ty),
             DfValue::Numeric(d) => float::coerce_decimal(d.as_ref(), to_ty, from_ty),
-            DfValue::Time(ts) if to_ty.is_any_text() => Ok(ts.to_string().into()),
+            DfValue::Time(ts) => {
+                if let DfType::Text(collation) = to_ty {
+                    Ok(DfValue::from_str_and_collation(&ts.to_string(), *collation))
+                } else {
+                    Err(mk_err())
+                }
+            }
             DfValue::BitVector(vec) => match to_ty {
                 DfType::VarBit(None) => Ok(self.clone()),
                 DfType::VarBit(max_size_opt) => match max_size_opt {
@@ -527,7 +536,7 @@ impl DfValue {
                 },
                 _ => Err(mk_err()),
             },
-            DfValue::Time(_) | DfValue::ByteArray(_) | DfValue::Max => Err(mk_err()),
+            DfValue::ByteArray(_) | DfValue::Max => Err(mk_err()),
             DfValue::PassThrough(ref p) => Err(ReadySetError::DfValueConversionError {
                 src_type: format!("PassThrough[{}]", p.ty),
                 target_type: to_ty.to_string(),

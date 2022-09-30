@@ -81,7 +81,7 @@ where
         DfType::Float(_) => Ok(DfValue::Float(val.to_f32())),
         DfType::Double => Ok(DfValue::Double(val.to_f64())),
 
-        DfType::Text { .. } => Ok(val.to_string().into()),
+        DfType::Text(collation) => Ok(DfValue::from_str_and_collation(&val.to_string(), collation)),
 
         DfType::VarChar(l, ..) => {
             let mut val = val.to_string();

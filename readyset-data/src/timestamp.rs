@@ -371,7 +371,10 @@ impl TimestampTz {
                 self.to_chrono().naive_local() != NaiveDate::from_ymd(0, 0, 0).and_hms(0, 0, 0),
             )),
 
-            DfType::Text { .. } => Ok(self.to_string().into()),
+            DfType::Text(collation) => Ok(DfValue::from_str_and_collation(
+                &self.to_string(),
+                collation,
+            )),
             DfType::Char(l, ..) | DfType::VarChar(l, ..) => {
                 let mut string = self.to_string();
                 string.truncate(l as usize);
