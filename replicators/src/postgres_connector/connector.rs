@@ -13,7 +13,6 @@ use super::wal_reader::{WalEvent, WalReader};
 use super::{PostgresPosition, PUBLICATION_NAME, REPLICATION_SLOT};
 use crate::noria_adapter::{Connector, ReplicationAction};
 use crate::postgres_connector::wal::WalError;
-use crate::table_filter::TableFilter;
 use crate::Config;
 
 /// A connector that connects to a PostgreSQL server and starts reading WAL from the "noria"
@@ -41,8 +40,6 @@ pub struct PostgresWalConnector {
     next_position: Option<PostgresPosition>,
     /// The replication slot if was created for this connector
     pub(crate) replication_slot: Option<CreatedSlot>,
-    /// Table filter to ignore rows for filtered tables
-    table_filter: TableFilter,
 }
 
 /// The decoded response to `IDENTIFY_SYSTEM`
@@ -87,7 +84,6 @@ impl PostgresWalConnector {
         dbname: S,
         config: Config,
         next_position: Option<PostgresPosition>,
-        table_filter: TableFilter,
         tls_connector: MakeTlsConnector,
     ) -> ReadySetResult<Self> {
         if !config.disable_setup_ddl_replication {
@@ -105,7 +101,6 @@ impl PostgresWalConnector {
             peek: None,
             next_position,
             replication_slot: None,
-            table_filter,
         };
 
         if next_position.is_none() {
@@ -445,11 +440,9 @@ impl Connector for PostgresWalConnector {
                 Some(event) => event,
                 None => match self.next_event().await {
                     Ok(ev) => ev,
-                    Err(WalError::UnsupportedTypeConversion { schema, table, .. })
-                        if !self.table_filter.contains(&schema[..], &table[..]) =>
-                    {
-                        // Skip events that failed to parse for tables that we ignore, since we
-                        // don't really care
+                    Err(WalError::UnsupportedTypeConversion { .. }) => {
+                        // ReadySet will skip replicate tables with unsupported types (e.g.
+                        // Postgres's user defined types). RS will leverage the fallback instead.
                         continue;
                     }
                     Err(err) => return Err(err.into()),

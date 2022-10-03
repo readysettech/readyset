@@ -6,7 +6,7 @@ use itertools::Itertools;
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::character::complete::digit1;
-use nom::combinator::{map, map_parser, opt};
+use nom::combinator::{map, map_parser, not, opt};
 use nom::error::{ErrorKind, ParseError};
 use nom::multi::{fold_many0, separated_list0};
 use nom::sequence::{delimited, preceded, terminated, tuple};
@@ -19,7 +19,7 @@ use triomphe::ThinArc;
 
 use crate::common::{ws_sep_comma, Sign};
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{literal, Dialect, Literal};
+use crate::{literal, Dialect, Literal, SqlIdentifier};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize, Arbitrary)]
 pub enum SqlType {
@@ -76,6 +76,8 @@ pub enum SqlType {
     Serial,
     BigSerial,
     Array(Box<SqlType>),
+    /// Used in this context for Postgres's user defined types
+    PassThrough(SqlIdentifier),
 }
 
 impl SqlType {
@@ -219,6 +221,7 @@ impl fmt::Display for SqlType {
             SqlType::Serial => write!(f, "SERIAL"),
             SqlType::BigSerial => write!(f, "BIGSERIAL"),
             SqlType::Array(ref t) => write!(f, "{}[]", t),
+            SqlType::PassThrough(ref t) => write!(f, "{t}"),
         }
     }
 }
@@ -619,8 +622,31 @@ fn type_identifier_part2(i: &[u8]) -> IResult<&[u8], SqlType> {
     ))(i)
 }
 
-fn type_identifier_part3(i: &[u8]) -> IResult<&[u8], SqlType> {
-    alt((map(tag_no_case("citext"), |_| SqlType::Citext),))(i)
+fn type_identifier_part3(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlType> {
+    move |i| {
+        alt((
+            map(tag_no_case("citext"), |_| SqlType::Citext),
+            map(
+                preceded(
+                    // TODO(ENG-1910): We can remove this filter when ReadySet fully support the
+                    // PostgreSQL quoted-char type
+                    not(tag_no_case("\"char\"")),
+                    pass_through_type(dialect),
+                ),
+                SqlType::PassThrough,
+            ),
+        ))(i)
+    }
+}
+
+fn pass_through_type(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], crate::SqlIdentifier> {
+    move |i| match dialect {
+        Dialect::PostgreSQL => dialect.identifier()(i),
+        Dialect::MySQL => Err(nom::Err::Error(ParseError::from_error_kind(
+            i,
+            ErrorKind::IsNot,
+        ))),
+    }
 }
 
 fn array_suffix(i: &[u8]) -> IResult<&[u8], ()> {
@@ -637,7 +663,7 @@ fn type_identifier_no_arrays(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8
         alt((
             type_identifier_part1(dialect),
             type_identifier_part2,
-            type_identifier_part3,
+            type_identifier_part3(dialect),
         ))(i)
     }
 }
@@ -958,6 +984,12 @@ mod tests {
                 b"time without time zone"
             );
             assert_eq!(res, SqlType::Time);
+        }
+
+        #[test]
+        fn unsupported_passthrough() {
+            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"unsupportedtype");
+            assert_eq!(res, SqlType::PassThrough("unsupportedtype".into()));
         }
 
         #[test]

@@ -84,7 +84,7 @@ pub fn type_to_pgsql(col_type: &SqlType) -> Result<pgsql::types::Type, Error> {
         SqlType::Time => Ok(Type::TIME),
         SqlType::UnsignedInt(_) => unsupported_type!(),
         SqlType::UnsignedBigInt(_) => unsupported_type!(),
-        SqlType::TinyInt(_) => unsupported_type!(),
+        SqlType::TinyInt(_) => Ok(Type::CHAR),
         SqlType::UnsignedTinyInt(_) => unsupported_type!(),
         SqlType::UnsignedSmallInt(_) => unsupported_type!(),
         // Temporary workaround until we use `DfType` here and propagate dialect info (ENG-1418).
@@ -127,7 +127,7 @@ pub fn type_to_pgsql(col_type: &SqlType) -> Result<pgsql::types::Type, Error> {
         SqlType::Array(box SqlType::Time) => Ok(Type::TIME_ARRAY),
         SqlType::Array(box SqlType::UnsignedInt(_)) => unsupported_type!(),
         SqlType::Array(box SqlType::UnsignedBigInt(_)) => unsupported_type!(),
-        SqlType::Array(box SqlType::TinyInt(_)) => unsupported_type!(),
+        SqlType::Array(box SqlType::TinyInt(_)) => Ok(Type::CHAR),
         SqlType::Array(box SqlType::UnsignedTinyInt(_)) => unsupported_type!(),
         SqlType::Array(box SqlType::UnsignedSmallInt(_)) => unsupported_type!(),
         SqlType::Array(box SqlType::Blob) => unsupported_type!(),
@@ -153,5 +153,7 @@ pub fn type_to_pgsql(col_type: &SqlType) -> Result<pgsql::types::Type, Error> {
         SqlType::Array(box SqlType::Serial) => Ok(Type::INT4_ARRAY),
         SqlType::Array(box SqlType::BigSerial) => Ok(Type::INT8_ARRAY),
         SqlType::Array(box SqlType::Array(_)) => unsupported_type!(),
+        SqlType::Array(box SqlType::PassThrough(_)) => unsupported_type!(),
+        SqlType::PassThrough(_) => unsupported_type!(),
     }
 }

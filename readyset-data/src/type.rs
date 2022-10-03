@@ -2,8 +2,7 @@ use std::fmt;
 
 use enum_kinds::EnumKind;
 use itertools::Itertools;
-use nom_sql::{Dialect, EnumType, Literal, SqlType};
-// use readyset_errors::{internal, ReadySetError};
+use nom_sql::{Dialect, EnumType, Literal, SqlIdentifier, SqlType};
 use serde::{Deserialize, Serialize};
 
 use crate::Collation;
@@ -164,6 +163,10 @@ pub enum DfType {
 
     /// [PostgreSQL `jsonb`](https://www.postgresql.org/docs/current/datatype-json.html).
     Jsonb,
+
+    /// PostgreSQL fallback type, enabling the adapter to funnel arbitrary types to/from upstream.
+    /// These types are uncachable and effectively blackboxes to ReadySet.
+    PassThrough(SqlIdentifier),
 }
 
 /// Defaults.
@@ -280,6 +283,7 @@ impl DfType {
             MacAddr => Self::MacAddr,
             Inet => Self::Inet,
             Citext => Self::Text(Collation::Citext),
+            PassThrough(ref id) => Self::PassThrough(id.to_owned()),
         }
     }
 
@@ -344,6 +348,7 @@ impl DfType {
 
             Self::Json(_) => Json,
             Self::Jsonb => Jsonb,
+            Self::PassThrough(ref t) => SqlType::PassThrough(t.to_owned()),
         })
     }
 }
@@ -366,7 +371,7 @@ impl DfType {
 
         match *self {
             Binary(_) | VarBinary(_) | Date => Some(Dialect::MySQL),
-            Array(_) | TimestampTz { .. } | Jsonb | Inet | Uuid | MacAddr => {
+            Array(_) | TimestampTz { .. } | Jsonb | Inet | Uuid | MacAddr | PassThrough(_) => {
                 Some(Dialect::PostgreSQL)
             }
 
@@ -428,6 +433,7 @@ impl DfType {
             DfType::Uuid | DfType::Enum(_, _) | DfType::Json(_) | DfType::Jsonb => {
                 PgTypeCategory::UserDefined
             }
+            DfType::PassThrough(_) => PgTypeCategory::Unknown,
         }
     }
 
@@ -648,6 +654,7 @@ impl fmt::Display for DfType {
             | Self::Jsonb => write!(f, "{kind:?}"),
 
             Self::Array(ref ty) => write!(f, "{ty}[]"),
+            Self::PassThrough(ref ty) => write!(f, "PassThrough({ty})"),
 
             Self::Char(n, ..)
             | Self::VarChar(n, ..)

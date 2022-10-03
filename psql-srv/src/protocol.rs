@@ -2,10 +2,10 @@ use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use postgres_protocol::Oid;
 use postgres_types::{Kind, Type};
 use smallvec::smallvec;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tracing::error;
 
 use crate::bytes::BytesStr;
 use crate::channel::Channel;
@@ -86,6 +86,11 @@ pub struct Protocol {
     /// frontend for the prepared statement's parameters. This `HashMap` contains these parameter
     /// values as well as metadata about the portal, and is keyed by the portal's name.
     portals: HashMap<String, PortalData>,
+
+    /// Stores a mapping of Oid -> type lengths, used for when ReadySet encounters an
+    /// unsupported/custom type. On the first instance of such a type, the hashmap will be
+    /// populated with the data from pg_catalog.pg_type.
+    extended_types: HashMap<Oid, i16>,
 }
 
 /// A prepared statement allows a frontend to specify the general form of a SQL statement while
@@ -117,6 +122,7 @@ impl Protocol {
             state: State::StartingUp,
             prepared_statements: HashMap::new(),
             portals: HashMap::new(),
+            extended_types: HashMap::new(),
         }
     }
 
@@ -290,12 +296,16 @@ impl Protocol {
                 // A request to describe either a prepared statement or a portal.
                 Describe { name } => match name {
                     Portal(name) => {
+                        let Protocol {
+                            portals,
+                            extended_types,
+                            ..
+                        } = self;
                         let PortalData {
                             prepared_statement_name,
                             result_transfer_formats,
                             ..
-                        } = self
-                            .portals
+                        } = portals
                             .get(name.borrow() as &str)
                             .ok_or_else(|| Error::MissingPortal(name.to_string()))?;
                         let PreparedStatementData { row_schema, .. } = self
@@ -305,34 +315,46 @@ impl Protocol {
                                 Error::InternalError("missing prepared statement".to_string())
                             })?;
                         debug_assert_eq!(row_schema.len(), result_transfer_formats.len());
-                        Ok(Response::Message(RowDescription {
-                            field_descriptions: row_schema
-                                .iter()
-                                .zip(result_transfer_formats.iter())
-                                .map(|(i, f)| make_field_description(i, *f))
-                                .collect::<Result<Vec<FieldDescription>, Error>>()?,
-                        }))
+                        let mut field_descriptions = Vec::with_capacity(row_schema.len());
+                        for (i, f) in row_schema.iter().zip(result_transfer_formats.iter()) {
+                            field_descriptions.push(
+                                make_field_description(i, *f, backend, extended_types).await?,
+                            );
+                        }
+                        Ok(Response::Message(RowDescription { field_descriptions }))
                     }
 
                     PreparedStatement(name) => {
+                        let Protocol {
+                            prepared_statements,
+                            extended_types,
+                            ..
+                        } = self;
                         let PreparedStatementData {
                             param_schema,
                             row_schema,
                             ..
-                        } = self
-                            .prepared_statements
+                        } = prepared_statements
                             .get(name.borrow() as &str)
                             .ok_or_else(|| Error::MissingPreparedStatement(name.to_string()))?;
+
+                        let mut field_descriptions = Vec::with_capacity(row_schema.len());
+                        for i in row_schema {
+                            field_descriptions.push(
+                                make_field_description(
+                                    i,
+                                    TRANSFER_FORMAT_PLACEHOLDER,
+                                    backend,
+                                    extended_types,
+                                )
+                                .await?,
+                            );
+                        }
                         Ok(Response::Messages(smallvec![
                             ParameterDescription {
                                 parameter_data_types: param_schema.clone(),
                             },
-                            RowDescription {
-                                field_descriptions: row_schema
-                                    .iter()
-                                    .map(|i| make_field_description(i, TRANSFER_FORMAT_PLACEHOLDER))
-                                    .collect::<Result<Vec<FieldDescription>, Error>>()?,
-                            },
+                            RowDescription { field_descriptions },
                         ]))
                     }
                 },
@@ -380,13 +402,16 @@ impl Protocol {
                 Query { query } => {
                     let response = backend.on_query(query.borrow()).await?;
                     if let Select { schema, resultset } = response {
+                        let mut field_descriptions = Vec::with_capacity(schema.len());
+                        for i in schema {
+                            field_descriptions.push(
+                                make_field_description(&i, Text, backend, &mut self.extended_types)
+                                    .await?,
+                            );
+                        }
+
                         Ok(Response::Select {
-                            header: Some(RowDescription {
-                                field_descriptions: schema
-                                    .iter()
-                                    .map(|i| make_field_description(i, Text))
-                                    .collect::<Result<Vec<FieldDescription>, Error>>()?,
-                            }),
+                            header: Some(RowDescription { field_descriptions }),
                             resultset,
                             result_transfer_formats: None,
                             trailer: Some(BackendMessage::ready_for_query_idle()),
@@ -500,9 +525,38 @@ fn make_error_response<R>(error: Error) -> BackendMessage<R> {
     }
 }
 
-fn make_field_description(
+async fn load_extended_types<B: Backend>(backend: &mut B) -> Result<HashMap<Oid, i16>, Error> {
+    let response = backend
+        .on_query("select oid, typlen from pg_catalog.pg_type")
+        .await?;
+    let resultset = match response {
+        Select {
+            schema: _,
+            resultset,
+        } => resultset,
+        _ => todo!(),
+    };
+    let mut types = HashMap::new();
+    for row in resultset.into_iter() {
+        let cols: Result<Vec<Value>, Error> = row.into_iter().map(|x| x.try_into()).collect();
+        let cols = cols?;
+        match cols.as_slice() {
+            [Value::Oid(oid), Value::SmallInt(typlen)] => types.insert(*oid, *typlen),
+            _ => {
+                return Err(Error::InternalError(
+                    "Failed while loading extended type information".into(),
+                ))
+            }
+        };
+    }
+    Ok(types)
+}
+
+async fn make_field_description<B: Backend>(
     col: &Column,
     transfer_format: TransferFormat,
+    backend: &mut B,
+    extended_types: &mut HashMap<Oid, i16>,
 ) -> Result<FieldDescription, Error> {
     let data_type_size = match col.col_type.kind() {
         Kind::Array(_) => TYPLEN_VARLENA,
@@ -600,9 +654,14 @@ fn make_field_description(
             Type::XID8 => TYPLEN_8,
             Type::ANYCOMPATIBLE => TYPLEN_4,
             Type::ANYCOMPATIBLE_RANGE => TYPLEN_VARLENA,
-            _ => {
-                error!(?col, "Couldn't make field description");
-                return Err(Error::UnsupportedType(col.col_type.clone()));
+            ref ty => {
+                if extended_types.is_empty() {
+                    *extended_types = load_extended_types(backend).await?;
+                }
+                extended_types
+                    .get(&ty.oid())
+                    .cloned()
+                    .ok_or_else(|| Error::UnsupportedType(col.col_type.clone()))?
             }
         },
     };
@@ -617,6 +676,7 @@ fn make_field_description(
         transfer_format,
     })
 }
+
 #[cfg(test)]
 mod tests {
 

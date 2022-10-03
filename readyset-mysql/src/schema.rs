@@ -123,6 +123,7 @@ pub(crate) fn convert_column(
         SqlType::BigSerial => MYSQL_TYPE_LONGLONG,
         SqlType::Citext => unsupported!("MySQL does not support CITEXT"),
         SqlType::Array(_) => unsupported!("MySQL does not support arrays"),
+        SqlType::PassThrough(_) => unsupported!("MySQL does not support PassThrough types"),
     };
 
     for c in &col.constraints {

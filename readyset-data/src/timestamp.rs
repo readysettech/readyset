@@ -412,6 +412,10 @@ impl TimestampTz {
                 target_type: format!("{:?}", to_ty),
                 details: "Not allowed".to_string(),
             }),
+            DfType::PassThrough(ref ty) => Err(ReadySetError::PassThroughConversionError {
+                target_contained: ty.to_string(),
+                src_type: "DfValue::TimestampTz".to_string(),
+            }),
         }
     }
 }

@@ -189,5 +189,9 @@ where
             target_type: to_ty.to_string(),
             details: "Not allowed".to_string(),
         }),
+        DfType::PassThrough(ref ty) => Err(ReadySetError::PassThroughConversionError {
+            target_contained: ty.to_string(),
+            src_type: from_ty.to_string(),
+        }),
     }
 }

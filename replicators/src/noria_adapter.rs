@@ -489,7 +489,6 @@ impl NoriaAdapter {
                 dbname,
                 config,
                 pos,
-                table_filter.clone(),
                 tls_connector.clone(),
             )
             .await?,
