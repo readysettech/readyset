@@ -52,7 +52,7 @@ pub enum SqlType {
     Text,
     Date,
     DateTime(#[strategy(proptest::option::of(1..=6u16))] Option<u16>),
-    // FIXME(ENG-1832): Parse fractional seconds part (FSP).
+    // FIXME(ENG-1832): Parse subsecond digit count.
     Time,
     Timestamp,
     TimestampTz,
@@ -192,7 +192,7 @@ impl fmt::Display for SqlType {
             SqlType::LongText => write!(f, "LONGTEXT"),
             SqlType::Text => write!(f, "TEXT"),
             SqlType::Date => write!(f, "DATE"),
-            SqlType::DateTime(len) => write_with_len(f, "DATETIME", len),
+            SqlType::DateTime(subsecond_digits) => write_with_len(f, "DATETIME", subsecond_digits),
             SqlType::Time => write!(f, "TIME"),
             SqlType::Timestamp => write!(f, "TIMESTAMP"),
             SqlType::TimestampTz => write!(f, "TIMESTAMP WITH TIME ZONE"),
@@ -461,9 +461,10 @@ fn type_identifier_first_half(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u
             map(alt((tag_no_case("boolean"), tag_no_case("bool"))), |_| {
                 SqlType::Bool
             }),
-            map(preceded(tag_no_case("datetime"), opt(delim_u16)), |fsp| {
-                SqlType::DateTime(fsp)
-            }),
+            map(
+                preceded(tag_no_case("datetime"), opt(delim_u16)),
+                SqlType::DateTime,
+            ),
             map(tag_no_case("date"), |_| SqlType::Date),
             map(
                 tuple((

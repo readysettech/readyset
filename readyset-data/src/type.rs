@@ -9,6 +9,9 @@ use serde::{Deserialize, Serialize};
 use crate::Collation;
 
 /// Dataflow runtime representation of [`SqlType`].
+///
+/// Time types contain a `subsecond_digits` property, also known as fractional seconds precision
+/// (FSP). It must be between 0 through 6, and defaults to [`Dialect::default_subsecond_digits`].
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, EnumKind)]
 #[enum_kind(DfTypeKind)]
 pub enum DfType {
@@ -128,26 +131,17 @@ pub enum DfType {
     Date,
 
     /// [MySQL `datetime`](https://dev.mysql.com/doc/refman/8.0/en/datetime.html).
-    ///
-    /// The parameter determines the fractional seconds part (FSP),
-    /// [which has a default value of 0](https://dev.mysql.com/doc/refman/8.0/en/date-and-time-type-syntax.html).
-    DateTime(u16),
+    DateTime { subsecond_digits: u16 },
 
     /// [MySQL `time`](https://dev.mysql.com/doc/refman/8.0/en/datetime.html).
-    ///
-    /// The parameter determines the fractional seconds part (FSP),
-    /// [which has a default value of 0](https://dev.mysql.com/doc/refman/8.0/en/date-and-time-type-syntax.html).
-    Time(u16),
+    Time { subsecond_digits: u16 },
 
     /// [MySQL `timestamp`](https://dev.mysql.com/doc/refman/8.0/en/datetime.html) or
     /// [PostgreSQL `timestamp`](https://www.postgresql.org/docs/current/datatype-datetime.html).
-    ///
-    /// The parameter determines the fractional seconds part (FSP),
-    /// [which has a default value of 0](https://dev.mysql.com/doc/refman/8.0/en/date-and-time-type-syntax.html).
-    Timestamp(u16),
+    Timestamp { subsecond_digits: u16 },
 
-    /// [PostgreSQL `timestamptz`/`timestamp with timezone`]().
-    TimestampTz(u16),
+    /// [PostgreSQL `timestamptz`/`timestamp with timezone`](https://www.postgresql.org/docs/current/datatype-datetime.html).
+    TimestampTz { subsecond_digits: u16 },
 
     /// [PostgreSQL `macaddr`](https://www.postgresql.org/docs/current/datatype-net-types.html).
     MacAddr,
@@ -267,10 +261,18 @@ impl DfType {
 
             Date => Self::Date,
             #[allow(clippy::or_fun_call)]
-            DateTime(fsp) => Self::DateTime(fsp.unwrap_or(dialect.default_datetime_precision())),
-            Time => Self::Time(dialect.default_datetime_precision()),
-            Timestamp => Self::Timestamp(dialect.default_datetime_precision()),
-            TimestampTz => Self::TimestampTz(dialect.default_datetime_precision()),
+            DateTime(subsecond_digits) => Self::DateTime {
+                subsecond_digits: subsecond_digits.unwrap_or(dialect.default_subsecond_digits()),
+            },
+            Time => Self::Time {
+                subsecond_digits: dialect.default_subsecond_digits(),
+            },
+            Timestamp => Self::Timestamp {
+                subsecond_digits: dialect.default_subsecond_digits(),
+            },
+            TimestampTz => Self::TimestampTz {
+                subsecond_digits: dialect.default_subsecond_digits(),
+            },
 
             Uuid => Self::Uuid,
             MacAddr => Self::MacAddr,
@@ -324,10 +326,10 @@ impl DfType {
             Self::VarBit(n) => VarBit(n),
 
             Self::Date => Date,
-            Self::DateTime(fsp) => DateTime(Some(fsp)),
-            Self::Time(_) => Time,
-            Self::Timestamp(_) => Timestamp,
-            Self::TimestampTz(_) => TimestampTz,
+            Self::DateTime { subsecond_digits } => DateTime(Some(subsecond_digits)),
+            Self::Time { .. } => Time,
+            Self::Timestamp { .. } => Timestamp,
+            Self::TimestampTz { .. } => TimestampTz,
 
             Self::MacAddr => MacAddr,
             Self::Inet => Inet,
@@ -360,7 +362,9 @@ impl DfType {
 
         match *self {
             Binary(_) | VarBinary(_) | Date => Some(Dialect::MySQL),
-            Array(_) | TimestampTz(_) | Jsonb | Inet | Uuid | MacAddr => Some(Dialect::PostgreSQL),
+            Array(_) | TimestampTz { .. } | Jsonb | Inet | Uuid | MacAddr => {
+                Some(Dialect::PostgreSQL)
+            }
 
             Float(d) | Enum(.., d) | Char(.., d) | Blob(d) | Json(d) => Some(d),
 
@@ -380,9 +384,9 @@ impl DfType {
             | VarChar { .. }
             | Bit(_)
             | VarBit(_)
-            | DateTime(_)
-            | Time(_)
-            | Timestamp(_) => None,
+            | DateTime { .. }
+            | Time { .. }
+            | Timestamp { .. } => None,
         }
     }
 
@@ -545,10 +549,10 @@ impl fmt::Display for DfType {
             | Self::VarBinary(n)
             | Self::Bit(n)
             | Self::VarBit(Some(n))
-            | Self::DateTime(n)
-            | Self::Time(n)
-            | Self::Timestamp(n)
-            | Self::TimestampTz(n) => write!(f, "{kind:?}({n})"),
+            | Self::DateTime { subsecond_digits: n }
+            | Self::Time { subsecond_digits: n }
+            | Self::Timestamp { subsecond_digits: n }
+            | Self::TimestampTz { subsecond_digits: n } => write!(f, "{kind:?}({n})"),
 
             Self::Enum(ref variants, _) => write!(f, "{kind:?}({})", variants.iter().join(", ")),
             Self::Numeric { prec, scale } => write!(f, "{kind:?}({prec}, {scale})"),
@@ -577,7 +581,7 @@ mod tests {
     #[test]
     fn to_sql_type() {
         let len: u16 = 42;
-        let fsp: u16 = 6;
+        let subsecond_digits: u16 = 6;
 
         let cases: &[(DfType, Option<SqlType>)] = &[
             (DfType::Unknown, None),
@@ -626,10 +630,19 @@ mod tests {
             (DfType::Bit(len), Some(SqlType::Bit(Some(len)))),
             (DfType::VarBit(Some(len)), Some(SqlType::VarBit(Some(len)))),
             (DfType::Date, Some(SqlType::Date)),
-            (DfType::DateTime(fsp), Some(SqlType::DateTime(Some(fsp)))),
-            (DfType::Time(fsp), Some(SqlType::Time)),
-            (DfType::Timestamp(fsp), Some(SqlType::Timestamp)),
-            (DfType::TimestampTz(fsp), Some(SqlType::TimestampTz)),
+            (
+                DfType::DateTime { subsecond_digits },
+                Some(SqlType::DateTime(Some(subsecond_digits))),
+            ),
+            (DfType::Time { subsecond_digits }, Some(SqlType::Time)),
+            (
+                DfType::Timestamp { subsecond_digits },
+                Some(SqlType::Timestamp),
+            ),
+            (
+                DfType::TimestampTz { subsecond_digits },
+                Some(SqlType::TimestampTz),
+            ),
             (DfType::MacAddr, Some(SqlType::MacAddr)),
             (DfType::Inet, Some(SqlType::Inet)),
             (DfType::Uuid, Some(SqlType::Uuid)),

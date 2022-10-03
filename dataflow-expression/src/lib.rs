@@ -106,7 +106,9 @@ impl BuiltinFunction {
                 Ok((
                     Self::Timediff(next_arg()?, next_arg()?),
                     // type is always time
-                    DfType::Time(dialect.default_datetime_precision()),
+                    DfType::Time {
+                        subsecond_digits: dialect.default_subsecond_digits(),
+                    },
                 ))
             }
             "addtime" => {

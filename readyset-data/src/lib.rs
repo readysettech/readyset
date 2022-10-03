@@ -385,15 +385,17 @@ impl DfValue {
             Self::Double(_) => Double,
             Self::Text(_) | Self::TinyText(_) => DfType::Text(/* TODO */ Collation::default()),
             Self::TimestampTz(ts) => {
-                let fsp = u16::from(ts.get_microsecond_precision());
+                let subsecond_digits = u16::from(ts.subsecond_digits());
                 if ts.has_timezone() {
-                    TimestampTz(fsp)
+                    TimestampTz { subsecond_digits }
                 } else {
-                    Timestamp(fsp)
+                    Timestamp { subsecond_digits }
                 }
             }
-            // TODO(ENG-1833): Make this based off of the time value.
-            Self::Time(_) => Time(dialect.default_datetime_precision()),
+            Self::Time(_) => Time {
+                // TODO(ENG-1833): Make this based off of the time value.
+                subsecond_digits: dialect.default_subsecond_digits(),
+            },
             Self::ByteArray(_) => Blob(dialect),
             Self::Numeric(_) => DfType::DEFAULT_NUMERIC,
             Self::BitVector(_) => VarBit(None),

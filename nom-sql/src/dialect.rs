@@ -231,12 +231,12 @@ impl Dialect {
         }
     }
 
-    /// Returns the default fractional second part (FSP) value for temporal types.
+    /// Returns the default subsecond digit count for time types.
     ///
-    /// This value can be queried via `datetime_precision` in
-    /// [`information_schema.columns`](https://dev.mysql.com/doc/refman/8.0/en/information-schema-columns-table.html).
+    /// This value is also known as fractional second precision (FSP), and can be queried via
+    /// `datetime_precision` in [`information_schema.columns`](https://dev.mysql.com/doc/refman/8.0/en/information-schema-columns-table.html).
     #[inline]
-    pub fn default_datetime_precision(self) -> u16 {
+    pub fn default_subsecond_digits(self) -> u16 {
         match self {
             // https://dev.mysql.com/doc/refman/8.0/en/date-and-time-type-syntax.html
             // "If omitted, the default precision is 0. (This differs from the standard SQL default

@@ -35,15 +35,15 @@ pub const DATE_FORMAT: &str = "%Y-%m-%d";
 /// Externally this type behaves like a [`chrono::DateTime<Tz>`], since it casts
 /// itself to that type except for storage. The only difference is in how [`fmt::Display`]
 /// behaves. It knows to properly format to whatever inner representation is appropriate,
-/// i.e. date only, timestamp with timezone, timestamp with microsecond precision etc.
+/// i.e. date only, timestamp with timezone, timestamp with subsecond digits etc.
 ///
-/// Sadly the way chrono implements DateTime<Tz> occupies at least 16 bytes, and therefore
+/// Sadly the way chrono implements `DateTime<Tz>` occupies at least 16 bytes, and therefore
 /// overflows DfValue. So this type internally stores a [`NaiveDateTime`] with a 3 byte
 /// of extra data. Since 3 bytes allow us to store 24 bytes, this is how we use them:
 ///
 /// 17 bits for the timezone offset (0 to 86_400)
 /// 1 bit to signify negative offset
-/// 3 bits for the microsecond precision requiered
+/// 3 bits for the subsecond digit count required
 /// 1 bit to signify this is DATE only
 /// 1 bit to signify timezone offset is present (since 0 is a valid offset)
 /// 1 bit unused - available for future use
@@ -57,16 +57,11 @@ pub struct TimestampTz {
 }
 
 impl TimestampTz {
-    #[rustfmt::skip]
-    const TIMEZONE_FLAG: u8 =     0b_0100_0000;
-    #[rustfmt::skip]
-    const DATE_FLAG: u8 =         0b_0010_0000;
-    #[rustfmt::skip]
-    const MICROSECONDS_BITS: u8 = 0b_0001_1100;
-    #[rustfmt::skip]
-    const NEGATIVE_FLAG: u8 =     0b_0000_0010;
-    #[rustfmt::skip]
-    const TOP_OFFSET_BIT: u8 =    0b_0000_0001;
+    const TIMEZONE_FLAG: u8 = 0b_0100_0000;
+    const DATE_FLAG: u8 = 0b_0010_0000;
+    const SUBSECOND_DIGITS_BITS: u8 = 0b_0001_1100;
+    const NEGATIVE_FLAG: u8 = 0b_0000_0010;
+    const TOP_OFFSET_BIT: u8 = 0b_0000_0001;
 
     /// Returns true if the contained offset should be negated
     #[inline(always)]
@@ -127,19 +122,19 @@ impl TimestampTz {
         self.extra[2] |= TimestampTz::TIMEZONE_FLAG;
     }
 
-    /// Return the desired precison when displaying sub microseconds
+    /// Return the desired precision when displaying subseconds.
     #[inline(always)]
-    pub fn get_microsecond_precision(&self) -> u8 {
-        (self.extra[2] & TimestampTz::MICROSECONDS_BITS)
-            >> TimestampTz::MICROSECONDS_BITS.trailing_zeros()
+    pub fn subsecond_digits(&self) -> u8 {
+        (self.extra[2] & TimestampTz::SUBSECOND_DIGITS_BITS)
+            >> TimestampTz::SUBSECOND_DIGITS_BITS.trailing_zeros()
     }
 
-    /// Set the desired precison when displaying sub microseconds
+    /// Set the desired precision when displaying subseconds.
     #[inline(always)]
-    fn set_microsecond_precision(&mut self, precision: u8) {
-        self.extra[2] = ((precision << TimestampTz::MICROSECONDS_BITS.trailing_zeros())
-            & TimestampTz::MICROSECONDS_BITS)
-            | (self.extra[2] & !TimestampTz::MICROSECONDS_BITS);
+    fn set_subsecond_digits(&mut self, count: u8) {
+        self.extra[2] = ((count << TimestampTz::SUBSECOND_DIGITS_BITS.trailing_zeros())
+            & TimestampTz::SUBSECOND_DIGITS_BITS)
+            | (self.extra[2] & !TimestampTz::SUBSECOND_DIGITS_BITS);
     }
 }
 
@@ -169,11 +164,11 @@ impl fmt::Display for TimestampTz {
             write!(f, "{}", ts.format(TIMESTAMP_FORMAT))?;
         }
 
-        if self.get_microsecond_precision() > 0 {
+        if self.subsecond_digits() > 0 {
             let micros = ts.time().nanosecond() / 1000;
             let micros_str = format!(
                 "{1:.0$}",
-                self.get_microsecond_precision() as usize,
+                self.subsecond_digits() as usize,
                 micros as f64 * 0.000001
             );
             write!(f, "{}", &micros_str[1..])?;
@@ -335,10 +330,10 @@ impl TimestampTz {
                 ts_tz.set_offset(0);
                 Ok(DfValue::TimestampTz(ts_tz))
             }
-            SqlType::DateTime(precision) => {
+            SqlType::DateTime(subsecond_digits) => {
                 // TODO(ENG-1834): Use `DfType` so that we use the correct default precision.
                 let mut ts = *self;
-                ts.set_microsecond_precision(precision.unwrap_or(0) as u8);
+                ts.set_subsecond_digits(subsecond_digits.unwrap_or(0) as u8);
                 Ok(DfValue::TimestampTz(ts))
             }
             SqlType::Date => Ok(DfValue::TimestampTz(self.to_chrono().date().into())),
@@ -386,7 +381,7 @@ impl TimestampTz {
 
             SqlType::Json => {
                 let mut ts = *self;
-                ts.set_microsecond_precision(6); // Set max precision before json conversion
+                ts.set_subsecond_digits(6); // Set max precision before json conversion
                 Ok(DfValue::from(format!("\"{}\"", ts).as_str()))
             }
 
