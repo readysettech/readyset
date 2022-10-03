@@ -24,7 +24,6 @@ machine-uid = "0.2"
 blake2= "0.10"
 
 readyset-version = { path = "../readyset-version" }
-readyset = { path = "../readyset" }
 
 [dev_dependencies]
 tokio = { version = "1.18", features = ["macros", "time", "test-util"] }

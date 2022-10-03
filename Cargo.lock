@@ -4344,7 +4344,6 @@ dependencies = [
  "hex",
  "lazy_static",
  "machine-uid",
- "readyset",
  "readyset-tracing",
  "readyset-version",
  "reqwest",
