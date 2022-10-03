@@ -1,0 +1,48 @@
+skipif readyset
+statement ok
+create extension if not exists citext;
+
+statement ok
+create table t (id int primary key, v citext)
+
+statement ok
+insert into t (id, v) values
+(1, 'abc'),
+(2, 'AbC'),
+(3, 'äbç')
+
+# 1. Make a view
+statement ok
+create view tt as select id from t where v = 'abc'
+
+statement ok
+select id from tt
+
+graphviz
+
+query I valuesort
+select id from tt
+----
+1
+2
+
+onlyif readyset
+statement ok
+create cache from
+select id from t where v = $1
+
+graphviz
+
+query I valuesort
+select id from t where v = $1
+? = abc
+----
+1
+2
+
+query T valuesort
+select v from t where v = $1
+? = abc
+----
+AbC
+abc
