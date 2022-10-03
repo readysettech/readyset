@@ -5,6 +5,7 @@ use std::convert::TryInto;
 use std::mem;
 use std::num::NonZeroUsize;
 
+use dataflow_state::PointKey;
 use itertools::Itertools;
 use launchpad::Indices;
 use maplit::hashmap;
@@ -148,7 +149,7 @@ impl TopK {
                 match self.lookup(
                     *self.src,
                     &self.group_by,
-                    &KeyType::from(current_group_key.iter()),
+                    &PointKey::from(current_group_key.iter()),
                     nodes,
                     state,
                     LookupMode::Strict,
@@ -316,7 +317,7 @@ impl Ingredient for TopK {
                 current_group_key.extend(self.project_group(r.rec())?.into_iter().cloned());
 
                 // check out current state
-                match db.lookup(&self.group_by[..], &KeyType::from(&current_group_key[..])) {
+                match db.lookup(&self.group_by[..], &PointKey::from(&current_group_key[..])) {
                     LookupResult::Some(local_records) => {
                         if replay.is_partial() {
                             lookups.push(Lookup {

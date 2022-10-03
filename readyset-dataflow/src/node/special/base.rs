@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 
-use dataflow_state::SnapshotMode;
+use dataflow_state::{PointKey, SnapshotMode};
 use itertools::Itertools;
 use launchpad::redacted::Sensitive;
 use launchpad::Indices;
@@ -353,7 +353,7 @@ impl Base {
                     Some(TouchedKey::Inserted(row)) => Some(row.clone()), /* Row was added in previous iteration */
                     Some(TouchedKey::Deleted) => None,                    /* Row was deleted */
                     // previously
-                    None => match db.lookup(key_cols, &KeyType::from(&key)) {
+                    None => match db.lookup(key_cols, &PointKey::from(&key)) {
                         LookupResult::Missing => internal!(),
                         LookupResult::Some(rows) if rows.is_empty() => None,
                         LookupResult::Some(rows) if rows.len() == 1 => rows.into_iter().next(),

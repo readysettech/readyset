@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 
 use dataflow_expression::Expr;
+use dataflow_state::PointKey;
 use readyset_errors::ReadySetResult;
 use serde::{Deserialize, Serialize};
 use tracing::error;
@@ -64,7 +65,7 @@ impl Ingredient for Project {
     fn query_through<'a>(
         &self,
         columns: &[usize],
-        key: &KeyType,
+        key: &PointKey,
         nodes: &DomainNodes,
         states: &'a StateMap,
         mode: LookupMode,
@@ -509,7 +510,7 @@ mod tests {
         let mut iter = project
             .query_through(
                 &[by_column],
-                &KeyType::Single(&key),
+                &PointKey::Single(&key),
                 &DomainNodes::default(),
                 &states,
                 LookupMode::Strict,

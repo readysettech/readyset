@@ -1,7 +1,7 @@
 use std::ops::{Bound, RangeBounds};
 use std::rc::Rc;
 
-use common::{IndexType, KeyType, RangeKey, SizeOf};
+use common::{IndexType, SizeOf};
 use itertools::Either;
 use rand::prelude::*;
 use readyset::internal::Index;
@@ -11,7 +11,7 @@ use vec1::Vec1;
 
 use crate::keyed_state::KeyedState;
 use crate::mk_key::MakeKey;
-use crate::{LookupResult, RangeLookupResult, RecordResult, Row, Rows};
+use crate::{LookupResult, PointKey, RangeKey, RangeLookupResult, RecordResult, Row, Rows};
 
 /// A single index of a [`MemoryState`].
 ///
@@ -429,7 +429,7 @@ impl SingleState {
         self.row_count == 0
     }
 
-    pub(super) fn lookup<'a>(&'a self, key: &KeyType) -> LookupResult<'a> {
+    pub(super) fn lookup<'a>(&'a self, key: &PointKey) -> LookupResult<'a> {
         if let Some(rs) = self.state.lookup(key) {
             LookupResult::Some(RecordResult::Borrowed(rs))
         } else if self.partial() {
@@ -461,7 +461,7 @@ mod tests {
     fn mark_filled_point() {
         let mut state = SingleState::new(Index::new(IndexType::BTreeMap, vec![0]), true);
         state.mark_filled(KeyComparison::Equal(vec1![0.into()]));
-        assert!(state.lookup(&KeyType::from(&[0.into()])).is_some())
+        assert!(state.lookup(&PointKey::from(&[0.into()])).is_some())
     }
 
     #[test]
@@ -471,7 +471,7 @@ mod tests {
             Bound::Included(vec1![0.into()]),
             Bound::Excluded(vec1![5.into()]),
         )));
-        assert!(state.lookup(&KeyType::from(&[0.into()])).is_some());
+        assert!(state.lookup(&PointKey::from(&[0.into()])).is_some());
         assert!(state
             .lookup_range(&RangeKey::from(&(vec1![0.into()]..vec1![5.into()])))
             .is_some());
@@ -489,7 +489,7 @@ mod tests {
             state.mark_filled(key.clone());
             state.insert_row(vec![0.into(), 1.into()].into());
             state.evict_keys(&[key]);
-            assert!(state.lookup(&KeyType::from(&[0.into()])).is_missing())
+            assert!(state.lookup(&PointKey::from(&[0.into()])).is_missing())
         }
 
         #[test]
@@ -506,7 +506,7 @@ mod tests {
 
             state.insert_row(vec![0.into(), 1.into()].into());
             state.evict_keys(&[key]);
-            assert!(state.lookup(&KeyType::from(&[0.into()])).is_missing());
+            assert!(state.lookup(&PointKey::from(&[0.into()])).is_missing());
             assert!(state
                 .lookup_range(&RangeKey::from(
                     &(vec1![DfValue::from(0)]..vec1![DfValue::from(10)])

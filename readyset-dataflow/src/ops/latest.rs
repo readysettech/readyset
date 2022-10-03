@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::convert::TryInto;
 
+use dataflow_state::PointKey;
 use maplit::hashmap;
 use readyset_errors::{internal_err, ReadySetResult};
 use serde::{Deserialize, Serialize};
@@ -79,7 +80,7 @@ impl Ingredient for Latest {
                     return None;
                 }
 
-                match db.lookup(&[self.key], &KeyType::Single(&r[self.key])) {
+                match db.lookup(&[self.key], &PointKey::Single(&r[self.key])) {
                     LookupResult::Some(rs) => {
                         if replay.is_partial() {
                             lookups.push(Lookup {

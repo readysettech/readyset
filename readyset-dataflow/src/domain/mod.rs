@@ -11,7 +11,9 @@ use std::sync::Arc;
 use std::{cell, cmp, mem, time};
 
 use ahash::RandomState;
-use dataflow_state::{EvictBytesResult, MaterializedNodeState, RangeLookupResult};
+use dataflow_state::{
+    EvictBytesResult, MaterializedNodeState, PointKey, RangeKey, RangeLookupResult,
+};
 use failpoint_macros::failpoint;
 use futures_util::future::FutureExt;
 use futures_util::stream::StreamExt;
@@ -2316,7 +2318,7 @@ impl Domain {
         let equal_keys = keys
             .iter()
             .filter_map(|k| match k {
-                KeyComparison::Equal(equal) => Some(KeyType::from(equal)),
+                KeyComparison::Equal(equal) => Some(PointKey::from(equal)),
                 KeyComparison::Range(range) => {
                     // TODO: aggregate ranges to optimize range lookups too?
                     match state.lookup_range(cols, &RangeKey::from(range)) {
@@ -2347,7 +2349,7 @@ impl Domain {
         let mut replay_keys = HashSet::new();
         // Drain misses, and keep the hits
         keys.drain_filter(|key| match key {
-            KeyComparison::Equal(equal) => match state.lookup(cols, &KeyType::from(equal)) {
+            KeyComparison::Equal(equal) => match state.lookup(cols, &PointKey::from(equal)) {
                 LookupResult::Some(record) => {
                     records.push(record);
                     false

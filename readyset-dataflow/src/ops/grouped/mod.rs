@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt;
 
+use dataflow_state::PointKey;
 use maplit::hashmap;
 use readyset_data::DfType;
 use readyset_errors::{internal_err, ReadySetResult};
@@ -235,7 +236,7 @@ where
                 let group = get_group_values(&group_by, group_rs.peek().unwrap());
 
                 let rs = {
-                    match db.lookup(&this.out_key[..], &KeyType::from(&group[..])) {
+                    match db.lookup(&this.out_key[..], &PointKey::from(&group[..])) {
                         LookupResult::Some(rs) => {
                             if replay.is_partial() {
                                 lookups.push(Lookup {
@@ -293,7 +294,7 @@ where
                             match this.lookup(
                                 *this.src,
                                 &group_by,
-                                &KeyType::from(&group[..]),
+                                &PointKey::from(&group[..]),
                                 nodes,
                                 state,
                                 LookupMode::Strict,

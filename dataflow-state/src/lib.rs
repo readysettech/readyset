@@ -1,5 +1,6 @@
 #![feature(stmt_expr_attributes, bound_map, iter_order_by, bound_as_ref)]
 
+mod key;
 mod keyed_state;
 mod memory_state;
 mod mk_key;
@@ -14,7 +15,7 @@ use std::rc::Rc;
 use std::vec;
 
 use ahash::RandomState;
-use common::{KeyType, RangeKey, Records, SizeOf, Tag};
+use common::{Records, SizeOf, Tag};
 use derive_more::From;
 use hashbag::HashBag;
 pub use partial_map::PartialMap;
@@ -24,8 +25,9 @@ use readyset::{KeyComparison, KeyCount};
 use readyset_data::DfValue;
 use readyset_errors::ReadySetResult;
 
-pub use self::memory_state::MemoryState;
-pub use self::persistent_state::{
+pub use crate::key::{PointKey, RangeKey};
+pub use crate::memory_state::MemoryState;
+pub use crate::persistent_state::{
     DurabilityMode, PersistenceParameters, PersistentState, PersistentStateHandle, SnapshotMode,
 };
 
@@ -153,7 +155,7 @@ pub trait State: SizeOf + Send {
     ///
     /// [`HashMap`]: IndexType::HashMap
     /// [`make_key`]: State::make_key
-    fn lookup<'a>(&'a self, columns: &[usize], key: &KeyType) -> LookupResult<'a>;
+    fn lookup<'a>(&'a self, columns: &[usize], key: &PointKey) -> LookupResult<'a>;
 
     /// Lookup all rows in this state where the values at the given `columns` are within the range
     /// specified by the given `key`
@@ -179,7 +181,7 @@ pub trait State: SizeOf + Send {
     /// * This method should only be called with a set of `columns` that have been previously added
     ///   as a weak key with [`add_weak_key`](State::add_weak_key)
     /// * The length of `columns` must match the length of `key`
-    fn lookup_weak<'a>(&'a self, columns: &[usize], key: &KeyType) -> Option<RecordResult<'a>>;
+    fn lookup_weak<'a>(&'a self, columns: &[usize], key: &PointKey) -> Option<RecordResult<'a>>;
 
     /// If the internal type is a `PersistentState` return a reference to itself
     fn as_persistent(&self) -> Option<&PersistentState> {
@@ -320,7 +322,7 @@ impl State for MaterializedNodeState {
         }
     }
 
-    fn lookup<'a>(&'a self, columns: &[usize], key: &KeyType) -> LookupResult<'a> {
+    fn lookup<'a>(&'a self, columns: &[usize], key: &PointKey) -> LookupResult<'a> {
         match self {
             MaterializedNodeState::Memory(ms) => ms.lookup(columns, key),
             MaterializedNodeState::Persistent(ps) => ps.lookup(columns, key),
@@ -336,7 +338,7 @@ impl State for MaterializedNodeState {
         }
     }
 
-    fn lookup_weak<'a>(&'a self, columns: &[usize], key: &KeyType) -> Option<RecordResult<'a>> {
+    fn lookup_weak<'a>(&'a self, columns: &[usize], key: &PointKey) -> Option<RecordResult<'a>> {
         match self {
             MaterializedNodeState::Memory(ms) => ms.lookup_weak(columns, key),
             MaterializedNodeState::Persistent(ps) => ps.lookup_weak(columns, key),

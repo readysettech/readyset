@@ -4,6 +4,7 @@ use std::convert::TryInto;
 use std::ops::{Bound, RangeBounds};
 use std::{iter, mem};
 
+use dataflow_state::PointKey;
 use derive_more::From;
 use launchpad::Indices;
 use readyset::KeyComparison;
@@ -727,7 +728,7 @@ where
     fn query_through<'a>(
         &self,
         _columns: &[usize],
-        _key: &KeyType,
+        _key: &PointKey,
         _nodes: &DomainNodes,
         _states: &'a StateMap,
         _mode: LookupMode,
@@ -749,7 +750,7 @@ where
         &self,
         parent_index: LocalNodeIndex,
         columns: &[usize],
-        key: &KeyType,
+        key: &PointKey,
         nodes: &DomainNodes,
         states: &'a StateMap,
         mode: LookupMode,

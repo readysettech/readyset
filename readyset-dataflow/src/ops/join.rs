@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
 
+use dataflow_state::PointKey;
 use itertools::Itertools;
 use launchpad::intervals::into_bound_endpoint;
 use launchpad::Indices;
@@ -387,7 +388,7 @@ impl Ingredient for Join {
                 let rc = self.lookup(
                     *self.right,
                     &self.on_right(),
-                    &KeyType::from(join_key.iter()),
+                    &PointKey::from(join_key.iter()),
                     nodes,
                     state,
                     lookup_mode,
@@ -429,7 +430,7 @@ impl Ingredient for Join {
                 false => self.lookup(
                     other,
                     &other_key,
-                    &KeyType::from(join_key.iter()),
+                    &PointKey::from(join_key.iter()),
                     nodes,
                     state,
                     lookup_mode,

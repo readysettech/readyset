@@ -28,13 +28,13 @@
 //! * For [`BTreeMap`] indices, we configure a custom key comparator to compare the keys via
 //!   deserializing to `DfValue` rather than RocksDB's default lexicographic bytewise ordering,
 //!   which allows us to do queries across ranges covering multiple keys. To avoid having to encode
-//!   the length of the index (really the enum variant tag for [`KeyType`]) in the key itself, this
+//!   the length of the index (really the enum variant tag for [`PointKey`]) in the key itself, this
 //!   custom key comparator is built dynamically based on the number of columns in the index, up to
-//!   a maximum of 6 (since past that point we use [`KeyType::Multi`]). Note that since we currently
-//!   don't have the ability to do zero-copy deserialization of [`DfValue`], deserializing for the
-//!   custom comparator currently requires copying any string values just to compare them. If we are
-//!   able to make [`DfValue`] enable zero-copy deserialization (by adding a lifetime parameter)
-//!   this would likely speed up rather significantly.
+//!   a maximum of 6 (since past that point we use [`PointKey::Multi`]). Note that since we
+//!   currently don't have the ability to do zero-copy deserialization of [`DfValue`], deserializing
+//!   for the custom comparator currently requires copying any string values just to compare them.
+//!   If we are able to make [`DfValue`] enable zero-copy deserialization (by adding a lifetime
+//!   parameter) this would likely speed up rather significantly.
 //!
 //! Since RocksDB requires that we always provide the same set of options (including the name of the
 //! custom comparator, if any) when re-opening column families, we have to be careful to always
@@ -72,7 +72,7 @@ use std::time::{Duration, Instant};
 use std::{fmt, fs};
 
 use bincode::Options;
-use common::{IndexType, KeyType, RangeKey, Record, Records, SizeOf, Tag};
+use common::{IndexType, Record, Records, SizeOf, Tag};
 use parking_lot::{
     MappedRwLockReadGuard, MappedRwLockWriteGuard, RwLock, RwLockReadGuard, RwLockWriteGuard,
 };
@@ -89,7 +89,9 @@ use test_strategy::Arbitrary;
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
 
-use crate::{EvictKeysResult, LookupResult, RangeLookupResult, RecordResult, State};
+use crate::{
+    EvictKeysResult, LookupResult, PointKey, RangeKey, RangeLookupResult, RecordResult, State,
+};
 
 // Incremented on each PersistentState initialization so that IndexSeq
 // can be used to create unique identifiers for rows.
@@ -374,7 +376,7 @@ impl PersistentStateHandle {
     pub fn lookup_multi<'a>(
         &'a self,
         columns: &[usize],
-        keys: &[KeyType],
+        keys: &[PointKey],
     ) -> Vec<RecordResult<'a>> {
         if keys.is_empty() {
             return vec![];
@@ -438,7 +440,7 @@ impl PersistentStateHandle {
     /// If the index is the primary index, the lookup gets the rows from the primary index directly.
     /// If the index is a secondary index, we will first lookup the primary index keys from that
     /// secondary index, then perform a lookup into the primary index
-    fn do_lookup(&self, columns: &[usize], key: &KeyType) -> Option<Vec<Vec<DfValue>>> {
+    fn do_lookup(&self, columns: &[usize], key: &PointKey) -> Option<Vec<Vec<DfValue>>> {
         let inner = self.inner();
         if self.replication_offset < inner.replication_offset {
             // We are checking the replication offset under a read lock, and the lock remains in
@@ -602,7 +604,7 @@ impl State for PersistentState {
         self.db.replication_offset.as_ref()
     }
 
-    fn lookup(&self, columns: &[usize], key: &KeyType) -> LookupResult {
+    fn lookup(&self, columns: &[usize], key: &PointKey) -> LookupResult {
         self.db.lookup(columns, key)
     }
 
@@ -705,7 +707,7 @@ impl State for PersistentState {
         self.add_key(index, None);
     }
 
-    fn lookup_weak<'a>(&'a self, columns: &[usize], key: &KeyType) -> Option<RecordResult<'a>> {
+    fn lookup_weak<'a>(&'a self, columns: &[usize], key: &PointKey) -> Option<RecordResult<'a>> {
         self.db.lookup_weak(columns, key)
     }
 
@@ -772,7 +774,7 @@ impl State for PersistentStateHandle {
 
     fn mark_hole(&mut self, _: &KeyComparison, _: Tag) {}
 
-    fn lookup(&self, columns: &[usize], key: &KeyType) -> LookupResult {
+    fn lookup(&self, columns: &[usize], key: &PointKey) -> LookupResult {
         match self.do_lookup(columns, key) {
             Some(result) => LookupResult::Some(result.into()),
             None => LookupResult::Missing,
@@ -893,7 +895,7 @@ impl State for PersistentStateHandle {
         RangeLookupResult::Some(RecordResult::Owned(rows))
     }
 
-    fn lookup_weak<'a>(&'a self, columns: &[usize], key: &KeyType) -> Option<RecordResult<'a>> {
+    fn lookup_weak<'a>(&'a self, columns: &[usize], key: &PointKey) -> Option<RecordResult<'a>> {
         self.lookup(columns, key).records()
     }
 
@@ -994,7 +996,7 @@ struct IndexParams {
     /// The number of columns that we're indexing on, if that number is between 1 and 6, or None if
     /// the number is greater than 6
     ///
-    /// The "6" limit corresponds to the upper limit on the variants of [`KeyType`] and
+    /// The "6" limit corresponds to the upper limit on the variants of [`PointKey`] and
     /// [`RangeKey`]
     ///
     /// # Invariants
@@ -1336,8 +1338,8 @@ impl PersistentState {
         info!("Base finished compacting secondary index");
     }
 
-    fn build_key<'a>(row: &'a [DfValue], columns: &[usize]) -> KeyType<'a> {
-        KeyType::from(columns.iter().map(|i| &row[*i]))
+    fn build_key<'a>(row: &'a [DfValue], columns: &[usize]) -> PointKey<'a> {
+        PointKey::from(columns.iter().map(|i| &row[*i]))
     }
 
     /// Builds a [`PersistentMeta`] from the in-memory metadata information stored in `self`,
@@ -1572,25 +1574,25 @@ impl PersistentState {
     // (size, key, primary_key), where `primary_key` makes sure that each secondary index row is
     // unique.
     //
-    // Self::serialize_raw_key is responsible for serializing the underlying KeyType tuple directly
-    // (without the enum variant), plus any extra information as described above.
-    fn serialize_raw_key<S: serde::Serialize>(key: &KeyType, extra: S) -> Vec<u8> {
+    // Self::serialize_raw_key is responsible for serializing the underlying PointKey tuple
+    // directly (without the enum variant), plus any extra information as described above.
+    fn serialize_raw_key<S: serde::Serialize>(key: &PointKey, extra: S) -> Vec<u8> {
         match key {
-            KeyType::Single(k) => serialize_key(k, extra),
-            KeyType::Double(k) => serialize_key(k, extra),
-            KeyType::Tri(k) => serialize_key(k, extra),
-            KeyType::Quad(k) => serialize_key(k, extra),
-            KeyType::Quin(k) => serialize_key(k, extra),
-            KeyType::Sex(k) => serialize_key(k, extra),
-            KeyType::Multi(k) => serialize_key(k, extra),
+            PointKey::Single(k) => serialize_key(k, extra),
+            PointKey::Double(k) => serialize_key(k, extra),
+            PointKey::Tri(k) => serialize_key(k, extra),
+            PointKey::Quad(k) => serialize_key(k, extra),
+            PointKey::Quin(k) => serialize_key(k, extra),
+            PointKey::Sex(k) => serialize_key(k, extra),
+            PointKey::Multi(k) => serialize_key(k, extra),
         }
     }
 
-    fn serialize_prefix(key: &KeyType) -> Vec<u8> {
+    fn serialize_prefix(key: &PointKey) -> Vec<u8> {
         Self::serialize_raw_key(key, ())
     }
 
-    fn serialize_secondary(key: &KeyType, raw_primary: &[u8]) -> Vec<u8> {
+    fn serialize_secondary(key: &PointKey, raw_primary: &[u8]) -> Vec<u8> {
         let mut bytes = Self::serialize_raw_key(key, ());
         bytes.extend_from_slice(raw_primary);
         bytes
@@ -1738,7 +1740,7 @@ impl PersistentState {
     pub fn lookup_multi<'a>(
         &'a self,
         columns: &[usize],
-        keys: &[KeyType],
+        keys: &[PointKey],
     ) -> Vec<RecordResult<'a>> {
         self.db.lookup_multi(columns, keys)
     }
@@ -1946,12 +1948,12 @@ mod tests {
         let row: Vec<DfValue> = vec![10.into(), "Cat".into()];
         insert(&mut state, row);
 
-        match state.lookup(&[0], &KeyType::Single(&5.into())) {
+        match state.lookup(&[0], &PointKey::Single(&5.into())) {
             LookupResult::Some(RecordResult::Owned(rows)) => assert_eq!(rows.len(), 0),
             _ => unreachable!(),
         };
 
-        match state.lookup(&[0], &KeyType::Single(&10.into())) {
+        match state.lookup(&[0], &PointKey::Single(&10.into())) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
                 assert_eq!(rows[0][0], 10.into());
                 assert_eq!(rows[0][1], "Cat".into());
@@ -1969,12 +1971,12 @@ mod tests {
         state.add_key(index, None);
         insert(&mut state, row.clone());
 
-        match state.lookup(&cols, &KeyType::Double((1.into(), 2.into()))) {
+        match state.lookup(&cols, &PointKey::Double((1.into(), 2.into()))) {
             LookupResult::Some(RecordResult::Owned(rows)) => assert_eq!(rows.len(), 0),
             _ => unreachable!(),
         };
 
-        match state.lookup(&cols, &KeyType::Double((10.into(), 20.into()))) {
+        match state.lookup(&cols, &PointKey::Double((10.into(), 20.into()))) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
                 assert_eq!(rows[0], row);
             }
@@ -1991,7 +1993,7 @@ mod tests {
         state.add_key(Index::new(IndexType::HashMap, vec![1, 2]), None);
         state.process_records(&mut vec![first.clone(), second.clone()].into(), None, None);
 
-        match state.lookup(&[0], &KeyType::Single(&10.into())) {
+        match state.lookup(&[0], &PointKey::Single(&10.into())) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
                 assert_eq!(rows.len(), 1);
                 assert_eq!(rows[0], first);
@@ -1999,7 +2001,7 @@ mod tests {
             _ => unreachable!(),
         }
 
-        match state.lookup(&[1, 2], &KeyType::Double(("Cat".into(), 1.into()))) {
+        match state.lookup(&[1, 2], &PointKey::Double(("Cat".into(), 1.into()))) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
                 assert_eq!(rows.len(), 2);
                 assert_eq!(&rows[0], &first);
@@ -2029,11 +2031,11 @@ mod tests {
                 .lookup_multi(
                     &[0],
                     &[
-                        KeyType::Single(&10.into()),
-                        KeyType::Single(&20.into()),
-                        KeyType::Single(&30.into()),
-                        KeyType::Single(&10.into()),
-                        KeyType::Single(&40.into()),
+                        PointKey::Single(&10.into()),
+                        PointKey::Single(&20.into()),
+                        PointKey::Single(&30.into()),
+                        PointKey::Single(&10.into()),
+                        PointKey::Single(&40.into()),
                     ],
                 )
                 .as_slice()
@@ -2058,10 +2060,10 @@ mod tests {
                 .lookup_multi(
                     &[1, 2],
                     &[
-                        KeyType::Double(("Dog".into(), 1.into())),
-                        KeyType::Double(("Cat".into(), 1.into())),
-                        KeyType::Double(("Dog".into(), 1.into())),
-                        KeyType::Double(("Cat".into(), 1.into())),
+                        PointKey::Double(("Dog".into(), 1.into())),
+                        PointKey::Double(("Cat".into(), 1.into())),
+                        PointKey::Double(("Dog".into(), 1.into())),
+                        PointKey::Double(("Cat".into(), 1.into())),
                     ],
                 )
                 .as_slice()
@@ -2101,7 +2103,7 @@ mod tests {
         state.add_key(Index::new(IndexType::HashMap, vec![2]), None);
         state.process_records(&mut vec![first.clone(), second.clone()].into(), None, None);
 
-        match state.lookup(&pk_cols, &KeyType::Double((1.into(), 2.into()))) {
+        match state.lookup(&pk_cols, &PointKey::Double((1.into(), 2.into()))) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
                 assert_eq!(rows.len(), 1);
                 assert_eq!(&rows[0], &first);
@@ -2109,7 +2111,7 @@ mod tests {
             _ => unreachable!(),
         }
 
-        match state.lookup(&pk_cols, &KeyType::Double((10.into(), 20.into()))) {
+        match state.lookup(&pk_cols, &PointKey::Double((10.into(), 20.into()))) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
                 assert_eq!(rows.len(), 1);
                 assert_eq!(&rows[0], &second);
@@ -2117,14 +2119,14 @@ mod tests {
             _ => unreachable!(),
         }
 
-        match state.lookup(&pk_cols, &KeyType::Double((1.into(), 20.into()))) {
+        match state.lookup(&pk_cols, &PointKey::Double((1.into(), 20.into()))) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
                 assert_eq!(rows.len(), 0);
             }
             _ => unreachable!(),
         }
 
-        match state.lookup(&[2], &KeyType::Single(&"Cat".into())) {
+        match state.lookup(&[2], &PointKey::Single(&"Cat".into())) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
                 assert_eq!(rows.len(), 2);
                 assert_eq!(&rows[0], &first);
@@ -2146,7 +2148,7 @@ mod tests {
         let second: Vec<DfValue> = vec![10.into(), 20.into()];
         state.add_key(pk, None);
         state.process_records(&mut vec![first.clone(), second.clone()].into(), None, None);
-        match state.lookup(&[0], &KeyType::Single(&1.into())) {
+        match state.lookup(&[0], &PointKey::Single(&1.into())) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
                 assert_eq!(rows.len(), 1);
                 assert_eq!(&rows[0], &first);
@@ -2155,14 +2157,14 @@ mod tests {
         }
 
         state.process_records(&mut vec![(first, false)].into(), None, None);
-        match state.lookup(&[0], &KeyType::Single(&1.into())) {
+        match state.lookup(&[0], &PointKey::Single(&1.into())) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
                 assert_eq!(rows.len(), 0);
             }
             _ => unreachable!(),
         }
 
-        match state.lookup(&[0], &KeyType::Single(&10.into())) {
+        match state.lookup(&[0], &PointKey::Single(&10.into())) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
                 assert_eq!(rows.len(), 1);
                 assert_eq!(&rows[0], &second);
@@ -2180,7 +2182,7 @@ mod tests {
         state.add_key(Index::new(IndexType::HashMap, vec![1]), None);
         state.process_records(&mut vec![first.clone(), second.clone()].into(), None, None);
 
-        match state.lookup(&[0], &KeyType::Single(&0.into())) {
+        match state.lookup(&[0], &PointKey::Single(&0.into())) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
                 assert_eq!(rows.len(), 2);
                 assert_eq!(&rows[0], &first);
@@ -2189,7 +2191,7 @@ mod tests {
             _ => unreachable!(),
         }
 
-        match state.lookup(&[1], &KeyType::Single(&0.into())) {
+        match state.lookup(&[1], &PointKey::Single(&0.into())) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
                 assert_eq!(rows.len(), 1);
                 assert_eq!(&rows[0], &first);
@@ -2207,7 +2209,7 @@ mod tests {
         state.add_key(Index::new(IndexType::HashMap, vec![1]), None);
         state.process_records(&mut vec![first.clone(), second.clone()].into(), None, None);
 
-        match state.lookup(&[0], &KeyType::Single(&10.into())) {
+        match state.lookup(&[0], &PointKey::Single(&10.into())) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
                 assert_eq!(rows.len(), 1);
                 assert_eq!(&rows[0], &first);
@@ -2215,7 +2217,7 @@ mod tests {
             _ => unreachable!(),
         }
 
-        match state.lookup(&[1], &KeyType::Single(&"Bob".into())) {
+        match state.lookup(&[1], &PointKey::Single(&"Bob".into())) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
                 assert_eq!(rows.len(), 1);
                 assert_eq!(&rows[0], &second);
@@ -2239,7 +2241,7 @@ mod tests {
         }
 
         let state = PersistentState::new(name, Vec::<Box<[usize]>>::new(), &params);
-        match state.lookup(&[0], &KeyType::Single(&10.into())) {
+        match state.lookup(&[0], &PointKey::Single(&10.into())) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
                 assert_eq!(rows.len(), 1);
                 assert_eq!(&rows[0], &first);
@@ -2247,7 +2249,7 @@ mod tests {
             _ => unreachable!(),
         }
 
-        match state.lookup(&[1], &KeyType::Single(&"Bob".into())) {
+        match state.lookup(&[1], &PointKey::Single(&"Bob".into())) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
                 assert_eq!(rows.len(), 1);
                 assert_eq!(&rows[0], &second);
@@ -2271,7 +2273,7 @@ mod tests {
         }
 
         let state = PersistentState::new(name, Some(&[0]), &params);
-        match state.lookup(&[0], &KeyType::Single(&10.into())) {
+        match state.lookup(&[0], &PointKey::Single(&10.into())) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
                 assert_eq!(rows.len(), 1);
                 assert_eq!(&rows[0], &first);
@@ -2279,7 +2281,7 @@ mod tests {
             _ => unreachable!(),
         }
 
-        match state.lookup(&[1], &KeyType::Single(&"Bob".into())) {
+        match state.lookup(&[1], &PointKey::Single(&"Bob".into())) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
                 assert_eq!(rows.len(), 1);
                 assert_eq!(&rows[0], &second);
@@ -2308,7 +2310,7 @@ mod tests {
         );
 
         // We only want to remove rows that match exactly, not all rows that match the key
-        match state.lookup(&[0], &KeyType::Single(&first[0])) {
+        match state.lookup(&[0], &PointKey::Single(&first[0])) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
                 assert_eq!(rows.len(), 1);
                 assert_eq!(&rows[0], &duplicate);
@@ -2317,7 +2319,7 @@ mod tests {
         };
 
         // Also should have removed the secondary CF
-        match state.lookup(&[1], &KeyType::Single(&first[1])) {
+        match state.lookup(&[1], &PointKey::Single(&first[1])) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
                 assert_eq!(rows.len(), 1);
                 assert_eq!(&rows[0], &second);
@@ -2326,7 +2328,7 @@ mod tests {
         };
 
         // Also shouldn't have removed other keys:
-        match state.lookup(&[0], &KeyType::Single(&second[0])) {
+        match state.lookup(&[0], &PointKey::Single(&second[0])) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
                 assert_eq!(rows.len(), 1);
                 assert_eq!(&rows[0], &second);
@@ -2335,7 +2337,7 @@ mod tests {
         }
 
         // Make sure we didn't remove secondary keys pointing to different rows:
-        match state.lookup(&[1], &KeyType::Single(&second[1])) {
+        match state.lookup(&[1], &PointKey::Single(&second[1])) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
                 assert_eq!(rows.len(), 1);
                 assert_eq!(&rows[0], &second);
@@ -2366,7 +2368,7 @@ mod tests {
 
         for i in 0..3usize {
             // Make sure we removed the row for every CF
-            match state.lookup(&[i], &KeyType::Single(&first[i])) {
+            match state.lookup(&[i], &PointKey::Single(&first[i])) {
                 LookupResult::Some(RecordResult::Owned(rows)) => {
                     assert!(!rows.is_empty());
                     assert!(rows.iter().all(|row| row[i] == first[i] && row != &first));
@@ -2376,7 +2378,7 @@ mod tests {
         }
 
         // Make sure we have all of our unique nulls intact
-        match state.lookup(&[2], &KeyType::Single(&DfValue::None)) {
+        match state.lookup(&[2], &PointKey::Single(&DfValue::None)) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
                 assert_eq!(rows.len(), 2);
                 assert_eq!(&rows[0], &duplicate);
@@ -2472,7 +2474,7 @@ mod tests {
         insert(&mut state, row.clone());
         state.add_key(Index::new(IndexType::HashMap, vec![1]), None);
 
-        match state.lookup(&[1], &KeyType::Single(&row[1])) {
+        match state.lookup(&[1], &PointKey::Single(&row[1])) {
             LookupResult::Some(RecordResult::Owned(rows)) => assert_eq!(&rows[0], &row),
             _ => unreachable!(),
         };
@@ -2494,14 +2496,14 @@ mod tests {
         state.process_records(&mut records[3].clone().into(), None, None);
 
         // Make sure the first record has been deleted:
-        match state.lookup(&[0], &KeyType::Single(&records[0][0])) {
+        match state.lookup(&[0], &PointKey::Single(&records[0][0])) {
             LookupResult::Some(RecordResult::Owned(rows)) => assert_eq!(rows.len(), 0),
             _ => unreachable!(),
         };
 
         // Then check that the rest exist:
         for record in &records[1..3] {
-            match state.lookup(&[0], &KeyType::Single(&record[0])) {
+            match state.lookup(&[0], &PointKey::Single(&record[0])) {
                 LookupResult::Some(RecordResult::Owned(rows)) => assert_eq!(rows[0], **record),
                 _ => unreachable!(),
             };
@@ -2528,7 +2530,7 @@ mod tests {
         let mut state = setup_persistent("persistent_state_prefix_transform", None);
         state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
         let data = (DfValue::from(1), DfValue::from(10));
-        let r = KeyType::Double(data.clone());
+        let r = PointKey::Double(data.clone());
         let k = PersistentState::serialize_prefix(&r);
         let prefix = prefix_transform(&k);
         let size: u64 = bincode::options()
@@ -2584,7 +2586,7 @@ mod tests {
 
         let mut rh = state.read_handle();
         // When we first create the rh, it is up to date
-        assert!(rh.do_lookup(&[0], &KeyType::Single(&0.into())).is_some());
+        assert!(rh.do_lookup(&[0], &PointKey::Single(&0.into())).is_some());
 
         // Process more records ...
         state.process_records(
@@ -2599,7 +2601,7 @@ mod tests {
         );
 
         // Now read handle is behind, since it didn't get the forward processing yet
-        assert!(rh.do_lookup(&[0], &KeyType::Single(&0.into())).is_none());
+        assert!(rh.do_lookup(&[0], &PointKey::Single(&0.into())).is_none());
 
         rh.process_records(
             &mut Records::from(Vec::<Record>::new()),
@@ -2611,7 +2613,7 @@ mod tests {
         );
 
         // Read handle is up to date now
-        assert!(rh.do_lookup(&[0], &KeyType::Single(&0.into())).is_some());
+        assert!(rh.do_lookup(&[0], &PointKey::Single(&0.into())).is_some());
     }
 
     mod lookup_range {

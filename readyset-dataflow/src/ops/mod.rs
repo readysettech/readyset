@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use dataflow_state::PointKey;
 use derive_more::From;
 use readyset::KeyComparison;
 use readyset_errors::ReadySetResult;
@@ -176,7 +177,7 @@ impl Ingredient for NodeOperator {
     fn query_through<'a>(
         &self,
         columns: &[usize],
-        key: &KeyType,
+        key: &PointKey,
         nodes: &DomainNodes,
         states: &'a StateMap,
         mode: LookupMode,
@@ -188,7 +189,7 @@ impl Ingredient for NodeOperator {
         &self,
         parent: LocalNodeIndex,
         columns: &[usize],
-        key: &KeyType,
+        key: &PointKey,
         domain: &DomainNodes,
         states: &'a StateMap,
         mode: LookupMode,

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 
 use dataflow_expression::Expr;
+use dataflow_state::PointKey;
 pub use nom_sql::BinaryOperator;
 use readyset_errors::ReadySetResult;
 use serde::{Deserialize, Serialize};
@@ -87,7 +88,7 @@ impl Ingredient for Filter {
     fn query_through<'a>(
         &self,
         columns: &[usize],
-        key: &KeyType,
+        key: &PointKey,
         nodes: &DomainNodes,
         states: &'a StateMap,
         mode: LookupMode,

@@ -1,7 +1,7 @@
 use std::iter;
 use std::ops::{Bound, RangeBounds};
 
-use common::{Index, IndexType, KeyType, RangeKey};
+use common::{Index, IndexType};
 use indexmap::IndexMap;
 use launchpad::intervals::into_bound_endpoint;
 use partial_map::PartialMap;
@@ -10,7 +10,7 @@ use tuple::{Map, TupleElements};
 use vec1::Vec1;
 
 use crate::mk_key::MakeKey;
-use crate::{Misses, Row, Rows};
+use crate::{Misses, PointKey, RangeKey, Row, Rows};
 
 /// A map containing a single index into the state of a node.
 ///
@@ -85,24 +85,24 @@ impl KeyedState {
     /// # Panics
     ///
     /// Panics if the length of `key` is different than the length of this `KeyedState`
-    pub(super) fn lookup<'a>(&'a self, key: &KeyType) -> Option<&'a Rows> {
+    pub(super) fn lookup<'a>(&'a self, key: &PointKey) -> Option<&'a Rows> {
         match (self, key) {
-            (&KeyedState::SingleBTree(ref m), &KeyType::Single(k)) => m.get(k),
-            (&KeyedState::DoubleBTree(ref m), &KeyType::Double(ref k)) => m.get(k),
-            (&KeyedState::TriBTree(ref m), &KeyType::Tri(ref k)) => m.get(k),
-            (&KeyedState::QuadBTree(ref m), &KeyType::Quad(ref k)) => m.get(k),
-            (&KeyedState::QuinBTree(ref m), &KeyType::Quin(ref k)) => m.get(k),
-            (&KeyedState::SexBTree(ref m), &KeyType::Sex(ref k)) => m.get(k),
-            (&KeyedState::MultiBTree(ref m, len), &KeyType::Multi(ref k)) if k.len() == len => {
+            (&KeyedState::SingleBTree(ref m), &PointKey::Single(k)) => m.get(k),
+            (&KeyedState::DoubleBTree(ref m), &PointKey::Double(ref k)) => m.get(k),
+            (&KeyedState::TriBTree(ref m), &PointKey::Tri(ref k)) => m.get(k),
+            (&KeyedState::QuadBTree(ref m), &PointKey::Quad(ref k)) => m.get(k),
+            (&KeyedState::QuinBTree(ref m), &PointKey::Quin(ref k)) => m.get(k),
+            (&KeyedState::SexBTree(ref m), &PointKey::Sex(ref k)) => m.get(k),
+            (&KeyedState::MultiBTree(ref m, len), &PointKey::Multi(ref k)) if k.len() == len => {
                 m.get(k)
             }
-            (&KeyedState::SingleHash(ref m), &KeyType::Single(k)) => m.get(k),
-            (&KeyedState::DoubleHash(ref m), &KeyType::Double(ref k)) => m.get(k),
-            (&KeyedState::TriHash(ref m), &KeyType::Tri(ref k)) => m.get(k),
-            (&KeyedState::QuadHash(ref m), &KeyType::Quad(ref k)) => m.get(k),
-            (&KeyedState::QuinHash(ref m), &KeyType::Quin(ref k)) => m.get(k),
-            (&KeyedState::SexHash(ref m), &KeyType::Sex(ref k)) => m.get(k),
-            (&KeyedState::MultiHash(ref m, len), &KeyType::Multi(ref k)) if k.len() == len => {
+            (&KeyedState::SingleHash(ref m), &PointKey::Single(k)) => m.get(k),
+            (&KeyedState::DoubleHash(ref m), &PointKey::Double(ref k)) => m.get(k),
+            (&KeyedState::TriHash(ref m), &PointKey::Tri(ref k)) => m.get(k),
+            (&KeyedState::QuadHash(ref m), &PointKey::Quad(ref k)) => m.get(k),
+            (&KeyedState::QuinHash(ref m), &PointKey::Quin(ref k)) => m.get(k),
+            (&KeyedState::SexHash(ref m), &PointKey::Sex(ref k)) => m.get(k),
+            (&KeyedState::MultiHash(ref m, len), &PointKey::Multi(ref k)) if k.len() == len => {
                 m.get(k)
             }
             _ => {

@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
-use common::{IndexType, KeyType, RangeKey, Record, Records, SizeOf, Tag};
+use common::{IndexType, Record, Records, SizeOf, Tag};
 use rand::{self, Rng};
 use readyset::internal::Index;
 use readyset::replication::ReplicationOffset;
@@ -13,8 +13,8 @@ use tracing::trace;
 use crate::keyed_state::KeyedState;
 use crate::single_state::SingleState;
 use crate::{
-    EvictBytesResult, EvictKeysResult, LookupResult, RangeLookupResult, RecordResult, Row, Rows,
-    State,
+    EvictBytesResult, EvictKeysResult, LookupResult, PointKey, RangeKey, RangeLookupResult,
+    RecordResult, Row, Rows, State,
 };
 
 #[derive(Default)]
@@ -172,7 +172,7 @@ impl State for MemoryState {
             .saturating_sub(freed_bytes + base_row_bytes_from_comparison(key));
     }
 
-    fn lookup<'a>(&'a self, columns: &[usize], key: &KeyType) -> LookupResult<'a> {
+    fn lookup<'a>(&'a self, columns: &[usize], key: &PointKey) -> LookupResult<'a> {
         debug_assert!(!self.state.is_empty(), "lookup on uninitialized index");
         let index = self
             .state_for(columns, IndexType::HashMap)
@@ -223,7 +223,7 @@ impl State for MemoryState {
                         let pos = col_positions[col];
                         shuffled_key[pos] = val;
                     }
-                    let key = KeyType::from(shuffled_key);
+                    let key = PointKey::from(shuffled_key);
                     let res = state.lookup(&key);
                     if res.is_some() {
                         return res;
@@ -252,7 +252,7 @@ impl State for MemoryState {
                     // the index only contains columns from `columns` (and none other).
                     // make a new lookup key
                     positions.sort_unstable_by_key(|(idx, _)| *idx);
-                    let kt = KeyType::from(positions.into_iter().map(|(_, val)| val));
+                    let kt = PointKey::from(positions.into_iter().map(|(_, val)| val));
                     if let LookupResult::Some(mut ret) = state.lookup(&kt) {
                         // filter the rows in this index to ones which actually match the key
                         // FIXME(eta): again, probably O(terrible)
@@ -384,7 +384,7 @@ impl State for MemoryState {
         self.weak_indices.insert(index.columns, state);
     }
 
-    fn lookup_weak<'a>(&'a self, columns: &[usize], key: &KeyType) -> Option<RecordResult<'a>> {
+    fn lookup_weak<'a>(&'a self, columns: &[usize], key: &PointKey) -> Option<RecordResult<'a>> {
         self.weak_indices[columns].lookup(key).map(From::from)
     }
 
@@ -502,14 +502,14 @@ mod tests {
         state.process_records(&mut records[3].clone().into(), None, None);
 
         // Make sure the first record has been deleted:
-        match state.lookup(&[0], &KeyType::Single(&records[0][0])) {
+        match state.lookup(&[0], &PointKey::Single(&records[0][0])) {
             LookupResult::Some(RecordResult::Borrowed(rows)) => assert_eq!(rows.len(), 0),
             _ => unreachable!(),
         };
 
         // Then check that the rest exist:
         for record in &records[1..3] {
-            match state.lookup(&[0], &KeyType::Single(&record[0])) {
+            match state.lookup(&[0], &PointKey::Single(&record[0])) {
                 LookupResult::Some(RecordResult::Borrowed(rows)) => {
                     assert_eq!(&**rows.iter().next().unwrap(), &**record)
                 }
@@ -526,7 +526,7 @@ mod tests {
         insert(&mut state, row.clone());
         state.add_key(Index::hash_map(vec![1]), None);
 
-        match state.lookup(&[1], &KeyType::Single(&row[1])) {
+        match state.lookup(&[1], &PointKey::Single(&row[1])) {
             LookupResult::Some(RecordResult::Borrowed(rows)) => {
                 assert_eq!(&**rows.iter().next().unwrap(), &row)
             }
@@ -546,7 +546,7 @@ mod tests {
 
         assert_eq!(
             state
-                .lookup(&[0], &KeyType::Single(&1.into()))
+                .lookup(&[0], &PointKey::Single(&1.into()))
                 .unwrap()
                 .len(),
             1
@@ -571,7 +571,7 @@ mod tests {
         state.mark_filled(KeyComparison::from_range(&(..)), Tag::new(1));
         state.insert(vec![DfValue::from(1), DfValue::from(2)], Some(Tag::new(1)));
 
-        let res = state.lookup(&[0], &KeyType::Single(&DfValue::from(1)));
+        let res = state.lookup(&[0], &PointKey::Single(&DfValue::from(1)));
         assert!(res.is_some());
         assert_eq!(
             res.unwrap(),
@@ -591,7 +591,7 @@ mod tests {
             Some(Tag::new(0)),
         );
 
-        let res = state.lookup(&[3, 2], &KeyType::Double((1.into(), 1.into())));
+        let res = state.lookup(&[3, 2], &PointKey::Double((1.into(), 1.into())));
         assert!(res.is_some());
         let rows = res.unwrap();
         assert_eq!(
@@ -804,7 +804,7 @@ mod tests {
 
             assert_eq!(records.len(), 3);
 
-            let result = state.lookup_weak(&[1], &KeyType::Single(&DfValue::from("A")));
+            let result = state.lookup_weak(&[1], &PointKey::Single(&DfValue::from("A")));
             let mut rows: Vec<_> = result.unwrap().into_iter().collect();
             rows.sort();
             assert_eq!(
@@ -831,7 +831,7 @@ mod tests {
             state.process_records(&mut delete_records, Some(Tag::new(0)), None);
             assert_eq!(delete_records.len(), 1);
 
-            let result = state.lookup_weak(&[1], &KeyType::Single(&DfValue::from("A")));
+            let result = state.lookup_weak(&[1], &PointKey::Single(&DfValue::from("A")));
             assert_eq!(
                 result,
                 Some(RecordResult::Owned(vec![vec![1.into(), "A".into()],]))
@@ -854,7 +854,7 @@ mod tests {
 
             state.evict_keys(Tag::new(0), &[KeyComparison::Equal(vec1![2.into()])]);
 
-            let result = state.lookup_weak(&[1], &KeyType::Single(&DfValue::from("A")));
+            let result = state.lookup_weak(&[1], &PointKey::Single(&DfValue::from("A")));
             assert_eq!(
                 result,
                 Some(RecordResult::Owned(vec![vec![1.into(), "A".into()],]))

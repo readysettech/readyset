@@ -4,6 +4,7 @@ use std::collections::{BinaryHeap, HashMap};
 use std::convert::TryInto;
 use std::mem;
 
+use dataflow_state::PointKey;
 use itertools::Itertools;
 use launchpad::Indices;
 use nom_sql::OrderType;
@@ -221,7 +222,7 @@ impl Ingredient for Paginate {
                 current_group_key.extend(record_group.into_iter().cloned());
 
                 // Load all pages for the group into memory
-                match db.lookup(&self.group_by, &KeyType::from(&current_group_key)) {
+                match db.lookup(&self.group_by, &PointKey::from(&current_group_key)) {
                     LookupResult::Some(local_records) => {
                         if replay.is_partial() {
                             lookups.push(Lookup {
