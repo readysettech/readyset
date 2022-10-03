@@ -1,5 +1,6 @@
 #![feature(box_patterns, iter_order_by)]
 
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::convert::{TryFrom, TryInto};
 use std::error::Error;
@@ -555,6 +556,42 @@ impl DfValue {
             *self = self
                 .coerce_to(col_ty, &DfType::Unknown)
                 .unwrap_or(DfValue::Int(0));
+        }
+    }
+
+    /// If `self` represents a string value, returns a reference to that string, otherwise returns
+    /// `None`.
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            DfValue::Text(t) => Some(t.as_str()),
+            DfValue::TinyText(t) => Some(t.as_str()),
+            _ => None,
+        }
+    }
+
+    /// If `self` represents a string value, returns a tuple of a reference to that string value and
+    /// the [`Collation`], otherwise returns `None`
+    pub fn as_str_and_collation(&self) -> Option<(&str, Collation)> {
+        match self {
+            DfValue::Text(t) => Some((t.as_str(), t.collation())),
+            DfValue::TinyText(t) => Some((t.as_str(), t.collation())),
+            _ => None,
+        }
+    }
+
+    /// Transform this [`DfValue`] in preparation for being serialized to disk as part of an index.
+    ///
+    /// This function has the property that if `d1 == d2`, then
+    /// `serialize(d1.transform_for_serialized_key()) ==
+    /// serialize(d2.transform_for_serialized_key())`, which is not necessarily the case for eg
+    /// `serialize(d1) == serialize(d2)`.
+    pub fn transform_for_serialized_key(&self) -> Cow<Self> {
+        match self.as_str_and_collation() {
+            Some((s, collation)) => match collation.normalize(s) {
+                Cow::Borrowed(_) => Cow::Borrowed(self),
+                Cow::Owned(s) => Cow::Owned(s.into()),
+            },
+            None => Cow::Borrowed(self),
         }
     }
 
@@ -1304,26 +1341,19 @@ impl<'a> TryFrom<&'a DfValue> for Vec<u8> {
     }
 }
 
-// This conversion has many unwraps, but all of them are expected to be safe,
-// because DfValue variants (i.e. `Text` and `TinyText`) constructors are all
-// generated from valid UTF-8 strings, or the constructor fails (e.g. TryFrom &[u8]).
-// Thus, we can safely generate a &str from a DfValue.
 impl<'a> TryFrom<&'a DfValue> for &'a str {
     type Error = ReadySetError;
 
     fn try_from(data: &'a DfValue) -> Result<Self, Self::Error> {
-        match *data {
-            DfValue::Text(ref t) => Ok(t.as_str()),
-            DfValue::TinyText(ref tt) => Ok(tt.as_str()),
-            _ => Err(Self::Error::DfValueConversionError {
+        data.as_str()
+            .ok_or_else(|| ReadySetError::DfValueConversionError {
                 src_type: match data.sql_type() {
                     Some(ty) => ty.to_string(),
                     None => "Null".to_string(),
                 },
                 target_type: "&str".to_string(),
                 details: "".to_string(),
-            }),
-        }
+            })
     }
 }
 

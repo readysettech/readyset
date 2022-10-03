@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 
@@ -43,6 +44,19 @@ pub enum Collation {
 }
 
 impl Collation {
+    /// Normalize the given string according to this collation.
+    ///
+    /// It will always be the case that two normalized strings compare in the same way as
+    /// [`compare_strs`][]
+    ///
+    /// [`compare_strs`]: Collation::compare_strs
+    pub(crate) fn normalize(self, s: &str) -> Cow<str> {
+        match self {
+            Collation::Utf8 => s.into(),
+            Collation::Citext => s.to_lowercase().into(),
+        }
+    }
+
     /// Hash the given string according to this collation
     pub(crate) fn hash_str<H>(self, s: &str, state: &mut H)
     where
@@ -94,6 +108,14 @@ mod tests {
 
             assert_eq!(h1, h2);
         }
+    }
+
+    #[proptest]
+    fn normalize_matches_cmp(collation: Collation, s1: String, s2: String) {
+        assert_eq!(
+            collation.compare_strs(&s1, &s2),
+            collation.normalize(&s1).cmp(&collation.normalize(&s2))
+        )
     }
 
     #[test]

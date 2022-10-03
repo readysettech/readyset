@@ -2,12 +2,13 @@ use std::ops::{Bound, RangeBounds};
 
 use common::DfValue;
 use launchpad::intervals::BoundPair;
+use serde::ser::{SerializeSeq, SerializeTuple};
 use serde::Serialize;
 use tuple::TupleElements;
 use vec1::Vec1;
 
 /// An internal type used as the key when performing point lookups and inserts into node state.
-#[derive(Clone, Debug, Serialize, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PointKey<'a> {
     Single(&'a DfValue),
     Double((DfValue, DfValue)),
@@ -121,6 +122,47 @@ impl<'a> PointKey<'a> {
                     || e5.is_none()
             }
             PointKey::Multi(k) => k.iter().any(DfValue::is_none),
+        }
+    }
+}
+
+impl<'a> Serialize for PointKey<'a> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        macro_rules! serialize_val {
+            ($ser: ident, $v: ident) => {{
+                let val = $v.transform_for_serialized_key();
+                match val.as_str() {
+                    Some(s) => $ser.serialize_element(s)?, // Don't serialize collation
+                    None => $ser.serialize_element(val.as_ref())?,
+                }
+            }};
+        }
+
+        macro_rules! serialize {
+            ($count: expr, $($v:ident),+) => {{
+                let mut tup = serializer.serialize_tuple($count)?;
+                $({ serialize_val!(tup, $v) })+
+                tup.end()
+            }};
+        }
+
+        match self {
+            PointKey::Single(v) => v.transform_for_serialized_key().serialize(serializer),
+            PointKey::Double((v1, v2)) => serialize!(2, v1, v2),
+            PointKey::Tri((v1, v2, v3)) => serialize!(3, v1, v2, v3),
+            PointKey::Quad((v1, v2, v3, v4)) => serialize!(4, v1, v2, v3, v4),
+            PointKey::Quin((v1, v2, v3, v4, v5)) => serialize!(5, v1, v2, v3, v4, v5),
+            PointKey::Sex((v1, v2, v3, v4, v5, v6)) => serialize!(6, v1, v2, v3, v4, v5, v6),
+            PointKey::Multi(vs) => {
+                let mut seq = serializer.serialize_seq(Some(vs.len()))?;
+                for v in vs {
+                    serialize_val!(seq, v);
+                }
+                seq.end()
+            }
         }
     }
 }
@@ -326,5 +368,65 @@ impl<'a> RangeKey<'a> {
                 (lower.map(|dts| dts.to_vec()), upper.map(|dts| dts.to_vec()))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use readyset_data::Collation;
+
+    use super::*;
+
+    #[test]
+    fn single_point_key_serialize_normalizes_citext() {
+        assert_eq!(
+            bincode::serialize(&PointKey::Single(&DfValue::from_str_and_collation(
+                "AbC",
+                Collation::Citext
+            )))
+            .unwrap(),
+            bincode::serialize(&PointKey::Single(&DfValue::from("abc"))).unwrap(),
+        )
+    }
+
+    #[test]
+    fn double_point_key_serialize_normalizes_citext() {
+        assert_eq!(
+            bincode::serialize(&PointKey::Double((
+                DfValue::from(1),
+                DfValue::from_str_and_collation("AbC", Collation::Citext)
+            )))
+            .unwrap(),
+            bincode::serialize(&PointKey::Double((DfValue::from(1), DfValue::from("abc"))))
+                .unwrap(),
+        )
+    }
+
+    #[test]
+    fn multi_point_key_serialize_normalizes_citext() {
+        assert_eq!(
+            bincode::serialize(&PointKey::Multi(vec![
+                DfValue::from(1),
+                DfValue::from(2),
+                DfValue::from(3),
+                DfValue::from(4),
+                DfValue::from(5),
+                DfValue::from(6),
+                DfValue::from(7),
+                DfValue::from_str_and_collation("AbC", Collation::Citext)
+            ]))
+            .unwrap(),
+            bincode::serialize(&PointKey::Multi(vec![
+                DfValue::from(1),
+                DfValue::from(2),
+                DfValue::from(3),
+                DfValue::from(4),
+                DfValue::from(5),
+                DfValue::from(6),
+                DfValue::from(7),
+                DfValue::from_str_and_collation("abc", Collation::Utf8)
+            ]))
+            .unwrap(),
+        );
     }
 }

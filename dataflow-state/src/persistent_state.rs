@@ -936,7 +936,27 @@ impl State for PersistentStateHandle {
     }
 }
 
-fn serialize_key<K: serde::Serialize, E: serde::Serialize>(k: K, extra: E) -> Vec<u8> {
+fn build_key<'a>(row: &'a [DfValue], columns: &[usize]) -> PointKey<'a> {
+    PointKey::from(columns.iter().map(|i| &row[*i]))
+}
+
+/// Our RocksDB keys come in three forms, and are encoded as follows:
+///
+/// * Unique Primary Keys
+/// (size, key), where size is the serialized byte size of `key`
+/// (used in `prefix_transform`).
+///
+/// * Non-unique Primary Keys
+/// (size, key, epoch, seq), where epoch is incremented on each recover, and seq is a
+/// monotonically increasing sequence number that starts at 0 for every new epoch.
+///
+/// * Secondary Index Keys
+/// (size, key, primary_key), where `primary_key` makes sure that each secondary index row is
+/// unique.
+///
+/// `serialize_key` is responsible for serializing the underlying PointKey tuple
+/// directly, plus any extra information as described above.
+fn serialize_key<K: Serialize, E: Serialize>(k: K, extra: E) -> Vec<u8> {
     let size: u64 = bincode::options().serialized_size(&k).unwrap();
     bincode::options().serialize(&(size, k, extra)).unwrap()
 }
@@ -1311,7 +1331,7 @@ impl PersistentState {
                 }
 
                 let row = deserialize_row(value);
-                let index_key = Self::build_key(&row, &index.columns);
+                let index_key = build_key(&row, &index.columns);
                 if is_unique && !index_key.has_null() {
                     // We know this key to be unique, so we just use it as is
                     let key = Self::serialize_prefix(&index_key);
@@ -1336,10 +1356,6 @@ impl PersistentState {
         // Manually compact the newly created column family
         self.compact_cf(&db, &persistent_index);
         info!("Base finished compacting secondary index");
-    }
-
-    fn build_key<'a>(row: &'a [DfValue], columns: &[usize]) -> PointKey<'a> {
-        PointKey::from(columns.iter().map(|i| &row[*i]))
     }
 
     /// Builds a [`PersistentMeta`] from the in-memory metadata information stored in `self`,
@@ -1560,48 +1576,20 @@ impl PersistentState {
         }
     }
 
-    // Our RocksDB keys come in three forms, and are encoded as follows:
-    //
-    // * Unique Primary Keys
-    // (size, key), where size is the serialized byte size of `key`
-    // (used in `prefix_transform`).
-    //
-    // * Non-unique Primary Keys
-    // (size, key, epoch, seq), where epoch is incremented on each recover, and seq is a
-    // monotonically increasing sequence number that starts at 0 for every new epoch.
-    //
-    // * Secondary Index Keys
-    // (size, key, primary_key), where `primary_key` makes sure that each secondary index row is
-    // unique.
-    //
-    // Self::serialize_raw_key is responsible for serializing the underlying PointKey tuple
-    // directly (without the enum variant), plus any extra information as described above.
-    fn serialize_raw_key<S: serde::Serialize>(key: &PointKey, extra: S) -> Vec<u8> {
-        match key {
-            PointKey::Single(k) => serialize_key(k, extra),
-            PointKey::Double(k) => serialize_key(k, extra),
-            PointKey::Tri(k) => serialize_key(k, extra),
-            PointKey::Quad(k) => serialize_key(k, extra),
-            PointKey::Quin(k) => serialize_key(k, extra),
-            PointKey::Sex(k) => serialize_key(k, extra),
-            PointKey::Multi(k) => serialize_key(k, extra),
-        }
-    }
-
     fn serialize_prefix(key: &PointKey) -> Vec<u8> {
-        Self::serialize_raw_key(key, ())
+        serialize_key(key, ())
     }
 
     fn serialize_secondary(key: &PointKey, raw_primary: &[u8]) -> Vec<u8> {
-        let mut bytes = Self::serialize_raw_key(key, ());
+        let mut bytes = serialize_key(key, ());
         bytes.extend_from_slice(raw_primary);
         bytes
     }
 
     fn serialize_range<S, T>(key: &RangeKey, extra: (S, T)) -> (Bound<Vec<u8>>, Bound<Vec<u8>>)
     where
-        S: serde::Serialize,
-        T: serde::Serialize,
+        S: Serialize,
+        T: Serialize,
     {
         use Bound::*;
         fn do_serialize_range<K, S, T>(
@@ -1609,9 +1597,9 @@ impl PersistentState {
             extra: (S, T),
         ) -> (Bound<Vec<u8>>, Bound<Vec<u8>>)
         where
-            K: serde::Serialize,
-            S: serde::Serialize,
-            T: serde::Serialize,
+            K: Serialize,
+            S: Serialize,
+            T: Serialize,
         {
             (
                 range.0.map(|k| serialize_key(k, &extra.0)),
@@ -1637,7 +1625,7 @@ impl PersistentState {
         let inner = self.db.inner();
         let db = &inner.db;
         let primary_index = inner.indices.first().expect("Insert on un-indexed state");
-        let primary_key = Self::build_key(r, &primary_index.index.columns);
+        let primary_key = build_key(r, &primary_index.index.columns);
         let primary_cf = db.cf_handle(&primary_index.column_family).unwrap();
 
         // Generate a new primary key by extracting the key columns from the provided row
@@ -1648,7 +1636,7 @@ impl PersistentState {
             // The primary index may not be unique so we append a monotonically incremented
             // counter to make sure the key is unique (prefixes will be shared for non unique keys)
             self.seq += 1;
-            Self::serialize_raw_key(&primary_key, (self.epoch, self.seq))
+            serialize_key(&primary_key, (self.epoch, self.seq))
         };
 
         let serialized_row = bincode::options().serialize(r).unwrap();
@@ -1660,8 +1648,8 @@ impl PersistentState {
         for index in inner.indices[1..].iter() {
             // Construct a key with the index values, and serialize it with bincode:
             let cf = db.cf_handle(&index.column_family).unwrap();
+            let key = build_key(r, &index.index.columns);
 
-            let key = Self::build_key(r, &index.index.columns);
             if index.is_unique && !key.has_null() {
                 let serialized_key = Self::serialize_prefix(&key);
                 batch.put_cf(cf, &serialized_key, &serialized_pk);
@@ -1679,7 +1667,7 @@ impl PersistentState {
         let db = &inner.db;
 
         let primary_index = inner.indices.first().expect("Delete on un-indexed state");
-        let primary_key = Self::build_key(r, &primary_index.index.columns);
+        let primary_key = build_key(r, &primary_index.index.columns);
         let primary_cf = db.cf_handle(&primary_index.column_family).unwrap();
 
         let prefix = Self::serialize_prefix(&primary_key);
@@ -1713,7 +1701,7 @@ impl PersistentState {
         // Then delete the value for all the secondary indices
         for index in inner.indices[1..].iter() {
             // Construct a key with the index values, and serialize it with bincode:
-            let key = Self::build_key(r, &index.index.columns);
+            let key = build_key(r, &index.index.columns);
             let serialized_key = if index.is_unique && !key.has_null() {
                 Self::serialize_prefix(&key)
             } else {
@@ -1905,6 +1893,7 @@ mod tests {
     use std::path::PathBuf;
 
     use pretty_assertions::assert_eq;
+    use readyset_data::Collation;
 
     use super::*;
 
@@ -2009,6 +1998,34 @@ mod tests {
             }
             _ => unreachable!(),
         }
+    }
+
+    #[test]
+    fn lookup_citext() {
+        let mut state = setup_persistent("lookup_citext", None);
+        state.add_key(Index::hash_map(vec![0]), None);
+
+        let abc = vec![
+            vec![
+                DfValue::from_str_and_collation("abc", Collation::Citext),
+                1.into(),
+            ],
+            vec![
+                DfValue::from_str_and_collation("AbC", Collation::Citext),
+                2.into(),
+            ],
+        ];
+
+        state.process_records(&mut abc.clone().into(), None, None);
+
+        let res = state
+            .lookup(
+                &[0],
+                &PointKey::Single(&DfValue::from_str_and_collation("abc", Collation::Citext)),
+            )
+            .unwrap();
+
+        assert_eq!(res, abc.into())
     }
 
     #[test]
