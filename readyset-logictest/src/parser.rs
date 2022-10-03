@@ -12,7 +12,7 @@ use std::str::FromStr;
 
 use anyhow::{anyhow, bail, Context};
 use chrono::NaiveDateTime;
-use mysql_time::MysqlTime;
+use mysql_time::MySqlTime;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::character::complete::{
@@ -200,7 +200,7 @@ fn value(i: &[u8]) -> IResult<&[u8], Value> {
         terminated(
             map_opt(not_line_ending, |s: &[u8]| {
                 Some(Value::Time(
-                    MysqlTime::from_str(String::from_utf8_lossy(s).as_ref()).ok()?,
+                    MySqlTime::from_str(String::from_utf8_lossy(s).as_ref()).ok()?,
                 ))
             }),
             line_ending,

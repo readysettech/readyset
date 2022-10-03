@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use bit_vec::BitVec;
 use chrono::NaiveDateTime;
-use mysql_time::MysqlTime;
+use mysql_time::MySqlTime;
 use rust_decimal::Decimal;
 use serde::de::{EnumAccess, VariantAccess, Visitor};
 use serde::{Deserialize, Deserializer};
@@ -192,7 +192,7 @@ impl<'de> Deserialize<'de> for DfValue {
                         })
                     }
                     (Variant::Time, variant) => {
-                        VariantAccess::newtype_variant::<MysqlTime>(variant).map(DfValue::Time)
+                        VariantAccess::newtype_variant::<MySqlTime>(variant).map(DfValue::Time)
                     }
                     (Variant::ByteArray, variant) => {
                         VariantAccess::newtype_variant::<ByteBuf>(variant)

@@ -265,11 +265,11 @@ impl<'a> TryFrom<Value<'a>> for NaiveDateTime {
     }
 }
 
-use mysql_time::MysqlTime;
+use mysql_time::MySqlTime;
 
-impl<'a> TryFrom<Value<'a>> for MysqlTime {
+impl<'a> TryFrom<Value<'a>> for MySqlTime {
     type Error = MsqlSrvError;
-    fn try_from(val: Value<'a>) -> Result<MysqlTime, Self::Error> {
+    fn try_from(val: Value<'a>) -> Result<MySqlTime, Self::Error> {
         if let ValueInner::Time(mut v) = val.0 {
             let is_positive = v.read_u8()? == 0; // sign: 1 negative, 0 positive
             let d = v.read_u32::<LittleEndian>()? as u16;
@@ -277,10 +277,10 @@ impl<'a> TryFrom<Value<'a>> for MysqlTime {
             let m = v.read_u8()?;
             let s = v.read_u8()?;
             let us = v.read_u32::<LittleEndian>().unwrap_or(0) as u64;
-            Ok(MysqlTime::from_hmsus(is_positive, d * 24 + h, m, s, us))
+            Ok(MySqlTime::from_hmsus(is_positive, d * 24 + h, m, s, us))
         } else {
             Err(MsqlSrvError::InvalidConversion {
-                target_type: "MysqlTime".to_string(),
+                target_type: "MySqlTime".to_string(),
                 src_type: format!("{:?}", val),
             })
         }
@@ -334,7 +334,7 @@ mod tests {
     use std::time;
 
     use chrono::{self, TimeZone};
-    use mysql_time::MysqlTime;
+    use mysql_time::MySqlTime;
 
     use super::Value;
     use crate::myc::io::{ParseBuf, WriteMysqlExt};
@@ -515,8 +515,8 @@ mod tests {
     );
     rt!(
         time,
-        MysqlTime,
-        MysqlTime::from_hmsus(true, 20, 15, 14, 123_456),
+        MySqlTime,
+        MySqlTime::from_hmsus(true, 20, 15, 14, 123_456),
         ColumnType::MYSQL_TYPE_TIME
     );
     rt!(

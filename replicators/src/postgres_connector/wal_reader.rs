@@ -3,7 +3,7 @@ use std::convert::TryInto;
 use std::sync::Arc;
 
 use bit_vec::BitVec;
-use mysql_time::MysqlTime;
+use mysql_time::MySqlTime;
 use nom_sql::SqlType;
 use postgres_types::Kind;
 use readyset::ReadySetError;
@@ -436,7 +436,7 @@ impl wal::TupleData {
                             PGType::DATE => DfValue::TimestampTz(
                                 str.parse().map_err(|_| WalError::DateParseError)?,
                             ),
-                            PGType::TIME => DfValue::Time(MysqlTime::from_str(&str)?),
+                            PGType::TIME => DfValue::Time(MySqlTime::from_str(&str)?),
                             PGType::BIT | PGType::VARBIT => {
                                 let mut bits = BitVec::with_capacity(str.len());
                                 for c in str.chars() {

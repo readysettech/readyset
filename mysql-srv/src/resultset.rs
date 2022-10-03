@@ -7,7 +7,7 @@ use tokio::io::AsyncWrite;
 
 use crate::myc::constants::{ColumnFlags, StatusFlags};
 use crate::packet::PacketWriter;
-use crate::value::ToMysqlValue;
+use crate::value::ToMySqlValue;
 use crate::{writers, Column, ErrorKind, StatementData};
 
 pub(crate) const DEFAULT_ROW_CAPACITY: usize = 4096;
@@ -338,7 +338,7 @@ where
     /// provided.
     pub fn write_col<T>(&mut self, v: T) -> io::Result<()>
     where
-        T: ToMysqlValue,
+        T: ToMySqlValue,
     {
         if self.columns.is_empty() {
             return Ok(());
@@ -433,7 +433,7 @@ where
     pub async fn write_row<I, E>(&mut self, row: I) -> io::Result<()>
     where
         I: IntoIterator<Item = E>,
-        E: ToMysqlValue,
+        E: ToMySqlValue,
     {
         if !self.columns.is_empty() {
             for v in row {

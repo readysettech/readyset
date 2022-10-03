@@ -11,7 +11,7 @@ mod value;
 use async_trait::async_trait;
 pub use backend::Backend;
 pub use error::Error;
-use mysql_srv::MysqlIntermediary;
+use mysql_srv::MySqlIntermediary;
 pub use query_handler::MySqlQueryHandler;
 use readyset_client_adapter::ConnectionHandler;
 use tokio::net;
@@ -19,10 +19,10 @@ use tracing::{error, instrument};
 pub use upstream::{MySqlUpstream, QueryResult};
 
 #[derive(Clone, Copy)]
-pub struct MysqlHandler;
+pub struct MySqlHandler;
 
 #[async_trait]
-impl ConnectionHandler for MysqlHandler {
+impl ConnectionHandler for MySqlHandler {
     type UpstreamDatabase = MySqlUpstream;
     type Handler = MySqlQueryHandler;
 
@@ -32,7 +32,7 @@ impl ConnectionHandler for MysqlHandler {
         stream: net::TcpStream,
         backend: readyset_client::Backend<MySqlUpstream, MySqlQueryHandler>,
     ) {
-        if let Err(e) = MysqlIntermediary::run_on_tcp(Backend::new(backend), stream).await {
+        if let Err(e) = MySqlIntermediary::run_on_tcp(Backend::new(backend), stream).await {
             error!(err = %e, "connection lost");
         }
     }

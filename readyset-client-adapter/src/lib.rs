@@ -84,7 +84,7 @@ pub trait ConnectionHandler {
 #[derive(Copy, Clone, Debug)]
 pub enum DatabaseType {
     /// MySQL database.
-    Mysql,
+    MySql,
     /// PostgreSQL database.
     Psql,
 }
@@ -1101,7 +1101,7 @@ async fn query_logger(
                             readyset_client_metrics::recorded::QUERY_LOG_EXECUTION_TIME,
                             upstream.as_secs_f64(),
                             "query" => query.clone(),
-                            "database_type" => String::from(readyset_client_metrics::DatabaseType::Mysql),
+                            "database_type" => String::from(readyset_client_metrics::DatabaseType::MySql),
                             "event_type" => SharedString::from(event.event),
                             "query_type" => SharedString::from(event.sql_type)
                         );
@@ -1136,7 +1136,7 @@ async fn query_logger(
 impl From<DatabaseType> for readyset_client_metrics::DatabaseType {
     fn from(database_type: DatabaseType) -> Self {
         match database_type {
-            DatabaseType::Mysql => readyset_client_metrics::DatabaseType::Mysql,
+            DatabaseType::MySql => readyset_client_metrics::DatabaseType::MySql,
             DatabaseType::Psql => readyset_client_metrics::DatabaseType::Psql,
         }
     }

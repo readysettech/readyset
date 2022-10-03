@@ -19,16 +19,16 @@ const MICROSECS_IN_SECOND: i64 = 1_000_000;
 
 const MAX_MYSQL_TIME_SECONDS: i64 = 3020399; // 3020399 secs = 838:59:59
 
-/// Errors that can occur when converting various types into a [`MysqlTime`]
+/// Errors that can occur when converting various types into a [`MySqlTime`]
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ConvertError {
-    /// An error occurred when parsing a string into a [`MysqlTime`].
+    /// An error occurred when parsing a string into a [`MySqlTime`].
     ///
     /// In MySQL, these result in an all-zero time
     #[error("Error parsing string as time")]
     ParseError,
 
-    /// A [`MysqlTime`] was parsed successfully, but one of the fields was out of bounds.
+    /// A [`MySqlTime`] was parsed successfully, but one of the fields was out of bounds.
     ///
     /// In MySQL, these result in a NULL value
     #[error("{0}")]
@@ -46,24 +46,24 @@ pub enum ConvertError {
 /// an invalid [`chrono::Duration`] (for example, one that surpasses or falls below the
 /// allowed range), in which case it is "truncated" to the closest range limit.
 #[derive(Clone, Copy, Serialize, Deserialize)]
-pub struct MysqlTime {
+pub struct MySqlTime {
     nanos: i64,
 }
 
-impl MysqlTime {
-    /// Creates a new [`MysqlTime`] with the given [`chrono::Duration`].
+impl MySqlTime {
+    /// Creates a new [`MySqlTime`] with the given [`chrono::Duration`].
     /// Note that if the [`chrono::Duration`] surpasses the MySQL's TIME max value, then
-    /// the [`MysqlTime::max_value()`] is used (resp. [`MysqlTime::min_value()`] if the
+    /// the [`MySqlTime::max_value()`] is used (resp. [`MySqlTime::min_value()`] if the
     /// [`chrono::Duration`] falls below the MySQL's TIME min value).
     ///
     /// # Example
     ///
     /// ```rust
     /// use chrono::Duration;
-    /// use mysql_time::MysqlTime;
+    /// use mysql_time::MySqlTime;
     ///
     /// let duration: Duration = Duration::hours(838); // Within range
-    /// let mysql_time: MysqlTime = MysqlTime::new(duration); // 838:00:00
+    /// let mysql_time: MySqlTime = MySqlTime::new(duration); // 838:00:00
     /// assert!(mysql_time.is_positive());
     /// assert_eq!(838, mysql_time.hour());
     /// assert_eq!(0, mysql_time.minutes());
@@ -71,7 +71,7 @@ impl MysqlTime {
     /// assert_eq!(0, mysql_time.microseconds());
     ///
     /// let exceeded_duration: Duration = Duration::hours(839); // Out of range
-    /// let truncated_mysql_time: MysqlTime = MysqlTime::new(exceeded_duration); // 838:59:59
+    /// let truncated_mysql_time: MySqlTime = MySqlTime::new(exceeded_duration); // 838:59:59
     ///
     /// assert!(truncated_mysql_time.is_positive());
     /// assert_eq!(838, truncated_mysql_time.hour());
@@ -79,32 +79,32 @@ impl MysqlTime {
     /// assert_eq!(59, truncated_mysql_time.seconds());
     /// assert_eq!(0, truncated_mysql_time.microseconds());
     /// ```
-    pub fn new(duration: Duration) -> MysqlTime {
+    pub fn new(duration: Duration) -> MySqlTime {
         let secs = duration.num_seconds();
         if secs > MAX_MYSQL_TIME_SECONDS {
-            return MysqlTime::max_value();
+            return MySqlTime::max_value();
         }
         if secs < (-MAX_MYSQL_TIME_SECONDS) {
-            return MysqlTime::min_value();
+            return MySqlTime::min_value();
         }
-        MysqlTime {
+        MySqlTime {
             nanos: duration.num_nanoseconds().expect("Limit checked above"),
         }
     }
 
-    /// Creates a new [`MysqlTime`] from the given `hour`, `minutes`, `seconds`
+    /// Creates a new [`MySqlTime`] from the given `hour`, `minutes`, `seconds`
     /// and `microseconds`.
-    /// The sign of the [`MysqlTime`] is given by the `hour` parameter.
-    /// Truncation of the [`MysqlTime`] applies if the time exceeds/falls below
+    /// The sign of the [`MySqlTime`] is given by the `hour` parameter.
+    /// Truncation of the [`MySqlTime`] applies if the time exceeds/falls below
     /// the allowed range.
     ///
     /// # Example
     ///
     /// ```rust
-    /// use mysql_time::MysqlTime;
+    /// use mysql_time::MySqlTime;
     ///
-    /// let mysql_time_from_hmsus: MysqlTime = MysqlTime::from_hmsus(false, 3, 5, 37, 300000); // -03:05:37.300000
-    /// let mysql_time_from_hmsus_invalid_range: MysqlTime = MysqlTime::from_hmsus(false, 900, 5, 37, 300000); // -838:59:59
+    /// let mysql_time_from_hmsus: MySqlTime = MySqlTime::from_hmsus(false, 3, 5, 37, 300000); // -03:05:37.300000
+    /// let mysql_time_from_hmsus_invalid_range: MySqlTime = MySqlTime::from_hmsus(false, 900, 5, 37, 300000); // -838:59:59
     /// ```
     pub fn from_hmsus(
         positive: bool,
@@ -112,36 +112,36 @@ impl MysqlTime {
         minutes: u8,
         seconds: u8,
         microseconds: u64,
-    ) -> MysqlTime {
+    ) -> MySqlTime {
         let sum = (hour as i64 * 3600 * MICROSECS_IN_SECOND)
             + (minutes.min(59) as i64 * 60 * MICROSECS_IN_SECOND)
             + (seconds.min(59) as i64 * MICROSECS_IN_SECOND)
             + (microseconds.min(999_999) as i64);
-        MysqlTime::new(Duration::microseconds(sum * if positive { 1 } else { -1 }))
+        MySqlTime::new(Duration::microseconds(sum * if positive { 1 } else { -1 }))
     }
 
-    /// Creates a new [`MysqlTime`] from the given `microseconds`.
-    /// Truncation of the [`MysqlTime`] applies if the time exceeds/falls below
+    /// Creates a new [`MySqlTime`] from the given `microseconds`.
+    /// Truncation of the [`MySqlTime`] applies if the time exceeds/falls below
     /// the allowed range.
     ///
     /// # Example
     ///
     /// ```rust
-    /// use mysql_time::MysqlTime;
+    /// use mysql_time::MySqlTime;
     ///
-    /// let mysql_time_from_ms: MysqlTime = MysqlTime::from_microseconds(3020399000000); // 838:59:59
-    /// let mysql_time_from_ms_invalid_range: MysqlTime = MysqlTime::from_microseconds(3020399000001); // 838:59:59
+    /// let mysql_time_from_ms: MySqlTime = MySqlTime::from_microseconds(3020399000000); // 838:59:59
+    /// let mysql_time_from_ms_invalid_range: MySqlTime = MySqlTime::from_microseconds(3020399000001); // 838:59:59
     /// ```
-    pub fn from_microseconds(microseconds: i64) -> MysqlTime {
-        MysqlTime::new(Duration::microseconds(microseconds))
+    pub fn from_microseconds(microseconds: i64) -> MySqlTime {
+        MySqlTime::new(Duration::microseconds(microseconds))
     }
 
-    /// Attempts to parse a byte array into a new [`MysqlTime`].
+    /// Attempts to parse a byte array into a new [`MySqlTime`].
     ///
     /// # Example
     ///
     /// ```rust
-    /// use mysql_time::{MysqlTime, ConvertError};
+    /// use mysql_time::{MySqlTime, ConvertError};
     ///
     /// macro_rules! assert_time {
     ///     ($mysql_time:expr, $positive:literal , $h:literal, $m:literal, $s:literal, $us: literal) => {
@@ -153,18 +153,18 @@ impl MysqlTime {
     ///     };
     /// }
     ///
-    /// let result = MysqlTime::from_bytes("not-timestamp".as_bytes());
+    /// let result = MySqlTime::from_bytes("not-timestamp".as_bytes());
     /// assert_eq!(result, Err(ConvertError::ParseError));
     ///
-    /// let mysql_time: MysqlTime = MysqlTime::from_bytes("1112".as_bytes()).unwrap(); // 00:11:12
+    /// let mysql_time: MySqlTime = MySqlTime::from_bytes("1112".as_bytes()).unwrap(); // 00:11:12
     /// assert_time!(mysql_time, true, 0, 11, 12, 0);
     ///
-    /// let mysql_time: MysqlTime = MysqlTime::from_bytes("11:12".as_bytes()).unwrap(); // 00:11:12
+    /// let mysql_time: MySqlTime = MySqlTime::from_bytes("11:12".as_bytes()).unwrap(); // 00:11:12
     /// assert_time!(mysql_time, true, 11, 12, 0, 0);
     ///
-    /// assert!(MysqlTime::from_bytes("60".as_bytes()).is_err());
+    /// assert!(MySqlTime::from_bytes("60".as_bytes()).is_err());
     /// ```
-    pub fn from_bytes(bytes: &[u8]) -> Result<MysqlTime, ConvertError> {
+    pub fn from_bytes(bytes: &[u8]) -> Result<MySqlTime, ConvertError> {
         let (positive, hour, minutes, seconds, microseconds) = parse::h_m_s_us(bytes)
             .map(|res| res.1)
             .map_err(|_| ConvertError::ParseError)?;
@@ -183,7 +183,7 @@ impl MysqlTime {
                 "Microseconds can't be greater than 999999".to_owned(),
             ));
         }
-        Ok(MysqlTime::from_hmsus(
+        Ok(MySqlTime::from_hmsus(
             positive,
             hour,
             minutes,
@@ -192,57 +192,57 @@ impl MysqlTime {
         ))
     }
 
-    /// Returns the maximum value that a [`MysqlTime`] can represent: `838:59:59`.
+    /// Returns the maximum value that a [`MySqlTime`] can represent: `838:59:59`.
     ///
     /// # Example
     ///
     /// ```rust
-    /// use mysql_time::MysqlTime;
+    /// use mysql_time::MySqlTime;
     ///
-    /// let mysql_time_max: MysqlTime = MysqlTime::max_value(); // 838:59:59
+    /// let mysql_time_max: MySqlTime = MySqlTime::max_value(); // 838:59:59
     /// ```
-    pub fn max_value() -> MysqlTime {
-        MysqlTime::new(Duration::seconds(MAX_MYSQL_TIME_SECONDS))
+    pub fn max_value() -> MySqlTime {
+        MySqlTime::new(Duration::seconds(MAX_MYSQL_TIME_SECONDS))
     }
 
-    /// Returns the minimum value that a [`MysqlTime`] can represent: `-838:59:59`.
+    /// Returns the minimum value that a [`MySqlTime`] can represent: `-838:59:59`.
     ///
     /// # Example
     ///
     /// ```
-    /// use mysql_time::MysqlTime;
+    /// use mysql_time::MySqlTime;
     ///
-    /// let mysql_time_min: MysqlTime = MysqlTime::min_value(); // -838:59:59
+    /// let mysql_time_min: MySqlTime = MySqlTime::min_value(); // -838:59:59
     /// ```
-    pub fn min_value() -> MysqlTime {
-        MysqlTime::new(Duration::seconds(-MAX_MYSQL_TIME_SECONDS))
+    pub fn min_value() -> MySqlTime {
+        MySqlTime::new(Duration::seconds(-MAX_MYSQL_TIME_SECONDS))
     }
 
-    /// Returns the sign of the [`MysqlTime`] as 1 if it's positive, or -1 if it's negative.
+    /// Returns the sign of the [`MySqlTime`] as 1 if it's positive, or -1 if it's negative.
     ///
     /// # Example
     ///
     /// ```rust
-    /// use mysql_time::MysqlTime;
+    /// use mysql_time::MySqlTime;
     ///
-    /// let neg_mysql_time = MysqlTime::from_hmsus(false, 2, 23, 58, 829313); // -02:23:58.829313
+    /// let neg_mysql_time = MySqlTime::from_hmsus(false, 2, 23, 58, 829313); // -02:23:58.829313
     /// assert_eq!(neg_mysql_time.is_positive(), false);
     ///
-    /// let pos_mysql_time = MysqlTime::from_hmsus(true, 2, 23, 58, 829313); // 02:23:58.829313
+    /// let pos_mysql_time = MySqlTime::from_hmsus(true, 2, 23, 58, 829313); // 02:23:58.829313
     /// assert_eq!(pos_mysql_time.is_positive(), true);
     /// ```
     pub fn is_positive(&self) -> bool {
         self.nanos.is_positive()
     }
 
-    /// Returns the `hour` from this [`MysqlTime`]
+    /// Returns the `hour` from this [`MySqlTime`]
     ///
     /// # Example
     ///
     /// ```rust
-    /// use mysql_time::MysqlTime;
+    /// use mysql_time::MySqlTime;
     ///
-    /// let mysql_time = MysqlTime::from_hmsus(false, 2, 23, 58, 829313); // -02:23:58.829313
+    /// let mysql_time = MySqlTime::from_hmsus(false, 2, 23, 58, 829313); // -02:23:58.829313
     /// assert_eq!(mysql_time.hour(), 2);
     /// ```
     pub fn hour(&self) -> u16 {
@@ -253,14 +253,14 @@ impl MysqlTime {
             .unwrap_or(u16::MAX)
     }
 
-    /// Returns the `minutes` from this [`MysqlTime`].
+    /// Returns the `minutes` from this [`MySqlTime`].
     ///
     /// # Example
     ///
     /// ```rust
-    /// use mysql_time::MysqlTime;
+    /// use mysql_time::MySqlTime;
     ///
-    /// let mysql_time = MysqlTime::from_hmsus(false, 2, 23, 58, 829313); // -02:23:58.829313
+    /// let mysql_time = MySqlTime::from_hmsus(false, 2, 23, 58, 829313); // -02:23:58.829313
     /// assert_eq!(mysql_time.minutes(), 23);
     /// ```
     pub fn minutes(&self) -> u8 {
@@ -270,14 +270,14 @@ impl MysqlTime {
             .min(59)
     }
 
-    /// Returns the `seconds` from this [`MysqlTime`].
+    /// Returns the `seconds` from this [`MySqlTime`].
     ///
     /// # Example
     ///
     /// ```rust
-    /// use mysql_time::MysqlTime;
+    /// use mysql_time::MySqlTime;
     ///
-    /// let mysql_time = MysqlTime::from_hmsus(false, 2, 23, 58, 829313); // -02:23:58.829313
+    /// let mysql_time = MySqlTime::from_hmsus(false, 2, 23, 58, 829313); // -02:23:58.829313
     /// assert_eq!(mysql_time.seconds(), 58);
     /// ```
     pub fn seconds(&self) -> u8 {
@@ -287,14 +287,14 @@ impl MysqlTime {
             .min(59)
     }
 
-    /// Returns the `microseconds` from this [`MysqlTime`].
+    /// Returns the `microseconds` from this [`MySqlTime`].
     ///
     /// # Example
     ///
     /// ```rust
-    /// use mysql_time::MysqlTime;
+    /// use mysql_time::MySqlTime;
     ///
-    /// let mysql_time = MysqlTime::from_hmsus(false, 2, 23, 58, 829313); // -02:23:58.829313
+    /// let mysql_time = MySqlTime::from_hmsus(false, 2, 23, 58, 829313); // -02:23:58.829313
     /// assert_eq!(mysql_time.microseconds(), 829313);
     /// ```
     pub fn microseconds(&self) -> u32 {
@@ -310,13 +310,13 @@ impl MysqlTime {
     }
 }
 
-impl Default for MysqlTime {
+impl Default for MySqlTime {
     fn default() -> Self {
-        MysqlTime::new(Duration::microseconds(0))
+        MySqlTime::new(Duration::microseconds(0))
     }
 }
 
-impl fmt::Display for MysqlTime {
+impl fmt::Display for MySqlTime {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let sign = if self.is_positive() { "" } else { "-" };
         let h = self.hour();
@@ -331,13 +331,13 @@ impl fmt::Display for MysqlTime {
     }
 }
 
-impl fmt::Debug for MysqlTime {
+impl fmt::Debug for MySqlTime {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self)
     }
 }
 
-impl PartialEq for MysqlTime {
+impl PartialEq for MySqlTime {
     fn eq(&self, other: &Self) -> bool {
         self.is_positive() == other.is_positive()
             && self.hour() == other.hour()
@@ -347,15 +347,15 @@ impl PartialEq for MysqlTime {
     }
 }
 
-impl Eq for MysqlTime {}
+impl Eq for MySqlTime {}
 
-impl PartialOrd for MysqlTime {
+impl PartialOrd for MySqlTime {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for MysqlTime {
+impl Ord for MySqlTime {
     fn cmp(&self, other: &Self) -> Ordering {
         self.is_positive()
             .cmp(&other.is_positive())
@@ -366,7 +366,7 @@ impl Ord for MysqlTime {
     }
 }
 
-impl Hash for MysqlTime {
+impl Hash for MySqlTime {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.is_positive().hash(state);
         self.hour().hash(state);
@@ -376,8 +376,8 @@ impl Hash for MysqlTime {
     }
 }
 
-impl From<MysqlTime> for Duration {
-    fn from(t: MysqlTime) -> Self {
+impl From<MySqlTime> for Duration {
+    fn from(t: MySqlTime) -> Self {
         Duration::nanoseconds(t.nanos)
     }
 }
@@ -510,17 +510,17 @@ mod parse {
     }
 }
 
-impl FromStr for MysqlTime {
+impl FromStr for MySqlTime {
     type Err = ConvertError;
 
-    /// Attempts to parse a [`&str`] into a [`MysqlTime`], according to the parsing rules
+    /// Attempts to parse a [`&str`] into a [`MySqlTime`], according to the parsing rules
     /// defined by [MySQL's TIME string](https://dev.mysql.com/doc/refman/8.0/en/time.html)
     /// interpretation.
     ///
     /// # Example
     ///
     /// ```rust
-    /// use mysql_time::{MysqlTime, ConvertError};
+    /// use mysql_time::{MySqlTime, ConvertError};
     ///
     /// macro_rules! assert_time {
     ///     ($mysql_time:expr, $positive:literal , $h:literal, $m:literal, $s:literal, $us: literal) => {
@@ -532,23 +532,23 @@ impl FromStr for MysqlTime {
     ///     };
     /// }
     ///
-    /// let result: Result<MysqlTime, _> = "not-timestamp".parse();
+    /// let result: Result<MySqlTime, _> = "not-timestamp".parse();
     /// assert_eq!(result, Err(ConvertError::ParseError));
     ///
-    /// let mysql_time: MysqlTime = "1112".parse().unwrap(); // 00:11:12
+    /// let mysql_time: MySqlTime = "1112".parse().unwrap(); // 00:11:12
     /// assert_time!(mysql_time, true, 0, 11, 12, 0);
     ///
-    /// let mysql_time: MysqlTime = "11:12".parse().unwrap(); // 00:11:12
+    /// let mysql_time: MySqlTime = "11:12".parse().unwrap(); // 00:11:12
     /// assert_time!(mysql_time, true, 11, 12, 0, 0);
     ///
-    /// assert!("60".parse::<MysqlTime>().is_err());
+    /// assert!("60".parse::<MySqlTime>().is_err());
     /// ```
     fn from_str(string: &str) -> Result<Self, Self::Err> {
-        MysqlTime::from_bytes(string.as_bytes())
+        MySqlTime::from_bytes(string.as_bytes())
     }
 }
 
-impl From<NaiveTime> for MysqlTime {
+impl From<NaiveTime> for MySqlTime {
     fn from(nt: NaiveTime) -> Self {
         let h = nt.hour() as i64;
         let m = nt.minute() as i64;
@@ -558,12 +558,12 @@ impl From<NaiveTime> for MysqlTime {
             + (m * 60 * MICROSECS_IN_SECOND)
             + (s * MICROSECS_IN_SECOND)
             + us;
-        MysqlTime::new(Duration::microseconds(sum))
+        MySqlTime::new(Duration::microseconds(sum))
     }
 }
 
-impl From<MysqlTime> for NaiveTime {
-    fn from(t: MysqlTime) -> Self {
+impl From<MySqlTime> for NaiveTime {
+    fn from(t: MySqlTime) -> Self {
         NaiveTime::from_hms_micro(
             t.hour().into(),
             t.minutes().into(),
@@ -573,9 +573,9 @@ impl From<MysqlTime> for NaiveTime {
     }
 }
 
-impl TryFrom<MysqlTime> for Value {
+impl TryFrom<MySqlTime> for Value {
     type Error = std::convert::Infallible;
-    fn try_from(mysql_time: MysqlTime) -> Result<Self, Self::Error> {
+    fn try_from(mysql_time: MySqlTime) -> Result<Self, Self::Error> {
         let total_hours = mysql_time.hour();
         let days = (total_hours / 24) as u32;
         let hours = (total_hours % 24) as u8;
@@ -596,13 +596,13 @@ pub struct ParseIr<T> {
     output: T,
 }
 
-impl ConvIr<MysqlTime> for ParseIr<MysqlTime> {
-    fn new(v: Value) -> Result<ParseIr<MysqlTime>, FromValueError> {
+impl ConvIr<MySqlTime> for ParseIr<MySqlTime> {
+    fn new(v: Value) -> Result<ParseIr<MySqlTime>, FromValueError> {
         match v {
             Value::Time(is_neg, days, hours, minutes, seconds, microseconds) => {
                 let hours = (days * 24) as u16 + hours as u16;
                 Ok(ParseIr {
-                    output: MysqlTime::from_hmsus(
+                    output: MySqlTime::from_hmsus(
                         !is_neg,
                         hours,
                         minutes,
@@ -612,7 +612,7 @@ impl ConvIr<MysqlTime> for ParseIr<MysqlTime> {
                     value: v,
                 })
             }
-            Value::Bytes(val_bytes) => match MysqlTime::from_bytes(&val_bytes) {
+            Value::Bytes(val_bytes) => match MySqlTime::from_bytes(&val_bytes) {
                 Ok(time) => Ok(ParseIr {
                     output: time,
                     value: Value::Bytes(val_bytes),
@@ -623,7 +623,7 @@ impl ConvIr<MysqlTime> for ParseIr<MysqlTime> {
         }
     }
 
-    fn commit(self) -> MysqlTime {
+    fn commit(self) -> MySqlTime {
         self.output
     }
 
@@ -632,17 +632,17 @@ impl ConvIr<MysqlTime> for ParseIr<MysqlTime> {
     }
 }
 
-impl FromValue for MysqlTime {
-    type Intermediate = ParseIr<MysqlTime>;
+impl FromValue for MySqlTime {
+    type Intermediate = ParseIr<MySqlTime>;
 }
 
 macro_rules! impl_try_from_num {
     ( $x:ty ) => {
-        impl TryFrom<$x> for MysqlTime {
+        impl TryFrom<$x> for MySqlTime {
             type Error = ConvertError;
 
             fn try_from(value: $x) -> Result<Self, Self::Error> {
-                MysqlTime::from_str(format!("{:.6}", value).as_str())
+                MySqlTime::from_str(format!("{:.6}", value).as_str())
             }
         }
     };
@@ -659,23 +659,23 @@ impl_try_from_num!(i64);
 impl_try_from_num!(f32);
 impl_try_from_num!(f64);
 
-impl Sub for MysqlTime {
-    type Output = MysqlTime;
+impl Sub for MySqlTime {
+    type Output = MySqlTime;
 
     fn sub(self, rhs: Self) -> Self::Output {
-        MysqlTime::new(self.duration().sub(rhs.duration()))
+        MySqlTime::new(self.duration().sub(rhs.duration()))
     }
 }
 
-impl Add for MysqlTime {
-    type Output = MysqlTime;
+impl Add for MySqlTime {
+    type Output = MySqlTime;
 
     fn add(self, rhs: Self) -> Self::Output {
-        MysqlTime::new(self.duration().add(rhs.duration()))
+        MySqlTime::new(self.duration().add(rhs.duration()))
     }
 }
 
-impl Add<NaiveDateTime> for MysqlTime {
+impl Add<NaiveDateTime> for MySqlTime {
     type Output = NaiveDateTime;
 
     fn add(self, rhs: NaiveDateTime) -> Self::Output {
@@ -683,9 +683,9 @@ impl Add<NaiveDateTime> for MysqlTime {
     }
 }
 
-impl Arbitrary for MysqlTime {
+impl Arbitrary for MySqlTime {
     type Parameters = ();
-    type Strategy = proptest::strategy::BoxedStrategy<MysqlTime>;
+    type Strategy = proptest::strategy::BoxedStrategy<MySqlTime>;
 
     fn arbitrary_with((): Self::Parameters) -> Self::Strategy {
         arbitrary_duration().prop_map(Self::new).boxed()
@@ -730,7 +730,7 @@ mod tests {
 
     #[proptest]
     fn new(#[strategy(arbitrary_duration())] duration: Duration) {
-        let mysql_time = MysqlTime::new(duration);
+        let mysql_time = MySqlTime::new(duration);
         let total_secs = duration.num_seconds();
         assert_valid!(mysql_time, total_secs);
     }
@@ -738,21 +738,21 @@ mod tests {
     #[test]
     fn new_exceeded_range() {
         let duration = Duration::seconds(MAX_MYSQL_TIME_SECONDS + 1);
-        let mysql_time = MysqlTime::new(duration);
+        let mysql_time = MySqlTime::new(duration);
         assert_valid!(mysql_time, MAX_MYSQL_TIME_SECONDS);
     }
 
     #[test]
     fn new_below_range() {
         let duration = Duration::seconds(-MAX_MYSQL_TIME_SECONDS - 1);
-        let mysql_time = MysqlTime::new(duration);
+        let mysql_time = MySqlTime::new(duration);
         assert_valid!(mysql_time, -MAX_MYSQL_TIME_SECONDS);
     }
 
     #[proptest]
     fn from_microseconds(#[strategy(arbitrary_duration())] duration: Duration) {
         let mysql_time =
-            MysqlTime::from_microseconds(duration.num_microseconds().unwrap_or(i64::max_value()));
+            MySqlTime::from_microseconds(duration.num_microseconds().unwrap_or(i64::max_value()));
         let total_secs = duration.num_seconds();
         assert_valid!(mysql_time, total_secs);
     }
@@ -762,9 +762,9 @@ mod tests {
         let duration1 = Duration::nanoseconds(1222333999); // 00:00:01.222333
         let duration2 = Duration::nanoseconds(1222333555); // 00:00:01.222333
         let duration3 = Duration::nanoseconds(1222333000); // 00:00:01.222333
-        let mysql_time1 = MysqlTime::new(duration1);
-        let mysql_time2 = MysqlTime::new(duration2);
-        let mysql_time3 = MysqlTime::new(duration3);
+        let mysql_time1 = MySqlTime::new(duration1);
+        let mysql_time2 = MySqlTime::new(duration2);
+        let mysql_time3 = MySqlTime::new(duration3);
         // Reflexiveness
         assert!(mysql_time1.eq(&mysql_time1)); // Used like this to avoid Clippy from complaining
 
@@ -781,8 +781,8 @@ mod tests {
     fn hash() {
         let duration1 = Duration::nanoseconds(1222333999); // 00:00:01.222333
         let duration2 = Duration::nanoseconds(1222333555); // 00:00:01.222333
-        let mysql_time1 = MysqlTime::new(duration1);
-        let mysql_time2 = MysqlTime::new(duration2);
+        let mysql_time1 = MySqlTime::new(duration1);
+        let mysql_time2 = MySqlTime::new(duration2);
 
         let mut hasher1 = DefaultHasher::new();
         mysql_time1.hash(&mut hasher1);
@@ -798,9 +798,9 @@ mod tests {
         let duration1 = Duration::nanoseconds(1222333000); // 00:00:01.222334
         let duration2 = Duration::nanoseconds(1222334000); // 00:00:01.222335
         let duration3 = Duration::nanoseconds(1222335000); // 00:00:01.222336
-        let mysql_time1 = MysqlTime::new(duration1);
-        let mysql_time2 = MysqlTime::new(duration2);
-        let mysql_time3 = MysqlTime::new(duration3);
+        let mysql_time1 = MySqlTime::new(duration1);
+        let mysql_time2 = MySqlTime::new(duration2);
+        let mysql_time3 = MySqlTime::new(duration3);
 
         assert!(mysql_time1 < mysql_time2);
         assert!(mysql_time1 < mysql_time2);
@@ -814,8 +814,8 @@ mod tests {
         #[strategy(arbitrary_duration())] duration1: Duration,
         #[strategy(arbitrary_duration())] duration2: Duration,
     ) {
-        let mysql_time1 = MysqlTime::new(duration1);
-        let mysql_time2 = MysqlTime::new(duration2);
+        let mysql_time1 = MySqlTime::new(duration1);
+        let mysql_time2 = MySqlTime::new(duration2);
         let total_secs = (duration1 - duration2).num_seconds();
         assert_valid!(mysql_time1 - mysql_time2, total_secs);
     }
@@ -825,8 +825,8 @@ mod tests {
         #[strategy(arbitrary_duration())] duration1: Duration,
         #[strategy(arbitrary_duration())] duration2: Duration,
     ) {
-        let mysql_time1 = MysqlTime::new(duration1);
-        let mysql_time2 = MysqlTime::new(duration2);
+        let mysql_time1 = MySqlTime::new(duration1);
+        let mysql_time2 = MySqlTime::new(duration2);
         let total_secs = (duration1 + duration2).num_seconds();
         assert_valid!(mysql_time1 + mysql_time2, total_secs);
     }
@@ -836,7 +836,7 @@ mod tests {
         #[strategy(arbitrary_duration())] duration: Duration,
         #[strategy(arbitrary_naive_date_time())] ndt: NaiveDateTime,
     ) {
-        let mysql_time = MysqlTime::new(duration);
+        let mysql_time = MySqlTime::new(duration);
         let new_datetime = ndt.add(duration);
         assert_eq!(mysql_time + ndt, new_datetime);
     }
@@ -847,339 +847,339 @@ mod tests {
         #[proptest]
         fn from_str(#[strategy(arbitrary_duration())] duration: Duration) {
             let duration_str = duration_to_str(duration);
-            let mysql_time = MysqlTime::from_str(duration_str.as_str()).unwrap();
+            let mysql_time = MySqlTime::from_str(duration_str.as_str()).unwrap();
             let total_secs = duration.num_seconds();
             assert_valid!(mysql_time, total_secs);
         }
 
         #[proptest]
         fn from_str_display(#[strategy(arbitrary_duration())] duration: Duration) {
-            let mysql_time = MysqlTime::new(duration);
-            let parsed_time = MysqlTime::from_str(mysql_time.to_string().as_str()).unwrap();
+            let mysql_time = MySqlTime::new(duration);
+            let parsed_time = MySqlTime::from_str(mysql_time.to_string().as_str()).unwrap();
             assert_eq!(mysql_time, parsed_time);
         }
 
         #[test]
         fn from_str_without_colons() {
-            let mysql_time = MysqlTime::from_str("1234559").unwrap();
+            let mysql_time = MySqlTime::from_str("1234559").unwrap();
             assert_time!(mysql_time, true, 123, 45, 59, 0);
 
-            let mysql_time = MysqlTime::from_str("0000001234559").unwrap();
+            let mysql_time = MySqlTime::from_str("0000001234559").unwrap();
             assert_time!(mysql_time, true, 123, 45, 59, 0);
 
-            let mysql_time = MysqlTime::from_str("1234559.6").unwrap();
+            let mysql_time = MySqlTime::from_str("1234559.6").unwrap();
             assert_time!(mysql_time, true, 123, 45, 59, 600_000);
 
-            let mysql_time = MysqlTime::from_str("0000001234559.6").unwrap();
+            let mysql_time = MySqlTime::from_str("0000001234559.6").unwrap();
             assert_time!(mysql_time, true, 123, 45, 59, 600_000);
 
-            let mysql_time = MysqlTime::from_str("-1234559").unwrap();
+            let mysql_time = MySqlTime::from_str("-1234559").unwrap();
             assert_time!(mysql_time, false, 123, 45, 59, 0);
 
-            let mysql_time = MysqlTime::from_str("-0000001234559").unwrap();
+            let mysql_time = MySqlTime::from_str("-0000001234559").unwrap();
             assert_time!(mysql_time, false, 123, 45, 59, 0);
 
-            let mysql_time = MysqlTime::from_str("-1234559.6").unwrap();
+            let mysql_time = MySqlTime::from_str("-1234559.6").unwrap();
             assert_time!(mysql_time, false, 123, 45, 59, 600_000);
 
-            let mysql_time = MysqlTime::from_str("-0000001234559.6").unwrap();
+            let mysql_time = MySqlTime::from_str("-0000001234559.6").unwrap();
             assert_time!(mysql_time, false, 123, 45, 59, 600_000);
 
-            let mysql_time = MysqlTime::from_str("234559").unwrap();
+            let mysql_time = MySqlTime::from_str("234559").unwrap();
             assert_time!(mysql_time, true, 23, 45, 59, 0);
 
-            let mysql_time = MysqlTime::from_str("000000234559").unwrap();
+            let mysql_time = MySqlTime::from_str("000000234559").unwrap();
             assert_time!(mysql_time, true, 23, 45, 59, 0);
 
-            let mysql_time = MysqlTime::from_str("234559.65").unwrap();
+            let mysql_time = MySqlTime::from_str("234559.65").unwrap();
             assert_time!(mysql_time, true, 23, 45, 59, 650_000);
 
-            let mysql_time = MysqlTime::from_str("000000234559.65").unwrap();
+            let mysql_time = MySqlTime::from_str("000000234559.65").unwrap();
             assert_time!(mysql_time, true, 23, 45, 59, 650_000);
 
-            let mysql_time = MysqlTime::from_str("-234559").unwrap();
+            let mysql_time = MySqlTime::from_str("-234559").unwrap();
             assert_time!(mysql_time, false, 23, 45, 59, 0);
 
-            let mysql_time = MysqlTime::from_str("-000000234559").unwrap();
+            let mysql_time = MySqlTime::from_str("-000000234559").unwrap();
             assert_time!(mysql_time, false, 23, 45, 59, 0);
 
-            let mysql_time = MysqlTime::from_str("-234559.65").unwrap();
+            let mysql_time = MySqlTime::from_str("-234559.65").unwrap();
             assert_time!(mysql_time, false, 23, 45, 59, 650_000);
 
-            let mysql_time = MysqlTime::from_str("34559").unwrap();
+            let mysql_time = MySqlTime::from_str("34559").unwrap();
             assert_time!(mysql_time, true, 3, 45, 59, 0);
 
-            let mysql_time = MysqlTime::from_str("00000034559").unwrap();
+            let mysql_time = MySqlTime::from_str("00000034559").unwrap();
             assert_time!(mysql_time, true, 3, 45, 59, 0);
 
-            let mysql_time = MysqlTime::from_str("34559.654").unwrap();
+            let mysql_time = MySqlTime::from_str("34559.654").unwrap();
             assert_time!(mysql_time, true, 3, 45, 59, 654_000);
 
-            let mysql_time = MysqlTime::from_str("00000034559.654").unwrap();
+            let mysql_time = MySqlTime::from_str("00000034559.654").unwrap();
             assert_time!(mysql_time, true, 3, 45, 59, 654_000);
 
-            let mysql_time = MysqlTime::from_str("-34559").unwrap();
+            let mysql_time = MySqlTime::from_str("-34559").unwrap();
             assert_time!(mysql_time, false, 3, 45, 59, 0);
 
-            let mysql_time = MysqlTime::from_str("-00000034559").unwrap();
+            let mysql_time = MySqlTime::from_str("-00000034559").unwrap();
             assert_time!(mysql_time, false, 3, 45, 59, 0);
 
-            let mysql_time = MysqlTime::from_str("-34559.654").unwrap();
+            let mysql_time = MySqlTime::from_str("-34559.654").unwrap();
             assert_time!(mysql_time, false, 3, 45, 59, 654_000);
 
-            let mysql_time = MysqlTime::from_str("-00000034559.654").unwrap();
+            let mysql_time = MySqlTime::from_str("-00000034559.654").unwrap();
             assert_time!(mysql_time, false, 3, 45, 59, 654_000);
 
-            let mysql_time = MysqlTime::from_str("4559").unwrap();
+            let mysql_time = MySqlTime::from_str("4559").unwrap();
             assert_time!(mysql_time, true, 0, 45, 59, 0);
 
-            let mysql_time = MysqlTime::from_str("0000004559").unwrap();
+            let mysql_time = MySqlTime::from_str("0000004559").unwrap();
             assert_time!(mysql_time, true, 0, 45, 59, 0);
 
-            let mysql_time = MysqlTime::from_str("4559.6543").unwrap();
+            let mysql_time = MySqlTime::from_str("4559.6543").unwrap();
             assert_time!(mysql_time, true, 0, 45, 59, 654_300);
 
-            let mysql_time = MysqlTime::from_str("0000004559.6543").unwrap();
+            let mysql_time = MySqlTime::from_str("0000004559.6543").unwrap();
             assert_time!(mysql_time, true, 0, 45, 59, 654_300);
 
-            let mysql_time = MysqlTime::from_str("-4559").unwrap();
+            let mysql_time = MySqlTime::from_str("-4559").unwrap();
             assert_time!(mysql_time, false, 0, 45, 59, 0);
 
-            let mysql_time = MysqlTime::from_str("-0000004559").unwrap();
+            let mysql_time = MySqlTime::from_str("-0000004559").unwrap();
             assert_time!(mysql_time, false, 0, 45, 59, 0);
 
-            let mysql_time = MysqlTime::from_str("-4559.6543").unwrap();
+            let mysql_time = MySqlTime::from_str("-4559.6543").unwrap();
             assert_time!(mysql_time, false, 0, 45, 59, 654_300);
 
-            let mysql_time = MysqlTime::from_str("-0000004559.6543").unwrap();
+            let mysql_time = MySqlTime::from_str("-0000004559.6543").unwrap();
             assert_time!(mysql_time, false, 0, 45, 59, 654_300);
 
-            let mysql_time = MysqlTime::from_str("559").unwrap();
+            let mysql_time = MySqlTime::from_str("559").unwrap();
             assert_time!(mysql_time, true, 0, 5, 59, 0);
 
-            let mysql_time = MysqlTime::from_str("000000559").unwrap();
+            let mysql_time = MySqlTime::from_str("000000559").unwrap();
             assert_time!(mysql_time, true, 0, 5, 59, 0);
 
-            let mysql_time = MysqlTime::from_str("559.65432").unwrap();
+            let mysql_time = MySqlTime::from_str("559.65432").unwrap();
             assert_time!(mysql_time, true, 0, 5, 59, 654_320);
 
-            let mysql_time = MysqlTime::from_str("000000559.65432").unwrap();
+            let mysql_time = MySqlTime::from_str("000000559.65432").unwrap();
             assert_time!(mysql_time, true, 0, 5, 59, 654_320);
 
-            let mysql_time = MysqlTime::from_str("-559").unwrap();
+            let mysql_time = MySqlTime::from_str("-559").unwrap();
             assert_time!(mysql_time, false, 0, 5, 59, 0);
 
-            let mysql_time = MysqlTime::from_str("-000000559").unwrap();
+            let mysql_time = MySqlTime::from_str("-000000559").unwrap();
             assert_time!(mysql_time, false, 0, 5, 59, 0);
 
-            let mysql_time = MysqlTime::from_str("-559.65432").unwrap();
+            let mysql_time = MySqlTime::from_str("-559.65432").unwrap();
             assert_time!(mysql_time, false, 0, 5, 59, 654_320);
 
-            let mysql_time = MysqlTime::from_str("-000000559.65432").unwrap();
+            let mysql_time = MySqlTime::from_str("-000000559.65432").unwrap();
             assert_time!(mysql_time, false, 0, 5, 59, 654_320);
 
-            let mysql_time = MysqlTime::from_str("9").unwrap();
+            let mysql_time = MySqlTime::from_str("9").unwrap();
             assert_time!(mysql_time, true, 0, 0, 9, 0);
 
-            let mysql_time = MysqlTime::from_str("0000009").unwrap();
+            let mysql_time = MySqlTime::from_str("0000009").unwrap();
             assert_time!(mysql_time, true, 0, 0, 9, 0);
 
-            let mysql_time = MysqlTime::from_str("9.654321").unwrap();
+            let mysql_time = MySqlTime::from_str("9.654321").unwrap();
             assert_time!(mysql_time, true, 0, 0, 9, 654_321);
 
-            let mysql_time = MysqlTime::from_str("0000009.654321").unwrap();
+            let mysql_time = MySqlTime::from_str("0000009.654321").unwrap();
             assert_time!(mysql_time, true, 0, 0, 9, 654_321);
 
-            let mysql_time = MysqlTime::from_str("-9").unwrap();
+            let mysql_time = MySqlTime::from_str("-9").unwrap();
             assert_time!(mysql_time, false, 0, 0, 9, 0);
 
-            let mysql_time = MysqlTime::from_str("-0000009").unwrap();
+            let mysql_time = MySqlTime::from_str("-0000009").unwrap();
             assert_time!(mysql_time, false, 0, 0, 9, 0);
 
-            let mysql_time = MysqlTime::from_str("-9.654321").unwrap();
+            let mysql_time = MySqlTime::from_str("-9.654321").unwrap();
             assert_time!(mysql_time, false, 0, 0, 9, 654_321);
 
-            let mysql_time = MysqlTime::from_str("-0000009.654321").unwrap();
+            let mysql_time = MySqlTime::from_str("-0000009.654321").unwrap();
             assert_time!(mysql_time, false, 0, 0, 9, 654_321);
 
-            let mysql_time = MysqlTime::from_str("67");
+            let mysql_time = MySqlTime::from_str("67");
             assert_eq!(mysql_time.is_err(), true);
 
-            let mysql_time = MysqlTime::from_str("00000067");
+            let mysql_time = MySqlTime::from_str("00000067");
             assert_eq!(mysql_time.is_err(), true);
 
-            let mysql_time = MysqlTime::from_str("67.654321");
+            let mysql_time = MySqlTime::from_str("67.654321");
             assert_eq!(mysql_time.is_err(), true);
 
-            let mysql_time = MysqlTime::from_str("00000067.654321");
+            let mysql_time = MySqlTime::from_str("00000067.654321");
             assert_eq!(mysql_time.is_err(), true);
 
-            let mysql_time = MysqlTime::from_str("-67");
+            let mysql_time = MySqlTime::from_str("-67");
             assert_eq!(mysql_time.is_err(), true);
 
-            let mysql_time = MysqlTime::from_str("-00000067");
+            let mysql_time = MySqlTime::from_str("-00000067");
             assert_eq!(mysql_time.is_err(), true);
 
-            let mysql_time = MysqlTime::from_str("-67.654321");
+            let mysql_time = MySqlTime::from_str("-67.654321");
             assert_eq!(mysql_time.is_err(), true);
 
-            let mysql_time = MysqlTime::from_str("-00000067.654321");
+            let mysql_time = MySqlTime::from_str("-00000067.654321");
             assert_eq!(mysql_time.is_err(), true);
         }
 
         #[test]
         fn from_str_with_colons() {
-            let mysql_time = MysqlTime::from_str("123:45:59").unwrap();
+            let mysql_time = MySqlTime::from_str("123:45:59").unwrap();
             assert_time!(mysql_time, true, 123, 45, 59, 0);
 
-            let mysql_time = MysqlTime::from_str("000000123:45:59").unwrap();
+            let mysql_time = MySqlTime::from_str("000000123:45:59").unwrap();
             assert_time!(mysql_time, true, 123, 45, 59, 0);
 
-            let mysql_time = MysqlTime::from_str("123:45:59.6").unwrap();
+            let mysql_time = MySqlTime::from_str("123:45:59.6").unwrap();
             assert_time!(mysql_time, true, 123, 45, 59, 600_000);
 
-            let mysql_time = MysqlTime::from_str("000000123:45:59.6").unwrap();
+            let mysql_time = MySqlTime::from_str("000000123:45:59.6").unwrap();
             assert_time!(mysql_time, true, 123, 45, 59, 600_000);
 
-            let mysql_time = MysqlTime::from_str("-123:45:59").unwrap();
+            let mysql_time = MySqlTime::from_str("-123:45:59").unwrap();
             assert_time!(mysql_time, false, 123, 45, 59, 0);
 
-            let mysql_time = MysqlTime::from_str("-000000123:45:59").unwrap();
+            let mysql_time = MySqlTime::from_str("-000000123:45:59").unwrap();
             assert_time!(mysql_time, false, 123, 45, 59, 0);
 
-            let mysql_time = MysqlTime::from_str("-123:45:59.6").unwrap();
+            let mysql_time = MySqlTime::from_str("-123:45:59.6").unwrap();
             assert_time!(mysql_time, false, 123, 45, 59, 600_000);
 
-            let mysql_time = MysqlTime::from_str("-000000123:45:59.6").unwrap();
+            let mysql_time = MySqlTime::from_str("-000000123:45:59.6").unwrap();
             assert_time!(mysql_time, false, 123, 45, 59, 600_000);
 
-            let mysql_time = MysqlTime::from_str("23:45:59").unwrap();
+            let mysql_time = MySqlTime::from_str("23:45:59").unwrap();
             assert_time!(mysql_time, true, 23, 45, 59, 0);
 
-            let mysql_time = MysqlTime::from_str("00000023:45:59").unwrap();
+            let mysql_time = MySqlTime::from_str("00000023:45:59").unwrap();
             assert_time!(mysql_time, true, 23, 45, 59, 0);
 
-            let mysql_time = MysqlTime::from_str("23:45:59.65").unwrap();
+            let mysql_time = MySqlTime::from_str("23:45:59.65").unwrap();
             assert_time!(mysql_time, true, 23, 45, 59, 650_000);
 
-            let mysql_time = MysqlTime::from_str("00000023:45:59.65").unwrap();
+            let mysql_time = MySqlTime::from_str("00000023:45:59.65").unwrap();
             assert_time!(mysql_time, true, 23, 45, 59, 650_000);
 
-            let mysql_time = MysqlTime::from_str("-23:45:59").unwrap();
+            let mysql_time = MySqlTime::from_str("-23:45:59").unwrap();
             assert_time!(mysql_time, false, 23, 45, 59, 0);
 
-            let mysql_time = MysqlTime::from_str("-000000023:45:59").unwrap();
+            let mysql_time = MySqlTime::from_str("-000000023:45:59").unwrap();
             assert_time!(mysql_time, false, 23, 45, 59, 0);
 
-            let mysql_time = MysqlTime::from_str("-23:45:59.65").unwrap();
+            let mysql_time = MySqlTime::from_str("-23:45:59.65").unwrap();
             assert_time!(mysql_time, false, 23, 45, 59, 650_000);
 
-            let mysql_time = MysqlTime::from_str("-00000023:45:59.65").unwrap();
+            let mysql_time = MySqlTime::from_str("-00000023:45:59.65").unwrap();
             assert_time!(mysql_time, false, 23, 45, 59, 650_000);
 
-            let mysql_time = MysqlTime::from_str("3:45:59").unwrap();
+            let mysql_time = MySqlTime::from_str("3:45:59").unwrap();
             assert_time!(mysql_time, true, 3, 45, 59, 0);
 
-            let mysql_time = MysqlTime::from_str("0000003:45:59").unwrap();
+            let mysql_time = MySqlTime::from_str("0000003:45:59").unwrap();
             assert_time!(mysql_time, true, 3, 45, 59, 0);
 
-            let mysql_time = MysqlTime::from_str("3:45:59.654").unwrap();
+            let mysql_time = MySqlTime::from_str("3:45:59.654").unwrap();
             assert_time!(mysql_time, true, 3, 45, 59, 654_000);
 
-            let mysql_time = MysqlTime::from_str("0000003:45:59.654").unwrap();
+            let mysql_time = MySqlTime::from_str("0000003:45:59.654").unwrap();
             assert_time!(mysql_time, true, 3, 45, 59, 654_000);
 
-            let mysql_time = MysqlTime::from_str("-3:45:59").unwrap();
+            let mysql_time = MySqlTime::from_str("-3:45:59").unwrap();
             assert_time!(mysql_time, false, 3, 45, 59, 0);
 
-            let mysql_time = MysqlTime::from_str("-0000003:45:59").unwrap();
+            let mysql_time = MySqlTime::from_str("-0000003:45:59").unwrap();
             assert_time!(mysql_time, false, 3, 45, 59, 0);
 
-            let mysql_time = MysqlTime::from_str("-3:45:59.654").unwrap();
+            let mysql_time = MySqlTime::from_str("-3:45:59.654").unwrap();
             assert_time!(mysql_time, false, 3, 45, 59, 654_000);
 
-            let mysql_time = MysqlTime::from_str("-0000003:45:59.654").unwrap();
+            let mysql_time = MySqlTime::from_str("-0000003:45:59.654").unwrap();
             assert_time!(mysql_time, false, 3, 45, 59, 654_000);
 
-            let mysql_time = MysqlTime::from_str("45:59").unwrap();
+            let mysql_time = MySqlTime::from_str("45:59").unwrap();
             assert_time!(mysql_time, true, 45, 59, 0, 0);
 
-            let mysql_time = MysqlTime::from_str("00000045:59").unwrap();
+            let mysql_time = MySqlTime::from_str("00000045:59").unwrap();
             assert_time!(mysql_time, true, 45, 59, 0, 0);
 
-            let mysql_time = MysqlTime::from_str("45:59.6543").unwrap();
+            let mysql_time = MySqlTime::from_str("45:59.6543").unwrap();
             assert_time!(mysql_time, true, 45, 59, 0, 654_300);
 
-            let mysql_time = MysqlTime::from_str("00000045:59.6543").unwrap();
+            let mysql_time = MySqlTime::from_str("00000045:59.6543").unwrap();
             assert_time!(mysql_time, true, 45, 59, 0, 654_300);
 
-            let mysql_time = MysqlTime::from_str("-45:59").unwrap();
+            let mysql_time = MySqlTime::from_str("-45:59").unwrap();
             assert_time!(mysql_time, false, 45, 59, 0, 0);
 
-            let mysql_time = MysqlTime::from_str("-00000045:59").unwrap();
+            let mysql_time = MySqlTime::from_str("-00000045:59").unwrap();
             assert_time!(mysql_time, false, 45, 59, 0, 0);
 
-            let mysql_time = MysqlTime::from_str("-45:59.6543").unwrap();
+            let mysql_time = MySqlTime::from_str("-45:59.6543").unwrap();
             assert_time!(mysql_time, false, 45, 59, 0, 654_300);
 
-            let mysql_time = MysqlTime::from_str("-00000045:59.6543").unwrap();
+            let mysql_time = MySqlTime::from_str("-00000045:59.6543").unwrap();
             assert_time!(mysql_time, false, 45, 59, 0, 654_300);
 
-            let mysql_time = MysqlTime::from_str("5:59").unwrap();
+            let mysql_time = MySqlTime::from_str("5:59").unwrap();
             assert_time!(mysql_time, true, 5, 59, 0, 0);
 
-            let mysql_time = MysqlTime::from_str("0000005:59").unwrap();
+            let mysql_time = MySqlTime::from_str("0000005:59").unwrap();
             assert_time!(mysql_time, true, 5, 59, 0, 0);
 
-            let mysql_time = MysqlTime::from_str("5:59.65432").unwrap();
+            let mysql_time = MySqlTime::from_str("5:59.65432").unwrap();
             assert_time!(mysql_time, true, 5, 59, 0, 654_320);
 
-            let mysql_time = MysqlTime::from_str("0000005:59.65432").unwrap();
+            let mysql_time = MySqlTime::from_str("0000005:59.65432").unwrap();
             assert_time!(mysql_time, true, 5, 59, 0, 654_320);
 
-            let mysql_time = MysqlTime::from_str("-5:59").unwrap();
+            let mysql_time = MySqlTime::from_str("-5:59").unwrap();
             assert_time!(mysql_time, false, 5, 59, 0, 0);
 
-            let mysql_time = MysqlTime::from_str("-0000005:59").unwrap();
+            let mysql_time = MySqlTime::from_str("-0000005:59").unwrap();
             assert_time!(mysql_time, false, 5, 59, 0, 0);
 
-            let mysql_time = MysqlTime::from_str("-5:59.65432").unwrap();
+            let mysql_time = MySqlTime::from_str("-5:59.65432").unwrap();
             assert_time!(mysql_time, false, 5, 59, 0, 654_320);
 
-            let mysql_time = MysqlTime::from_str("-0000005:59.65432").unwrap();
+            let mysql_time = MySqlTime::from_str("-0000005:59.65432").unwrap();
             assert_time!(mysql_time, false, 5, 59, 0, 654_320);
 
-            let mysql_time = MysqlTime::from_str("5:9").unwrap();
+            let mysql_time = MySqlTime::from_str("5:9").unwrap();
             assert_time!(mysql_time, true, 5, 9, 0, 0);
 
-            let mysql_time = MysqlTime::from_str("0000005:9").unwrap();
+            let mysql_time = MySqlTime::from_str("0000005:9").unwrap();
             assert_time!(mysql_time, true, 5, 9, 0, 0);
 
-            let mysql_time = MysqlTime::from_str("5:9.654321").unwrap();
+            let mysql_time = MySqlTime::from_str("5:9.654321").unwrap();
             assert_time!(mysql_time, true, 5, 9, 0, 654_321);
 
-            let mysql_time = MysqlTime::from_str("5:9.654321").unwrap();
+            let mysql_time = MySqlTime::from_str("5:9.654321").unwrap();
             assert_time!(mysql_time, true, 5, 9, 0, 654_321);
 
-            let mysql_time = MysqlTime::from_str("0000005:9.654321").unwrap();
+            let mysql_time = MySqlTime::from_str("0000005:9.654321").unwrap();
             assert_time!(mysql_time, true, 5, 9, 0, 654_321);
 
-            let mysql_time = MysqlTime::from_str("-5:9").unwrap();
+            let mysql_time = MySqlTime::from_str("-5:9").unwrap();
             assert_time!(mysql_time, false, 5, 9, 0, 0);
 
-            let mysql_time = MysqlTime::from_str("-0000005:9").unwrap();
+            let mysql_time = MySqlTime::from_str("-0000005:9").unwrap();
             assert_time!(mysql_time, false, 5, 9, 0, 0);
 
-            let mysql_time = MysqlTime::from_str("-5:9.654321").unwrap();
+            let mysql_time = MySqlTime::from_str("-5:9.654321").unwrap();
             assert_time!(mysql_time, false, 5, 9, 0, 654_321);
 
-            let mysql_time = MysqlTime::from_str("-0000005:9.654321").unwrap();
+            let mysql_time = MySqlTime::from_str("-0000005:9.654321").unwrap();
             assert_time!(mysql_time, false, 5, 9, 0, 654_321);
         }
 
         #[test]
         fn from_str_non_timestamp() {
-            let result = MysqlTime::from_str("banana");
+            let result = MySqlTime::from_str("banana");
             assert_eq!(result, Err(ConvertError::ParseError));
         }
     }
@@ -1189,79 +1189,79 @@ mod tests {
 
         #[test]
         fn try_from_u8() {
-            let mysql_time = MysqlTime::try_from(59u8).unwrap();
+            let mysql_time = MySqlTime::try_from(59u8).unwrap();
             assert_time!(mysql_time, true, 0, 0, 59, 0);
         }
 
         #[test]
         fn try_from_u16() {
-            let mysql_time = MysqlTime::try_from(4559u16).unwrap();
+            let mysql_time = MySqlTime::try_from(4559u16).unwrap();
             assert_time!(mysql_time, true, 0, 45, 59, 0);
         }
 
         #[test]
         fn try_from_u32() {
-            let mysql_time = MysqlTime::try_from(1234559u32).unwrap();
+            let mysql_time = MySqlTime::try_from(1234559u32).unwrap();
             assert_time!(mysql_time, true, 123, 45, 59, 0);
         }
 
         #[test]
         fn try_from_u64() {
-            let mysql_time = MysqlTime::try_from(1234559u64).unwrap();
+            let mysql_time = MySqlTime::try_from(1234559u64).unwrap();
             assert_time!(mysql_time, true, 123, 45, 59, 0);
         }
 
         #[test]
         fn try_from_i8() {
-            let mysql_time = MysqlTime::try_from(59i8).unwrap();
+            let mysql_time = MySqlTime::try_from(59i8).unwrap();
             assert_time!(mysql_time, true, 0, 0, 59, 0);
 
-            let mysql_time = MysqlTime::try_from(-59i8).unwrap();
+            let mysql_time = MySqlTime::try_from(-59i8).unwrap();
             assert_time!(mysql_time, false, 0, 0, 59, 0);
         }
 
         #[test]
         fn try_from_i16() {
-            let mysql_time = MysqlTime::try_from(4559i16).unwrap();
+            let mysql_time = MySqlTime::try_from(4559i16).unwrap();
             assert_time!(mysql_time, true, 0, 45, 59, 0);
 
-            let mysql_time = MysqlTime::try_from(-4559i16).unwrap();
+            let mysql_time = MySqlTime::try_from(-4559i16).unwrap();
             assert_time!(mysql_time, false, 0, 45, 59, 0);
         }
 
         #[test]
         fn try_from_i32() {
-            let mysql_time = MysqlTime::try_from(1234559i32).unwrap();
+            let mysql_time = MySqlTime::try_from(1234559i32).unwrap();
             assert_time!(mysql_time, true, 123, 45, 59, 0);
 
-            let mysql_time = MysqlTime::try_from(-1234559i32).unwrap();
+            let mysql_time = MySqlTime::try_from(-1234559i32).unwrap();
             assert_time!(mysql_time, false, 123, 45, 59, 0);
         }
 
         #[test]
         fn try_from_i64() {
-            let mysql_time = MysqlTime::try_from(1234559i64).unwrap();
+            let mysql_time = MySqlTime::try_from(1234559i64).unwrap();
             assert_time!(mysql_time, true, 123, 45, 59, 0);
 
-            let mysql_time = MysqlTime::try_from(-1234559i64).unwrap();
+            let mysql_time = MySqlTime::try_from(-1234559i64).unwrap();
             assert_time!(mysql_time, false, 123, 45, 59, 0);
         }
 
         #[test]
         fn try_from_f32() {
-            let mysql_time = MysqlTime::try_from(1234559.5f32).unwrap();
+            let mysql_time = MySqlTime::try_from(1234559.5f32).unwrap();
             assert_time!(mysql_time, true, 123, 45, 59, 500_000);
 
-            let mysql_time = MysqlTime::try_from(-1234559.5f32).unwrap();
+            let mysql_time = MySqlTime::try_from(-1234559.5f32).unwrap();
             assert_time!(mysql_time, false, 123, 45, 59, 500_000);
         }
 
         #[test]
         fn try_from_f64() {
-            let mysql_time = MysqlTime::try_from(1234559.654321f64).unwrap();
+            let mysql_time = MySqlTime::try_from(1234559.654321f64).unwrap();
             assert_time!(mysql_time, true, 123, 45, 59, 654_321);
 
-            let mysql_time = MysqlTime::try_from(-1234559.654321f64).unwrap();
+            let mysql_time = MySqlTime::try_from(-1234559.654321f64).unwrap();
             assert_time!(mysql_time, false, 123, 45, 59, 654_321);
         }
     }
@@ -1286,7 +1286,7 @@ mod tests {
 
     #[proptest]
     fn naive_time_from_into_round_trip(#[strategy(arbitrary_naive_time())] naive_time: NaiveTime) {
-        let mt = MysqlTime::from(naive_time);
+        let mt = MySqlTime::from(naive_time);
         let round_trip = NaiveTime::from(mt);
         assert_eq!(naive_time, round_trip);
     }

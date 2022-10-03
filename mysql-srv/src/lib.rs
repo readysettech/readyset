@@ -6,7 +6,7 @@
 //! acting as a MySQL server, and delegating operations such as querying and query execution to
 //! user-defined logic.
 //!
-//! To start, implement `MysqlShim` for your backend, and create a `MysqlIntermediary` over an
+//! To start, implement `MySqlShim` for your backend, and create a `MySqlIntermediary` over an
 //! instance of your backend and a connection stream. The appropriate methods will be called on
 //! your backend whenever a client issues a `QUERY`, `PREPARE`, or `EXECUTE` command, and you will
 //! have a chance to respond appropriately. For example, to write a shim that always responds to
@@ -29,7 +29,7 @@
 //!
 //! struct Backend;
 //! #[async_trait]
-//! impl<W: AsyncWrite + Unpin + Send + 'static> MysqlShim<W> for Backend {
+//! impl<W: AsyncWrite + Unpin + Send + 'static> MySqlShim<W> for Backend {
 //!     async fn on_prepare(
 //!         &mut self,
 //!         _: &str,
@@ -119,7 +119,7 @@
 //!                 let _guard = rt.handle().enter();
 //!                 tokio::net::TcpStream::from_std(s).unwrap()
 //!             };
-//!             rt.block_on(MysqlIntermediary::run_on_tcp(Backend, s))
+//!             rt.block_on(MySqlIntermediary::run_on_tcp(Backend, s))
 //!                 .unwrap();
 //!         }
 //!     });
@@ -231,11 +231,11 @@ pub use crate::error::MsqlSrvError;
 pub use crate::errorcodes::ErrorKind;
 pub use crate::params::{ParamParser, ParamValue, Params};
 pub use crate::resultset::{InitWriter, QueryResultWriter, RowWriter, StatementMetaWriter};
-pub use crate::value::{ToMysqlValue, Value, ValueInner};
+pub use crate::value::{ToMySqlValue, Value, ValueInner};
 
 /// Implementors of this trait can be used to drive a MySQL-compatible database backend.
 #[async_trait]
-pub trait MysqlShim<W: AsyncWrite + Unpin + Send> {
+pub trait MySqlShim<W: AsyncWrite + Unpin + Send> {
     /// Called when the client issues a request to prepare `query` for later execution.
     ///
     /// The provided [`StatementMetaWriter`](struct.StatementMetaWriter.html) should be used to
@@ -298,8 +298,8 @@ pub struct CachedSchema {
 }
 
 /// A server that speaks the MySQL/MariaDB protocol, and can delegate client commands to a backend
-/// that implements [`MysqlShim`](trait.MysqlShim.html).
-pub struct MysqlIntermediary<B, R: AsyncRead + Unpin, W: AsyncWrite + Unpin> {
+/// that implements [`MySqlShim`](trait.MySqlShim.html).
+pub struct MySqlIntermediary<B, R: AsyncRead + Unpin, W: AsyncWrite + Unpin> {
     shim: B,
     reader: packet::PacketReader<R>,
     writer: packet::PacketWriter<W>,
@@ -307,27 +307,27 @@ pub struct MysqlIntermediary<B, R: AsyncRead + Unpin, W: AsyncWrite + Unpin> {
     schema_cache: HashMap<u32, CachedSchema>,
 }
 
-impl<B: MysqlShim<net::tcp::OwnedWriteHalf> + Send>
-    MysqlIntermediary<B, net::TcpStream, net::TcpStream>
+impl<B: MySqlShim<net::tcp::OwnedWriteHalf> + Send>
+    MySqlIntermediary<B, net::TcpStream, net::TcpStream>
 {
     /// Create a new server over a TCP stream and process client commands until the client
     /// disconnects or an error occurs. See also
-    /// [`MysqlIntermediary::run_on`](struct.MysqlIntermediary.html#method.run_on).
+    /// [`MySqlIntermediary::run_on`](struct.MySqlIntermediary.html#method.run_on).
     pub async fn run_on_tcp(shim: B, stream: net::TcpStream) -> Result<(), io::Error> {
         stream.set_nodelay(true)?;
         let (reader, writer) = stream.into_split();
-        MysqlIntermediary::run_on(shim, reader, writer).await
+        MySqlIntermediary::run_on(shim, reader, writer).await
     }
 }
 
-impl<B: MysqlShim<S> + Send, S: AsyncRead + AsyncWrite + Clone + Unpin + Send>
-    MysqlIntermediary<B, S, S>
+impl<B: MySqlShim<S> + Send, S: AsyncRead + AsyncWrite + Clone + Unpin + Send>
+    MySqlIntermediary<B, S, S>
 {
     /// Create a new server over a two-way stream and process client commands until the client
     /// disconnects or an error occurs. See also
-    /// [`MysqlIntermediary::run_on`](struct.MysqlIntermediary.html#method.run_on).
+    /// [`MySqlIntermediary::run_on`](struct.MySqlIntermediary.html#method.run_on).
     pub async fn run_on_stream(shim: B, stream: S) -> Result<(), io::Error> {
-        MysqlIntermediary::run_on(shim, stream.clone(), stream).await
+        MySqlIntermediary::run_on(shim, stream.clone(), stream).await
     }
 }
 
@@ -349,15 +349,15 @@ struct StatementData {
 
 const CAPABILITIES: u32 = PROTOCOL_41 | SECURE_CONNECTION | RESERVED | CLIENT_PLUGIN_AUTH;
 
-impl<B: MysqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
-    MysqlIntermediary<B, R, W>
+impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
+    MySqlIntermediary<B, R, W>
 {
     /// Create a new server over two one-way channels and process client commands until the client
     /// disconnects or an error occurs.
     pub async fn run_on(shim: B, reader: R, writer: W) -> Result<(), io::Error> {
         let r = packet::PacketReader::new(reader);
         let w = packet::PacketWriter::new(writer);
-        let mut mi = MysqlIntermediary {
+        let mut mi = MySqlIntermediary {
             shim,
             reader: r,
             writer: w,

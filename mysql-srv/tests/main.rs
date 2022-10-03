@@ -18,7 +18,7 @@ use async_trait::async_trait;
 use mysql::prelude::Queryable;
 use mysql::Row;
 use mysql_srv::{
-    CachedSchema, Column, ErrorKind, InitWriter, MysqlIntermediary, MysqlShim, ParamParser,
+    CachedSchema, Column, ErrorKind, InitWriter, MySqlIntermediary, MySqlShim, ParamParser,
     QueryResultWriter, StatementMetaWriter,
 };
 use tokio::io::AsyncWrite;
@@ -37,7 +37,7 @@ struct TestingShim<Q, P, E, I, W> {
 }
 
 #[async_trait]
-impl<Q, P, E, I, W> MysqlShim<W> for TestingShim<Q, P, E, I, W>
+impl<Q, P, E, I, W> MySqlShim<W> for TestingShim<Q, P, E, I, W>
 where
     Q: for<'a> FnMut(
             &'a str,
@@ -182,7 +182,7 @@ where
                 let _guard = rt.handle().enter();
                 tokio::net::TcpStream::from_std(s).unwrap()
             };
-            rt.block_on(MysqlIntermediary::run_on_tcp(self, s))
+            rt.block_on(MySqlIntermediary::run_on_tcp(self, s))
         });
 
         let mut db = mysql::Conn::new(
@@ -219,7 +219,7 @@ fn failed_authentication() {
     let port = listener.local_addr().unwrap().port();
     let jh = thread::spawn(move || {
         let (s, _) = listener.accept().unwrap();
-        MysqlIntermediary::run_on_tcp(shim, s)
+        MySqlIntermediary::run_on_tcp(shim, s)
     });
 
     let res = mysql::Conn::new(&format!("mysql://user:bad_password@127.0.0.1:{}", port));

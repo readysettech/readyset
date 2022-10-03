@@ -191,7 +191,7 @@ where
             let hh = val / 1_00_00;
             let mm = val / 1_00 % 1_00;
             let ss = val % 1_00;
-            Ok(mysql_time::MysqlTime::from_hmsus(true, hh as _, mm as _, ss as _, 0).into())
+            Ok(mysql_time::MySqlTime::from_hmsus(true, hh as _, mm as _, ss as _, 0).into())
         }
 
         SqlType::Double => Ok(DfValue::Double(val.to_f64())),

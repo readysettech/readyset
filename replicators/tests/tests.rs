@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use launchpad::eventually;
 use mysql_async::prelude::Queryable;
-use mysql_time::MysqlTime;
+use mysql_time::MySqlTime;
 use nom_sql::Relation;
 use readyset::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use readyset::recipe::changelist::ChangeList;
@@ -818,14 +818,14 @@ async fn mysql_datetime_replication_inner() -> ReadySetResult<()> {
                 DfValue::None,
                 DfValue::None,
                 DfValue::None,
-                DfValue::Time(MysqlTime::from_hmsus(false, 0, 0, 0, 0)),
+                DfValue::Time(MySqlTime::from_hmsus(false, 0, 0, 0, 0)),
             ],
             &[
                 DfValue::Int(1),
                 DfValue::None,
                 DfValue::None,
                 DfValue::None,
-                DfValue::Time(MysqlTime::from_hmsus(false, 0, 0, 0, 0)),
+                DfValue::Time(MySqlTime::from_hmsus(false, 0, 0, 0, 0)),
             ],
         ],
     )
@@ -849,28 +849,28 @@ async fn mysql_datetime_replication_inner() -> ReadySetResult<()> {
                 DfValue::None,
                 DfValue::None,
                 DfValue::None,
-                DfValue::Time(MysqlTime::from_hmsus(false, 0, 0, 0, 0)),
+                DfValue::Time(MySqlTime::from_hmsus(false, 0, 0, 0, 0)),
             ],
             &[
                 DfValue::Int(1),
                 DfValue::None,
                 DfValue::None,
                 DfValue::None,
-                DfValue::Time(MysqlTime::from_hmsus(false, 0, 0, 0, 0)),
+                DfValue::Time(MySqlTime::from_hmsus(false, 0, 0, 0, 0)),
             ],
             &[
                 DfValue::Int(2),
                 DfValue::None,
                 DfValue::None,
                 DfValue::None,
-                DfValue::Time(MysqlTime::from_hmsus(false, 0, 0, 0, 0)),
+                DfValue::Time(MySqlTime::from_hmsus(false, 0, 0, 0, 0)),
             ],
             &[
                 DfValue::Int(3),
                 DfValue::None,
                 DfValue::None,
                 DfValue::None,
-                DfValue::Time(MysqlTime::from_hmsus(false, 0, 0, 0, 0)),
+                DfValue::Time(MySqlTime::from_hmsus(false, 0, 0, 0, 0)),
             ],
         ],
     )
@@ -1496,7 +1496,7 @@ async fn snapshot_telemetry_inner(url: &String) -> ReadySetResult<()> {
         .collect::<Vec<_>>();
     let schema_str = format!("{:?}", schemas);
 
-    // Mysql has 1 create table and 1 create view -- postgres has 2 of each. Just assert that we
+    // MySQL has 1 create table and 1 create view -- postgres has 2 of each. Just assert that we
     // see at least one of each create type:
 
     assert!(schema_str.contains("CREATE TABLE"));

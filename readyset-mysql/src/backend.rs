@@ -10,7 +10,7 @@ use launchpad::redacted::Sensitive;
 use mysql_async::consts::StatusFlags;
 use mysql_common::bigdecimal03::ToPrimitive;
 use mysql_srv::{
-    CachedSchema, Column, ColumnFlags, ColumnType, InitWriter, MsqlSrvError, MysqlShim,
+    CachedSchema, Column, ColumnFlags, ColumnType, InitWriter, MsqlSrvError, MySqlShim,
     QueryResultWriter, RowWriter, StatementMetaWriter,
 };
 use nom_sql::{Dialect, SqlType};
@@ -420,7 +420,7 @@ where
 }
 
 #[async_trait]
-impl<W> MysqlShim<W> for Backend
+impl<W> MySqlShim<W> for Backend
 where
     W: AsyncWrite + Unpin + Send + 'static,
 {

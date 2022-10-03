@@ -320,7 +320,7 @@ impl DatabaseConnection {
         for<'a> V: pgsql::types::FromSql<'a>,
     {
         match stmt.into() {
-            DatabaseStatement::Mysql(s) => {
+            DatabaseStatement::MySql(s) => {
                 convert_mysql_results(
                     self.as_mysql_conn()
                         .ok_or(DatabaseError::WrongConnection(ConnectionType::MySQL))?
@@ -393,7 +393,7 @@ impl DatabaseConnection {
 #[derive(From, Clone)]
 pub enum DatabaseStatement {
     /// A MySQL prepared statement returned from a prepare call in `mysql_async`.
-    Mysql(mysql_async::Statement),
+    MySql(mysql_async::Statement),
     /// A PostgreSQL prepared statement returned from a prepare call in `tokio_postgres`.
     Postgres(tokio_postgres::Statement),
     /// A simple query string that a user would like to be both prepared and executed.

@@ -151,7 +151,7 @@ pub(crate) fn coerce_f64(val: f64, to_ty: &SqlType, from_ty: &DfType) -> ReadySe
             let hh = val / 1_00_00;
             let mm = val / 1_00 % 1_00;
             let ss = val % 1_00;
-            Ok(mysql_time::MysqlTime::from_hmsus(true, hh as _, mm as _, ss as _, ms).into())
+            Ok(mysql_time::MySqlTime::from_hmsus(true, hh as _, mm as _, ss as _, ms).into())
         }
 
         SqlType::Date | SqlType::DateTime(_) | SqlType::Timestamp | SqlType::TimestampTz => {

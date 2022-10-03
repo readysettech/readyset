@@ -3,7 +3,7 @@ use std::fmt::Display;
 
 use async_trait::async_trait;
 use mysql_async::prelude::Queryable;
-use mysql_srv::MysqlIntermediary;
+use mysql_srv::MySqlIntermediary;
 use readyset_client::backend::QueryInfo;
 use readyset_mysql::{Backend, MySqlQueryHandler, MySqlUpstream};
 use tokio::net::TcpStream;
@@ -84,7 +84,7 @@ impl Adapter for MySQLAdapter {
         backend: readyset_client::Backend<Self::Upstream, Self::Handler>,
         s: TcpStream,
     ) {
-        MysqlIntermediary::run_on_tcp(Backend::new(backend), s)
+        MySqlIntermediary::run_on_tcp(Backend::new(backend), s)
             .await
             .unwrap()
     }

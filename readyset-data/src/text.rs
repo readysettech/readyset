@@ -391,7 +391,7 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
                 }
             }
 
-            SqlType::Time => match str.parse::<mysql_time::MysqlTime>() {
+            SqlType::Time => match str.parse::<mysql_time::MySqlTime>() {
                 Ok(t) => Ok(DfValue::Time(t)),
                 Err(mysql_time::ConvertError::ParseError) => Ok(DfValue::Time(Default::default())),
                 Err(e) => Err(Self::coerce_err(sql_type, e)),

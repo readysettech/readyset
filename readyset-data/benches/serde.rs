@@ -1,7 +1,7 @@
 use std::convert::TryInto;
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use mysql_time::MysqlTime;
+use mysql_time::MySqlTime;
 
 criterion_group!(benches, serde);
 criterion_main!(benches);
@@ -28,7 +28,7 @@ fn serde(c: &mut Criterion) {
     ));
     let timestamp = DfValue::from(chrono::NaiveDateTime::from_timestamp(0, 42_000_000));
 
-    let time: DfValue = MysqlTime::from_hmsus(false, 10, 30, 24, 100).into();
+    let time: DfValue = MySqlTime::from_hmsus(false, 10, 30, 24, 100).into();
 
     let mut temp_storage = Vec::with_capacity(500);
 

@@ -117,7 +117,7 @@ impl From<SqlQueryType> for SharedString {
 /// Identifies the database that this metric corresponds to.
 #[derive(Debug)]
 pub enum DatabaseType {
-    Mysql,
+    MySql,
     Psql,
     ReadySet,
 }
@@ -125,7 +125,7 @@ pub enum DatabaseType {
 impl From<DatabaseType> for String {
     fn from(database_type: DatabaseType) -> Self {
         match database_type {
-            DatabaseType::Mysql => "mysql".to_owned(),
+            DatabaseType::MySql => "mysql".to_owned(),
             DatabaseType::Psql => "psql".to_owned(),
             DatabaseType::ReadySet => "readyset".to_owned(),
         }

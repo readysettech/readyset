@@ -16,7 +16,7 @@ use enum_kinds::EnumKind;
 use eui48::{MacAddress, MacAddressFormat};
 use itertools::Itertools;
 use launchpad::arbitrary::{arbitrary_decimal, arbitrary_duration};
-use mysql_time::MysqlTime;
+use mysql_time::MySqlTime;
 use ndarray::{ArrayD, IxDyn};
 use nom_sql::{Dialect, Double, Float, Literal, SqlType};
 use proptest::prelude::{prop_oneof, Arbitrary};
@@ -85,9 +85,9 @@ pub enum DfValue {
     /// A timestamp with an optional time zone.
     TimestampTz(TimestampTz),
     /// A time duration
-    /// NOTE: [`MysqlTime`] is from -838:59:59 to 838:59:59 whereas Postgres time is from 00:00:00
+    /// NOTE: [`MySqlTime`] is from -838:59:59 to 838:59:59 whereas Postgres time is from 00:00:00
     /// to 24:00:00
-    Time(MysqlTime),
+    Time(MySqlTime),
     //NOTE(Fran): Using an `Arc` to keep the `DfValue` type 16 bytes long
     /// A byte array
     ByteArray(Arc<Vec<u8>>),
@@ -175,7 +175,7 @@ impl DfValue {
             DfValue::Double(..) => DfValue::Double(f64::MIN),
             DfValue::Int(_) => DfValue::Int(i64::min_value()),
             DfValue::UnsignedInt(_) => DfValue::UnsignedInt(0),
-            DfValue::Time(_) => DfValue::Time(MysqlTime::min_value()),
+            DfValue::Time(_) => DfValue::Time(MySqlTime::min_value()),
             DfValue::ByteArray(_) => DfValue::ByteArray(Arc::new(Vec::new())),
             DfValue::Numeric(_) => DfValue::from(Decimal::MIN),
             DfValue::BitVector(_) => DfValue::from(BitVec::new()),
@@ -201,7 +201,7 @@ impl DfValue {
             DfValue::Double(..) => DfValue::Double(f64::MIN),
             DfValue::Int(_) => DfValue::Int(i64::max_value()),
             DfValue::UnsignedInt(_) => DfValue::UnsignedInt(u64::max_value()),
-            DfValue::Time(_) => DfValue::Time(MysqlTime::max_value()),
+            DfValue::Time(_) => DfValue::Time(MySqlTime::max_value()),
             DfValue::Numeric(_) => DfValue::from(Decimal::MAX),
             DfValue::TinyText(_)
             | DfValue::Text(_)
@@ -287,7 +287,7 @@ impl DfValue {
             DfValue::TimestampTz(ref dt) => {
                 dt.to_chrono().naive_local() != NaiveDate::from_ymd(0, 0, 0).and_hms(0, 0, 0)
             }
-            DfValue::Time(ref t) => *t != MysqlTime::from_microseconds(0),
+            DfValue::Time(ref t) => *t != MySqlTime::from_microseconds(0),
             DfValue::ByteArray(ref array) => !array.is_empty(),
             DfValue::Numeric(ref d) => !d.is_zero(),
             DfValue::BitVector(ref bits) => !bits.is_empty(),
@@ -587,7 +587,7 @@ impl PartialEq for DfValue {
                 #[allow(clippy::unwrap_used)]
                 let a = <&str>::try_from(self).unwrap();
                 a.parse()
-                    .map(|other_t: MysqlTime| t.eq(&other_t))
+                    .map(|other_t: MySqlTime| t.eq(&other_t))
                     .unwrap_or(false)
             }
             (&DfValue::Int(a), &DfValue::Int(b)) => a == b,
@@ -698,7 +698,7 @@ impl Ord for DfValue {
                 // TinyText
                 #[allow(clippy::unwrap_used)]
                 let a = <&str>::try_from(self).unwrap().parse();
-                a.map(|t: MysqlTime| t.cmp(other_t))
+                a.map(|t: MySqlTime| t.cmp(other_t))
                     .unwrap_or(Ordering::Greater)
             }
             (
@@ -1146,8 +1146,8 @@ impl From<NaiveTime> for DfValue {
     }
 }
 
-impl From<MysqlTime> for DfValue {
-    fn from(t: MysqlTime) -> Self {
+impl From<MySqlTime> for DfValue {
+    fn from(t: MySqlTime) -> Self {
         DfValue::Time(t)
     }
 }
@@ -1220,7 +1220,7 @@ impl<'a> TryFrom<&'a DfValue> for NaiveDate {
     }
 }
 
-impl<'a> TryFrom<&'a DfValue> for MysqlTime {
+impl<'a> TryFrom<&'a DfValue> for MySqlTime {
     type Error = ReadySetError;
 
     fn try_from(data: &'a DfValue) -> Result<Self, Self::Error> {
@@ -1228,7 +1228,7 @@ impl<'a> TryFrom<&'a DfValue> for MysqlTime {
             DfValue::Time(ref mysql_time) => Ok(*mysql_time),
             _ => Err(Self::Error::DfValueConversionError {
                 src_type: "DfValue".to_string(),
-                target_type: "MysqlTime".to_string(),
+                target_type: "MySqlTime".to_string(),
                 details: "".to_string(),
             }),
         }
@@ -1631,7 +1631,7 @@ impl TryFrom<&mysql_common::value::Value> for DfValue {
                 Ok(DfValue::None)
             }
             Value::Time(neg, days, hours, minutes, seconds, microseconds) => {
-                Ok(DfValue::Time(MysqlTime::from_hmsus(
+                Ok(DfValue::Time(MySqlTime::from_hmsus(
                     !neg,
                     <u16>::try_from(*hours as u32 + days * 24u32).unwrap_or(u16::MAX),
                     *minutes,
@@ -1999,7 +1999,7 @@ impl Arbitrary for DfValue {
                 .prop_map(DfValue::TimestampTz)
                 .boxed(),
             Some(DfValueKind::Time) => arbitrary_duration()
-                .prop_map(MysqlTime::new)
+                .prop_map(MySqlTime::new)
                 .prop_map(DfValue::Time)
                 .boxed(),
             Some(DfValueKind::ByteArray) => any::<Vec<u8>>()
@@ -2033,7 +2033,7 @@ impl Arbitrary for DfValue {
                 any::<String>().prop_map(|s| DfValue::from(s.replace('\0', ""))),
                 any::<crate::TimestampTz>().prop_map(DfValue::TimestampTz),
                 arbitrary_duration()
-                    .prop_map(MysqlTime::new)
+                    .prop_map(MySqlTime::new)
                     .prop_map(DfValue::Time),
                 any::<Vec<u8>>().prop_map(|b| DfValue::ByteArray(Arc::new(b))),
                 arbitrary_decimal().prop_map(DfValue::from),
@@ -2294,7 +2294,7 @@ mod tests {
         assert!(a_dt.is_ok());
         assert_eq!(
             a_dt.unwrap(),
-            DfValue::Time(MysqlTime::from_microseconds(0))
+            DfValue::Time(MySqlTime::from_microseconds(0))
         )
     }
 
@@ -3462,7 +3462,7 @@ mod tests {
                 DfValue::from(101112i64)
                     .coerce_to(&SqlType::Time, &DfType::Unknown)
                     .unwrap(),
-                DfValue::from(MysqlTime::from_hmsus(true, 10, 11, 12, 0))
+                DfValue::from(MySqlTime::from_hmsus(true, 10, 11, 12, 0))
             );
         }
 

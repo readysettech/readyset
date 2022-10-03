@@ -18,7 +18,7 @@ use chrono::{NaiveDate, NaiveTime};
 use derive_more::{From, TryInto};
 use itertools::Itertools;
 use mysql_common::chrono::NaiveDateTime;
-use mysql_time::MysqlTime;
+use mysql_time::MySqlTime;
 use nom_sql::{Literal, SqlQuery};
 use pgsql::types::{accepts, to_sql_checked};
 use readyset_data::{DfValue, TIMESTAMP_FORMAT};
@@ -191,7 +191,7 @@ pub enum Value {
     Integer(i64),
     Real(i64, u64),
     Date(NaiveDateTime),
-    Time(MysqlTime),
+    Time(MySqlTime),
     ByteArray(Vec<u8>),
     Numeric(Decimal),
     Null,
@@ -237,7 +237,7 @@ impl TryFrom<mysql_async::Value> for Value {
                     us,
                 ),
             )),
-            Time(neg, d, h, m, s, us) => Ok(Self::Time(MysqlTime::from_hmsus(
+            Time(neg, d, h, m, s, us) => Ok(Self::Time(MySqlTime::from_hmsus(
                 !neg,
                 (d * 24 + (h as u32))
                     .try_into()
@@ -523,10 +523,10 @@ impl Value {
             Type::Date => Ok(Self::Date(mysql_async::from_value_opt(val)?)),
             Type::Time => Ok(Self::Time(match val {
                 mysql_async::Value::Bytes(s) => {
-                    MysqlTime::from_str(std::str::from_utf8(&s)?).map_err(|e| anyhow!("{}", e))?
+                    MySqlTime::from_str(std::str::from_utf8(&s)?).map_err(|e| anyhow!("{}", e))?
                 }
                 mysql_async::Value::Time(neg, d, h, m, s, us) => {
-                    MysqlTime::from_hmsus(!neg, ((d * 24) + h as u32).try_into()?, m, s, us.into())
+                    MySqlTime::from_hmsus(!neg, ((d * 24) + h as u32).try_into()?, m, s, us.into())
                 }
                 _ => bail!("Could not convert {:?} to Time", val),
             })),

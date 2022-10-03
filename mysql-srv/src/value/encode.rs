@@ -1,7 +1,7 @@
 use std::io::{self, Write};
 
 use byteorder::{LittleEndian, WriteBytesExt};
-use mysql_time::MysqlTime;
+use mysql_time::MySqlTime;
 
 use crate::error::{other_error, OtherErrorKind};
 use crate::myc::constants::{ColumnFlags, ColumnType};
@@ -9,7 +9,7 @@ use crate::myc::io::WriteMysqlExt;
 use crate::{myc, Column};
 
 /// Implementors of this trait can be sent as a single resultset value to a MySQL/MariaDB client.
-pub trait ToMysqlValue {
+pub trait ToMySqlValue {
     /// Encode value using the text-based protocol.
     fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()>;
 
@@ -39,9 +39,9 @@ fn bad<V: fmt::Debug>(v: V, c: &Column) -> io::Error {
     )
 }
 
-impl<T> ToMysqlValue for Option<T>
+impl<T> ToMySqlValue for Option<T>
 where
-    T: ToMysqlValue,
+    T: ToMySqlValue,
 {
     fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
         if let Some(ref v) = *self {
@@ -93,7 +93,7 @@ macro_rules! like_try_into {
 
 macro_rules! forgiving_numeric {
     ($t:ty) => {
-        impl ToMysqlValue for $t {
+        impl ToMySqlValue for $t {
             mysql_text_trivial!();
             fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
                 let signed = !c.colflags.contains(ColumnFlags::UNSIGNED_FLAG);
@@ -136,7 +136,7 @@ macro_rules! forgiving_numeric {
 forgiving_numeric!(usize);
 forgiving_numeric!(isize);
 
-impl ToMysqlValue for u8 {
+impl ToMySqlValue for u8 {
     mysql_text_trivial!();
     fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
         let signed = !c.colflags.contains(ColumnFlags::UNSIGNED_FLAG);
@@ -171,7 +171,7 @@ impl ToMysqlValue for u8 {
     }
 }
 
-impl ToMysqlValue for i8 {
+impl ToMySqlValue for i8 {
     mysql_text_trivial!();
     fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
         let signed = !c.colflags.contains(ColumnFlags::UNSIGNED_FLAG);
@@ -206,7 +206,7 @@ impl ToMysqlValue for i8 {
     }
 }
 
-impl ToMysqlValue for u16 {
+impl ToMySqlValue for u16 {
     mysql_text_trivial!();
     fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
         let signed = !c.colflags.contains(ColumnFlags::UNSIGNED_FLAG);
@@ -234,7 +234,7 @@ impl ToMysqlValue for u16 {
     }
 }
 
-impl ToMysqlValue for i16 {
+impl ToMySqlValue for i16 {
     mysql_text_trivial!();
     fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
         let signed = !c.colflags.contains(ColumnFlags::UNSIGNED_FLAG);
@@ -262,7 +262,7 @@ impl ToMysqlValue for i16 {
     }
 }
 
-impl ToMysqlValue for u32 {
+impl ToMySqlValue for u32 {
     mysql_text_trivial!();
     fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
         let signed = !c.colflags.contains(ColumnFlags::UNSIGNED_FLAG);
@@ -283,7 +283,7 @@ impl ToMysqlValue for u32 {
     }
 }
 
-impl ToMysqlValue for i32 {
+impl ToMySqlValue for i32 {
     mysql_text_trivial!();
     fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
         let signed = !c.colflags.contains(ColumnFlags::UNSIGNED_FLAG);
@@ -304,7 +304,7 @@ impl ToMysqlValue for i32 {
     }
 }
 
-impl ToMysqlValue for u64 {
+impl ToMySqlValue for u64 {
     mysql_text_trivial!();
     fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
         let signed = !c.colflags.contains(ColumnFlags::UNSIGNED_FLAG);
@@ -318,7 +318,7 @@ impl ToMysqlValue for u64 {
     }
 }
 
-impl ToMysqlValue for i64 {
+impl ToMySqlValue for i64 {
     mysql_text_trivial!();
     fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
         let signed = !c.colflags.contains(ColumnFlags::UNSIGNED_FLAG);
@@ -332,7 +332,7 @@ impl ToMysqlValue for i64 {
     }
 }
 
-impl ToMysqlValue for f32 {
+impl ToMySqlValue for f32 {
     mysql_text_trivial!();
     fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
         match c.coltype {
@@ -343,7 +343,7 @@ impl ToMysqlValue for f32 {
     }
 }
 
-impl ToMysqlValue for f64 {
+impl ToMySqlValue for f64 {
     mysql_text_trivial!();
     fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
         match c.coltype {
@@ -353,7 +353,7 @@ impl ToMysqlValue for f64 {
     }
 }
 
-impl ToMysqlValue for String {
+impl ToMySqlValue for String {
     fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
         self.as_bytes().to_mysql_text(w)
     }
@@ -362,7 +362,7 @@ impl ToMysqlValue for String {
     }
 }
 
-impl ToMysqlValue for str {
+impl ToMySqlValue for str {
     fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
         self.as_bytes().to_mysql_text(w)
     }
@@ -371,7 +371,7 @@ impl ToMysqlValue for str {
     }
 }
 
-impl ToMysqlValue for [u8] {
+impl ToMySqlValue for [u8] {
     fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
         w.write_lenenc_str(self).map(|_| ())
     }
@@ -396,7 +396,7 @@ impl ToMysqlValue for [u8] {
     }
 }
 
-impl ToMysqlValue for Vec<u8> {
+impl ToMySqlValue for Vec<u8> {
     fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
         (self[..]).to_mysql_text(w)
     }
@@ -405,9 +405,9 @@ impl ToMysqlValue for Vec<u8> {
     }
 }
 
-impl<'a, T> ToMysqlValue for &'a T
+impl<'a, T> ToMySqlValue for &'a T
 where
-    T: ToMysqlValue + ?Sized,
+    T: ToMySqlValue + ?Sized,
 {
     fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
         (*self).to_mysql_text(w)
@@ -421,7 +421,7 @@ where
 }
 
 use chrono::{self, Datelike, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
-impl ToMysqlValue for NaiveDate {
+impl ToMySqlValue for NaiveDate {
     fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
         w.write_lenenc_str(
             format!("{:04}-{:02}-{:02}", self.year(), self.month(), self.day()).as_bytes(),
@@ -441,7 +441,7 @@ impl ToMysqlValue for NaiveDate {
     }
 }
 
-impl ToMysqlValue for NaiveTime {
+impl ToMySqlValue for NaiveTime {
     fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
         let us = self.nanosecond() / 1_000;
         if us == 0 {
@@ -485,7 +485,7 @@ impl ToMysqlValue for NaiveTime {
     }
 }
 
-impl ToMysqlValue for MysqlTime {
+impl ToMySqlValue for MySqlTime {
     fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
         w.write_lenenc_str(self.to_string().as_bytes()).map(|_| ())
     }
@@ -507,7 +507,7 @@ impl ToMysqlValue for MysqlTime {
     }
 }
 
-impl ToMysqlValue for NaiveDateTime {
+impl ToMySqlValue for NaiveDateTime {
     fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
         let us = self.nanosecond() / 1_000;
 
@@ -577,7 +577,7 @@ impl ToMysqlValue for NaiveDateTime {
 
 use std::time::Duration;
 
-impl ToMysqlValue for Duration {
+impl ToMySqlValue for Duration {
     fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
         let s = self.as_secs();
         //let d = s / (24 * 3600);
@@ -630,7 +630,7 @@ impl ToMysqlValue for Duration {
     }
 }
 
-impl ToMysqlValue for myc::value::Value {
+impl ToMySqlValue for myc::value::Value {
     #[allow(clippy::many_single_char_names)]
     fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
         match *self {
@@ -751,7 +751,7 @@ mod tests {
 
     use chrono::{self, TimeZone};
 
-    use super::ToMysqlValue;
+    use super::ToMySqlValue;
     use crate::myc::io::ParseBuf;
     use crate::myc::proto::MyDeserialize;
     use crate::myc::value::convert::from_value;
@@ -759,7 +759,7 @@ mod tests {
     use crate::{Column, ColumnFlags, ColumnType};
 
     mod roundtrip_text {
-        use mysql_time::MysqlTime;
+        use mysql_time::MySqlTime;
 
         use super::*;
 
@@ -818,7 +818,7 @@ mod tests {
     }
 
     mod roundtrip_bin {
-        use mysql_time::MysqlTime;
+        use mysql_time::MySqlTime;
 
         use super::*;
 
@@ -998,8 +998,8 @@ mod tests {
         );
         rt!(
             time,
-            MysqlTime,
-            MysqlTime::from_hmsus(true, 20, 15, 14, 123_456),
+            MySqlTime,
+            MySqlTime::from_hmsus(true, 20, 15, 14, 123_456),
             ColumnType::MYSQL_TYPE_TIME
         );
         rt!(

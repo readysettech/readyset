@@ -7,7 +7,7 @@ use chrono::{Datelike, LocalResult, NaiveDate, NaiveDateTime, TimeZone};
 use chrono_tz::Tz;
 use launchpad::redacted::Sensitive;
 use maths::int::integer_rnd;
-use mysql_time::MysqlTime;
+use mysql_time::MySqlTime;
 use nom_sql::{BinaryOperator, SqlType};
 use readyset_data::DfValue;
 use readyset_errors::{ReadySetError, ReadySetResult};
@@ -90,20 +90,20 @@ fn month(date: &NaiveDate) -> u8 {
     date.month() as u8
 }
 
-fn timediff_datetimes(time1: &NaiveDateTime, time2: &NaiveDateTime) -> MysqlTime {
+fn timediff_datetimes(time1: &NaiveDateTime, time2: &NaiveDateTime) -> MySqlTime {
     let duration = time1.sub(*time2);
-    MysqlTime::new(duration)
+    MySqlTime::new(duration)
 }
 
-fn timediff_times(time1: &MysqlTime, time2: &MysqlTime) -> MysqlTime {
+fn timediff_times(time1: &MySqlTime, time2: &MySqlTime) -> MySqlTime {
     time1.sub(*time2)
 }
 
-fn addtime_datetime(time1: &NaiveDateTime, time2: &MysqlTime) -> NaiveDateTime {
+fn addtime_datetime(time1: &NaiveDateTime, time2: &MySqlTime) -> NaiveDateTime {
     time2.add(*time1)
 }
 
-fn addtime_times(time1: &MysqlTime, time2: &MysqlTime) -> MysqlTime {
+fn addtime_times(time1: &MySqlTime, time2: &MySqlTime) -> MySqlTime {
     time1.add(*time2)
 }
 
@@ -247,8 +247,8 @@ impl Expr {
                         )
                     } else {
                         timediff_times(
-                            &(MysqlTime::try_from(&time_param1)?),
-                            &(MysqlTime::try_from(&time_param2)?),
+                            &(MySqlTime::try_from(&time_param1)?),
+                            &(MySqlTime::try_from(&time_param2)?),
                         )
                     };
                     Ok(DfValue::Time(time))
@@ -265,14 +265,14 @@ impl Expr {
                         Ok(DfValue::TimestampTz(
                             addtime_datetime(
                                 &(NaiveDateTime::try_from(&time_param1)?),
-                                &(MysqlTime::try_from(&time_param2)?),
+                                &(MySqlTime::try_from(&time_param2)?),
                             )
                             .into(),
                         ))
                     } else {
                         Ok(DfValue::Time(addtime_times(
-                            &(MysqlTime::try_from(&time_param1)?),
-                            &(MysqlTime::try_from(&time_param2)?),
+                            &(MySqlTime::try_from(&time_param1)?),
+                            &(MySqlTime::try_from(&time_param2)?),
                         )))
                     }
                 }
@@ -706,7 +706,7 @@ mod tests {
         assert_eq!(
             expr.eval::<DfValue>(&[param1.into(), param2.into()])
                 .unwrap(),
-            DfValue::Time(MysqlTime::from_hmsus(false, 47, 0, 0, 0))
+            DfValue::Time(MySqlTime::from_hmsus(false, 47, 0, 0, 0))
         );
         assert_eq!(
             expr.eval::<DfValue>(&[
@@ -714,7 +714,7 @@ mod tests {
                 param2.to_string().try_into().unwrap()
             ])
             .unwrap(),
-            DfValue::Time(MysqlTime::from_hmsus(false, 47, 0, 0, 0))
+            DfValue::Time(MySqlTime::from_hmsus(false, 47, 0, 0, 0))
         );
         let param1 = NaiveDateTime::new(
             NaiveDate::from_ymd(2003, 10, 12),
@@ -727,7 +727,7 @@ mod tests {
         assert_eq!(
             expr.eval::<DfValue>(&[param1.into(), param2.into()])
                 .unwrap(),
-            DfValue::Time(MysqlTime::from_hmsus(true, 49, 0, 0, 0))
+            DfValue::Time(MySqlTime::from_hmsus(true, 49, 0, 0, 0))
         );
         assert_eq!(
             expr.eval::<DfValue>(&[
@@ -735,7 +735,7 @@ mod tests {
                 param2.to_string().try_into().unwrap()
             ])
             .unwrap(),
-            DfValue::Time(MysqlTime::from_hmsus(true, 49, 0, 0, 0))
+            DfValue::Time(MySqlTime::from_hmsus(true, 49, 0, 0, 0))
         );
         let param2 = NaiveTime::from_hms(4, 13, 33);
         assert_eq!(
@@ -755,7 +755,7 @@ mod tests {
         assert_eq!(
             expr.eval::<DfValue>(&[param1.into(), param2.into()])
                 .unwrap(),
-            DfValue::Time(MysqlTime::from_hmsus(true, 1, 0, 0, 0))
+            DfValue::Time(MySqlTime::from_hmsus(true, 1, 0, 0, 0))
         );
         assert_eq!(
             expr.eval::<DfValue>(&[
@@ -763,31 +763,31 @@ mod tests {
                 param2.to_string().try_into().unwrap()
             ])
             .unwrap(),
-            DfValue::Time(MysqlTime::from_hmsus(true, 1, 0, 0, 0))
+            DfValue::Time(MySqlTime::from_hmsus(true, 1, 0, 0, 0))
         );
         let param1 = "not a date nor time";
         let param2 = "01:00:00.4";
         assert_eq!(
             expr.eval::<DfValue>(&[param1.try_into().unwrap(), param2.try_into().unwrap()])
                 .unwrap(),
-            DfValue::Time(MysqlTime::from_hmsus(false, 1, 0, 0, 400_000))
+            DfValue::Time(MySqlTime::from_hmsus(false, 1, 0, 0, 400_000))
         );
         assert_eq!(
             expr.eval::<DfValue>(&[param2.try_into().unwrap(), param1.try_into().unwrap()])
                 .unwrap(),
-            DfValue::Time(MysqlTime::from_hmsus(true, 1, 0, 0, 400_000))
+            DfValue::Time(MySqlTime::from_hmsus(true, 1, 0, 0, 400_000))
         );
 
         let param2 = "10000.4";
         assert_eq!(
             expr.eval::<DfValue>(&[param1.try_into().unwrap(), param2.try_into().unwrap()])
                 .unwrap(),
-            DfValue::Time(MysqlTime::from_hmsus(false, 1, 0, 0, 400_000))
+            DfValue::Time(MySqlTime::from_hmsus(false, 1, 0, 0, 400_000))
         );
         assert_eq!(
             expr.eval::<DfValue>(&[param2.try_into().unwrap(), param1.try_into().unwrap()])
                 .unwrap(),
-            DfValue::Time(MysqlTime::from_hmsus(true, 1, 0, 0, 400_000))
+            DfValue::Time(MySqlTime::from_hmsus(true, 1, 0, 0, 400_000))
         );
 
         let param2: f32 = 3.57;
@@ -797,7 +797,7 @@ mod tests {
                 DfValue::try_from(param2).unwrap()
             ])
             .unwrap(),
-            DfValue::Time(MysqlTime::from_microseconds(
+            DfValue::Time(MySqlTime::from_microseconds(
                 (-param2 * 1_000_000_f32) as i64
             ))
         );
@@ -809,7 +809,7 @@ mod tests {
                 DfValue::try_from(param2).unwrap()
             ])
             .unwrap(),
-            DfValue::Time(MysqlTime::from_microseconds(
+            DfValue::Time(MySqlTime::from_microseconds(
                 (-param2 * 1_000_000_f64) as i64
             ))
         );
@@ -865,7 +865,7 @@ mod tests {
                 .into()
             )
         );
-        let param2 = MysqlTime::from_hmsus(false, 3, 11, 35, 0);
+        let param2 = MySqlTime::from_hmsus(false, 3, 11, 35, 0);
         assert_eq!(
             expr.eval::<DfValue>(&[param1.into(), param2.into()])
                 .unwrap(),
@@ -891,11 +891,11 @@ mod tests {
                 .into()
             )
         );
-        let param1 = MysqlTime::from_hmsus(true, 10, 12, 44, 123_000);
+        let param1 = MySqlTime::from_hmsus(true, 10, 12, 44, 123_000);
         assert_eq!(
             expr.eval::<DfValue>(&[param2.into(), param1.into()])
                 .unwrap(),
-            DfValue::Time(MysqlTime::from_hmsus(true, 7, 1, 9, 123_000))
+            DfValue::Time(MySqlTime::from_hmsus(true, 7, 1, 9, 123_000))
         );
         assert_eq!(
             expr.eval::<DfValue>(&[
@@ -903,31 +903,31 @@ mod tests {
                 param1.to_string().try_into().unwrap()
             ])
             .unwrap(),
-            DfValue::Time(MysqlTime::from_hmsus(true, 7, 1, 9, 123_000))
+            DfValue::Time(MySqlTime::from_hmsus(true, 7, 1, 9, 123_000))
         );
         let param1 = "not a date nor time";
         let param2 = "01:00:00.4";
         assert_eq!(
             expr.eval::<DfValue>(&[param1.try_into().unwrap(), param2.try_into().unwrap()])
                 .unwrap(),
-            DfValue::Time(MysqlTime::from_hmsus(true, 1, 0, 0, 400_000))
+            DfValue::Time(MySqlTime::from_hmsus(true, 1, 0, 0, 400_000))
         );
         assert_eq!(
             expr.eval::<DfValue>(&[param2.try_into().unwrap(), param1.try_into().unwrap()])
                 .unwrap(),
-            DfValue::Time(MysqlTime::from_hmsus(true, 1, 0, 0, 400_000))
+            DfValue::Time(MySqlTime::from_hmsus(true, 1, 0, 0, 400_000))
         );
 
         let param2 = "10000.4";
         assert_eq!(
             expr.eval::<DfValue>(&[param1.try_into().unwrap(), param2.try_into().unwrap()])
                 .unwrap(),
-            DfValue::Time(MysqlTime::from_hmsus(true, 1, 0, 0, 400_000))
+            DfValue::Time(MySqlTime::from_hmsus(true, 1, 0, 0, 400_000))
         );
         assert_eq!(
             expr.eval::<DfValue>(&[param2.try_into().unwrap(), param1.try_into().unwrap()])
                 .unwrap(),
-            DfValue::Time(MysqlTime::from_hmsus(true, 1, 0, 0, 400_000))
+            DfValue::Time(MySqlTime::from_hmsus(true, 1, 0, 0, 400_000))
         );
 
         let param2: f32 = 3.57;
@@ -937,7 +937,7 @@ mod tests {
                 DfValue::try_from(param2).unwrap()
             ])
             .unwrap(),
-            DfValue::Time(MysqlTime::from_microseconds(
+            DfValue::Time(MySqlTime::from_microseconds(
                 (param2 * 1_000_000_f32) as i64
             ))
         );
@@ -949,7 +949,7 @@ mod tests {
                 DfValue::try_from(param2).unwrap()
             ])
             .unwrap(),
-            DfValue::Time(MysqlTime::from_microseconds(
+            DfValue::Time(MySqlTime::from_microseconds(
                 (param2 * 1_000_000_f64) as i64
             ))
         );

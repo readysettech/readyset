@@ -5,7 +5,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use clap::Parser;
 use nom_sql::Dialect;
 use readyset_client_adapter::{DatabaseType, NoriaAdapter};
-use readyset_mysql::MysqlHandler;
+use readyset_mysql::MySqlHandler;
 use readyset_version::COMMIT_ID;
 
 mod backend;
@@ -35,8 +35,8 @@ fn main() -> anyhow::Result<()> {
     let mut adapter = NoriaAdapter {
         description: "MySQL adapter for ReadySet.",
         default_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 3306),
-        connection_handler: MysqlHandler,
-        database_type: DatabaseType::Mysql,
+        connection_handler: MySqlHandler,
+        database_type: DatabaseType::MySql,
         dialect: Dialect::MySQL,
         upstream_config: (),
     };

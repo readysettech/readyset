@@ -13,7 +13,7 @@ use anyhow::{anyhow, bail, Context};
 use console::style;
 use database_utils::{DatabaseConnection, DatabaseType, DatabaseURL};
 use itertools::Itertools;
-use mysql_srv::MysqlIntermediary;
+use mysql_srv::MySqlIntermediary;
 use nom_sql::{Dialect, Relation};
 use readyset::consensus::{Authority, LocalAuthorityStore};
 use readyset::{ReadySetHandle, ViewCreateRequest};
@@ -554,7 +554,7 @@ impl TestScript {
             }
 
             match database_type {
-                DatabaseType::MySQL => MysqlIntermediary::run_on_tcp(
+                DatabaseType::MySQL => MySqlIntermediary::run_on_tcp(
                     readyset_mysql::Backend::new(make_backend!(
                         MySqlUpstream,
                         MySqlQueryHandler,
