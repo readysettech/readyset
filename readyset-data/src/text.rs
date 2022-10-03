@@ -291,13 +291,25 @@ impl Eq for Text {}
 
 impl fmt::Debug for Text {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self.as_str())
+        write!(f, "{:?}", self.as_str())?;
+
+        if self.collation() != Collation::default() {
+            write!(f, " ({:?})", self.collation())?;
+        }
+
+        Ok(())
     }
 }
 
 impl fmt::Debug for TinyText {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self.as_str())
+        write!(f, "{:?}", self.as_str())?;
+
+        if self.collation() != Collation::default() {
+            write!(f, " ({:?})", self.collation())?;
+        }
+
+        Ok(())
     }
 }
 
