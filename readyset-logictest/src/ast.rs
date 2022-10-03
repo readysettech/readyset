@@ -20,7 +20,7 @@ use itertools::Itertools;
 use mysql_common::chrono::NaiveDateTime;
 use mysql_time::MySqlTime;
 use nom_sql::{Literal, SqlQuery};
-use pgsql::types::{accepts, to_sql_checked};
+use pgsql::types::to_sql_checked;
 use readyset_data::{DfValue, TIMESTAMP_FORMAT};
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
@@ -348,10 +348,25 @@ impl pgsql::types::ToSql for Value {
         }
     }
 
-    accepts!(
-        BOOL, BYTEA, CHAR, NAME, INT2, INT4, INT8, TEXT, VARCHAR, DATE, TIME, TIMESTAMP, BIT,
-        VARBIT
-    );
+    fn accepts(ty: &pgsql::types::Type) -> bool {
+        use pgsql::types::Type;
+
+        match *ty {
+            Type::BOOL
+            | Type::CHAR
+            | Type::INT2
+            | Type::INT4
+            | Type::INT8
+            | Type::FLOAT4
+            | Type::FLOAT8
+            | Type::NUMERIC
+            | Type::TEXT
+            | Type::DATE
+            | Type::TIME => true,
+            ref ty if ty.name() == "citext" => true,
+            _ => false,
+        }
+    }
 
     to_sql_checked!();
 }
@@ -380,7 +395,25 @@ impl<'a> pgsql::types::FromSql<'a> for Value {
         }
     }
 
-    accepts!(BOOL, CHAR, INT2, INT4, INT8, FLOAT4, FLOAT8, NUMERIC, TEXT, DATE, TIME);
+    fn accepts(ty: &pgsql::types::Type) -> bool {
+        use pgsql::types::Type;
+
+        match *ty {
+            Type::BOOL
+            | Type::CHAR
+            | Type::INT2
+            | Type::INT4
+            | Type::INT8
+            | Type::FLOAT4
+            | Type::FLOAT8
+            | Type::NUMERIC
+            | Type::TEXT
+            | Type::DATE
+            | Type::TIME => true,
+            ref ty if ty.name() == "citext" => true,
+            _ => false,
+        }
+    }
 }
 
 impl TryFrom<DfValue> for Value {
