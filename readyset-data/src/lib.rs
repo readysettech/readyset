@@ -1851,15 +1851,19 @@ impl TryFrom<&DfValue> for mysql_common::value::Value {
 
 // Performs an arithmetic operation on two numeric DfValues,
 // returning a new DfValue as the result.
+//
+// Note that Rust's builtin floating-point types do not panic on overflow or division by zero, so
+// there are no checked_add/sub/mul/div methods for f32/f64, hence the need to pass in both $op and
+// $checked_op to this macro.
 macro_rules! arithmetic_operation (
-    ($op:tt, $first:ident, $second:ident) => (
+    ($op:tt, $checked_op:ident, $first:ident, $second:ident) => (
         match ($first, $second) {
             (&DfValue::None, _) | (_, &DfValue::None) => DfValue::None,
-            (&DfValue::Int(a), &DfValue::Int(b)) => (a $op b).into(),
-            (&DfValue::UnsignedInt(a), &DfValue::UnsignedInt(b)) => (a $op b).into(),
+            (&DfValue::Int(a), &DfValue::Int(b)) => a.$checked_op(b).into(),
+            (&DfValue::UnsignedInt(a), &DfValue::UnsignedInt(b)) => a.$checked_op(b).into(),
 
-            (&DfValue::UnsignedInt(a), &DfValue::Int(b)) => DfValue::try_from(i128::from(a) $op i128::from(b))?,
-            (&DfValue::Int(a), &DfValue::UnsignedInt(b)) => DfValue::try_from(i128::from(a) $op i128::from(b))?,
+            (&DfValue::UnsignedInt(a), &DfValue::Int(b)) => i128::from(a).$checked_op(i128::from(b)).map_or(Ok(DfValue::None), DfValue::try_from)?,
+            (&DfValue::Int(a), &DfValue::UnsignedInt(b)) => i128::from(a).$checked_op(i128::from(b)).map_or(Ok(DfValue::None), DfValue::try_from)?,
 
             (first @ &DfValue::Int(..), second @ &DfValue::Float(..)) |
             (first @ &DfValue::UnsignedInt(..), second @ &DfValue::Float(..)) |
@@ -1902,7 +1906,7 @@ macro_rules! arithmetic_operation (
                         target_type: "Decimal".to_string(),
                         details: e.to_string(),
                     })?;
-                DfValue::from(a $op b)
+                DfValue::from(a.$checked_op(b))
             }
             (first @ &DfValue::Numeric(..), second @ &DfValue::Float(..)) => {
                 let a: Decimal = Decimal::try_from(first)
@@ -1917,7 +1921,7 @@ macro_rules! arithmetic_operation (
                         target_type: "Decimal".to_string(),
                         details: "".to_string(),
                     }))?;
-                DfValue::from(a $op b)
+                DfValue::from(a.$checked_op(b))
             }
             (first @ &DfValue::Numeric(..), second @ &DfValue::Double(..)) => {
                 let a: Decimal = Decimal::try_from(first)
@@ -1932,7 +1936,7 @@ macro_rules! arithmetic_operation (
                         target_type: "Decimal".to_string(),
                         details: "".to_string(),
                     }))?;
-                DfValue::from(a $op b)
+                DfValue::from(a.$checked_op(b))
             }
 
 
@@ -1950,7 +1954,7 @@ impl<'a, 'b> Add<&'b DfValue> for &'a DfValue {
     type Output = ReadySetResult<DfValue>;
 
     fn add(self, other: &'b DfValue) -> Self::Output {
-        Ok(arithmetic_operation!(+, self, other))
+        Ok(arithmetic_operation!(+, checked_add, self, other))
     }
 }
 
@@ -1958,7 +1962,7 @@ impl<'a, 'b> Sub<&'b DfValue> for &'a DfValue {
     type Output = ReadySetResult<DfValue>;
 
     fn sub(self, other: &'b DfValue) -> Self::Output {
-        Ok(arithmetic_operation!(-, self, other))
+        Ok(arithmetic_operation!(-, checked_sub, self, other))
     }
 }
 
@@ -1966,7 +1970,7 @@ impl<'a, 'b> Mul<&'b DfValue> for &'a DfValue {
     type Output = ReadySetResult<DfValue>;
 
     fn mul(self, other: &'b DfValue) -> Self::Output {
-        Ok(arithmetic_operation!(*, self, other))
+        Ok(arithmetic_operation!(*, checked_mul, self, other))
     }
 }
 
@@ -1974,7 +1978,7 @@ impl<'a, 'b> Div<&'b DfValue> for &'a DfValue {
     type Output = ReadySetResult<DfValue>;
 
     fn div(self, other: &'b DfValue) -> Self::Output {
-        Ok(arithmetic_operation!(/, self, other))
+        Ok(arithmetic_operation!(/, checked_div, self, other))
     }
 }
 
@@ -2376,6 +2380,8 @@ mod tests {
         assert_arithmetic!(+, Decimal::new(15, 1), Decimal::new(25, 1), Decimal::new(40, 1));
         assert_arithmetic!(+, Decimal::new(15, 1), 2.5_f32, Decimal::new(40, 1));
         assert_arithmetic!(+, Decimal::new(15, 1), 2.5_f64, Decimal::new(40, 1));
+        assert_arithmetic!(+, i64::MAX, 1, None::<i64>);
+        assert_arithmetic!(+, Decimal::MAX, Decimal::MAX, None::<Decimal>);
         assert_eq!((&DfValue::Int(1) + &DfValue::Int(2)).unwrap(), 3.into());
         assert_eq!((&DfValue::from(1) + &DfValue::Int(2)).unwrap(), 3.into());
         assert_eq!((&DfValue::Int(2) + &DfValue::from(1)).unwrap(), 3.into());
@@ -2399,6 +2405,8 @@ mod tests {
         assert_arithmetic!(-, Decimal::new(35, 1), 2.0_f32, Decimal::new(15, 1));
         assert_arithmetic!(-, Decimal::new(35, 1), 2.0_f64, Decimal::new(15, 1));
         assert_arithmetic!(-, Decimal::new(35, 1), Decimal::new(20, 1), Decimal::new(15, 1));
+        assert_arithmetic!(-, 1_u64, 2_u64, None::<u64>);
+        assert_arithmetic!(-, Decimal::MIN, Decimal::MAX, None::<Decimal>);
         assert_eq!((&DfValue::Int(1) - &DfValue::Int(2)).unwrap(), (-1).into());
         assert_eq!((&DfValue::from(1) - &DfValue::Int(2)).unwrap(), (-1).into());
         assert_eq!((&DfValue::Int(2) - &DfValue::from(1)).unwrap(), 1.into());
@@ -2419,6 +2427,8 @@ mod tests {
         assert_arithmetic!(*, 3.5_f64, 2.0_f32, 7.0_f64);
         assert_arithmetic!(*, 3.5_f64, 2.0_f64, 7.0_f64);
         assert_arithmetic!(*, 3.5_f64, Decimal::new(20, 1), Decimal::new(70, 1));
+        assert_arithmetic!(*, i64::MAX, 2, None::<i64>);
+        assert_arithmetic!(*, Decimal::MAX, Decimal::MAX, None::<Decimal>);
         assert_eq!((&DfValue::Int(1) * &DfValue::Int(2)).unwrap(), 2.into());
         assert_eq!((&DfValue::from(1) * &DfValue::Int(2)).unwrap(), 2.into());
         assert_eq!((&DfValue::Int(2) * &DfValue::from(1)).unwrap(), 2.into());
@@ -2439,6 +2449,8 @@ mod tests {
         assert_arithmetic!(/, 3.5_f64, 2.0_f32, 1.75_f64);
         assert_arithmetic!(/, 3.5_f64, 2.0_f64, 1.75_f64);
         assert_arithmetic!(/, 3.5_f64, Decimal::new(20, 1), Decimal::new(175, 2));
+        assert_arithmetic!(/, 1, 0, None::<i64>);
+        assert_arithmetic!(/, Decimal::ONE, Decimal::ZERO, None::<Decimal>);
         assert_eq!((&DfValue::Int(4) / &DfValue::Int(2)).unwrap(), 2.into());
         assert_eq!((&DfValue::from(4) / &DfValue::Int(2)).unwrap(), 2.into());
         assert_eq!((&DfValue::Int(4) / &DfValue::from(2)).unwrap(), 2.into());
