@@ -11,12 +11,16 @@ fn main() {
     // - $BUILDKITE_COMMIT
     // - $(git rev-parse HEAD)
     // - "unknown-commit-id"
-    let maybe_buildkite_commit = std::env::var("BUILDKITE_COMMIT");
+    let maybe_buildkite_commit = std::env::var("BUILDKITE_COMMIT").map(|s| s.trim().to_owned());
     let maybe_git_hash = Command::new("git")
         .args(&["rev-parse", "HEAD"])
         .output()
         .ok()
-        .and_then(|output| String::from_utf8(output.stdout).ok());
+        .and_then(|output| {
+            String::from_utf8(output.stdout)
+                .ok()
+                .map(|s| s.trim().to_owned())
+        });
     match (maybe_buildkite_commit, maybe_git_hash) {
         // If both are present and they aren't the same, warn, but still take BUILDKITE_COMMIT
         (Ok(buildkite_commit), Some(git_hash)) if buildkite_commit != git_hash => {
