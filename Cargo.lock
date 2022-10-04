@@ -2747,6 +2747,7 @@ dependencies = [
  "assert_approx_eq",
  "bincode",
  "bit-vec",
+ "concrete-iter",
  "criterion",
  "derive_more",
  "eui48",

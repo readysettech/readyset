@@ -1,8 +1,9 @@
 use std::fmt::{self, Display};
 use std::iter;
 
+use concrete_iter::concrete_iter;
 use derive_more::From;
-use itertools::{Either, Itertools};
+use itertools::Itertools;
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::character::complete::char;
@@ -47,6 +48,20 @@ pub enum FunctionExpr {
     /// `GROUP_CONCAT` aggregation. The second argument is the separator
     GroupConcat { expr: Box<Expr>, separator: String },
 
+    /// The SQL `SUBSTRING`/`SUBSTR` function.
+    ///
+    /// The supported syntax is one of:
+    ///
+    /// `SUBSTR[ING](string FROM pos FOR len)`
+    /// `SUBSTR[ING](string FROM pos)`
+    /// `SUBSTR[ING](string, pos)`
+    /// `SUBSTR[ING](string, pos, len)`
+    Substring {
+        string: Box<Expr>,
+        pos: Option<Box<Expr>>,
+        len: Option<Box<Expr>>,
+    },
+
     /// Generic function call expression
     Call {
         name: SqlIdentifier,
@@ -57,16 +72,24 @@ pub enum FunctionExpr {
 impl FunctionExpr {
     /// Returns an iterator over all the direct arguments passed to the given function call
     /// expression
-    pub fn arguments(&self) -> impl Iterator<Item = &Expr> {
+    #[concrete_iter]
+    pub fn arguments<'a>(&'a self) -> impl Iterator<Item = &'a Expr> {
         match self {
             FunctionExpr::Avg { expr: arg, .. }
             | FunctionExpr::Count { expr: arg, .. }
             | FunctionExpr::Sum { expr: arg, .. }
             | FunctionExpr::Max(arg)
             | FunctionExpr::Min(arg)
-            | FunctionExpr::GroupConcat { expr: arg, .. } => Either::Left(iter::once(arg.as_ref())),
-            FunctionExpr::CountStar => Either::Right(Either::Left(iter::empty())),
-            FunctionExpr::Call { arguments, .. } => Either::Right(Either::Right(arguments.iter())),
+            | FunctionExpr::GroupConcat { expr: arg, .. } => {
+                concrete_iter!(iter::once(arg.as_ref()))
+            }
+            FunctionExpr::CountStar => concrete_iter!(iter::empty()),
+            FunctionExpr::Call { arguments, .. } => concrete_iter!(arguments.iter()),
+            FunctionExpr::Substring { string, pos, len } => {
+                concrete_iter!(iter::once(string.as_ref())
+                    .chain(pos.iter().map(|p| p.as_ref()))
+                    .chain(len.iter().map(|p| p.as_ref())))
+            }
         }
     }
 }
@@ -97,6 +120,18 @@ impl Display for FunctionExpr {
             }
             FunctionExpr::Call { name, arguments } => {
                 write!(f, "{}({})", name, arguments.iter().join(", "))
+            }
+            FunctionExpr::Substring { string, pos, len } => {
+                write!(f, "substring({string}")?;
+                if let Some(pos) = pos {
+                    write!(f, " from {pos}")?;
+                }
+
+                if let Some(len) = len {
+                    write!(f, " for {len}")?;
+                }
+
+                write!(f, ")")
             }
         }
     }

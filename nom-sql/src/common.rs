@@ -416,6 +416,34 @@ fn function_call_without_parens(i: &[u8]) -> IResult<&[u8], FunctionExpr> {
     ))
 }
 
+fn substring(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FunctionExpr> {
+    move |i| {
+        let (i, _) = alt((tag_no_case("substring"), tag_no_case("substr")))(i)?;
+        let (i, _) = whitespace0(i)?;
+        let (i, _) = tag("(")(i)?;
+        let (i, string) = expression(dialect)(i)?;
+        let (i, pos) = opt(preceded(
+            tuple((whitespace1, tag_no_case("from"), whitespace1)),
+            expression(dialect),
+        ))(i)?;
+        let (i, len) = opt(preceded(
+            tuple((whitespace1, tag_no_case("for"), whitespace1)),
+            expression(dialect),
+        ))(i)?;
+        let (i, _) = whitespace0(i)?;
+        let (i, _) = tag(")")(i)?;
+
+        Ok((
+            i,
+            FunctionExpr::Substring {
+                string: Box::new(string),
+                pos: pos.map(Box::new),
+                len: len.map(Box::new),
+            },
+        ))
+    }
+}
+
 fn function_call(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FunctionExpr> {
     move |i| {
         let (i, name) = dialect.function_identifier()(i)?;
@@ -478,6 +506,7 @@ pub fn function_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Funct
                     }
                 },
             ),
+            substring(dialect),
             function_call(dialect),
             function_call_without_parens,
         ))(i)
@@ -828,6 +857,74 @@ mod tests {
     fn terminated_by_semicolon() {
         let res = statement_terminator(b"   ;  ");
         assert_eq!(res, Ok((&b""[..], ())));
+    }
+
+    #[test]
+    fn substr_from_for() {
+        let res = test_parse!(function_expr(Dialect::MySQL), b"substr(a from 1 for 7)");
+        assert_eq!(
+            res,
+            FunctionExpr::Substring {
+                string: Box::new(Expr::Column("a".into())),
+                pos: Some(Box::new(Expr::Literal(1u32.into()))),
+                len: Some(Box::new(Expr::Literal(7u32.into())))
+            }
+        );
+    }
+
+    #[test]
+    fn substring_from_for() {
+        let res = test_parse!(function_expr(Dialect::MySQL), b"substring(a from 1 for 7)");
+        assert_eq!(
+            res,
+            FunctionExpr::Substring {
+                string: Box::new(Expr::Column("a".into())),
+                pos: Some(Box::new(Expr::Literal(1u32.into()))),
+                len: Some(Box::new(Expr::Literal(7u32.into())))
+            }
+        );
+    }
+
+    #[test]
+    fn substr_from() {
+        let res = test_parse!(function_expr(Dialect::MySQL), b"substr(a from 1)");
+        assert_eq!(
+            res,
+            FunctionExpr::Substring {
+                string: Box::new(Expr::Column("a".into())),
+                pos: Some(Box::new(Expr::Literal(1u32.into()))),
+                len: None,
+            }
+        );
+    }
+
+    #[test]
+    fn substr_for() {
+        let res = test_parse!(function_expr(Dialect::MySQL), b"substr(a for 7)");
+        assert_eq!(
+            res,
+            FunctionExpr::Substring {
+                string: Box::new(Expr::Column("a".into())),
+                pos: None,
+                len: Some(Box::new(Expr::Literal(7u32.into()))),
+            }
+        );
+    }
+
+    #[test]
+    fn substring_regular_args() {
+        let res = test_parse!(function_expr(Dialect::MySQL), b"substring(a,1,7)");
+        assert_eq!(
+            res,
+            FunctionExpr::Call {
+                name: "substring".into(),
+                arguments: vec![
+                    Expr::Column("a".into()),
+                    Expr::Literal(1u32.into()),
+                    Expr::Literal(7u32.into()),
+                ]
+            }
+        );
     }
 
     mod mysql {

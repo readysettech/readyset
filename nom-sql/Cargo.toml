@@ -30,6 +30,8 @@ bit-vec = { version = "0.6", features = ["serde"] }
 triomphe = "0.1"
 lazy_static = "1.4"
 
+concrete-iter = { path = "../concrete-iter" }
+
 [dev-dependencies]
 assert_approx_eq = "1.1.0"
 pretty_assertions = "0.7.2"

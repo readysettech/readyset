@@ -145,6 +145,11 @@ impl<'a> ReferredColumnsIter<'a> {
                 }
                 self.visit_expr(first_arg)
             }),
+            Substring { string, pos, len } => {
+                self.exprs_to_visit.extend(pos.iter().map(|e| e.as_ref()));
+                self.exprs_to_visit.extend(len.iter().map(|e| e.as_ref()));
+                self.visit_expr(string)
+            }
         }
     }
 
@@ -238,6 +243,13 @@ impl<'a> ReferredColumnsMut<'a> {
                 self.exprs_to_visit.extend(args);
                 self.visit_expr(first_arg)
             }),
+            Substring { string, pos, len } => {
+                self.exprs_to_visit
+                    .extend(pos.iter_mut().map(|e| e.as_mut()));
+                self.exprs_to_visit
+                    .extend(len.iter_mut().map(|e| e.as_mut()));
+                self.visit_expr(string)
+            }
         }
     }
 
@@ -360,8 +372,9 @@ pub fn is_aggregate(function: &FunctionExpr) -> bool {
         | FunctionExpr::Max(_)
         | FunctionExpr::Min(_)
         | FunctionExpr::GroupConcat { .. } => true,
+        FunctionExpr::Substring { .. }
         // For now, assume all "generic" function calls are not aggregates
-        FunctionExpr::Call { .. } => false,
+        | FunctionExpr::Call { .. } => false,
     }
 }
 

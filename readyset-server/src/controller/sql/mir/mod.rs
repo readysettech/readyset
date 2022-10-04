@@ -102,7 +102,7 @@ fn default_row_for_select(st: &SelectStatement) -> Option<Vec<DfValue>> {
                     FunctionExpr::Max(..) => DfValue::None,
                     FunctionExpr::Min(..) => DfValue::None,
                     FunctionExpr::GroupConcat { .. } => DfValue::None,
-                    FunctionExpr::Call { .. } => DfValue::None,
+                    FunctionExpr::Call { .. } | FunctionExpr::Substring { .. } => DfValue::None,
                 },
                 _ => DfValue::None,
             })

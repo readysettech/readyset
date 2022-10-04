@@ -454,6 +454,16 @@ pub fn walk_function_expr<'ast, V: Visitor<'ast>>(
             }
             Ok(())
         }
+        FunctionExpr::Substring { string, pos, len } => {
+            visitor.visit_expr(string.as_mut())?;
+            if let Some(pos) = pos {
+                visitor.visit_expr(pos.as_mut())?;
+            }
+            if let Some(len) = len {
+                visitor.visit_expr(len.as_mut())?;
+            }
+            Ok(())
+        }
     }
 }
 

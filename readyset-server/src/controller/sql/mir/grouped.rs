@@ -330,7 +330,7 @@ pub(super) fn post_lookup_aggregates(
                 GroupConcat { separator, .. } => PostLookupAggregateFunction::GroupConcat {
                     separator: separator.clone(),
                 },
-                Call { .. } => continue,
+                Call { .. } | Substring { .. } => continue,
             },
         });
     }
