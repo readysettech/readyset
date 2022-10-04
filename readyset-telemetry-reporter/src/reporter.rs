@@ -274,18 +274,9 @@ impl TelemetryReporter {
         true
     }
 
-    #[cfg(not(any(test, feature = "test-util")))]
     async fn maybe_recv_event(
         rx: &mut Receiver<(TelemetryEvent, Telemetry)>,
     ) -> Option<(TelemetryEvent, Telemetry)> {
-        rx.recv().await
-    }
-
-    #[cfg(any(test, feature = "test-util"))]
-    async fn maybe_recv_event(
-        rx: &mut Receiver<(TelemetryEvent, Telemetry)>,
-    ) -> Option<(TelemetryEvent, Telemetry)> {
-        // FIXME(ENG-1859): Add reliable failure injection back here
         rx.recv().await
     }
 
@@ -319,16 +310,6 @@ impl TelemetryReporter {
     #[cfg(any(test, feature = "test-util"))]
     pub async fn run_timeout(&mut self, timeout: Duration) {
         let _ = tokio::time::timeout(timeout, self.run()).await;
-    }
-
-    #[cfg(any(test, feature = "test-util"))]
-    pub fn disable_event_recv() {
-        // FIXME(ENG-1859): Add reliable failure injection back here
-    }
-
-    #[cfg(any(test, feature = "test-util"))]
-    pub fn enable_event_recv() {
-        // FIXME(ENG-1859): Add reliable failure injection back here
     }
 }
 
@@ -443,11 +424,12 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    #[ignore = "FIXME(ENG-1859)"]
     async fn test_shutdown_drain() {
         // Tests that the TelemetryReporter will drain any incoming requests
         let (sender, mut reporter) = TelemetryInitializer::test_init().await;
-        TelemetryReporter::disable_event_recv();
+
+        // The biased select! will always process the shutdown first, even if we send an event ahead
+        // of a shutdown.
         sender
             .send_event(TelemetryEvent::InstallerRun)
             .expect("failed to send event");
