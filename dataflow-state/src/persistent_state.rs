@@ -73,6 +73,7 @@ use std::{fmt, fs};
 
 use bincode::Options;
 use common::{IndexType, Record, Records, SizeOf, Tag};
+use launchpad::intervals::BoundPair;
 use parking_lot::{
     MappedRwLockReadGuard, MappedRwLockWriteGuard, RwLock, RwLockReadGuard, RwLockWriteGuard,
 };
@@ -802,7 +803,7 @@ impl State for PersistentStateHandle {
             .cf_handle(PK_CF)
             .expect("Primary key column family not found");
 
-        let (lower, upper) = PersistentState::serialize_range(key, ((), ()));
+        let (lower, upper) = serialize_range(key.clone());
 
         let mut opts = rocksdb::ReadOptions::default();
         let mut inclusive_end = None;
@@ -959,6 +960,14 @@ fn build_key(row: &[DfValue], columns: &[usize]) -> PointKey {
 fn serialize_key<K: Serialize, E: Serialize>(k: K, extra: E) -> Vec<u8> {
     let size: u64 = bincode::options().serialized_size(&k).unwrap();
     bincode::options().serialize(&(size, k, extra)).unwrap()
+}
+
+fn serialize_range(range: RangeKey) -> BoundPair<Vec<u8>> {
+    let (lower, upper) = range.into_point_keys();
+    (
+        lower.map(|v| serialize_key(v, ())),
+        upper.map(|v| serialize_key(v, ())),
+    )
 }
 
 fn deserialize_row<T: AsRef<[u8]>>(bytes: T) -> Vec<DfValue> {
@@ -1584,38 +1593,6 @@ impl PersistentState {
         let mut bytes = serialize_key(key, ());
         bytes.extend_from_slice(raw_primary);
         bytes
-    }
-
-    fn serialize_range<S, T>(key: &RangeKey, extra: (S, T)) -> (Bound<Vec<u8>>, Bound<Vec<u8>>)
-    where
-        S: Serialize,
-        T: Serialize,
-    {
-        use Bound::*;
-        fn do_serialize_range<K, S, T>(
-            range: &(Bound<K>, Bound<K>),
-            extra: (S, T),
-        ) -> (Bound<Vec<u8>>, Bound<Vec<u8>>)
-        where
-            K: Serialize,
-            S: Serialize,
-            T: Serialize,
-        {
-            (
-                range.0.as_ref().map(|k| serialize_key(k, &extra.0)),
-                range.1.as_ref().map(|k| serialize_key(k, &extra.1)),
-            )
-        }
-        match key {
-            RangeKey::Unbounded => (Unbounded, Unbounded),
-            RangeKey::Single(range) => do_serialize_range(range, extra),
-            RangeKey::Double(range) => do_serialize_range(range, extra),
-            RangeKey::Tri(range) => do_serialize_range(range, extra),
-            RangeKey::Quad(range) => do_serialize_range(range, extra),
-            RangeKey::Quin(range) => do_serialize_range(range, extra),
-            RangeKey::Sex(range) => do_serialize_range(range, extra),
-            RangeKey::Multi(range) => do_serialize_range(range, extra),
-        }
     }
 
     /// Inserts the row into the database by replicating it across all of the column
@@ -3091,6 +3068,48 @@ mod tests {
                         .into()
                 )
             );
+        }
+
+        #[test]
+        fn citext() {
+            let mut state = setup();
+            state.add_key(Index::btree_map(vec![0]), None);
+            state.process_records(
+                &mut vec![
+                    vec![DfValue::from_str_and_collation("a", Collation::Citext)],
+                    vec![DfValue::from_str_and_collation("B", Collation::Citext)],
+                    vec![DfValue::from_str_and_collation("c", Collation::Citext)],
+                    vec![DfValue::from_str_and_collation("D", Collation::Citext)],
+                ]
+                .into(),
+                None,
+                None,
+            );
+
+            let result = state
+                .lookup_range(
+                    &[0],
+                    &RangeKey::from(&(
+                        Included(vec1![DfValue::from_str_and_collation(
+                            "b",
+                            Collation::Citext
+                        )]),
+                        Included(vec1![DfValue::from_str_and_collation(
+                            "c",
+                            Collation::Citext
+                        )]),
+                    )),
+                )
+                .unwrap();
+
+            assert_eq!(
+                result,
+                vec![
+                    vec![DfValue::from_str_and_collation("B", Collation::Citext)],
+                    vec![DfValue::from_str_and_collation("c", Collation::Citext)],
+                ]
+                .into()
+            )
         }
     }
 }

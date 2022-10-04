@@ -46,3 +46,36 @@ select v from t where v = $1
 ----
 AbC
 abc
+
+statement ok
+delete from t where id = 1;
+
+statement ok
+delete from t where id = 2;
+
+statement ok
+delete from t where id = 3;
+
+statement ok
+insert into t (id, v) values (1, 'a'), (2, 'B'), (3, 'c'), (4, 'D');
+
+statement ok
+select id from t order by v asc;
+
+graphviz
+
+query I nosort
+select id from t order by v asc;
+----
+1
+2
+3
+4
+
+query I valuesort
+select id from t where v between $1 and $2;
+? = b
+? = c
+----
+2
+3

@@ -1,6 +1,7 @@
 use std::ops::{Bound, RangeBounds};
 
 use common::DfValue;
+use derive_more::From;
 use launchpad::intervals::BoundPair;
 use serde::ser::{SerializeSeq, SerializeTuple};
 use serde::Serialize;
@@ -8,7 +9,7 @@ use tuple::TupleElements;
 use vec1::Vec1;
 
 /// An internal type used as the key when performing point lookups and inserts into node state.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, From)]
 pub enum PointKey {
     Single(DfValue),
     Double((DfValue, DfValue)),
@@ -262,6 +263,29 @@ impl RangeKey {
                 | (_, Bound::Included(k))
                 | (_, Bound::Excluded(k)),
             ) => Some(k.len()),
+        }
+    }
+
+    /// Convert this [`RangeKey`] into a pair of bounds on [`PointKey`]s, for use during
+    /// serialization of lookup keys for ranges
+    pub(crate) fn into_point_keys(self) -> BoundPair<PointKey> {
+        use Bound::*;
+
+        macro_rules! point_keys {
+            ($r:ident, $variant:ident) => {
+                ($r.0.map(PointKey::$variant), $r.1.map(PointKey::$variant))
+            };
+        }
+
+        match self {
+            RangeKey::Unbounded => (Unbounded, Unbounded),
+            RangeKey::Single((l, u)) => (l.map(PointKey::Single), u.map(PointKey::Single)),
+            RangeKey::Double(r) => point_keys!(r, Double),
+            RangeKey::Tri(r) => point_keys!(r, Tri),
+            RangeKey::Quad(r) => point_keys!(r, Quad),
+            RangeKey::Quin(r) => point_keys!(r, Quin),
+            RangeKey::Sex(r) => point_keys!(r, Sex),
+            RangeKey::Multi(r) => point_keys!(r, Multi),
         }
     }
 
