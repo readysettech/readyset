@@ -10,7 +10,7 @@ use maths::int::integer_rnd;
 use mysql_time::MySqlTime;
 use nom_sql::{BinaryOperator, SqlType};
 use readyset_data::DfValue;
-use readyset_errors::{ReadySetError, ReadySetResult};
+use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 use rust_decimal::Decimal;
 
@@ -185,7 +185,7 @@ impl Expr {
                 let res = expr.eval(record)?;
                 Ok(res.coerce_to(to_type, expr.ty())?)
             }
-            Call { func, .. } => match &**func {
+            Call { func, ty } => match &**func {
                 BuiltinFunction::ConvertTZ(arg1, arg2, arg3) => {
                     let param1 = arg1.eval(record)?;
                     let param2 = arg2.eval(record)?;
@@ -410,6 +410,22 @@ impl Expr {
                             .find(|v| !v.is_none())
                             .unwrap_or(DfValue::None))
                     }
+                }
+                BuiltinFunction::Concat(arg1, rest_args) => {
+                    // TODO: Just use `ty`, once `coerce_to` takes a DfType as its first arg
+                    let return_ty = ty.to_sql_type().ok_or_else(|| internal_err!())?;
+
+                    let mut s = <&str>::try_from(
+                        &non_null!(arg1.eval(record)?).coerce_to(&return_ty, arg1.ty())?,
+                    )?
+                    .to_owned();
+
+                    for arg in rest_args {
+                        let val = non_null!(arg.eval(record)?).coerce_to(&return_ty, arg.ty())?;
+                        s.push_str((&val).try_into()?)
+                    }
+
+                    Ok(s.into())
                 }
             },
             CaseWhen {
@@ -1181,6 +1197,7 @@ mod tests {
 
     mod builtin_funcs {
         use launchpad::arbitrary::arbitrary_timestamp_naive_date_time;
+        use readyset_data::Collation;
 
         use super::*;
 
@@ -1200,7 +1217,7 @@ mod tests {
                 .with_timezone(&target_tz)
                 .naive_local();
             assert_eq!(super::convert_tz(&datetime, src, target).unwrap(), expected);
-            assert!(super::convert_tz(&datetime, "invalid timezone", target).is_err());
+            super::convert_tz(&datetime, "invalid timezone", target).unwrap_err();
             assert!(super::convert_tz(&datetime, src, "invalid timezone").is_err());
         }
 
@@ -1267,6 +1284,58 @@ mod tests {
             );
             assert_eq!(call_with(123.into(), DfValue::None).unwrap(), 123.into());
             assert_eq!(call_with(123.into(), 456.into()).unwrap(), 123.into());
+        }
+
+        #[test]
+        fn concat() {
+            let expr = Expr::Call {
+                func: Box::new(BuiltinFunction::Concat(
+                    Expr::Literal {
+                        val: "My".into(),
+                        ty: DfType::Text(Collation::default()),
+                    },
+                    vec![
+                        Expr::Literal {
+                            val: "S".into(),
+                            ty: DfType::Text(Collation::default()),
+                        },
+                        Expr::Literal {
+                            val: "QL".into(),
+                            ty: DfType::Text(Collation::default()),
+                        },
+                    ],
+                )),
+                ty: DfType::Text(Collation::default()),
+            };
+
+            let res = expr.eval::<DfValue>(&[]).unwrap();
+            assert_eq!(res, "MySQL".into());
+        }
+
+        #[test]
+        fn concat_with_nulls() {
+            let expr = Expr::Call {
+                func: Box::new(BuiltinFunction::Concat(
+                    Expr::Literal {
+                        val: "My".into(),
+                        ty: DfType::Text(Collation::default()),
+                    },
+                    vec![
+                        Expr::Literal {
+                            val: DfValue::None,
+                            ty: DfType::Text(Collation::default()),
+                        },
+                        Expr::Literal {
+                            val: "QL".into(),
+                            ty: DfType::Text(Collation::default()),
+                        },
+                    ],
+                )),
+                ty: DfType::Text(Collation::default()),
+            };
+
+            let res = expr.eval::<DfValue>(&[]).unwrap();
+            assert_eq!(res, DfValue::None);
         }
     }
 }

@@ -5,8 +5,8 @@ mod like;
 mod post_lookup;
 pub mod utils;
 
-use std::fmt;
 use std::fmt::Formatter;
+use std::{fmt, iter};
 
 use itertools::Itertools;
 use launchpad::redacted::Sensitive;
@@ -44,6 +44,8 @@ pub enum BuiltinFunction {
     JsonbTypeof(Expr),
     /// [`coalesce`](https://www.postgresql.org/docs/current/functions-conditional.html#FUNCTIONS-COALESCE-NVL-IFNULL)
     Coalesce(Expr, Vec<Expr>),
+    /// [`concat`](https://dev.mysql.com/doc/refman/8.0/en/string-functions.html#function_concat)
+    Concat(Expr, Vec<Expr>),
 }
 
 impl BuiltinFunction {
@@ -144,6 +146,18 @@ impl BuiltinFunction {
                 let ty = arg1.ty().clone();
                 (Self::Coalesce(arg1, args.by_ref().collect()), ty)
             }
+            "concat" => {
+                let arg1 = next_arg()?;
+                let rest_args = args.by_ref().collect::<Vec<_>>();
+                let collation = iter::once(&arg1)
+                    .chain(&rest_args)
+                    .find_map(|expr| match expr.ty() {
+                        DfType::Text(c) => Some(*c),
+                        _ => None,
+                    })
+                    .unwrap_or_default();
+                (Self::Concat(arg1, rest_args), DfType::Text(collation))
+            }
             _ => return Err(ReadySetError::NoSuchFunction(name.to_owned())),
         };
 
@@ -167,6 +181,7 @@ impl BuiltinFunction {
             JsonTypeof { .. } => "json_typeof",
             JsonbTypeof { .. } => "jsonb_typeof",
             Coalesce { .. } => "coalesce",
+            Concat { .. } => "concat",
         }
     }
 }
@@ -206,6 +221,9 @@ impl fmt::Display for BuiltinFunction {
                 write!(f, "({})", arg)
             }
             Coalesce(arg1, args) => {
+                write!(f, "({}, {})", arg1, args.iter().join(", "))
+            }
+            Concat(arg1, args) => {
                 write!(f, "({}, {})", arg1, args.iter().join(", "))
             }
         }
@@ -482,6 +500,8 @@ mod tests {
     use super::*;
 
     mod lower {
+        use nom_sql::parse_expr;
+
         use super::*;
 
         #[test]
@@ -534,6 +554,34 @@ mod tests {
                         }]
                     )),
                     ty: DfType::Int
+                }
+            );
+        }
+
+        #[test]
+        fn call_concat_with_texts() {
+            let input = parse_expr(Dialect::MySQL, "concat('My', 'SQ', 'L')").unwrap();
+            let res = Expr::lower(input, |_| internal!()).unwrap();
+            assert_eq!(
+                res,
+                Expr::Call {
+                    func: Box::new(BuiltinFunction::Concat(
+                        Expr::Literal {
+                            val: "My".into(),
+                            ty: DfType::Text(Collation::default()),
+                        },
+                        vec![
+                            Expr::Literal {
+                                val: "SQ".into(),
+                                ty: DfType::Text(Collation::default()),
+                            },
+                            Expr::Literal {
+                                val: "L".into(),
+                                ty: DfType::Text(Collation::default()),
+                            },
+                        ],
+                    )),
+                    ty: DfType::Text(Collation::default()),
                 }
             );
         }
