@@ -1,6 +1,7 @@
+use nom_sql::analysis::visit::{self, Visitor};
 use nom_sql::{
-    BinaryOperator, DeleteStatement, Expr, FunctionExpr, InValue, SelectStatement, SqlQuery,
-    UnaryOperator, UpdateStatement,
+    BinaryOperator, DeleteStatement, Expr, SelectStatement, SqlQuery, UnaryOperator,
+    UpdateStatement,
 };
 use Expr::*;
 
@@ -26,148 +27,85 @@ pub trait RewriteBetween {
     fn rewrite_between(self) -> Self;
 }
 
+fn rewrite_between_condition(operand: Expr, min: Expr, max: Expr) -> Expr {
+    Expr::BinaryOp {
+        lhs: Box::new(Expr::BinaryOp {
+            lhs: Box::new(operand.clone()),
+            op: BinaryOperator::GreaterOrEqual,
+            rhs: Box::new(min),
+        }),
+        op: BinaryOperator::And,
+        rhs: Box::new(Expr::BinaryOp {
+            lhs: Box::new(operand),
+            op: BinaryOperator::LessOrEqual,
+            rhs: Box::new(max),
+        }),
+    }
+}
+
+struct RewriteBetweenVisitor;
+
+impl<'ast> Visitor<'ast> for RewriteBetweenVisitor {
+    type Error = !;
+
+    fn visit_expr(&mut self, expr: &'ast mut Expr) -> Result<(), Self::Error> {
+        match expr {
+            Between {
+                operand,
+                min,
+                max,
+                negated: false,
+            } => {
+                *expr =
+                    rewrite_between_condition((**operand).clone(), (**min).clone(), (**max).clone())
+            }
+            Between {
+                operand,
+                min,
+                max,
+                negated: true,
+            } => {
+                *expr = UnaryOp {
+                    op: UnaryOperator::Not,
+                    rhs: Box::new(rewrite_between_condition(
+                        (**operand).clone(),
+                        (**min).clone(),
+                        (**max).clone(),
+                    )),
+                }
+            }
+            _ => {}
+        }
+
+        visit::walk_expr(self, expr)
+    }
+}
+
 impl RewriteBetween for SelectStatement {
     fn rewrite_between(mut self) -> Self {
-        if let Some(where_clause) = self.where_clause {
-            self.where_clause = Some(rewrite_expression(where_clause));
-        }
+        let Ok(()) = RewriteBetweenVisitor.visit_select_statement(&mut self);
         self
     }
 }
 
 impl RewriteBetween for DeleteStatement {
     fn rewrite_between(mut self) -> Self {
-        if let Some(where_clause) = self.where_clause {
-            self.where_clause = Some(rewrite_expression(where_clause));
-        }
+        let Ok(()) = RewriteBetweenVisitor.visit_delete_statement(&mut self);
         self
     }
 }
 
 impl RewriteBetween for UpdateStatement {
     fn rewrite_between(mut self) -> Self {
-        if let Some(where_clause) = self.where_clause {
-            self.where_clause = Some(rewrite_expression(where_clause));
-        }
+        let Ok(()) = RewriteBetweenVisitor.visit_update_statement(&mut self);
         self
     }
 }
 
 impl RewriteBetween for SqlQuery {
-    fn rewrite_between(self) -> Self {
-        match self {
-            SqlQuery::Select(select) => SqlQuery::Select(select.rewrite_between()),
-            SqlQuery::Delete(del) => SqlQuery::Delete(del.rewrite_between()),
-            SqlQuery::CompoundSelect(mut compound_select) => {
-                for (_, ref mut select) in compound_select.selects.iter_mut() {
-                    *select = select.clone().rewrite_between()
-                }
-                SqlQuery::CompoundSelect(compound_select)
-            }
-            SqlQuery::Update(upd) => SqlQuery::Update(upd.rewrite_between()),
-            _ => self,
-        }
-    }
-}
-
-fn rewrite_expression(expr: Expr) -> Expr {
-    match expr {
-        BinaryOp { lhs, rhs, op } => BinaryOp {
-            lhs: Box::new(rewrite_expression(*lhs)),
-            op,
-            rhs: Box::new(rewrite_expression(*rhs)),
-        },
-        UnaryOp { op, rhs } => UnaryOp {
-            op,
-            rhs: Box::new(rewrite_expression(*rhs)),
-        },
-        Between {
-            operand,
-            min,
-            max,
-            negated: false,
-        } => rewrite_between_condition(*operand, *min, *max),
-        Between {
-            operand,
-            min,
-            max,
-            negated: true,
-        } => UnaryOp {
-            op: UnaryOperator::Not,
-            rhs: Box::new(rewrite_between_condition(*operand, *min, *max)),
-        },
-        Exists(select_stmt) => Exists(Box::new(select_stmt.rewrite_between())),
-        Call(fexpr) => Call(match fexpr {
-            FunctionExpr::Avg { expr, distinct } => FunctionExpr::Avg {
-                expr: Box::new(rewrite_expression(*expr)),
-                distinct,
-            },
-            FunctionExpr::Count { expr, distinct } => FunctionExpr::Count {
-                expr: Box::new(rewrite_expression(*expr)),
-                distinct,
-            },
-            FunctionExpr::CountStar => FunctionExpr::CountStar,
-            FunctionExpr::Sum { expr, distinct } => FunctionExpr::Sum {
-                expr: Box::new(rewrite_expression(*expr)),
-                distinct,
-            },
-            FunctionExpr::Max(expr) => FunctionExpr::Max(Box::new(rewrite_expression(*expr))),
-            FunctionExpr::Min(expr) => FunctionExpr::Min(Box::new(rewrite_expression(*expr))),
-            FunctionExpr::GroupConcat { expr, separator } => FunctionExpr::GroupConcat {
-                expr: Box::new(rewrite_expression(*expr)),
-                separator,
-            },
-            FunctionExpr::Call { name, arguments } => FunctionExpr::Call {
-                name,
-                arguments: arguments.into_iter().map(rewrite_expression).collect(),
-            },
-        }),
-        Literal(_) | Column(_) | Variable(_) => expr,
-        CaseWhen {
-            condition,
-            then_expr,
-            else_expr,
-        } => CaseWhen {
-            condition: Box::new(rewrite_expression(*condition)),
-            then_expr: Box::new(rewrite_expression(*then_expr)),
-            else_expr: else_expr.map(|else_expr| Box::new(rewrite_expression(*else_expr))),
-        },
-        NestedSelect(sel) => NestedSelect(Box::new(sel.rewrite_between())),
-        In { lhs, rhs, negated } => In {
-            lhs: Box::new(rewrite_expression(*lhs)),
-            rhs: match rhs {
-                InValue::Subquery(sel) => InValue::Subquery(Box::new(sel.rewrite_between())),
-                InValue::List(exprs) => {
-                    InValue::List(exprs.into_iter().map(rewrite_expression).collect())
-                }
-            },
-            negated,
-        },
-        Cast {
-            expr,
-            ty,
-            postgres_style,
-        } => Cast {
-            expr: Box::new(rewrite_expression(*expr)),
-            ty,
-            postgres_style,
-        },
-    }
-}
-
-fn rewrite_between_condition(operand: Expr, min: Expr, max: Expr) -> Expr {
-    Expr::BinaryOp {
-        lhs: Box::new(Expr::BinaryOp {
-            lhs: Box::new(operand.clone()),
-            op: BinaryOperator::GreaterOrEqual,
-            rhs: Box::new(rewrite_expression(min)),
-        }),
-        op: BinaryOperator::And,
-        rhs: Box::new(Expr::BinaryOp {
-            lhs: Box::new(operand),
-            op: BinaryOperator::LessOrEqual,
-            rhs: Box::new(rewrite_expression(max)),
-        }),
+    fn rewrite_between(mut self) -> Self {
+        let Ok(()) = RewriteBetweenVisitor.visit_sql_query(&mut self);
+        self
     }
 }
 
