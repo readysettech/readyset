@@ -556,7 +556,7 @@ mod tests {
             state
                 .lookup_range(
                     &[0],
-                    &RangeKey::Single((Bound::Unbounded, Bound::Included(&3.into())))
+                    &RangeKey::Single((Bound::Unbounded, Bound::Included(3.into())))
                 )
                 .unwrap()
                 .len(),

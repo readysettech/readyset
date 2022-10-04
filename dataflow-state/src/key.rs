@@ -149,73 +149,21 @@ impl Serialize for PointKey {
     }
 }
 
-#[allow(clippy::type_complexity)]
 #[derive(Clone, Debug, Serialize, Eq, PartialEq)]
-pub enum RangeKey<'a> {
+pub enum RangeKey {
     /// Key-length-polymorphic double-unbounded range key
     Unbounded,
-    Single((Bound<&'a DfValue>, Bound<&'a DfValue>)),
-    Double(
-        (
-            Bound<(&'a DfValue, &'a DfValue)>,
-            Bound<(&'a DfValue, &'a DfValue)>,
-        ),
-    ),
-    Tri(
-        (
-            Bound<(&'a DfValue, &'a DfValue, &'a DfValue)>,
-            Bound<(&'a DfValue, &'a DfValue, &'a DfValue)>,
-        ),
-    ),
-    Quad(
-        (
-            Bound<(&'a DfValue, &'a DfValue, &'a DfValue, &'a DfValue)>,
-            Bound<(&'a DfValue, &'a DfValue, &'a DfValue, &'a DfValue)>,
-        ),
-    ),
-    Quin(
-        (
-            Bound<(
-                &'a DfValue,
-                &'a DfValue,
-                &'a DfValue,
-                &'a DfValue,
-                &'a DfValue,
-            )>,
-            Bound<(
-                &'a DfValue,
-                &'a DfValue,
-                &'a DfValue,
-                &'a DfValue,
-                &'a DfValue,
-            )>,
-        ),
-    ),
-    Sex(
-        (
-            Bound<(
-                &'a DfValue,
-                &'a DfValue,
-                &'a DfValue,
-                &'a DfValue,
-                &'a DfValue,
-                &'a DfValue,
-            )>,
-            Bound<(
-                &'a DfValue,
-                &'a DfValue,
-                &'a DfValue,
-                &'a DfValue,
-                &'a DfValue,
-                &'a DfValue,
-            )>,
-        ),
-    ),
-    Multi((Bound<&'a [DfValue]>, Bound<&'a [DfValue]>)),
+    Single(BoundPair<DfValue>),
+    Double(BoundPair<(DfValue, DfValue)>),
+    Tri(BoundPair<(DfValue, DfValue, DfValue)>),
+    Quad(BoundPair<(DfValue, DfValue, DfValue, DfValue)>),
+    Quin(BoundPair<(DfValue, DfValue, DfValue, DfValue, DfValue)>),
+    Sex(BoundPair<(DfValue, DfValue, DfValue, DfValue, DfValue, DfValue)>),
+    Multi(BoundPair<Box<[DfValue]>>),
 }
 
 #[allow(clippy::len_without_is_empty)]
-impl<'a> RangeKey<'a> {
+impl RangeKey {
     /// Build a [`RangeKey`] from a type that implements [`RangeBounds`] over a vector of keys.
     ///
     /// # Panics
@@ -235,10 +183,10 @@ impl<'a> RangeKey<'a> {
     /// assert_eq!(RangeKey::from(&(..)), RangeKey::Unbounded);
     /// assert_eq!(
     ///     RangeKey::from(&(vec1![DfValue::from(0)]..vec1![DfValue::from(1)])),
-    ///     RangeKey::Single((Included(&(0.into())), Excluded(&(1.into()))))
+    ///     RangeKey::Single((Included(0.into()), Excluded(1.into())))
     /// );
     /// ```
-    pub fn from<R>(range: &'a R) -> Self
+    pub fn from<R>(range: &R) -> Self
     where
         R: RangeBounds<Vec1<DfValue>>,
     {
@@ -263,7 +211,7 @@ impl<'a> RangeKey<'a> {
             (bound, $bound_type: ident, $elem: ident, $make_tuple: expr) => {
                 range.$bound_type().map(|key| {
                     let mut key = key.into_iter();
-                    let mut $elem = move || key.next().unwrap();
+                    let mut $elem = move || key.next().unwrap().clone();
                     $make_tuple
                 })
             };
@@ -285,16 +233,16 @@ impl<'a> RangeKey<'a> {
     }
 
     /// Returns the upper bound of the range key
-    pub fn upper_bound(&self) -> Bound<Vec<&'a DfValue>> {
+    pub fn upper_bound(&self) -> Bound<Vec<&DfValue>> {
         match self {
             RangeKey::Unbounded => Bound::Unbounded,
-            RangeKey::Single((_, upper)) => upper.map(|dt| vec![dt]),
-            RangeKey::Double((_, upper)) => upper.map(|dts| dts.into_elements().collect()),
-            RangeKey::Tri((_, upper)) => upper.map(|dts| dts.into_elements().collect()),
-            RangeKey::Quad((_, upper)) => upper.map(|dts| dts.into_elements().collect()),
-            RangeKey::Quin((_, upper)) => upper.map(|dts| dts.into_elements().collect()),
-            RangeKey::Sex((_, upper)) => upper.map(|dts| dts.into_elements().collect()),
-            RangeKey::Multi((_, upper)) => upper.map(|dts| dts.iter().collect()),
+            RangeKey::Single((_, upper)) => upper.as_ref().map(|dt| vec![dt]),
+            RangeKey::Double((_, upper)) => upper.as_ref().map(|dts| dts.elements().collect()),
+            RangeKey::Tri((_, upper)) => upper.as_ref().map(|dts| dts.elements().collect()),
+            RangeKey::Quad((_, upper)) => upper.as_ref().map(|dts| dts.elements().collect()),
+            RangeKey::Quin((_, upper)) => upper.as_ref().map(|dts| dts.elements().collect()),
+            RangeKey::Sex((_, upper)) => upper.as_ref().map(|dts| dts.elements().collect()),
+            RangeKey::Multi((_, upper)) => upper.as_ref().map(|dts| dts.iter().collect()),
         }
     }
 
@@ -316,39 +264,39 @@ impl<'a> RangeKey<'a> {
             ) => Some(k.len()),
         }
     }
-}
 
-impl<'a> RangeKey<'a> {
     pub fn as_bound_pair(&self) -> BoundPair<Vec<DfValue>> {
+        fn as_bound_pair<T>(bound_pair: &BoundPair<T>) -> BoundPair<Vec<DfValue>>
+        where
+            T: TupleElements<Element = DfValue>,
+        {
+            (
+                bound_pair
+                    .0
+                    .as_ref()
+                    .map(|v| v.elements().cloned().collect()),
+                bound_pair
+                    .1
+                    .as_ref()
+                    .map(|v| v.elements().cloned().collect()),
+            )
+        }
+
         match self {
             RangeKey::Unbounded => (Bound::Unbounded, Bound::Unbounded),
             RangeKey::Single((lower, upper)) => (
-                lower.map(|dt| vec![dt.clone()]),
-                upper.map(|dt| vec![dt.clone()]),
+                lower.as_ref().map(|dt| vec![dt.clone()]),
+                upper.as_ref().map(|dt| vec![dt.clone()]),
             ),
-            RangeKey::Double((lower, upper)) => (
-                lower.map(|dts| dts.into_elements().cloned().collect()),
-                upper.map(|dts| dts.into_elements().cloned().collect()),
+            RangeKey::Double(bp) => as_bound_pair(bp),
+            RangeKey::Tri(bp) => as_bound_pair(bp),
+            RangeKey::Quad(bp) => as_bound_pair(bp),
+            RangeKey::Quin(bp) => as_bound_pair(bp),
+            RangeKey::Sex(bp) => as_bound_pair(bp),
+            RangeKey::Multi((lower, upper)) => (
+                lower.as_ref().map(|dts| dts.to_vec()),
+                upper.as_ref().map(|dts| dts.to_vec()),
             ),
-            RangeKey::Tri((lower, upper)) => (
-                lower.map(|dts| dts.into_elements().cloned().collect()),
-                upper.map(|dts| dts.into_elements().cloned().collect()),
-            ),
-            RangeKey::Quad((lower, upper)) => (
-                lower.map(|dts| dts.into_elements().cloned().collect()),
-                upper.map(|dts| dts.into_elements().cloned().collect()),
-            ),
-            RangeKey::Quin((lower, upper)) => (
-                lower.map(|dts| dts.into_elements().cloned().collect()),
-                upper.map(|dts| dts.into_elements().cloned().collect()),
-            ),
-            RangeKey::Sex((lower, upper)) => (
-                lower.map(|dts| dts.into_elements().cloned().collect()),
-                upper.map(|dts| dts.into_elements().cloned().collect()),
-            ),
-            RangeKey::Multi((lower, upper)) => {
-                (lower.map(|dts| dts.to_vec()), upper.map(|dts| dts.to_vec()))
-            }
         }
     }
 }

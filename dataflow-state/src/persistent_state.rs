@@ -1593,7 +1593,7 @@ impl PersistentState {
     {
         use Bound::*;
         fn do_serialize_range<K, S, T>(
-            range: (Bound<K>, Bound<K>),
+            range: &(Bound<K>, Bound<K>),
             extra: (S, T),
         ) -> (Bound<Vec<u8>>, Bound<Vec<u8>>)
         where
@@ -1602,19 +1602,19 @@ impl PersistentState {
             T: Serialize,
         {
             (
-                range.0.map(|k| serialize_key(k, &extra.0)),
-                range.1.map(|k| serialize_key(k, &extra.1)),
+                range.0.as_ref().map(|k| serialize_key(k, &extra.0)),
+                range.1.as_ref().map(|k| serialize_key(k, &extra.1)),
             )
         }
         match key {
             RangeKey::Unbounded => (Unbounded, Unbounded),
-            RangeKey::Single(range) => do_serialize_range(*range, extra),
-            RangeKey::Double(range) => do_serialize_range(*range, extra),
-            RangeKey::Tri(range) => do_serialize_range(*range, extra),
-            RangeKey::Quad(range) => do_serialize_range(*range, extra),
-            RangeKey::Quin(range) => do_serialize_range(*range, extra),
-            RangeKey::Sex(range) => do_serialize_range(*range, extra),
-            RangeKey::Multi(range) => do_serialize_range(*range, extra),
+            RangeKey::Single(range) => do_serialize_range(range, extra),
+            RangeKey::Double(range) => do_serialize_range(range, extra),
+            RangeKey::Tri(range) => do_serialize_range(range, extra),
+            RangeKey::Quad(range) => do_serialize_range(range, extra),
+            RangeKey::Quin(range) => do_serialize_range(range, extra),
+            RangeKey::Sex(range) => do_serialize_range(range, extra),
+            RangeKey::Multi(range) => do_serialize_range(range, extra),
         }
     }
 

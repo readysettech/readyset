@@ -6,7 +6,7 @@ use indexmap::IndexMap;
 use launchpad::intervals::into_bound_endpoint;
 use partial_map::PartialMap;
 use readyset_data::DfValue;
-use tuple::{Map, TupleElements};
+use tuple::TupleElements;
 use vec1::Vec1;
 
 use crate::mk_key::MakeKey;
@@ -379,12 +379,7 @@ impl KeyedState {
 
         macro_rules! range {
             ($m: expr, $range: ident) => {
-                $m.range(&(
-                    $range.0.map(|k| k.map(Clone::clone)),
-                    $range.1.map(|k| k.map(Clone::clone)),
-                ))
-                .map(flatten_rows)
-                .map_err(to_misses)
+                $m.range($range).map(flatten_rows).map_err(to_misses)
             };
         }
 
@@ -402,20 +397,23 @@ impl KeyedState {
             (&KeyedState::TriBTree(ref m), &RangeKey::Unbounded) => full_range!(m),
             (&KeyedState::QuadBTree(ref m), &RangeKey::Unbounded) => full_range!(m),
             (&KeyedState::SexBTree(ref m), &RangeKey::Unbounded) => full_range!(m),
-            (&KeyedState::SingleBTree(ref m), &RangeKey::Single(range)) => {
-                m.range(&range).map(flatten_rows).map_err(|misses| {
+            (&KeyedState::SingleBTree(ref m), RangeKey::Single(range)) => {
+                m.range(range).map(flatten_rows).map_err(|misses| {
                     misses
                         .into_iter()
                         .map(|(lower, upper)| (lower.map(|k| vec![k]), upper.map(|k| vec![k])))
                         .collect()
                 })
             }
-            (&KeyedState::DoubleBTree(ref m), &RangeKey::Double(range)) => range!(m, range),
-            (&KeyedState::TriBTree(ref m), &RangeKey::Tri(range)) => range!(m, range),
-            (&KeyedState::QuadBTree(ref m), &RangeKey::Quad(range)) => range!(m, range),
-            (&KeyedState::SexBTree(ref m), &RangeKey::Sex(range)) => range!(m, range),
-            (&KeyedState::MultiBTree(ref m, _), &RangeKey::Multi(range)) => m
-                .range(&(range.0.map(|x| x.to_owned()), range.1.map(|x| x.to_owned())))
+            (&KeyedState::DoubleBTree(ref m), RangeKey::Double(range)) => range!(m, range),
+            (&KeyedState::TriBTree(ref m), RangeKey::Tri(range)) => range!(m, range),
+            (&KeyedState::QuadBTree(ref m), RangeKey::Quad(range)) => range!(m, range),
+            (&KeyedState::SexBTree(ref m), RangeKey::Sex(range)) => range!(m, range),
+            (&KeyedState::MultiBTree(ref m, _), RangeKey::Multi(range)) => m
+                .range::<_, [DfValue]>(&(
+                    range.0.as_ref().map(|b| b.as_ref()),
+                    range.1.as_ref().map(|b| b.as_ref()),
+                ))
                 .map(flatten_rows),
             (
                 KeyedState::SingleHash(_)

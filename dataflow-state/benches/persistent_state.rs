@@ -227,7 +227,7 @@ pub fn rocksdb_range_lookup_large_strings(c: &mut Criterion) {
         b.iter(|| {
             black_box(state.lookup_range(
                 &[1],
-                &RangeKey::Single((Bound::Included(&key), Bound::Unbounded)),
+                &RangeKey::Single((Bound::Included(key.clone()), Bound::Unbounded)),
             ));
         })
     });
