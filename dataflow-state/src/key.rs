@@ -16,7 +16,7 @@ pub enum PointKey {
     Quad((DfValue, DfValue, DfValue, DfValue)),
     Quin((DfValue, DfValue, DfValue, DfValue, DfValue)),
     Sex((DfValue, DfValue, DfValue, DfValue, DfValue, DfValue)),
-    Multi(Vec<DfValue>),
+    Multi(Box<[DfValue]>),
 }
 
 #[allow(clippy::len_without_is_empty)]
@@ -140,7 +140,7 @@ impl Serialize for PointKey {
             PointKey::Sex((v1, v2, v3, v4, v5, v6)) => serialize!(6, v1, v2, v3, v4, v5, v6),
             PointKey::Multi(vs) => {
                 let mut seq = serializer.serialize_seq(Some(vs.len()))?;
-                for v in vs {
+                for v in vs.iter() {
                     serialize_val!(seq, v);
                 }
                 seq.end()
@@ -335,7 +335,7 @@ mod tests {
     #[test]
     fn multi_point_key_serialize_normalizes_citext() {
         assert_eq!(
-            bincode::serialize(&PointKey::Multi(vec![
+            bincode::serialize(&PointKey::Multi(Box::new([
                 DfValue::from(1),
                 DfValue::from(2),
                 DfValue::from(3),
@@ -344,9 +344,9 @@ mod tests {
                 DfValue::from(6),
                 DfValue::from(7),
                 DfValue::from_str_and_collation("AbC", Collation::Citext)
-            ]))
+            ])))
             .unwrap(),
-            bincode::serialize(&PointKey::Multi(vec![
+            bincode::serialize(&PointKey::Multi(Box::new([
                 DfValue::from(1),
                 DfValue::from(2),
                 DfValue::from(3),
@@ -355,7 +355,7 @@ mod tests {
                 DfValue::from(6),
                 DfValue::from(7),
                 DfValue::from_str_and_collation("abc", Collation::Utf8)
-            ]))
+            ])))
             .unwrap(),
         );
     }

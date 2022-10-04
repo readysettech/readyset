@@ -94,7 +94,7 @@ impl KeyedState {
             (&KeyedState::QuinBTree(ref m), &PointKey::Quin(ref k)) => m.get(k),
             (&KeyedState::SexBTree(ref m), &PointKey::Sex(ref k)) => m.get(k),
             (&KeyedState::MultiBTree(ref m, len), &PointKey::Multi(ref k)) if k.len() == len => {
-                m.get(k)
+                m.get(k.as_ref())
             }
             (&KeyedState::SingleHash(ref m), &PointKey::Single(ref k)) => m.get(k),
             (&KeyedState::DoubleHash(ref m), &PointKey::Double(ref k)) => m.get(k),
@@ -103,7 +103,7 @@ impl KeyedState {
             (&KeyedState::QuinHash(ref m), &PointKey::Quin(ref k)) => m.get(k),
             (&KeyedState::SexHash(ref m), &PointKey::Sex(ref k)) => m.get(k),
             (&KeyedState::MultiHash(ref m, len), &PointKey::Multi(ref k)) if k.len() == len => {
-                m.get(k)
+                m.get(k.as_ref())
             }
             _ => {
                 #[allow(clippy::panic)] // documented invariant
