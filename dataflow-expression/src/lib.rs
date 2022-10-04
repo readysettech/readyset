@@ -81,40 +81,40 @@ impl BuiltinFunction {
                 // Type is inferred from input argument
                 let input = next_arg()?;
                 let ty = input.ty().clone();
-                Ok((Self::ConvertTZ(input, next_arg()?, next_arg()?), ty))
+                (Self::ConvertTZ(input, next_arg()?, next_arg()?), ty)
             }
             "dayofweek" => {
-                Ok((
+                (
                     Self::DayOfWeek(next_arg()?),
                     DfType::Int, // Day of week is always an int
-                ))
+                )
             }
             "ifnull" => {
                 let expr = next_arg()?;
                 let val = next_arg()?;
                 // Type is inferred from the value provided
                 let ty = val.ty().clone();
-                Ok((Self::IfNull(expr, val), ty))
+                (Self::IfNull(expr, val), ty)
             }
             "month" => {
-                Ok((
+                (
                     Self::Month(next_arg()?),
                     DfType::Int, // Month is always an int
-                ))
+                )
             }
             "timediff" => {
-                Ok((
+                (
                     Self::Timediff(next_arg()?, next_arg()?),
                     // type is always time
                     DfType::Time {
                         subsecond_digits: dialect.default_subsecond_digits(),
                     },
-                ))
+                )
             }
             "addtime" => {
                 let base_time = next_arg()?;
                 let ty = base_time.ty().clone();
-                Ok((Self::Addtime(base_time, next_arg()?), ty))
+                (Self::Addtime(base_time, next_arg()?), ty)
             }
             "round" => {
                 let expr = next_arg()?;
@@ -123,35 +123,35 @@ impl BuiltinFunction {
                     ty: DfType::Int,
                 });
                 let ty = type_for_round(&expr, &prec);
-                Ok((Self::Round(expr, prec), ty))
+                (Self::Round(expr, prec), ty)
             }
             "json_typeof" => {
-                Ok((
+                (
                     Self::JsonTypeof(next_arg()?),
                     // Always returns text containing the JSON type.
                     DfType::Text(Collation::default()),
-                ))
+                )
             }
             "jsonb_typeof" => {
-                Ok((
+                (
                     Self::JsonbTypeof(next_arg()?),
                     // Always returns text containing the JSON type.
                     DfType::Text(Collation::default()),
-                ))
+                )
             }
             "coalesce" => {
                 let arg1 = next_arg()?;
                 let ty = arg1.ty().clone();
-                Ok((Self::Coalesce(arg1, args.by_ref().collect()), ty))
+                (Self::Coalesce(arg1, args.by_ref().collect()), ty)
             }
-            _ => Err(ReadySetError::NoSuchFunction(name.to_owned())),
+            _ => return Err(ReadySetError::NoSuchFunction(name.to_owned())),
         };
 
         if args.next().is_some() {
             return Err(arity_error());
         }
 
-        result
+        Ok(result)
     }
 
     fn name(&self) -> &'static str {
