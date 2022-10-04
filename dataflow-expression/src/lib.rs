@@ -24,25 +24,25 @@ pub use crate::post_lookup::{
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum BuiltinFunction {
-    /// convert_tz(expr, expr, expr)
+    /// [`convert_tz`](https://dev.mysql.com/doc/refman/8.0/en/date-and-time-functions.html#function_convert-tz)
     ConvertTZ(Expr, Expr, Expr),
-    /// dayofweek(expr)
+    /// [`dayofweek`](https://dev.mysql.com/doc/refman/8.0/en/date-and-time-functions.html#function_dayofweek)
     DayOfWeek(Expr),
-    /// ifnull(expr, expr)
+    /// [`ifnull`](https://dev.mysql.com/doc/refman/8.0/en/flow-control-functions.html#function_ifnull)
     IfNull(Expr, Expr),
-    /// month(expr)
+    /// [`month`](https://dev.mysql.com/doc/refman/8.0/en/date-and-time-functions.html#function_month)
     Month(Expr),
-    /// timediff(expr, expr)
+    /// [`timediff`](https://dev.mysql.com/doc/refman/8.0/en/date-and-time-functions.html#function_timediff)
     Timediff(Expr, Expr),
-    /// addtime(expr, expr)
+    /// [`addtime`](https://dev.mysql.com/doc/refman/8.0/en/date-and-time-functions.html#function_addtime)
     Addtime(Expr, Expr),
-    /// round(expr, prec)
+    /// [`round`](https://dev.mysql.com/doc/refman/8.0/en/mathematical-functions.html#function_round)
     Round(Expr, Expr),
-    /// json_typeof(expr)
+    /// [`json_typeof`](https://www.postgresql.org/docs/current/functions-json.html)
     JsonTypeof(Expr),
-    /// jsonb_typeof(expr)
+    /// [`jsonb_typeof`](https://www.postgresql.org/docs/current/functions-json.html)
     JsonbTypeof(Expr),
-    /// coalesce(expr, expr, ...)
+    /// [`coalesce`](https://www.postgresql.org/docs/current/functions-conditional.html#FUNCTIONS-COALESCE-NVL-IFNULL)
     Coalesce(Expr, Vec<Expr>),
 }
 
