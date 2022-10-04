@@ -119,7 +119,7 @@ mod tests {
     }
 
     #[test]
-    fn citext_compare() {
+    fn citext_equal() {
         #[track_caller]
         fn citext_strings_equal(s1: &str, s2: &str) {
             assert_eq!(Collation::Citext.compare_strs(s1, s2), Ordering::Equal)
@@ -138,5 +138,17 @@ mod tests {
 
         // LATIN CAPITAL LETTER I WITH OGONEK, which has some interesting casing rules
         citext_strings_equal("Į", "į");
+    }
+
+    #[test]
+    fn citext_ordering() {
+        #[track_caller]
+        fn citext_strings_less(s1: &str, s2: &str) {
+            assert_eq!(Collation::Citext.compare_strs(s1, s2), Ordering::Less)
+        }
+
+        citext_strings_less("a", "b");
+        citext_strings_less("A", "b");
+        citext_strings_less("a", "B");
     }
 }
