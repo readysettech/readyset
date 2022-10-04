@@ -539,7 +539,7 @@ mod tests {
         fn generic_with_multiple_columns() {
             assert_eq!(
                 Call(FunctionExpr::Call {
-                    name: "ifnull".to_owned(),
+                    name: "ifnull".into(),
                     arguments: vec![
                         Expr::Column(Column::from("col1")),
                         Expr::Column(Column::from("col2")),
@@ -556,7 +556,7 @@ mod tests {
             assert_eq!(
                 Call(FunctionExpr::Count {
                     expr: Box::new(Expr::Call(FunctionExpr::Call {
-                        name: "ifnull".to_owned(),
+                        name: "ifnull".into(),
                         arguments: vec![
                             Expr::Column(Column::from("col1")),
                             Expr::Column(Column::from("col2")),

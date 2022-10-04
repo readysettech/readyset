@@ -1154,7 +1154,7 @@ mod tests {
 
         let res = selection(Dialect::MySQL)(qstring.as_bytes());
         let agg_expr = FunctionExpr::Call {
-            name: "coalesce".to_owned(),
+            name: "coalesce".into(),
             arguments: vec![
                 Expr::Column(Column {
                     name: "a".into(),
@@ -1673,7 +1673,7 @@ mod tests {
                         FieldDefinitionExpr::Expr {
                             alias: Some("created_day".into()),
                             expr: Expr::Call(FunctionExpr::Call {
-                                name: "coalesce".to_owned(),
+                                name: "coalesce".into(),
                                 arguments: vec![
                                     Expr::Column(Column::from("a")),
                                     Expr::Literal(Literal::String("b".to_owned())),
@@ -1805,7 +1805,7 @@ mod tests {
                         FieldDefinitionExpr::Expr {
                             alias: Some("created_day".into()),
                             expr: Expr::Call(FunctionExpr::Call {
-                                name: "coalesce".to_owned(),
+                                name: "coalesce".into(),
                                 arguments: vec![
                                     Expr::Column(Column::from("a")),
                                     Expr::Literal(Literal::String("b".to_owned())),

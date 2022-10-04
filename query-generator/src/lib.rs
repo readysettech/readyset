@@ -2370,7 +2370,7 @@ impl QueryOperation {
                         let mut arguments = Vec::new();
                         add_builtin!(@args_to_expr, table, arguments, $($arg)*);
                         let expr = Expr::Call(FunctionExpr::Call {
-                            name: stringify!($fname).to_owned(),
+                            name: stringify!($fname).into(),
                             arguments,
                         });
                         let alias = state.fresh_alias();

@@ -400,7 +400,11 @@ fn function_call_without_parens(i: &[u8]) -> IResult<&[u8], FunctionExpr> {
             tag_no_case("localtimestamp"),
             tag_no_case("localtime"),
         )),
-        |n: &[u8]| String::from_utf8(n.to_vec()).expect("Only constant string literals"),
+        |n: &[u8]| {
+            String::from_utf8(n.to_vec())
+                .expect("Only constant string literals")
+                .into()
+        },
     )(i)?;
 
     Ok((
@@ -764,7 +768,7 @@ mod tests {
         for q in qlist.iter() {
             let res = function_expr(Dialect::MySQL)(q);
             let expected = FunctionExpr::Call {
-                name: "coalesce".to_string(),
+                name: "coalesce".into(),
                 arguments: vec![
                     Expr::Column(Column::from("a")),
                     Expr::Column(Column::from("b")),
@@ -805,7 +809,7 @@ mod tests {
         assert_eq!(
             res,
             FunctionExpr::Call {
-                name: "ifnull".to_owned(),
+                name: "ifnull".into(),
                 arguments: vec![
                     Expr::Column(Column::from("x")),
                     Expr::Literal(Literal::UnsignedInteger(0))
@@ -855,7 +859,7 @@ mod tests {
             for q in qlist.iter() {
                 let res = function_expr(Dialect::MySQL)(q);
                 let expected = FunctionExpr::Call {
-                    name: "coalesce".to_string(),
+                    name: "coalesce".into(),
                     arguments: vec![
                         Expr::Literal(Literal::String("a".to_owned())),
                         Expr::Column(Column::from("b")),
@@ -935,7 +939,7 @@ mod tests {
             for q in qlist.iter() {
                 let res = function_expr(Dialect::PostgreSQL)(q);
                 let expected = FunctionExpr::Call {
-                    name: "coalesce".to_string(),
+                    name: "coalesce".into(),
                     arguments: vec![
                         Expr::Literal(Literal::String("a".to_owned())),
                         Expr::Column(Column::from("b")),

@@ -225,7 +225,7 @@ mod tests {
                     fields: vec![(
                         Column::from("permission"),
                         Expr::Call(FunctionExpr::Call {
-                            name: "REPLACE".to_string(),
+                            name: "REPLACE".into(),
                             arguments: vec![
                                 Expr::Column(Column::from("permission")),
                                 Expr::Literal(Literal::String("viewDiscussions".into())),

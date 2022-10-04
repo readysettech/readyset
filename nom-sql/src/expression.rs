@@ -21,7 +21,7 @@ use crate::select::nested_selection;
 use crate::set::{variable_scope_prefix, Variable};
 use crate::sql_type::{mysql_int_cast_targets, type_identifier};
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Column, Dialect, Literal, SelectStatement, SqlType};
+use crate::{Column, Dialect, Literal, SelectStatement, SqlIdentifier, SqlType};
 
 /// Function call expressions
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
@@ -48,7 +48,10 @@ pub enum FunctionExpr {
     GroupConcat { expr: Box<Expr>, separator: String },
 
     /// Generic function call expression
-    Call { name: String, arguments: Vec<Expr> },
+    Call {
+        name: SqlIdentifier,
+        arguments: Vec<Expr>,
+    },
 }
 
 impl FunctionExpr {
@@ -1507,7 +1510,7 @@ mod tests {
             let qs = b"f(foo, bar) between 1 and 2";
             let expected = Expr::Between {
                 operand: Box::new(Expr::Call(FunctionExpr::Call {
-                    name: "f".to_owned(),
+                    name: "f".into(),
                     arguments: vec![
                         Expr::Column(Column::from("foo")),
                         Expr::Column(Column::from("bar")),
