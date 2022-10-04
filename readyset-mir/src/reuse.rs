@@ -232,8 +232,7 @@ mod tests {
             "c".into(),
             0,
             MirNodeInner::Join {
-                on_left: vec![Column::from("ab")],
-                on_right: vec![Column::from("bb")],
+                on: vec![(Column::from("ab"), Column::from("bb"))],
                 project: vec![Column::from("aa"), Column::from("ba")],
             },
             vec![],

@@ -194,9 +194,9 @@ fn mir_node_to_flow_parts(
                     make_identity_node(name, parent, &mir_node.columns(), mig)?
                 }
                 MirNodeInner::Join {
-                    ref on_left,
-                    ref on_right,
+                    ref on,
                     ref project,
+                    ..
                 } => {
                     invariant_eq!(mir_node.ancestors.len(), 2);
                     #[allow(clippy::indexing_slicing, clippy::unwrap_used)]
@@ -208,8 +208,7 @@ fn mir_node_to_flow_parts(
                         left,
                         right,
                         &mir_node.columns(),
-                        on_left,
-                        on_right,
+                        on,
                         project,
                         JoinType::Inner,
                         mig,
@@ -267,9 +266,9 @@ fn mir_node_to_flow_parts(
                     node
                 }
                 MirNodeInner::LeftJoin {
-                    ref on_left,
-                    ref on_right,
+                    ref on,
                     ref project,
+                    ..
                 } => {
                     invariant_eq!(mir_node.ancestors.len(), 2);
                     #[allow(clippy::indexing_slicing, clippy::unwrap_used)]
@@ -281,8 +280,7 @@ fn mir_node_to_flow_parts(
                         left,
                         right,
                         &mir_node.columns(),
-                        on_left,
-                        on_right,
+                        on,
                         project,
                         JoinType::Left,
                         mig,
@@ -702,15 +700,12 @@ fn make_join_node(
     left: MirNodeRef,
     right: MirNodeRef,
     columns: &[Column],
-    on_left: &[Column],
-    on_right: &[Column],
+    on: &[(Column, Column)],
     proj_cols: &[Column],
     kind: JoinType,
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<FlowNode> {
     use dataflow::ops::join::JoinSource;
-
-    invariant_eq!(on_left.len(), on_right.len());
 
     #[allow(clippy::indexing_slicing)] // just got the address
     let left_cols = mig.dataflow_state.ingredients[left.borrow().flow_node_addr()?].columns();
@@ -720,7 +715,7 @@ fn make_join_node(
     let mut emit = Vec::with_capacity(proj_cols.len());
     let mut cols = Vec::with_capacity(proj_cols.len());
     for c in proj_cols {
-        if let Some(join_key_idx) = on_left.iter().position(|left_col| left_col == c) {
+        if let Some(join_key_idx) = on.iter().position(|(left_col, _)| left_col == c) {
             // Column is a join key - find its index in the left and the index of the corresponding
             // column in the right, then add it as a column from both sides.
             //
@@ -733,7 +728,7 @@ fn make_join_node(
             #[allow(clippy::indexing_slicing)] // validated they're the same length
             let r = right
                 .borrow()
-                .column_id_for_column(&on_right[join_key_idx])
+                .column_id_for_column(&on[join_key_idx].1)
                 .map_err(|_| internal_err!("Right join column must exist in right parent"))?;
             emit.push(JoinSource::B(l, r));
             cols.push(
@@ -773,7 +768,7 @@ fn make_join_node(
     // If we don't have any join condition, we're making a cross join.
     // Dataflow needs a non-empty join condition, so project out a constant value on both sides to
     // use as our join key
-    if on_left.is_empty() {
+    if on.is_empty() {
         let mut make_cross_join_bogokey = |node: MirNodeRef| {
             let mut node_columns = node.borrow().columns().to_vec();
             node_columns.push(Column::named("cross_join_bogokey"));

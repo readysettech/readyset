@@ -88,22 +88,9 @@ pub enum MirNodeInner {
     /// [`Join`]: dataflow::ops::join::Join
     /// [`JoinType::Inner`]: dataflow::ops::join::JoinType::Inner
     Join {
-        /// Columns in the first parent to use as the join key.
-        ///
-        /// The columns in this list have a 1:1 correspondence with the columns in `on_right`
-        ///
-        /// # Invariants
-        ///
-        /// * This must have the same length as `on_right`
-        on_left: Vec<Column>,
-        /// Columns in the second parent to use as the join key.
-        ///
-        /// The columns in this list have a 1:1 correspondence with the columns in `on_right`
-        ///
-        /// # Invariants
-        ///
-        /// * This must have the same length as `on_left`
-        on_right: Vec<Column>,
+        /// Columns to use as the join keys. Each tuple corresponds to a column in the left parent
+        /// and column in the right parent.
+        on: Vec<(Column, Column)>,
         /// Columns (from both parents) to project in the output.
         project: Vec<Column>,
     },
@@ -127,18 +114,9 @@ pub enum MirNodeInner {
     /// [`Join`]: dataflow::ops::join::Join
     /// [`JoinType::Left`]: dataflow::ops::join::JoinType::Left
     LeftJoin {
-        /// Columns in the first parent to use as the join key.
-        ///
-        /// # Invariants
-        ///
-        /// * This must have the same length as `on_right`
-        on_left: Vec<Column>,
-        /// Columns in the second parent to use as the join key.
-        ///
-        /// # Invariants
-        ///
-        /// * This must have the same length as `on_left`
-        on_right: Vec<Column>,
+        /// Columns to use as the join keys. Each tuple corresponds to a column in the left parent
+        /// and column in the right parent.
+        on: Vec<(Column, Column)>,
         /// Columns (from both parents) to project in the output.
         project: Vec<Column>,
     },
@@ -153,18 +131,9 @@ pub enum MirNodeInner {
     ///
     /// [hyper-joins]: http://btw2017.informatik.uni-stuttgart.de/slidesandpapers/F1-10-37/paper_web.pdf
     DependentJoin {
-        /// Columns in the first parent to use as the join key.
-        ///
-        /// # Invariants
-        ///
-        /// * This must have the same length as `on_right`
-        on_left: Vec<Column>,
-        /// Columns in the second parent to use as the join key.
-        ///
-        /// # Invariants
-        ///
-        /// * This must have the same length as `on_left`
-        on_right: Vec<Column>,
+        /// Columns to use as the join keys. Each tuple corresponds to a column in the left parent
+        /// and column in the right parent.
+        on: Vec<(Column, Column)>,
         /// Columns (from both parents) to project in the output.
         project: Vec<Column>,
     },
@@ -455,38 +424,38 @@ impl MirNodeInner {
                 _ => false,
             },
             MirNodeInner::Join {
-                on_left: ref our_on_left,
-                on_right: ref our_on_right,
+                on: ref our_on,
                 project: ref our_project,
+                ..
             } => {
                 match *other {
                     MirNodeInner::Join {
-                        ref on_left,
-                        ref on_right,
+                        ref on,
                         ref project,
+                        ..
                     } => {
                         // TODO(malte): column order does not actually need to match, but this only
                         // succeeds if it does.
-                        our_on_left == on_left && our_on_right == on_right && our_project == project
+                        our_on == on && our_project == project
                     }
                     _ => false,
                 }
             }
             MirNodeInner::JoinAggregates => matches!(*other, MirNodeInner::JoinAggregates),
             MirNodeInner::LeftJoin {
-                on_left: ref our_on_left,
-                on_right: ref our_on_right,
+                on: ref our_on,
                 project: ref our_project,
+                ..
             } => {
                 match *other {
                     MirNodeInner::LeftJoin {
-                        ref on_left,
-                        ref on_right,
+                        ref on,
                         ref project,
+                        ..
                     } => {
                         // TODO(malte): column order does not actually need to match, but this only
                         // succeeds if it does.
-                        our_on_left == on_left && our_on_right == on_right && our_project == project
+                        our_on == on && our_project == project
                     }
                     _ => false,
                 }
@@ -644,13 +613,12 @@ impl Debug for MirNodeInner {
             }
             MirNodeInner::Identity => write!(f, "≡"),
             MirNodeInner::Join {
-                ref on_left,
-                ref on_right,
+                ref on,
                 ref project,
+                ..
             } => {
-                let jc = on_left
+                let jc = on
                     .iter()
-                    .zip(on_right)
                     .map(|(l, r)| format!("{}:{}", l.name, r.name))
                     .collect::<Vec<_>>()
                     .join(", ");
@@ -677,13 +645,12 @@ impl Debug for MirNodeInner {
                 write!(f, "Leaf [⚷: {}]", key_cols)
             }
             MirNodeInner::LeftJoin {
-                ref on_left,
-                ref on_right,
+                ref on,
                 ref project,
+                ..
             } => {
-                let jc = on_left
+                let jc = on
                     .iter()
-                    .zip(on_right)
                     .map(|(l, r)| format!("{}:{}", l.name, r.name))
                     .collect::<Vec<_>>()
                     .join(", ");
@@ -699,17 +666,15 @@ impl Debug for MirNodeInner {
                 )
             }
             MirNodeInner::DependentJoin {
-                ref on_left,
-                ref on_right,
+                ref on,
                 ref project,
+                ..
             } => {
                 write!(
                     f,
                     "⧑ | {} on: {}",
                     project.iter().map(|c| &c.name).join(", "),
-                    on_left
-                        .iter()
-                        .zip(on_right)
+                    on.iter()
                         .map(|(l, r)| format!("{}:{}", l.name, r.name))
                         .join(", ")
                 )

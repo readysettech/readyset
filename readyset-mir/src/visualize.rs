@@ -166,16 +166,8 @@ impl GraphViz for MirNodeInner {
             MirNodeInner::Filter { ref conditions, .. } => write!(f, "σ: {}", conditions),
 
             MirNodeInner::Identity => write!(f, "≡"),
-            MirNodeInner::Join {
-                ref on_left,
-                ref on_right,
-                ..
-            } => {
-                let jc = on_left
-                    .iter()
-                    .zip(on_right)
-                    .map(|(l, r)| format!("{}:{}", l, r))
-                    .join(", ");
+            MirNodeInner::Join { ref on, .. } => {
+                let jc = on.iter().map(|(l, r)| format!("{}:{}", l, r)).join(", ");
                 write!(f, "⋈  | on: {}", jc)
             }
             MirNodeInner::JoinAggregates => write!(f, "AGG ⋈"),
@@ -235,31 +227,15 @@ impl GraphViz for MirNodeInner {
 
                 Ok(())
             }
-            MirNodeInner::LeftJoin {
-                ref on_left,
-                ref on_right,
-                ..
-            } => {
-                let jc = on_left
-                    .iter()
-                    .zip(on_right)
-                    .map(|(l, r)| format!("{}:{}", l, r))
-                    .join(", ");
+            MirNodeInner::LeftJoin { ref on, .. } => {
+                let jc = on.iter().map(|(l, r)| format!("{}:{}", l, r)).join(", ");
                 write!(f, "⋉  | on: {}", jc)
             }
-            MirNodeInner::DependentJoin {
-                ref on_left,
-                ref on_right,
-                ..
-            } => {
+            MirNodeInner::DependentJoin { ref on, .. } => {
                 write!(
                     f,
                     "⧑ | on: {}",
-                    on_left
-                        .iter()
-                        .zip(on_right)
-                        .map(|(l, r)| format!("{}:{}", l, r))
-                        .join(", ")
+                    on.iter().map(|(l, r)| format!("{}:{}", l, r)).join(", ")
                 )
             }
             MirNodeInner::Latest { ref group_by } => {

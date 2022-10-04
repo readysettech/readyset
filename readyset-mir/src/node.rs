@@ -958,8 +958,10 @@ mod tests {
                 "j".into(),
                 1,
                 MirNodeInner::Join {
-                    on_left: vec![Column::new(Some("base"), "a")],
-                    on_right: vec![Column::new(Some("base2"), "a")],
+                    on: vec![(
+                        Column::new(Some("base"), "a"),
+                        Column::new(Some("base2"), "a"),
+                    )],
                     project: project.clone(),
                 },
                 vec![MirNodeRef::downgrade(&base1), MirNodeRef::downgrade(&base2)],

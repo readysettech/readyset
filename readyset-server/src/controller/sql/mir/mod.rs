@@ -1014,8 +1014,7 @@ impl SqlToMirConverter {
             .collect::<Vec<Column>>();
 
         // join columns need us to generate join group configs for the operator
-        let mut left_join_columns = Vec::new();
-        let mut right_join_columns = Vec::new();
+        let mut on = Vec::new();
 
         for jp in join_predicates {
             let mut l_col = match jp.left {
@@ -1055,27 +1054,13 @@ impl SqlToMirConverter {
                     .collect();
             }
 
-            left_join_columns.push(l_col);
-            right_join_columns.push(r_col);
+            on.push((l_col, r_col));
         }
 
-        invariant_eq!(left_join_columns.len(), right_join_columns.len());
         let inner = match kind {
-            JoinKind::Inner => MirNodeInner::Join {
-                on_left: left_join_columns,
-                on_right: right_join_columns,
-                project,
-            },
-            JoinKind::Left => MirNodeInner::LeftJoin {
-                on_left: left_join_columns,
-                on_right: right_join_columns,
-                project,
-            },
-            JoinKind::Dependent => MirNodeInner::DependentJoin {
-                on_left: left_join_columns,
-                on_right: right_join_columns,
-                project,
-            },
+            JoinKind::Inner => MirNodeInner::Join { on, project },
+            JoinKind::Left => MirNodeInner::LeftJoin { on, project },
+            JoinKind::Dependent => MirNodeInner::DependentJoin { on, project },
         };
         trace!(?inner, "Added join node");
         Ok(MirNode::new(

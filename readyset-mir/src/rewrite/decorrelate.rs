@@ -85,18 +85,17 @@ fn push_dependent_filter(
         child_name
     );
     let should_insert = match &mut child_ref.inner {
-        MirNodeInner::DependentJoin {
-            on_left, on_right, ..
-        } if child_name == dependent_join_name => match dependency {
-            DependentCondition::JoinKey { lhs, rhs } => {
-                on_left.push(lhs.clone());
-                on_right.push(rhs.clone());
-                child_ref.add_column(lhs)?;
-                child_ref.add_column(rhs)?;
-                false
+        MirNodeInner::DependentJoin { on, .. } if child_name == dependent_join_name => {
+            match dependency {
+                DependentCondition::JoinKey { lhs, rhs } => {
+                    on.push((lhs.clone(), rhs.clone()));
+                    child_ref.add_column(lhs)?;
+                    child_ref.add_column(rhs)?;
+                    false
+                }
+                DependentCondition::FullyDependent { .. } => true,
             }
-            DependentCondition::FullyDependent { .. } => true,
-        },
+        }
         MirNodeInner::Project { .. }
         | MirNodeInner::Filter { .. }
         | MirNodeInner::Join { .. }
@@ -281,13 +280,8 @@ pub(super) fn eliminate_dependent_joins(query: &mut MirQuery) -> ReadySetResult<
             // Can't find any dependent nodes, which means the join isn't dependent anymore! So turn
             // it into a non-dependent join
             let new_inner = match &join.borrow().inner {
-                MirNodeInner::DependentJoin {
-                    on_left,
-                    on_right,
-                    project,
-                } => MirNodeInner::Join {
-                    on_left: on_left.clone(),
-                    on_right: on_right.clone(),
+                MirNodeInner::DependentJoin { on, project } => MirNodeInner::Join {
+                    on: on.clone(),
                     project: project.clone(),
                 },
                 _ => unreachable!("Already checked is_dependent_join above"),
@@ -483,8 +477,10 @@ mod tests {
             "exists_join".into(),
             0,
             MirNodeInner::DependentJoin {
-                on_left: vec![Column::named("__exists_join_key")],
-                on_right: vec![Column::named("__count_grp")],
+                on: vec![(
+                    Column::named("__exists_join_key"),
+                    Column::named("__count_grp"),
+                )],
                 project: vec![
                     Column::new(Some("t1"), "a"),
                     Column::named("__exists_join_key"),
@@ -519,18 +515,15 @@ mod tests {
         eprintln!("{}", query.to_graphviz());
 
         match &exists_join.borrow().inner {
-            MirNodeInner::Join {
-                on_left, on_right, ..
-            } => {
-                assert_eq!(on_left.len(), 2);
-                assert_eq!(on_right.len(), 2);
+            MirNodeInner::Join { on, .. } => {
+                assert_eq!(on.len(), 2);
 
-                let left_pos = on_left
+                let left_pos = on
                     .iter()
-                    .position(|col| col.name == "a" && col.table == Some("t1".into()));
-                let right_pos = on_right
+                    .position(|(col, _)| col.name == "a" && col.table == Some("t1".into()));
+                let right_pos = on
                     .iter()
-                    .position(|col| col.name == "a" && col.table == Some("rhs".into()));
+                    .position(|(_, col)| col.name == "a" && col.table == Some("rhs".into()));
 
                 assert!(left_pos.is_some());
                 assert!(right_pos.is_some());
@@ -756,8 +749,10 @@ mod tests {
             "exists_join".into(),
             0,
             MirNodeInner::DependentJoin {
-                on_left: vec![Column::named("__exists_join_key")],
-                on_right: vec![Column::named("__count_grp")],
+                on: vec![(
+                    Column::named("__exists_join_key"),
+                    Column::named("__count_grp"),
+                )],
                 project: vec![
                     Column::new(Some("t1"), "a"),
                     Column::named("__exists_join_key"),
@@ -802,18 +797,15 @@ mod tests {
         );
 
         match &exists_join.borrow().inner {
-            MirNodeInner::Join {
-                on_left, on_right, ..
-            } => {
-                assert_eq!(on_left.len(), 2);
-                assert_eq!(on_right.len(), 2);
+            MirNodeInner::Join { on, .. } => {
+                assert_eq!(on.len(), 2);
 
-                let left_pos = on_left
+                let left_pos = on
                     .iter()
-                    .position(|col| col.name == "a" && col.table == Some("t1".into()));
-                let right_pos = on_right
+                    .position(|(col, _)| col.name == "a" && col.table == Some("t1".into()));
+                let right_pos = on
                     .iter()
-                    .position(|col| col.name == "a" && col.table == Some("t2".into()));
+                    .position(|(_, col)| col.name == "a" && col.table == Some("t2".into()));
 
                 assert!(left_pos.is_some());
                 assert!(right_pos.is_some());
