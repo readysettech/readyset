@@ -87,7 +87,7 @@ impl KeyedState {
     /// Panics if the length of `key` is different than the length of this `KeyedState`
     pub(super) fn lookup<'a>(&'a self, key: &PointKey) -> Option<&'a Rows> {
         match (self, key) {
-            (&KeyedState::SingleBTree(ref m), &PointKey::Single(k)) => m.get(k),
+            (&KeyedState::SingleBTree(ref m), &PointKey::Single(ref k)) => m.get(k),
             (&KeyedState::DoubleBTree(ref m), &PointKey::Double(ref k)) => m.get(k),
             (&KeyedState::TriBTree(ref m), &PointKey::Tri(ref k)) => m.get(k),
             (&KeyedState::QuadBTree(ref m), &PointKey::Quad(ref k)) => m.get(k),
@@ -96,7 +96,7 @@ impl KeyedState {
             (&KeyedState::MultiBTree(ref m, len), &PointKey::Multi(ref k)) if k.len() == len => {
                 m.get(k)
             }
-            (&KeyedState::SingleHash(ref m), &PointKey::Single(k)) => m.get(k),
+            (&KeyedState::SingleHash(ref m), &PointKey::Single(ref k)) => m.get(k),
             (&KeyedState::DoubleHash(ref m), &PointKey::Double(ref k)) => m.get(k),
             (&KeyedState::TriHash(ref m), &PointKey::Tri(ref k)) => m.get(k),
             (&KeyedState::QuadHash(ref m), &PointKey::Quad(ref k)) => m.get(k),

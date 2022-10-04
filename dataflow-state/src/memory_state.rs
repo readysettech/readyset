@@ -215,13 +215,13 @@ impl State for MemoryState {
                     .map(|(idx, col)| (col, idx))
                     .collect::<BTreeMap<_, _>>();
                 if columns.iter().all(|c| col_positions.contains_key(c)) {
-                    let mut shuffled_key = vec![&DfValue::None; key.len()];
+                    let mut shuffled_key = vec![DfValue::None; key.len()];
                     for (key_pos, col) in columns.iter().enumerate() {
                         let val = key
                             .get(key_pos)
                             .expect("Columns and key must have the same len");
                         let pos = col_positions[col];
-                        shuffled_key[pos] = val;
+                        shuffled_key[pos] = val.clone();
                     }
                     let key = PointKey::from(shuffled_key);
                     let res = state.lookup(&key);
@@ -252,7 +252,7 @@ impl State for MemoryState {
                     // the index only contains columns from `columns` (and none other).
                     // make a new lookup key
                     positions.sort_unstable_by_key(|(idx, _)| *idx);
-                    let kt = PointKey::from(positions.into_iter().map(|(_, val)| val));
+                    let kt = PointKey::from(positions.into_iter().map(|(_, val)| val.clone()));
                     if let LookupResult::Some(mut ret) = state.lookup(&kt) {
                         // filter the rows in this index to ones which actually match the key
                         // FIXME(eta): again, probably O(terrible)
@@ -502,14 +502,14 @@ mod tests {
         state.process_records(&mut records[3].clone().into(), None, None);
 
         // Make sure the first record has been deleted:
-        match state.lookup(&[0], &PointKey::Single(&records[0][0])) {
+        match state.lookup(&[0], &PointKey::Single(records[0][0].clone())) {
             LookupResult::Some(RecordResult::Borrowed(rows)) => assert_eq!(rows.len(), 0),
             _ => unreachable!(),
         };
 
         // Then check that the rest exist:
         for record in &records[1..3] {
-            match state.lookup(&[0], &PointKey::Single(&record[0])) {
+            match state.lookup(&[0], &PointKey::Single(record[0].clone())) {
                 LookupResult::Some(RecordResult::Borrowed(rows)) => {
                     assert_eq!(&**rows.iter().next().unwrap(), &**record)
                 }
@@ -526,7 +526,7 @@ mod tests {
         insert(&mut state, row.clone());
         state.add_key(Index::hash_map(vec![1]), None);
 
-        match state.lookup(&[1], &PointKey::Single(&row[1])) {
+        match state.lookup(&[1], &PointKey::Single(row[1].clone())) {
             LookupResult::Some(RecordResult::Borrowed(rows)) => {
                 assert_eq!(&**rows.iter().next().unwrap(), &row)
             }
@@ -546,7 +546,7 @@ mod tests {
 
         assert_eq!(
             state
-                .lookup(&[0], &PointKey::Single(&1.into()))
+                .lookup(&[0], &PointKey::Single(1.into()))
                 .unwrap()
                 .len(),
             1
@@ -571,7 +571,7 @@ mod tests {
         state.mark_filled(KeyComparison::from_range(&(..)), Tag::new(1));
         state.insert(vec![DfValue::from(1), DfValue::from(2)], Some(Tag::new(1)));
 
-        let res = state.lookup(&[0], &PointKey::Single(&DfValue::from(1)));
+        let res = state.lookup(&[0], &PointKey::Single(DfValue::from(1)));
         assert!(res.is_some());
         assert_eq!(
             res.unwrap(),
@@ -804,7 +804,7 @@ mod tests {
 
             assert_eq!(records.len(), 3);
 
-            let result = state.lookup_weak(&[1], &PointKey::Single(&DfValue::from("A")));
+            let result = state.lookup_weak(&[1], &PointKey::Single(DfValue::from("A")));
             let mut rows: Vec<_> = result.unwrap().into_iter().collect();
             rows.sort();
             assert_eq!(
@@ -831,7 +831,7 @@ mod tests {
             state.process_records(&mut delete_records, Some(Tag::new(0)), None);
             assert_eq!(delete_records.len(), 1);
 
-            let result = state.lookup_weak(&[1], &PointKey::Single(&DfValue::from("A")));
+            let result = state.lookup_weak(&[1], &PointKey::Single(DfValue::from("A")));
             assert_eq!(
                 result,
                 Some(RecordResult::Owned(vec![vec![1.into(), "A".into()],]))
@@ -854,7 +854,7 @@ mod tests {
 
             state.evict_keys(Tag::new(0), &[KeyComparison::Equal(vec1![2.into()])]);
 
-            let result = state.lookup_weak(&[1], &PointKey::Single(&DfValue::from("A")));
+            let result = state.lookup_weak(&[1], &PointKey::Single(DfValue::from("A")));
             assert_eq!(
                 result,
                 Some(RecordResult::Owned(vec![vec![1.into(), "A".into()],]))

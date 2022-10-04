@@ -149,7 +149,7 @@ impl TopK {
                 match self.lookup(
                     *self.src,
                     &self.group_by,
-                    &PointKey::from(current_group_key.iter()),
+                    &PointKey::from(current_group_key.iter().cloned()),
                     nodes,
                     state,
                     LookupMode::Strict,
@@ -317,7 +317,10 @@ impl Ingredient for TopK {
                 current_group_key.extend(self.project_group(r.rec())?.into_iter().cloned());
 
                 // check out current state
-                match db.lookup(&self.group_by[..], &PointKey::from(&current_group_key[..])) {
+                match db.lookup(
+                    &self.group_by[..],
+                    &PointKey::from(current_group_key.iter().cloned()),
+                ) {
                     LookupResult::Some(local_records) => {
                         if replay.is_partial() {
                             lookups.push(Lookup {

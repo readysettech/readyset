@@ -9,8 +9,8 @@ use vec1::Vec1;
 
 /// An internal type used as the key when performing point lookups and inserts into node state.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum PointKey<'a> {
-    Single(&'a DfValue),
+pub enum PointKey {
+    Single(DfValue),
     Double((DfValue, DfValue)),
     Tri((DfValue, DfValue, DfValue)),
     Quad((DfValue, DfValue, DfValue, DfValue)),
@@ -20,7 +20,7 @@ pub enum PointKey<'a> {
 }
 
 #[allow(clippy::len_without_is_empty)]
-impl<'a> PointKey<'a> {
+impl PointKey {
     /// Return the value at the given index within this [`PointKey`].
     ///
     /// # Panics
@@ -48,7 +48,7 @@ impl<'a> PointKey<'a> {
     #[track_caller]
     pub fn from<I>(iter: I) -> Self
     where
-        I: IntoIterator<Item = &'a DfValue>,
+        I: IntoIterator<Item = DfValue>,
         <I as IntoIterator>::IntoIter: ExactSizeIterator,
     {
         let mut iter = iter.into_iter();
@@ -57,30 +57,12 @@ impl<'a> PointKey<'a> {
         match len {
             0 => panic!("Empty iterator passed to PointKey::from_iter"),
             1 => PointKey::Single(more()),
-            2 => PointKey::Double((more().clone(), more().clone())),
-            3 => PointKey::Tri((more().clone(), more().clone(), more().clone())),
-            4 => PointKey::Quad((
-                more().clone(),
-                more().clone(),
-                more().clone(),
-                more().clone(),
-            )),
-            5 => PointKey::Quin((
-                more().clone(),
-                more().clone(),
-                more().clone(),
-                more().clone(),
-                more().clone(),
-            )),
-            6 => PointKey::Sex((
-                more().clone(),
-                more().clone(),
-                more().clone(),
-                more().clone(),
-                more().clone(),
-                more().clone(),
-            )),
-            x => PointKey::Multi((0..x).map(|_| more().clone()).collect()),
+            2 => PointKey::Double((more(), more())),
+            3 => PointKey::Tri((more(), more(), more())),
+            4 => PointKey::Quad((more(), more(), more(), more())),
+            5 => PointKey::Quin((more(), more(), more(), more(), more())),
+            6 => PointKey::Sex((more(), more(), more(), more(), more(), more())),
+            x => PointKey::Multi((0..x).map(|_| more()).collect()),
         }
     }
 
@@ -126,7 +108,7 @@ impl<'a> PointKey<'a> {
     }
 }
 
-impl<'a> Serialize for PointKey<'a> {
+impl Serialize for PointKey {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -380,12 +362,12 @@ mod tests {
     #[test]
     fn single_point_key_serialize_normalizes_citext() {
         assert_eq!(
-            bincode::serialize(&PointKey::Single(&DfValue::from_str_and_collation(
+            bincode::serialize(&PointKey::Single(DfValue::from_str_and_collation(
                 "AbC",
                 Collation::Citext
             )))
             .unwrap(),
-            bincode::serialize(&PointKey::Single(&DfValue::from("abc"))).unwrap(),
+            bincode::serialize(&PointKey::Single(DfValue::from("abc"))).unwrap(),
         )
     }
 

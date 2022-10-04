@@ -506,7 +506,7 @@ mod tests {
         let mut iter = project
             .query_through(
                 &[by_column],
-                &PointKey::Single(&key),
+                &PointKey::Single(key),
                 &DomainNodes::default(),
                 &states,
                 LookupMode::Strict,

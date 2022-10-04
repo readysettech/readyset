@@ -2318,7 +2318,7 @@ impl Domain {
         let equal_keys = keys
             .iter()
             .filter_map(|k| match k {
-                KeyComparison::Equal(equal) => Some(PointKey::from(equal)),
+                KeyComparison::Equal(equal) => Some(PointKey::from(equal.clone())),
                 KeyComparison::Range(range) => {
                     // TODO: aggregate ranges to optimize range lookups too?
                     match state.lookup_range(cols, &RangeKey::from(range)) {
@@ -2349,7 +2349,8 @@ impl Domain {
         let mut replay_keys = HashSet::new();
         // Drain misses, and keep the hits
         keys.drain_filter(|key| match key {
-            KeyComparison::Equal(equal) => match state.lookup(cols, &PointKey::from(equal)) {
+            KeyComparison::Equal(equal) => match state.lookup(cols, &PointKey::from(equal.clone()))
+            {
                 LookupResult::Some(record) => {
                     records.push(record);
                     false

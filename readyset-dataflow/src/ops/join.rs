@@ -388,7 +388,7 @@ impl Ingredient for Join {
                 let rc = self.lookup(
                     *self.right,
                     &self.on_right(),
-                    &PointKey::from(join_key.iter()),
+                    &PointKey::from(join_key.iter().cloned()),
                     nodes,
                     state,
                     lookup_mode,
@@ -430,7 +430,7 @@ impl Ingredient for Join {
                 false => self.lookup(
                     other,
                     &other_key,
-                    &PointKey::from(join_key.iter()),
+                    &PointKey::from(join_key.iter().cloned()),
                     nodes,
                     state,
                     lookup_mode,

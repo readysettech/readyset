@@ -461,7 +461,7 @@ mod tests {
     fn mark_filled_point() {
         let mut state = SingleState::new(Index::new(IndexType::BTreeMap, vec![0]), true);
         state.mark_filled(KeyComparison::Equal(vec1![0.into()]));
-        assert!(state.lookup(&PointKey::from(&[0.into()])).is_some())
+        assert!(state.lookup(&PointKey::from([0.into()])).is_some())
     }
 
     #[test]
@@ -471,7 +471,7 @@ mod tests {
             Bound::Included(vec1![0.into()]),
             Bound::Excluded(vec1![5.into()]),
         )));
-        assert!(state.lookup(&PointKey::from(&[0.into()])).is_some());
+        assert!(state.lookup(&PointKey::from([0.into()])).is_some());
         assert!(state
             .lookup_range(&RangeKey::from(&(vec1![0.into()]..vec1![5.into()])))
             .is_some());
@@ -489,7 +489,7 @@ mod tests {
             state.mark_filled(key.clone());
             state.insert_row(vec![0.into(), 1.into()].into());
             state.evict_keys(&[key]);
-            assert!(state.lookup(&PointKey::from(&[0.into()])).is_missing())
+            assert!(state.lookup(&PointKey::from([0.into()])).is_missing())
         }
 
         #[test]
@@ -506,7 +506,7 @@ mod tests {
 
             state.insert_row(vec![0.into(), 1.into()].into());
             state.evict_keys(&[key]);
-            assert!(state.lookup(&PointKey::from(&[0.into()])).is_missing());
+            assert!(state.lookup(&PointKey::from([0.into()])).is_missing());
             assert!(state
                 .lookup_range(&RangeKey::from(
                     &(vec1![DfValue::from(0)]..vec1![DfValue::from(10)])

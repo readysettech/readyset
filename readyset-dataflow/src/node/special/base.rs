@@ -353,7 +353,7 @@ impl Base {
                     Some(TouchedKey::Inserted(row)) => Some(row.clone()), /* Row was added in previous iteration */
                     Some(TouchedKey::Deleted) => None,                    /* Row was deleted */
                     // previously
-                    None => match db.lookup(key_cols, &PointKey::from(&key)) {
+                    None => match db.lookup(key_cols, &PointKey::from(key.clone())) {
                         LookupResult::Missing => internal!(),
                         LookupResult::Some(rows) if rows.is_empty() => None,
                         LookupResult::Some(rows) if rows.len() == 1 => rows.into_iter().next(),

@@ -236,7 +236,7 @@ where
                 let group = get_group_values(&group_by, group_rs.peek().unwrap());
 
                 let rs = {
-                    match db.lookup(&this.out_key[..], &PointKey::from(&group[..])) {
+                    match db.lookup(&this.out_key[..], &PointKey::from(group.iter().cloned())) {
                         LookupResult::Some(rs) => {
                             if replay.is_partial() {
                                 lookups.push(Lookup {
@@ -294,7 +294,7 @@ where
                             match this.lookup(
                                 *this.src,
                                 &group_by,
-                                &PointKey::from(&group[..]),
+                                &PointKey::from(group.iter().cloned()),
                                 nodes,
                                 state,
                                 LookupMode::Strict,
