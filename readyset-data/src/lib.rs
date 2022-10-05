@@ -374,8 +374,11 @@ impl DfValue {
     }
 
     /// Returns a guess for the [`DfType`] that can represent this [`DfValue`].
-    pub fn infer_dataflow_type(&self, dialect: Dialect) -> DfType {
+    pub fn infer_dataflow_type(&self) -> DfType {
         use DfType::*;
+
+        // TODO(ENG-1853): Remove dialect once `to_sql_type` is removed.
+        let dialect = Dialect::MySQL;
 
         match self {
             Self::None | Self::PassThrough(_) | Self::Max => Unknown,
@@ -402,7 +405,7 @@ impl DfValue {
             Self::Array(array) => Array(Box::new(
                 array
                     .values()
-                    .map(|v| v.infer_dataflow_type(dialect))
+                    .map(Self::infer_dataflow_type)
                     .find(DfType::is_known)
                     .unwrap_or_default(),
             )),

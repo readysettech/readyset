@@ -1,4 +1,3 @@
-use nom_sql::Dialect;
 use readyset_data::{DfType, DfValue};
 
 use crate::{BuiltinFunction, Expr};
@@ -35,7 +34,7 @@ pub fn column_with_type(index: usize, ty: DfType) -> Expr {
 pub fn make_literal(val: DfValue) -> Expr {
     Expr::Literal {
         val: val.clone(),
-        ty: val.infer_dataflow_type(Dialect::MySQL),
+        ty: val.infer_dataflow_type(),
     }
 }
 

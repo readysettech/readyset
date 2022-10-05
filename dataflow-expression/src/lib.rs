@@ -356,7 +356,7 @@ impl Expr {
             AstExpr::Literal(lit) => {
                 let val: DfValue = lit.try_into()?;
                 // TODO: Infer type from SQL
-                let ty = val.infer_dataflow_type(dialect);
+                let ty = val.infer_dataflow_type();
 
                 Ok(Self::Literal { val, ty })
             }

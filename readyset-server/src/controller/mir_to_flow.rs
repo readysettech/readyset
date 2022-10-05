@@ -948,9 +948,6 @@ fn make_project_node(
     literals: &[(SqlIdentifier, DfValue)],
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<FlowNode> {
-    // TODO(ENG-1418): Propagate dialect info.
-    let dialect = Dialect::MySQL;
-
     let parent_na = parent.borrow().flow_node_addr()?;
     #[allow(clippy::indexing_slicing)] // just got the address
     let parent_cols = mig.dataflow_state.ingredients[parent_na].columns();
@@ -1001,7 +998,7 @@ fn make_project_node(
 
     let literal_types = literal_values
         .iter()
-        .map(|l| l.infer_dataflow_type(dialect))
+        .map(DfValue::infer_dataflow_type)
         .collect::<Vec<_>>();
 
     cols.extend(
