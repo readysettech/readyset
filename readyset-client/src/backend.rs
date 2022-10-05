@@ -437,6 +437,8 @@ where
     execution_info: Option<ExecutionInfo>,
     /// If query was successfully parsed, will store the parsed query
     parsed_query: Option<Arc<SqlQuery>>,
+    /// If was able to hash the query, will store the generated hash
+    query_id: Option<QueryId>,
     /// If statement was successfully rewritten, will store all information necessary to install
     /// the view in readyset
     view_request: Option<ViewCreateRequest>,
@@ -1059,8 +1061,9 @@ where
         let meta = self.plan_prepare(query).await;
         let res = self.do_prepare(&meta, query, &mut query_event).await?;
 
-        let (parsed_query, migration_state, view_request, always) = match meta {
+        let (id, parsed_query, migration_state, view_request, always) = match meta {
             PrepareMeta::Write { stmt } => (
+                None,
                 Some(Arc::new(stmt)),
                 MigrationState::Successful,
                 None,
@@ -1074,20 +1077,28 @@ where
             }) => {
                 let request =
                     ViewCreateRequest::new(rewritten, self.noria.schema_search_path().to_owned());
+                let migration_state = self
+                    .state
+                    .query_status_cache
+                    .query_migration_state(&request);
                 (
+                    Some(migration_state.0),
                     Some(Arc::new(SqlQuery::Select(stmt))),
-                    self.state
-                        .query_status_cache
-                        .query_migration_state(&request)
-                        .1,
+                    migration_state.1,
                     Some(request),
                     always,
                 )
             }
-            _ => (None, MigrationState::Successful, None, false),
+            _ => (None, None, MigrationState::Successful, None, false),
         };
 
+        if let Some(parsed) = &parsed_query {
+            query_event.query = Some(parsed.clone());
+        }
+        query_event.query_id = id;
+
         let cache_entry = CachedPreparedStatement {
+            query_id: id,
             prep: res,
             migration_state,
             execution_info: None,
@@ -1310,6 +1321,7 @@ where
 
         let mut event = QueryExecutionEvent::new(EventType::Execute);
         event.query = cached_statement.parsed_query.clone();
+        event.query_id = cached_statement.query_id;
 
         let upstream = &mut self.upstream;
         let noria = &mut self.noria;

@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 
 use metrics::SharedString;
 use nom_sql::SqlQuery;
+use readyset::query::QueryId;
 use readyset::ReadySetError;
 use serde::Serialize;
 
@@ -19,6 +20,9 @@ pub struct QueryExecutionEvent {
 
     /// SqlQuery associated with this execution event.
     pub query: Option<Arc<SqlQuery>>,
+
+    /// If query has an assigned readyset id
+    pub query_id: Option<QueryId>,
 
     /// The number of keys that were read
     pub num_keys: Option<u64>,
@@ -144,6 +148,7 @@ impl QueryExecutionEvent {
             event: t,
             sql_type: SqlQueryType::Other,
             query: None,
+            query_id: None,
             parse_duration: None,
             upstream_duration: None,
             readyset_duration: None,

@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize, Serializer};
 use crate::ViewCreateRequest;
 
 /// A QueryId is a string with the prefix `q_` and the suffix of the hash of the query
-#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[repr(transparent)]
 pub struct QueryId(u64);
 
