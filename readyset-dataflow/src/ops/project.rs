@@ -229,18 +229,14 @@ impl Ingredient for Project {
         match self.emit.as_ref() {
             None => emit_cols.push("*".to_string()),
             Some(emit) => {
-                emit_cols.extend(emit.iter().map(ToString::to_string).collect::<Vec<_>>());
+                emit_cols.extend(emit.iter().map(ToString::to_string));
 
                 if let Some(ref arithmetic) = self.expressions {
-                    emit_cols.extend(arithmetic.iter().map(|e| e.to_string()).collect::<Vec<_>>());
+                    emit_cols.extend(arithmetic.iter().map(ToString::to_string));
                 }
 
                 if let Some(ref add) = self.additional {
-                    emit_cols.extend(
-                        add.iter()
-                            .map(|e| format!("lit: {}", e))
-                            .collect::<Vec<_>>(),
-                    );
+                    emit_cols.extend(add.iter().map(|e| format!("lit: {}", e)));
                 }
             }
         };
