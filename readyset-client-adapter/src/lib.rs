@@ -519,7 +519,7 @@ where
                 .name("Query logger".to_string())
                 .stack_size(2 * 1024 * 1024) // Use the same value tokio is using
                 .spawn(move || {
-                    runtime.block_on(query_logger::query_logger(qlog_receiver, shutdown_recv));
+                    runtime.block_on(query_logger::QueryLogger::run(qlog_receiver, shutdown_recv));
                     runtime.shutdown_background();
                 })?;
 

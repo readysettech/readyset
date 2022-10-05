@@ -78,7 +78,7 @@ impl fmt::Display for QueryDestination {
     }
 }
 
-#[derive(Copy, Debug, Serialize, Clone)]
+#[derive(Copy, Debug, Serialize, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum EventType {
     Prepare,
     Execute,
@@ -96,7 +96,7 @@ impl From<EventType> for SharedString {
 }
 
 /// The type of a SQL query.
-#[derive(Copy, Serialize, Clone, Debug)]
+#[derive(Copy, Serialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SqlQueryType {
     Read,
     Write,
@@ -122,13 +122,19 @@ pub enum DatabaseType {
     ReadySet,
 }
 
-impl From<DatabaseType> for String {
+impl From<DatabaseType> for SharedString {
     fn from(database_type: DatabaseType) -> Self {
         match database_type {
-            DatabaseType::MySql => "mysql".to_owned(),
-            DatabaseType::Psql => "psql".to_owned(),
-            DatabaseType::ReadySet => "readyset".to_owned(),
+            DatabaseType::MySql => SharedString::const_str("mysql"),
+            DatabaseType::Psql => SharedString::const_str("psql"),
+            DatabaseType::ReadySet => SharedString::const_str("readyset"),
         }
+    }
+}
+
+impl From<DatabaseType> for String {
+    fn from(database_type: DatabaseType) -> Self {
+        SharedString::from(database_type).into_owned()
     }
 }
 
