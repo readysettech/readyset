@@ -81,13 +81,8 @@ impl QueryStatusCache {
                 status
             }
         };
-        let id = hash_to_query_id(hash(&q));
-        debug_assert!(
-            id.len() <= format!("q_{}", u64::MAX).len(),
-            "query id should be small enough that cloning isn't slow"
-        );
-
-        self.ids.insert(id.clone(), q.clone());
+        let id = QueryId::new(hash(&q));
+        self.ids.insert(id, q.clone());
         self.statuses.insert(q, status);
         id
     }
@@ -103,13 +98,13 @@ impl QueryStatusCache {
     /// This function returns the id and query migration state of a query. If the query does not
     /// exist within the query status cache, an entry is created and the query is set to
     /// PendingMigration.
-    pub fn query_migration_state<Q>(&self, q: &Q) -> (String, MigrationState)
+    pub fn query_migration_state<Q>(&self, q: &Q) -> (QueryId, MigrationState)
     where
         Q: Into<Query> + Hash + Eq + Clone,
         Query: Borrow<Q>,
     {
         let query_state = self.statuses.get(q).map(|m| m.migration_state);
-        let id = hash_to_query_id(hash(&q));
+        let id = QueryId::new(hash(&q));
 
         match query_state {
             Some(s) => {
@@ -337,7 +332,7 @@ impl QueryStatusCache {
                         .and_then(|s| {
                             if s.is_unsupported() {
                                 Some(DeniedQuery {
-                                    id: r.key().clone(),
+                                    id: *r.key(),
                                     query: r.value().clone(),
                                     status: s.value().clone(),
                                 })
@@ -356,7 +351,7 @@ impl QueryStatusCache {
                         .and_then(|s| {
                             if s.is_denied() {
                                 Some(DeniedQuery {
-                                    id: r.key().clone(),
+                                    id: *r.key(),
                                     query: r.value().clone(),
                                     status: s.value().clone(),
                                 })
@@ -371,7 +366,8 @@ impl QueryStatusCache {
 
     /// Returns a query given a query hash
     pub fn query(&self, id: &str) -> Option<Query> {
-        self.ids.get(id).map(|r| (*r.value()).clone())
+        let id = QueryId::new(u64::from_str_radix(id.strip_prefix("q_")?, 16).ok()?);
+        self.ids.get(&id).map(|r| (*r.value()).clone())
     }
 }
 
@@ -460,11 +456,11 @@ mod tests {
         cache.query_migration_state(&q1);
         cache.update_query_migration_state(&q2, MigrationState::Successful);
 
-        let h1 = hash_to_query_id(hash(&q1));
-        let h2 = hash_to_query_id(hash(&q2));
+        let h1 = QueryId::new(hash(&q1));
+        let h2 = QueryId::new(hash(&q2));
 
-        let r1 = cache.query(&h1).unwrap();
-        let r2 = cache.query(&h2).unwrap();
+        let r1 = cache.query(&h1.to_string()).unwrap();
+        let r2 = cache.query(&h2.to_string()).unwrap();
 
         assert_eq!(r1, q1.into());
         assert_eq!(r2, q2.into());
@@ -477,7 +473,7 @@ mod tests {
 
         assert_eq!(
             cache.query_migration_state(&query).0,
-            hash_to_query_id(hash(&Into::<Query>::into(query.clone())))
+            QueryId::new(hash(&Into::<Query>::into(query.clone())))
         );
         assert_eq!(
             cache.query_migration_state(&query).1,

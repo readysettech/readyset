@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use ::readyset::metrics::{recorded, DumpedMetricValue};
-use ::readyset::query::hash_to_query_id;
+use ::readyset::query::QueryId;
 use ::readyset::{get_metric, ViewCreateRequest};
 use launchpad::eventually;
 use launchpad::hash::hash;
@@ -464,10 +464,11 @@ async fn dry_run_evaluates_support() {
         nom_sql::SqlQuery::Select(s) => s,
         _ => unreachable!(),
     };
-    let query_id = hash_to_query_id(hash(&ViewCreateRequest::new(
+    let query_id = QueryId::new(hash(&ViewCreateRequest::new(
         select_query,
         vec![deployment.name().into()],
-    )));
+    )))
+    .to_string();
     let mut results = EventuallyConsistentResults::new();
     results.write(&[(
         query_id.clone(),

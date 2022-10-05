@@ -34,7 +34,7 @@ impl ProxiedQueriesReporter {
         tracing::debug!(?query, "reporting query");
         let mut reported_query_ids = self.reported_query_ids.lock().await;
         let mut anonymizer = self.anonymizer.lock().await;
-        match reported_query_ids.insert(query.id.clone()) {
+        match reported_query_ids.insert(query.id) {
             true => None,
             false => {
                 let anon_q = query.query.to_anonymized_string(&mut anonymizer);

@@ -1,6 +1,6 @@
 use launchpad::hash::hash;
 use mysql_async::prelude::*;
-use readyset::query::hash_to_query_id;
+use readyset::query::QueryId;
 use readyset_client::backend::UnsupportedSetMode;
 use readyset_client::BackendBuilder;
 use readyset_client_metrics::QueryDestination;
@@ -677,10 +677,10 @@ async fn valid_sql_parsing_failed_shows_proxied() {
         .query::<(String, String, String), _>("SHOW PROXIED QUERIES;")
         .await
         .unwrap();
-    let id = hash_to_query_id(hash(&q));
+    let id = QueryId::new(hash(&q));
 
     assert!(
-        proxied_queries.contains(&(id, q, "unsupported".to_owned())),
+        proxied_queries.contains(&(id.to_string(), q, "unsupported".to_owned())),
         "proxied_queries = {:?}",
         proxied_queries,
     );

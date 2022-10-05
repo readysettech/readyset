@@ -1602,7 +1602,7 @@ where
                 .to_string();
 
                 vec![
-                    DfValue::from(id),
+                    DfValue::from(id.to_string()),
                     DfValue::from(query.to_string()),
                     DfValue::from(s),
                 ]
@@ -2105,7 +2105,7 @@ where
                                 TelemetryEvent::QueryParseFailed,
                                 TelemetryBuilder::new()
                                     .server_version(option_env!("CARGO_PKG_VERSION").unwrap_or_default())
-                                    .query_id(id)
+                                    .query_id(id.to_string())
                                     .build(),
                             )
                         {

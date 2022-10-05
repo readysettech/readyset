@@ -18,7 +18,22 @@ use serde::{Deserialize, Serialize, Serializer};
 use crate::ViewCreateRequest;
 
 /// A QueryId is a string with the prefix `q_` and the suffix of the hash of the query
-pub type QueryId = String;
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq, Hash)]
+#[repr(transparent)]
+pub struct QueryId(u64);
+
+impl QueryId {
+    /// Wrap a u64 in a [`QueryId`]
+    pub fn new(id: u64) -> Self {
+        QueryId(id)
+    }
+}
+
+impl Display for QueryId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "q_{:x}", self.0)
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq)]
 /// A Query that was made against readyset, which could have either been parsed successfully or
@@ -122,11 +137,6 @@ impl Query {
     }
 }
 
-/// Converts a u64 query hash to a query id
-pub fn hash_to_query_id(hash: u64) -> QueryId {
-    format!("q_{:x}", hash)
-}
-
 /// A Query that should not be cached vy ReadySet
 #[derive(Debug, Clone)]
 pub struct DeniedQuery {
@@ -145,7 +155,7 @@ impl Serialize for DeniedQuery {
     {
         let mut ser = serializer.serialize_tuple(2)?;
         let mut anonymizer = Anonymizer::new();
-        ser.serialize_element(self.id.as_str())?;
+        ser.serialize_element(&self.id)?;
         ser.serialize_element(self.query.to_anonymized_string(&mut anonymizer).as_str())?;
         // We intentionally do not serialize the QueryStatus
         ser.end()
