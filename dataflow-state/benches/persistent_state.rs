@@ -2,7 +2,7 @@ use std::ops::Bound;
 
 use common::{Index, IndexType, KeyType, RangeKey};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use dataflow_state::{PersistenceParameters, PersistentState, State};
+use dataflow_state::{PersistenceParameters, PersistentState, SnapshotMode, State};
 use itertools::Itertools;
 use readyset_data::DfValue;
 
@@ -20,6 +20,8 @@ lazy_static::lazy_static! {
         state.add_key(Index::new(IndexType::HashMap, vec![1, 2]), None);
         state.add_key(Index::new(IndexType::HashMap, vec![3]), None);
 
+        state.set_snapshot_mode(SnapshotMode::SnapshotModeEnabled);
+
         let animals = ["Cat", "Dog", "Bat"];
 
         for i in 0..UNIQUE_ENTIRES {
@@ -31,6 +33,8 @@ lazy_static::lazy_static! {
             ];
             state.process_records(&mut vec![rec].into(), None, None);
         }
+
+        state.set_snapshot_mode(SnapshotMode::SnapshotModeDisabled);
 
         state
     };
@@ -45,6 +49,8 @@ lazy_static::lazy_static! {
             vec![&[0usize][..], &[3][..]],
             &PersistenceParameters::default(),
         );
+
+        state.set_snapshot_mode(SnapshotMode::SnapshotModeEnabled);
 
         state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
         state.add_key(Index::new(IndexType::HashMap, vec![1]), None);
@@ -61,6 +67,8 @@ lazy_static::lazy_static! {
             ];
             state.process_records(&mut vec![rec].into(), None, None);
         }
+
+        state.set_snapshot_mode(SnapshotMode::SnapshotModeDisabled);
 
         state
     };
