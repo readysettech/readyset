@@ -67,7 +67,7 @@ mod types {
         assert_eq!(star_results[0].get::<_, V>(0), val);
 
         // check parameter parsing
-        if format!("{}", type_name).as_str() != "json" {
+        if type_name.to_string().as_str() != "json" {
             let count_where_result = client
                 .query_one("SELECT count(*) FROM t WHERE x = $1", &[&val])
                 .await

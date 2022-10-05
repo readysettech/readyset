@@ -83,7 +83,7 @@ impl fmt::Display for JoinConstraint {
                 "USING ({})",
                 columns
                     .iter()
-                    .map(|c| format!("{}", c))
+                    .map(|c| c.to_string())
                     .collect::<Vec<_>>()
                     .join(", ")
             )?,
@@ -142,6 +142,6 @@ mod tests {
 
         let q = res.unwrap().1;
         assert_eq!(q, expected_stmt);
-        assert_eq!(expected, format!("{}", q));
+        assert_eq!(expected, q.to_string());
     }
 }

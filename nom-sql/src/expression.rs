@@ -1509,7 +1509,7 @@ mod tests {
             assert_eq!(c1, expected1);
 
             let expected1 = "`id` NOT IN (1, 2)";
-            assert_eq!(format!("{}", c1), expected1);
+            assert_eq!(c1.to_string(), expected1);
         }
 
         #[test]

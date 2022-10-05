@@ -30,7 +30,7 @@
 //!     ],
 //!     vec![],
 //! ));
-//! let query_str = format!("{}", query.statement);
+//! let query_str = query.statement.to_string();
 //! assert_eq!(
 //!     query_str,
 //!     "SELECT `table_1`.`column_2` AS `alias_1`, `table_2`.`column_2` AS `alias_2` \

@@ -231,12 +231,7 @@ impl Ingredient for Project {
                 emit_cols.extend(emit.iter().map(ToString::to_string).collect::<Vec<_>>());
 
                 if let Some(ref arithmetic) = self.expressions {
-                    emit_cols.extend(
-                        arithmetic
-                            .iter()
-                            .map(|e| format!("{}", e))
-                            .collect::<Vec<_>>(),
-                    );
+                    emit_cols.extend(arithmetic.iter().map(|e| e.to_string()).collect::<Vec<_>>());
                 }
 
                 if let Some(ref add) = self.additional {

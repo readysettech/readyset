@@ -305,14 +305,14 @@ async fn check_query(
                         DfValue::None | DfValue::Max => "NULL".to_owned(),
                         DfValue::Int(i) => i.to_string(),
                         DfValue::UnsignedInt(i) => i.to_string(),
-                        DfValue::Float(f) => format!("{}", f),
-                        DfValue::Double(f) => format!("{}", f),
+                        DfValue::Float(f) => f.to_string(),
+                        DfValue::Double(f) => f.to_string(),
                         DfValue::Numeric(ref d) => d.to_string(),
                         DfValue::Text(_) | DfValue::TinyText(_) => {
                             let s: &str = (&v).try_into().unwrap();
                             s.to_string()
                         }
-                        d @ DfValue::ByteArray(_) => format!("{}", d),
+                        d @ DfValue::ByteArray(_) => d.to_string(),
                         DfValue::TimestampTz(_)
                         | DfValue::Time(_)
                         // These types are PostgreSQL specific

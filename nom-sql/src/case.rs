@@ -63,7 +63,7 @@ mod tests {
         };
 
         assert_eq!(
-            format!("{}", exp),
+            exp.to_string(),
             "CASE WHEN (`foo` = 0) THEN `foo` ELSE 1 END"
         );
 
@@ -78,7 +78,7 @@ mod tests {
         };
 
         assert_eq!(
-            format!("{}", exp_no_else),
+            exp_no_else.to_string(),
             "CASE WHEN (`foo` = 0) THEN `foo` END"
         );
     }

@@ -133,7 +133,7 @@ impl fmt::Display for AlterTableStatement {
             "{}",
             self.definitions
                 .iter()
-                .map(|def| format!("{}", def))
+                .map(|def| def.to_string())
                 .collect::<Vec<_>>()
                 .join(", ")
         )?;
@@ -366,7 +366,7 @@ mod tests {
             only: false,
         };
 
-        let result = format!("{}", stmt);
+        let result = stmt.to_string();
         assert_eq!(result, "ALTER TABLE `t` ADD COLUMN `c` INT(32)");
     }
 

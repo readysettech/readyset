@@ -164,7 +164,7 @@ mod tests {
         let qstring = "DROP TABLE IF EXISTS users,posts;";
         let expected = "DROP TABLE IF EXISTS `users`, `posts`";
         let res = drop_table(Dialect::MySQL)(qstring.as_bytes());
-        assert_eq!(format!("{}", res.unwrap().1), expected);
+        assert_eq!(res.unwrap().1.to_string(), expected);
     }
 
     #[test]

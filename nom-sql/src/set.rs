@@ -447,7 +447,7 @@ mod tests {
         let qstring = "set autocommit=1";
         let expected = "SET @@LOCAL.autocommit = 1";
         let res = set(Dialect::MySQL)(qstring.as_bytes());
-        assert_eq!(format!("{}", res.unwrap().1), expected);
+        assert_eq!(res.unwrap().1.to_string(), expected);
     }
 
     #[test]
@@ -457,8 +457,8 @@ mod tests {
         let expected = "SET @@GLOBAL.var = 2";
         let res1 = test_parse!(set(Dialect::MySQL), qstring1.as_bytes());
         let res2 = test_parse!(set(Dialect::MySQL), qstring2.as_bytes());
-        assert_eq!(format!("{}", res1), expected);
-        assert_eq!(format!("{}", res2), expected);
+        assert_eq!(res1.to_string(), expected);
+        assert_eq!(res2.to_string(), expected);
     }
 
     #[test]
@@ -470,9 +470,9 @@ mod tests {
         let res1 = set(Dialect::MySQL)(qstring1.as_bytes());
         let res2 = set(Dialect::MySQL)(qstring2.as_bytes());
         let res3 = set(Dialect::MySQL)(qstring3.as_bytes());
-        assert_eq!(format!("{}", res1.unwrap().1), expected);
-        assert_eq!(format!("{}", res2.unwrap().1), expected);
-        assert_eq!(format!("{}", res3.unwrap().1), expected);
+        assert_eq!(res1.unwrap().1.to_string(), expected);
+        assert_eq!(res2.unwrap().1.to_string(), expected);
+        assert_eq!(res3.unwrap().1.to_string(), expected);
     }
 
     #[test]
@@ -482,8 +482,8 @@ mod tests {
         let expected = "SET @@LOCAL.var = 2";
         let res1 = set(Dialect::MySQL)(qstring1.as_bytes());
         let res2 = set(Dialect::MySQL)(qstring2.as_bytes());
-        assert_eq!(format!("{}", res1.unwrap().1), expected);
-        assert_eq!(format!("{}", res2.unwrap().1), expected);
+        assert_eq!(res1.unwrap().1.to_string(), expected);
+        assert_eq!(res2.unwrap().1.to_string(), expected);
     }
 
     #[test]

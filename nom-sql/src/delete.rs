@@ -109,6 +109,6 @@ mod tests {
         let qstring = "DELETE FROM users WHERE id = 1";
         let expected = "DELETE FROM `users` WHERE (`id` = 1)";
         let res = deletion(Dialect::MySQL)(qstring.as_bytes());
-        assert_eq!(format!("{}", res.unwrap().1), expected);
+        assert_eq!(res.unwrap().1.to_string(), expected);
     }
 }

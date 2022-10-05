@@ -57,10 +57,7 @@ impl FromStr for DatabaseType {
 /// ```
 /// use database_utils::DatabaseType;
 ///
-/// assert_eq!(
-///     format!("{}", DatabaseType::PostgreSQL),
-///     "PostgreSQL".to_owned()
-/// );
+/// assert_eq!(DatabaseType::PostgreSQL.to_string(), "PostgreSQL");
 /// ```
 impl Display for DatabaseType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

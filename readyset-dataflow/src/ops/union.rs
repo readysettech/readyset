@@ -304,7 +304,7 @@ impl Ingredient for Union {
 
     fn probe(&self) -> HashMap<String, String> {
         let mut hm = HashMap::new();
-        hm.insert("captured".into(), format!("{}", self.replay_pieces.len()));
+        hm.insert("captured".into(), self.replay_pieces.len().to_string());
         hm
     }
     fn on_connected(&mut self, g: &Graph) {

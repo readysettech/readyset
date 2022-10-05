@@ -344,12 +344,12 @@ mod tests {
         assert!(res4.is_ok());
         assert!(res5.is_ok());
 
-        assert_eq!(qstring0, format!("{}", res0.unwrap()));
-        assert_eq!(qstring1, format!("{}", res1.unwrap()));
-        assert_eq!(qstring2, format!("{}", res2.unwrap()));
-        assert_eq!(qstring3, format!("{}", res3.unwrap()));
-        assert_eq!(qstring4, format!("{}", res4.unwrap()));
-        assert_eq!(qstring5, format!("{}", res5.unwrap()));
+        assert_eq!(qstring0, res0.unwrap().to_string());
+        assert_eq!(qstring1, res1.unwrap().to_string());
+        assert_eq!(qstring2, res2.unwrap().to_string());
+        assert_eq!(qstring3, res3.unwrap().to_string());
+        assert_eq!(qstring4, res4.unwrap().to_string());
+        assert_eq!(qstring5, res5.unwrap().to_string());
     }
 
     #[test]
@@ -370,9 +370,9 @@ mod tests {
         assert!(res2.is_ok());
         assert!(res3.is_ok());
 
-        assert_eq!(expected1, format!("{}", res1.unwrap()));
-        assert_eq!(expected2, format!("{}", res2.unwrap()));
-        assert_eq!(expected3, format!("{}", res3.unwrap()));
+        assert_eq!(expected1, res1.unwrap().to_string());
+        assert_eq!(expected2, res2.unwrap().to_string());
+        assert_eq!(expected3, res3.unwrap().to_string());
     }
 
     #[test]
@@ -389,8 +389,8 @@ mod tests {
         let res1 = parse_query(Dialect::MySQL, qstring1);
         assert!(res0.is_ok());
         assert!(res1.is_ok());
-        assert_eq!(expected0, format!("{}", res0.unwrap()));
-        assert_eq!(expected1, format!("{}", res1.unwrap()));
+        assert_eq!(expected0, res0.unwrap().to_string());
+        assert_eq!(expected1, res1.unwrap().to_string());
     }
 
     #[test]
@@ -400,7 +400,7 @@ mod tests {
 
         let res1 = parse_query(Dialect::MySQL, qstring1);
         assert!(res1.is_ok());
-        assert_eq!(expected1, format!("{}", res1.unwrap()));
+        assert_eq!(expected1, res1.unwrap().to_string());
     }
 
     #[test]
@@ -409,7 +409,7 @@ mod tests {
         let expected = "INSERT INTO `users` (`name`, `password`) VALUES ('aaa', 'xxx')";
         let res = parse_query(Dialect::MySQL, qstring);
         assert!(res.is_ok());
-        assert_eq!(expected, format!("{}", res.unwrap()));
+        assert_eq!(expected, res.unwrap().to_string());
     }
 
     #[test]
@@ -418,7 +418,7 @@ mod tests {
         let expected = "INSERT INTO `users` VALUES ('aaa', 'xxx')";
         let res = parse_query(Dialect::MySQL, qstring);
         assert!(res.is_ok());
-        assert_eq!(expected, format!("{}", res.unwrap()));
+        assert_eq!(expected, res.unwrap().to_string());
     }
 
     #[test]
@@ -427,7 +427,7 @@ mod tests {
         let expected = "INSERT INTO `users` (`name`, `password`) VALUES ('aaa', 'xxx')";
         let res = parse_query(Dialect::MySQL, qstring);
         assert!(res.is_ok());
-        assert_eq!(expected, format!("{}", res.unwrap()));
+        assert_eq!(expected, res.unwrap().to_string());
     }
 
     #[test]
@@ -436,7 +436,7 @@ mod tests {
         let expected = "UPDATE `users` SET `name` = 42, `password` = 'xxx' WHERE (`id` = 1)";
         let res = parse_query(Dialect::MySQL, qstring);
         assert!(res.is_ok());
-        assert_eq!(expected, format!("{}", res.unwrap()));
+        assert_eq!(expected, res.unwrap().to_string());
     }
 
     #[test]
@@ -451,8 +451,8 @@ mod tests {
         let res1 = parse_query(Dialect::MySQL, qstring1);
         assert!(res0.is_ok());
         assert!(res1.is_ok());
-        assert_eq!(expected0, format!("{}", res0.unwrap()));
-        assert_eq!(expected1, format!("{}", res1.unwrap()));
+        assert_eq!(expected0, res0.unwrap().to_string());
+        assert_eq!(expected1, res1.unwrap().to_string());
     }
 
     #[test]
@@ -524,8 +524,8 @@ mod tests {
             let res1 = parse_query(Dialect::MySQL, qstring1);
             assert!(res0.is_ok());
             assert!(res1.is_ok());
-            assert_eq!(expected0, format!("{}", res0.unwrap()));
-            assert_eq!(expected1, format!("{}", res1.unwrap()));
+            assert_eq!(expected0, res0.unwrap().to_string());
+            assert_eq!(expected1, res1.unwrap().to_string());
         }
     }
 
@@ -598,8 +598,8 @@ mod tests {
             let res1 = parse_query(Dialect::PostgreSQL, qstring1);
             assert!(res0.is_ok());
             assert!(res1.is_ok());
-            assert_eq!(expected0, format!("{}", res0.unwrap()));
-            assert_eq!(expected1, format!("{}", res1.unwrap()));
+            assert_eq!(expected0, res0.unwrap().to_string());
+            assert_eq!(expected1, res1.unwrap().to_string());
         }
     }
 }

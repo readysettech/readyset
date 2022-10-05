@@ -25,8 +25,7 @@ pub trait ToMySqlValue {
 macro_rules! mysql_text_trivial {
     () => {
         fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
-            w.write_lenenc_str(format!("{}", self).as_bytes())
-                .map(|_| ())
+            w.write_lenenc_str(self.to_string().as_bytes()).map(|_| ())
         }
     };
 }

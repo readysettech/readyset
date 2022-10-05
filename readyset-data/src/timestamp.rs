@@ -362,10 +362,10 @@ impl TimestampTz {
             | SqlType::Text
             | SqlType::LongText
             | SqlType::Char(None)
-            | SqlType::VarChar(None) => Ok(DfValue::from(format!("{}", self).as_str())),
+            | SqlType::VarChar(None) => Ok(DfValue::from(self.to_string().as_str())),
 
             SqlType::Char(Some(l)) | SqlType::VarChar(Some(l)) => {
-                let mut string = format!("{}", self);
+                let mut string = self.to_string();
                 string.truncate(*l as usize);
                 Ok(DfValue::from(string.as_str()))
             }
@@ -376,7 +376,7 @@ impl TimestampTz {
             | SqlType::LongBlob
             | SqlType::Binary(None)
             | SqlType::ByteArray => Ok(DfValue::ByteArray(std::sync::Arc::new(
-                format!("{}", self).as_bytes().into(),
+                self.to_string().as_bytes().into(),
             ))),
 
             SqlType::Json => {
@@ -386,7 +386,7 @@ impl TimestampTz {
             }
 
             SqlType::Binary(Some(l)) | SqlType::VarBinary(l) => {
-                let mut string = format!("{}", self);
+                let mut string = self.to_string();
                 string.truncate(*l as usize);
                 Ok(DfValue::ByteArray(std::sync::Arc::new(
                     string.as_bytes().into(),

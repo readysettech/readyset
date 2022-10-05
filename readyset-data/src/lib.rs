@@ -2498,19 +2498,19 @@ mod tests {
         let bytes = DfValue::ByteArray(Arc::new(vec![0, 8, 39, 92, 100, 128]));
         // bits = 000000000000100000100111010111000110010010000000
         let bits = DfValue::BitVector(Arc::new(BitVec::from_bytes(&[0, 8, 39, 92, 100, 128])));
-        assert_eq!(format!("{}", tiny_text), "hi");
-        assert_eq!(format!("{}", text), "this is a very long text indeed");
-        assert_eq!(format!("{}", float_from_real), "-8.99");
-        assert_eq!(format!("{}", float), "-8.99");
-        assert_eq!(format!("{}", double_from_real), "-8.99");
-        assert_eq!(format!("{}", double), "-8.99");
-        assert_eq!(format!("{}", numeric), "-8.99");
-        assert_eq!(format!("{}", timestamp), "1970-01-01 00:00:00");
-        assert_eq!(format!("{}", timestamp_tz), "1969-12-31 18:30:00-05:30");
-        assert_eq!(format!("{}", int), "5");
-        assert_eq!(format!("{}", bytes), "E'\\x0008275c6480'");
+        assert_eq!(tiny_text.to_string(), "hi");
+        assert_eq!(text.to_string(), "this is a very long text indeed");
+        assert_eq!(float_from_real.to_string(), "-8.99");
+        assert_eq!(float.to_string(), "-8.99");
+        assert_eq!(double_from_real.to_string(), "-8.99");
+        assert_eq!(double.to_string(), "-8.99");
+        assert_eq!(numeric.to_string(), "-8.99");
+        assert_eq!(timestamp.to_string(), "1970-01-01 00:00:00");
+        assert_eq!(timestamp_tz.to_string(), "1969-12-31 18:30:00-05:30");
+        assert_eq!(int.to_string(), "5");
+        assert_eq!(bytes.to_string(), "E'\\x0008275c6480'");
         assert_eq!(
-            format!("{}", bits),
+            bits.to_string(),
             "000000000000100000100111010111000110010010000000"
         );
     }

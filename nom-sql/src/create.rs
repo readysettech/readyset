@@ -43,7 +43,7 @@ impl fmt::Display for CreateTableStatement {
             "{}",
             self.fields
                 .iter()
-                .map(|field| format!("{}", field))
+                .map(|field| field.to_string())
                 .collect::<Vec<_>>()
                 .join(", ")
         )?;
@@ -52,7 +52,7 @@ impl fmt::Display for CreateTableStatement {
                 f,
                 ", {}",
                 keys.iter()
-                    .map(|key| format!("{}", key))
+                    .map(|key| key.to_string())
                     .collect::<Vec<_>>()
                     .join(", ")
             )?;
@@ -63,7 +63,7 @@ impl fmt::Display for CreateTableStatement {
             "{}",
             self.options
                 .iter()
-                .map(|option| format!("{}", option))
+                .map(|option| option.to_string())
                 .collect::<Vec<_>>()
                 .join(", ")
         )
@@ -122,7 +122,7 @@ impl fmt::Display for CreateViewStatement {
                 "{}",
                 self.fields
                     .iter()
-                    .map(|field| format!("{}", field))
+                    .map(|field| field.to_string())
                     .collect::<Vec<_>>()
                     .join(", ")
             )?;
@@ -1257,7 +1257,7 @@ mod tests {
                         `name` VARCHAR(80) NOT NULL UNIQUE)\
                         ENGINE=InnoDB, AUTO_INCREMENT=495209, DEFAULT CHARSET=utf8mb4, COLLATE=utf8mb4_unicode_ci";
             let res = create_table(Dialect::MySQL)(qstring.as_bytes());
-            assert_eq!(format!("{}", res.unwrap().1), expected);
+            assert_eq!(res.unwrap().1.to_string(), expected);
         }
 
         #[test]
@@ -1293,7 +1293,7 @@ mod tests {
             let qstring = "CREATE VIEW `v` AS SELECT * FROM `t`;";
             let expected = "CREATE VIEW `v` AS SELECT * FROM `t`";
             let res = view_creation(Dialect::MySQL)(qstring.as_bytes());
-            assert_eq!(format!("{}", res.unwrap().1), expected);
+            assert_eq!(res.unwrap().1.to_string(), expected);
         }
 
         #[test]
@@ -1761,7 +1761,7 @@ mod tests {
                         `id` INT AUTO_INCREMENT NOT NULL PRIMARY KEY, \
                         `name` VARCHAR(80) NOT NULL UNIQUE)";
             let res = create_table(Dialect::PostgreSQL)(qstring.as_bytes());
-            assert_eq!(format!("{}", res.unwrap().1), expected);
+            assert_eq!(res.unwrap().1.to_string(), expected);
         }
 
         #[test]
@@ -1797,7 +1797,7 @@ mod tests {
             let qstring = "CREATE VIEW \"v\" AS SELECT * FROM \"t\";";
             let expected = "CREATE VIEW `v` AS SELECT * FROM `t`";
             let res = view_creation(Dialect::PostgreSQL)(qstring.as_bytes());
-            assert_eq!(format!("{}", res.unwrap().1), expected);
+            assert_eq!(res.unwrap().1.to_string(), expected);
         }
 
         #[test]

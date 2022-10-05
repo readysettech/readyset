@@ -476,7 +476,7 @@ impl PartialOrd for Value {
 
 impl Ord for Value {
     fn cmp(&self, other: &Self) -> cmp::Ordering {
-        format!("{}", self).cmp(&format!("{}", other))
+        self.to_string().cmp(&other.to_string())
     }
 }
 
@@ -561,7 +561,7 @@ impl Value {
     pub fn hash_results(results: &[Self]) -> md5::Digest {
         let mut context = md5::Context::new();
         for result in results {
-            context.consume(&format!("{}", result));
+            context.consume(&result.to_string());
             context.consume("\n");
         }
         context.compute()
@@ -830,7 +830,7 @@ mod tests {
 
     #[test]
     fn display_result_value() {
-        assert_eq!(format!("{}", Value::Text("\0".to_string())), "@");
+        assert_eq!(Value::Text("\0".to_string()).to_string(), "@");
     }
 
     #[test]

@@ -35,7 +35,7 @@ impl fmt::Display for GroupByClause {
             "{}",
             self.fields
                 .iter()
-                .map(|c| format!("{}", c))
+                .map(|c| c.to_string())
                 .collect::<Vec<_>>()
                 .join(", ")
         )?;
@@ -123,7 +123,7 @@ impl fmt::Display for SelectStatement {
             "{}",
             self.fields
                 .iter()
-                .map(|field| format!("{}", field))
+                .map(|field| field.to_string())
                 .collect::<Vec<_>>()
                 .join(", ")
         )?;
@@ -135,7 +135,7 @@ impl fmt::Display for SelectStatement {
                 "{}",
                 self.tables
                     .iter()
-                    .map(|table| format!("{}", table))
+                    .map(|table| table.to_string())
                     .collect::<Vec<_>>()
                     .join(", ")
             )?;

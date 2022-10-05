@@ -120,7 +120,7 @@ mod tests {
         let qstring = "UPDATE users SET id = 42, name = 'test' WHERE id = 1";
         let expected = "UPDATE `users` SET `id` = 42, `name` = 'test' WHERE (`id` = 1)";
         let res = updating(Dialect::MySQL)(qstring.as_bytes());
-        assert_eq!(format!("{}", res.unwrap().1), expected);
+        assert_eq!(res.unwrap().1.to_string(), expected);
     }
 
     #[test]

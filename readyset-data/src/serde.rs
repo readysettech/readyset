@@ -175,7 +175,7 @@ impl<'de> Deserialize<'de> for DfValue {
                         .and_then(|x| {
                             DfValue::try_from(x).map_err(|_| {
                                 serde::de::Error::invalid_value(
-                                    serde::de::Unexpected::Other(format!("{}", x).as_str()),
+                                    serde::de::Unexpected::Other(x.to_string().as_str()),
                                     &"integer (i128)",
                                 )
                             })
