@@ -526,9 +526,15 @@ impl NoriaConnector {
         Ok(QueryResult::Meta(vec![(label, graphviz).into()]))
     }
 
-    pub(crate) async fn verbose_views(&mut self) -> ReadySetResult<QueryResult<'static>> {
+    pub(crate) async fn verbose_views(
+        &mut self,
+        query_id: &Option<String>,
+    ) -> ReadySetResult<QueryResult<'static>> {
         let noria = &mut self.inner.get_mut()?.noria;
-        let views = noria.verbose_views().await?;
+        let mut views = noria.verbose_views().await?;
+        if let Some(q_id) = query_id {
+            views.retain(|n, _| n.name.as_str() == q_id);
+        }
         //TODO(DAN): this is ridiculous, update Meta instead
         let select_schema = SelectSchema {
             use_bogo: false,

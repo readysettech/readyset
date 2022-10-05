@@ -1586,6 +1586,7 @@ where
     /// Responds to a `SHOW PROXIED QUERIES` query
     async fn show_proxied_queries(
         &mut self,
+        query_id: &Option<String>,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         let create_dummy_column = |n: &str| ColumnSchema {
             column: nom_sql::Column {
@@ -1596,7 +1597,10 @@ where
             base: None,
         };
 
-        let queries = self.state.query_status_cache.deny_list();
+        let mut queries = self.state.query_status_cache.deny_list();
+        if let Some(q_id) = query_id {
+            queries.retain(|q| &q.id.to_string() == q_id);
+        }
         let select_schema = SelectSchema {
             use_bogo: false,
             schema: Cow::Owned(vec![
@@ -1692,7 +1696,7 @@ where
             }
             SqlQuery::DropCache(DropCacheStatement { name }) => self.drop_cached_query(name).await,
             SqlQuery::DropAllCaches(_) => self.drop_all_caches().await,
-            SqlQuery::Show(ShowStatement::CachedQueries) => {
+            SqlQuery::Show(ShowStatement::CachedQueries(query_id)) => {
                 // Log a telemetry event
                 if let Some(ref telemetry_sender) = self.telemetry_sender {
                     if let Err(e) = telemetry_sender.send_event(TelemetryEvent::ShowCaches) {
@@ -1702,11 +1706,11 @@ where
                     trace!("No telemetry sender. not sending metric for SHOW CACHES");
                 }
 
-                self.noria.verbose_views().await
+                self.noria.verbose_views(query_id).await
             }
             SqlQuery::Show(ShowStatement::ReadySetStatus) => self.noria.readyset_status().await,
             SqlQuery::Show(ShowStatement::ReadySetVersion) => readyset_version(),
-            SqlQuery::Show(ShowStatement::ProxiedQueries) => {
+            SqlQuery::Show(ShowStatement::ProxiedQueries(q_id)) => {
                 // Log a telemetry event
                 if let Some(ref telemetry_sender) = self.telemetry_sender {
                     if let Err(e) = telemetry_sender.send_event(TelemetryEvent::ShowProxiedQueries)
@@ -1717,7 +1721,7 @@ where
                     trace!("No telemetry sender. not sending metric for SHOW PROXIED QUERIES");
                 }
 
-                self.show_proxied_queries().await
+                self.show_proxied_queries(q_id).await
             }
             _ => {
                 drop(_t);

@@ -499,6 +499,145 @@ async fn dry_run_evaluates_support() {
     deployment.teardown().await.unwrap();
 }
 
+#[clustertest]
+async fn proxied_queries_filtering() {
+    let mut deployment = readyset_mysql("proxied_queries_filtering")
+        .add_server(ServerParams::default())
+        .explicit_migrations(500)
+        .start()
+        .await
+        .unwrap();
+
+    let mut adapter = deployment.first_adapter().await;
+    adapter
+        .query_drop(
+            r"CREATE TABLE t1 (
+        uid INT NOT NULL,
+        value INT NOT NULL
+    );",
+        )
+        .await
+        .unwrap();
+    adapter
+        .query_drop(r"INSERT INTO t1 VALUES (1, 4), (2, 5);")
+        .await
+        .unwrap();
+
+    assert!(
+        query_until_expected(
+            &mut adapter,
+            QueryExecution::PrepareExecute(r"SELECT * FROM t1 where uid = ?", (2,)),
+            &EventuallyConsistentResults::empty_or(&[(2, 5)]),
+            PROPAGATION_DELAY_TIMEOUT,
+        )
+        .await
+    );
+
+    // After executing the query, the query will be dry run against ReadySet
+    // in the background. Until the dry run is complete, the query has a
+    // "pending" status in the proxied query table. Once the dry run
+    // is complete, it will have a "yes" status.
+    let select_query = match nom_sql::parse_query(
+        nom_sql::Dialect::MySQL,
+        "SELECT * FROM `t1` WHERE (`uid` = $1)",
+    )
+    .unwrap()
+    {
+        nom_sql::SqlQuery::Select(s) => s,
+        _ => unreachable!(),
+    };
+    let query_id = QueryId::new(hash(&ViewCreateRequest::new(
+        select_query,
+        vec![deployment.name().into()],
+    )))
+    .to_string();
+    let mut results = EventuallyConsistentResults::new();
+    results.write(&[(
+        query_id.clone(),
+        "SELECT * FROM `t1` WHERE (`uid` = $1)".to_string(),
+        "pending".to_string(),
+    )]);
+    results.write(&[(
+        query_id.clone(),
+        "SELECT * FROM `t1` WHERE (`uid` = $1)".to_string(),
+        "yes".to_string(),
+    )]);
+
+    // Verify that the query eventually reaches the "yes" state in the
+    // proxied query table.
+    assert!(
+        query_until_expected(
+            &mut adapter,
+            QueryExecution::<String, ()>::Query("SHOW PROXIED QUERIES"),
+            &results,
+            PROPAGATION_DELAY_TIMEOUT,
+        )
+        .await
+    );
+
+    let query = format!("SHOW PROXIED QUERIES WHERE query_id = '{}';", &query_id);
+    let proxied_queries = adapter
+        .query::<(String, String, String), _>(query)
+        .await
+        .unwrap();
+
+    assert_eq!(proxied_queries.len(), 1);
+
+    assert_eq!(proxied_queries[0].0, query_id);
+
+    deployment.teardown().await.unwrap();
+}
+
+#[clustertest]
+async fn cached_queries_filtering() {
+    let mut deployment = readyset_mysql("cached_queries_filtering")
+        .add_server(ServerParams::default())
+        .explicit_migrations(500)
+        .start()
+        .await
+        .unwrap();
+
+    let mut adapter = deployment.first_adapter().await;
+    adapter
+        .query_drop(
+            r"CREATE TABLE t1 (
+        uid INT NOT NULL,
+        value INT NOT NULL
+    );",
+        )
+        .await
+        .unwrap();
+    adapter
+        .query_drop(r"INSERT INTO t1 VALUES (1, 4), (2, 5);")
+        .await
+        .unwrap();
+    adapter
+        .query_drop(r"CREATE CACHE q FROM SELECT * FROM t1 WHERE uid = ?")
+        .await
+        .unwrap();
+
+    assert!(
+        query_until_expected(
+            &mut adapter,
+            QueryExecution::PrepareExecute(r"SELECT * FROM t1 where uid = ?", (2,)),
+            &EventuallyConsistentResults::empty_or(&[(2, 5)]),
+            PROPAGATION_DELAY_TIMEOUT,
+        )
+        .await
+    );
+
+    let cached_queries = adapter
+        .query::<(String, String, String), _>("SHOW CACHES WHERE query_id = 'q';")
+        .await
+        .unwrap();
+
+    assert_eq!(cached_queries.len(), 1);
+
+    assert_eq!(cached_queries[0].0, "`q`");
+
+    deployment.teardown().await.unwrap();
+}
+
 /// Creates a two servers deployment and performs a failure and recovery on one
 /// of the servers. After the failure, we verify that we can still perform the
 /// query on ReadySet and we return the correct results.

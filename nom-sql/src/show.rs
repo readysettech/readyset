@@ -8,15 +8,17 @@ use nom_locate::LocatedSpan;
 use serde::{Deserialize, Serialize};
 
 use crate::expression::expression;
-use crate::whitespace::whitespace1;
+use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Dialect, Expr, NomSqlResult};
+
+pub type QueryID = String;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum ShowStatement {
     Events,
     Tables(Tables),
-    CachedQueries,
-    ProxiedQueries,
+    CachedQueries(Option<QueryID>),
+    ProxiedQueries(Option<QueryID>),
     ReadySetStatus,
     ReadySetVersion,
 }
@@ -27,8 +29,20 @@ impl fmt::Display for ShowStatement {
         match self {
             Self::Events => write!(f, "EVENTS"),
             Self::Tables(tables) => write!(f, "{}", tables),
-            Self::CachedQueries => write!(f, "CACHES"),
-            Self::ProxiedQueries => write!(f, "PROXIED QUERIES"),
+            Self::CachedQueries(maybe_query_id) => {
+                if let Some(query_id) = maybe_query_id {
+                    write!(f, "CACHES WHERE query_id = {}", query_id)
+                } else {
+                    write!(f, "CACHES")
+                }
+            }
+            Self::ProxiedQueries(maybe_query_id) => {
+                if let Some(query_id) = maybe_query_id {
+                    write!(f, "PROXIED QUERIES WHERE query_id = {}", query_id)
+                } else {
+                    write!(f, "PROXIED QUERIES")
+                }
+            }
             Self::ReadySetStatus => write!(f, "READYSET STATUS"),
             Self::ReadySetVersion => write!(f, "READYSET VERSION"),
         }
@@ -41,10 +55,53 @@ pub fn show(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u
         let (i, _) = whitespace1(i)?;
         let (i, statement) = alt((
             //ReadySet specific show statement
-            map(tag_no_case("caches"), |_| ShowStatement::CachedQueries),
             map(
-                tuple((tag_no_case("proxied"), whitespace1, tag_no_case("queries"))),
-                |_| ShowStatement::ProxiedQueries,
+                tuple((
+                    tag_no_case("caches"),
+                    opt(tuple((
+                        whitespace1,
+                        tag_no_case("where"),
+                        whitespace1,
+                        tag_no_case("query_id"),
+                        whitespace0,
+                        tag_no_case("="),
+                        whitespace0,
+                        dialect.string_literal(),
+                    ))),
+                )),
+                |(_, query_id)| {
+                    let q_id = if let Some((_, _, _, _, _, _, _, q_id)) = query_id {
+                        String::from_utf8(q_id).ok()
+                    } else {
+                        None
+                    };
+                    ShowStatement::CachedQueries(q_id)
+                },
+            ),
+            map(
+                tuple((
+                    tag_no_case("proxied"),
+                    whitespace1,
+                    tag_no_case("queries"),
+                    opt(tuple((
+                        whitespace1,
+                        tag_no_case("where"),
+                        whitespace1,
+                        tag_no_case("query_id"),
+                        whitespace0,
+                        tag_no_case("="),
+                        whitespace0,
+                        dialect.string_literal(),
+                    ))),
+                )),
+                |(_, _, _, query_id)| {
+                    let q_id = if let Some((_, _, _, _, _, _, _, q_id)) = query_id {
+                        String::from_utf8(q_id).ok()
+                    } else {
+                        None
+                    };
+                    ShowStatement::ProxiedQueries(q_id)
+                },
             ),
             alt((
                 map(
@@ -244,8 +301,17 @@ mod tests {
         let res2 = show(Dialect::MySQL)(LocatedSpan::new(qstring2.as_bytes()))
             .unwrap()
             .1;
-        assert_eq!(res1, ShowStatement::CachedQueries);
-        assert_eq!(res2, ShowStatement::CachedQueries);
+        assert_eq!(res1, ShowStatement::CachedQueries(None));
+        assert_eq!(res2, ShowStatement::CachedQueries(None));
+    }
+
+    #[test]
+    fn show_caches_where() {
+        let qstring1 = "SHOW CACHES where query_id = 'test'";
+        let res1 = show(Dialect::MySQL)(LocatedSpan::new(qstring1.as_bytes()))
+            .unwrap()
+            .1;
+        assert_eq!(res1, ShowStatement::CachedQueries(Some("test".to_string())));
     }
 
     #[test]
@@ -258,8 +324,20 @@ mod tests {
         let res2 = show(Dialect::MySQL)(LocatedSpan::new(qstring2.as_bytes()))
             .unwrap()
             .1;
-        assert_eq!(res1, ShowStatement::ProxiedQueries);
-        assert_eq!(res2, ShowStatement::ProxiedQueries);
+        assert_eq!(res1, ShowStatement::ProxiedQueries(None));
+        assert_eq!(res2, ShowStatement::ProxiedQueries(None));
+    }
+
+    #[test]
+    fn show_proxied_queries_where() {
+        let qstring1 = "SHOW PROXIED QUERIES where query_id = 'test'";
+        let res1 = show(Dialect::MySQL)(LocatedSpan::new(qstring1.as_bytes()))
+            .unwrap()
+            .1;
+        assert_eq!(
+            res1,
+            ShowStatement::ProxiedQueries(Some("test".to_string()))
+        );
     }
 
     #[test]

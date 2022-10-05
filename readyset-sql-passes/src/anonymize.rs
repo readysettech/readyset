@@ -193,8 +193,8 @@ impl<'ast> VisitorMut<'ast> for AnonymizeVisitor<'_> {
             }
             // No anonymizaion needed
             nom_sql::ShowStatement::Events
-            | nom_sql::ShowStatement::CachedQueries
-            | nom_sql::ShowStatement::ProxiedQueries
+            | nom_sql::ShowStatement::CachedQueries(..)
+            | nom_sql::ShowStatement::ProxiedQueries(..)
             | nom_sql::ShowStatement::ReadySetStatus
             | nom_sql::ShowStatement::ReadySetVersion => {}
         }
