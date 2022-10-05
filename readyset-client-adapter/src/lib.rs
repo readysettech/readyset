@@ -1,5 +1,7 @@
 #![deny(macro_use_extern_crate)]
 
+mod query_logger;
+
 use std::collections::HashMap;
 use std::io;
 use std::marker::Send;
@@ -19,9 +21,8 @@ use health_reporter::{HealthReporter as AdapterHealthReporter, State as AdapterS
 use launchpad::futures::abort_on_panic;
 use launchpad::redacted::RedactedString;
 use maplit::hashmap;
-use metrics::SharedString;
 use metrics_exporter_prometheus::PrometheusBuilder;
-use nom_sql::{Dialect, Relation, SqlQuery};
+use nom_sql::{Dialect, Relation};
 use readyset::consensus::{AuthorityControl, AuthorityType, ConsulAuthority};
 #[cfg(feature = "failure_injection")]
 use readyset::failpoints;
@@ -35,21 +36,17 @@ use readyset_client::proxied_queries_reporter::ProxiedQueriesReporter;
 use readyset_client::query_status_cache::{MigrationStyle, QueryStatusCache};
 use readyset_client::views_synchronizer::ViewsSynchronizer;
 use readyset_client::{Backend, BackendBuilder, QueryHandler, UpstreamDatabase};
-use readyset_client_metrics::QueryExecutionEvent;
 use readyset_dataflow::Readers;
 use readyset_server::metrics::{CompositeMetricsRecorder, MetricsRecorder};
 use readyset_server::worker::readers::{retry_misses, Ack, BlockingRead, ReadRequestHandler};
-use readyset_sql_passes::anonymize::anonymize_literals;
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetryInitializer};
 use readyset_version::COMMIT_ID;
 use stream_cancel::Valve;
+use tokio::net;
 use tokio::net::UdpSocket;
-use tokio::sync::broadcast;
-use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::time::timeout;
-use tokio::{net, select};
 use tokio_stream::wrappers::TcpListenerStream;
-use tracing::{debug, debug_span, error, info, info_span, span, warn, Level};
+use tracing::{debug, debug_span, error, info, span, warn, Level};
 use tracing_futures::Instrument;
 
 // How frequently to try to establish an http registration for the first time or if the last tick
@@ -510,7 +507,22 @@ where
         let qlog_sender = if options.query_log {
             rs_connect.in_scope(|| info!("Query logs are enabled. Spawning query logger"));
             let (qlog_sender, qlog_receiver) = tokio::sync::mpsc::unbounded_channel();
-            rt.spawn(query_logger(qlog_receiver, shutdown_recv));
+
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .max_blocking_threads(1)
+                .build()
+                .unwrap();
+
+            // Spawn the actual thread to run the logger
+            std::thread::Builder::new()
+                .name("Query logger".to_string())
+                .stack_size(2 * 1024 * 1024) // Use the same value tokio is using
+                .spawn(move || {
+                    runtime.block_on(query_logger::query_logger(qlog_receiver, shutdown_recv));
+                    runtime.shutdown_background();
+                })?;
+
             Some(qlog_sender)
         } else {
             rs_connect.in_scope(|| info!("Query logs are disabled"));
@@ -1039,99 +1051,6 @@ async fn reconcile_endpoint_registration(
             }
             Err(e) => {
                 error!(%e, "encountered error while trying to register adapter endpoint in authority")
-            }
-        }
-    }
-}
-
-/// Async task that logs query stats.
-async fn query_logger(
-    mut receiver: UnboundedReceiver<QueryExecutionEvent>,
-    mut shutdown_recv: broadcast::Receiver<()>,
-) {
-    let _span = info_span!("query-logger");
-
-    loop {
-        select! {
-            event = receiver.recv() => {
-                if let Some(event) = event {
-                    let query = match event.query {
-                        Some(s) => match s.as_ref() {
-                            SqlQuery::Select(stmt) => {
-                                let mut stmt = stmt.clone();
-                                if readyset_client::rewrite::process_query(&mut stmt, true).is_ok() {
-                                    anonymize_literals(&mut stmt);
-                                    stmt.to_string()
-                                } else {
-                                    "".to_string()
-                                }
-                            },
-                            _ => "".to_string()
-                        },
-                        _ => "".to_string()
-                    };
-
-                    if let Some(num_keys) = event.num_keys {
-                        metrics::counter!(
-                            readyset_client_metrics::recorded::QUERY_LOG_TOTAL_KEYS_READ,
-                            num_keys,
-                            "query" => query.clone(),
-                        );
-                    }
-
-                    if let Some(parse) = event.parse_duration {
-                        metrics::histogram!(
-                            readyset_client_metrics::recorded::QUERY_LOG_PARSE_TIME,
-                            parse,
-                            "query" => query.clone(),
-                            "event_type" => SharedString::from(event.event),
-                            "query_type" => SharedString::from(event.sql_type)
-                        );
-                    }
-
-                    if let Some(readyset) = event.readyset_duration {
-                        metrics::histogram!(
-                            readyset_client_metrics::recorded::QUERY_LOG_EXECUTION_TIME,
-                            readyset.as_secs_f64(),
-                            "query" => query.clone(),
-                            "database_type" => String::from(readyset_client_metrics::DatabaseType::ReadySet),
-                            "event_type" => SharedString::from(event.event),
-                            "query_type" => SharedString::from(event.sql_type)
-                        );
-                    }
-
-                    if let Some(upstream) = event.upstream_duration {
-                        metrics::histogram!(
-                            readyset_client_metrics::recorded::QUERY_LOG_EXECUTION_TIME,
-                            upstream.as_secs_f64(),
-                            "query" => query.clone(),
-                            "database_type" => String::from(readyset_client_metrics::DatabaseType::MySql),
-                            "event_type" => SharedString::from(event.event),
-                            "query_type" => SharedString::from(event.sql_type)
-                        );
-                    }
-
-                    if let Some(cache_misses) = event.cache_misses {
-                        metrics::counter!(
-                            readyset_client_metrics::recorded::QUERY_LOG_TOTAL_CACHE_MISSES,
-                            cache_misses,
-                            "query" => query.clone(),
-                        );
-                        if cache_misses != 0 {
-                            metrics::counter!(
-                                readyset_client_metrics::recorded::QUERY_LOG_QUERY_CACHE_MISSED,
-                                1,
-                                "query" => query.clone(),
-                            );
-                        }
-                    }
-                } else {
-                    info!("Metrics task shutting down after request handle dropped.");
-                }
-            }
-            _ = shutdown_recv.recv() => {
-                info!("Metrics task shutting down after signal received.");
-                break;
             }
         }
     }
