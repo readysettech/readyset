@@ -792,13 +792,13 @@ impl State for PersistentStateHandle {
         let db = &inner.db;
 
         let index = inner.index(IndexType::BTreeMap, columns);
+        let is_primary = index.is_primary;
 
         let cf = db.cf_handle(&index.column_family).unwrap();
-        let primary_cf = if !index.is_primary {
-            Some(db.cf_handle(PK_CF).unwrap())
-        } else {
-            None
-        };
+
+        let primary_cf = db
+            .cf_handle(PK_CF)
+            .expect("Primary key column family not found");
 
         let (lower, upper) = PersistentState::serialize_range(key, ((), ()));
 
@@ -836,18 +836,31 @@ impl State for PersistentStateHandle {
             Bound::Unbounded => iterator.seek_to_first(),
         }
 
-        let mut rows = vec![];
-        // If we have a primary index, then the values of this index contain primary keys, which
-        // are keys in that primary index.
-        let get_value = |val: &[u8]| match primary_cf {
-            Some(primary_cf) => {
-                deserialize_row(db.get_pinned_cf(primary_cf, val).unwrap().unwrap())
-            }
-            None => deserialize_row(val),
-        };
+        let mut rows = Vec::new();
+        let mut keys: Vec<Box<[u8]>> = Vec::new();
+
+        if is_primary {
+            rows.reserve(32);
+        } else {
+            keys.reserve(32);
+        }
 
         while let Some(value) = iterator.value() {
-            rows.push(get_value(value));
+            if is_primary {
+                // If this is the primary CF, the value is already the value we are looking for
+                rows.push(deserialize_row(value));
+            } else {
+                // Otherwise this is the key to lookup the value in the primary CF
+                keys.push(value.into());
+
+                if keys.len() == 128 {
+                    let primary_rows = db.batched_multi_get_cf(primary_cf, &keys, false);
+                    rows.extend(primary_rows.into_iter().map(|r| {
+                        deserialize_row(r.expect("can't error on known primary key").unwrap())
+                    }));
+                    keys.clear();
+                }
+            }
             iterator.next();
         }
 
@@ -859,9 +872,22 @@ impl State for PersistentStateHandle {
                 if prefix_transform(cur_key) != end_key {
                     break;
                 }
-                rows.push(get_value(iterator.value().unwrap()));
+                if is_primary {
+                    rows.push(deserialize_row(iterator.value().unwrap()));
+                } else {
+                    keys.push(iterator.value().unwrap().into());
+                }
                 iterator.next();
             }
+        }
+
+        if !keys.is_empty() {
+            let primary_rows = db.batched_multi_get_cf(primary_cf, &keys, false);
+            rows.extend(
+                primary_rows.into_iter().map(|r| {
+                    deserialize_row(r.expect("can't error on known primary key").unwrap())
+                }),
+            );
         }
 
         RangeLookupResult::Some(RecordResult::Owned(rows))

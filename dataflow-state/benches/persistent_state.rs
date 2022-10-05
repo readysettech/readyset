@@ -20,6 +20,8 @@ lazy_static::lazy_static! {
         state.add_key(Index::new(IndexType::HashMap, vec![1, 2]), None);
         state.add_key(Index::new(IndexType::HashMap, vec![3]), None);
 
+        state.add_key(Index::new(IndexType::BTreeMap, vec![1]), None);
+
         state.set_snapshot_mode(SnapshotMode::SnapshotModeEnabled);
 
         let animals = ["Cat", "Dog", "Bat"];
@@ -198,6 +200,22 @@ pub fn rocksdb_get_secondary_unique_key(c: &mut Criterion) {
     group.finish();
 }
 
+pub fn rocksdb_range_lookup(c: &mut Criterion) {
+    let state = &*STATE;
+    let key = DfValue::from("D");
+
+    let mut group = c.benchmark_group("RocksDB lookup_range");
+    group.bench_function("lookup_range", |b| {
+        b.iter(|| {
+            black_box(state.lookup_range(
+                &[1],
+                &RangeKey::Single((Bound::Included(&key), Bound::Unbounded)),
+            ));
+        })
+    });
+    group.finish();
+}
+
 pub fn rocksdb_range_lookup_large_strings(c: &mut Criterion) {
     let state = &*STATE_LARGE_STRINGS;
     let key = DfValue::from(LARGE_STRINGS[0].clone());
@@ -219,6 +237,7 @@ criterion_group!(
     rocksdb_get_primary_key,
     rocksdb_get_secondary_key,
     rocksdb_get_secondary_unique_key,
+    rocksdb_range_lookup,
     rocksdb_range_lookup_large_strings,
 );
 criterion_main!(benches);
