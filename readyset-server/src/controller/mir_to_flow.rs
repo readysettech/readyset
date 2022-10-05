@@ -926,7 +926,10 @@ fn lower_expression(
     expr: Expr,
     parent_cols: &[DfColumn],
 ) -> ReadySetResult<DfExpr> {
-    DfExpr::lower(expr, |nom_sql::Column { name, table, .. }| {
+    // TODO(ENG-1418): Propagate dialect info.
+    let dialect = Dialect::MySQL;
+
+    DfExpr::lower(expr, dialect, |nom_sql::Column { name, table, .. }| {
         let index = parent
             .borrow()
             .column_id_for_column(&Column::new(table, name))?;

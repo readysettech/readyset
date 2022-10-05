@@ -356,13 +356,10 @@ impl Expr {
     /// - Replacing unary negation with `(expr * -1)`
     /// - Replacing unary NOT with `(expr != 1)`
     /// - Inferring the type of each node in the expression AST.
-    pub fn lower<F>(expr: AstExpr, mut resolve_column: F) -> ReadySetResult<Self>
+    pub fn lower<F>(expr: AstExpr, dialect: Dialect, mut resolve_column: F) -> ReadySetResult<Self>
     where
         F: FnMut(Column) -> ReadySetResult<(usize, DfType)> + Copy,
     {
-        // TODO(ENG-1418): Propagate dialect info.
-        let dialect = Dialect::MySQL;
-
         match expr {
             AstExpr::Call(FunctionExpr::Call {
                 name: fname,
@@ -370,7 +367,7 @@ impl Expr {
             }) => {
                 let args = arguments
                     .into_iter()
-                    .map(|arg| Self::lower(arg, resolve_column))
+                    .map(|arg| Self::lower(arg, dialect, resolve_column))
                     .collect::<Result<Vec<_>, _>>()?;
                 let (func, ty) = BuiltinFunction::from_name_and_args(&fname, args)?;
                 Ok(Self::Call {
@@ -382,7 +379,7 @@ impl Expr {
                 let args = iter::once(string)
                     .chain(pos)
                     .chain(len)
-                    .map(|arg| Self::lower(*arg, resolve_column))
+                    .map(|arg| Self::lower(*arg, dialect, resolve_column))
                     .collect::<Result<Vec<_>, _>>()?;
                 let (func, ty) = BuiltinFunction::from_name_and_args("substring", args)?;
 
@@ -408,12 +405,12 @@ impl Expr {
             }
             AstExpr::BinaryOp { lhs, op, rhs } => {
                 // TODO: Consider rhs and op when inferring type
-                let left = Box::new(Self::lower(*lhs, resolve_column)?);
+                let left = Box::new(Self::lower(*lhs, dialect, resolve_column)?);
                 let ty = left.ty().clone();
                 Ok(Self::Op {
                     op,
                     left,
-                    right: Box::new(Self::lower(*rhs, resolve_column)?),
+                    right: Box::new(Self::lower(*rhs, dialect, resolve_column)?),
                     ty,
                 })
             }
@@ -421,7 +418,7 @@ impl Expr {
                 op: UnaryOperator::Neg,
                 rhs,
             } => {
-                let left = Box::new(Self::lower(*rhs, resolve_column)?);
+                let left = Box::new(Self::lower(*rhs, dialect, resolve_column)?);
                 // TODO: Negation may change type to signed
                 let ty = left.ty().clone();
                 Ok(Self::Op {
@@ -439,7 +436,7 @@ impl Expr {
                 rhs,
             } => Ok(Self::Op {
                 op: BinaryOperator::NotEqual,
-                left: Box::new(Self::lower(*rhs, resolve_column)?),
+                left: Box::new(Self::lower(*rhs, dialect, resolve_column)?),
                 right: Box::new(Self::Literal {
                     val: DfValue::Int(1),
                     ty: DfType::Int,
@@ -447,7 +444,7 @@ impl Expr {
                 ty: DfType::Bool, // type of NE is always bool
             }),
             AstExpr::Cast { expr, ty, .. } => Ok(Self::Cast {
-                expr: Box::new(Self::lower(*expr, resolve_column)?),
+                expr: Box::new(Self::lower(*expr, dialect, resolve_column)?),
                 ty: DfType::from_sql_type(&ty, dialect),
                 to_type: ty,
             }),
@@ -456,14 +453,16 @@ impl Expr {
                 then_expr,
                 else_expr,
             } => {
-                let then_expr = Box::new(Self::lower(*then_expr, resolve_column)?);
+                let then_expr = Box::new(Self::lower(*then_expr, dialect, resolve_column)?);
                 let ty = then_expr.ty().clone();
                 Ok(Self::CaseWhen {
                     // TODO: Do case arm types have to match? See if type is inferred at runtime
-                    condition: Box::new(Self::lower(*condition, resolve_column)?),
+                    condition: Box::new(Self::lower(*condition, dialect, resolve_column)?),
                     then_expr,
                     else_expr: match else_expr {
-                        Some(else_expr) => Box::new(Self::lower(*else_expr, resolve_column)?),
+                        Some(else_expr) => {
+                            Box::new(Self::lower(*else_expr, dialect, resolve_column)?)
+                        }
                         None => Box::new(Self::Literal {
                             val: DfValue::None,
                             ty: DfType::Unknown,
@@ -485,12 +484,12 @@ impl Expr {
                         (BinaryOperator::Equal, BinaryOperator::Or)
                     };
 
-                    let lhs = Self::lower(*lhs, resolve_column)?;
+                    let lhs = Self::lower(*lhs, dialect, resolve_column)?;
                     let make_comparison = |rhs| -> ReadySetResult<_> {
                         Ok(Self::Op {
                             left: Box::new(lhs.clone()),
                             op: comparison_op,
-                            right: Box::new(Self::lower(rhs, resolve_column)?),
+                            right: Box::new(Self::lower(rhs, dialect, resolve_column)?),
                             ty: DfType::Bool, // type of =/!= is always bool
                         })
                     };
@@ -549,7 +548,7 @@ mod tests {
         #[test]
         fn simple_column_reference() {
             let input = AstExpr::Column("t.x".into());
-            let result = Expr::lower(input, |c| {
+            let result = Expr::lower(input, Dialect::MySQL, |c| {
                 if c == "t.x".into() {
                     Ok((0, DfType::Int))
                 } else {
@@ -573,7 +572,7 @@ mod tests {
                 arguments: vec![AstExpr::Column("t.x".into()), AstExpr::Literal(2.into())],
             });
 
-            let result = Expr::lower(input, |c| {
+            let result = Expr::lower(input, Dialect::MySQL, |c| {
                 if c == "t.x".into() {
                     Ok((0, DfType::Int))
                 } else {
@@ -603,7 +602,7 @@ mod tests {
         #[test]
         fn call_concat_with_texts() {
             let input = parse_expr(Dialect::MySQL, "concat('My', 'SQ', 'L')").unwrap();
-            let res = Expr::lower(input, |_| internal!()).unwrap();
+            let res = Expr::lower(input, Dialect::MySQL, |_| internal!()).unwrap();
             assert_eq!(
                 res,
                 Expr::Call {
@@ -631,7 +630,7 @@ mod tests {
         #[test]
         fn substring_from_for() {
             let input = parse_expr(Dialect::MySQL, "substr(col from 1 for 7)").unwrap();
-            let res = Expr::lower(input, |c| {
+            let res = Expr::lower(input, Dialect::MySQL, |c| {
                 if c == "col".into() {
                     Ok((0, DfType::Text(Collation::Citext)))
                 } else {
@@ -664,7 +663,7 @@ mod tests {
         #[test]
         fn substr_regular() {
             let input = parse_expr(Dialect::MySQL, "substr('abcdefghi', 1, 7)").unwrap();
-            let res = Expr::lower(input, |_| internal!()).unwrap();
+            let res = Expr::lower(input, Dialect::MySQL, |_| internal!()).unwrap();
             assert_eq!(
                 res,
                 Expr::Call {
@@ -690,7 +689,7 @@ mod tests {
         #[test]
         fn substring_regular() {
             let input = parse_expr(Dialect::MySQL, "substring('abcdefghi', 1, 7)").unwrap();
-            let res = Expr::lower(input, |_| internal!()).unwrap();
+            let res = Expr::lower(input, Dialect::MySQL, |_| internal!()).unwrap();
             assert_eq!(
                 res,
                 Expr::Call {
@@ -716,7 +715,7 @@ mod tests {
         #[test]
         fn substring_without_string_arg() {
             let input = parse_expr(Dialect::MySQL, "substring(123 from 2)").unwrap();
-            let res = Expr::lower(input, |_| internal!()).unwrap();
+            let res = Expr::lower(input, Dialect::MySQL, |_| internal!()).unwrap();
             assert_eq!(res.ty(), &DfType::Text(Collation::default()));
         }
     }
