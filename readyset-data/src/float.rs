@@ -1,6 +1,5 @@
 use std::convert::TryInto;
 
-use nom_sql::SqlType;
 use readyset_errors::{ReadySetError, ReadySetResult};
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
@@ -37,7 +36,7 @@ where
     (val.round() as u64).try_into().ok()
 }
 
-pub(crate) fn coerce_f64(val: f64, to_ty: &SqlType, from_ty: &DfType) -> ReadySetResult<DfValue> {
+pub(crate) fn coerce_f64(val: f64, to_ty: &DfType, from_ty: &DfType) -> ReadySetResult<DfValue> {
     let err = |deets: &str| ReadySetError::DfValueConversionError {
         src_type: "Double".to_string(),
         target_type: to_ty.to_string(),
@@ -54,94 +53,86 @@ pub(crate) fn coerce_f64(val: f64, to_ty: &SqlType, from_ty: &DfType) -> ReadySe
         return Err(err("Nan not allowed"));
     }
 
-    match to_ty {
-        SqlType::Bool => Ok(DfValue::from(val != 0.0)),
+    match *to_ty {
+        DfType::Bool => Ok(DfValue::from(val != 0.0)),
 
-        SqlType::Float | SqlType::Real => {
+        DfType::Double => Ok(DfValue::Double(val)),
+
+        DfType::Float(_) => {
             let val = val as f32;
             if val.is_infinite() {
                 return Err(bounds_err());
             }
             Ok(DfValue::Float(val))
         }
-        SqlType::Double => Ok(DfValue::Double(val)),
 
-        SqlType::Numeric(_) | SqlType::Decimal(_, _) => Decimal::from_f64_retain(val)
-            .ok_or_else(bounds_err)
-            .map(DfValue::from),
-
-        SqlType::TinyInt(_) => coerce_f64_to_int::<i8>(val)
-            .ok_or_else(bounds_err)
-            .map(DfValue::from),
-        SqlType::SmallInt(_) => coerce_f64_to_int::<i16>(val)
-            .ok_or_else(bounds_err)
-            .map(DfValue::from),
-        SqlType::Int(_) | SqlType::Serial => coerce_f64_to_int::<i32>(val)
-            .ok_or_else(bounds_err)
-            .map(DfValue::from),
-        SqlType::BigInt(_) | SqlType::BigSerial => coerce_f64_to_int::<i64>(val)
+        DfType::Numeric { .. } => Decimal::from_f64_retain(val)
             .ok_or_else(bounds_err)
             .map(DfValue::from),
 
-        SqlType::UnsignedTinyInt(_) => coerce_f64_to_uint::<u8>(val)
+        DfType::TinyInt => coerce_f64_to_int::<i8>(val)
             .ok_or_else(bounds_err)
             .map(DfValue::from),
-        SqlType::UnsignedSmallInt(_) => coerce_f64_to_uint::<u16>(val)
+        DfType::UnsignedTinyInt => coerce_f64_to_uint::<u8>(val)
             .ok_or_else(bounds_err)
             .map(DfValue::from),
-        SqlType::UnsignedInt(_) => coerce_f64_to_uint::<u32>(val)
+        DfType::SmallInt => coerce_f64_to_int::<i16>(val)
             .ok_or_else(bounds_err)
             .map(DfValue::from),
-        SqlType::UnsignedBigInt(_) => coerce_f64_to_uint::<u64>(val)
+        DfType::UnsignedSmallInt => coerce_f64_to_uint::<u16>(val)
+            .ok_or_else(bounds_err)
+            .map(DfValue::from),
+        DfType::Int => coerce_f64_to_int::<i32>(val)
+            .ok_or_else(bounds_err)
+            .map(DfValue::from),
+        DfType::UnsignedInt => coerce_f64_to_uint::<u32>(val)
+            .ok_or_else(bounds_err)
+            .map(DfValue::from),
+        DfType::BigInt => coerce_f64_to_int::<i64>(val)
+            .ok_or_else(bounds_err)
+            .map(DfValue::from),
+        DfType::UnsignedBigInt => coerce_f64_to_uint::<u64>(val)
             .ok_or_else(bounds_err)
             .map(DfValue::from),
 
         // The numeric cast from f64 to usize will round down, which is what we want for enums:
-        SqlType::Enum(elements) => Ok(r#enum::apply_enum_limits(val as usize, elements).into()),
+        DfType::Enum(ref elements, _) => {
+            Ok(r#enum::apply_enum_limits(val as usize, elements).into())
+        }
 
-        SqlType::TinyText
-        | SqlType::MediumText
-        | SqlType::Text
-        | SqlType::LongText
-        | SqlType::Char(None)
-        | SqlType::VarChar(None) => Ok(val.to_string().into()),
+        DfType::Text { .. } => Ok(val.to_string().into()),
 
-        SqlType::VarChar(Some(l)) => {
+        DfType::VarChar(l, ..) => {
             let mut val = val.to_string();
-            val.truncate(*l as usize);
+            val.truncate(l as usize);
             Ok(val.to_string().into())
         }
 
-        SqlType::Char(Some(l)) => {
+        DfType::Char(l, ..) => {
             let mut val = val.to_string();
-            val.truncate(*l as usize);
-            val.extend(std::iter::repeat(' ').take((*l as usize).saturating_sub(val.len())));
+            val.truncate(l as usize);
+            val.extend(std::iter::repeat(' ').take((l as usize).saturating_sub(val.len())));
             Ok(val.into())
         }
 
-        SqlType::TinyBlob
-        | SqlType::MediumBlob
-        | SqlType::Blob
-        | SqlType::LongBlob
-        | SqlType::ByteArray
-        | SqlType::Binary(None) => Ok(DfValue::ByteArray(val.to_string().into_bytes().into())),
+        DfType::Blob(_) => Ok(DfValue::ByteArray(val.to_string().into_bytes().into())),
 
-        SqlType::VarBinary(l) => {
+        DfType::VarBinary(l) => {
             let mut val = val.to_string();
-            val.truncate(*l as usize);
+            val.truncate(l as usize);
             Ok(val.to_string().into_bytes().into())
         }
 
-        SqlType::Binary(Some(l)) => {
+        DfType::Binary(l) => {
             let mut val = val.to_string();
-            val.truncate(*l as usize);
-            val.extend(std::iter::repeat(' ').take((*l as usize).saturating_sub(val.len())));
+            val.truncate(l as usize);
+            val.extend(std::iter::repeat(' ').take((l as usize).saturating_sub(val.len())));
             Ok(val.into_bytes().into())
         }
 
-        SqlType::Json | SqlType::Jsonb => Ok(val.to_string().into()),
+        DfType::Json(_) | DfType::Jsonb => Ok(val.to_string().into()),
 
-        SqlType::Time => {
+        DfType::Time { .. } => {
             // https://dev.mysql.com/doc/refman/8.0/en/date-and-time-literals.html
             // As a number in hhmmss format, provided that it makes sense as a time. For
             // example, 101112 is understood as '10:11:12'. The following
@@ -154,26 +145,28 @@ pub(crate) fn coerce_f64(val: f64, to_ty: &SqlType, from_ty: &DfType) -> ReadySe
             Ok(mysql_time::MySqlTime::from_hmsus(true, hh as _, mm as _, ss as _, ms).into())
         }
 
-        SqlType::Date | SqlType::DateTime(_) | SqlType::Timestamp | SqlType::TimestampTz => {
-            crate::integer::coerce_integer(
-                coerce_f64_to_int::<i64>(val).ok_or_else(bounds_err)?,
-                to_ty,
-                from_ty,
-            )
-        }
+        DfType::Date
+        | DfType::DateTime { .. }
+        | DfType::Timestamp { .. }
+        | DfType::TimestampTz { .. } => crate::integer::coerce_integer(
+            coerce_f64_to_int::<i64>(val).ok_or_else(bounds_err)?,
+            to_ty,
+            from_ty,
+        ),
 
-        SqlType::MacAddr
-        | SqlType::Inet
-        | SqlType::Uuid
-        | SqlType::Bit(_)
-        | SqlType::VarBit(_)
-        | SqlType::Array(_) => Err(err("not allowed")),
+        DfType::Unknown
+        | DfType::MacAddr
+        | DfType::Inet
+        | DfType::Uuid
+        | DfType::Bit(_)
+        | DfType::VarBit(_)
+        | DfType::Array(_) => Err(err("not allowed")),
     }
 }
 
 pub(crate) fn coerce_decimal(
     val: &Decimal,
-    to_ty: &SqlType,
+    to_ty: &DfType,
     from_ty: &DfType,
 ) -> ReadySetResult<DfValue> {
     let err = || ReadySetError::DfValueConversionError {
@@ -182,92 +175,82 @@ pub(crate) fn coerce_decimal(
         details: "out of bounds".to_string(),
     };
 
-    match to_ty {
-        SqlType::Bool => Ok(DfValue::from(!val.is_zero())),
+    match *to_ty {
+        DfType::Numeric { .. } => Ok(DfValue::from(*val)),
 
-        SqlType::Float | SqlType::Real => val
+        DfType::Bool => Ok(DfValue::from(!val.is_zero())),
+
+        DfType::TinyInt => val.to_i8().ok_or_else(err).map(DfValue::from),
+        DfType::UnsignedTinyInt => val.to_u8().ok_or_else(err).map(DfValue::from),
+        DfType::SmallInt => val.to_i16().ok_or_else(err).map(DfValue::from),
+        DfType::UnsignedSmallInt => val.to_u16().ok_or_else(err).map(DfValue::from),
+        DfType::Int => val.to_i32().ok_or_else(err).map(DfValue::from),
+        DfType::UnsignedInt => val.to_u32().ok_or_else(err).map(DfValue::from),
+        DfType::BigInt => val.to_i64().ok_or_else(err).map(DfValue::from),
+        DfType::UnsignedBigInt => val.to_u64().ok_or_else(err).map(DfValue::from),
+
+        DfType::Float(_) => val
             .to_f32()
             .and_then(|v| if v.is_finite() { Some(v) } else { None })
             .ok_or_else(err)
             .map(DfValue::Float),
-        SqlType::Double => val
+        DfType::Double => val
             .to_f64()
             .and_then(|v| if v.is_finite() { Some(v) } else { None })
             .ok_or_else(err)
             .map(DfValue::Double),
 
-        SqlType::Decimal(_, _) | SqlType::Numeric(_) => Ok(DfValue::from(*val)),
-
-        SqlType::TinyInt(_) => val.to_i8().ok_or_else(err).map(DfValue::from),
-        SqlType::SmallInt(_) => val.to_i16().ok_or_else(err).map(DfValue::from),
-        SqlType::Int(_) | SqlType::Serial => val.to_i32().ok_or_else(err).map(DfValue::from),
-        SqlType::BigInt(_) | SqlType::BigSerial => val.to_i64().ok_or_else(err).map(DfValue::from),
-
-        SqlType::UnsignedTinyInt(_) => val.to_u8().ok_or_else(err).map(DfValue::from),
-        SqlType::UnsignedSmallInt(_) => val.to_u16().ok_or_else(err).map(DfValue::from),
-        SqlType::UnsignedInt(_) => val.to_u32().ok_or_else(err).map(DfValue::from),
-        SqlType::UnsignedBigInt(_) => val.to_u64().ok_or_else(err).map(DfValue::from),
-
-        SqlType::Enum(elements) => {
+        DfType::Enum(ref elements, _) => {
             Ok(r#enum::apply_enum_limits(usize::try_from(*val).unwrap_or(0), elements).into())
         }
 
-        SqlType::TinyText
-        | SqlType::MediumText
-        | SqlType::Text
-        | SqlType::LongText
-        | SqlType::Char(None)
-        | SqlType::VarChar(None) => Ok(val.to_string().into()),
+        DfType::Text { .. } => Ok(val.to_string().into()),
 
-        SqlType::VarChar(Some(l)) => {
+        DfType::VarChar(l, ..) => {
             let mut val = val.to_string();
-            val.truncate(*l as usize);
+            val.truncate(l as usize);
             Ok(val.to_string().into())
         }
 
-        SqlType::Char(Some(l)) => {
+        DfType::Char(l, ..) => {
             let mut val = val.to_string();
-            val.truncate(*l as usize);
-            val.extend(std::iter::repeat(' ').take((*l as usize).saturating_sub(val.len())));
+            val.truncate(l as usize);
+            val.extend(std::iter::repeat(' ').take((l as usize).saturating_sub(val.len())));
             Ok(val.into())
         }
 
-        SqlType::TinyBlob
-        | SqlType::MediumBlob
-        | SqlType::Blob
-        | SqlType::LongBlob
-        | SqlType::ByteArray
-        | SqlType::Binary(None) => Ok(DfValue::ByteArray(val.to_string().into_bytes().into())),
+        DfType::Blob(_) => Ok(DfValue::ByteArray(val.to_string().into_bytes().into())),
 
-        SqlType::VarBinary(l) => {
+        DfType::VarBinary(l) => {
             let mut val = val.to_string();
-            val.truncate(*l as usize);
+            val.truncate(l as usize);
             Ok(val.to_string().into_bytes().into())
         }
 
-        SqlType::Binary(Some(l)) => {
+        DfType::Binary(l) => {
             let mut val = val.to_string();
-            val.truncate(*l as usize);
-            val.extend(std::iter::repeat(' ').take((*l as usize).saturating_sub(val.len())));
+            val.truncate(l as usize);
+            val.extend(std::iter::repeat(' ').take((l as usize).saturating_sub(val.len())));
             Ok(val.into_bytes().into())
         }
 
-        SqlType::Json | SqlType::Jsonb => Ok(val.to_string().into()),
+        DfType::Json(_) | DfType::Jsonb => Ok(val.to_string().into()),
 
-        SqlType::Date
-        | SqlType::DateTime(_)
-        | SqlType::Time
-        | SqlType::Timestamp
-        | SqlType::TimestampTz => {
+        DfType::Date
+        | DfType::DateTime { .. }
+        | DfType::Time { .. }
+        | DfType::Timestamp { .. }
+        | DfType::TimestampTz { .. } => {
             crate::integer::coerce_integer(val.to_i64().ok_or_else(err)?, to_ty, from_ty)
         }
 
-        SqlType::MacAddr
-        | SqlType::Inet
-        | SqlType::Uuid
-        | SqlType::Bit(_)
-        | SqlType::VarBit(_)
-        | SqlType::Array(_) => Err(ReadySetError::DfValueConversionError {
+        DfType::Unknown
+        | DfType::MacAddr
+        | DfType::Inet
+        | DfType::Uuid
+        | DfType::Bit(_)
+        | DfType::VarBit(_)
+        | DfType::Array(_) => Err(ReadySetError::DfValueConversionError {
             src_type: "Decimal".to_string(),
             target_type: to_ty.to_string(),
             details: "Not allowed".to_string(),
@@ -277,32 +260,32 @@ pub(crate) fn coerce_decimal(
 
 #[cfg(test)]
 mod tests {
+    use nom_sql::Dialect;
     use test_strategy::proptest;
 
     use super::*;
-    use crate::{DfType, DfValue};
+    use crate::Collation;
 
     #[proptest]
     fn float_to_tinyint(val: f32) {
         if val < i8::MIN as f32 - 0.5 || val >= i8::MAX as f32 + 0.5 {
             DfValue::Double(val as _)
-                .coerce_to(&SqlType::TinyInt(None), &DfType::Unknown)
+                .coerce_to(&DfType::TinyInt, &DfType::Unknown)
                 .expect_err("OOB");
         } else {
             assert_eq!(
-                DfValue::Double(val as f64).coerce_to(&SqlType::TinyInt(None), &DfType::Unknown),
+                DfValue::Double(val as f64).coerce_to(&DfType::TinyInt, &DfType::Unknown),
                 Ok(DfValue::Int(val.round() as i64))
             );
         }
         // Yes, this is indeed the valid range for MySQL float to u8 conversion
         if val < -0.5f32 || val >= u8::MAX as f32 + 0.5 {
             DfValue::Double(val as _)
-                .coerce_to(&SqlType::UnsignedTinyInt(None), &DfType::Unknown)
+                .coerce_to(&DfType::UnsignedTinyInt, &DfType::Unknown)
                 .expect_err("OOB");
         } else {
             assert_eq!(
-                DfValue::Double(val as f64)
-                    .coerce_to(&SqlType::UnsignedTinyInt(None), &DfType::Unknown),
+                DfValue::Double(val as f64).coerce_to(&DfType::UnsignedTinyInt, &DfType::Unknown),
                 Ok(DfValue::UnsignedInt(val.round() as u64))
             );
         }
@@ -312,22 +295,21 @@ mod tests {
     fn float_to_smallint(val: f32) {
         if val < i16::MIN as f32 - 0.5 || val >= i16::MAX as f32 + 0.5 {
             DfValue::Double(val as _)
-                .coerce_to(&SqlType::SmallInt(None), &DfType::Unknown)
+                .coerce_to(&DfType::SmallInt, &DfType::Unknown)
                 .expect_err("OOB");
         } else {
             assert_eq!(
-                DfValue::Double(val as f64).coerce_to(&SqlType::SmallInt(None), &DfType::Unknown),
+                DfValue::Double(val as f64).coerce_to(&DfType::SmallInt, &DfType::Unknown),
                 Ok(DfValue::Int(val.round() as i64))
             );
         }
         if val < -0.5f32 || val >= u16::MAX as f32 + 0.5 {
             DfValue::Double(val as _)
-                .coerce_to(&SqlType::UnsignedSmallInt(None), &DfType::Unknown)
+                .coerce_to(&DfType::UnsignedSmallInt, &DfType::Unknown)
                 .expect_err("OOB");
         } else {
             assert_eq!(
-                DfValue::Double(val as f64)
-                    .coerce_to(&SqlType::UnsignedSmallInt(None), &DfType::Unknown),
+                DfValue::Double(val as f64).coerce_to(&DfType::UnsignedSmallInt, &DfType::Unknown),
                 Ok(DfValue::UnsignedInt(val.round() as u64))
             );
         }
@@ -337,22 +319,21 @@ mod tests {
     fn float_to_int(val: f64) {
         if val < i32::MIN as f64 - 0.5 || val >= i32::MAX as f64 + 0.5 {
             DfValue::Double(val as _)
-                .coerce_to(&SqlType::Int(None), &DfType::Unknown)
+                .coerce_to(&DfType::Int, &DfType::Unknown)
                 .expect_err("OOB");
         } else {
             assert_eq!(
-                DfValue::Double(val as f64).coerce_to(&SqlType::Int(None), &DfType::Unknown),
+                DfValue::Double(val as f64).coerce_to(&DfType::Int, &DfType::Unknown),
                 Ok(DfValue::Int(val.round() as i64))
             );
         }
         if val < -0.5f64 || val >= u32::MAX as f64 + 0.5 {
             DfValue::Double(val as _)
-                .coerce_to(&SqlType::UnsignedInt(None), &DfType::Unknown)
+                .coerce_to(&DfType::UnsignedInt, &DfType::Unknown)
                 .expect_err("OOB");
         } else {
             assert_eq!(
-                DfValue::Double(val as f64)
-                    .coerce_to(&SqlType::UnsignedInt(None), &DfType::Unknown),
+                DfValue::Double(val as f64).coerce_to(&DfType::UnsignedInt, &DfType::Unknown),
                 Ok(DfValue::UnsignedInt(val.round() as u64))
             );
         }
@@ -362,22 +343,21 @@ mod tests {
     fn float_to_bigint(val: f64) {
         if val < i64::MIN as f64 - 0.5 || val >= i64::MAX as f64 + 0.5 {
             DfValue::Double(val as _)
-                .coerce_to(&SqlType::BigInt(None), &DfType::Unknown)
+                .coerce_to(&DfType::BigInt, &DfType::Unknown)
                 .expect_err("OOB");
         } else {
             assert_eq!(
-                DfValue::Double(val as f64).coerce_to(&SqlType::BigInt(None), &DfType::Unknown),
+                DfValue::Double(val as f64).coerce_to(&DfType::BigInt, &DfType::Unknown),
                 Ok(DfValue::Int(val.round() as i64))
             );
         }
         if val < -0.5f64 || val >= u64::MAX as f64 + 0.5 {
             DfValue::Double(val as _)
-                .coerce_to(&SqlType::UnsignedBigInt(None), &DfType::Unknown)
+                .coerce_to(&DfType::UnsignedBigInt, &DfType::Unknown)
                 .expect_err("OOB");
         } else {
             assert_eq!(
-                DfValue::Double(val as f64)
-                    .coerce_to(&SqlType::UnsignedBigInt(None), &DfType::Unknown),
+                DfValue::Double(val as f64).coerce_to(&DfType::UnsignedBigInt, &DfType::Unknown),
                 Ok(DfValue::UnsignedInt(val.round() as u64))
             );
         }
@@ -387,42 +367,45 @@ mod tests {
     fn float_to_text() {
         assert_eq!(
             DfValue::Double(312.0)
-                .coerce_to(&SqlType::Text, &DfType::Unknown)
+                .coerce_to(&DfType::Text(Collation::default()), &DfType::Unknown)
                 .unwrap(),
             DfValue::from("312")
         );
 
         assert_eq!(
             DfValue::Double(312.222222)
-                .coerce_to(&SqlType::Text, &DfType::Unknown)
+                .coerce_to(&DfType::Text(Collation::default()), &DfType::Unknown)
                 .unwrap(),
             DfValue::from("312.222222")
         );
 
         assert_eq!(
             DfValue::Double(1e4)
-                .coerce_to(&SqlType::Text, &DfType::Unknown)
+                .coerce_to(&DfType::Text(Collation::default()), &DfType::Unknown)
                 .unwrap(),
             DfValue::from("10000")
         );
 
         assert_eq!(
             DfValue::Double(1e4)
-                .coerce_to(&SqlType::VarChar(Some(2)), &DfType::Unknown)
+                .coerce_to(&DfType::VarChar(2, Collation::default()), &DfType::Unknown)
                 .unwrap(),
             DfValue::from("10")
         );
 
         assert_eq!(
             DfValue::Double(1e4)
-                .coerce_to(&SqlType::Char(Some(8)), &DfType::Unknown)
+                .coerce_to(
+                    &DfType::Char(8, Collation::default(), Dialect::MySQL),
+                    &DfType::Unknown
+                )
                 .unwrap(),
             DfValue::from("10000   ")
         );
 
         assert_eq!(
             DfValue::Double(-1.0 / 3.0)
-                .coerce_to(&SqlType::Text, &DfType::Unknown)
+                .coerce_to(&DfType::Text(Collation::default()), &DfType::Unknown)
                 .unwrap(),
             DfValue::from("-0.3333333333333333")
         );
@@ -432,7 +415,7 @@ mod tests {
     fn float_to_json() {
         assert_eq!(
             DfValue::Double(-5000.0)
-                .coerce_to(&SqlType::Json, &DfType::Unknown)
+                .coerce_to(&DfType::Json(Dialect::MySQL), &DfType::Unknown)
                 .unwrap(),
             DfValue::from("-5000")
         );
@@ -441,79 +424,78 @@ mod tests {
     #[test]
     fn float_to_int_manual() {
         assert_eq!(
-            DfValue::Float(-0.6874218).coerce_to(&SqlType::TinyInt(None), &DfType::Unknown),
+            DfValue::Float(-0.6874218).coerce_to(&DfType::TinyInt, &DfType::Unknown),
             Ok(DfValue::Int(-1))
         );
 
         assert_eq!(
-            DfValue::Float(0.6874218).coerce_to(&SqlType::TinyInt(None), &DfType::Unknown),
+            DfValue::Float(0.6874218).coerce_to(&DfType::TinyInt, &DfType::Unknown),
             Ok(DfValue::Int(1))
         );
 
         DfValue::Float(-128.9039)
-            .coerce_to(&SqlType::TinyInt(None), &DfType::Unknown)
+            .coerce_to(&DfType::TinyInt, &DfType::Unknown)
             .unwrap_err();
 
         DfValue::Float(127.9039)
-            .coerce_to(&SqlType::TinyInt(None), &DfType::Unknown)
+            .coerce_to(&DfType::TinyInt, &DfType::Unknown)
             .unwrap_err();
 
         assert_eq!(
-            DfValue::Float(-128.4039).coerce_to(&SqlType::TinyInt(None), &DfType::Unknown),
+            DfValue::Float(-128.4039).coerce_to(&DfType::TinyInt, &DfType::Unknown),
             Ok(DfValue::Int(-128))
         );
 
         assert_eq!(
-            DfValue::Float(127.4039).coerce_to(&SqlType::TinyInt(None), &DfType::Unknown),
+            DfValue::Float(127.4039).coerce_to(&DfType::TinyInt, &DfType::Unknown),
             Ok(DfValue::Int(127))
         );
 
         assert_eq!(
-            DfValue::Float(0.5).coerce_to(&SqlType::UnsignedTinyInt(None), &DfType::Unknown),
+            DfValue::Float(0.5).coerce_to(&DfType::UnsignedTinyInt, &DfType::Unknown),
             Ok(DfValue::UnsignedInt(1))
         );
 
         assert_eq!(
-            DfValue::Float(0.687_421_9)
-                .coerce_to(&SqlType::UnsignedTinyInt(None), &DfType::Unknown),
+            DfValue::Float(0.687_421_9).coerce_to(&DfType::UnsignedTinyInt, &DfType::Unknown),
             Ok(DfValue::UnsignedInt(1))
         );
 
         assert_eq!(
-            DfValue::Float(255.49).coerce_to(&SqlType::UnsignedTinyInt(None), &DfType::Unknown),
+            DfValue::Float(255.49).coerce_to(&DfType::UnsignedTinyInt, &DfType::Unknown),
             Ok(DfValue::UnsignedInt(255))
         );
 
         DfValue::Float(255.5)
-            .coerce_to(&SqlType::UnsignedTinyInt(None), &DfType::Unknown)
+            .coerce_to(&DfType::UnsignedTinyInt, &DfType::Unknown)
             .unwrap_err();
 
         assert_eq!(
-            DfValue::Float(65535.49).coerce_to(&SqlType::UnsignedSmallInt(None), &DfType::Unknown),
+            DfValue::Float(65535.49).coerce_to(&DfType::UnsignedSmallInt, &DfType::Unknown),
             Ok(DfValue::UnsignedInt(65535))
         );
 
         DfValue::Float(65535.5)
-            .coerce_to(&SqlType::UnsignedSmallInt(None), &DfType::Unknown)
+            .coerce_to(&DfType::UnsignedSmallInt, &DfType::Unknown)
             .unwrap_err();
 
         assert_eq!(
-            DfValue::Double(4294967295.49).coerce_to(&SqlType::UnsignedInt(None), &DfType::Unknown),
+            DfValue::Double(4294967295.49).coerce_to(&DfType::UnsignedInt, &DfType::Unknown),
             Ok(DfValue::UnsignedInt(4294967295))
         );
 
         DfValue::Double(4294967295.5)
-            .coerce_to(&SqlType::UnsignedInt(None), &DfType::Unknown)
+            .coerce_to(&DfType::UnsignedInt, &DfType::Unknown)
             .unwrap_err();
 
         // Since u64 max is not accurately representable as a doulbe, there are no exact conversions
         DfValue::Double(18446744073709551613.49)
-            .coerce_to(&SqlType::UnsignedBigInt(None), &DfType::Unknown)
+            .coerce_to(&DfType::UnsignedBigInt, &DfType::Unknown)
             .unwrap_err();
 
         assert_eq!(
             DfValue::Double(17946744073709551610.49)
-                .coerce_to(&SqlType::UnsignedBigInt(None), &DfType::Unknown),
+                .coerce_to(&DfType::UnsignedBigInt, &DfType::Unknown),
             Ok(DfValue::UnsignedInt(17946744073709551616))
         );
     }

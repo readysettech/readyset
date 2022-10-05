@@ -4,10 +4,10 @@ use std::sync::Arc;
 
 use bit_vec::BitVec;
 use mysql_time::MySqlTime;
-use nom_sql::SqlType;
+use nom_sql::Dialect;
 use postgres_types::Kind;
 use readyset::ReadySetError;
-use readyset_data::{Array, DfType, DfValue};
+use readyset_data::{Array, Collation, DfType, DfValue};
 use rust_decimal::prelude::FromStr;
 use rust_decimal::Decimal;
 use tokio_postgres as pgsql;
@@ -354,29 +354,33 @@ impl wal::TupleData {
 
                     let val = match spec.data_type.kind() {
                         Kind::Array(member_type) => {
-                            let target_sql_type = SqlType::Array(Box::new(match *member_type {
-                                PGType::BOOL => SqlType::Bool,
-                                PGType::CHAR => SqlType::Char(None),
-                                PGType::VARCHAR => SqlType::VarChar(None),
-                                PGType::INT4 => SqlType::Int(None),
-                                PGType::INT8 => SqlType::BigInt(None),
-                                PGType::INT2 => SqlType::SmallInt(None),
-                                PGType::FLOAT4 => SqlType::Real,
-                                PGType::FLOAT8 => SqlType::Double,
-                                PGType::TEXT => SqlType::Text,
-                                PGType::TIMESTAMP => SqlType::Timestamp,
-                                PGType::TIMESTAMPTZ => SqlType::TimestampTz,
-                                PGType::JSON => SqlType::Json,
-                                PGType::JSONB => SqlType::Jsonb,
-                                PGType::DATE => SqlType::Date,
-                                PGType::TIME => SqlType::Time,
-                                PGType::NUMERIC => SqlType::Numeric(None),
-                                PGType::BYTEA => SqlType::ByteArray,
-                                PGType::MACADDR => SqlType::MacAddr,
-                                PGType::INET => SqlType::Inet,
-                                PGType::UUID => SqlType::Uuid,
-                                PGType::BIT => SqlType::Bit(None),
-                                PGType::VARBIT => SqlType::VarBit(None),
+                            let dialect = Dialect::PostgreSQL;
+                            let subsecond_digits = dialect.default_subsecond_digits();
+
+                            let target_type = DfType::Array(Box::new(match *member_type {
+                                PGType::BOOL => DfType::Bool,
+                                PGType::CHAR => DfType::Char(1, Collation::default(), dialect),
+                                PGType::TEXT | PGType::VARCHAR => {
+                                    DfType::Text(Collation::default())
+                                }
+                                PGType::INT2 => DfType::SmallInt,
+                                PGType::INT4 => DfType::Int,
+                                PGType::INT8 => DfType::BigInt,
+                                PGType::FLOAT4 => DfType::Float(dialect),
+                                PGType::FLOAT8 => DfType::Double,
+                                PGType::TIMESTAMP => DfType::Timestamp { subsecond_digits },
+                                PGType::TIMESTAMPTZ => DfType::TimestampTz { subsecond_digits },
+                                PGType::JSON => DfType::Json(dialect),
+                                PGType::JSONB => DfType::Jsonb,
+                                PGType::DATE => DfType::Date,
+                                PGType::TIME => DfType::Time { subsecond_digits },
+                                PGType::NUMERIC => DfType::DEFAULT_NUMERIC,
+                                PGType::BYTEA => DfType::Blob(dialect),
+                                PGType::MACADDR => DfType::MacAddr,
+                                PGType::INET => DfType::Inet,
+                                PGType::UUID => DfType::Uuid,
+                                PGType::BIT => DfType::DEFAULT_BIT,
+                                PGType::VARBIT => DfType::VarBit(None),
                                 _ => {
                                     return Err(WalError::UnsupportedTypeConversion {
                                         ty: spec.data_type.clone(),
@@ -387,7 +391,7 @@ impl wal::TupleData {
                             }));
 
                             DfValue::from(str.parse::<Array>()?)
-                                .coerce_to(&target_sql_type, &DfType::Unknown)?
+                                .coerce_to(&target_type, &DfType::Unknown)?
                         }
                         _ => match spec.data_type {
                             PGType::BOOL => DfValue::UnsignedInt(match str.as_ref() {

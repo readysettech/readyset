@@ -13,12 +13,12 @@ use mysql_srv::{
     CachedSchema, Column, ColumnFlags, ColumnType, InitWriter, MsqlSrvError, MySqlShim,
     QueryResultWriter, RowWriter, StatementMetaWriter,
 };
-use nom_sql::{Dialect, SqlType};
+use nom_sql::Dialect;
 use readyset_client::backend::noria_connector::MetaVariable;
 use readyset_client::backend::{
     noria_connector, QueryResult, SinglePrepareResult, UpstreamPrepare,
 };
-use readyset_data::{DfType, DfValue, DfValueKind};
+use readyset_data::{Collation, DfType, DfValue, DfValueKind};
 use readyset_errors::{internal, internal_err, ReadySetError};
 use streaming_iterator::StreamingIterator;
 use tokio::io::{self, AsyncWrite};
@@ -50,7 +50,10 @@ async fn write_column<W: AsyncWrite + Unpin>(
         // variant.
         DfValue::Int(i) => {
             if ty.is_enum() {
-                rw.write_col(c.coerce_to(&SqlType::Text, ty)?.to_string())
+                rw.write_col(
+                    c.coerce_to(&DfType::Text(Collation::default()), ty)?
+                        .to_string(),
+                )
             } else if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
                 rw.write_col(i as usize)
             } else {
@@ -59,7 +62,10 @@ async fn write_column<W: AsyncWrite + Unpin>(
         }
         DfValue::UnsignedInt(i) => {
             if ty.is_enum() {
-                rw.write_col(c.coerce_to(&SqlType::Text, ty)?.to_string())
+                rw.write_col(
+                    c.coerce_to(&DfType::Text(Collation::default()), ty)?
+                        .to_string(),
+                )
             } else if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
                 rw.write_col(i as usize)
             } else {

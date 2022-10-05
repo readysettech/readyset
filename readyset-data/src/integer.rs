@@ -5,7 +5,7 @@ use std::sync::Arc;
 use readyset_errors::{ReadySetError, ReadySetResult};
 use rust_decimal::Decimal;
 
-use crate::{r#enum, DfType, DfValue, SqlType};
+use crate::{r#enum, DfType, DfValue};
 
 /// A convenience trait that implements casts of i64 and u64 to f32 and f64
 pub(crate) trait IntAsFloat {
@@ -45,11 +45,7 @@ impl IntAsFloat for u32 {
 /// Note that this only handles converting *integer types*, not other types with values represented
 /// as integers (for example, enums). The conversion logic for other such types is implemented
 /// elsewhere.
-pub(crate) fn coerce_integer<I>(
-    val: I,
-    to_ty: &SqlType,
-    from_ty: &DfType,
-) -> ReadySetResult<DfValue>
+pub(crate) fn coerce_integer<I>(val: I, to_ty: &DfType, from_ty: &DfType) -> ReadySetResult<DfValue>
 where
     i8: TryFrom<I>,
     i16: TryFrom<I>,
@@ -69,76 +65,55 @@ where
         details: "out of bounds".to_string(),
     };
 
-    match to_ty {
-        SqlType::Bool => {
-            #[allow(clippy::eq_op)]
-            {
-                Ok(DfValue::from(val ^ val != val))
-            }
-        }
-        SqlType::TinyInt(_) => i8::try_from(val).map_err(|_| err()).map(DfValue::from),
-        SqlType::SmallInt(_) => i16::try_from(val).map_err(|_| err()).map(DfValue::from),
-        SqlType::Int(_) | SqlType::Serial => {
-            i32::try_from(val).map_err(|_| err()).map(DfValue::from)
-        }
-        SqlType::BigInt(_) | SqlType::BigSerial => {
-            i64::try_from(val).map_err(|_| err()).map(DfValue::from)
-        }
-        SqlType::UnsignedTinyInt(_) => u8::try_from(val).map_err(|_| err()).map(DfValue::from),
-        SqlType::UnsignedSmallInt(_) => u16::try_from(val).map_err(|_| err()).map(DfValue::from),
-        SqlType::UnsignedInt(_) => u32::try_from(val).map_err(|_| err()).map(DfValue::from),
-        SqlType::UnsignedBigInt(_) => u64::try_from(val).map_err(|_| err()).map(DfValue::from),
+    match *to_ty {
+        #[allow(clippy::eq_op)]
+        DfType::Bool => Ok(DfValue::from(val ^ val != val)),
 
-        SqlType::Enum(elements) => {
-            // Values above the number of elements are converted to 0 by MySQL, and anything that
-            // can't be held in a usize is certainly too high, hence the .unwrap_or(0)
-            let idx = usize::try_from(val).unwrap_or(0);
-            Ok(DfValue::from(r#enum::apply_enum_limits(idx, elements)))
-        }
+        DfType::TinyInt => i8::try_from(val).map_err(|_| err()).map(DfValue::from),
+        DfType::UnsignedTinyInt => u8::try_from(val).map_err(|_| err()).map(DfValue::from),
+        DfType::SmallInt => i16::try_from(val).map_err(|_| err()).map(DfValue::from),
+        DfType::UnsignedSmallInt => u16::try_from(val).map_err(|_| err()).map(DfValue::from),
+        DfType::Int => i32::try_from(val).map_err(|_| err()).map(DfValue::from),
+        DfType::UnsignedInt => u32::try_from(val).map_err(|_| err()).map(DfValue::from),
+        DfType::BigInt => i64::try_from(val).map_err(|_| err()).map(DfValue::from),
+        DfType::UnsignedBigInt => u64::try_from(val).map_err(|_| err()).map(DfValue::from),
 
-        SqlType::TinyText
-        | SqlType::MediumText
-        | SqlType::Text
-        | SqlType::LongText
-        | SqlType::Char(None)
-        | SqlType::VarChar(None) => Ok(val.to_string().into()),
+        DfType::Float(_) => Ok(DfValue::Float(val.to_f32())),
+        DfType::Double => Ok(DfValue::Double(val.to_f64())),
 
-        SqlType::VarChar(Some(l)) => {
+        DfType::Text { .. } => Ok(val.to_string().into()),
+
+        DfType::VarChar(l, ..) => {
             let mut val = val.to_string();
-            val.truncate(*l as usize);
+            val.truncate(l as usize);
             Ok(val.to_string().into())
         }
 
-        SqlType::Char(Some(l)) => {
+        DfType::Char(l, ..) => {
             let mut val = val.to_string();
-            val.truncate(*l as usize);
-            val.extend(std::iter::repeat(' ').take((*l as usize).saturating_sub(val.len())));
+            val.truncate(l as usize);
+            val.extend(std::iter::repeat(' ').take((l as usize).saturating_sub(val.len())));
             Ok(val.into())
         }
 
-        SqlType::TinyBlob
-        | SqlType::MediumBlob
-        | SqlType::Blob
-        | SqlType::LongBlob
-        | SqlType::ByteArray
-        | SqlType::Binary(None) => Ok(DfValue::ByteArray(val.to_string().into_bytes().into())),
+        DfType::Blob(_) => Ok(val.to_string().into_bytes().into()),
 
-        SqlType::VarBinary(l) => {
+        DfType::VarBinary(l) => {
             let mut val = val.to_string();
-            val.truncate(*l as usize);
+            val.truncate(l as usize);
             Ok(val.to_string().into_bytes().into())
         }
 
-        SqlType::Binary(Some(l)) => {
+        DfType::Binary(l) => {
             let mut val = val.to_string();
-            val.truncate(*l as usize);
-            val.extend(std::iter::repeat(' ').take((*l as usize).saturating_sub(val.len())));
+            val.truncate(l as usize);
+            val.extend(std::iter::repeat(' ').take((l as usize).saturating_sub(val.len())));
             Ok(val.into_bytes().into())
         }
 
-        SqlType::Json | SqlType::Jsonb => Ok(format!("\"{}\"", val).into()),
+        DfType::Json(_) | DfType::Jsonb => Ok(format!("\"{}\"", val).into()),
 
-        SqlType::Date => {
+        DfType::Date => {
             // https://dev.mysql.com/doc/refman/8.0/en/date-and-time-literals.html
             // As a number in either YYYYMMDD or YYMMDD format, provided that the number makes sense
             // as a date. For example, 19830905 and 830905 are interpreted as '1983-09-05'.
@@ -158,7 +133,7 @@ where
             )
         }
 
-        SqlType::Timestamp | SqlType::TimestampTz | SqlType::DateTime(_) => {
+        DfType::Timestamp { .. } | DfType::TimestampTz { .. } | DfType::DateTime { .. } => {
             // https://dev.mysql.com/doc/refman/8.0/en/date-and-time-literals.html
             // As a number in either YYYYMMDDhhmmss or YYMMDDhhmmss format, provided that the number
             // makes sense as a date. For example, 19830905132800 and 830905132800 are interpreted
@@ -182,7 +157,7 @@ where
             )
         }
 
-        SqlType::Time => {
+        DfType::Time { .. } => {
             // https://dev.mysql.com/doc/refman/8.0/en/date-and-time-literals.html
             // As a number in hhmmss format, provided that it makes sense as a time. For example,
             // 101112 is understood as '10:11:12'. The following alternative formats are also
@@ -194,16 +169,22 @@ where
             Ok(mysql_time::MySqlTime::from_hmsus(true, hh as _, mm as _, ss as _, 0).into())
         }
 
-        SqlType::Double => Ok(DfValue::Double(val.to_f64())),
-        SqlType::Real | SqlType::Float => Ok(DfValue::Float(val.to_f32())),
-        SqlType::Numeric(_) | SqlType::Decimal(_, _) => Ok(DfValue::Numeric(Arc::new(val.into()))),
+        DfType::Numeric { .. } => Ok(DfValue::Numeric(Arc::new(val.into()))),
 
-        SqlType::MacAddr
-        | SqlType::Inet
-        | SqlType::Uuid
-        | SqlType::Bit(_)
-        | SqlType::VarBit(_)
-        | SqlType::Array(_) => Err(ReadySetError::DfValueConversionError {
+        DfType::Enum(ref elements, _) => {
+            // Values above the number of elements are converted to 0 by MySQL, and anything that
+            // can't be held in a usize is certainly too high, hence the .unwrap_or(0)
+            let idx = usize::try_from(val).unwrap_or(0);
+            Ok(DfValue::from(r#enum::apply_enum_limits(idx, elements)))
+        }
+
+        DfType::Unknown
+        | DfType::MacAddr
+        | DfType::Inet
+        | DfType::Uuid
+        | DfType::Bit(_)
+        | DfType::VarBit(_)
+        | DfType::Array(_) => Err(ReadySetError::DfValueConversionError {
             src_type: from_ty.to_string(),
             target_type: to_ty.to_string(),
             details: "Not allowed".to_string(),

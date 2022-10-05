@@ -4,7 +4,6 @@ use std::str::FromStr;
 
 use fallible_iterator::FallibleIterator;
 use ndarray::{ArrayBase, ArrayD, Data, IxDyn, RawData};
-use nom_sql::SqlType;
 use postgres_protocol::types::ArrayDimension;
 use proptest::arbitrary::Arbitrary;
 use proptest::prop_oneof;
@@ -100,11 +99,23 @@ impl Array {
         self.contents.iter_mut()
     }
 
+    /// Returns `true` if the array does not contain a mix of inferred types.
+    pub fn is_homogenous(&self) -> bool {
+        let mut iter = self.values();
+
+        let expected_type: DfType = match iter.next() {
+            Some(first) => first.infer_dataflow_type(),
+            None => return true,
+        };
+
+        iter.all(|v| v.infer_dataflow_type() == expected_type)
+    }
+
     /// Coerce the values within this array to the given new member type, which can either be an
-    /// arbitrarily-nested array type or a scalar type
+    /// arbitrarily-nested array type or a scalar type.
     pub(crate) fn coerce_to(
         &self,
-        new_member_type: &SqlType,
+        new_member_type: &DfType,
         from_member_type: &DfType,
     ) -> ReadySetResult<Self> {
         // Postgresql doesn't validate array nesting levels in type cast expressions:

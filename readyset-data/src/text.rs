@@ -7,7 +7,7 @@ use std::str::FromStr;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
 
-use nom_sql::{Literal, SqlType};
+use nom_sql::Literal;
 use readyset_errors::{ReadySetError, ReadySetResult};
 
 use crate::{Array, Collation, DfType, DfValue};
@@ -336,17 +336,17 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
     fn type_name() -> String;
 
     /// A convenience constructor for a coerction error from this type
-    fn coerce_err<D: ToString>(sql_type: &SqlType, deets: D) -> ReadySetError {
+    fn coerce_err<D: ToString>(ty: &DfType, deets: D) -> ReadySetError {
         ReadySetError::DfValueConversionError {
             src_type: Self::type_name(),
-            target_type: format!("{:?}", sql_type),
+            target_type: format!("{:?}", ty),
             details: deets.to_string(),
         }
     }
 
     /// A convenience integer parser that diffirentiates between out of bounds errors and other
     /// parse errors
-    fn parse_int<I>(str: &str, sql_type: &SqlType) -> ReadySetResult<DfValue>
+    fn parse_int<I>(str: &str, ty: &DfType) -> ReadySetResult<DfValue>
     where
         I: FromStr<Err = ParseIntError> + Into<DfValue>,
     {
@@ -356,110 +356,102 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
                 if *e.kind() == IntErrorKind::PosOverflow
                     || *e.kind() == IntErrorKind::NegOverflow =>
             {
-                Err(Self::coerce_err(sql_type, "out of bounds"))
+                Err(Self::coerce_err(ty, "out of bounds"))
             }
-            Err(e) => Err(Self::coerce_err(sql_type, e)),
+            Err(e) => Err(Self::coerce_err(ty, e)),
         }
     }
 
     /// Coerce this type to a different DfValue.
-    fn coerce_to(&self, sql_type: &SqlType, from_ty: &DfType) -> ReadySetResult<DfValue> {
+    fn coerce_to(&self, to_ty: &DfType, from_ty: &DfType) -> ReadySetResult<DfValue> {
         let str = self.try_str()?;
 
-        match sql_type {
-            SqlType::Bool => Ok(DfValue::from(!str.is_empty())),
+        match *to_ty {
+            DfType::Bool => Ok(DfValue::from(!str.is_empty())),
 
-            SqlType::TinyText
-            | SqlType::MediumText
-            | SqlType::Text
-            | SqlType::LongText
-            | SqlType::Char(None)
-            | SqlType::VarChar(None) => Ok(self.clone().into()),
+            DfType::Text { .. } => Ok(self.clone().into()),
 
-            SqlType::VarChar(Some(l)) if *l as usize >= str.len() => {
+            DfType::VarChar(l, ..) if l as usize >= str.len() => {
                 // VarChar, but length is sufficient to store current string
                 Ok(self.clone().into())
             }
 
-            SqlType::Char(Some(l)) if *l as usize == str.len() => {
+            DfType::Char(l, ..) if l as usize == str.len() => {
                 // Char, but length is same as current string
                 Ok(self.clone().into())
             }
 
-            SqlType::Char(Some(l)) if *l as usize > str.len() => {
+            DfType::Char(l, ..) if l as usize > str.len() => {
                 // Char, but length is greater than the current string, have to pad with whitespace
-                let mut new_string = String::with_capacity(*l as usize);
+                let mut new_string = String::with_capacity(l as usize);
                 new_string += str;
-                new_string.extend(std::iter::repeat(' ').take(*l as usize - str.len()));
+                new_string.extend(std::iter::repeat(' ').take(l as usize - str.len()));
                 Ok(DfValue::from(new_string))
             }
 
-            SqlType::VarChar(Some(l)) | SqlType::Char(Some(l)) => {
+            DfType::VarChar(l, ..) | DfType::Char(l, ..) => {
                 // String is too long, so have to truncate and allocate a new one
                 // TODO: can we do something smarter, like keep a len field, and clone the existing
                 // Arc?
-                Ok(DfValue::from(&str[..*l as usize]))
+                Ok(DfValue::from(&str[..l as usize]))
             }
 
-            SqlType::TinyBlob
-            | SqlType::MediumBlob
-            | SqlType::Blob
-            | SqlType::LongBlob
-            | SqlType::ByteArray
-            | SqlType::Binary(None) => Ok(DfValue::ByteArray(str.as_bytes().to_vec().into())),
+            DfType::Blob(_) => Ok(DfValue::ByteArray(str.as_bytes().to_vec().into())),
 
-            SqlType::Binary(Some(l)) if *l as usize == str.len() => {
+            DfType::Binary(l) if l as usize == str.len() => {
                 // Binary is sufficent to store whole string
                 Ok(DfValue::ByteArray(str.as_bytes().to_vec().into()))
             }
 
-            SqlType::Binary(Some(l)) if *l as usize > str.len() => {
+            DfType::Binary(l) if l as usize > str.len() => {
                 // Binary is longer than string, pad with zero bytes
-                let mut new_vec = Vec::with_capacity(*l as usize);
+                let mut new_vec = Vec::with_capacity(l as usize);
                 new_vec.extend_from_slice(str.as_bytes());
-                new_vec.extend(std::iter::repeat(0).take(*l as usize - str.len()));
+                new_vec.extend(std::iter::repeat(0).take(l as usize - str.len()));
                 Ok(DfValue::ByteArray(new_vec.into()))
             }
 
-            SqlType::VarBinary(l) if *l as usize >= str.len() => {
+            DfType::VarBinary(l) if l as usize >= str.len() => {
                 // VarBinary is sufficent to store whole string
                 Ok(DfValue::ByteArray(str.as_bytes().to_vec().into()))
             }
 
-            SqlType::Binary(Some(l)) | SqlType::VarBinary(l) => {
+            DfType::Binary(l) | DfType::VarBinary(l) => {
                 // Binary is shorter than string, truncate and convert
                 Ok(DfValue::ByteArray(
-                    str.as_bytes()[..*l as usize].to_vec().into(),
+                    str.as_bytes()[..l as usize].to_vec().into(),
                 ))
             }
 
-            SqlType::Timestamp | SqlType::DateTime(_) | SqlType::TimestampTz | SqlType::Date => str
+            DfType::Timestamp { .. }
+            | DfType::DateTime { .. }
+            | DfType::TimestampTz { .. }
+            | DfType::Date => str
                 .trim()
                 .parse::<crate::TimestampTz>()
-                .map_err(|e| Self::coerce_err(sql_type, e))
+                .map_err(|e| Self::coerce_err(to_ty, e))
                 .map(DfValue::TimestampTz),
 
-            SqlType::TinyInt(_) => Self::parse_int::<i8>(str, sql_type),
-            SqlType::SmallInt(_) => Self::parse_int::<i16>(str, sql_type),
-            SqlType::Int(_) | SqlType::Serial => Self::parse_int::<i32>(str, sql_type),
-            SqlType::BigInt(_) | SqlType::BigSerial => Self::parse_int::<i64>(str, sql_type),
+            DfType::TinyInt => Self::parse_int::<i8>(str, to_ty),
+            DfType::UnsignedTinyInt => Self::parse_int::<u8>(str, to_ty),
+            DfType::SmallInt => Self::parse_int::<i16>(str, to_ty),
+            DfType::UnsignedSmallInt => Self::parse_int::<u16>(str, to_ty),
+            DfType::Int => Self::parse_int::<i32>(str, to_ty),
+            DfType::UnsignedInt => Self::parse_int::<u32>(str, to_ty),
+            DfType::BigInt => Self::parse_int::<i64>(str, to_ty),
+            DfType::UnsignedBigInt => Self::parse_int::<u64>(str, to_ty),
 
-            SqlType::UnsignedTinyInt(_) => Self::parse_int::<u8>(str, sql_type),
-            SqlType::UnsignedSmallInt(_) => Self::parse_int::<u16>(str, sql_type),
-            SqlType::UnsignedInt(_) => Self::parse_int::<u32>(str, sql_type),
-            SqlType::UnsignedBigInt(_) => Self::parse_int::<u64>(str, sql_type),
-
-            SqlType::Json | SqlType::Jsonb => {
+            DfType::Json(_) | DfType::Jsonb => {
                 // Currently just validates the json
                 // TODO: this is very very wrong as there is no gurantee two equal json objects will
                 // be string equal, quite the opposite actually. And we can't just "normalize the
                 // json" as we do for MAC and UUID.
                 str.parse::<serde_json::Value>()
-                    .map_err(|e| Self::coerce_err(sql_type, e))?;
+                    .map_err(|e| Self::coerce_err(to_ty, e))?;
                 Ok(self.clone().into())
             }
 
-            SqlType::MacAddr => {
+            DfType::MacAddr => {
                 // Since MAC addresses can be represented in many ways, if we want to store them as
                 // a string, we have to at least normalize to the same representation.
                 // I.e. we want to make sure that:
@@ -471,7 +463,7 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
                 // '08002b010203' are equal
                 let mut mac = str
                     .parse::<eui48::MacAddress>()
-                    .map_err(|e| Self::coerce_err(sql_type, e))?
+                    .map_err(|e| Self::coerce_err(to_ty, e))?
                     .to_string(eui48::MacAddressFormat::HexString);
                 mac.make_ascii_lowercase(); // Same as postgres style
                 if mac.as_str() == str {
@@ -481,7 +473,7 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
                 }
             }
 
-            SqlType::Inet => {
+            DfType::Inet => {
                 // Since MAC addresses can be represented in many ways, if we want to store them as
                 // a string, we have to at least normalize to the same representation.
                 // I.e. we want to make sure that:
@@ -490,12 +482,12 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
                 // '::beef' are equal
                 let ip = str
                     .parse::<IpAddr>()
-                    .map_err(|e| Self::coerce_err(sql_type, e))?
+                    .map_err(|e| Self::coerce_err(to_ty, e))?
                     .to_string();
                 Ok(ip.into())
             }
 
-            SqlType::Uuid => {
+            DfType::Uuid => {
                 // Since UUIDs can be represented in many ways, if we want to store them as a
                 // string, we have to at least normalize to the same representation.
                 // I.e. we want to make sure that
@@ -504,7 +496,7 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
                 // and '123e4567e89b12d3a456426614174000' are equal.
                 let uuid = str
                     .parse::<uuid::Uuid>()
-                    .map_err(|e| Self::coerce_err(sql_type, e))?
+                    .map_err(|e| Self::coerce_err(to_ty, e))?
                     .to_string();
 
                 if uuid.as_str() == str {
@@ -514,35 +506,35 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
                 }
             }
 
-            SqlType::Time => match str.parse::<mysql_time::MySqlTime>() {
+            DfType::Time { .. } => match str.parse::<mysql_time::MySqlTime>() {
                 Ok(t) => Ok(DfValue::Time(t)),
                 Err(mysql_time::ConvertError::ParseError) => Ok(DfValue::Time(Default::default())),
-                Err(e) => Err(Self::coerce_err(sql_type, e)),
+                Err(e) => Err(Self::coerce_err(to_ty, e)),
             },
 
-            SqlType::Float | SqlType::Real => str
+            DfType::Float(_) => str
                 .parse::<f32>()
-                .map_err(|e| Self::coerce_err(sql_type, e))?
+                .map_err(|e| Self::coerce_err(to_ty, e))?
                 .try_into(),
 
-            SqlType::Double => str
+            DfType::Double => str
                 .parse::<f64>()
-                .map_err(|e| Self::coerce_err(sql_type, e))?
+                .map_err(|e| Self::coerce_err(to_ty, e))?
                 .try_into(),
 
-            SqlType::Decimal(_, _) | SqlType::Numeric(_) => Ok(str
+            DfType::Numeric { .. } => Ok(str
                 .parse::<rust_decimal::Decimal>()
-                .map_err(|e| Self::coerce_err(sql_type, e))?
+                .map_err(|e| Self::coerce_err(to_ty, e))?
                 .into()),
 
-            SqlType::Array(_) => DfValue::from(
+            DfType::Array(_) => DfValue::from(
                 str.parse::<Array>()
-                    .map_err(|e| Self::coerce_err(sql_type, e))?,
+                    .map_err(|e| Self::coerce_err(to_ty, e))?,
             )
-            .coerce_to(sql_type, from_ty),
+            .coerce_to(to_ty, from_ty),
 
-            SqlType::Enum(elements) => {
-                if let Some(i) = elements
+            DfType::Enum(ref variants, _) => {
+                if let Some(i) = variants
                     .iter()
                     .position(|e| matches!(e, Literal::String(s) if s == str))
                 {
@@ -557,7 +549,9 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
                 }
             }
 
-            SqlType::Bit(_) | SqlType::VarBit(_) => Err(Self::coerce_err(sql_type, "Not allowed")),
+            DfType::Unknown | DfType::Bit(_) | DfType::VarBit(_) => {
+                Err(Self::coerce_err(to_ty, "Not allowed"))
+            }
         }
     }
 }
@@ -584,6 +578,7 @@ impl TextCoerce for Text {
 
 #[cfg(test)]
 mod tests {
+    use nom_sql::Dialect;
     use test_strategy::proptest;
 
     use super::*;
@@ -657,44 +652,50 @@ mod tests {
         // TEXT to TEXT coercions
         let text = DfValue::from("abcdefgh");
         assert_eq!(
-            text.coerce_to(&SqlType::Char(Some(10)), &DfType::Unknown)
-                .unwrap(),
+            text.coerce_to(
+                &DfType::Char(10, Collation::default(), Dialect::MySQL),
+                &DfType::Unknown
+            )
+            .unwrap(),
             DfValue::from("abcdefgh  ")
         );
         assert_eq!(
-            text.coerce_to(&SqlType::Char(Some(4)), &DfType::Unknown)
-                .unwrap(),
+            text.coerce_to(
+                &DfType::Char(4, Collation::default(), Dialect::MySQL),
+                &DfType::Unknown
+            )
+            .unwrap(),
             DfValue::from("abcd")
         );
         assert_eq!(
-            text.coerce_to(&SqlType::VarChar(Some(10)), &DfType::Unknown)
+            text.coerce_to(&DfType::VarChar(10, Collation::default()), &DfType::Unknown)
                 .unwrap(),
             DfValue::from("abcdefgh")
         );
         assert_eq!(
-            text.coerce_to(&SqlType::VarChar(Some(4)), &DfType::Unknown)
+            text.coerce_to(&DfType::VarChar(4, Collation::default()), &DfType::Unknown)
                 .unwrap(),
             DfValue::from("abcd")
         );
 
         // TEXT to BINARY
         assert_eq!(
-            text.coerce_to(&SqlType::Binary(Some(10)), &DfType::Unknown)
+            text.coerce_to(&DfType::Binary(10), &DfType::Unknown)
                 .unwrap(),
             DfValue::ByteArray(b"abcdefgh\0\0".to_vec().into())
         );
         assert_eq!(
-            text.coerce_to(&SqlType::Binary(Some(4)), &DfType::Unknown)
+            text.coerce_to(&DfType::Binary(4), &DfType::Unknown)
                 .unwrap(),
             DfValue::ByteArray(b"abcd".to_vec().into())
         );
         assert_eq!(
-            text.coerce_to(&SqlType::VarBinary(10), &DfType::Unknown)
+            text.coerce_to(&DfType::VarBinary(10), &DfType::Unknown)
                 .unwrap(),
             DfValue::ByteArray(b"abcdefgh".to_vec().into())
         );
         assert_eq!(
-            text.coerce_to(&SqlType::VarBinary(4), &DfType::Unknown)
+            text.coerce_to(&DfType::VarBinary(4), &DfType::Unknown)
                 .unwrap(),
             DfValue::ByteArray(b"abcd".to_vec().into())
         );
@@ -702,33 +703,33 @@ mod tests {
         // TEXT to INTEGER
         assert_eq!(
             DfValue::from("50")
-                .coerce_to(&SqlType::TinyInt(None), &DfType::Unknown)
+                .coerce_to(&DfType::TinyInt, &DfType::Unknown)
                 .unwrap(),
             DfValue::Int(50),
         );
         DfValue::from("500")
-            .coerce_to(&SqlType::TinyInt(None), &DfType::Unknown)
+            .coerce_to(&DfType::TinyInt, &DfType::Unknown)
             .unwrap_err();
         assert_eq!(
             DfValue::from("-500")
-                .coerce_to(&SqlType::Int(None), &DfType::Unknown)
+                .coerce_to(&DfType::Int, &DfType::Unknown)
                 .unwrap(),
             DfValue::Int(-500),
         );
         DfValue::from("-500")
-            .coerce_to(&SqlType::UnsignedInt(None), &DfType::Unknown)
+            .coerce_to(&DfType::UnsignedInt, &DfType::Unknown)
             .unwrap_err();
 
         // TEXT to FLOAT
         assert_eq!(
             DfValue::from("50")
-                .coerce_to(&SqlType::Real, &DfType::Unknown)
+                .coerce_to(&DfType::Float(Dialect::MySQL), &DfType::Unknown)
                 .unwrap(),
             DfValue::Float(50.0),
         );
         assert_eq!(
             DfValue::from("-50.5")
-                .coerce_to(&SqlType::Double, &DfType::Unknown)
+                .coerce_to(&DfType::Double, &DfType::Unknown)
                 .unwrap(),
             DfValue::Double(-50.5),
         );
@@ -736,32 +737,32 @@ mod tests {
         // TEXT to UUID
         assert_eq!(
             DfValue::from("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
-                .coerce_to(&SqlType::Uuid, &DfType::Unknown)
+                .coerce_to(&DfType::Uuid, &DfType::Unknown)
                 .unwrap(),
             DfValue::from("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"),
         );
         assert_eq!(
             DfValue::from("A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11")
-                .coerce_to(&SqlType::Uuid, &DfType::Unknown)
+                .coerce_to(&DfType::Uuid, &DfType::Unknown)
                 .unwrap(),
             DfValue::from("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"),
         );
         assert_eq!(
             DfValue::from("a0eebc999c0b4ef8bb6d6bb9bd380a11")
-                .coerce_to(&SqlType::Uuid, &DfType::Unknown)
+                .coerce_to(&DfType::Uuid, &DfType::Unknown)
                 .unwrap(),
             DfValue::from("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"),
         );
         /* TODO: fix the following UUID conversions one day
         assert_eq!(
             DfValue::from("a0ee-bc99-9c0b-4ef8-bb6d-6bb9-bd38-0a11")
-                .coerce_to(&SqlType::Uuid, &DfType::Unknown)
+                .coerce_to(&DfType::Uuid, &DfType::Unknown)
                 .unwrap(),
             DfValue::from("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"),
         );
         assert_eq!(
             DfValue::from("{a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11}")
-                .coerce_to(&SqlType::Uuid, &DfType::Unknown)
+                .coerce_to(&DfType::Uuid, &DfType::Unknown)
                 .unwrap(),
             DfValue::from("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"),
         );*/
@@ -769,57 +770,58 @@ mod tests {
         // TEXT to MAC
         assert_eq!(
             DfValue::from("08:00:2b:01:02:03")
-                .coerce_to(&SqlType::MacAddr, &DfType::Unknown)
+                .coerce_to(&DfType::MacAddr, &DfType::Unknown)
                 .unwrap(),
             DfValue::from("08:00:2b:01:02:03"),
         );
         // TEXT to MAC
         assert_eq!(
             DfValue::from("08-00-2b-01-02-03")
-                .coerce_to(&SqlType::MacAddr, &DfType::Unknown)
+                .coerce_to(&DfType::MacAddr, &DfType::Unknown)
                 .unwrap(),
             DfValue::from("08:00:2b:01:02:03"),
         );
         // TEXT to MAC
         assert_eq!(
             DfValue::from("08002b:010203")
-                .coerce_to(&SqlType::MacAddr, &DfType::Unknown)
+                .coerce_to(&DfType::MacAddr, &DfType::Unknown)
                 .unwrap(),
             DfValue::from("08:00:2b:01:02:03"),
         );
         // TEXT to MAC
         assert_eq!(
             DfValue::from("08002b-010203")
-                .coerce_to(&SqlType::MacAddr, &DfType::Unknown)
+                .coerce_to(&DfType::MacAddr, &DfType::Unknown)
                 .unwrap(),
             DfValue::from("08:00:2b:01:02:03"),
         );
         // TEXT to MAC
         assert_eq!(
             DfValue::from("0800.2b01.0203")
-                .coerce_to(&SqlType::MacAddr, &DfType::Unknown)
+                .coerce_to(&DfType::MacAddr, &DfType::Unknown)
                 .unwrap(),
             DfValue::from("08:00:2b:01:02:03"),
         );
         // TEXT to MAC
         assert_eq!(
             DfValue::from("08002b010203")
-                .coerce_to(&SqlType::MacAddr, &DfType::Unknown)
+                .coerce_to(&DfType::MacAddr, &DfType::Unknown)
                 .unwrap(),
             DfValue::from("08:00:2b:01:02:03"),
         );
         // TEXT to INET
         assert_eq!(
             DfValue::from("feed:0:0::beef")
-                .coerce_to(&SqlType::Inet, &DfType::Unknown)
+                .coerce_to(&DfType::Inet, &DfType::Unknown)
                 .unwrap(),
             DfValue::from("feed::beef")
         );
         // TEXT to ENUM
-        let enum_type = SqlType::Enum(
+        let enum_type = DfType::Enum(
             ["red", "yellow", "green"]
                 .map(|s| Literal::String(s.to_string()))
                 .into(),
+            Dialect::MySQL,
         );
         assert_eq!(
             DfValue::from("green")

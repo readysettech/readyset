@@ -3,7 +3,7 @@ use std::convert::{TryFrom, TryInto};
 
 use launchpad::hash::hash;
 use nom_sql::{
-    BinaryOperator, Column, ColumnConstraint, CreateTableStatement, DeleteStatement, Expr,
+    BinaryOperator, Column, ColumnConstraint, CreateTableStatement, DeleteStatement, Dialect, Expr,
     InsertStatement, Literal, SelectStatement, SqlIdentifier, SqlQuery, TableKey, UpdateStatement,
 };
 use readyset::{Modification, Operation};
@@ -420,6 +420,9 @@ pub(crate) fn extract_update_params_and_fields<I>(
 where
     I: Iterator<Item = DfValue>,
 {
+    // TODO(ENG-1418): Propagate dialect info.
+    let dialect = Dialect::MySQL;
+
     let mut updates = Vec::new();
     for (i, field) in schema.fields.iter().enumerate() {
         if let Some(sets) = q
@@ -439,11 +442,13 @@ where
                     updates.push((i, Modification::Set(v)));
                 }
                 Expr::Literal(ref v) => {
+                    let target_type = DfType::from_sql_type(&field.sql_type, dialect);
+
                     updates.push((
                         i,
                         // Coercing from a literal, so no "from" type to pass to coerce_to
                         Modification::Set(
-                            DfValue::try_from(v)?.coerce_to(&field.sql_type, &DfType::Unknown)?,
+                            DfValue::try_from(v)?.coerce_to(&target_type, &DfType::Unknown)?,
                         ),
                     ));
                 }
@@ -532,15 +537,20 @@ pub(crate) fn coerce_params(
     q: &SqlQuery,
     schema: &CreateTableStatement,
 ) -> ReadySetResult<Option<Vec<DfValue>>> {
+    // TODO(ENG-1418): Propagate dialect info.
+    let dialect = Dialect::MySQL;
+
     if let Some(prms) = params {
         let mut coerced_params = vec![];
         for (i, col) in get_parameter_columns(q).iter().enumerate() {
             for field in &schema.fields {
                 if col.name == field.column.name {
-                    // coercing from the raw parameters, so no prior SqlType to use for from_ty
+                    let target_type = DfType::from_sql_type(&field.sql_type, dialect);
+
                     coerced_params.push(DfValue::coerce_to(
                         &prms[i],
-                        &field.sql_type,
+                        &target_type,
+                        // Coercing from the raw parameters, so no prior type to use.
                         &DfType::Unknown,
                     )?);
                 }

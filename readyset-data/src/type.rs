@@ -175,6 +175,8 @@ impl DfType {
 
     pub const DEFAULT_NUMERIC_PREC: u16 = 10;
     pub const DEFAULT_NUMERIC_SCALE: u8 = 0;
+
+    pub const DEFAULT_BIT: Self = Self::Bit(1);
 }
 
 /// Conversions to/from [`SqlType`].
@@ -355,7 +357,7 @@ impl DfType {
         Self::Enum(variants.into(), dialect)
     }
 
-    /// Returns the SQL [`Dialect`] to determine this type's expression evaluation semantics.
+    /// Returns the SQL [`Dialect`], which determines this type's expression evaluation semantics.
     #[inline]
     pub fn dialect(&self) -> Option<Dialect> {
         use DfType::*;
@@ -390,13 +392,48 @@ impl DfType {
         }
     }
 
-    /// Returns `true` if the type carries information.
+    /// Returns the number of subsecond digits if this is a time type, otherwise [`None`].
+    ///
+    /// This is also known as fractional seconds precision (FSP). It must be between 0 through 6,
+    /// and defaults to [`Dialect::default_subsecond_digits`].
+    #[inline]
+    pub fn subsecond_digits(&self) -> Option<u16> {
+        match *self {
+            Self::DateTime { subsecond_digits }
+            | Self::Time { subsecond_digits }
+            | Self::Timestamp { subsecond_digits }
+            | Self::TimestampTz { subsecond_digits } => Some(subsecond_digits),
+            _ => None,
+        }
+    }
+
+    /// Converts the type to an [`Option`] where [`DfType::Unknown`] becomes [`None`].
+    #[inline]
+    pub fn try_into_known(self) -> Option<Self> {
+        if self.is_known() {
+            Some(self)
+        } else {
+            None
+        }
+    }
+
+    /// Returns `true` if the type carries information (i.e. is not [`DfType::Unknown`]).
     #[inline]
     pub fn is_known(&self) -> bool {
         !self.is_unknown()
     }
 
-    /// Returns `true` if the type carries no information.
+    /// Returns `true` if the type does not contain [`DfType::Unknown`].
+    #[inline]
+    pub fn is_strictly_known(&self) -> bool {
+        match self {
+            Self::Unknown => false,
+            Self::Array(ty) => ty.is_strictly_known(),
+            _ => true,
+        }
+    }
+
+    /// Returns `true` if the type carries no information (i.e. is [`DfType::Unknown`]).
     #[inline]
     pub fn is_unknown(&self) -> bool {
         matches!(self, Self::Unknown)
@@ -434,6 +471,15 @@ impl DfType {
     #[inline]
     pub fn is_any_float(&self) -> bool {
         matches!(*self, Self::Float(_) | Self::Double)
+    }
+
+    /// Returns whether `self` is any text-containing type.
+    #[inline]
+    pub fn is_any_text(&self) -> bool {
+        matches!(
+            self,
+            Self::Text { .. } | Self::Char { .. } | Self::VarChar { .. }
+        )
     }
 
     /// Returns the deepest nested type in [`DfType::Array`], otherwise returns `self`.

@@ -25,7 +25,12 @@ pub use crate::post_lookup::{
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum BuiltinFunction {
     /// [`convert_tz`](https://dev.mysql.com/doc/refman/8.0/en/date-and-time-functions.html#function_convert-tz)
-    ConvertTZ(Expr, Expr, Expr),
+    ConvertTZ {
+        args: [Expr; 3],
+
+        /// Precision for coercing input to [`DfType::Timestamp`].
+        subsecond_digits: u16,
+    },
     /// [`dayofweek`](https://dev.mysql.com/doc/refman/8.0/en/date-and-time-functions.html#function_dayofweek)
     DayOfWeek(Expr),
     /// [`ifnull`](https://dev.mysql.com/doc/refman/8.0/en/flow-control-functions.html#function_ifnull)
@@ -88,7 +93,15 @@ impl BuiltinFunction {
                 // Type is inferred from input argument
                 let input = next_arg()?;
                 let ty = input.ty().clone();
-                (Self::ConvertTZ(input, next_arg()?, next_arg()?), ty)
+                (
+                    Self::ConvertTZ {
+                        args: [input, next_arg()?, next_arg()?],
+                        subsecond_digits: ty
+                            .subsecond_digits()
+                            .unwrap_or_else(|| dialect.default_subsecond_digits()),
+                    },
+                    ty,
+                )
             }
             "dayofweek" => {
                 (
@@ -212,7 +225,10 @@ impl fmt::Display for BuiltinFunction {
         write!(f, "{}", self.name())?;
 
         match self {
-            ConvertTZ(arg1, arg2, arg3) => {
+            ConvertTZ {
+                args: [arg1, arg2, arg3],
+                ..
+            } => {
                 write!(f, "({}, {}, {})", arg1, arg2, arg3)
             }
             DayOfWeek(arg) => {

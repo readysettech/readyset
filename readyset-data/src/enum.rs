@@ -1,4 +1,4 @@
-use nom_sql::{EnumType, Literal, SqlType};
+use nom_sql::{EnumType, Literal};
 use readyset_errors::ReadySetResult;
 
 use crate::{integer, DfType, DfValue};
@@ -10,7 +10,7 @@ use crate::{integer, DfType, DfValue};
 pub(crate) fn coerce_enum(
     enum_value: u64,
     enum_elements: &[Literal],
-    to_ty: &SqlType,
+    to_ty: &DfType,
     from_ty: &DfType,
 ) -> ReadySetResult<DfValue> {
     if to_ty.is_any_text() {
@@ -23,14 +23,14 @@ pub(crate) fn coerce_enum(
             // char/varchar types. When Nikolai's apply_str_limit function is finished and merged,
             // we should be able to replace this logic with a simple call to that function:
             match to_ty {
-                SqlType::Char(Some(l)) if *l as usize > s.len() => {
+                DfType::Char(l, ..) if *l as usize > s.len() => {
                     // Char, but len is greater than current string, have to pad with whitespace
                     let mut new_string = String::with_capacity(*l as usize);
                     new_string += s;
                     new_string.extend(std::iter::repeat(' ').take(*l as usize - s.len()));
                     Ok(DfValue::from(new_string))
                 }
-                SqlType::Char(Some(l)) | SqlType::VarChar(Some(l)) if (*l as usize) < s.len() => {
+                DfType::Char(l, ..) | DfType::VarChar(l, ..) if (*l as usize) < s.len() => {
                     // Len is less than current string, have to truncate
                     Ok(DfValue::from(&s[..*l as usize]))
                 }

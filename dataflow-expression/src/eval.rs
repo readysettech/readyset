@@ -9,9 +9,9 @@ use chrono_tz::Tz;
 use launchpad::redacted::Sensitive;
 use maths::int::integer_rnd;
 use mysql_time::MySqlTime;
-use nom_sql::{BinaryOperator, SqlType};
-use readyset_data::DfValue;
-use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
+use nom_sql::BinaryOperator;
+use readyset_data::{Collation, DfType, DfValue};
+use readyset_errors::{ReadySetError, ReadySetResult};
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 use rust_decimal::Decimal;
 
@@ -19,21 +19,12 @@ use crate::like::{CaseInsensitive, CaseSensitive, LikePattern};
 use crate::{utils, BuiltinFunction, Expr};
 
 macro_rules! try_cast_or_none {
-    ($df_value:expr, $sqltype:expr, $from_sqltype:expr) => {{
-        match $df_value.coerce_to($sqltype, $from_sqltype) {
+    ($df_value:expr, $to_ty:expr, $from_ty:expr) => {{
+        match $df_value.coerce_to($to_ty, $from_ty) {
             Ok(v) => v,
             Err(_) => return Ok(DfValue::None),
         }
     }};
-}
-
-macro_rules! get_time_or_default {
-    ($df_value:expr, $from_sqltype:expr) => {
-        $df_value
-            .coerce_to(&SqlType::Timestamp, $from_sqltype)
-            .or_else(|_| $df_value.coerce_to(&SqlType::Time, $from_sqltype))
-            .unwrap_or(DfValue::None)
-    };
 }
 
 macro_rules! non_null {
@@ -44,6 +35,18 @@ macro_rules! non_null {
             return Ok(DfValue::None);
         }
     };
+}
+
+/// Attempts to coerce the value to `Timestamp` or `Time`, otherwise defaults to null on failure.
+fn get_time_or_default(value: &DfValue, from_ty: &DfType) -> DfValue {
+    // Default to 0 for consistency rather than rely on type dialect.
+    // TODO: Use the database's real default.
+    let subsecond_digits = from_ty.subsecond_digits().unwrap_or_default();
+
+    value
+        .coerce_to(&DfType::Timestamp { subsecond_digits }, from_ty)
+        .or_else(|_| value.coerce_to(&DfType::Time { subsecond_digits }, from_ty))
+        .unwrap_or(DfValue::None)
 }
 
 /// Transforms a `[NaiveDateTime]` into a new one with a different timezone.
@@ -137,8 +140,8 @@ impl Expr {
                 macro_rules! like {
                     ($case_sensitivity: expr, $negated: expr) => {{
                         match (
-                            left.coerce_to(&SqlType::Text, left_ty),
-                            right.coerce_to(&SqlType::Text, right_ty),
+                            left.coerce_to(&DfType::Text(Collation::default()), left_ty),
+                            right.coerce_to(&DfType::Text(Collation::default()), right_ty),
                         ) {
                             (Ok(left), Ok(right)) => {
                                 // NOTE(grfn): At some point, we may want to optimize this to
@@ -182,18 +185,31 @@ impl Expr {
                     NotILike => like!(CaseInsensitive, true),
                 }
             }
-            Cast { expr, to_type, .. } => {
+            Cast { expr, ty, .. } => {
                 let res = expr.eval(record)?;
-                Ok(res.coerce_to(to_type, expr.ty())?)
+                Ok(res.coerce_to(ty, expr.ty())?)
             }
             Call { func, ty } => match &**func {
-                BuiltinFunction::ConvertTZ(arg1, arg2, arg3) => {
+                BuiltinFunction::ConvertTZ {
+                    args: [arg1, arg2, arg3],
+                    subsecond_digits,
+                } => {
                     let param1 = arg1.eval(record)?;
                     let param2 = arg2.eval(record)?;
                     let param3 = arg3.eval(record)?;
-                    let param1_cast = try_cast_or_none!(param1, &SqlType::Timestamp, arg1.ty());
-                    let param2_cast = try_cast_or_none!(param2, &SqlType::Text, arg2.ty());
-                    let param3_cast = try_cast_or_none!(param3, &SqlType::Text, arg3.ty());
+
+                    let param1_cast = try_cast_or_none!(
+                        param1,
+                        &DfType::Timestamp {
+                            subsecond_digits: *subsecond_digits
+                        },
+                        arg1.ty()
+                    );
+                    let param2_cast =
+                        try_cast_or_none!(param2, &DfType::Text(Collation::default()), arg2.ty());
+                    let param3_cast =
+                        try_cast_or_none!(param3, &DfType::Text(Collation::default()), arg3.ty());
+
                     match convert_tz(
                         &(NaiveDateTime::try_from(&param1_cast))?,
                         <&str>::try_from(&param2_cast)?,
@@ -205,7 +221,7 @@ impl Expr {
                 }
                 BuiltinFunction::DayOfWeek(arg) => {
                     let param = arg.eval(record)?;
-                    let param_cast = try_cast_or_none!(param, &SqlType::Date, arg.ty());
+                    let param_cast = try_cast_or_none!(param, &DfType::Date, arg.ty());
                     Ok(DfValue::Int(
                         day_of_week(&(NaiveDate::try_from(&param_cast)?)) as i64,
                     ))
@@ -221,7 +237,7 @@ impl Expr {
                 }
                 BuiltinFunction::Month(arg) => {
                     let param = arg.eval(record)?;
-                    let param_cast = try_cast_or_none!(param, &SqlType::Date, arg.ty());
+                    let param_cast = try_cast_or_none!(param, &DfType::Date, arg.ty());
                     Ok(DfValue::UnsignedInt(
                         month(&(NaiveDate::try_from(non_null!(param_cast))?)) as u64,
                     ))
@@ -230,8 +246,8 @@ impl Expr {
                     let param1 = arg1.eval(record)?;
                     let param2 = arg2.eval(record)?;
                     let null_result = Ok(DfValue::None);
-                    let time_param1 = get_time_or_default!(param1, arg1.ty());
-                    let time_param2 = get_time_or_default!(param2, arg2.ty());
+                    let time_param1 = get_time_or_default(&param1, arg1.ty());
+                    let time_param2 = get_time_or_default(&param2, arg2.ty());
                     if time_param1.is_none()
                         || time_param1
                             .sql_type()
@@ -257,11 +273,11 @@ impl Expr {
                 BuiltinFunction::Addtime(arg1, arg2) => {
                     let param1 = arg1.eval(record)?;
                     let param2 = arg2.eval(record)?;
-                    let time_param2 = get_time_or_default!(param2, arg2.ty());
+                    let time_param2 = get_time_or_default(&param2, arg2.ty());
                     if time_param2.is_datetime() {
                         return Ok(DfValue::None);
                     }
-                    let time_param1 = get_time_or_default!(param1, arg1.ty());
+                    let time_param1 = get_time_or_default(&param1, arg1.ty());
                     if time_param1.is_datetime() {
                         Ok(DfValue::TimestampTz(
                             addtime_datetime(
@@ -383,7 +399,7 @@ impl Expr {
                     // `DfValue` actually representing JSON.
                     let val = try_cast_or_none!(
                         non_null!(&expr.eval(record)?),
-                        &SqlType::Text,
+                        &DfType::Text(Collation::default()),
                         expr.ty()
                     );
                     let json_str = <&str>::try_from(&val)?;
@@ -413,16 +429,12 @@ impl Expr {
                     }
                 }
                 BuiltinFunction::Concat(arg1, rest_args) => {
-                    // TODO: Just use `ty`, once `coerce_to` takes a DfType as its first arg
-                    let return_ty = ty.to_sql_type().ok_or_else(|| internal_err!())?;
-
-                    let mut s = <&str>::try_from(
-                        &non_null!(arg1.eval(record)?).coerce_to(&return_ty, arg1.ty())?,
-                    )?
-                    .to_owned();
+                    let mut s =
+                        <&str>::try_from(&non_null!(arg1.eval(record)?).coerce_to(ty, arg1.ty())?)?
+                            .to_owned();
 
                     for arg in rest_args {
-                        let val = non_null!(arg.eval(record)?).coerce_to(&return_ty, arg.ty())?;
+                        let val = non_null!(arg.eval(record)?).coerce_to(ty, arg.ty())?;
                         s.push_str((&val).try_into()?)
                     }
 
@@ -494,6 +506,7 @@ mod tests {
     use std::convert::TryInto;
 
     use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
+    use nom_sql::{Dialect, SqlType};
     use readyset_data::DfType;
     use rust_decimal::prelude::FromPrimitive;
     use rust_decimal::Decimal;
@@ -593,11 +606,10 @@ mod tests {
 
     #[test]
     fn eval_call_convert_tz() {
-        let expr = make_call(BuiltinFunction::ConvertTZ(
-            make_column(0),
-            make_column(1),
-            make_column(2),
-        ));
+        let expr = make_call(BuiltinFunction::ConvertTZ {
+            args: [make_column(0), make_column(1), make_column(2)],
+            subsecond_digits: Dialect::MySQL.default_subsecond_digits(),
+        });
         let datetime = NaiveDateTime::new(
             NaiveDate::from_ymd(2003, 10, 12),
             NaiveTime::from_hms(5, 13, 33),

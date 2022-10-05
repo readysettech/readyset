@@ -3,12 +3,11 @@ use std::hash::Hash;
 use std::str::FromStr;
 
 use chrono::{Date, DateTime, Datelike, FixedOffset, NaiveDate, NaiveDateTime, Timelike};
-use nom_sql::SqlType;
 use proptest::arbitrary::Arbitrary;
 use readyset_errors::{ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
-use crate::DfValue;
+use crate::{DfType, DfValue};
 
 /// The format for timestamps when parsed as text
 pub const TIMESTAMP_PARSE_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.f";
@@ -316,103 +315,96 @@ impl TimestampTz {
         )
     }
 
-    /// Attempt to coerce this timestamp to a specific SqlType
-    pub(crate) fn coerce_to(&self, to_ty: &SqlType) -> ReadySetResult<DfValue> {
-        match to_ty {
-            SqlType::Timestamp => {
-                // Conversion into timestamp without tz
-                Ok(DfValue::TimestampTz(self.to_chrono().naive_local().into()))
+    /// Attempt to coerce this timestamp to a specific [`DfType`].
+    pub(crate) fn coerce_to(&self, to_ty: &DfType) -> ReadySetResult<DfValue> {
+        match *to_ty {
+            DfType::Timestamp { subsecond_digits } => {
+                // Conversion into timestamp without tz.
+                let mut ts: TimestampTz = self.to_chrono().naive_local().into();
+                ts.set_subsecond_digits(subsecond_digits as u8);
+                Ok(DfValue::TimestampTz(ts))
             }
-            SqlType::TimestampTz => {
+            DfType::TimestampTz { subsecond_digits } => {
                 // TODO: when converting into a timestamp with tz on postgres should apply
                 // local tz, but what is local for noria?
                 let mut ts_tz = *self;
                 ts_tz.set_offset(0);
+                ts_tz.set_subsecond_digits(subsecond_digits as u8);
                 Ok(DfValue::TimestampTz(ts_tz))
             }
-            SqlType::DateTime(subsecond_digits) => {
-                // TODO(ENG-1834): Use `DfType` so that we use the correct default precision.
+            DfType::DateTime { subsecond_digits } => {
                 let mut ts = *self;
-                ts.set_subsecond_digits(subsecond_digits.unwrap_or(0) as u8);
+                ts.set_subsecond_digits(subsecond_digits as u8);
                 Ok(DfValue::TimestampTz(ts))
             }
-            SqlType::Date => Ok(DfValue::TimestampTz(self.to_chrono().date().into())),
-            SqlType::Time => Ok(self.to_chrono().naive_local().time().into()),
+            DfType::Date => Ok(DfValue::TimestampTz(self.to_chrono().date().into())),
+            // TODO(ENG-1833): Use `subsecond_digits` value.
+            DfType::Time { .. } => Ok(self.to_chrono().naive_local().time().into()),
 
-            SqlType::BigInt(_) | SqlType::BigSerial => Ok(DfValue::Int(self.datetime_as_int())),
-            SqlType::UnsignedBigInt(_) => Ok(DfValue::UnsignedInt(self.datetime_as_int() as _)),
-            SqlType::Int(_) | SqlType::Serial if self.has_date_only() => {
-                Ok(DfValue::Int(self.date_as_int()))
-            }
-            SqlType::UnsignedInt(_) if self.has_date_only() => {
+            DfType::BigInt => Ok(DfValue::Int(self.datetime_as_int())),
+            DfType::UnsignedBigInt => Ok(DfValue::UnsignedInt(self.datetime_as_int() as _)),
+
+            DfType::Int if self.has_date_only() => Ok(DfValue::Int(self.date_as_int())),
+            DfType::UnsignedInt if self.has_date_only() => {
                 Ok(DfValue::UnsignedInt(self.date_as_int() as _))
             }
 
-            SqlType::Double => Ok(DfValue::Double(self.datetime_as_int() as _)),
-            SqlType::Float | SqlType::Real => Ok(DfValue::Float(self.datetime_as_int() as _)),
-            SqlType::Decimal(_, _) | SqlType::Numeric(_) => Ok(DfValue::Numeric(
-                std::sync::Arc::new(self.datetime_as_int().into()),
-            )),
-            SqlType::Bool => Ok(DfValue::from(
-                self.to_chrono().naive_local() != NaiveDate::from_ymd(0, 0, 0).and_hms(0, 0, 0),
-            )),
-
-            SqlType::TinyText
-            | SqlType::MediumText
-            | SqlType::Text
-            | SqlType::LongText
-            | SqlType::Char(None)
-            | SqlType::VarChar(None) => Ok(DfValue::from(self.to_string().as_str())),
-
-            SqlType::Char(Some(l)) | SqlType::VarChar(Some(l)) => {
-                let mut string = self.to_string();
-                string.truncate(*l as usize);
-                Ok(DfValue::from(string.as_str()))
-            }
-
-            SqlType::TinyBlob
-            | SqlType::MediumBlob
-            | SqlType::Blob
-            | SqlType::LongBlob
-            | SqlType::Binary(None)
-            | SqlType::ByteArray => Ok(DfValue::ByteArray(std::sync::Arc::new(
-                self.to_string().as_bytes().into(),
-            ))),
-
-            SqlType::Json => {
-                let mut ts = *self;
-                ts.set_subsecond_digits(6); // Set max precision before json conversion
-                Ok(DfValue::from(format!("\"{}\"", ts).as_str()))
-            }
-
-            SqlType::Binary(Some(l)) | SqlType::VarBinary(l) => {
-                let mut string = self.to_string();
-                string.truncate(*l as usize);
-                Ok(DfValue::ByteArray(std::sync::Arc::new(
-                    string.as_bytes().into(),
-                )))
-            }
-
-            SqlType::TinyInt(_)
-            | SqlType::SmallInt(_)
-            | SqlType::Int(_)
-            | SqlType::UnsignedTinyInt(_)
-            | SqlType::UnsignedSmallInt(_)
-            | SqlType::UnsignedInt(_)
-            | SqlType::Serial => Err(ReadySetError::DfValueConversionError {
+            DfType::Int
+            | DfType::UnsignedInt
+            | DfType::SmallInt
+            | DfType::UnsignedSmallInt
+            | DfType::TinyInt
+            | DfType::UnsignedTinyInt => Err(ReadySetError::DfValueConversionError {
                 src_type: "DfValue::TimestampTz".to_string(),
                 target_type: format!("{:?}", to_ty),
                 details: "Out of range".to_string(),
             }),
 
-            SqlType::Enum(_)
-            | SqlType::Jsonb
-            | SqlType::MacAddr
-            | SqlType::Inet
-            | SqlType::Uuid
-            | SqlType::Bit(_)
-            | SqlType::VarBit(_)
-            | SqlType::Array(_) => Err(ReadySetError::DfValueConversionError {
+            DfType::Double => Ok(DfValue::Double(self.datetime_as_int() as _)),
+            DfType::Float(_) => Ok(DfValue::Float(self.datetime_as_int() as _)),
+
+            DfType::Numeric { .. } => Ok(DfValue::Numeric(std::sync::Arc::new(
+                self.datetime_as_int().into(),
+            ))),
+
+            DfType::Bool => Ok(DfValue::from(
+                self.to_chrono().naive_local() != NaiveDate::from_ymd(0, 0, 0).and_hms(0, 0, 0),
+            )),
+
+            DfType::Text { .. } => Ok(self.to_string().into()),
+            DfType::Char(l, ..) | DfType::VarChar(l, ..) => {
+                let mut string = self.to_string();
+                string.truncate(l as usize);
+                Ok(string.into())
+            }
+
+            DfType::Blob(_) => Ok(DfValue::ByteArray(std::sync::Arc::new(
+                self.to_string().as_bytes().into(),
+            ))),
+
+            DfType::Binary(l) | DfType::VarBinary(l) => {
+                let mut string = self.to_string();
+                string.truncate(l as usize);
+                Ok(DfValue::ByteArray(std::sync::Arc::new(
+                    string.as_bytes().into(),
+                )))
+            }
+
+            DfType::Json(_) => {
+                let mut ts = *self;
+                ts.set_subsecond_digits(6); // Set max precision before json conversion
+                Ok(DfValue::from(format!("\"{}\"", ts).as_str()))
+            }
+
+            DfType::Unknown
+            | DfType::Enum(_, _)
+            | DfType::Jsonb
+            | DfType::MacAddr
+            | DfType::Inet
+            | DfType::Uuid
+            | DfType::Bit(_)
+            | DfType::VarBit(_)
+            | DfType::Array(_) => Err(ReadySetError::DfValueConversionError {
                 src_type: "DfValue::TimestampTz".to_string(),
                 target_type: format!("{:?}", to_ty),
                 details: "Not allowed".to_string(),
@@ -472,9 +464,10 @@ impl Arbitrary for TimestampTz {
 #[cfg(test)]
 mod tests {
     use chrono::TimeZone;
+    use nom_sql::Dialect;
 
     use super::*;
-    use crate::DfType;
+    use crate::{Collation, DfType};
 
     #[test]
     fn timestamp_coercion() {
@@ -482,28 +475,28 @@ mod tests {
             DfValue::from(chrono::NaiveDate::from_ymd(2022, 2, 9).and_hms_milli(13, 14, 15, 169));
 
         assert_eq!(
-            ts.coerce_to(&SqlType::BigInt(None), &DfType::Unknown)
-                .unwrap(),
+            ts.coerce_to(&DfType::BigInt, &DfType::Unknown).unwrap(),
             DfValue::from(20220209131415i64)
         );
 
         assert_eq!(
-            ts.coerce_to(&SqlType::Date, &DfType::Unknown)
+            ts.coerce_to(&DfType::Date, &DfType::Unknown)
                 .unwrap()
-                .coerce_to(&SqlType::BigInt(None), &DfType::Unknown)
+                .coerce_to(&DfType::BigInt, &DfType::Unknown)
                 .unwrap(),
             DfValue::from(20220209i64)
         );
 
         assert_eq!(
-            ts.coerce_to(&SqlType::Double, &DfType::Unknown).unwrap(),
+            ts.coerce_to(&DfType::Double, &DfType::Unknown).unwrap(),
             DfValue::Double(20220209131415.0f64)
         );
 
         assert_eq!(
             &format!(
                 "{}",
-                ts.coerce_to(&SqlType::Text, &DfType::Unknown).unwrap()
+                ts.coerce_to(&DfType::Text(Collation::default()), &DfType::Unknown)
+                    .unwrap()
             ),
             "2022-02-09 13:14:15"
         );
@@ -511,7 +504,7 @@ mod tests {
         assert_eq!(
             &format!(
                 "{}",
-                ts.coerce_to(&SqlType::VarChar(Some(6)), &DfType::Unknown)
+                ts.coerce_to(&DfType::VarChar(6, Collation::default()), &DfType::Unknown)
                     .unwrap()
             ),
             "2022-0"
@@ -520,10 +513,15 @@ mod tests {
         assert_eq!(
             &format!(
                 "{}",
-                ts.coerce_to(&SqlType::DateTime(Some(6)), &DfType::Unknown)
-                    .unwrap()
-                    .coerce_to(&SqlType::Text, &DfType::Unknown)
-                    .unwrap()
+                ts.coerce_to(
+                    &DfType::DateTime {
+                        subsecond_digits: 6
+                    },
+                    &DfType::Unknown
+                )
+                .unwrap()
+                .coerce_to(&DfType::Text(Collation::default()), &DfType::Unknown)
+                .unwrap()
             ),
             "2022-02-09 13:14:15.169000"
         );
@@ -531,10 +529,15 @@ mod tests {
         assert_eq!(
             &format!(
                 "{}",
-                ts.coerce_to(&SqlType::DateTime(Some(2)), &DfType::Unknown)
-                    .unwrap()
-                    .coerce_to(&SqlType::Text, &DfType::Unknown)
-                    .unwrap()
+                ts.coerce_to(
+                    &DfType::DateTime {
+                        subsecond_digits: 2
+                    },
+                    &DfType::Unknown
+                )
+                .unwrap()
+                .coerce_to(&DfType::Text(Collation::default()), &DfType::Unknown)
+                .unwrap()
             ),
             "2022-02-09 13:14:15.17"
         );
@@ -542,10 +545,15 @@ mod tests {
         assert_eq!(
             &format!(
                 "{}",
-                ts.coerce_to(&SqlType::DateTime(Some(1)), &DfType::Unknown)
-                    .unwrap()
-                    .coerce_to(&SqlType::Text, &DfType::Unknown)
-                    .unwrap()
+                ts.coerce_to(
+                    &DfType::DateTime {
+                        subsecond_digits: 1
+                    },
+                    &DfType::Unknown
+                )
+                .unwrap()
+                .coerce_to(&DfType::Text(Collation::default()), &DfType::Unknown)
+                .unwrap()
             ),
             "2022-02-09 13:14:15.2"
         );
@@ -553,9 +561,9 @@ mod tests {
         assert_eq!(
             &format!(
                 "{}",
-                ts.coerce_to(&SqlType::Date, &DfType::Unknown)
+                ts.coerce_to(&DfType::Date, &DfType::Unknown)
                     .unwrap()
-                    .coerce_to(&SqlType::Text, &DfType::Unknown)
+                    .coerce_to(&DfType::Text(Collation::default()), &DfType::Unknown)
                     .unwrap()
             ),
             "2022-02-09"
@@ -564,10 +572,15 @@ mod tests {
         assert_eq!(
             &format!(
                 "{}",
-                ts.coerce_to(&SqlType::DateTime(Some(1)), &DfType::Unknown)
-                    .unwrap()
-                    .coerce_to(&SqlType::Json, &DfType::Unknown)
-                    .unwrap()
+                ts.coerce_to(
+                    &DfType::DateTime {
+                        subsecond_digits: 1
+                    },
+                    &DfType::Unknown
+                )
+                .unwrap()
+                .coerce_to(&DfType::Json(Dialect::MySQL), &DfType::Unknown)
+                .unwrap()
             ),
             "\"2022-02-09 13:14:15.169000\""
         );

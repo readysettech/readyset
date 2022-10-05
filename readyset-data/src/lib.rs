@@ -272,6 +272,11 @@ impl DfValue {
         matches!(*self, DfValue::ByteArray(_))
     }
 
+    /// Checks if this value is of a PostgreSQL array.
+    pub fn is_array(&self) -> bool {
+        matches!(*self, DfValue::Array(_))
+    }
+
     /// Returns `true` if this value is truthy (is not 0, 0.0, '', or NULL).
     ///
     /// # Examples
@@ -412,7 +417,15 @@ impl DfValue {
         }
     }
 
-    /// Attempt to coerce the given DfValue to a value of the given `SqlType`.
+    /// Returns `true` if the value does not contain a mix of inferred types.
+    pub fn is_homogenous(&self) -> bool {
+        match self {
+            Self::Array(array) => array.is_homogenous(),
+            _ => true,
+        }
+    }
+
+    /// Attempt to coerce the given [`DfValue`] to a value of the given [`DfType`].
     ///
     /// Currently, this entails:
     ///
@@ -427,13 +440,10 @@ impl DfValue {
     /// Reals can be converted to integers
     ///
     /// ```rust
-    /// use nom_sql::SqlType;
     /// use readyset_data::{DfType, DfValue};
     ///
     /// let real = DfValue::Double(123.0);
-    /// let int = real
-    ///     .coerce_to(&SqlType::Int(None), &DfType::Unknown)
-    ///     .unwrap();
+    /// let int = real.coerce_to(&DfType::Int, &DfType::Unknown).unwrap();
     /// assert_eq!(int, DfValue::Int(123));
     /// ```
     ///
@@ -444,25 +454,35 @@ impl DfValue {
     /// use std::convert::TryFrom;
     ///
     /// use chrono::NaiveDate;
-    /// use nom_sql::SqlType;
+    /// use nom_sql::Dialect;
     /// use readyset_data::{DfType, DfValue};
     ///
+    /// let subsecond_digits = Dialect::MySQL.default_subsecond_digits();
     /// let text = DfValue::from("2021-01-26 10:20:37");
     /// let timestamp = text
-    ///     .coerce_to(&SqlType::Timestamp, &DfType::Unknown)
+    ///     .coerce_to(&DfType::Timestamp { subsecond_digits }, &DfType::Unknown)
     ///     .unwrap();
     /// assert_eq!(
     ///     timestamp,
     ///     DfValue::TimestampTz(NaiveDate::from_ymd(2021, 01, 26).and_hms(10, 20, 37).into())
     /// );
     /// ```
-    pub fn coerce_to(&self, to_ty: &SqlType, from_ty: &DfType) -> ReadySetResult<DfValue> {
+    pub fn coerce_to(&self, to_ty: &DfType, from_ty: &DfType) -> ReadySetResult<DfValue> {
         use crate::text::TextCoerce;
 
         let mk_err = || ReadySetError::DfValueConversionError {
             src_type: from_ty.to_string(),
             target_type: to_ty.to_string(),
             details: "unsupported".into(),
+        };
+
+        // Returns whether `self` can simply use `Clone` for coercion.
+        let is_clone_coercible = || -> bool {
+            // This check could produce invalid results for heterogenous arrays, but arrays are
+            // never coerced with `Clone`.
+            debug_assert!(self.is_homogenous());
+
+            self.infer_dataflow_type().try_into_known().as_ref() == Some(to_ty)
         };
 
         // This lets us avoid repeating this logic in multiple match arms for different int types.
@@ -485,11 +505,11 @@ impl DfValue {
         match self {
             DfValue::None => Ok(DfValue::None),
             DfValue::Array(arr) => match to_ty {
-                SqlType::Array(t) => Ok(DfValue::from(arr.coerce_to(t, from_ty)?)),
-                SqlType::Text => Ok(DfValue::from(arr.to_string())),
+                DfType::Array(t) => Ok(DfValue::from(arr.coerce_to(t, from_ty)?)),
+                DfType::Text { .. } => Ok(DfValue::from(arr.to_string())),
                 _ => Err(mk_err()),
             },
-            dt if dt.sql_type().as_ref() == Some(to_ty) => Ok(self.clone()),
+            _ if is_clone_coercible() => Ok(self.clone()),
             DfValue::Text(t) => t.coerce_to(to_ty, from_ty),
             DfValue::TinyText(tt) => tt.coerce_to(to_ty, from_ty),
             DfValue::TimestampTz(tz) => tz.coerce_to(to_ty),
@@ -500,8 +520,8 @@ impl DfValue {
             DfValue::Numeric(d) => float::coerce_decimal(d.as_ref(), to_ty, from_ty),
             DfValue::Time(ts) if to_ty.is_any_text() => Ok(ts.to_string().into()),
             DfValue::BitVector(vec) => match to_ty {
-                SqlType::VarBit(None) => Ok(self.clone()),
-                SqlType::VarBit(max_size_opt) => match max_size_opt {
+                DfType::VarBit(None) => Ok(self.clone()),
+                DfType::VarBit(max_size_opt) => match max_size_opt {
                     Some(max_size) if vec.len() > *max_size as usize => Err(mk_err()),
                     _ => Ok(self.clone()),
                 },
@@ -519,15 +539,12 @@ impl DfValue {
     /// Mutates the given DfType value to match its underlying database representation for the
     /// given column schema.
     pub fn maybe_coerce_for_table_op(&mut self, col_ty: &DfType) {
-        if let DfType::Enum(enum_ty, _) = col_ty {
-            // PERF: Cloning enum types is O(1).
-            let enum_ty = SqlType::Enum(enum_ty.clone());
-
+        if col_ty.is_enum() {
             // There shouldn't be any cases where this coerce_to call returns an error, but if
             // it does then a value of 0 is generally a safe bet for enum values that don't
             // trigger the happy path:
             *self = self
-                .coerce_to(&enum_ty, &DfType::Unknown)
+                .coerce_to(col_ty, &DfType::Unknown)
                 .unwrap_or(DfValue::Int(0));
         }
     }
@@ -1135,8 +1152,8 @@ impl TryFrom<Literal> for DfValue {
 impl TryFrom<DfValue> for Literal {
     type Error = ReadySetError;
 
-    fn try_from(dt: DfValue) -> Result<Self, Self::Error> {
-        match dt {
+    fn try_from(value: DfValue) -> Result<Self, Self::Error> {
+        match value {
             DfValue::None => Ok(Literal::Null),
             DfValue::Int(i) => Ok(Literal::Integer(i)),
             DfValue::UnsignedInt(i) => Ok(Literal::Integer(i as _)),
@@ -1148,13 +1165,13 @@ impl TryFrom<DfValue> for Literal {
                 value,
                 precision: u8::MAX,
             })),
-            DfValue::Text(_) => Ok(Literal::String(String::try_from(dt)?)),
-            DfValue::TinyText(_) => Ok(Literal::String(String::try_from(dt)?)),
+            DfValue::Text(_) => Ok(Literal::String(String::try_from(value)?)),
+            DfValue::TinyText(_) => Ok(Literal::String(String::try_from(value)?)),
             DfValue::TimestampTz(_) => Ok(Literal::String(String::try_from(
-                dt.coerce_to(&SqlType::Text, &DfType::Unknown)?,
+                value.coerce_to(&DfType::Text(Collation::default()), &DfType::Unknown)?,
             )?)),
             DfValue::Time(_) => Ok(Literal::String(String::try_from(
-                dt.coerce_to(&SqlType::Text, &DfType::Unknown)?,
+                value.coerce_to(&DfType::Text(Collation::default()), &DfType::Unknown)?,
             )?)),
             DfValue::ByteArray(ref array) => Ok(Literal::ByteArray(array.as_ref().clone())),
             DfValue::Numeric(ref d) => Ok(Literal::Numeric(d.mantissa(), d.scale())),
@@ -3231,41 +3248,58 @@ mod tests {
         };
         use rust_decimal::Decimal;
         use test_strategy::proptest;
-        use SqlType::*;
 
         use super::*;
 
         #[proptest]
         fn same_type_is_identity(dt: DfValue) {
-            if let Some(ty) = dt.sql_type() {
-                assert_eq!(dt.coerce_to(&ty, &DfType::Unknown).unwrap(), dt);
-            }
+            prop_assume!(dt.is_homogenous());
+
+            let ty = dt.infer_dataflow_type();
+            prop_assume!(ty.is_strictly_known());
+
+            assert_eq!(
+                dt.coerce_to(&ty, &DfType::Unknown),
+                Ok(dt),
+                "coerce to {ty:?}"
+            );
         }
 
         #[proptest]
         fn parse_timestamps(#[strategy(arbitrary_naive_date_time())] ndt: NaiveDateTime) {
+            let subsecond_digits = Dialect::MySQL.default_subsecond_digits();
             let expected = DfValue::from(ndt);
             let input = DfValue::from(ndt.format(crate::timestamp::TIMESTAMP_FORMAT).to_string());
-            let result = input.coerce_to(&Timestamp, &DfType::Unknown).unwrap();
+
+            let result = input
+                .coerce_to(&DfType::Timestamp { subsecond_digits }, &DfType::Unknown)
+                .unwrap();
+
             assert_eq!(result, expected);
         }
 
         #[proptest]
         fn parse_times(#[strategy(arbitrary_naive_time())] nt: NaiveTime) {
+            let subsecond_digits = Dialect::MySQL.default_subsecond_digits();
             let expected = DfValue::from(nt);
             let input = DfValue::from(nt.format(TIME_FORMAT).to_string());
-            let result = input.coerce_to(&Time, &DfType::Unknown).unwrap();
+            let result = input
+                .coerce_to(&DfType::Time { subsecond_digits }, &DfType::Unknown)
+                .unwrap();
             assert_eq!(result, expected);
         }
 
         #[proptest]
         fn parse_datetimes(#[strategy(arbitrary_naive_date())] nd: NaiveDate) {
+            let subsecond_digits = Dialect::MySQL.default_subsecond_digits();
             let dt = NaiveDateTime::new(nd, NaiveTime::from_hms(12, 0, 0));
             let expected = DfValue::from(dt);
             let input = DfValue::from(dt.format(crate::timestamp::TIMESTAMP_FORMAT).to_string());
+
             let result = input
-                .coerce_to(&SqlType::DateTime(None), &DfType::Unknown)
+                .coerce_to(&DfType::DateTime { subsecond_digits }, &DfType::Unknown)
                 .unwrap();
+
             assert_eq!(result, expected);
         }
 
@@ -3273,19 +3307,22 @@ mod tests {
         fn parse_dates(#[strategy(arbitrary_naive_date())] nd: NaiveDate) {
             let expected = DfValue::from(NaiveDateTime::new(nd, NaiveTime::from_hms(0, 0, 0)));
             let input = DfValue::from(nd.format(crate::timestamp::DATE_FORMAT).to_string());
-            let result = input.coerce_to(&Date, &DfType::Unknown).unwrap();
+            let result = input.coerce_to(&DfType::Date, &DfType::Unknown).unwrap();
             assert_eq!(result, expected);
         }
 
         #[test]
         fn timestamp_surjections() {
+            let subsecond_digits = Dialect::MySQL.default_subsecond_digits();
             let input = DfValue::from(NaiveDate::from_ymd(2021, 3, 17).and_hms(11, 34, 56));
             assert_eq!(
-                input.coerce_to(&Date, &DfType::Unknown).unwrap(),
+                input.coerce_to(&DfType::Date, &DfType::Unknown).unwrap(),
                 NaiveDate::from_ymd(2021, 3, 17).into()
             );
             assert_eq!(
-                input.coerce_to(&Time, &DfType::Unknown).unwrap(),
+                input
+                    .coerce_to(&DfType::Time { subsecond_digits }, &DfType::Unknown)
+                    .unwrap(),
                 NaiveTime::from_hms(11, 34, 56).into()
             );
         }
@@ -3293,27 +3330,29 @@ mod tests {
         #[proptest]
         fn timestamp_to_datetime(
             #[strategy(arbitrary_naive_date_time())] ndt: NaiveDateTime,
-            prec: Option<u16>,
+            subsecond_digits: Option<u16>,
         ) {
+            let subsecond_digits =
+                subsecond_digits.unwrap_or(Dialect::MySQL.default_subsecond_digits());
             let input = DfValue::from(ndt);
             assert_eq!(
                 input
                     .clone()
-                    .coerce_to(&SqlType::DateTime(prec), &DfType::Unknown)
+                    .coerce_to(&DfType::DateTime { subsecond_digits }, &DfType::Unknown)
                     .unwrap(),
                 input
             );
         }
 
         macro_rules! int_conversion {
-            ($name: ident, $from: ty, $to: ty, $sql_type: expr) => {
+            ($name: ident, $from: ty, $to: ty, $df_type: expr) => {
                 #[proptest]
                 fn $name(source: $to) {
                     let input = <$from>::try_from(source);
                     prop_assume!(input.is_ok());
                     assert_eq!(
                         DfValue::from(input.unwrap())
-                            .coerce_to(&$sql_type, &DfType::Unknown)
+                            .coerce_to(&$df_type, &DfType::Unknown)
                             .unwrap(),
                         DfValue::from(source)
                     );
@@ -3321,39 +3360,38 @@ mod tests {
             };
         }
 
-        int_conversion!(int_to_tinyint, i32, i8, TinyInt(None));
-        int_conversion!(int_to_unsigned_tinyint, i32, u8, UnsignedTinyInt(None));
-        int_conversion!(int_to_smallint, i32, i16, SmallInt(None));
-        int_conversion!(int_to_unsigned_smallint, i32, u16, UnsignedSmallInt(None));
-        int_conversion!(bigint_to_tinyint, i64, i8, TinyInt(None));
-        int_conversion!(bigint_to_unsigned_tinyint, i64, u8, UnsignedTinyInt(None));
-        int_conversion!(bigint_to_smallint, i64, i16, SmallInt(None));
+        int_conversion!(int_to_tinyint, i32, i8, DfType::TinyInt);
+        int_conversion!(int_to_unsigned_tinyint, i32, u8, DfType::UnsignedTinyInt);
+        int_conversion!(int_to_smallint, i32, i16, DfType::SmallInt);
+        int_conversion!(int_to_unsigned_smallint, i32, u16, DfType::UnsignedSmallInt);
+        int_conversion!(bigint_to_tinyint, i64, i8, DfType::TinyInt);
+        int_conversion!(bigint_to_unsigned_tinyint, i64, u8, DfType::UnsignedTinyInt);
+        int_conversion!(bigint_to_smallint, i64, i16, DfType::SmallInt);
         int_conversion!(
             bigint_to_unsigned_smallint,
             i64,
             u16,
-            UnsignedSmallInt(None)
+            DfType::UnsignedSmallInt
         );
-        int_conversion!(bigint_to_int, i64, i32, Int(None));
-        int_conversion!(bigint_to_serial, i64, i32, Serial);
-        int_conversion!(bigint_to_unsigned_bigint, i64, u64, UnsignedBigInt(None));
+        int_conversion!(bigint_to_int, i64, i32, DfType::Int);
+        int_conversion!(bigint_to_unsigned_bigint, i64, u64, DfType::UnsignedBigInt);
 
         macro_rules! real_conversion {
-            ($name: ident, $from: ty, $to: ty, $sql_type: expr) => {
+            ($name: ident, $from: ty, $to: ty, $df_type: expr) => {
                 #[proptest]
                 fn $name(source: $from) {
                     if (source as $to).is_finite() {
                         assert_eq!(
                             DfValue::try_from(source)
                                 .unwrap()
-                                .coerce_to(&$sql_type, &DfType::Unknown)
+                                .coerce_to(&$df_type, &DfType::Unknown)
                                 .unwrap(),
                             DfValue::try_from(source as $to).unwrap()
                         );
                     } else {
                         assert!(DfValue::try_from(source)
                             .unwrap()
-                            .coerce_to(&$sql_type, &DfType::Unknown)
+                            .coerce_to(&$df_type, &DfType::Unknown)
                             .is_err());
                         assert!(DfValue::try_from(source as $to).is_err());
                     }
@@ -3361,15 +3399,19 @@ mod tests {
             };
         }
 
-        real_conversion!(float_to_double, f32, f64, Double);
+        real_conversion!(float_to_double, f32, f64, DfType::Double);
 
-        real_conversion!(double_to_float, f64, f32, Float);
+        real_conversion!(double_to_float, f64, f32, DfType::Float(Dialect::MySQL));
 
         #[proptest]
         fn char_equal_length(#[strategy("a{1,30}")] text: String) {
-            use SqlType::*;
             let input = DfValue::from(text.as_str());
-            let intermediate = Char(Some(u16::try_from(text.len()).unwrap()));
+            let dialect = Dialect::MySQL;
+            let intermediate = DfType::Char(
+                u16::try_from(text.len()).unwrap(),
+                Collation::default(),
+                dialect,
+            );
             let result = input.coerce_to(&intermediate, &DfType::Unknown).unwrap();
             assert_eq!(String::try_from(&result).unwrap().as_str(), text.as_str());
         }
@@ -3377,26 +3419,26 @@ mod tests {
         #[test]
         fn text_to_json() {
             let input = DfValue::from("{\"name\": \"John Doe\", \"age\": 43, \"phones\": [\"+44 1234567\", \"+44 2345678\"] }");
-            let result = input.coerce_to(&SqlType::Json, &DfType::Unknown).unwrap();
+            let result = input
+                .coerce_to(&DfType::Json(Dialect::MySQL), &DfType::Unknown)
+                .unwrap();
             assert_eq!(input, result);
 
-            let result = input.coerce_to(&SqlType::Jsonb, &DfType::Unknown).unwrap();
+            let result = input.coerce_to(&DfType::Jsonb, &DfType::Unknown).unwrap();
             assert_eq!(input, result);
 
             let input = DfValue::from("not a json");
-            let result = input.coerce_to(&SqlType::Json, &DfType::Unknown);
+            let result = input.coerce_to(&DfType::Json(Dialect::MySQL), &DfType::Unknown);
             result.unwrap_err();
 
-            let result = input.coerce_to(&SqlType::Jsonb, &DfType::Unknown);
+            let result = input.coerce_to(&DfType::Jsonb, &DfType::Unknown);
             result.unwrap_err();
         }
 
         #[test]
         fn text_to_macaddr() {
             let input = DfValue::from("12:34:56:ab:cd:ef");
-            let result = input
-                .coerce_to(&SqlType::MacAddr, &DfType::Unknown)
-                .unwrap();
+            let result = input.coerce_to(&DfType::MacAddr, &DfType::Unknown).unwrap();
             assert_eq!(input, result);
         }
 
@@ -3405,19 +3447,22 @@ mod tests {
         fn int_to_text() {
             assert_eq!(
                 DfValue::from(20070523i64)
-                    .coerce_to(&SqlType::Text, &DfType::Unknown)
+                    .coerce_to(&DfType::Text(Collation::default()), &DfType::Unknown)
                     .unwrap(),
                 DfValue::from("20070523"),
             );
             assert_eq!(
                 DfValue::from(20070523i64)
-                    .coerce_to(&SqlType::VarChar(Some(2)), &DfType::Unknown)
+                    .coerce_to(&DfType::VarChar(2, Collation::default()), &DfType::Unknown)
                     .unwrap(),
                 DfValue::from("20"),
             );
             assert_eq!(
                 DfValue::from(20070523i64)
-                    .coerce_to(&SqlType::Char(Some(10)), &DfType::Unknown)
+                    .coerce_to(
+                        &DfType::Char(10, Collation::default(), Dialect::MySQL),
+                        &DfType::Unknown
+                    )
                     .unwrap(),
                 DfValue::from("20070523  "),
             );
@@ -3425,37 +3470,39 @@ mod tests {
 
         #[test]
         fn int_to_date_time() {
+            let subsecond_digits = Dialect::MySQL.default_subsecond_digits();
+
             assert_eq!(
                 DfValue::from(20070523i64)
-                    .coerce_to(&SqlType::Date, &DfType::Unknown)
+                    .coerce_to(&DfType::Date, &DfType::Unknown)
                     .unwrap(),
                 DfValue::from(NaiveDate::from_ymd(2007, 5, 23))
             );
 
             assert_eq!(
                 DfValue::from(70523u64)
-                    .coerce_to(&SqlType::Date, &DfType::Unknown)
+                    .coerce_to(&DfType::Date, &DfType::Unknown)
                     .unwrap(),
                 DfValue::from(NaiveDate::from_ymd(2007, 5, 23))
             );
 
             assert_eq!(
                 DfValue::from(19830905132800i64)
-                    .coerce_to(&SqlType::Timestamp, &DfType::Unknown)
+                    .coerce_to(&DfType::Timestamp { subsecond_digits }, &DfType::Unknown)
                     .unwrap(),
                 DfValue::from(NaiveDate::from_ymd(1983, 9, 5).and_hms(13, 28, 00))
             );
 
             assert_eq!(
                 DfValue::from(830905132800u64)
-                    .coerce_to(&SqlType::DateTime(None), &DfType::Unknown)
+                    .coerce_to(&DfType::DateTime { subsecond_digits }, &DfType::Unknown)
                     .unwrap(),
                 DfValue::from(NaiveDate::from_ymd(1983, 9, 5).and_hms(13, 28, 00))
             );
 
             assert_eq!(
                 DfValue::from(101112i64)
-                    .coerce_to(&SqlType::Time, &DfType::Unknown)
+                    .coerce_to(&DfType::Time { subsecond_digits }, &DfType::Unknown)
                     .unwrap(),
                 DfValue::from(MySqlTime::from_hmsus(true, 10, 11, 12, 0))
             );
@@ -3464,7 +3511,7 @@ mod tests {
         #[test]
         fn text_to_uuid() {
             let input = DfValue::from(uuid::Uuid::new_v4().to_string());
-            let result = input.coerce_to(&SqlType::Uuid, &DfType::Unknown).unwrap();
+            let result = input.coerce_to(&DfType::Uuid, &DfType::Unknown).unwrap();
             assert_eq!(input, result);
         }
 
@@ -3473,9 +3520,7 @@ mod tests {
                 #[proptest]
                 fn $name(input: $ty) {
                     let input_dt = DfValue::from(input);
-                    let result = input_dt
-                        .coerce_to(&SqlType::Bool, &DfType::Unknown)
-                        .unwrap();
+                    let result = input_dt.coerce_to(&DfType::Bool, &DfType::Unknown).unwrap();
                     let expected = DfValue::from(input != 0);
                     assert_eq!(result, expected);
                 }
@@ -3495,7 +3540,10 @@ mod tests {
         fn string_to_array() {
             let input = DfValue::from(r#"{"a", "b", "c"}"#);
             let res = input
-                .coerce_to(&SqlType::Array(Box::new(SqlType::Text)), &DfType::Unknown)
+                .coerce_to(
+                    &DfType::Array(Box::new(DfType::Text(Collation::default()))),
+                    &DfType::Unknown,
+                )
                 .unwrap();
             assert_eq!(
                 res,
@@ -3511,7 +3559,10 @@ mod tests {
         fn array_coercing_values() {
             let input = DfValue::from(r#"{1, 2, 3}"#);
             let res = input
-                .coerce_to(&SqlType::Array(Box::new(SqlType::Text)), &DfType::Unknown)
+                .coerce_to(
+                    &DfType::Array(Box::new(DfType::Text(Collation::default()))),
+                    &DfType::Unknown,
+                )
                 .unwrap();
             assert_eq!(
                 res,
@@ -3527,7 +3578,10 @@ mod tests {
         fn two_d_array_coercing_values() {
             let input = DfValue::from(r#"[0:1][0:1]={{1, 2}, {3, 4}}"#);
             let res = input
-                .coerce_to(&SqlType::Array(Box::new(SqlType::Text)), &DfType::Unknown)
+                .coerce_to(
+                    &DfType::Array(Box::new(DfType::Text(Collation::default()))),
+                    &DfType::Unknown,
+                )
                 .unwrap();
             assert_eq!(
                 res,
@@ -3553,16 +3607,18 @@ mod tests {
         #[test]
         fn enum_coercions() {
             let variants = ["red", "yellow", "green"];
-            let enum_ty = SqlType::from_enum_variants(
+            let enum_ty = DfType::from_enum_variants(
                 variants.iter().map(|s| Literal::String(s.to_string())),
+                Dialect::MySQL,
             );
-            let from_ty = DfType::from_sql_type(&enum_ty, Dialect::MySQL);
 
             // Test conversions from enums to strings
             for dv in [DfValue::Int(2), DfValue::UnsignedInt(2)] {
                 assert_eq!(
                     "yellow",
-                    dv.coerce_to(&SqlType::Text, &from_ty).unwrap().to_string()
+                    dv.coerce_to(&DfType::Text(Collation::default()), &enum_ty)
+                        .unwrap()
+                        .to_string()
                 )
             }
 
@@ -3571,7 +3627,7 @@ mod tests {
                 assert_eq!(
                     "",
                     DfValue::Int(i)
-                        .coerce_to(&SqlType::Text, &from_ty)
+                        .coerce_to(&DfType::Text(Collation::default()), &enum_ty)
                         .unwrap()
                         .to_string()
                 );
@@ -3641,32 +3697,35 @@ mod tests {
             // Test coercion from enum to text types with length limits
 
             let result = DfValue::Int(2)
-                .coerce_to(&SqlType::Char(Some(3)), &from_ty)
+                .coerce_to(
+                    &DfType::Char(3, Collation::default(), Dialect::MySQL),
+                    &enum_ty,
+                )
                 .unwrap();
             assert_eq!("yel", result.to_string());
 
             let result = DfValue::Int(2)
-                .coerce_to(&SqlType::VarChar(Some(3)), &from_ty)
+                .coerce_to(&DfType::VarChar(3, Collation::default()), &enum_ty)
                 .unwrap();
             assert_eq!("yel", result.to_string());
 
             let result = DfValue::Int(2)
-                .coerce_to(&SqlType::Char(Some(10)), &from_ty)
+                .coerce_to(
+                    &DfType::Char(10, Collation::default(), Dialect::MySQL),
+                    &enum_ty,
+                )
                 .unwrap();
             assert_eq!("yellow    ", result.to_string());
 
             let no_change_tys = [
-                SqlType::VarChar(Some(10)),
-                SqlType::Char(None),
-                SqlType::VarChar(None),
-                SqlType::Text,
-                SqlType::TinyText,
-                SqlType::MediumText,
-                SqlType::LongText,
+                DfType::VarChar(10, Collation::default()),
+                // FIXME(ENG-1839)
+                // DfType::Char(None, Collation::default(), Dialect::MySQL),
+                DfType::Text(Collation::default()),
             ];
 
             for to_ty in no_change_tys {
-                let result = DfValue::Int(2).coerce_to(&to_ty, &from_ty).unwrap();
+                let result = DfValue::Int(2).coerce_to(&to_ty, &enum_ty).unwrap();
                 assert_eq!("yellow", result.to_string());
             }
         }

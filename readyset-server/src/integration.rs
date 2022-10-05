@@ -6049,24 +6049,26 @@ async fn simple_enum() {
         .col_types([0], SchemaType::ReturnedSchema)
         .unwrap()[0];
 
+    let result_type = DfType::from_sql_type(result_type, Dialect::MySQL);
+
     assert_eq!(result.len(), 3);
 
     assert_eq!(
         result[0][0],
         DfValue::from("purple")
-            .coerce_to(result_type, &DfType::Unknown)
+            .coerce_to(&result_type, &DfType::Unknown)
             .unwrap()
     );
     assert_eq!(
         result[1][0],
         DfValue::from("red")
-            .coerce_to(result_type, &DfType::Unknown)
+            .coerce_to(&result_type, &DfType::Unknown)
             .unwrap()
     );
     assert_eq!(
         result[2][0],
         DfValue::from("green")
-            .coerce_to(result_type, &DfType::Unknown)
+            .coerce_to(&result_type, &DfType::Unknown)
             .unwrap()
     );
 }

@@ -6,7 +6,7 @@ use std::{iter, mem};
 
 use itertools::{Either, Itertools};
 use nom_sql::analysis::visit::{self, Visitor};
-use nom_sql::{BinaryOperator, Expr, InValue, ItemPlaceholder, Literal, SelectStatement, SqlType};
+use nom_sql::{BinaryOperator, Expr, InValue, ItemPlaceholder, Literal, SelectStatement};
 use readyset_data::{DfType, DfValue};
 use readyset_errors::{invalid_err, unsupported, ReadySetError, ReadySetResult};
 use tracing::trace;
@@ -113,7 +113,7 @@ impl ProcessedQueryParams {
                 Literal::Placeholder(_) => match params_iter
                     .next()
                     .ok_or_else(|| invalid_err!("Wrong number of parameters"))
-                    .and_then(|v| v.coerce_to(&SqlType::UnsignedBigInt(None), &DfType::Unknown))?
+                    .and_then(|v| v.coerce_to(&DfType::UnsignedBigInt, &DfType::Unknown))?
                 {
                     DfValue::UnsignedInt(v) => Ok(v as usize),
                     _ => unreachable!("Succesfully coerced"),
@@ -129,7 +129,7 @@ impl ProcessedQueryParams {
                 | Literal::Numeric(_, _) => {
                     // All of those are invalid in MySQL, but Postgres coerces to integer
                     match DfValue::try_from(lit)?
-                        .coerce_to(&SqlType::UnsignedBigInt(None), &DfType::Unknown)?
+                        .coerce_to(&DfType::UnsignedBigInt, &DfType::Unknown)?
                     {
                         DfValue::UnsignedInt(v) => Ok(v as usize),
                         _ => unreachable!("Succesfully coerced"),

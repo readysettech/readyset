@@ -85,9 +85,9 @@ use lazy_static::lazy_static;
 use nom_sql::analysis::{contains_aggregate, ReferredColumns};
 use nom_sql::{
     BinaryOperator, Column, ColumnConstraint, ColumnSpecification, CommonTableExpr,
-    CreateTableStatement, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, InValue,
-    ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, Literal, OrderClause,
-    OrderType, Relation, SelectStatement, SqlIdentifier, SqlType, TableExpr, TableKey,
+    CreateTableStatement, Dialect, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr,
+    InValue, ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, Literal,
+    OrderClause, OrderType, Relation, SelectStatement, SqlIdentifier, SqlType, TableExpr, TableKey,
 };
 use parking_lot::Mutex;
 use proptest::arbitrary::{any, any_with, Arbitrary};
@@ -558,6 +558,9 @@ pub enum ColumnGenerationSpec {
 
 impl ColumnGenerationSpec {
     pub fn generator_for_col(&self, col_type: SqlType) -> ColumnGenerator {
+        // TODO(ENG-1418): Propagate dialect info.
+        let dialect = Dialect::MySQL;
+
         match self {
             ColumnGenerationSpec::Unique => ColumnGenerator::Unique(col_type.into()),
             ColumnGenerationSpec::UniqueFrom(index) => {
@@ -589,9 +592,11 @@ impl ColumnGenerationSpec {
             ColumnGenerationSpec::Zipfian { min, max, alpha } => {
                 ColumnGenerator::Zipfian(ZipfianGenerator::new(min.clone(), max.clone(), *alpha))
             }
-            ColumnGenerationSpec::Constant(val) => ColumnGenerator::Constant(
-                val.coerce_to(&col_type, &DfType::Unknown).unwrap().into(),
-            ),
+            ColumnGenerationSpec::Constant(val) => {
+                let col_type = DfType::from_sql_type(&col_type, dialect);
+                let val = val.coerce_to(&col_type, &DfType::Unknown).unwrap();
+                ColumnGenerator::Constant(val.into())
+            }
         }
     }
 }
@@ -929,6 +934,9 @@ pub struct TableSpec {
 
 impl From<CreateTableStatement> for TableSpec {
     fn from(stmt: CreateTableStatement) -> Self {
+        // TODO(ENG-1418): Propagate dialect info.
+        let dialect = Dialect::MySQL;
+
         let primary_key: Option<ColumnName> =
             find_primary_keys(&stmt).map(|cspec| cspec.column.clone().into());
 
@@ -939,12 +947,14 @@ impl From<CreateTableStatement> for TableSpec {
                 .iter()
                 .map(|field| {
                     let sql_type = field.sql_type.clone();
+                    let df_type = DfType::from_sql_type(&sql_type, dialect);
+
                     let generator = if let Some(d) =
                         field.has_default().and_then(|l| DfValue::try_from(l).ok())
                     {
                         // Prefer the specified default value for a field
                         ColumnGenerator::Constant(
-                            d.coerce_to(&sql_type, &DfType::Unknown).unwrap().into(),
+                            d.coerce_to(&df_type, &DfType::Unknown).unwrap().into(),
                         )
                     } else {
                         // Otherwise default to generating fields with a constant value.

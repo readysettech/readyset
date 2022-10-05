@@ -30,3 +30,5 @@ cc d55e1c7e303cca5b804d94ff5852ad1469d2fffa6bda8e519b4434ae2116301e # shrinks to
 cc e9957cf4c60f7616baa9472fe9d0f80cb3549d10497e648bfbfeaae8e02fd2b0 # shrinks to input = _GtTransitiveArgs { x: Int(0), y: Double(-1.4349343569398359e237, 0), z: Numeric(9223372036854775808) }
 cc 393b504d56573e2bf87d3241bcdc012ed597497fbd61a62008555c1d32c1798b # shrinks to input = _MatchesEqArgs { x: None, y: Max }
 cc 8435c0ede858eda337ff5755eac4f4b3a6e84cce57660c509b4e94966eb32674
+cc 71d343c9fb0f633673cc6e38a866d27568a3c220d059c94a51640e6e3ac7cf84 # shrinks to input = _MysqlValueToDtRoundtripPropArgs { dt: TinyText("") }
+cc 44c5643c6014ada5eae107dc2ab0fb3acbaaedb4718b0ac5220c565ebeab2c60 # shrinks to input = _SameTypeIsIdentityArgs { dt: Array(Array { lower_bounds: [1], contents: [TimestampTz(0000-05-07T10:01:30+00:00), TimestampTz(0659-12-19T16:14:07-14:36:10)], shape=[2], strides=[1], layout=CFcf (0xf), dynamic ndim=1 }) }
