@@ -424,6 +424,12 @@ impl DfType {
         )
     }
 
+    /// Returns `true` if this is any `text` type
+    #[inline]
+    pub fn is_any_text(&self) -> bool {
+        matches!(self, Self::Text(..) | Self::VarChar(..) | Self::Char(..))
+    }
+
     /// Returns `true` if this is any IEEE 754 floating-point type.
     #[inline]
     pub fn is_any_float(&self) -> bool {

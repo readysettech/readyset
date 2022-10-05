@@ -1,4 +1,5 @@
 use std::borrow::Borrow;
+use std::cmp::Ordering;
 use std::convert::TryFrom;
 use std::ops::{Add, Div, Mul, Sub};
 use std::str::FromStr;
@@ -426,6 +427,50 @@ impl Expr {
                     }
 
                     Ok(s.into())
+                }
+                BuiltinFunction::Substring(string, from, len) => {
+                    // TODO: Just use `ty`, once `coerce_to` takes a DfType as its first arg
+                    let return_ty = ty.to_sql_type().ok_or_else(|| internal_err!())?;
+
+                    let string =
+                        non_null!(string.eval(record)?).coerce_to(&return_ty, string.ty())?;
+                    let s = <&str>::try_from(&string)?;
+
+                    let from = match from {
+                        Some(from) => non_null!(from.eval(record)?)
+                            .coerce_to(&SqlType::BigInt(None), from.ty())?
+                            .try_into()?,
+                        None => 1i64,
+                    };
+
+                    let len = match len {
+                        Some(len) => non_null!(len.eval(record)?)
+                            .coerce_to(&SqlType::BigInt(None), len.ty())?
+                            .try_into()?,
+                        None => s.len() as i64 + 1,
+                    };
+
+                    if len <= 0 {
+                        return Ok("".into());
+                    }
+
+                    let start = match from.cmp(&0) {
+                        Ordering::Equal => return Ok("".into()),
+                        Ordering::Less => {
+                            let reverse_from = -from as usize;
+                            if reverse_from > s.len() {
+                                return Ok("".into());
+                            }
+                            s.len() - reverse_from
+                        }
+                        Ordering::Greater => (from - 1) as usize,
+                    };
+
+                    Ok(s.chars()
+                        .skip(start)
+                        .take(len as _)
+                        .collect::<String>()
+                        .into())
                 }
             },
             CaseWhen {
@@ -1336,6 +1381,102 @@ mod tests {
 
             let res = expr.eval::<DfValue>(&[]).unwrap();
             assert_eq!(res, DfValue::None);
+        }
+
+        #[test]
+        fn substring_with_from_and_for() {
+            let expr = Expr::Call {
+                func: Box::new(BuiltinFunction::Substring(
+                    Expr::Literal {
+                        val: "abcdef".into(),
+                        ty: DfType::Text(Collation::default()),
+                    },
+                    Some(Expr::Column {
+                        index: 0,
+                        ty: DfType::Int,
+                    }),
+                    Some(Expr::Column {
+                        index: 1,
+                        ty: DfType::Int,
+                    }),
+                )),
+                ty: DfType::Text(Collation::default()),
+            };
+            let call_with =
+                |from: i64, len: i64| expr.eval::<DfValue>(&[from.into(), len.into()]).unwrap();
+
+            assert_eq!(call_with(2, 3), "bcd".into());
+            assert_eq!(call_with(3, 3), "cde".into());
+            assert_eq!(call_with(6, 3), "f".into());
+            assert_eq!(call_with(7, 12), "".into());
+            assert_eq!(call_with(-3, 3), "def".into());
+            assert_eq!(call_with(-3, -3), "".into());
+            assert_eq!(call_with(0, 3), "".into());
+            assert_eq!(call_with(0, 0), "".into());
+            assert_eq!(call_with(-7, 2), "".into());
+        }
+
+        #[test]
+        fn substring_multibyte() {
+            let expr = Expr::Call {
+                func: Box::new(BuiltinFunction::Substring(
+                    Expr::Literal {
+                        val: "é".into(),
+                        ty: DfType::Text(Collation::default()),
+                    },
+                    Some(Expr::Literal {
+                        val: 1.into(),
+                        ty: DfType::Int,
+                    }),
+                    Some(Expr::Literal {
+                        val: 1.into(),
+                        ty: DfType::Int,
+                    }),
+                )),
+                ty: DfType::Text(Collation::default()),
+            };
+            let res = expr.eval::<DfValue>(&[]).unwrap();
+            assert_eq!(res, "é".into());
+        }
+
+        #[test]
+        fn substring_with_from() {
+            let expr = Expr::Call {
+                func: Box::new(BuiltinFunction::Substring(
+                    Expr::Literal {
+                        val: "abcdef".into(),
+                        ty: DfType::Text(Collation::default()),
+                    },
+                    Some(Expr::Column {
+                        index: 0,
+                        ty: DfType::Int,
+                    }),
+                    None,
+                )),
+                ty: DfType::Text(Collation::default()),
+            };
+            let res = expr.eval::<DfValue>(&[2.into()]).unwrap();
+            assert_eq!(res, "bcdef".into());
+        }
+
+        #[test]
+        fn substring_with_for() {
+            let expr = Expr::Call {
+                func: Box::new(BuiltinFunction::Substring(
+                    Expr::Literal {
+                        val: "abcdef".into(),
+                        ty: DfType::Text(Collation::default()),
+                    },
+                    None,
+                    Some(Expr::Column {
+                        index: 0,
+                        ty: DfType::Int,
+                    }),
+                )),
+                ty: DfType::Text(Collation::default()),
+            };
+            let res = expr.eval::<DfValue>(&[3.into()]).unwrap();
+            assert_eq!(res, "abc".into());
         }
     }
 }

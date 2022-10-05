@@ -46,6 +46,11 @@ pub enum BuiltinFunction {
     Coalesce(Expr, Vec<Expr>),
     /// [`concat`](https://dev.mysql.com/doc/refman/8.0/en/string-functions.html#function_concat)
     Concat(Expr, Vec<Expr>),
+    /// `substring`:
+    ///
+    /// * [MySQL](https://dev.mysql.com/doc/refman/8.0/en/string-functions.html#function_substring)
+    /// * [Postgres](https://www.postgresql.org/docs/9.1/functions-string.html)
+    Substring(Expr, Option<Expr>, Option<Expr>),
 }
 
 impl BuiltinFunction {
@@ -158,6 +163,19 @@ impl BuiltinFunction {
                     .unwrap_or_default();
                 (Self::Concat(arg1, rest_args), DfType::Text(collation))
             }
+            "substring" | "substr" => {
+                let string = next_arg()?;
+                let ty = if string.ty().is_any_text() {
+                    string.ty().clone()
+                } else {
+                    DfType::Text(Collation::default())
+                };
+
+                (
+                    Self::Substring(string, next_arg().ok(), next_arg().ok()),
+                    ty,
+                )
+            }
             _ => return Err(ReadySetError::NoSuchFunction(name.to_owned())),
         };
 
@@ -182,6 +200,7 @@ impl BuiltinFunction {
             JsonbTypeof { .. } => "jsonb_typeof",
             Coalesce { .. } => "coalesce",
             Concat { .. } => "concat",
+            Substring { .. } => "substring",
         }
     }
 }
@@ -225,6 +244,16 @@ impl fmt::Display for BuiltinFunction {
             }
             Concat(arg1, args) => {
                 write!(f, "({}, {})", arg1, args.iter().join(", "))
+            }
+            Substring(string, from, len) => {
+                write!(f, "substring({string}")?;
+                if let Some(from) = from {
+                    write!(f, " from {from}")?;
+                }
+                if let Some(len) = len {
+                    write!(f, " for {len}")?;
+                }
+                write!(f, ")")
             }
         }
     }
@@ -344,6 +373,19 @@ impl Expr {
                     .map(|arg| Self::lower(arg, resolve_column))
                     .collect::<Result<Vec<_>, _>>()?;
                 let (func, ty) = BuiltinFunction::from_name_and_args(&fname, args)?;
+                Ok(Self::Call {
+                    func: Box::new(func),
+                    ty,
+                })
+            }
+            AstExpr::Call(FunctionExpr::Substring { string, pos, len }) => {
+                let args = iter::once(string)
+                    .chain(pos)
+                    .chain(len)
+                    .map(|arg| Self::lower(*arg, resolve_column))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let (func, ty) = BuiltinFunction::from_name_and_args("substring", args)?;
+
                 Ok(Self::Call {
                     func: Box::new(func),
                     ty,
@@ -584,6 +626,98 @@ mod tests {
                     ty: DfType::Text(Collation::default()),
                 }
             );
+        }
+
+        #[test]
+        fn substring_from_for() {
+            let input = parse_expr(Dialect::MySQL, "substr(col from 1 for 7)").unwrap();
+            let res = Expr::lower(input, |c| {
+                if c == "col".into() {
+                    Ok((0, DfType::Text(Collation::Citext)))
+                } else {
+                    internal!()
+                }
+            })
+            .unwrap();
+            assert_eq!(
+                res,
+                Expr::Call {
+                    func: Box::new(BuiltinFunction::Substring(
+                        Expr::Column {
+                            index: 0,
+                            ty: DfType::Text(Collation::Citext)
+                        },
+                        Some(Expr::Literal {
+                            val: 1u32.into(),
+                            ty: DfType::UnsignedBigInt
+                        }),
+                        Some(Expr::Literal {
+                            val: 7u32.into(),
+                            ty: DfType::UnsignedBigInt
+                        })
+                    )),
+                    ty: DfType::Text(Collation::Citext)
+                }
+            )
+        }
+
+        #[test]
+        fn substr_regular() {
+            let input = parse_expr(Dialect::MySQL, "substr('abcdefghi', 1, 7)").unwrap();
+            let res = Expr::lower(input, |_| internal!()).unwrap();
+            assert_eq!(
+                res,
+                Expr::Call {
+                    func: Box::new(BuiltinFunction::Substring(
+                        Expr::Literal {
+                            val: "abcdefghi".into(),
+                            ty: DfType::Text(Collation::default())
+                        },
+                        Some(Expr::Literal {
+                            val: 1.into(),
+                            ty: DfType::UnsignedBigInt
+                        }),
+                        Some(Expr::Literal {
+                            val: 7.into(),
+                            ty: DfType::UnsignedBigInt
+                        })
+                    )),
+                    ty: DfType::Text(Collation::default())
+                }
+            )
+        }
+
+        #[test]
+        fn substring_regular() {
+            let input = parse_expr(Dialect::MySQL, "substring('abcdefghi', 1, 7)").unwrap();
+            let res = Expr::lower(input, |_| internal!()).unwrap();
+            assert_eq!(
+                res,
+                Expr::Call {
+                    func: Box::new(BuiltinFunction::Substring(
+                        Expr::Literal {
+                            val: "abcdefghi".into(),
+                            ty: DfType::Text(Collation::default())
+                        },
+                        Some(Expr::Literal {
+                            val: 1.into(),
+                            ty: DfType::UnsignedBigInt
+                        }),
+                        Some(Expr::Literal {
+                            val: 7.into(),
+                            ty: DfType::UnsignedBigInt
+                        })
+                    )),
+                    ty: DfType::Text(Collation::default())
+                }
+            )
+        }
+
+        #[test]
+        fn substring_without_string_arg() {
+            let input = parse_expr(Dialect::MySQL, "substring(123 from 2)").unwrap();
+            let res = Expr::lower(input, |_| internal!()).unwrap();
+            assert_eq!(res.ty(), &DfType::Text(Collation::default()));
         }
     }
 }
