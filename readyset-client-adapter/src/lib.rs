@@ -11,7 +11,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, bail};
 use async_trait::async_trait;
-use clap::Parser;
+use clap::{ArgGroup, Parser};
 use failpoint_macros::set_failpoint;
 use futures_util::future::FutureExt;
 use futures_util::stream::StreamExt;
@@ -145,6 +145,11 @@ where
 }
 
 #[derive(Parser, Debug)]
+#[clap(group(
+    ArgGroup::new("metrics")
+        .multiple(true)
+        .args(&["prometheus-metrics", "noria-metrics"]),
+))]
 pub struct Options {
     /// IP:PORT to listen on
     #[clap(long, short = 'a', env = "LISTEN_ADDRESS", parse(try_from_str))]
@@ -235,9 +240,8 @@ pub struct Options {
     #[clap(long, hide = true)]
     noria_metrics: bool,
 
-    /// Enable logging queries and execution metrics in prometheus. This creates a
-    /// histogram per unique query.
-    #[clap(long, env = "QUERY_LOG", requires = "prometheus-metrics")]
+    /// Enable logging queries and execution metrics. This creates a histogram per unique query.
+    #[clap(long, env = "QUERY_LOG", requires = "metrics")]
     query_log: bool,
 
     /// Enables logging ad-hoc queries in the query log. Useful for testing.
