@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use database_utils::UpstreamConfig as Config;
 use launchpad::eventually;
 use mysql_async::prelude::Queryable;
 use mysql_time::MySqlTime;
@@ -14,7 +15,7 @@ use readyset::{ReadySetError, ReadySetHandle, ReadySetResult};
 use readyset_data::{Collation, DfValue, TinyText};
 use readyset_server::Builder;
 use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer, TelemetrySender};
-use replicators::{Config, NoriaAdapter};
+use replicators::NoriaAdapter;
 use test_utils::slow;
 use tracing::{error, trace};
 
@@ -286,7 +287,7 @@ impl TestHandle {
             if let Err(error) = NoriaAdapter::start(
                 controller,
                 Config {
-                    replication_url: Some(url),
+                    upstream_db_url: Some(url),
                     ..config.unwrap_or_default()
                 },
                 ready_notify.clone(),

@@ -438,6 +438,7 @@ use controller::migrate::materialization;
 pub use controller::migrate::materialization::FrontierStrategy;
 pub use controller::replication::{ReplicationOptions, ReplicationStrategy};
 use controller::sql;
+use database_utils::UpstreamConfig;
 pub use dataflow::{DurabilityMode, PersistenceParameters};
 pub use petgraph::graph::NodeIndex;
 pub use readyset::consensus::{Authority, LocalAuthority};
@@ -486,7 +487,7 @@ pub struct Config {
     /// Configuration for converting SQL to MIR
     pub(crate) mir_config: sql::mir::Config,
     #[serde(flatten)]
-    pub(crate) replicator_config: replicators::Config,
+    pub(crate) replicator_config: UpstreamConfig,
     pub(crate) keep_prior_recipes: bool,
     #[serde(default)]
     pub(crate) replication_strategy: ReplicationStrategy,
@@ -616,7 +617,7 @@ pub struct WorkerOptions {
 
     #[allow(missing_docs)]
     #[clap(flatten)]
-    pub replicator_config: replicators::Config,
+    pub replicator_config: UpstreamConfig,
 }
 
 use std::pin::Pin;

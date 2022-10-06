@@ -14,9 +14,3 @@ pub use crate::error::Error;
 pub use crate::query_handler::PostgreSqlQueryHandler;
 pub use crate::upstream::PostgreSqlUpstream;
 pub use crate::value::Value;
-
-/// PostgreSQL-specific runtime adapter configuration
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Default)]
-pub struct Config {
-    pub disable_upstream_ssl_verification: bool,
-}

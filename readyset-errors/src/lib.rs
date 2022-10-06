@@ -75,9 +75,9 @@ pub enum ReadySetError {
         statement: String,
     },
 
-    /// Could not connect to the mysql database provided
-    #[error("Could not connect to the mysql database provided")]
-    InvalidMySqlDatabase,
+    /// Could not connect to the upstream database provided
+    #[error("Could not connect to the upstream database provided")]
+    InvalidUpstreamDatabase,
 
     /// An intra-ReadySet RPC call failed.
     #[error("Error during RPC ({during}): {source}")]

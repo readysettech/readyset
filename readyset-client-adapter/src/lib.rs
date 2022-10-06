@@ -137,8 +137,6 @@ where
     pub database_type: DatabaseType,
     /// SQL dialect to use when parsing queries
     pub dialect: Dialect,
-    /// Configuration for the connection handler's upstream database
-    pub upstream_config: <<H as ConnectionHandler>::UpstreamDatabase as UpstreamDatabase>::Config,
 }
 
 #[derive(Parser, Debug)]
@@ -224,11 +222,6 @@ pub struct Options {
     /// --allow-unauthenticated-connections is passed
     #[clap(long, env = "ALLOWED_PASSWORD", short = 'p')]
     password: Option<RedactedString>,
-
-    /// URL for the upstream database to connect to. Should include username and password if
-    /// necessary
-    #[clap(long, env = "UPSTREAM_DB_URL")]
-    upstream_db_url: Option<RedactedString>,
 
     /// Enable recording and exposing Prometheus metrics
     #[clap(long, env = "PROMETHEUS_METRICS")]
@@ -622,8 +615,6 @@ where
 
         if let MigrationMode::OutOfBand = migration_mode {
             set_failpoint!("adapter-out-of-band");
-            let upstream_db_url = options.upstream_db_url.as_ref().map(|u| u.0.clone());
-            let upstream_config = self.upstream_config.clone();
             let rh = rh.clone();
             let (auto_increments, query_cache) = (auto_increments.clone(), query_cache.clone());
             let shutdown_recv = shutdown_sender.subscribe();
@@ -631,21 +622,23 @@ where
             let max_retry = options.max_processing_minutes;
             let validate_queries = options.validate_queries;
             let dry_run = options.explicit_migrations;
+            let upstream_config = options.server_worker_options.replicator_config.clone();
 
             rs_connect.in_scope(|| info!("Spawning migration handler task"));
             let fut = async move {
                 let connection = span!(Level::INFO, "migration task upstream database connection");
                 let mut upstream =
-                    match upstream_db_url {
-                        Some(url) if !dry_run => Some(
-                            H::UpstreamDatabase::connect(url.clone(), upstream_config)
+                    if upstream_config.upstream_db_url.is_some() && !dry_run {
+                        Some(
+                            H::UpstreamDatabase::connect(upstream_config)
                                 .instrument(connection.in_scope(|| {
                                     span!(Level::INFO, "Connecting to upstream database")
                                 }))
                                 .await
                                 .unwrap(),
-                        ),
-                        _ => None,
+                        )
+                    } else {
+                        None
                     };
 
                 let schema_search_path = if let Some(upstream) = &mut upstream {
@@ -729,6 +722,8 @@ where
         // from readers on the adapter rather than across a network hop.
         let readers: Readers = Arc::new(Mutex::new(Default::default()));
 
+        let upstream_config = options.server_worker_options.replicator_config.clone();
+
         // Run a readyset-server instance within this adapter.
         let _handle = if options.standalone || options.embedded_readers {
             let (handle, valve) = Valve::new();
@@ -744,10 +739,6 @@ where
             if options.embedded_readers {
                 builder.as_reader_only();
                 builder.cannot_become_leader();
-            }
-
-            if let Some(upstream_db_url) = &options.upstream_db_url {
-                builder.set_replication_url(upstream_db_url.clone().into());
             }
 
             builder.set_telemetry_sender(telemetry_sender.clone());
@@ -784,8 +775,6 @@ where
             let rh = rh.clone();
             let (auto_increments, query_cache) = (auto_increments.clone(), query_cache.clone());
             let mut connection_handler = self.connection_handler.clone();
-            let upstream_db_url = options.upstream_db_url.clone();
-            let upstream_config = self.upstream_config.clone();
             let backend_builder = BackendBuilder::new()
                 .slowlog(options.log_slow)
                 .users(users.clone())
@@ -814,15 +803,13 @@ where
             });
 
             let query_status_cache = query_status_cache;
+            let upstream_config = upstream_config.clone();
             let fut = async move {
-                let upstream_res = if let Some(upstream_db_url) = &upstream_db_url {
+                let upstream_res = if upstream_config.upstream_db_url.is_some() {
                     set_failpoint!(failpoints::UPSTREAM);
                     timeout(
                         UPSTREAM_CONNECTION_TIMEOUT,
-                        H::UpstreamDatabase::connect(
-                            upstream_db_url.0.clone(),
-                            upstream_config.clone(),
-                        ),
+                        H::UpstreamDatabase::connect(upstream_config),
                     )
                     .instrument(debug_span!("Connecting to upstream database"))
                     .await

@@ -11,6 +11,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
+use database_utils::UpstreamConfig;
 use failpoint_macros::failpoint;
 use hyper::Method;
 use readyset::consensus::Authority;
@@ -51,7 +52,7 @@ pub struct Leader {
     /// The amount of time to wait for a worker request to complete.
     worker_request_timeout: Duration,
     /// Configuration for the replicator
-    pub(super) replicator_config: replicators::Config,
+    pub(super) replicator_config: UpstreamConfig,
     /// A handle to the replicator task
     pub(super) replicator_task: Option<tokio::task::JoinHandle<()>>,
     /// A client to the current authority.
@@ -97,7 +98,7 @@ impl Leader {
         replication_error: UnboundedSender<ReadySetError>,
         telemetry_sender: TelemetrySender,
     ) {
-        if self.replicator_config.replication_url.is_none() {
+        if self.replicator_config.upstream_db_url.is_none() {
             ready_notification.notify_one();
             info!("No primary instance specified");
             return;
@@ -640,7 +641,7 @@ impl Leader {
         state: ControllerState,
         controller_uri: Url,
         authority: Arc<Authority>,
-        replicator_config: replicators::Config,
+        replicator_config: UpstreamConfig,
         worker_request_timeout: Duration,
     ) -> Self {
         assert_ne!(state.config.quorum, 0);

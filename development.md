@@ -48,7 +48,7 @@ ReadySet runs alongside a backing MySQL or Postgres database and uses Consul for
 First, compile and run ReadySet server.
 
 ```
-cargo run --bin readyset-server --release -- --replication-url <upstream-url>  --deployment <deployment name>
+cargo run --bin readyset-server --release -- --upstream-db-url <upstream-url>  --deployment <deployment name>
 ```
 
 If using the databases supplied by the docker-compose environment in this repository, replace <upstream-url> with the URL of the database corresponding to your database engine:

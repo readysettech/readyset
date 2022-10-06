@@ -3,18 +3,136 @@
 use std::convert::TryFrom;
 use std::fmt::{self, Display};
 use std::marker::{Send, Sync};
+use std::num::ParseIntError;
+use std::path::PathBuf;
 use std::str::FromStr;
+use std::time::Duration;
 
+use clap::Parser;
 use derive_more::From;
 use error::{ConnectionType, DatabaseTypeParseError};
 use futures::{StreamExt, TryStreamExt};
+use launchpad::redacted::RedactedString;
 use mysql_async::prelude::Queryable;
 use mysql_async::OptsBuilder;
+use readyset::{ReadySetError, ReadySetResult};
+use serde::{Deserialize, Serialize};
 use {mysql_async as mysql, tokio_postgres as pgsql};
 
 use crate::error::{DatabaseError, DatabaseURLParseError};
 
 pub mod error;
+
+/// Shared configuration for replication.
+///
+/// Usable as command-line options via `#[clap(flatten)]`
+#[derive(Debug, Clone, Parser, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UpstreamConfig {
+    /// URL for the upstream database to connect to. Should include username and password if
+    /// necessary
+    #[clap(long, env = "UPSTREAM_DB_URL")]
+    #[serde(default)]
+    pub upstream_db_url: Option<RedactedString>,
+
+    /// Disable verification of SSL certificates supplied by the upstream database (postgres
+    /// only, ignored for mysql). Ignored if `--upstream-db-url` is not passed.
+    ///
+    /// # Warning
+    ///
+    /// You should think very carefully before using this flag. If invalid certificates are
+    /// trusted, any certificate for any site will be trusted for use, including expired
+    /// certificates. This introduces significant vulnerabilities, and should only be used as a
+    /// last resort.
+    #[clap(long, env = "DISABLE_UPSTREAM_SSL_VERIFICATION")]
+    #[serde(default)]
+    pub disable_upstream_ssl_verification: bool,
+
+    /// A path to a pem or der certificate of the root that the upstream connection will trust.
+    #[clap(long, env = "SSL_ROOT_CERT")]
+    #[serde(default)]
+    pub ssl_root_cert: Option<PathBuf>,
+
+    /// Disable running DDL Streaming Replication Setup for PostgreSQL. If this flag is set
+    /// the DDL Streaming Replication Setup SQL queries will need to be manually run on the
+    /// primary server before streaming replication will start.
+    #[clap(long, env = "DISABLE_SETUP_DDL_REPLICATION")]
+    #[serde(default)]
+    pub disable_setup_ddl_replication: bool,
+
+    /// Sets the server id when acquiring a binlog replication slot.
+    #[clap(long, hide = true)]
+    #[serde(default)]
+    pub replication_server_id: Option<u32>,
+
+    /// The time to wait before restarting the replicator in seconds.
+    #[clap(long, hide = true, default_value = "30", parse(try_from_str = duration_from_seconds))]
+    #[serde(default = "default_replicator_restart_timeout")]
+    pub replicator_restart_timeout: Duration,
+
+    #[clap(long, env = "REPLICATION_TABLES")]
+    #[serde(default)]
+    pub replication_tables: Option<RedactedString>,
+
+    /// Sets the time (in seconds) between reports of progress snapshotting the database. A value
+    /// of 0 disables reporting.
+    #[clap(long, default_value = "30")]
+    #[serde(default = "default_snapshot_report_interval_secs")]
+    pub snapshot_report_interval_secs: u16,
+}
+
+impl UpstreamConfig {
+    /// Read the certificate at [`Self::ssl_root_cert`] path and try to parse it as either PEM or
+    /// DER encoded certificate
+    pub async fn get_root_cert(&self) -> Option<ReadySetResult<native_tls::Certificate>> {
+        match self.ssl_root_cert.as_ref() {
+            Some(path) => Some({
+                tokio::fs::read(path)
+                    .await
+                    .map_err(ReadySetError::from)
+                    .and_then(|cert| {
+                        native_tls::Certificate::from_pem(&cert)
+                            .or_else(|_| native_tls::Certificate::from_der(&cert))
+                            .map_err(|_| ReadySetError::InvalidRootCertificate)
+                    })
+            }),
+            None => None,
+        }
+    }
+
+    pub fn from_url<S: AsRef<str>>(url: S) -> Self {
+        UpstreamConfig {
+            upstream_db_url: Some(url.as_ref().to_string().into()),
+            ..Default::default()
+        }
+    }
+}
+
+fn default_replicator_restart_timeout() -> Duration {
+    UpstreamConfig::default().replicator_restart_timeout
+}
+
+fn default_snapshot_report_interval_secs() -> u16 {
+    UpstreamConfig::default().snapshot_report_interval_secs
+}
+
+fn duration_from_seconds(i: &str) -> Result<Duration, ParseIntError> {
+    i.parse::<u64>().map(Duration::from_secs)
+}
+
+impl Default for UpstreamConfig {
+    fn default() -> Self {
+        Self {
+            upstream_db_url: Default::default(),
+            disable_upstream_ssl_verification: false,
+            disable_setup_ddl_replication: false,
+            replication_server_id: Default::default(),
+            replicator_restart_timeout: Duration::from_secs(30),
+            replication_tables: Default::default(),
+            snapshot_report_interval_secs: 30,
+            ssl_root_cert: None,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DatabaseType {

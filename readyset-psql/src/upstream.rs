@@ -12,7 +12,7 @@ use pgsql::{GenericResult, Row};
 use psql_srv::Column;
 use readyset::ColumnSchema;
 use readyset_client::upstream_database::NoriaCompare;
-use readyset_client::{UpstreamDatabase, UpstreamPrepare};
+use readyset_client::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
 use readyset_data::DfValue;
 use readyset_errors::{unsupported, ReadySetError};
 use tokio::process::Command;
@@ -21,7 +21,7 @@ use tracing::{debug, info, info_span};
 use tracing_futures::Instrument;
 
 use crate::schema::type_to_pgsql;
-use crate::{Config, Error};
+use crate::Error;
 
 /// A connector to an underlying PostgreSQL database
 pub struct PostgreSqlUpstream {
@@ -33,12 +33,10 @@ pub struct PostgreSqlUpstream {
     prepared_statements: HashMap<u32, pgsql::Statement>,
     /// ID for the next prepared statement
     statement_id_counter: u32,
-    /// The original URL used to create the connection
-    url: String,
     /// The user used to connect to the upstream, if any
     user: Option<String>,
-    /// Connection-specific configuration
-    config: Config,
+    /// Upstream db configuration
+    upstream_config: UpstreamConfig,
 }
 
 #[derive(Debug)]
@@ -102,18 +100,25 @@ impl NoriaCompare for StatementMeta {
 
 #[async_trait]
 impl UpstreamDatabase for PostgreSqlUpstream {
-    type Config = Config;
     type StatementMeta = StatementMeta;
     type QueryResult<'a> = QueryResult;
     type Error = Error;
 
-    async fn connect(url: String, config: Config) -> Result<Self, Error> {
-        let pg_config = pgsql::Config::from_str(&url)?;
+    async fn connect(upstream_config: UpstreamConfig) -> Result<Self, Error> {
+        let url = upstream_config
+            .upstream_db_url
+            .as_ref()
+            .ok_or(ReadySetError::InvalidUpstreamDatabase)?;
+
+        let pg_config = pgsql::Config::from_str(url)?;
         let user = pg_config.get_user().map(|s| s.to_owned());
         let connector = {
             let mut builder = native_tls::TlsConnector::builder();
-            if config.disable_upstream_ssl_verification {
+            if upstream_config.disable_upstream_ssl_verification {
                 builder.danger_accept_invalid_certs(true);
+            }
+            if let Some(cert) = upstream_config.get_root_cert().await {
+                builder.add_root_certificate(cert?);
             }
             builder.build().unwrap() // Never returns an error
         };
@@ -133,19 +138,17 @@ impl UpstreamDatabase for PostgreSqlUpstream {
             _connection_handle,
             prepared_statements: Default::default(),
             statement_id_counter: 0,
-            url,
             user,
-            config,
+            upstream_config,
         })
     }
 
     fn url(&self) -> &str {
-        &self.url
+        self.upstream_config.upstream_db_url.as_deref().unwrap()
     }
 
     async fn reset(&mut self) -> Result<(), Error> {
-        let url = self.url.clone();
-        let old_self = std::mem::replace(self, Self::connect(url, self.config).await?);
+        let old_self = std::mem::replace(self, Self::connect(self.upstream_config.clone()).await?);
         drop(old_self);
         Ok(())
     }
@@ -267,7 +270,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
     }
 
     async fn schema_dump(&mut self) -> Result<Vec<u8>, anyhow::Error> {
-        let config = pgsql::Config::from_str(&self.url)?;
+        let config = pgsql::Config::from_str(self.url())?;
         let mut pg_dump = Command::new("pg_dump");
         pg_dump.arg("--schema-only");
         if let Some(host) = config

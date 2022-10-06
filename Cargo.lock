@@ -955,11 +955,15 @@ dependencies = [
 name = "database-utils"
 version = "0.1.0"
 dependencies = [
+ "clap 3.0.4",
  "derive_more",
  "futures",
+ "launchpad",
  "mysql_async",
  "native-tls",
  "postgres-native-tls",
+ "readyset",
+ "serde",
  "thiserror",
  "tokio",
  "tokio-postgres",
@@ -3789,6 +3793,7 @@ dependencies = [
  "chrono",
  "criterion",
  "dashmap",
+ "database-utils",
  "dataflow-expression",
  "derive_more",
  "fail",
@@ -4261,6 +4266,7 @@ dependencies = [
  "chrono",
  "clap 3.0.4",
  "criterion",
+ "database-utils",
  "derive_more",
  "diff",
  "fail",

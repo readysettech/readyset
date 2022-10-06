@@ -13,7 +13,7 @@ use readyset::ViewCreateRequest;
 use readyset_client::backend::noria_connector::{NoriaConnector, ReadBehavior};
 use readyset_client::backend::{BackendBuilder, MigrationMode};
 use readyset_client::query_status_cache::QueryStatusCache;
-use readyset_client::{Backend, QueryHandler, UpstreamDatabase};
+use readyset_client::{Backend, QueryHandler, UpstreamConfig, UpstreamDatabase};
 use readyset_server::{Builder, Handle, LocalAuthority, ReadySetHandle};
 use tokio::net::{TcpListener, TcpStream};
 
@@ -38,7 +38,7 @@ pub trait Adapter: Send {
     fn url() -> String;
 
     async fn make_upstream(addr: String) -> Self::Upstream {
-        Self::Upstream::connect(addr, Default::default())
+        Self::Upstream::connect(UpstreamConfig::from_url(addr))
             .await
             .unwrap()
     }

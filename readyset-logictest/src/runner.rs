@@ -20,7 +20,7 @@ use readyset::{ReadySetHandle, ViewCreateRequest};
 use readyset_client::backend::noria_connector::ReadBehavior;
 use readyset_client::backend::{BackendBuilder, NoriaConnector};
 use readyset_client::query_status_cache::QueryStatusCache;
-use readyset_client::UpstreamDatabase;
+use readyset_client::{UpstreamConfig, UpstreamDatabase};
 use readyset_mysql::{MySqlQueryHandler, MySqlUpstream};
 use readyset_psql::{PostgreSqlQueryHandler, PostgreSqlUpstream};
 use readyset_server::{Builder, LocalAuthority, ReuseConfigType};
@@ -533,14 +533,11 @@ impl TestScript {
                 ($upstream:ty, $handler:ty, $dialect:expr $(,)?) => {{
                     // cannot use .await inside map
                     #[allow(clippy::manual_map)]
-                    let upstream = match replication_url.clone() {
+                    let upstream = match &replication_url {
                         Some(url) => Some(
-                            <$upstream as UpstreamDatabase>::connect(
-                                url.clone(),
-                                Default::default(),
-                            )
-                            .await
-                            .unwrap(),
+                            <$upstream as UpstreamDatabase>::connect(UpstreamConfig::from_url(url))
+                                .await
+                                .unwrap(),
                         ),
                         None => None,
                     };

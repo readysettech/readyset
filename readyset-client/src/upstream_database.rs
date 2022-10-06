@@ -2,6 +2,7 @@ use std::error::Error;
 use std::fmt::Debug;
 
 use async_trait::async_trait;
+pub use database_utils::UpstreamConfig;
 use nom_sql::SqlIdentifier;
 use readyset::ColumnSchema;
 use readyset_data::DfValue;
@@ -49,9 +50,6 @@ pub trait IsFatalError {
 /// [`Writer`]: crate::backend::Writer
 #[async_trait]
 pub trait UpstreamDatabase: Sized + Send {
-    /// Additional configuration passed when creating a new connection to the upstream database.
-    type Config: Debug + Send + Sync + Clone + Default + 'static;
-
     /// The result returned by queries. Likely to be implemented as an enum containing a read or a
     /// write result.
     ///
@@ -76,7 +74,7 @@ pub trait UpstreamDatabase: Sized + Send {
     type Error: From<ReadySetError> + IsFatalError + Error + Send + Sync + 'static;
 
     /// Create a new connection to this upstream database
-    async fn connect(url: String, config: Self::Config) -> Result<Self, Self::Error>;
+    async fn connect(upstream_config: UpstreamConfig) -> Result<Self, Self::Error>;
 
     /// Resets the connection with the upstream database
     async fn reset(&mut self) -> Result<(), Self::Error>;

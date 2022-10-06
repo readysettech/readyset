@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use database_utils::UpstreamConfig;
 use futures::FutureExt;
 use launchpad::select;
 use nom_sql::Relation;
@@ -13,7 +14,6 @@ use super::wal_reader::{WalEvent, WalReader};
 use super::{PostgresPosition, PUBLICATION_NAME, REPLICATION_SLOT};
 use crate::noria_adapter::{Connector, ReplicationAction};
 use crate::postgres_connector::wal::WalError;
-use crate::Config;
 
 /// A connector that connects to a PostgreSQL server and starts reading WAL from the "noria"
 /// replication slot with the "noria" publication.
@@ -82,7 +82,7 @@ impl PostgresWalConnector {
     pub(crate) async fn connect<S: AsRef<str>>(
         mut pg_config: pgsql::Config,
         dbname: S,
-        config: Config,
+        config: UpstreamConfig,
         next_position: Option<PostgresPosition>,
         tls_connector: MakeTlsConnector,
     ) -> ReadySetResult<Self> {

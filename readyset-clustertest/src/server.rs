@@ -168,7 +168,7 @@ impl ReadysetServerBuilder {
     }
 
     pub fn mysql(self, addr: &str) -> Self {
-        self.push_arg_kv("--replication-url", addr)
+        self.push_arg_kv("--upstream-db-url", addr)
     }
 
     pub fn replicator_restart_timeout(self, timeout: u64) -> Self {

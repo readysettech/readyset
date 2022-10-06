@@ -21,5 +21,5 @@ pub mod views_synchronizer;
 
 pub use crate::backend::{Backend, BackendBuilder};
 pub use crate::query_handler::{QueryHandler, SetBehavior};
-pub use crate::upstream_database::{UpstreamDatabase, UpstreamPrepare};
+pub use crate::upstream_database::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
 pub use crate::views_synchronizer::ViewsSynchronizer;

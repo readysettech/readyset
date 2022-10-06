@@ -56,6 +56,7 @@ readyset-client-metrics = { path = "../readyset-client-metrics" }
 readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter" }
 readyset-sql-passes = { path = "../readyset-sql-passes" }
 health-reporter = { path = "../health-reporter" }
+database-utils = { path = "../database-utils" }
 
 [dev-dependencies]
 proptest = "1.0.0"

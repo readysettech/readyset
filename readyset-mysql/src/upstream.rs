@@ -6,12 +6,14 @@ use async_trait::async_trait;
 use futures_util::Stream;
 use mysql_async::consts::{CapabilityFlags, StatusFlags};
 use mysql_async::prelude::Queryable;
-use mysql_async::{Column, Conn, Opts, OptsBuilder, ResultSetStream, Row, TxOpts, UrlError};
+use mysql_async::{
+    Column, Conn, Opts, OptsBuilder, ResultSetStream, Row, SslOpts, TxOpts, UrlError,
+};
 use nom_sql::SqlIdentifier;
 use pin_project::pin_project;
 use readyset::ColumnSchema;
 use readyset_client::upstream_database::NoriaCompare;
-use readyset_client::{UpstreamDatabase, UpstreamPrepare};
+use readyset_client::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
 use readyset_data::DfValue;
 use readyset_errors::{internal_err, ReadySetError};
 use tracing::{error, info, info_span, Instrument};
@@ -68,7 +70,7 @@ pub enum QueryResult<'a> {
 pub struct MySqlUpstream {
     conn: Conn,
     prepared_statements: HashMap<StatementID, mysql_async::Statement>,
-    url: String,
+    upstream_config: UpstreamConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -182,18 +184,28 @@ macro_rules! handle_query_result {
 
 #[async_trait]
 impl UpstreamDatabase for MySqlUpstream {
-    type Config = ();
     type QueryResult<'a> = QueryResult<'a>;
     type StatementMeta = StatementMeta;
     type Error = Error;
 
-    async fn connect(url: String, _: Self::Config) -> Result<Self, Error> {
+    async fn connect(upstream_config: UpstreamConfig) -> Result<Self, Error> {
         // CLIENT_SESSION_TRACK is required for GTID information to be sent in OK packets on commits
         // GTID information is used for RYW
         // Currently this causes rows affected to return an incorrect result, so this is feature
         // gated.
-        let opts =
-            Opts::from_url(&url).map_err(|e: UrlError| Error::MySql(mysql_async::Error::Url(e)))?;
+        let url = upstream_config
+            .upstream_db_url
+            .as_deref()
+            .ok_or(ReadySetError::InvalidUpstreamDatabase)?;
+
+        let mut opts =
+            Opts::from_url(url).map_err(|e: UrlError| Error::MySql(mysql_async::Error::Url(e)))?;
+
+        if let Some(cert_path) = upstream_config.ssl_root_cert.clone() {
+            let ssl_opts = SslOpts::default().with_root_cert_path(Some(cert_path));
+            opts = OptsBuilder::from_opts(opts).ssl_opts(ssl_opts).into();
+        }
+
         let span = info_span!(
             "Connecting to MySQL upstream",
             host = %opts.ip_or_hostname(),
@@ -217,12 +229,12 @@ impl UpstreamDatabase for MySqlUpstream {
         Ok(Self {
             conn,
             prepared_statements,
-            url,
+            upstream_config,
         })
     }
 
     fn url(&self) -> &str {
-        &self.url
+        self.upstream_config.upstream_db_url.as_deref().unwrap()
     }
 
     fn database(&self) -> Option<&str> {
@@ -233,13 +245,13 @@ impl UpstreamDatabase for MySqlUpstream {
         let opts = self.conn.opts().clone();
         let conn = Conn::new(opts).await?;
         let prepared_statements = HashMap::new();
-        let url = self.url.clone();
+        let upstream_config = self.upstream_config.clone();
         let old_self = std::mem::replace(
             self,
             Self {
                 conn,
                 prepared_statements,
-                url,
+                upstream_config,
             },
         );
         let _ = old_self.conn.disconnect().await as Result<(), _>;

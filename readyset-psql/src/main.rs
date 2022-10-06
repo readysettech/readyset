@@ -6,8 +6,8 @@ use nom_sql::Dialect;
 use psql_srv::run_backend;
 use readyset_client::backend as cl;
 use readyset_client_adapter::{ConnectionHandler, DatabaseType, NoriaAdapter};
-use readyset_psql::{Backend, Config, PostgreSqlQueryHandler, PostgreSqlUpstream};
-use readyset_version::*;
+use readyset_psql::{Backend, PostgreSqlQueryHandler, PostgreSqlUpstream};
+use readyset_version::VERSION_STR_PRETTY;
 use tokio::net;
 use tracing::{error, instrument};
 
@@ -50,19 +50,6 @@ impl ConnectionHandler for PsqlHandler {
 struct Options {
     #[clap(flatten)]
     adapter_options: readyset_client_adapter::Options,
-
-    /// Disable verification of SSL certificates supplied by the upstream database
-    ///
-    /// Ignored if `--upstream-db-url` is not set
-    ///
-    /// # Warning
-    ///
-    /// You should think very carefully before using this flag. If invalid certificates are
-    /// trusted, any certificate for any site will be trusted for use, including expired
-    /// certificates. This introduces significant vulnerabilities, and should only be used as a
-    /// last resort.
-    #[clap(long, env = "DISABLE_UPSTREAM_SSL_VERIFICATION")]
-    disable_upstream_ssl_verification: bool,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -73,9 +60,6 @@ fn main() -> anyhow::Result<()> {
         connection_handler: PsqlHandler,
         database_type: DatabaseType::Psql,
         dialect: Dialect::PostgreSQL,
-        upstream_config: Config {
-            disable_upstream_ssl_verification: options.disable_upstream_ssl_verification,
-        },
     };
 
     adapter.run(options.adapter_options)

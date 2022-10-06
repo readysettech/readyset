@@ -16,3 +16,7 @@ thiserror = "1.0.30"
 tokio = "1.17.0"
 tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", features = ["with-chrono-0_4"] }
 postgres-native-tls = { git = "https://github.com/readysettech/rust-postgres.git" }
+clap = { version = "3.0", features = ["derive","env"] }
+serde = { version = "1.0", features = ["derive"] }
+launchpad = { path = "../launchpad" }
+readyset = { path = "../readyset" }

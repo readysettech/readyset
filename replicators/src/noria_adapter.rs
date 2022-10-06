@@ -1,16 +1,12 @@
 use std::collections::{hash_map, HashMap, HashSet};
 use std::convert::TryInto;
-use std::num::ParseIntError;
-use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use async_trait::async_trait;
-use clap::Parser;
-use database_utils::DatabaseURL;
+use database_utils::{DatabaseURL, UpstreamConfig};
 use failpoint_macros::set_failpoint;
 use futures::FutureExt;
-use launchpad::redacted::RedactedString;
 use launchpad::select;
 use metrics::{counter, histogram};
 use mysql::prelude::Queryable;
@@ -26,7 +22,6 @@ use readyset::replication::{ReplicationOffset, ReplicationOffsets};
 use readyset::{ReadySetError, ReadySetHandle, ReadySetResult, Table, TableOperation};
 use readyset_errors::{internal_err, invalid_err};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
-use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 use tracing::{debug, error, info, info_span, trace, warn, Instrument};
 use {mysql_async as mysql, tokio_postgres as pgsql};
@@ -39,110 +34,6 @@ use crate::postgres_connector::{
 use crate::table_filter::TableFilter;
 
 const RESNAPSHOT_SLOT: &str = "readyset_resnapshot";
-
-/// Shared configuration for replication.
-///
-/// Usable as command-line options via `#[clap(flatten)]`
-#[derive(Debug, Clone, Parser, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Config {
-    /// A URL identifying a MySQL or PostgreSQL primary server to replicate from. Should include
-    /// username and password if necessary.
-    #[clap(long, env = "REPLICATION_URL")]
-    #[serde(default)]
-    pub replication_url: Option<RedactedString>,
-
-    /// Disable verification of SSL certificates supplied by the replication database (postgres
-    /// only, ignored for mysql). Ignored if `--replication-url` is not passed.
-    ///
-    /// # Warning
-    ///
-    /// You should think very carefully before using this flag. If invalid certificates are
-    /// trusted, any certificate for any site will be trusted for use, including expired
-    /// certificates. This introduces significant vulnerabilities, and should only be used as a
-    /// last resort.
-    #[clap(long, env = "DISABLE_REPLICATION_SSL_VERIFICATION")]
-    #[serde(default)]
-    pub disable_replication_ssl_verification: bool,
-
-    /// A path to a pem or der certificate of the root that the upstream connection will trust.
-    #[clap(long, env = "SSL_ROOT_CERT")]
-    #[serde(default)]
-    pub ssl_root_cert: Option<PathBuf>,
-
-    /// Disable running DDL Streaming Replication Setup for PostgreSQL. If this flag is set
-    /// the DDL Streaming Replication Setup SQL queries will need to be manually run on the
-    /// primary server before streaming replication will start.
-    #[clap(long, env = "DISABLE_SETUP_DDL_REPLICATION")]
-    #[serde(default)]
-    pub disable_setup_ddl_replication: bool,
-
-    /// Sets the server id when acquiring a binlog replication slot.
-    #[clap(long, hide = true)]
-    #[serde(default)]
-    pub replication_server_id: Option<u32>,
-
-    /// The time to wait before restarting the replicator in seconds.
-    #[clap(long, hide = true, default_value = "30", parse(try_from_str = duration_from_seconds))]
-    #[serde(default = "default_replicator_restart_timeout")]
-    pub replicator_restart_timeout: Duration,
-
-    #[clap(long, env = "REPLICATION_TABLES")]
-    #[serde(default)]
-    pub replication_tables: Option<RedactedString>,
-
-    /// Sets the time (in seconds) between reports of progress snapshotting the database. A value
-    /// of 0 disables reporting.
-    #[clap(long, default_value = "30")]
-    #[serde(default = "default_snapshot_report_interval_secs")]
-    pub snapshot_report_interval_secs: u16,
-}
-
-impl Config {
-    /// Read the certificate at [`Self::ssl_root_cert`] path and try to parse it as either PEM or
-    /// DER encoded certificate
-    pub async fn get_root_cert(&self) -> Option<ReadySetResult<native_tls::Certificate>> {
-        match self.ssl_root_cert.as_ref() {
-            Some(path) => Some({
-                tokio::fs::read(path)
-                    .await
-                    .map_err(ReadySetError::from)
-                    .and_then(|cert| {
-                        native_tls::Certificate::from_pem(&cert)
-                            .or_else(|_| native_tls::Certificate::from_der(&cert))
-                            .map_err(|_| ReadySetError::InvalidRootCertificate)
-                    })
-            }),
-            None => None,
-        }
-    }
-}
-
-fn default_replicator_restart_timeout() -> Duration {
-    Config::default().replicator_restart_timeout
-}
-
-fn default_snapshot_report_interval_secs() -> u16 {
-    Config::default().snapshot_report_interval_secs
-}
-
-fn duration_from_seconds(i: &str) -> Result<Duration, ParseIntError> {
-    i.parse::<u64>().map(Duration::from_secs)
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            replication_url: Default::default(),
-            disable_replication_ssl_verification: false,
-            disable_setup_ddl_replication: false,
-            replication_server_id: Default::default(),
-            replicator_restart_timeout: Duration::from_secs(30),
-            replication_tables: Default::default(),
-            snapshot_report_interval_secs: 30,
-            ssl_root_cert: None,
-        }
-    }
-}
 
 #[derive(Debug)]
 pub(crate) enum ReplicationAction {
@@ -209,7 +100,7 @@ impl NoriaAdapter {
     pub async fn start_with_authority(
         authority: Authority,
         telemetry_sender: TelemetrySender,
-        config: Config,
+        config: UpstreamConfig,
     ) -> ReadySetResult<!> {
         let noria = readyset::ReadySetHandle::new(authority).await;
         NoriaAdapter::start(noria, config, None, telemetry_sender).await
@@ -217,17 +108,17 @@ impl NoriaAdapter {
 
     pub async fn start(
         noria: ReadySetHandle,
-        mut config: Config,
+        mut config: UpstreamConfig,
         mut notify: Option<Arc<Notify>>,
         telemetry_sender: TelemetrySender,
     ) -> ReadySetResult<!> {
         let mut resnapshot = false;
         let url: DatabaseURL = config
-            .replication_url
+            .upstream_db_url
             .take()
             .ok_or_else(|| internal_err!("Replication URL not supplied"))?
             .parse()
-            .map_err(|e| invalid_err!("Invalid URL supplied to --replication-url: {e}"))?;
+            .map_err(|e| invalid_err!("Invalid URL supplied to --upstream-db-url: {e}"))?;
 
         while let Err(err) = match url.clone() {
             DatabaseURL::MySQL(options) => {
@@ -278,7 +169,7 @@ impl NoriaAdapter {
     async fn start_inner_mysql(
         mut mysql_options: mysql::Opts,
         mut noria: ReadySetHandle,
-        mut config: Config,
+        mut config: UpstreamConfig,
         ready_notify: &mut Option<Arc<Notify>>,
         resnapshot: bool,
         telemetry_sender: &TelemetrySender,
@@ -450,7 +341,7 @@ impl NoriaAdapter {
     async fn start_inner_postgres(
         pgsql_opts: pgsql::Config,
         mut noria: ReadySetHandle,
-        mut config: Config,
+        mut config: UpstreamConfig,
         ready_notify: &mut Option<Arc<Notify>>,
         resnapshot: bool,
         telemetry_sender: &TelemetrySender,
@@ -473,7 +364,7 @@ impl NoriaAdapter {
 
         let connector = {
             let mut builder = native_tls::TlsConnector::builder();
-            if config.disable_replication_ssl_verification {
+            if config.disable_upstream_ssl_verification {
                 builder.danger_accept_invalid_certs(true);
             }
             if let Some(root_cert) = config.get_root_cert().await {

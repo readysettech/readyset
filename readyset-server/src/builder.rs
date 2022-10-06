@@ -3,6 +3,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::{self, Duration};
 
+use database_utils::UpstreamConfig;
 use dataflow::PersistenceParameters;
 use readyset::consensus::{
     Authority, LocalAuthority, LocalAuthorityStore, NodeTypeSchedulingRestriction,
@@ -197,19 +198,19 @@ impl Builder {
 
     /// Sets the URL for the database to replicate from
     pub fn set_replication_url(&mut self, url: String) {
-        self.config.replicator_config.replication_url = Some(url.into());
+        self.config.replicator_config.upstream_db_url = Some(url.into());
     }
 
     /// Sets configuration for the replicator thread
-    pub fn set_replicator_config(&mut self, config: replicators::Config) {
+    pub fn set_replicator_config(&mut self, config: UpstreamConfig) {
         self.config.replicator_config = config;
     }
 
-    /// Sets the value of [`replicators::Config::disable_replication_ssl_verification`]
-    pub fn set_disable_replication_ssl_verification(&mut self, value: bool) {
+    /// Sets the value of [`replicators::Config::disable_upstream_ssl_verification`]
+    pub fn set_disable_upstream_ssl_verification(&mut self, value: bool) {
         self.config
             .replicator_config
-            .disable_replication_ssl_verification = value;
+            .disable_upstream_ssl_verification = value;
     }
 
     /// Sets whether we should keep the chain of prior recipes when storing a new
