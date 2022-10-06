@@ -69,6 +69,17 @@ pub enum BuiltinFunction {
         /// actual return type of the function call.
         compare_as: DfType,
     },
+
+    /// `least`:
+    ///
+    /// * [MySQL](https://dev.mysql.com/doc/refman/8.0/en/comparison-operators.html#function_least)
+    /// * [PostgreSQL](https://www.postgresql.org/docs/current/functions-conditional.html#FUNCTIONS-GREATEST-LEAST)
+    Least {
+        args: Vec1<Expr>,
+        /// Which type to coerce the arguments to *for comparison*. This might be distinct from the
+        /// actual return type of the function call.
+        compare_as: DfType,
+    },
 }
 
 impl BuiltinFunction {
@@ -203,7 +214,9 @@ impl BuiltinFunction {
                     ty,
                 )
             }
-            "greatest" => {
+            "greatest" | "least" => {
+                // The type inference rules for GREATEST and LEAST are the same, so this block
+                // covers both then dispatches for the actual function construction at the end
                 let arg1 = next_arg()?;
                 let rest_args = args.by_ref().collect::<Vec<_>>();
                 let arg_tys = iter::once(arg1.ty())
@@ -231,7 +244,15 @@ impl BuiltinFunction {
 
                 let mut args = Vec1::with_capacity(arg1, rest_args.len() + 1);
                 args.extend(rest_args);
-                (Self::Greatest { args, compare_as }, ty)
+
+                (
+                    if name == "greatest" {
+                        Self::Greatest { args, compare_as }
+                    } else {
+                        Self::Least { args, compare_as }
+                    },
+                    ty,
+                )
             }
             _ => return Err(ReadySetError::NoSuchFunction(name.to_owned())),
         };
@@ -259,6 +280,7 @@ impl BuiltinFunction {
             Concat { .. } => "concat",
             Substring { .. } => "substring",
             Greatest { .. } => "greatest",
+            Least { .. } => "least",
         }
     }
 }
@@ -316,7 +338,7 @@ impl fmt::Display for BuiltinFunction {
                 }
                 write!(f, ")")
             }
-            Greatest { args, .. } => {
+            Greatest { args, .. } | Least { args, .. } => {
                 write!(f, "({})", args.iter().join(", "))
             }
         }

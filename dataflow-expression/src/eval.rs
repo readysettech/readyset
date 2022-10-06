@@ -14,6 +14,7 @@ use readyset_data::{Collation, DfType, DfValue};
 use readyset_errors::{ReadySetError, ReadySetResult};
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 use rust_decimal::Decimal;
+use vec1::Vec1;
 
 use crate::like::{CaseInsensitive, CaseSensitive, LikePattern};
 use crate::{utils, BuiltinFunction, Expr};
@@ -120,6 +121,33 @@ fn addtime_datetime(time1: &NaiveDateTime, time2: &MySqlTime) -> NaiveDateTime {
 
 fn addtime_times(time1: &MySqlTime, time2: &MySqlTime) -> MySqlTime {
     time1.add(*time2)
+}
+
+fn greatest_or_least<F, D>(
+    args: &Vec1<Expr>,
+    record: &[D],
+    compare_as: &DfType,
+    ty: &DfType,
+    mut compare: F,
+) -> ReadySetResult<DfValue>
+where
+    F: FnMut(&DfValue, &DfValue) -> bool,
+    D: Borrow<DfValue>,
+{
+    let arg1 = args.first();
+    let mut res = non_null_owned!(arg1.eval(record)?);
+    let mut res_ty = arg1.ty();
+    let mut res_compare = try_cast_or_none!(res, compare_as, arg1.ty());
+    for arg in args.iter().skip(1) {
+        let val = non_null_owned!(arg.eval(record)?);
+        let val_compare = try_cast_or_none!(val, compare_as, arg.ty());
+        if compare(&val_compare, &res_compare) {
+            res = val;
+            res_ty = arg.ty();
+            res_compare = val_compare;
+        }
+    }
+    Ok(try_cast_or_none!(res, ty, res_ty))
 }
 
 impl Expr {
@@ -492,21 +520,10 @@ impl Expr {
                         .into())
                 }
                 BuiltinFunction::Greatest { args, compare_as } => {
-                    let arg1 = args.first();
-                    // TODO: Just use `compare_as`, once `coerce_to` takes a DfType as its first arg
-                    let mut res = non_null_owned!(arg1.eval(record)?);
-                    let mut res_ty = arg1.ty();
-                    let mut res_compare = try_cast_or_none!(res, compare_as, arg1.ty());
-                    for arg in args.iter().skip(1) {
-                        let val = non_null_owned!(arg.eval(record)?);
-                        let val_compare = try_cast_or_none!(val, compare_as, arg.ty());
-                        if val_compare > res_compare {
-                            res = val;
-                            res_ty = arg.ty();
-                            res_compare = val_compare;
-                        }
-                    }
-                    Ok(try_cast_or_none!(res, ty, res_ty))
+                    greatest_or_least(args, record, compare_as, ty, |v1, v2| v1 > v2)
+                }
+                BuiltinFunction::Least { args, compare_as } => {
+                    greatest_or_least(args, record, compare_as, ty, |v1, v2| v1 < v2)
                 }
             },
             CaseWhen {
@@ -1537,6 +1554,19 @@ mod tests {
         }
 
         #[test]
+        fn least_mysql() {
+            assert_eq!(eval_expr("least(1, 2, 3)", Dialect::MySQL), 1u64.into());
+            assert_eq!(
+                eval_expr("least(123, '23')", Dialect::MySQL),
+                123.into() // TODO(ENG-1911) this should be a string!
+            );
+            assert_eq!(
+                eval_expr("least(1.23, '23')", Dialect::MySQL),
+                (1.23_f64).try_into().unwrap() // TODO(ENG-1911) this should be a string!
+            );
+        }
+
+        #[test]
         #[ignore = "ENG-1909"]
         fn greatest_mysql_ints_and_floats() {
             assert_eq!(
@@ -1555,6 +1585,15 @@ mod tests {
             assert_eq!(
                 eval_expr("greatest(23, '123')", Dialect::PostgreSQL),
                 123.into()
+            );
+        }
+
+        #[test]
+        fn least_postgresql() {
+            assert_eq!(eval_expr("least(1,2,3)", Dialect::PostgreSQL), 1.into());
+            assert_eq!(
+                eval_expr("least(123, '23')", Dialect::PostgreSQL),
+                23.into()
             );
         }
     }
