@@ -787,14 +787,20 @@ async fn wait_for_adapter_router(
     timeout: Duration,
     poll_interval: Duration,
 ) -> anyhow::Result<()> {
-    wait_for_poller(
+    let res = wait_for_poller(
         http_router_is_up,
         metrics_port,
         timeout,
         poll_interval,
         "adapter",
     )
-    .await
+    .await;
+    match res {
+        Ok(_) => tracing::debug!("Adapter http router is active"),
+        Err(_) => tracing::warn!("Adpater http router failed to become active"),
+    }
+
+    res
 }
 
 /// Waits for servers http router to come up.
@@ -804,7 +810,13 @@ async fn wait_for_server_router(
     timeout: Duration,
     poll_interval: Duration,
 ) -> anyhow::Result<()> {
-    wait_for_poller(http_router_is_up, port, timeout, poll_interval, "server").await
+    let res = wait_for_poller(http_router_is_up, port, timeout, poll_interval, "server").await;
+    match res {
+        Ok(_) => tracing::debug!("Server http router is active"),
+        Err(_) => tracing::warn!("Server http router failed to become active"),
+    }
+
+    res
 }
 
 /// Waits for server to come up as healthy.
@@ -880,6 +892,7 @@ async fn http_router_is_up(port: u16) -> bool {
 }
 
 /// A handle to a single server in the deployment.
+#[derive(Clone)]
 pub struct ServerHandle {
     /// The external address of the server.
     pub addr: Url,

@@ -710,7 +710,7 @@ where
         // http endpoint.
         // For now we only support registering adapters over consul.
         if let AuthorityType::Consul = options.authority {
-            set_failpoint!("adapter-consul");
+            set_failpoint!(failpoints::AUTHORITY);
             rs_connect.in_scope(|| info!("Spawning Consul session task"));
             let connection = span!(Level::DEBUG, "consul_session", addr = ?authority_address);
             let fut = reconcile_endpoint_registration(

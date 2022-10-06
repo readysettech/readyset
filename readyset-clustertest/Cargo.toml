@@ -22,13 +22,14 @@ tracing = { version = "0.1", features = ["release_max_level_debug"] }
 
 # local deps
 nom-sql = { path = "../nom-sql" }
-readyset = { path = "../readyset" }
+readyset = { path = "../readyset", features = ["failure_injection"] }
 readyset-data = { path = "../readyset-data" }
 launchpad = { path = "../launchpad" }
 
 [dev-dependencies]
 serial_test = "0.5.1"
 criterion = { version = "0.3", features=['real_blackbox', 'async_tokio']}
+itertools = "0.10.4"
 readyset-client = { path = "../readyset-client" }
 readyset-client-metrics = { path = "../readyset-client-metrics" }
 test-utils = { path = "../test-utils" }
@@ -42,3 +43,4 @@ harness = false
 
 [features]
 slow_bench = []
+failure_injection = ["readyset/failure_injection"]

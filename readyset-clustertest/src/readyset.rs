@@ -1,6 +1,6 @@
-use ::readyset::get_metric;
 use ::readyset::metrics::{recorded, DumpedMetricValue};
 use ::readyset::recipe::changelist::ChangeList;
+use ::readyset::{failpoints, get_metric};
 use launchpad::eventually;
 use readyset_data::{DfValue, Dialect};
 use rust_decimal::prelude::FromPrimitive;
@@ -465,7 +465,7 @@ async fn server_auto_restarts() {
 }
 
 /// Performs a simple create table, insert, and query to verify that the deployment is healthy.
-async fn assert_deployment_health(dh: &mut DeploymentHandle) {
+async fn assert_deployment_health(mut dh: DeploymentHandle) {
     let mut adapter = dh.first_adapter().await;
     let _ = adapter
         .query_drop(
@@ -480,6 +480,29 @@ async fn assert_deployment_health(dh: &mut DeploymentHandle) {
         .query_drop(r"INSERT INTO t1 VALUES (1, 4);")
         .await
         .unwrap();
+
+    tokio::spawn(async move {
+        // There is a race condition with auto_restart and wait_for_failpoint:
+        // Let's say we have the startup order: [Server, Upstream, Adapter, Authority]
+        // The First server comes up and waits for a failpoint. One is set since the adapter
+        // and authority are not up yet.
+        // The test proceeds to startup the upstream, adapter, and authority--in the
+        // meantime, the server's health reporter is running in the background and
+        // discovering that it is unhealthy due to not being able to connect to the
+        // authority. If the server is removed before the authority comes up, the next
+        // server will start waiting for a failpoint. If that happens before the Authority
+        // is up, a failpoint will be set when we remove it starting upt the authority. If
+        // the authority comes up first, though, the server will wait forever for a
+        // failpoint that never comes. We do an additional unset of the failpoints at this point to
+        // make sure we don't wait in that case.
+
+        // Since we spawned processes that will always wait for failpoints when they restart,
+        // periodically send no-op failpoints
+        loop {
+            ClusterComponent::send_noop_failpoints(&mut dh, failpoints::AUTHORITY).await;
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    });
 
     assert!(
         query_until_expected(
@@ -509,7 +532,7 @@ async fn server_ready_before_adapter() {
         .await
         .expect("adapter failed to become healthy");
 
-    assert_deployment_health(&mut deployment).await;
+    assert_deployment_health(deployment).await;
 }
 
 #[clustertest]
@@ -530,7 +553,7 @@ async fn adapter_ready_before_server() {
         .await
         .expect("server failed to become healthy");
 
-    assert_deployment_health(&mut deployment).await;
+    assert_deployment_health(deployment).await;
 }
 
 #[clustertest]
@@ -556,14 +579,16 @@ async fn adapter_reports_unhealthy_consul_down() {
         .unwrap();
 
     adapter_handle
-        .set_failpoint("adapter-consul", "pause")
+        .set_failpoint(failpoints::AUTHORITY, "pause")
         .await;
 
     let _ = wait_for_adapter_startup(adapter_handle.metrics_port, timeout).await;
 
     assert!(!endpoint_reports_healthy(adapter_handle.metrics_port).await);
 
-    adapter_handle.set_failpoint("adapter-consul", "off").await;
+    adapter_handle
+        .set_failpoint(failpoints::AUTHORITY, "off")
+        .await;
 
     wait_for_adapter_startup(adapter_handle.metrics_port, timeout)
         .await
@@ -626,4 +651,191 @@ async fn server_reports_unhealthy_controller_down() {
         "start-controller",
     )
     .await
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ClusterComponent {
+    Authority,
+    Upstream,
+    Adapter,
+    Server,
+}
+
+impl ClusterComponent {
+    const STARTUP_TIMEOUT: Duration = Duration::new(10, 0);
+    const POLL_INTERVAL: Duration = Duration::from_millis(500);
+
+    pub async fn startup(
+        &self,
+        deployment: &mut DeploymentHandle,
+        authority_up: &mut bool,
+        upstream_up: &mut bool,
+    ) {
+        tracing::debug!("Starting up {:?}", self);
+        let server_url = deployment.server_addrs().first().cloned();
+        let server_handle = server_url
+            .and_then(|server_url| deployment.server_handles().get_mut(&server_url).cloned());
+        let adapter_handle = deployment.first_adapter_handle();
+
+        match self {
+            ClusterComponent::Authority => {
+                if let Some(adapter_handle) = adapter_handle {
+                    adapter_handle
+                        .set_failpoint(failpoints::AUTHORITY, "off")
+                        .await;
+                }
+                if let Some(mut server_handle) = server_handle {
+                    server_handle
+                        .set_failpoint(failpoints::AUTHORITY, "off")
+                        .await;
+                }
+                *authority_up = true;
+                tracing::debug!("Authority up");
+            }
+            ClusterComponent::Upstream => {
+                if let Some(adapter_handle) = adapter_handle {
+                    adapter_handle
+                        .set_failpoint(failpoints::UPSTREAM, "off")
+                        .await;
+                }
+                if let Some(mut server_handle) = server_handle {
+                    server_handle
+                        .set_failpoint(failpoints::UPSTREAM, "off")
+                        .await;
+                }
+                *upstream_up = true;
+                tracing::debug!("Upstream up");
+            }
+            ClusterComponent::Adapter => {
+                deployment
+                    .start_mysql_adapter(false)
+                    .await
+                    .expect("readyset-mysql-adapter failed to startup");
+
+                let adapter_handle = deployment.first_adapter_handle().unwrap();
+                wait_for_adapter_router(
+                    adapter_handle.metrics_port,
+                    Self::STARTUP_TIMEOUT,
+                    Self::POLL_INTERVAL,
+                )
+                .await
+                .unwrap();
+
+                tracing::debug!("Adapter up");
+            }
+            ClusterComponent::Server => {
+                let server_url = deployment
+                    .start_server(ServerParams::default(), false)
+                    .await
+                    .expect("readyset-server failed to startup");
+
+                let server_handle = deployment.server_handles().get_mut(&server_url).unwrap();
+                wait_for_server_router(
+                    server_handle.addr.port().unwrap(),
+                    Self::STARTUP_TIMEOUT,
+                    Self::POLL_INTERVAL,
+                )
+                .await
+                .unwrap();
+
+                tracing::debug!("Server up");
+            }
+        }
+
+        if *authority_up && *upstream_up {
+            deployment.adapter_start_params().wait_for_failpoint = false;
+            deployment.server_start_params().wait_for_failpoint = false;
+        }
+    }
+
+    /// Sets no-op sleep 'failpoint', in case they are waiting on one.
+    async fn send_noop_failpoints(deployment: &mut DeploymentHandle, failpoint: &str) {
+        assert_eq!(1, deployment.adapter_handles().len());
+        let adapter_handle = deployment
+            .first_adapter_handle()
+            .expect("adapter handle expected to exist");
+        tracing::debug!("sending sleep failpoint to adapter");
+        adapter_handle.set_failpoint(failpoint, "sleep(1)").await;
+
+        assert_eq!(1, deployment.server_addrs().len());
+        let server_url = deployment.server_addrs().first().unwrap().clone();
+        let server_handle = deployment.server_handles().get_mut(&server_url).unwrap();
+        tracing::debug!("sending sleep failpoint to server");
+        server_handle.set_failpoint(failpoint, "sleep(1)").await;
+    }
+}
+
+async fn test_deployment_startup_order(startup_order: Vec<ClusterComponent>) {
+    tracing::info!(?startup_order, "Testing deployment startup");
+
+    let mut deployment = DeploymentBuilder::new(
+        format!(
+            "ct_{:?}_{:?}_{:?}_{:?}",
+            startup_order[0], startup_order[1], startup_order[2], startup_order[3]
+        )
+        .as_str(),
+    )
+    .wait_for_failpoint(FailpointDestination::Both)
+    .auto_restart(true)
+    .start()
+    .await
+    .unwrap();
+
+    // If the authority or adapter are not up yet, we set failpoints to mimic this behavior
+    let mut authority_up = false;
+    let mut upstream_up = false;
+
+    for component in startup_order {
+        component
+            .startup(&mut deployment, &mut authority_up, &mut upstream_up)
+            .await;
+    }
+
+    assert_deployment_health(deployment).await;
+}
+
+#[clustertest]
+async fn startup_permutations() {
+    use itertools::Itertools;
+    use ClusterComponent::*;
+
+    let startup_orders: Vec<Vec<ClusterComponent>> = [Authority, Upstream, Server, Adapter]
+        .into_iter()
+        .permutations(4)
+        .collect();
+
+    // FIXME[ENG-1668]: Either the system cannot startup healthily for the following situations, or
+    // there are bugs in the failure injection we are doing in tests.
+    let known_failures = vec![
+        vec![Authority, Adapter, Server, Upstream],
+        vec![Upstream, Adapter, Server, Authority],
+        vec![Adapter, Authority, Server, Upstream],
+        vec![Adapter, Upstream, Server, Authority],
+        vec![Adapter, Server, Authority, Upstream],
+    ];
+
+    for startup_order in startup_orders {
+        if known_failures.contains(&startup_order) {
+            continue;
+        }
+        test_deployment_startup_order(startup_order).await;
+    }
+}
+
+#[clustertest]
+#[ignore = "FIXME ENG-1668: convenience test for debugging"]
+async fn startup_permutations_failures() {
+    // Delete this test once these are passing and just use startup_permutations above
+    use ClusterComponent::*;
+    let known_failures = vec![
+        vec![Authority, Adapter, Server, Upstream],
+        vec![Upstream, Adapter, Server, Authority],
+        vec![Adapter, Authority, Server, Upstream],
+        vec![Adapter, Upstream, Server, Authority],
+        vec![Adapter, Server, Authority, Upstream],
+    ];
+
+    for startup_order in known_failures {
+        test_deployment_startup_order(startup_order).await;
+    }
 }

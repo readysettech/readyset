@@ -8,8 +8,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-fail = "0.5.0"
 anyhow = "1.0"
+fail = "0.5.0"
 futures-executor = "0.3.14"
 futures-util = "0.3.14"
 lazy_static = "1.0.0"

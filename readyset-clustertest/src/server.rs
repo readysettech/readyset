@@ -8,6 +8,7 @@ use tokio::select;
 use tokio::sync::Mutex;
 
 /// Wrapper for a single process.
+#[derive(Clone)]
 pub struct ProcessHandle {
     /// Child process handle running the command. None if not currently running
     process: Arc<Mutex<Option<Child>>>,

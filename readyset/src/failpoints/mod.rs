@@ -7,8 +7,8 @@
 /// All requests to the authority will behave as if the Authority is down
 ///
 /// Currently only supports consul.
-pub const AUTHORITY: &'static str = "authority";
+pub const AUTHORITY: &str = "authority";
 /// Injects an error in crate::worker::readers::listen()
-pub const READ_QUERY: &'static str = "read-query";
+pub const READ_QUERY: &str = "read-query";
 /// Imitates traffic being dropped from upstream
-pub const UPSTREAM: &'static str = "upstream";
+pub const UPSTREAM: &str = "upstream";
