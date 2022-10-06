@@ -1542,3 +1542,46 @@ async fn postgresql_replicate_citext() {
     .await
     .unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn postgresql_replicate_citext_array() {
+    readyset_tracing::init_test_logging();
+    let url = pgsql_url();
+    let mut client = DbConnection::connect(&url).await.unwrap();
+    client
+        .query(
+            "DROP TABLE IF EXISTS citext_t CASCADE;\
+             CREATE EXTENSION IF NOT EXISTS citext;
+             CREATE TABLE citext_t (t citext[]); \
+             CREATE VIEW citext_v AS SELECT t FROM citext_t;",
+        )
+        .await
+        .unwrap();
+    client
+        .query("INSERT INTO citext_t (t) VALUES ('{abc,DeF}'), ('{AbC,def}')")
+        .await
+        .unwrap();
+
+    let mut ctx = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
+    ctx.ready_notify.as_ref().unwrap().notified().await;
+
+    ctx.check_results(
+        "citext_v",
+        "Snapshot",
+        &[
+            &[DfValue::from(vec![
+                DfValue::from_str_and_collation("abc", Collation::Citext),
+                DfValue::from_str_and_collation("DeF", Collation::Citext),
+            ])],
+            &[DfValue::from(vec![
+                DfValue::from_str_and_collation("AbC", Collation::Citext),
+                DfValue::from_str_and_collation("def", Collation::Citext),
+            ])],
+        ],
+    )
+    .await
+    .unwrap();
+}

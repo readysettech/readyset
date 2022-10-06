@@ -98,33 +98,48 @@ impl TryFrom<pgsql::Row> for ColumnEntry {
     type Error = ReadySetError;
 
     fn try_from(row: pgsql::Row) -> Result<Self, Self::Error> {
-        let type_oid = row.try_get(3 /* pg_type.oid */)?;
-        let type_name: String = row.try_get(
-            2, /* pg_catalog.format_type(pg_attribute.atttypid, pg_attribute.atttypmod) */
-        )?;
+        let type_oid = row.try_get(4 /* pg_type.oid */)?;
+
+        let typtype_to_kind = |typtype: i8| -> ReadySetResult<Kind> {
+            match typtype as u8 as char {
+                'b' => Ok(Kind::Simple),
+                'c' => unsupported!("Composite types are not supported"),
+                'd' => unsupported!("Domain types are not supported"),
+                'e' => unsupported!("Enum types are not supported"),
+                'p' => Ok(Kind::Pseudo),
+                'r' => unsupported!("Range types are not supported"),
+                'm' => unsupported!("Multirange types are not supported"),
+                c => internal!("Unknown value '{c}' in pg_catalog.pg_type.typtype"),
+            }
+        };
+
+        let pg_type = if let Some(t) = Type::from_oid(type_oid) {
+            t
+        } else {
+            let kind = if row.try_get(7 /* is_array */)? {
+                Kind::Array(Type::new(
+                    row.try_get(8)?,
+                    row.try_get(9)?,
+                    typtype_to_kind(row.try_get(10)?)?,
+                    row.try_get(11)?,
+                ))
+            } else {
+                typtype_to_kind(row.try_get(5)?)?
+            };
+
+            Type::new(
+                row.try_get(3 /* pg_type.typname */)?,
+                type_oid,
+                kind,
+                row.try_get(6 /* pg_namespace.nspname */)?,
+            )
+        };
+
         Ok(ColumnEntry {
             name: row.try_get(0 /* pg_attribute.attname */)?,
             not_null: row.try_get(1 /* pg_attribute.attnotnull */)?,
-            type_name: type_name.clone(),
-            pg_type: if let Some(t) = Type::from_oid(type_oid) {
-                t
-            } else {
-                Type::new(
-                    type_name,
-                    type_oid,
-                    match row.try_get::<_, i8>(4 /* pg_type.typtype */)? as u8 as char {
-                        'b' => Kind::Simple,
-                        'c' => unsupported!("Composite types are not supported"),
-                        'd' => unsupported!("Domain types are not supported"),
-                        'e' => unsupported!("Enum types are not supported"),
-                        'p' => Kind::Pseudo,
-                        'r' => unsupported!("Range types are not supported"),
-                        'm' => unsupported!("Multirange types are not supported"),
-                        c => internal!("Unknown value '{c}' in pg_catalog.pg_type.typtype"),
-                    },
-                    row.try_get(5 /* pg_namespace.nspname */)?,
-                )
-            },
+            type_name: row.try_get(3)?,
+            pg_type,
         })
     }
 }
@@ -187,13 +202,21 @@ impl TableEntry {
             SELECT
                 a.attname,
                 a.attnotnull,
+                t.typname,
                 pg_catalog.format_type(a.atttypid, a.atttypmod),
                 t.oid,
                 t.typtype,
-                tn.nspname
+                tn.nspname,
+                member_t.oid IS NOT NULL AS is_array,
+                member_t.typname,
+                member_t.oid,
+                member_t.typtype,
+                member_tn.nspname
             FROM pg_catalog.pg_attribute a
             JOIN pg_catalog.pg_type t ON a.atttypid = t.oid
             JOIN pg_catalog.pg_namespace tn ON t.typnamespace = tn.oid
+            LEFT JOIN pg_catalog.pg_type member_t ON t.typelem = member_t.oid
+            LEFT JOIN pg_catalog.pg_namespace member_tn ON member_t.typnamespace = member_tn.oid
             WHERE a.attrelid = $1 AND a.attnum > 0 AND NOT a.attisdropped
             ";
 
