@@ -8,12 +8,12 @@ use futures::stream::FuturesUnordered;
 use futures::{pin_mut, StreamExt, TryFutureExt};
 use metrics::register_gauge;
 use nom_sql::{parse_key_specification_string, Dialect, Relation, SqlIdentifier, TableKey};
-use postgres_types::{accepts, FromSql, Type};
+use postgres_types::{accepts, FromSql, Kind, Type};
 use readyset::metrics::recorded;
 use readyset::recipe::changelist::ChangeList;
 use readyset::{ReadySetError, ReadySetResult};
 use readyset_data::DfValue;
-use readyset_errors::internal_err;
+use readyset_errors::{internal, internal_err, unsupported};
 use tokio_postgres as pgsql;
 use tracing::{debug, error, info, info_span, trace, Instrument};
 
@@ -63,9 +63,10 @@ struct TableDescription {
 #[derive(Debug)]
 struct ColumnEntry {
     name: String,
-    definition: String,
+    type_name: String,
     not_null: bool,
-    type_oid: Type,
+    /// The [`Type`] of this column
+    pg_type: Type,
 }
 
 #[derive(Debug)]
@@ -97,18 +98,33 @@ impl TryFrom<pgsql::Row> for ColumnEntry {
     type Error = ReadySetError;
 
     fn try_from(row: pgsql::Row) -> Result<Self, Self::Error> {
+        let type_oid = row.try_get(3 /* pg_type.oid */)?;
+        let type_name: String = row.try_get(
+            2, /* pg_catalog.format_type(pg_attribute.atttypid, pg_attribute.atttypmod) */
+        )?;
         Ok(ColumnEntry {
-            name: row.try_get(0)?,
-            definition: row.try_get(1)?,
-            not_null: row.try_get(2)?,
-            type_oid: Type::from_oid(row.try_get(3)?).ok_or_else(|| {
-                // Type::from_oid returns None when the oid does not refer to a Postgres type
-                #[allow(clippy::unwrap_used)] // this just worked
-                let definition: String = row.try_get(1).unwrap();
-                ReadySetError::Unsupported(format!(
-                    "ReadySet does not yet support custom types: {definition}"
-                ))
-            })?,
+            name: row.try_get(0 /* pg_attribute.attname */)?,
+            not_null: row.try_get(1 /* pg_attribute.attnotnull */)?,
+            type_name: type_name.clone(),
+            pg_type: if let Some(t) = Type::from_oid(type_oid) {
+                t
+            } else {
+                Type::new(
+                    type_name,
+                    type_oid,
+                    match row.try_get::<_, i8>(4 /* pg_type.typtype */)? as u8 as char {
+                        'b' => Kind::Simple,
+                        'c' => unsupported!("Composite types are not supported"),
+                        'd' => unsupported!("Domain types are not supported"),
+                        'e' => unsupported!("Enum types are not supported"),
+                        'p' => Kind::Pseudo,
+                        'r' => unsupported!("Range types are not supported"),
+                        'm' => unsupported!("Multirange types are not supported"),
+                        c => internal!("Unknown value '{c}' in pg_catalog.pg_type.typtype"),
+                    },
+                    row.try_get(5 /* pg_namespace.nspname */)?,
+                )
+            },
         })
     }
 }
@@ -119,7 +135,7 @@ impl Display for ColumnEntry {
             f,
             "`{}` {}{}",
             self.name,
-            self.definition,
+            self.type_name,
             if self.not_null { " NOT NULL" } else { "" },
         )
     }
@@ -168,8 +184,17 @@ impl TableEntry {
         transaction: &'a pgsql::Transaction<'a>,
     ) -> Result<Vec<ColumnEntry>, ReadySetError> {
         let query = r"
-            SELECT a.attname, pg_catalog.format_type(a.atttypid, a.atttypmod), a.attnotnull, a.atttypid
-            FROM pg_catalog.pg_attribute a WHERE a.attrelid = $1 AND a.attnum > 0 AND NOT a.attisdropped
+            SELECT
+                a.attname,
+                a.attnotnull,
+                pg_catalog.format_type(a.atttypid, a.atttypmod),
+                t.oid,
+                t.typtype,
+                tn.nspname
+            FROM pg_catalog.pg_attribute a
+            JOIN pg_catalog.pg_type t ON a.atttypid = t.oid
+            JOIN pg_catalog.pg_namespace tn ON t.typnamespace = tn.oid
+            WHERE a.attrelid = $1 AND a.attnum > 0 AND NOT a.attisdropped
             ";
 
         let columns = transaction.query(query, &[&oid]).await?;
@@ -284,7 +309,7 @@ impl TableDescription {
         );
         let rows = transaction.copy_out(query.as_str()).await?;
 
-        let type_map: Vec<_> = self.columns.iter().map(|c| c.type_oid.clone()).collect();
+        let type_map: Vec<_> = self.columns.iter().map(|c| c.pg_type.clone()).collect();
         let binary_rows = pgsql::binary_copy::BinaryCopyOutStream::new(rows, &type_map);
 
         pin_mut!(binary_rows);
@@ -566,27 +591,27 @@ mod tests {
             columns: vec![
                 ColumnEntry {
                     name: "key".into(),
-                    definition: "varchar".into(),
+                    type_name: "varchar".into(),
                     not_null: true,
-                    type_oid: Type::VARCHAR,
+                    pg_type: Type::VARCHAR,
                 },
                 ColumnEntry {
                     name: "value".into(),
-                    definition: "varchar".into(),
+                    type_name: "varchar".into(),
                     not_null: false,
-                    type_oid: Type::VARCHAR,
+                    pg_type: Type::VARCHAR,
                 },
                 ColumnEntry {
                     name: "created_at".into(),
-                    definition: "timestamp(6) without time zone".into(),
+                    type_name: "timestamp(6) without time zone".into(),
                     not_null: true,
-                    type_oid: Type::TIMESTAMP,
+                    pg_type: Type::TIMESTAMP,
                 },
                 ColumnEntry {
                     name: "updated_at".into(),
-                    definition: "timestamp(6) without time zone".into(),
+                    type_name: "timestamp(6) without time zone".into(),
                     not_null: true,
-                    type_oid: Type::TIMESTAMP,
+                    pg_type: Type::TIMESTAMP,
                 },
             ],
             constraints: vec![ConstraintEntry {

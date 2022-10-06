@@ -11,7 +11,7 @@ use nom_sql::Relation;
 use readyset::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use readyset::recipe::changelist::ChangeList;
 use readyset::{ReadySetError, ReadySetHandle, ReadySetResult};
-use readyset_data::{DfValue, TinyText};
+use readyset_data::{Collation, DfValue, TinyText};
 use readyset_server::Builder;
 use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer, TelemetrySender};
 use replicators::{Config, NoriaAdapter};
@@ -1503,4 +1503,41 @@ async fn snapshot_telemetry_inner(url: &String) -> ReadySetResult<()> {
     assert!(schema_str.contains("CREATE VIEW"));
 
     Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn postgresql_replicate_citext() {
+    readyset_tracing::init_test_logging();
+    let url = pgsql_url();
+    let mut client = DbConnection::connect(&url).await.unwrap();
+    client
+        .query(
+            "DROP TABLE IF EXISTS citext_t CASCADE;\
+             CREATE EXTENSION IF NOT EXISTS citext;
+             CREATE TABLE citext_t (t citext); \
+             CREATE VIEW citext_v AS SELECT t FROM citext_t;",
+        )
+        .await
+        .unwrap();
+    client
+        .query("INSERT INTO citext_t (t) VALUES ('abc'), ('AbC')")
+        .await
+        .unwrap();
+
+    let mut ctx = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
+    ctx.ready_notify.as_ref().unwrap().notified().await;
+
+    ctx.check_results(
+        "citext_v",
+        "Snapshot",
+        &[
+            &[DfValue::from_str_and_collation("AbC", Collation::Citext)],
+            &[DfValue::from_str_and_collation("abc", Collation::Citext)],
+        ],
+    )
+    .await
+    .unwrap();
 }

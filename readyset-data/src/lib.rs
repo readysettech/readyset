@@ -1869,6 +1869,10 @@ impl<'a> FromSql<'a> for DfValue {
                     serde_json::Value::from_sql(ty, raw)?.to_string(),
                 )),
                 Type::BIT | Type::VARBIT => mk_from_sql!(BitVec),
+                ref ty if ty.name() == "citext" => Ok(DfValue::from_str_and_collation(
+                    <&str>::from_sql(ty, raw)?,
+                    Collation::Citext,
+                )),
                 ref ty => Ok(DfValue::PassThrough(Arc::new(PassThrough {
                     ty: ty.clone(),
                     data: Box::from(raw),
