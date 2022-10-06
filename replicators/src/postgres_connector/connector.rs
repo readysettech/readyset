@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use futures::FutureExt;
 use launchpad::select;
 use nom_sql::Relation;
+use postgres_native_tls::MakeTlsConnector;
 use readyset::replication::ReplicationOffset;
 use readyset::{ReadySetError, ReadySetResult, TableOperation};
 use tokio_postgres as pgsql;
@@ -87,23 +88,14 @@ impl PostgresWalConnector {
         config: Config,
         next_position: Option<PostgresPosition>,
         table_filter: TableFilter,
+        tls_connector: MakeTlsConnector,
     ) -> ReadySetResult<Self> {
-        let connector = {
-            let mut builder = native_tls::TlsConnector::builder();
-            if config.disable_replication_ssl_verification {
-                builder.danger_accept_invalid_certs(true);
-            }
-            builder.build().unwrap() // Never returns an error
-        };
-        let connector = postgres_native_tls::MakeTlsConnector::new(connector);
-
         if !config.disable_setup_ddl_replication {
-            setup_ddl_replication(pg_config.clone(), connector.clone()).await?;
+            setup_ddl_replication(pg_config.clone(), tls_connector.clone()).await?;
         }
-
         pg_config.dbname(dbname.as_ref()).set_replication_database();
 
-        let (client, connection) = pg_config.connect(connector).await?;
+        let (client, connection) = pg_config.connect(tls_connector).await?;
         let connection_handle = tokio::spawn(connection);
 
         let mut connector = PostgresWalConnector {

@@ -583,6 +583,9 @@ pub enum ReadySetError {
 
     #[error("Change in DDL requires partial resnapshot")]
     ResnapshotNeeded,
+
+    #[error("Root certificate must be a valid DER or PEM encoded certificate")]
+    InvalidRootCertificate,
 }
 
 impl ReadySetError {

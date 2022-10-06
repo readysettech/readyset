@@ -1,6 +1,7 @@
 use std::collections::{hash_map, HashMap, HashSet};
 use std::convert::TryInto;
 use std::num::ParseIntError;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -13,6 +14,7 @@ use launchpad::redacted::RedactedString;
 use launchpad::select;
 use metrics::{counter, histogram};
 use mysql::prelude::Queryable;
+use mysql::{OptsBuilder, SslOpts};
 use nom_sql::Relation;
 use readyset::consensus::Authority;
 use readyset::consistency::Timestamp;
@@ -62,6 +64,11 @@ pub struct Config {
     #[serde(default)]
     pub disable_replication_ssl_verification: bool,
 
+    /// A path to a pem or der certificate of the root that the upstream connection will trust.
+    #[clap(long, env = "SSL_ROOT_CERT")]
+    #[serde(default)]
+    pub ssl_root_cert: Option<PathBuf>,
+
     /// Disable running DDL Streaming Replication Setup for PostgreSQL. If this flag is set
     /// the DDL Streaming Replication Setup SQL queries will need to be manually run on the
     /// primary server before streaming replication will start.
@@ -90,6 +97,26 @@ pub struct Config {
     pub snapshot_report_interval_secs: u16,
 }
 
+impl Config {
+    /// Read the certificate at [`Self::ssl_root_cert`] path and try to parse it as either PEM or
+    /// DER encoded certificate
+    pub async fn get_root_cert(&self) -> Option<ReadySetResult<native_tls::Certificate>> {
+        match self.ssl_root_cert.as_ref() {
+            Some(path) => Some({
+                tokio::fs::read(path)
+                    .await
+                    .map_err(ReadySetError::from)
+                    .and_then(|cert| {
+                        native_tls::Certificate::from_pem(&cert)
+                            .or_else(|_| native_tls::Certificate::from_der(&cert))
+                            .map_err(|_| ReadySetError::InvalidRootCertificate)
+                    })
+            }),
+            None => None,
+        }
+    }
+}
+
 fn default_replicator_restart_timeout() -> Duration {
     Config::default().replicator_restart_timeout
 }
@@ -112,6 +139,7 @@ impl Default for Config {
             replicator_restart_timeout: Duration::from_secs(30),
             replication_tables: Default::default(),
             snapshot_report_interval_secs: 30,
+            ssl_root_cert: None,
         }
     }
 }
@@ -248,7 +276,7 @@ impl NoriaAdapter {
     /// * READ LOCK is released
     /// * Adapter keeps reading binlog from the next position keeping ReadySet up to date
     async fn start_inner_mysql(
-        mysql_options: mysql::Opts,
+        mut mysql_options: mysql::Opts,
         mut noria: ReadySetHandle,
         mut config: Config,
         ready_notify: &mut Option<Arc<Notify>>,
@@ -256,6 +284,13 @@ impl NoriaAdapter {
         telemetry_sender: &TelemetrySender,
     ) -> ReadySetResult<!> {
         use crate::mysql_connector::BinlogPosition;
+
+        if let Some(cert_path) = config.ssl_root_cert.clone() {
+            let ssl_opts = SslOpts::default().with_root_cert_path(Some(cert_path));
+            mysql_options = OptsBuilder::from_opts(mysql_options)
+                .ssl_opts(ssl_opts)
+                .into();
+        }
 
         // Load the replication offset for all tables and the schema from ReadySet
         let mut replication_offsets = noria.replication_offsets().await?;
@@ -428,7 +463,6 @@ impl NoriaAdapter {
         // present begin the snapshot process
         let replication_offsets = noria.replication_offsets().await?;
         let pos = replication_offsets.max_offset()?.map(Into::into);
-        let disable_replication_ssl_verification = config.disable_replication_ssl_verification;
         let snapshot_report_interval_secs = config.snapshot_report_interval_secs;
 
         let table_filter = TableFilter::try_new(
@@ -437,6 +471,18 @@ impl NoriaAdapter {
             None,
         )?;
 
+        let connector = {
+            let mut builder = native_tls::TlsConnector::builder();
+            if config.disable_replication_ssl_verification {
+                builder.danger_accept_invalid_certs(true);
+            }
+            if let Some(root_cert) = config.get_root_cert().await {
+                builder.add_root_certificate(root_cert?);
+            }
+            builder.build().unwrap() // Never returns an error
+        };
+        let tls_connector = postgres_native_tls::MakeTlsConnector::new(connector);
+
         let mut connector = Box::new(
             PostgresWalConnector::connect(
                 pgsql_opts.clone(),
@@ -444,6 +490,7 @@ impl NoriaAdapter {
                 config,
                 pos,
                 table_filter.clone(),
+                tls_connector.clone(),
             )
             .await?,
         );
@@ -472,16 +519,8 @@ impl NoriaAdapter {
         if let Some(replication_slot) = replication_slot {
             let snapshot_start = Instant::now();
             // If snapshot name exists, it means we need to make a snapshot to noria
-            let mut builder = native_tls::TlsConnector::builder();
-            if disable_replication_ssl_verification {
-                builder.danger_accept_invalid_certs(true);
-            }
 
-            let (mut client, connection) = pgsql_opts
-                .connect(postgres_native_tls::MakeTlsConnector::new(
-                    builder.build().unwrap(),
-                ))
-                .await?;
+            let (mut client, connection) = pgsql_opts.connect(tls_connector).await?;
 
             let connection_handle = tokio::spawn(connection);
             let db_version = client

@@ -106,7 +106,7 @@ impl FromStr for DatabaseURL {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.starts_with("mysql://") {
             Ok(Self::MySQL(mysql::Opts::from_url(s)?))
-        } else if s.starts_with("postgresql://") {
+        } else if s.starts_with("postgresql://") || s.starts_with("postgres://") {
             Ok(Self::PostgreSQL(pgsql::Config::from_str(s)?))
         } else {
             Err(DatabaseURLParseError::InvalidFormat)
