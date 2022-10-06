@@ -11,6 +11,7 @@ use pgsql::types::Type;
 use pgsql::{GenericResult, Row};
 use psql_srv::Column;
 use readyset::ColumnSchema;
+use readyset_client::fallback_cache::FallbackCache;
 use readyset_client::upstream_database::NoriaCompare;
 use readyset_client::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
 use readyset_data::DfValue;
@@ -102,9 +103,14 @@ impl NoriaCompare for StatementMeta {
 impl UpstreamDatabase for PostgreSqlUpstream {
     type StatementMeta = StatementMeta;
     type QueryResult<'a> = QueryResult;
+    // TODO: Actually fill this in.
+    type CachedReadResult = ();
     type Error = Error;
 
-    async fn connect(upstream_config: UpstreamConfig) -> Result<Self, Error> {
+    async fn connect(
+        upstream_config: UpstreamConfig,
+        _: Option<FallbackCache<Self::CachedReadResult>>,
+    ) -> Result<Self, Error> {
         let url = upstream_config
             .upstream_db_url
             .as_ref()
@@ -148,7 +154,10 @@ impl UpstreamDatabase for PostgreSqlUpstream {
     }
 
     async fn reset(&mut self) -> Result<(), Error> {
-        let old_self = std::mem::replace(self, Self::connect(self.upstream_config.clone()).await?);
+        let old_self = std::mem::replace(
+            self,
+            Self::connect(self.upstream_config.clone(), None).await?,
+        );
         drop(old_self);
         Ok(())
     }

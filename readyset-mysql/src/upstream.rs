@@ -3,7 +3,7 @@ use std::convert::TryInto;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures_util::Stream;
+use futures_util::{Stream, StreamExt};
 use mysql_async::consts::{CapabilityFlags, StatusFlags};
 use mysql_async::prelude::Queryable;
 use mysql_async::{
@@ -12,6 +12,7 @@ use mysql_async::{
 use nom_sql::SqlIdentifier;
 use pin_project::pin_project;
 use readyset::ColumnSchema;
+use readyset_client::fallback_cache::FallbackCache;
 use readyset_client::upstream_database::NoriaCompare;
 use readyset_client::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
 use readyset_data::DfValue;
@@ -61,9 +62,58 @@ pub enum QueryResult<'a> {
         stream: ReadResultStream<'a>,
         columns: Arc<[Column]>,
     },
+    CachedReadResult(CachedReadResult),
     Command {
         status_flags: StatusFlags,
     },
+}
+
+#[derive(Debug, Clone)]
+pub struct CachedReadResult {
+    pub data: Vec<Row>,
+    pub columns: Arc<[Column]>,
+    pub status_flags: Option<StatusFlags>,
+}
+
+impl<'a> From<CachedReadResult> for QueryResult<'a> {
+    fn from(r: CachedReadResult) -> Self {
+        QueryResult::CachedReadResult(r)
+    }
+}
+
+impl<'a> QueryResult<'a> {
+    /// Can convert a stream ReadResult into a CachedReadResult.
+    async fn async_try_into(self) -> Result<CachedReadResult, Error> {
+        match self {
+            QueryResult::ReadResult {
+                mut stream,
+                columns,
+            } => {
+                let mut rows = vec![];
+                while let Some(row) = stream.next().await {
+                    match row {
+                        Ok(row) => rows.push(row),
+                        Err(e) => {
+                            // TODO: Update to be more sophisticated than this hack.
+                            return Err(Error::ReadySet(internal_err!(
+                                "Found error from MySQL rather than row {}",
+                                e
+                            )));
+                        }
+                    }
+                }
+                let status_flags = stream.status_flags();
+                Ok(CachedReadResult {
+                    data: rows,
+                    columns: columns.clone(),
+                    status_flags,
+                })
+            }
+            _ => Err(Error::ReadySet(internal_err!(
+                "Temp error: Can't convert because not a read result"
+            ))),
+        }
+    }
 }
 
 /// A connector to an underlying mysql store. This is really just a wrapper for the mysql crate.
@@ -71,6 +121,7 @@ pub struct MySqlUpstream {
     conn: Conn,
     prepared_statements: HashMap<StatementID, mysql_async::Statement>,
     upstream_config: UpstreamConfig,
+    fallback_cache: Option<FallbackCache<CachedReadResult>>,
 }
 
 #[derive(Debug, Clone)]
@@ -148,7 +199,7 @@ macro_rules! handle_query_result {
         })?;
 
         if columns.len() > 0 {
-            return Ok(QueryResult::ReadResult {
+            Ok(QueryResult::ReadResult {
                 stream: $result
                     .stream_and_drop()
                     .await?
@@ -159,14 +210,14 @@ macro_rules! handle_query_result {
                     })?
                     .into(),
                 columns,
-            });
+            })
         } else {
             // Kinda sad that can't get status from conn, since it is mutably borrowed above
             let resultset = $result.stream_and_drop::<Row>().await?.ok_or_else(|| {
                 ReadySetError::Internal("The mysql_async result has no resultsets".to_string())
             })?;
 
-            return Ok(QueryResult::WriteResult {
+            Ok(QueryResult::WriteResult {
                 num_rows_affected: resultset.affected_rows(),
                 last_inserted_id: resultset.last_insert_id().unwrap_or(1),
                 status_flags: resultset
@@ -177,7 +228,7 @@ macro_rules! handle_query_result {
                         )
                     })?
                     .status_flags(),
-            });
+            })
         }
     }};
 }
@@ -185,10 +236,14 @@ macro_rules! handle_query_result {
 #[async_trait]
 impl UpstreamDatabase for MySqlUpstream {
     type QueryResult<'a> = QueryResult<'a>;
+    type CachedReadResult = CachedReadResult;
     type StatementMeta = StatementMeta;
     type Error = Error;
 
-    async fn connect(upstream_config: UpstreamConfig) -> Result<Self, Error> {
+    async fn connect(
+        upstream_config: UpstreamConfig,
+        fallback_cache: Option<FallbackCache<Self::CachedReadResult>>,
+    ) -> Result<Self, Error> {
         // CLIENT_SESSION_TRACK is required for GTID information to be sent in OK packets on commits
         // GTID information is used for RYW
         // Currently this causes rows affected to return an incorrect result, so this is feature
@@ -230,6 +285,7 @@ impl UpstreamDatabase for MySqlUpstream {
             conn,
             prepared_statements,
             upstream_config,
+            fallback_cache,
         })
     }
 
@@ -246,12 +302,19 @@ impl UpstreamDatabase for MySqlUpstream {
         let conn = Conn::new(opts).await?;
         let prepared_statements = HashMap::new();
         let upstream_config = self.upstream_config.clone();
+        let fallback_cache = if let Some(ref cache) = self.fallback_cache {
+            cache.clear();
+            Some(cache.clone())
+        } else {
+            None
+        };
         let old_self = std::mem::replace(
             self,
             Self {
                 conn,
                 prepared_statements,
                 upstream_config,
+                fallback_cache,
             },
         );
         let _ = old_self.conn.disconnect().await as Result<(), _>;
@@ -298,8 +361,25 @@ impl UpstreamDatabase for MySqlUpstream {
     where
         S: AsRef<str> + Send + Sync + 'a,
     {
-        let result = self.conn.query_iter(query).await?;
-        handle_query_result!(result)
+        if let Some(ref cache) = self.fallback_cache {
+            if let Some(query_r) = cache.get(query.as_ref()) {
+                return Ok(query_r.into());
+            }
+            let query_str = query.as_ref().to_owned();
+            let result = self.conn.query_iter(query).await?;
+            let r = handle_query_result!(result);
+            match r {
+                Ok(query_result @ QueryResult::ReadResult { .. }) => {
+                    let cached_result: CachedReadResult = query_result.async_try_into().await?;
+                    cache.insert(query_str, cached_result.clone());
+                    Ok(cached_result.into())
+                }
+                _ => r,
+            }
+        } else {
+            let result = self.conn.query_iter(query).await?;
+            handle_query_result!(result)
+        }
     }
 
     /// Executes the given query on the mysql backend.

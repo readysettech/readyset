@@ -9,6 +9,7 @@
 #![deny(unreachable_pub)]
 
 pub mod backend;
+pub mod fallback_cache;
 pub mod http_router;
 pub mod migration_handler;
 pub mod proxied_queries_reporter;

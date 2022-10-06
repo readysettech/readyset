@@ -30,6 +30,7 @@ use readyset::metrics::recorded;
 use readyset::{ReadySetError, ReadySetHandle, ViewCreateRequest};
 use readyset_client::backend::noria_connector::{NoriaConnector, ReadBehavior};
 use readyset_client::backend::MigrationMode;
+use readyset_client::fallback_cache::FallbackCache;
 use readyset_client::http_router::NoriaAdapterHttpRouter;
 use readyset_client::migration_handler::MigrationHandler;
 use readyset_client::proxied_queries_reporter::ProxiedQueriesReporter;
@@ -347,6 +348,13 @@ pub struct Options {
     /// impact startup.
     #[clap(long, hide = true)]
     wait_for_failpoint: bool,
+
+    // TODO: This feature in general needs to be fleshed out significantly more. Off by default for
+    // now.
+    /// Used to enable the fallback cache, which can handle serving all queries that we can't parse
+    /// or support from an in-memory cache that lives in the adapter.
+    #[clap(long, hide = true)]
+    enable_fallback_cache: bool,
 }
 
 impl<H> NoriaAdapter<H>
@@ -615,6 +623,16 @@ where
             handle
         };
 
+        let fallback_cache: Option<
+            FallbackCache<
+                <<H as ConnectionHandler>::UpstreamDatabase as UpstreamDatabase>::CachedReadResult,
+            >,
+        > = if options.enable_fallback_cache {
+            Some(FallbackCache::new())
+        } else {
+            None
+        };
+
         if let MigrationMode::OutOfBand = migration_mode {
             set_failpoint!("adapter-out-of-band");
             let mut rh = rh.clone();
@@ -626,6 +644,7 @@ where
             let dry_run = options.explicit_migrations;
             let upstream_config = options.server_worker_options.replicator_config.clone();
             let expr_dialect = self.expr_dialect;
+            let fallback_cache = fallback_cache.clone();
 
             rs_connect.in_scope(|| info!("Spawning migration handler task"));
             let fut = async move {
@@ -633,7 +652,7 @@ where
                 let mut upstream =
                     if upstream_config.upstream_db_url.is_some() && !dry_run {
                         Some(
-                            H::UpstreamDatabase::connect(upstream_config)
+                            H::UpstreamDatabase::connect(upstream_config, fallback_cache)
                                 .instrument(connection.in_scope(|| {
                                     span!(Level::INFO, "Connecting to upstream database")
                                 }))
@@ -824,12 +843,13 @@ where
 
             let query_status_cache = query_status_cache;
             let upstream_config = upstream_config.clone();
+            let fallback_cache = fallback_cache.clone();
             let fut = async move {
                 let upstream_res = if upstream_config.upstream_db_url.is_some() {
                     set_failpoint!(failpoints::UPSTREAM);
                     timeout(
                         UPSTREAM_CONNECTION_TIMEOUT,
-                        H::UpstreamDatabase::connect(upstream_config),
+                        H::UpstreamDatabase::connect(upstream_config, fallback_cache),
                     )
                     .instrument(debug_span!("Connecting to upstream database"))
                     .await

@@ -8,6 +8,8 @@ use readyset::ColumnSchema;
 use readyset_data::DfValue;
 use readyset_errors::ReadySetError;
 
+use crate::fallback_cache::FallbackCache;
+
 /// Information about a statement that has been prepared in an [`UpstreamDatabase`]
 #[derive(Debug)]
 pub struct UpstreamPrepare<DB: UpstreamDatabase> {
@@ -60,6 +62,9 @@ pub trait UpstreamDatabase: Sized + Send {
     where
         Self: 'a;
 
+    /// A read result that has been cached in the underlying FallbackCache.
+    type CachedReadResult: Debug + Send + Clone;
+
     /// A type representing metadata about a prepared statement.
     ///
     /// This type is used as a field of [`UpstreamPrepare`], returned from
@@ -74,7 +79,10 @@ pub trait UpstreamDatabase: Sized + Send {
     type Error: From<ReadySetError> + IsFatalError + Error + Send + Sync + 'static;
 
     /// Create a new connection to this upstream database
-    async fn connect(upstream_config: UpstreamConfig) -> Result<Self, Self::Error>;
+    async fn connect(
+        upstream_config: UpstreamConfig,
+        fallback_cache: Option<FallbackCache<Self::CachedReadResult>>,
+    ) -> Result<Self, Self::Error>;
 
     /// Resets the connection with the upstream database
     async fn reset(&mut self) -> Result<(), Self::Error>;
