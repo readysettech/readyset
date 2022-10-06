@@ -927,9 +927,14 @@ where
         }
 
         let _ = telemetry_sender.send_event(TelemetryEvent::AdapterStop);
-        let shutdown_timeout = std::time::Duration::from_secs(20);
-        rt.spawn(async move {
-            match telemetry_sender.graceful_shutdown(shutdown_timeout).await {
+        rs_shutdown.in_scope(|| {
+            info!("Waiting up to 5s for telemetry reporter to drain in-flight metrics")
+        });
+        rt.block_on(async move {
+            match telemetry_sender
+                .graceful_shutdown(std::time::Duration::from_secs(5))
+                .await
+            {
                 Ok(_) => info!("TelemetrySender shutdown gracefully"),
                 Err(e) => info!(error=%e, "TelemetrySender did not shut down gracefully"),
             }
@@ -938,7 +943,7 @@ where
         // We use `shutdown_timeout` instead of `shutdown_background` in case any
         // blocking IO is ongoing.
         rs_shutdown.in_scope(|| info!("Waiting up to 20s for tasks to complete shutdown"));
-        rt.shutdown_timeout(shutdown_timeout);
+        rt.shutdown_timeout(std::time::Duration::from_secs(20));
         rs_shutdown.in_scope(|| info!("Shutdown completed successfully"));
 
         Ok(())

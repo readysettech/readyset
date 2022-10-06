@@ -207,7 +207,11 @@ fn main() -> anyhow::Result<()> {
             process::exit(1)
         });
         builder.set_external_addr(SocketAddr::from((external_addr, external_port)));
-        let res = builder.start(Arc::new(authority)).await;
+        builder.start(Arc::new(authority)).await
+    })?;
+
+    rt.block_on(handle.wait_done());
+    rt.block_on(async move {
         let _ = telemetry_sender.send_event(TelemetryEvent::ServerStop);
 
         let shutdown_timeout = std::time::Duration::from_secs(5);
@@ -216,10 +220,7 @@ fn main() -> anyhow::Result<()> {
             Ok(_) => info!("TelemetrySender shutdown gracefully"),
             Err(e) => info!(error=%e, "TelemetrySender did not shut down gracefully"),
         }
-        res
-    })?;
-
-    rt.block_on(handle.wait_done());
+    });
 
     drop(rt);
     Ok(())
