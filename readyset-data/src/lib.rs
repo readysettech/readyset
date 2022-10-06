@@ -392,7 +392,8 @@ impl DfValue {
             Self::UnsignedInt(_) => UnsignedBigInt,
             Self::Float(_) => Float(dialect),
             Self::Double(_) => Double,
-            Self::Text(_) | Self::TinyText(_) => DfType::Text(/* TODO */ Collation::default()),
+            Self::Text(t) => DfType::Text(t.collation()),
+            Self::TinyText(t) => DfType::Text(t.collation()),
             Self::TimestampTz(ts) => {
                 let subsecond_digits = u16::from(ts.subsecond_digits());
                 if ts.has_timezone() {
