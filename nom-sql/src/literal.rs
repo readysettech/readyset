@@ -339,6 +339,14 @@ impl Literal {
             SqlType::Array(_) => unimplemented!("Arrays aren't implemented yet"),
         }
     }
+
+    /// Returns `true` if `self` is a [`String`] literal
+    ///
+    /// [`String`]: Literal::String
+    #[must_use]
+    pub fn is_string(&self) -> bool {
+        matches!(self, Self::String(..))
+    }
 }
 
 // Integer literal value

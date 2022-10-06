@@ -393,9 +393,14 @@ impl Expr {
                 Sensitive(&call)
             ),
             AstExpr::Literal(lit) => {
+                let is_string_literal = lit.is_string();
                 let val: DfValue = lit.try_into()?;
                 // TODO: Infer type from SQL
-                let ty = val.infer_dataflow_type();
+                let ty = if is_string_literal && dialect == Dialect::PostgreSQL {
+                    DfType::Unknown
+                } else {
+                    val.infer_dataflow_type()
+                };
 
                 Ok(Self::Literal { val, ty })
             }
@@ -544,6 +549,18 @@ mod tests {
         use nom_sql::parse_expr;
 
         use super::*;
+
+        #[test]
+        fn postgresql_text_literaal() {
+            // localhost/postgres=# select pg_typeof('abc');
+            //  pg_typeof
+            // -----------
+            //  unknown
+
+            let input = AstExpr::Literal("abc".into());
+            let result = Expr::lower(input, Dialect::PostgreSQL, |_| internal!()).unwrap();
+            assert_eq!(result.ty(), &DfType::Unknown);
+        }
 
         #[test]
         fn simple_column_reference() {
