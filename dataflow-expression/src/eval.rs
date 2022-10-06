@@ -37,6 +37,17 @@ macro_rules! non_null {
     };
 }
 
+macro_rules! non_null_owned {
+    ($df_value:expr) => {{
+        let val = $df_value;
+        if val.is_none() {
+            return Ok(DfValue::None);
+        } else {
+            val
+        }
+    }};
+}
+
 /// Attempts to coerce the value to `Timestamp` or `Time`, otherwise defaults to null on failure.
 fn get_time_or_default(value: &DfValue, from_ty: &DfType) -> DfValue {
     // Default to 0 for consistency rather than rely on type dialect.
@@ -480,6 +491,23 @@ impl Expr {
                         .collect::<String>()
                         .into())
                 }
+                BuiltinFunction::Greatest { args, compare_as } => {
+                    let arg1 = args.first();
+                    // TODO: Just use `compare_as`, once `coerce_to` takes a DfType as its first arg
+                    let mut res = non_null_owned!(arg1.eval(record)?);
+                    let mut res_ty = arg1.ty();
+                    let mut res_compare = try_cast_or_none!(res, compare_as, arg1.ty());
+                    for arg in args.iter().skip(1) {
+                        let val = non_null_owned!(arg.eval(record)?);
+                        let val_compare = try_cast_or_none!(val, compare_as, arg.ty());
+                        if val_compare > res_compare {
+                            res = val;
+                            res_ty = arg.ty();
+                            res_compare = val_compare;
+                        }
+                    }
+                    Ok(try_cast_or_none!(res, ty, res_ty))
+                }
             },
             CaseWhen {
                 condition,
@@ -502,8 +530,9 @@ mod tests {
     use std::convert::TryInto;
 
     use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
-    use nom_sql::{Dialect, SqlType};
+    use nom_sql::{parse_expr, Dialect, SqlType};
     use readyset_data::DfType;
+    use readyset_errors::internal;
     use rust_decimal::prelude::FromPrimitive;
     use rust_decimal::Decimal;
     use test_strategy::proptest;
@@ -511,6 +540,13 @@ mod tests {
 
     use super::*;
     use crate::utils::{make_call, make_column, make_literal};
+
+    #[track_caller]
+    fn eval_expr(expr: &str, dialect: Dialect) -> DfValue {
+        let ast = parse_expr(dialect, expr).unwrap();
+        let expr = Expr::lower(ast, dialect, |_| internal!()).unwrap();
+        expr.eval::<DfValue>(&[]).unwrap()
+    }
 
     #[test]
     fn eval_column() {
@@ -1485,6 +1521,41 @@ mod tests {
             };
             let res = expr.eval::<DfValue>(&[3.into()]).unwrap();
             assert_eq!(res, "abc".into());
+        }
+
+        #[test]
+        fn greatest_mysql() {
+            assert_eq!(eval_expr("greatest(1, 2, 3)", Dialect::MySQL), 3.into());
+            assert_eq!(
+                eval_expr("greatest(123, '23')", Dialect::MySQL),
+                23.into() // TODO(ENG-1911) this should be a string!
+            );
+            assert_eq!(
+                eval_expr("greatest(1.23, '23')", Dialect::MySQL),
+                (23.0).try_into().unwrap()
+            );
+        }
+
+        #[test]
+        #[ignore = "ENG-1909"]
+        fn greatest_mysql_ints_and_floats() {
+            assert_eq!(
+                eval_expr("greatest(1, 2.5, 3)", Dialect::MySQL),
+                (3.0f64).try_into().unwrap()
+            );
+        }
+
+        #[test]
+        fn greatest_postgresql() {
+            assert_eq!(eval_expr("greatest(1,2,3)", Dialect::PostgreSQL), 3.into());
+            assert_eq!(
+                eval_expr("greatest(123, '23')", Dialect::PostgreSQL),
+                123.into()
+            );
+            assert_eq!(
+                eval_expr("greatest(23, '123')", Dialect::PostgreSQL),
+                123.into()
+            );
         }
     }
 }

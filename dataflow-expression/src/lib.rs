@@ -1,4 +1,4 @@
-#![feature(box_patterns)]
+#![feature(box_patterns, let_else)]
 
 mod eval;
 mod like;
@@ -14,8 +14,9 @@ use nom_sql::{
     BinaryOperator, Column, Dialect, Expr as AstExpr, FunctionExpr, InValue, SqlType, UnaryOperator,
 };
 use readyset_data::{Collation, DfType, DfValue};
-use readyset_errors::{internal, unsupported, ReadySetError, ReadySetResult};
+use readyset_errors::{internal, invalid_err, unsupported, ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
+use vec1::Vec1;
 
 pub use crate::post_lookup::{
     PostLookup, PostLookupAggregate, PostLookupAggregateFunction, PostLookupAggregates,
@@ -51,15 +52,31 @@ pub enum BuiltinFunction {
     Coalesce(Expr, Vec<Expr>),
     /// [`concat`](https://dev.mysql.com/doc/refman/8.0/en/string-functions.html#function_concat)
     Concat(Expr, Vec<Expr>),
+
     /// `substring`:
     ///
     /// * [MySQL](https://dev.mysql.com/doc/refman/8.0/en/string-functions.html#function_substring)
     /// * [Postgres](https://www.postgresql.org/docs/9.1/functions-string.html)
     Substring(Expr, Option<Expr>, Option<Expr>),
+
+    /// `greatest`:
+    ///
+    /// * [MySQL](https://dev.mysql.com/doc/refman/8.0/en/comparison-operators.html#function_greatest)
+    /// * [PostgreSQL](https://www.postgresql.org/docs/current/functions-conditional.html#FUNCTIONS-GREATEST-LEAST)
+    Greatest {
+        args: Vec1<Expr>,
+        /// Which type to coerce the arguments to *for comparison*. This might be distinct from the
+        /// actual return type of the function call.
+        compare_as: DfType,
+    },
 }
 
 impl BuiltinFunction {
-    pub fn from_name_and_args<A>(name: &str, args: A) -> Result<(Self, DfType), ReadySetError>
+    pub(crate) fn from_name_and_args<A>(
+        name: &str,
+        args: A,
+        dialect: Dialect,
+    ) -> Result<(Self, DfType), ReadySetError>
     where
         A: IntoIterator<Item = Expr>,
     {
@@ -79,9 +96,6 @@ impl BuiltinFunction {
                 _ => Double,
             }
         }
-
-        // TODO(ENG-1418): Propagate dialect info.
-        let dialect = Dialect::MySQL;
 
         let arity_error = || ReadySetError::ArityError(name.to_owned());
 
@@ -189,6 +203,36 @@ impl BuiltinFunction {
                     ty,
                 )
             }
+            "greatest" => {
+                let arg1 = next_arg()?;
+                let rest_args = args.by_ref().collect::<Vec<_>>();
+                let arg_tys = iter::once(arg1.ty())
+                    .chain(rest_args.iter().map(|arg| arg.ty()))
+                    .collect::<Vec<_>>();
+                let (compare_as, ty) = match dialect {
+                    Dialect::PostgreSQL => {
+                        let ty = unify_postgres_types(arg_tys)?;
+                        (ty.clone(), ty)
+                    }
+                    Dialect::MySQL => {
+                        // TODO(ENG-1911): What are the rules for MySQL's return type inference?
+                        // The documentation just says "The return type of LEAST() is the aggregated
+                        // type of the comparison argument types."
+                        let return_ty = arg_tys
+                            .iter()
+                            .find(|t| t.is_known())
+                            .copied()
+                            .cloned()
+                            .unwrap_or(DfType::Binary(0));
+                        let compare_as = mysql_least_greatest_compare_as(arg_tys);
+                        (compare_as, return_ty)
+                    }
+                };
+
+                let mut args = Vec1::with_capacity(arg1, rest_args.len() + 1);
+                args.extend(rest_args);
+                (Self::Greatest { args, compare_as }, ty)
+            }
             _ => return Err(ReadySetError::NoSuchFunction(name.to_owned())),
         };
 
@@ -214,6 +258,7 @@ impl BuiltinFunction {
             Coalesce { .. } => "coalesce",
             Concat { .. } => "concat",
             Substring { .. } => "substring",
+            Greatest { .. } => "greatest",
         }
     }
 }
@@ -270,6 +315,9 @@ impl fmt::Display for BuiltinFunction {
                     write!(f, " for {len}")?;
                 }
                 write!(f, ")")
+            }
+            Greatest { args, .. } => {
+                write!(f, "({})", args.iter().join(", "))
             }
         }
     }
@@ -385,7 +433,7 @@ impl Expr {
                     .into_iter()
                     .map(|arg| Self::lower(arg, dialect, resolve_column))
                     .collect::<Result<Vec<_>, _>>()?;
-                let (func, ty) = BuiltinFunction::from_name_and_args(&fname, args)?;
+                let (func, ty) = BuiltinFunction::from_name_and_args(&fname, args, dialect)?;
                 Ok(Self::Call {
                     func: Box::new(func),
                     ty,
@@ -397,7 +445,7 @@ impl Expr {
                     .chain(len)
                     .map(|arg| Self::lower(*arg, dialect, resolve_column))
                     .collect::<Result<Vec<_>, _>>()?;
-                let (func, ty) = BuiltinFunction::from_name_and_args("substring", args)?;
+                let (func, ty) = BuiltinFunction::from_name_and_args("substring", args, dialect)?;
 
                 Ok(Self::Call {
                     func: Box::new(func),
@@ -557,12 +605,110 @@ impl Expr {
     }
 }
 
+/// Unify the given list of types according to PostgreSQL's [type unification rules][pg-docs]
+///
+/// [pg-docs]: https://www.postgresql.org/docs/current/typeconv-union-case.html
+fn unify_postgres_types(types: Vec<&DfType>) -> ReadySetResult<DfType> {
+    let Some(first_ty) = types.first() else {
+        return Ok(DfType::Text(Collation::default()))
+    };
+
+    // > 1. If all inputs are of the same type, and it is not unknown, resolve as that type.
+    if types.iter().skip(1).all(|t| t == first_ty) && first_ty.is_known() {
+        return Ok((*first_ty).clone());
+    }
+
+    // > 2. If any input is of a domain type, treat it as being of the domain's base type for all
+    // > subsequent steps.
+    //
+    // We don't support domain types, so we can skip this step
+
+    // > 3. If all inputs are of type unknown, resolve as type text (the preferred type of the
+    // > string category). Otherwise, unknown inputs are ignored for the purposes of the remaining
+    // > rules.
+    let Some(first_known_type) = types.iter().find(|t| t.is_known()) else {
+        return Ok(DfType::Text(Collation::default()));
+    };
+
+    // > 4. If the non-unknown inputs are not all of the same type category, fail.
+    if types
+        .iter()
+        .skip(1)
+        .filter(|t| t.is_known())
+        .any(|t| t.pg_category() != first_known_type.pg_category())
+    {
+        invalid_err!(
+            "Cannot coerce type {} to type {}",
+            first_ty,
+            types
+                .get(1)
+                .expect("can't get here unless we have at least 2 types")
+        );
+    }
+
+    // > 5. Select the first non-unknown input type as the candidate type, then consider each other
+    // > non-unknown input type, left to right. [13] If the candidate type can be implicitly
+    // > converted to the other type, but not vice-versa, select the other type as the new candidate
+    // > type. Then continue considering the remaining inputs. If, at any stage of this process, a
+    // > preferred type is selected, stop considering additional inputs.
+    //
+    // TODO(ENG-1909): This bit is not completely correct, because we haven't yet implemented the
+    // notion of "preferred" types, or whether or not types can be implicitly converted. For now, we
+    // just take the first non-unknown type
+    Ok((*first_known_type).clone())
+}
+
+/// Returns a tuple of the inferred type to convert arguments to for comparison within a call to
+/// `GREATEST` or `LEAST` using MySQL's [inference rules for those functions][mysql-docs]
+///
+/// [mysql-docs]: https://dev.mysql.com/doc/refman/8.0/en/comparison-operators.html#function_least
+fn mysql_least_greatest_compare_as(arg_types: Vec<&DfType>) -> DfType {
+    // > * If any argument is NULL, the result is NULL. No comparison is needed.
+    if arg_types.is_empty() || arg_types.iter().any(|t| t.is_unknown()) {
+        return DfType::Unknown;
+    }
+
+    // > * If all arguments are integer-valued, they are compared as integers.
+    if arg_types.iter().all(|t| t.is_any_int()) {
+        return DfType::BigInt;
+    }
+
+    // > * If at least one argument is double precision, they are compared as double-precision
+    // > values
+    if arg_types.iter().any(|t| t.is_any_float()) {
+        return DfType::Double;
+    }
+
+    // > * If the arguments comprise a mix of numbers and strings, they are compared as strings.
+    // > * If any argument is a nonbinary (character) string, the arguments are compared as
+    // > nonbinary
+    // > strings.
+    //
+    // As far as I can tell, these two bullet points mean the same thing...
+    let mut has_strings = false;
+    let mut has_numbers = false;
+    for arg_ty in &arg_types {
+        if arg_ty.is_any_text() {
+            has_strings = true;
+        } else if arg_ty.is_any_int() {
+            has_numbers = true;
+        }
+
+        if has_strings && has_numbers {
+            return DfType::Text(Collation::default());
+        }
+    }
+
+    // > * In all other cases, the arguments are compared as binary strings.
+    DfType::VarBinary(u16::MAX)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     mod lower {
-        use nom_sql::parse_expr;
+        use nom_sql::{parse_expr, Float, Literal};
 
         use super::*;
 
@@ -750,6 +896,133 @@ mod tests {
             let input = parse_expr(Dialect::MySQL, "substring(123 from 2)").unwrap();
             let res = Expr::lower(input, Dialect::MySQL, |_| internal!()).unwrap();
             assert_eq!(res.ty(), &DfType::Text(Collation::default()));
+        }
+
+        #[test]
+        fn greatest_inferred_type() {
+            use Dialect::*;
+            use Literal::Null;
+
+            #[track_caller]
+            fn infers_type(args: Vec<Literal>, dialect: Dialect, expected_ty: DfType) {
+                let input = AstExpr::Call(FunctionExpr::Call {
+                    name: "greatest".into(),
+                    arguments: args.into_iter().map(AstExpr::Literal).collect(),
+                });
+                let result = Expr::lower(input, dialect, |_| internal!()).unwrap();
+                assert_eq!(result.ty(), &expected_ty);
+            }
+
+            infers_type(
+                vec![Null, Null],
+                PostgreSQL,
+                DfType::Text(Collation::default()),
+            );
+
+            infers_type(vec!["123".into(), 23.into()], PostgreSQL, DfType::BigInt);
+
+            infers_type(
+                vec!["123".into(), "456".into()],
+                PostgreSQL,
+                DfType::Text(Collation::default()),
+            );
+
+            infers_type(
+                vec!["123".into(), "456".into()],
+                PostgreSQL,
+                DfType::Text(Collation::default()),
+            );
+
+            infers_type(
+                vec![
+                    "123".into(),
+                    Literal::Float(Float {
+                        value: 1.23,
+                        precision: 2,
+                    }),
+                ],
+                PostgreSQL,
+                // TODO: should actually be DfType::Numeric { prec: 10, scale: 0 }, but our type
+                // inference for float literals in pg is (currently) wrong
+                DfType::Float(Dialect::MySQL),
+            );
+
+            infers_type(vec![Null, 23.into()], MySQL, DfType::BigInt);
+            infers_type(vec![Null, Null], MySQL, DfType::Binary(0));
+
+            infers_type(
+                vec![
+                    "123".into(),
+                    Literal::Float(Float {
+                        value: 1.23,
+                        precision: 2,
+                    }),
+                ],
+                MySQL,
+                DfType::Text(Collation::default()),
+            );
+
+            // TODO(ENG-1911)
+            // infers_type(
+            //     vec![
+            //         123.into(),
+            //         Literal::Float(Float {
+            //             value: 1.23,
+            //             precision: 2,
+            //         }),
+            //     ],
+            //     MySQL,
+            //     DfType::Numeric { prec: 5, scale: 2 },
+            // );
+        }
+
+        #[test]
+        fn greatest_compare_as() {
+            use Dialect::*;
+            use Literal::Null;
+
+            #[track_caller]
+            fn compares_as(args: Vec<Literal>, dialect: Dialect, expected_ty: DfType) {
+                let input = AstExpr::Call(FunctionExpr::Call {
+                    name: "greatest".into(),
+                    arguments: args.into_iter().map(AstExpr::Literal).collect(),
+                });
+                let result = Expr::lower(input, dialect, |_| internal!()).unwrap();
+                let compare_as = match result {
+                    Expr::Call { func, .. } => match *func {
+                        BuiltinFunction::Greatest { compare_as, .. } => compare_as,
+                        _ => panic!("Wrong function"),
+                    },
+                    _ => panic!("Not a function call"),
+                };
+                assert_eq!(compare_as, expected_ty);
+            }
+
+            compares_as(
+                vec![Null, Null],
+                PostgreSQL,
+                DfType::Text(Collation::default()),
+            );
+            compares_as(vec![Null, Null], MySQL, DfType::Unknown);
+            compares_as(vec![Null, "a".into(), "b".into()], MySQL, DfType::Unknown);
+            compares_as(
+                vec![Null, "a".into(), "b".into()],
+                PostgreSQL,
+                DfType::Text(Collation::default()),
+            );
+            compares_as(vec![12u64.into(), (-123).into()], MySQL, DfType::BigInt);
+            // TODO(ENG-1909)
+            // compares_as(vec![12u64.into(), (-123).into()], PostgreSQL, DfType::Int);
+            compares_as(
+                vec![12u64.into(), "123".into()],
+                MySQL,
+                DfType::Text(Collation::default()),
+            );
+            compares_as(
+                vec!["A".into(), "b".into(), 1.into()],
+                MySQL,
+                DfType::Text(Collation::default()),
+            );
         }
     }
 }

@@ -394,6 +394,43 @@ impl DfType {
         }
     }
 
+    /// Returns the PostgreSQL type category for this type
+    pub fn pg_category(&self) -> PgTypeCategory {
+        match self {
+            DfType::Unknown => PgTypeCategory::Unknown,
+            DfType::Array(_) => PgTypeCategory::Array,
+            DfType::Bool => PgTypeCategory::Boolean,
+            DfType::Int
+            | DfType::UnsignedInt
+            | DfType::BigInt
+            | DfType::UnsignedBigInt
+            | DfType::TinyInt
+            | DfType::UnsignedTinyInt
+            | DfType::SmallInt
+            | DfType::UnsignedSmallInt
+            | DfType::Float(_)
+            | DfType::Double
+            | DfType::Numeric { .. } => PgTypeCategory::Numeric,
+            DfType::Text(_) | DfType::Char(_, _, _) | DfType::VarChar(_, _) => {
+                PgTypeCategory::String
+            }
+            DfType::Blob(_)
+            | DfType::Binary(_)
+            | DfType::VarBinary(_)
+            | DfType::Bit(_)
+            | DfType::VarBit(_) => PgTypeCategory::BitString,
+            DfType::Date
+            | DfType::DateTime { .. }
+            | DfType::Time { .. }
+            | DfType::Timestamp { .. }
+            | DfType::TimestampTz { .. } => PgTypeCategory::DateTime,
+            DfType::MacAddr | DfType::Inet => PgTypeCategory::NetworkAddress,
+            DfType::Uuid | DfType::Enum(_, _) | DfType::Json(_) | DfType::Jsonb => {
+                PgTypeCategory::UserDefined
+            }
+        }
+    }
+
     /// Returns the number of subsecond digits if this is a time type, otherwise [`None`].
     ///
     /// This is also known as fractional seconds precision (FSP). It must be between 0 through 6,
@@ -536,6 +573,30 @@ impl DfType {
             f()
         }
     }
+}
+
+/// Postgresql type category. See [the docs][docs] for more information, and the [official list of
+/// type categories][list].
+///
+/// [docs]: https://www.postgresql.org/docs/current/typeconv-overview.html
+/// [list]: https://www.postgresql.org/docs/current/catalog-pg-type.html#CATALOG-TYPCATEGORY-TABLE
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PgTypeCategory {
+    Array,
+    Boolean,
+    Composite,
+    DateTime,
+    Enum,
+    Geometric,
+    NetworkAddress,
+    Numeric,
+    Pseudo,
+    Range,
+    String,
+    Timespan,
+    UserDefined,
+    BitString,
+    Unknown,
 }
 
 /// Test helpers.

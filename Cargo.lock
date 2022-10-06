@@ -980,6 +980,7 @@ dependencies = [
  "serde",
  "serde_json",
  "test-strategy",
+ "vec1",
 ]
 
 [[package]]
