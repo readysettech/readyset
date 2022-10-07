@@ -1017,12 +1017,21 @@ impl NoriaConnector {
                         error!(error = %e, "add query failed");
                         return Err(e);
                     }
-                } else if let Err(e) = noria_await!(
-                    self.inner.get_mut()?,
-                    self.inner.get_mut()?.noria.view(qname.clone())
-                ) {
-                    error!(error = %e, "getting view from noria failed");
-                    return Err(e);
+                } else {
+                    match noria_await!(
+                        self.inner.get_mut()?,
+                        self.inner.get_mut()?.noria.view(qname.clone())
+                    ) {
+                        Ok(view) => {
+                            // We should not have an entry, but if we do it's safe to overwrite
+                            // since we got this information from the controller.
+                            self.inner.get_mut()?.views.insert(qname.clone(), view);
+                        }
+                        Err(e) => {
+                            error!(error = %e, "getting view from noria failed");
+                            return Err(e);
+                        }
+                    }
                 }
                 self.view_cache.register_statement(&qname, view_request);
 
