@@ -307,7 +307,7 @@ impl fmt::Display for BuiltinFunction {
                 write!(f, "({}, {})", arg1, args.iter().join(", "))
             }
             Substring(string, from, len) => {
-                write!(f, "substring({string}")?;
+                write!(f, "({string}")?;
                 if let Some(from) = from {
                     write!(f, " from {from}")?;
                 }
