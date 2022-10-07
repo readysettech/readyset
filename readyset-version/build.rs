@@ -7,10 +7,15 @@ fn main() {
     println!("cargo:rerun-if-changed=../../.git/HEAD");
     println!("cargo:rerun-if-env-changed=BUILDKITE_COMMIT");
 
-    // Set COMMIT_ID to one of the following, in order:
-    // - $BUILDKITE_COMMIT
-    // - $(git rev-parse HEAD)
-    // - "unknown-commit-id"
+    // Attempt to set version info
+    maybe_set_commit_id();
+}
+
+/// Set COMMIT_ID to one of the following, in order:
+/// - $BUILDKITE_COMMIT
+/// - $(git rev-parse HEAD)
+/// - "unknown-commit-id"
+fn maybe_set_commit_id() {
     let maybe_buildkite_commit = std::env::var("BUILDKITE_COMMIT").map(|s| s.trim().to_owned());
     let maybe_git_hash = Command::new("git")
         .args(&["rev-parse", "HEAD"])
