@@ -210,7 +210,29 @@ fn main() -> anyhow::Result<()> {
         builder.start(Arc::new(authority)).await
     })?;
 
-    rt.block_on(handle.wait_done());
+    // Wait for a shutdown condition, being one of:
+    // - CTRL-C
+    // - SIGTERM
+    // - The controller shut down
+    let ctrl_c = tokio::signal::ctrl_c();
+    let mut sigterm = {
+        let _guard = rt.enter();
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).unwrap()
+    };
+    rt.block_on(async {
+        tokio::select! {
+            biased;
+            _ = ctrl_c => {
+                info!("ctrl-c received, shutting down");
+            },
+            _ = sigterm.recv() => {
+                info!("SIGTERM received, shutting down");
+            }
+            _ = handle.wait_done() => (),
+        }
+    });
+
+    // Attempt a graceful shutdown of the telemetry reporting system
     rt.block_on(async move {
         let _ = telemetry_sender.send_event(TelemetryEvent::ServerStop);
 
