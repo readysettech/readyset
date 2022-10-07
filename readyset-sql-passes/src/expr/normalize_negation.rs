@@ -38,7 +38,9 @@ fn negate_expr(expr: &mut Expr) -> bool {
                 | BinaryOperator::Subtract
                 | BinaryOperator::Multiply
                 | BinaryOperator::Divide
-                | BinaryOperator::DoublePipe => return false,
+                | BinaryOperator::DoublePipe
+                | BinaryOperator::Arrow1
+                | BinaryOperator::Arrow2 => return false,
                 BinaryOperator::QuestionMark
                 | BinaryOperator::QuestionMarkPipe
                 | BinaryOperator::QuestionMarkAnd => {

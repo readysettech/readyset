@@ -1,6 +1,7 @@
 use std::fmt;
 
 use nom_sql::BinaryOperator as SqlBinaryOperator;
+use readyset_data::dialect::SqlEngine;
 use readyset_data::{DfType, Dialect};
 use readyset_errors::{invalid_err, ReadySetResult};
 use serde::{Deserialize, Serialize};
@@ -78,12 +79,30 @@ pub enum BinaryOperator {
 
     /// `||`
     JsonConcat,
+
+    /// (Unimplemented) [MySQL `->`](https://dev.mysql.com/doc/refman/5.7/en/json-search-functions.html#operator_json-column-path)
+    /// operator to extract JSON values via a path: `json -> jsonpath` to `json`.
+    // TODO(ENG-1517)
+    JsonPathExtract,
+
+    /// (Unimplemented) [MySQL `->>`](https://dev.mysql.com/doc/refman/5.7/en/json-search-functions.html#operator_json-inline-path)
+    /// operator to extract JSON values and apply [`json_unquote`](https://dev.mysql.com/doc/refman/5.7/en/json-modification-functions.html#function_json-unquote):
+    /// `json ->> jsonpath` to unquoted `text`.
+    // TODO(ENG-1518)
+    JsonPathExtractUnquote,
+
+    /// PostgreSQL `->` operator to extract JSON values as JSON via a key:
+    /// `json[b] -> {text,integer}` to `json[b]`.
+    JsonKeyExtract,
+
+    /// PostgreSQL `->>` operator to extract JSON values as text via a key:
+    /// `json[b] ->> {text,integer}` to `text`.
+    JsonKeyExtractText,
 }
 
 impl BinaryOperator {
     /// Converts from a [`nom_sql::BinaryOperator`] within the context of a SQL [`Dialect`].
-    pub fn from_sql_op(op: SqlBinaryOperator, _dialect: Dialect) -> Self {
-        // TODO: Use dialect for future operators, such as JSON extraction arrows.
+    pub fn from_sql_op(op: SqlBinaryOperator, dialect: Dialect) -> Self {
         use SqlBinaryOperator::*;
         match op {
             And => Self::And,
@@ -108,6 +127,14 @@ impl BinaryOperator {
             QuestionMarkPipe => Self::JsonAnyExists,
             QuestionMarkAnd => Self::JsonAllExists,
             DoublePipe => Self::JsonConcat, // TODO handle other || operators
+            Arrow1 => match dialect.engine() {
+                SqlEngine::MySQL => Self::JsonPathExtract,
+                SqlEngine::PostgreSQL => Self::JsonKeyExtract,
+            },
+            Arrow2 => match dialect.engine() {
+                SqlEngine::MySQL => Self::JsonPathExtractUnquote,
+                SqlEngine::PostgreSQL => Self::JsonKeyExtractText,
+            },
         }
     }
 
@@ -140,25 +167,43 @@ impl BinaryOperator {
 
             // jsonb, unknown
             Self::JsonExists | Self::JsonAnyExists | Self::JsonAllExists
-                if !(left_type.is_jsonb() || left_type.is_unknown()) =>
+                if left_type.is_known() && !left_type.is_jsonb() =>
             {
                 error(Left, "JSONB")
+            }
+
+            // json, jsonb, unknown
+            Self::JsonPathExtract
+            | Self::JsonKeyExtract
+            | Self::JsonPathExtractUnquote
+            | Self::JsonKeyExtractText
+                if left_type.is_known() && !left_type.is_any_json() =>
+            {
+                error(Left, "JSON")
             }
 
             // Right type checks:
 
             // text, char, varchar, unknown
-            Self::JsonExists if !(right_type.is_any_text() || right_type.is_unknown()) => {
+            Self::JsonExists if right_type.is_known() && !right_type.is_any_text() => {
                 error(Right, "TEXT")
             }
 
             // text[], char[], varchar[], unknown, unknown[]
             Self::JsonAnyExists | Self::JsonAllExists
-                if !((right_type.is_array()
-                    && right_type.innermost_array_type().is_any_text())
-                    || right_type.innermost_array_type().is_unknown()) =>
+                if right_type.innermost_array_type().is_known()
+                    && !(right_type.is_array()
+                        && right_type.innermost_array_type().is_any_text()) =>
             {
                 error(Right, "TEXT[]")
+            }
+
+            // text, char, varchar, ints, unknown
+            Self::JsonKeyExtract | Self::JsonKeyExtractText
+                if right_type.is_known()
+                    && !(right_type.is_any_text() || right_type.is_any_int()) =>
+            {
+                error(Right, "TEXT or INT")
             }
 
             _ => Ok(()),
@@ -194,6 +239,8 @@ impl BinaryOperator {
             | Self::JsonAnyExists
             | Self::JsonAllExists => Ok(DfType::Bool),
 
+            Self::JsonPathExtractUnquote | Self::JsonKeyExtractText => Ok(DfType::DEFAULT_TEXT),
+
             _ => Ok(left_type.clone()),
         }
     }
@@ -224,7 +271,60 @@ impl fmt::Display for BinaryOperator {
             Self::JsonAnyExists => "?|",
             Self::JsonAllExists => "?&",
             Self::JsonConcat => "||",
+            Self::JsonPathExtract | Self::JsonKeyExtract => "->",
+            Self::JsonPathExtractUnquote | Self::JsonKeyExtractText => "->>",
         };
         f.write_str(op)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    mod output_type {
+        use super::*;
+
+        #[track_caller]
+        fn test_json_extract(op: BinaryOperator, left_type: DfType, output_type: DfType) {
+            assert_eq!(
+                op.output_type(&left_type, &DfType::DEFAULT_TEXT).unwrap(),
+                output_type
+            );
+        }
+
+        #[test]
+        fn json_path_extract() {
+            test_json_extract(BinaryOperator::JsonPathExtract, DfType::Json, DfType::Json);
+        }
+
+        #[test]
+        fn json_path_extract_unquote() {
+            test_json_extract(
+                BinaryOperator::JsonPathExtractUnquote,
+                DfType::Json,
+                DfType::DEFAULT_TEXT,
+            );
+        }
+
+        #[test]
+        fn json_key_extract() {
+            test_json_extract(BinaryOperator::JsonKeyExtract, DfType::Json, DfType::Json);
+            test_json_extract(BinaryOperator::JsonKeyExtract, DfType::Jsonb, DfType::Jsonb);
+        }
+
+        #[test]
+        fn json_key_extract_text() {
+            test_json_extract(
+                BinaryOperator::JsonKeyExtractText,
+                DfType::Json,
+                DfType::DEFAULT_TEXT,
+            );
+            test_json_extract(
+                BinaryOperator::JsonKeyExtractText,
+                DfType::Jsonb,
+                DfType::DEFAULT_TEXT,
+            );
+        }
     }
 }

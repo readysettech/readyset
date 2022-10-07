@@ -184,21 +184,25 @@ pub enum BinaryOperator {
     Multiply,
     /// `/`
     Divide,
+
     /// `?`
     ///
     /// Postgres-specific JSONB operator. Looks for the given string as an object key or an array
     /// element and returns a boolean indicating the presence or absence of that string.
     QuestionMark,
+
     /// `?|`
     ///
     /// Postgres-specific JSONB operator. Takes an array of strings and checks whether *any* of
     /// those strings appear as object keys or array elements in the provided JSON value.
     QuestionMarkPipe,
+
     /// `?&`
     ///
     /// Postgres-specific JSONB operator. Takes an array of strings and checks whether *all* of
     /// those strings appear as object keys or array elements in the provided JSON value.
     QuestionMarkAnd,
+
     /// `||`
     ///
     /// This can represent a few different operators in different contexts. In MySQL it can
@@ -206,6 +210,20 @@ pub enum BinaryOperator {
     /// `PIPES_AS_CONCAT` is enabled in the SQL mode. In Postgres it can either represent string
     /// concatenation or JSON concatenation, depending on the context.
     DoublePipe,
+
+    /// `->`
+    ///
+    /// This extracts JSON values as JSON:
+    /// - MySQL: `json -> jsonpath` to `json` (unimplemented)
+    /// - PostgreSQL: `json[b] -> {text,integer}` to `json[b]`
+    Arrow1,
+
+    /// `->>`
+    ///
+    /// This extracts JSON values and applies a transformation:
+    /// - MySQL: `json ->> jsonpath` to unquoted `text` (unimplemented)
+    /// - PostgreSQL: `json[b] ->> {text,integer}` to `text`
+    Arrow2,
 }
 
 impl BinaryOperator {
@@ -254,6 +272,8 @@ impl Display for BinaryOperator {
             Self::QuestionMarkPipe => "?|",
             Self::QuestionMarkAnd => "?&",
             Self::DoublePipe => "||",
+            Self::Arrow1 => "->",
+            Self::Arrow2 => "->>",
         };
         f.write_str(op)
     }
@@ -525,13 +545,6 @@ fn infix_no_and_or(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], TokenTree> {
 
             Ok((i, BinaryOperator::NotLike))
         },
-        map(char('='), |_| BinaryOperator::Equal),
-        map(tag("!="), |_| BinaryOperator::NotEqual),
-        map(tag("<>"), |_| BinaryOperator::NotEqual),
-        map(tag(">="), |_| BinaryOperator::GreaterOrEqual),
-        map(tag("<="), |_| BinaryOperator::LessOrEqual),
-        map(char('>'), |_| BinaryOperator::Greater),
-        map(char('<'), |_| BinaryOperator::Less),
         move |i| {
             let (i, _) = tag_no_case("is")(i)?;
             let (i, _) = whitespace1(i)?;
@@ -541,14 +554,29 @@ fn infix_no_and_or(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], TokenTree> {
             Ok((i, BinaryOperator::IsNot))
         },
         map(pair(tag_no_case("is"), whitespace1), |_| BinaryOperator::Is),
-        map(char('+'), |_| BinaryOperator::Add),
-        map(char('-'), |_| BinaryOperator::Subtract),
-        map(char('*'), |_| BinaryOperator::Multiply),
-        map(char('/'), |_| BinaryOperator::Divide),
-        map(tag("?|"), |_| BinaryOperator::QuestionMarkPipe),
-        map(tag("?&"), |_| BinaryOperator::QuestionMarkAnd),
-        map(char('?'), |_| BinaryOperator::QuestionMark),
-        map(tag("||"), |_| BinaryOperator::DoublePipe),
+        // Sigils are separated due to `alt` limit.
+        //
+        // NOTE: The order here matters or else some of these will be incorrectly partially parsed,
+        // such as `?` after `?|`.
+        alt((
+            map(char('='), |_| BinaryOperator::Equal),
+            map(tag("!="), |_| BinaryOperator::NotEqual),
+            map(tag("<>"), |_| BinaryOperator::NotEqual),
+            map(tag(">="), |_| BinaryOperator::GreaterOrEqual),
+            map(tag("<="), |_| BinaryOperator::LessOrEqual),
+            map(char('>'), |_| BinaryOperator::Greater),
+            map(char('<'), |_| BinaryOperator::Less),
+            map(char('+'), |_| BinaryOperator::Add),
+            map(tag("->>"), |_| BinaryOperator::Arrow2),
+            map(tag("->"), |_| BinaryOperator::Arrow1),
+            map(char('-'), |_| BinaryOperator::Subtract),
+            map(char('*'), |_| BinaryOperator::Multiply),
+            map(char('/'), |_| BinaryOperator::Divide),
+            map(tag("?|"), |_| BinaryOperator::QuestionMarkPipe),
+            map(tag("?&"), |_| BinaryOperator::QuestionMarkAnd),
+            map(char('?'), |_| BinaryOperator::QuestionMark),
+            map(tag("||"), |_| BinaryOperator::DoublePipe),
+        )),
     ))(i)?;
 
     Ok((i, TokenTree::Infix(operator)))
@@ -731,6 +759,14 @@ where
             Infix(Subtract) => Affix::Infix(Precedence(11), Associativity::Right),
             Infix(Multiply) => Affix::Infix(Precedence(12), Associativity::Right),
             Infix(Divide) => Affix::Infix(Precedence(12), Associativity::Right),
+            Prefix(Not) => Affix::Prefix(Precedence(6)),
+            Prefix(Neg) => Affix::Prefix(Precedence(5)),
+            Primary(_) => Affix::Nilfix,
+            Group(_) => Affix::Nilfix,
+            PgsqlCast(_, _) => Affix::Nilfix,
+
+            // All JSON operators have the same precedence.
+            //
             // Not positive whether this 8 puts all other operators at the correct relative
             // precedence here because these precedences come from MySQL rather than PG, but this
             // seems to produce the correct behavior in all the cases I've come up with:
@@ -738,11 +774,8 @@ where
             Infix(QuestionMarkPipe) => Affix::Infix(Precedence(8), Associativity::Left),
             Infix(QuestionMarkAnd) => Affix::Infix(Precedence(8), Associativity::Left),
             Infix(DoublePipe) => Affix::Infix(Precedence(8), Associativity::Left),
-            Prefix(Not) => Affix::Prefix(Precedence(6)),
-            Prefix(Neg) => Affix::Prefix(Precedence(5)),
-            Primary(_) => Affix::Nilfix,
-            Group(_) => Affix::Nilfix,
-            PgsqlCast(_, _) => Affix::Nilfix,
+            Infix(Arrow1) => Affix::Infix(Precedence(8), Associativity::Left),
+            Infix(Arrow2) => Affix::Infix(Precedence(8), Associativity::Left),
         })
     }
 
@@ -2007,6 +2040,48 @@ mod tests {
                     "((\"h\".\"x\" is null)
                  and (month(\"a\".\"b\") between \"t2\".\"start\" and \"t2\".\"end\")
                  and (dayofweek(\"c\".\"d\") between 1 and 3))",
+                )
+            }
+
+            /// `->` vs `=`.
+            #[test]
+            fn arrow1_equals() {
+                // NOTE: `=` does not work for `json`, but Postgres's error message indicates the
+                // precedence.
+                parses_same(
+                    Dialect::PostgreSQL,
+                    "'[1, 2, 3]'::json -> 0 = '[3, 2, 1]'::json -> 2",
+                    "('[1, 2, 3]'::json -> 0) = ('[3, 2, 1]'::json -> 2)",
+                )
+            }
+
+            /// `->` vs `-`.
+            #[test]
+            fn arrow1_subtract() {
+                parses_same(
+                    Dialect::PostgreSQL,
+                    "'[[1, 2, 3]]'::json -> 1 - 1 -> 1",
+                    "'[[1, 2, 3]]'::json -> (1 - 1) -> 1",
+                )
+            }
+
+            /// `->` vs `*`.
+            #[test]
+            fn arrow1_multiply() {
+                parses_same(
+                    Dialect::PostgreSQL,
+                    "'[[1, 2, 3]]'::json -> 1 * 0 -> 1",
+                    "'[[1, 2, 3]]'::json -> (1 * 0) -> 1",
+                )
+            }
+
+            /// `->>` vs `like`.
+            #[test]
+            fn arrow2_like() {
+                parses_same(
+                    Dialect::PostgreSQL,
+                    "'[1, 2, 3]'::json ->> 0 like '[3, 2, 1]'::json ->> 2",
+                    "('[1, 2, 3]'::json ->> 0) like ('[3, 2, 1]'::json ->> 2)",
                 )
             }
         }

@@ -129,7 +129,39 @@ impl Expr {
                         };
                         Ok(result.into())
                     }
+
                     JsonConcat => unsupported!("|| JSON operator not implement yet"),
+
+                    // TODO(ENG-1517)
+                    JsonPathExtract |
+                    // TODO(ENG-1518)
+                    JsonPathExtractUnquote => {
+                        // TODO: Perform `JSON_EXTRACT` conditionally followed by `JSON_UNQUOTE` for
+                        // `->>`.
+                        unsupported!("'{op}' operator not implemented yet for MySQL")
+                    }
+
+                    JsonKeyExtract | JsonKeyExtractText => {
+                        // Both extraction operations behave the same in PostgreSQL except for the
+                        // return type, which is handled during expression lowering.
+
+                        let json = left.to_json()?;
+
+                        let json_inner: Option<&JsonValue> = match &json {
+                            JsonValue::Array(array) => {
+                                isize::try_from(&right).ok().and_then(|index| {
+                                    crate::utils::index_bidirectional(array, index)
+                                })
+                            }
+                            JsonValue::Object(object) => {
+                                right.as_str().and_then(|key| object.get(key))
+                            }
+                            // Operator type errors are handled during expression lowering.
+                            _ => None,
+                        };
+
+                        Ok(json_inner.map(|inner| inner.to_string().into()).unwrap_or_default())
+                    }
                 }
             }
             Expr::Cast { expr, ty, .. } => {
@@ -635,5 +667,32 @@ mod tests {
                 .unwrap()
             )
         )
+    }
+
+    /// Tests evaluation of `JsonKeyExtract` and `JsonKeyExtractText` binary ops.
+    #[test]
+    fn eval_json_key_extract() {
+        #[track_caller]
+        fn test(json: &str, key: &str, expected: &str) {
+            // Both ops behave the same except for their return type.
+            for op in ["->", "->>"] {
+                for json_type in ["json", "jsonb"] {
+                    let expr = format!("'{json}'::{json_type} {op} {key}");
+                    assert_eq!(
+                        eval_expr(&expr, PostgreSQL),
+                        expected.into(),
+                        "incorrect result for for `{expr}`"
+                    );
+                }
+            }
+        }
+
+        let array = "[\"world\", 123]";
+        test(array, "0", "\"world\"");
+        test(array, "1", "123");
+
+        let object = r#"{ "hello": "world", "abc": 123 }"#;
+        test(object, "'hello'::text", "\"world\"");
+        test(object, "'abc'::char(3)", "123");
     }
 }

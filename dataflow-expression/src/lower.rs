@@ -372,10 +372,16 @@ impl Expr {
                 Ok(Self::Column { index, ty })
             }
             AstExpr::BinaryOp { lhs, op, rhs } => {
-                let op = BinaryOperator::from_sql_op(op, dialect);
-
                 let left = Box::new(Self::lower(*lhs, dialect, context.clone())?);
                 let right = Box::new(Self::lower(*rhs, dialect, context)?);
+                let op = BinaryOperator::from_sql_op(op, dialect);
+
+                if matches!(
+                    op,
+                    BinaryOperator::JsonPathExtract | BinaryOperator::JsonPathExtractUnquote
+                ) {
+                    unsupported!("'{op}' operator not implemented yet for MySQL");
+                }
 
                 let ty = op.output_type(left.ty(), right.ty())?;
 
