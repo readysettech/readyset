@@ -6,7 +6,7 @@ use clap::Parser;
 use nom_sql::Dialect;
 use readyset_client_adapter::{DatabaseType, NoriaAdapter};
 use readyset_mysql::MySqlHandler;
-use readyset_version::COMMIT_ID;
+use readyset_version::*;
 
 mod backend;
 mod constants;
@@ -23,7 +23,7 @@ use readyset_mysql::MySqlQueryHandler;
 static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 #[derive(Parser)]
-#[clap(version = COMMIT_ID)]
+#[clap(version = VERSION_STR_PRETTY)]
 struct Options {
     #[clap(flatten)]
     adapter_options: readyset_client_adapter::Options,

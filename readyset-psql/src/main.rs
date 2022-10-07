@@ -7,7 +7,7 @@ use psql_srv::run_backend;
 use readyset_client::backend as cl;
 use readyset_client_adapter::{ConnectionHandler, DatabaseType, NoriaAdapter};
 use readyset_psql::{Backend, Config, PostgreSqlQueryHandler, PostgreSqlUpstream};
-use readyset_version::COMMIT_ID;
+use readyset_version::*;
 use tokio::net;
 use tracing::{error, instrument};
 
@@ -46,7 +46,7 @@ impl ConnectionHandler for PsqlHandler {
 }
 
 #[derive(Parser)]
-#[clap(version = COMMIT_ID)]
+#[clap(version = VERSION_STR_PRETTY)]
 struct Options {
     #[clap(flatten)]
     adapter_options: readyset_client_adapter::Options,

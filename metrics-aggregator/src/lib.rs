@@ -9,7 +9,7 @@ use anyhow::anyhow;
 use clap::Parser;
 use prometheus_http_query::{Client, Scheme};
 use readyset::consensus::ConsulAuthority;
-use readyset_version::COMMIT_ID;
+use readyset_version::*;
 use stream_cancel::Valve;
 use tokio::sync::Mutex;
 use tracing::info;
@@ -23,7 +23,7 @@ use cache::QueryMetricsCache;
 use metrics_reconciler::MetricsReconciler;
 
 #[derive(Parser)]
-#[clap(version = COMMIT_ID)]
+#[clap(version = VERSION_STR_PRETTY)]
 pub struct Options {
     /// IP:PORT to listen on.
     #[clap(
@@ -69,7 +69,7 @@ pub struct Options {
 
 pub fn run(options: Options) -> anyhow::Result<()> {
     options.tracing.init("metrics-aggregator")?;
-    info!(commit_hash = %COMMIT_ID);
+    info!(version = %VERSION_STR_ONELINE);
 
     let prom_address_res: Vec<SocketAddr> = options.prom_address.to_socket_addrs()?.collect();
     if prom_address_res.is_empty() {

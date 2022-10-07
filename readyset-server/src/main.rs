@@ -13,7 +13,7 @@ use readyset_server::metrics::{
 };
 use readyset_server::{resolve_addr, Builder, NoriaMetricsRecorder, WorkerOptions};
 use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer};
-use readyset_version::COMMIT_ID;
+use readyset_version::*;
 use tracing::{error, info};
 
 #[cfg(not(target_env = "msvc"))]
@@ -47,7 +47,7 @@ pub async fn get_aws_private_ip() -> anyhow::Result<IpAddr> {
 }
 
 #[derive(Parser, Debug)]
-#[clap(version = COMMIT_ID)]
+#[clap(version = VERSION_STR_PRETTY)]
 struct Options {
     /// IP address to listen on
     #[clap(
@@ -140,7 +140,7 @@ fn main() -> anyhow::Result<()> {
     });
     info!(?opts, "Starting ReadySet server");
 
-    info!(commit_hash = %COMMIT_ID);
+    info!(version = %VERSION_STR_ONELINE);
 
     let telemetry_sender = rt.block_on(TelemetryInitializer::init(
         opts.disable_telemetry,

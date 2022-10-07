@@ -1,53 +1,111 @@
 use std::process::Command;
 
 fn main() {
-    // This is best effort. A failure here shouldn't cause us to fail building entirely.
-
-    // Declare re-run rules
     println!("cargo:rerun-if-changed=../../.git/HEAD");
-    println!("cargo:rerun-if-env-changed=BUILDKITE_COMMIT");
 
-    // Attempt to set version info
-    maybe_set_commit_id();
+    set_version_info();
+}
+
+/// Sets the fields to populate ['VERSION']
+/// This is best effort. A failure here shouldn't cause us to fail building entirely.
+fn set_version_info() {
+    set_release_version();
+    set_commit_id();
+    set_platform();
+    set_rustc_version();
+    set_profile();
+    set_opt_level();
+}
+
+/// Set RELEASE_VERSION to one of the following, in order:
+/// - $RELEASE_VERSION
+/// - "unknown-release-version"
+fn set_release_version() {
+    env_or_unknown("RELEASE_VERSION", "release-version");
 }
 
 /// Set COMMIT_ID to one of the following, in order:
 /// - $BUILDKITE_COMMIT
 /// - $(git rev-parse HEAD)
 /// - "unknown-commit-id"
-fn maybe_set_commit_id() {
-    let maybe_buildkite_commit = std::env::var("BUILDKITE_COMMIT").map(|s| s.trim().to_owned());
-    let maybe_git_hash = Command::new("git")
-        .args(&["rev-parse", "HEAD"])
-        .output()
-        .ok()
-        .and_then(|output| {
-            String::from_utf8(output.stdout)
-                .ok()
-                .map(|s| s.trim().to_owned())
-        });
-    match (maybe_buildkite_commit, maybe_git_hash) {
-        // If both are present and they aren't the same, warn, but still take BUILDKITE_COMMIT
-        (Ok(buildkite_commit), Some(git_hash)) if buildkite_commit != git_hash => {
-            // These warnings were getting clipped, so now they're in separate statements
-            println!(
-                "cargo:warning=Found BUILDKITE_COMMIT={buildkite_commit}, but HEAD={git_hash}"
-            );
-            println!("cargo:warning=Using BUILDKITE_COMMIT as the commit ID for run-time version information");
-            println!("cargo:rustc-env=COMMIT_ID={buildkite_commit}");
-        }
-        // If BUILDKITE_COMMIT is present, take it
-        (Ok(buildkite_commit), _) => {
-            println!("cargo:rustc-env=COMMIT_ID={buildkite_commit}");
-        }
-        // If only the git repo is present, take $(git rev-parse HEAD)
-        (Err(_), Some(git_hash)) => {
-            println!("cargo:rustc-env=COMMIT_ID={git_hash}");
-        }
-        // If neither is present, warn and take "unknown-commit-id"
-        (Err(_), None) => {
-            println!("cargo:warning=Failed to get git commit ID from either CI environment or local repository. It will be absent from run-time version information.");
-            println!("cargo:rustc-env=COMMIT_ID=unknown-commit-id");
-        }
-    }
+fn set_commit_id() {
+    let get_commit_id_from_git = || {
+        Command::new("git")
+            .args(&["rev-parse", "HEAD"])
+            .output()
+            .ok()
+            .and_then(|output| {
+                String::from_utf8(output.stdout)
+                    .ok()
+                    .map(|s| s.trim().to_owned())
+            })
+    };
+
+    env_or_unknown_with_fallback("BUILDKITE_COMMIT", "commit-id", get_commit_id_from_git);
+}
+
+/// Set PLATFORM to one of the following, in order:
+/// - $PLATFORM
+/// - $TARGET (set by cargo)
+/// - "unknown-platform"
+fn set_platform() {
+    let maybe_target = || std::env::var("TARGET").map(|s| s.trim().to_owned()).ok();
+    env_or_unknown_with_fallback("PLATFORM", "platform", maybe_target);
+}
+
+/// Set RUSTC_VERSION to one of the following, in order:
+/// - $RUSTC_VERSION
+/// - $HOST (set by cargo)
+/// - "unknown-rustc-version"
+fn set_rustc_version() {
+    let maybe_rustc_version = || {
+        Command::new("rustc")
+            .args(&["--version"])
+            .output()
+            .ok()
+            .and_then(|output| {
+                String::from_utf8(output.stdout)
+                    .ok()
+                    .map(|s| s.trim().to_owned())
+            })
+    };
+    env_or_unknown_with_fallback("RUSTC_VERSION", "rustc-version", maybe_rustc_version);
+}
+
+/// Set PROFILE to one of the following, in order:
+/// - $PROFILE (set by cargo)
+/// - "unknown-profile"
+fn set_profile() {
+    env_or_unknown("PROFILE", "profile");
+}
+
+/// Set OPT_LEVEL to one of the following, in order:
+/// - $OPT_LEVEL (set by cargo)
+/// - "unknown-profile"
+fn set_opt_level() {
+    env_or_unknown("OPT_LEVEL", "profile");
+}
+
+/// Sets cargo::rustc-env=$env if it is set,
+/// Otherwise sets it to unknown-$unknown
+fn env_or_unknown(env: &str, unknown: &str) {
+    env_or_unknown_with_fallback(env, unknown, || None)
+}
+
+/// Sets cargo::rustc-env=$env if it is set,
+/// otherwise runs fallback and sets it to that if it returns Some,
+/// Otherwise sets it to unknown-$unknown
+fn env_or_unknown_with_fallback<F>(env: &str, unknown: &str, fallback: F)
+where
+    F: Fn() -> Option<String>,
+{
+    println!("cargo:rerun-if-env-changed={env}");
+    let rustc_env = std::env::var(env)
+        .map(|s| s.trim().to_owned())
+        .unwrap_or_else(|_|
+            fallback().unwrap_or_else(|| {
+            println!("cargo:warning=Failed to get {unknown} from either CI env or local repository. It will be absent from run-time version information.");
+            format!("unknown-{unknown}")
+        }));
+    println!("cargo:rustc-env={env}={rustc_env}");
 }

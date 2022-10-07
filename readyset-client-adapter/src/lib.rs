@@ -40,7 +40,7 @@ use readyset_dataflow::Readers;
 use readyset_server::metrics::{CompositeMetricsRecorder, MetricsRecorder};
 use readyset_server::worker::readers::{retry_misses, Ack, BlockingRead, ReadRequestHandler};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetryInitializer};
-use readyset_version::COMMIT_ID;
+use readyset_version::*;
 use stream_cancel::Valve;
 use tokio::net;
 use tokio::net::UdpSocket;
@@ -375,7 +375,7 @@ where
                 HashMap::new()
             },
         ));
-        info!(commit_hash = %COMMIT_ID);
+        info!(version = %VERSION_STR_ONELINE);
 
         let telemetry_sender = rt.block_on(async {
             TelemetryInitializer::init(

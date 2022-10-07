@@ -595,6 +595,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "const-str"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fa6c093bf913e73cd79b842dba96371d00e9989e8c54330526df63e38f83131f"
+
+[[package]]
 name = "constant_time_eq"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4417,6 +4423,9 @@ dependencies = [
 [[package]]
 name = "readyset-version"
 version = "0.1.0"
+dependencies = [
+ "const-str",
+]
 
 [[package]]
 name = "redox_syscall"
