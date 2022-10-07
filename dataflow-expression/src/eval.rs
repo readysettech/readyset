@@ -441,23 +441,19 @@ impl Expr {
                     Ok(s.into())
                 }
                 BuiltinFunction::Substring(string, from, len) => {
-                    // TODO: Just use `ty`, once `coerce_to` takes a DfType as its first arg
-                    let return_ty = ty.to_sql_type().ok_or_else(|| internal_err!())?;
-
-                    let string =
-                        non_null!(string.eval(record)?).coerce_to(&return_ty, string.ty())?;
+                    let string = non_null!(string.eval(record)?).coerce_to(ty, string.ty())?;
                     let s = <&str>::try_from(&string)?;
 
                     let from = match from {
                         Some(from) => non_null!(from.eval(record)?)
-                            .coerce_to(&SqlType::BigInt(None), from.ty())?
+                            .coerce_to(&DfType::BigInt, from.ty())?
                             .try_into()?,
                         None => 1i64,
                     };
 
                     let len = match len {
                         Some(len) => non_null!(len.eval(record)?)
-                            .coerce_to(&SqlType::BigInt(None), len.ty())?
+                            .coerce_to(&DfType::BigInt, len.ty())?
                             .try_into()?,
                         None => s.len() as i64 + 1,
                     };

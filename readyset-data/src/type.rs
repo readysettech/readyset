@@ -473,15 +473,6 @@ impl DfType {
         matches!(*self, Self::Float(_) | Self::Double)
     }
 
-    /// Returns whether `self` is any text-containing type.
-    #[inline]
-    pub fn is_any_text(&self) -> bool {
-        matches!(
-            self,
-            Self::Text { .. } | Self::Char { .. } | Self::VarChar { .. }
-        )
-    }
-
     /// Returns the deepest nested type in [`DfType::Array`], otherwise returns `self`.
     #[inline]
     pub fn innermost_array_type(&self) -> &Self {
