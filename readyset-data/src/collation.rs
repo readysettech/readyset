@@ -36,9 +36,10 @@ pub enum Collation {
     #[default]
     Utf8,
 
-    /// The CITEXT collation.
+    /// The case-insensitive text collation.
     ///
-    /// This collation corresponds to the behavior of the [PostgreSQL CITEXT type][] with the
+    /// This collation corresponds to the behavior of the
+    /// [PostgreSQL `CITEXT` type](https://www.postgresql.org/docs/current/citext.html) with the
     /// locale set to `en_US.utf8`.
     Citext,
 }
