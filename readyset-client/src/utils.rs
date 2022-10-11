@@ -416,13 +416,11 @@ pub(crate) fn extract_update_params_and_fields<I>(
     q: &mut UpdateStatement,
     params: &mut Option<I>,
     schema: &CreateTableStatement,
+    dialect: Dialect,
 ) -> ReadySetResult<Vec<(usize, Modification)>>
 where
     I: Iterator<Item = DfValue>,
 {
-    // TODO(ENG-1418): Propagate dialect info.
-    let dialect = Dialect::DEFAULT_MYSQL;
-
     let mut updates = Vec::new();
     for (i, field) in schema.fields.iter().enumerate() {
         if let Some(sets) = q
@@ -505,11 +503,12 @@ pub(crate) fn extract_update<I>(
     mut q: UpdateStatement,
     mut params: Option<I>,
     schema: &CreateTableStatement,
+    dialect: Dialect,
 ) -> ReadySetResult<ExtractedUpdate>
 where
     I: Iterator<Item = DfValue>,
 {
-    let updates = extract_update_params_and_fields(&mut q, &mut params, schema);
+    let updates = extract_update_params_and_fields(&mut q, &mut params, schema, dialect);
     let where_clause = q
         .where_clause
         .ok_or_else(|| unsupported_err!("UPDATE without WHERE is not supported"))?;
@@ -536,10 +535,8 @@ pub(crate) fn coerce_params(
     params: Option<&[DfValue]>,
     q: &SqlQuery,
     schema: &CreateTableStatement,
+    dialect: Dialect,
 ) -> ReadySetResult<Option<Vec<DfValue>>> {
-    // TODO(ENG-1418): Propagate dialect info.
-    let dialect = Dialect::DEFAULT_MYSQL;
-
     if let Some(prms) = params {
         let mut coerced_params = vec![];
         for (i, col) in get_parameter_columns(q).iter().enumerate() {

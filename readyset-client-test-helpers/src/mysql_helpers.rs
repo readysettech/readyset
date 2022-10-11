@@ -68,6 +68,8 @@ impl Adapter for MySQLAdapter {
 
     const DIALECT: nom_sql::Dialect = nom_sql::Dialect::MySQL;
 
+    const EXPR_DIALECT: readyset_data::Dialect = readyset_data::Dialect::DEFAULT_MYSQL;
+
     fn connection_opts_with_port(port: u16) -> Self::ConnectionOpts {
         mysql_async::OptsBuilder::default().tcp_port(port).into()
     }

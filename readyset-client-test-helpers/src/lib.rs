@@ -34,6 +34,8 @@ pub trait Adapter: Send {
 
     const DIALECT: nom_sql::Dialect;
 
+    const EXPR_DIALECT: readyset_data::Dialect;
+
     fn connection_opts_with_port(port: u16) -> Self::ConnectionOpts;
     fn url() -> String;
 
@@ -195,6 +197,7 @@ impl TestBuilder {
                     auto_increments,
                     query_cache,
                     self.read_behavior,
+                    A::EXPR_DIALECT,
                     schema_search_path,
                 )
                 .await;

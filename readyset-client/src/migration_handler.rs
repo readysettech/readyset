@@ -30,6 +30,9 @@ pub struct MigrationHandler<DB> {
     /// The noria connector used to query if we are configured to run in dry_run mode.
     controller: Option<ReadySetHandle>,
 
+    /// SQL Dialect to pass to ReadySet as part of all migration requests
+    dialect: Dialect,
+
     /// Connector used to issue prepares to the upstream db.
     upstream: Option<DB>,
 
@@ -69,6 +72,7 @@ where
         upstream: Option<DB>,
         controller: Option<ReadySetHandle>,
         query_status_cache: &'static QueryStatusCache,
+        dialect: Dialect,
         validate_queries: bool,
         min_poll_interval: std::time::Duration,
         max_retry: std::time::Duration,
@@ -78,6 +82,7 @@ where
             noria,
             upstream,
             controller,
+            dialect,
             query_status_cache,
             validate_queries,
             min_poll_interval,
@@ -269,7 +274,7 @@ where
             utils::generate_query_name(&view_request.statement, &view_request.schema_search_path);
         let changelist = ChangeList::from_change(
             Change::create_cache(qname, view_request.statement.clone(), false),
-            Dialect::DEFAULT_MYSQL, /* TODO(ENG-1418) */
+            self.dialect,
         )
         .with_schema_search_path(view_request.schema_search_path.clone());
         match controller.dry_run(changelist).await {

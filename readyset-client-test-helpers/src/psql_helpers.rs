@@ -37,6 +37,8 @@ impl Adapter for PostgreSQLAdapter {
 
     const DIALECT: nom_sql::Dialect = nom_sql::Dialect::PostgreSQL;
 
+    const EXPR_DIALECT: readyset_data::Dialect = readyset_data::Dialect::DEFAULT_POSTGRESQL;
+
     fn connection_opts_with_port(port: u16) -> Self::ConnectionOpts {
         let mut config = tokio_postgres::Config::new();
         config.host("127.0.0.1").port(port).dbname("noria");

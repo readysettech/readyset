@@ -3,7 +3,6 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use clap::Parser;
-use nom_sql::Dialect;
 use readyset_client_adapter::{DatabaseType, NoriaAdapter};
 use readyset_mysql::MySqlHandler;
 use readyset_version::*;
@@ -37,7 +36,8 @@ fn main() -> anyhow::Result<()> {
         default_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 3306),
         connection_handler: MySqlHandler,
         database_type: DatabaseType::MySql,
-        dialect: Dialect::MySQL,
+        parse_dialect: nom_sql::Dialect::MySQL,
+        expr_dialect: readyset_data::Dialect::DEFAULT_MYSQL,
     };
 
     adapter.run(options.adapter_options)

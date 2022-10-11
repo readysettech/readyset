@@ -19,6 +19,7 @@ nom-sql = { path = "../nom-sql" }
 readyset = { path = "../readyset/" }
 readyset-client = { path = "../readyset-client" }
 readyset-server = { path = "../readyset-server/" }
+readyset-data = { path = "../readyset-data" }
 readyset-tracing = { path = "../readyset-tracing" }
 readyset-mysql = { path = "../readyset-mysql", optional = true }
 readyset-psql = { path = "../readyset-psql", optional = true }

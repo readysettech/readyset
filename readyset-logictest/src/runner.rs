@@ -524,6 +524,10 @@ impl TestScript {
                 auto_increments,
                 query_cache,
                 ReadBehavior::Blocking,
+                match database_type {
+                    DatabaseType::MySQL => readyset_data::Dialect::DEFAULT_MYSQL,
+                    DatabaseType::PostgreSQL => readyset_data::Dialect::DEFAULT_POSTGRESQL,
+                },
                 Default::default(),
             )
             .await;

@@ -22,7 +22,7 @@ use launchpad::futures::abort_on_panic;
 use launchpad::redacted::RedactedString;
 use maplit::hashmap;
 use metrics_exporter_prometheus::PrometheusBuilder;
-use nom_sql::{Dialect, Relation};
+use nom_sql::Relation;
 use readyset::consensus::{AuthorityControl, AuthorityType, ConsulAuthority};
 #[cfg(feature = "failure_injection")]
 use readyset::failpoints;
@@ -136,7 +136,9 @@ where
     pub connection_handler: H,
     pub database_type: DatabaseType,
     /// SQL dialect to use when parsing queries
-    pub dialect: Dialect,
+    pub parse_dialect: nom_sql::Dialect,
+    /// Expression evaluation dialect to pass to ReadySet for all migration requests
+    pub expr_dialect: readyset_data::Dialect,
 }
 
 #[derive(Parser, Debug)]
@@ -623,6 +625,7 @@ where
             let validate_queries = options.validate_queries;
             let dry_run = options.explicit_migrations;
             let upstream_config = options.server_worker_options.replicator_config.clone();
+            let expr_dialect = self.expr_dialect;
 
             rs_connect.in_scope(|| info!("Spawning migration handler task"));
             let fut = async move {
@@ -655,6 +658,7 @@ where
                         auto_increments.clone(),
                         query_cache.clone(),
                         noria_read_behavior,
+                        expr_dialect,
                         schema_search_path,
                     )
                     .instrument(connection.in_scope(|| {
@@ -668,6 +672,7 @@ where
                     upstream,
                     controller_handle,
                     query_status_cache,
+                    expr_dialect,
                     validate_queries,
                     std::time::Duration::from_millis(loop_interval),
                     std::time::Duration::from_secs(max_retry * 60),
@@ -767,6 +772,7 @@ where
 
         health_reporter.set_state(AdapterState::Healthy);
 
+        let expr_dialect = self.expr_dialect;
         while let Some(Ok(s)) = rt.block_on(listener.next()) {
             let connection = span!(Level::DEBUG, "connection", addr = ?s.peer_addr().unwrap());
             connection.in_scope(|| info!("Accepted new connection"));
@@ -779,7 +785,7 @@ where
                 .slowlog(options.log_slow)
                 .users(users.clone())
                 .require_authentication(!options.allow_unauthenticated_connections)
-                .dialect(self.dialect)
+                .dialect(self.parse_dialect)
                 .query_log(qlog_sender.clone(), options.query_log_ad_hoc)
                 .validate_queries(options.validate_queries, options.fail_invalidated_queries)
                 .unsupported_set_mode(if options.allow_unsupported_set {
@@ -853,6 +859,7 @@ where
                                     query_cache.clone(),
                                     noria_read_behavior,
                                     r,
+                                    expr_dialect,
                                     ssp,
                                 )
                                 .instrument(debug_span!("Building noria connector"))

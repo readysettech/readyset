@@ -375,6 +375,9 @@ pub struct NoriaConnector {
     /// on the same server.
     read_request_handler: request_handler::LocalReadHandler,
 
+    /// SQL Dialect to pass to ReadySet as part of all migration requests
+    dialect: Dialect,
+
     /// Currently configured search path for schemas.
     ///
     /// Note that the terminology used here is maximally general - while only PostgreSQL truly
@@ -462,6 +465,7 @@ impl NoriaConnector {
         auto_increments: Arc<RwLock<HashMap<Relation, atomic::AtomicUsize>>>,
         query_cache: Arc<RwLock<HashMap<ViewCreateRequest, Relation>>>,
         read_behavior: ReadBehavior,
+        dialect: Dialect,
         schema_search_path: Vec<SqlIdentifier>,
     ) -> Self {
         NoriaConnector::new_with_local_reads(
@@ -470,6 +474,7 @@ impl NoriaConnector {
             query_cache,
             read_behavior,
             None,
+            dialect,
             schema_search_path,
         )
         .await
@@ -481,6 +486,7 @@ impl NoriaConnector {
         query_cache: Arc<RwLock<HashMap<ViewCreateRequest, Relation>>>,
         read_behavior: ReadBehavior,
         read_request_handler: Option<ReadRequestHandler>,
+        dialect: Dialect,
         schema_search_path: Vec<SqlIdentifier>,
     ) -> Self {
         let backend = NoriaBackendInner::new(ch).await;
@@ -498,6 +504,7 @@ impl NoriaConnector {
             failed_views: HashSet::new(),
             read_behavior,
             read_request_handler: request_handler::LocalReadHandler::new(read_request_handler),
+            dialect,
             schema_search_path,
         }
     }
@@ -651,13 +658,7 @@ impl NoriaConnector {
             .ok_or_else(|| internal_err!("Could not find schema for table {}", q.table.name))?
             .fields
             .iter()
-            .map(|cs| {
-                ColumnSchema::from_base(
-                    cs.clone(),
-                    q.table.clone(),
-                    Dialect::DEFAULT_MYSQL, /* TODO(ENG-1418) */
-                )
-            })
+            .map(|cs| ColumnSchema::from_base(cs.clone(), q.table.clone(), self.dialect))
             .collect::<Vec<_>>();
 
         if q.fields.is_none() {
@@ -721,10 +722,14 @@ impl NoriaConnector {
                     .ok_or_else(|| internal_err!("no schema for table '{}'", table))?;
                 // unwrap: safe because we always pass in Some(params) so don't hit None path of
                 // coerce_params
-                let coerced_params =
-                    utils::coerce_params(Some(params), &SqlQuery::Insert(q.clone()), schema)
-                        .unwrap()
-                        .unwrap();
+                let coerced_params = utils::coerce_params(
+                    Some(params),
+                    &SqlQuery::Insert(q.clone()),
+                    schema,
+                    self.dialect,
+                )
+                .unwrap()
+                .unwrap();
                 self.do_insert(q, vec![coerced_params]).await
             }
             _ => {
@@ -824,13 +829,7 @@ impl NoriaConnector {
                     // and name - just check name here
                     .find(|f| f.column.name == c.name)
                     .cloned()
-                    .map(|cs| {
-                        ColumnSchema::from_base(
-                            cs,
-                            q.table.clone(),
-                            Dialect::DEFAULT_MYSQL, /* TODO(ENG-1418) */
-                        )
-                    })
+                    .map(|cs| ColumnSchema::from_base(cs, q.table.clone(), self.dialect))
                     .ok_or_else(|| internal_err!("Unknown column {}", c))
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -891,13 +890,7 @@ impl NoriaConnector {
                     // and name - just check name here
                     .find(|f| f.column.name == c.name)
                     .cloned()
-                    .map(|cs| {
-                        ColumnSchema::from_base(
-                            cs,
-                            q.table.clone(),
-                            Dialect::DEFAULT_MYSQL, /* TODO(ENG-1418) */
-                        )
-                    })
+                    .map(|cs| ColumnSchema::from_base(cs, q.table.clone(), self.dialect))
                     .ok_or_else(|| internal_err!("Unknown column {}", c))
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -942,7 +935,7 @@ impl NoriaConnector {
         noria_await!(
             self.inner.get_mut().await?,
             self.inner.get_mut().await?.noria.extend_recipe(
-                ChangeList::from_changes(changes, Dialect::DEFAULT_MYSQL /* TODO(ENG-1418) */)
+                ChangeList::from_changes(changes, self.dialect)
                     .with_schema_search_path(self.schema_search_path.clone())
             )
         )?;
@@ -992,7 +985,7 @@ impl NoriaConnector {
             override_schema_search_path.unwrap_or_else(|| self.schema_search_path.clone());
         let changelist = ChangeList::from_change(
             Change::create_cache(name.clone(), statement.clone(), always),
-            Dialect::DEFAULT_MYSQL, /* TODO(ENG-1418) */
+            self.dialect,
         )
         .with_schema_search_path(schema_search_path.clone());
 
@@ -1034,7 +1027,7 @@ impl NoriaConnector {
 
                     let changelist = ChangeList::from_change(
                         Change::create_cache(qname.clone(), q.clone(), false),
-                        Dialect::DEFAULT_MYSQL, /* TODO(ENG-1418) */
+                        self.dialect,
                     )
                     .with_schema_search_path(self.schema_search_path.clone());
 
@@ -1090,9 +1083,6 @@ impl NoriaConnector {
         q: &InsertStatement,
         data: Vec<Vec<DfValue>>,
     ) -> ReadySetResult<QueryResult<'_>> {
-        // TODO(ENG-1418): Propagate dialect info.
-        let dialect = Dialect::DEFAULT_MYSQL;
-
         let table = &q.table;
 
         // create a mutator if we don't have one for this table already
@@ -1215,7 +1205,7 @@ impl NoriaConnector {
                             )
                         })?;
 
-                    let target_type = DfType::from_sql_type(&field.sql_type, dialect);
+                    let target_type = DfType::from_sql_type(&field.sql_type, self.dialect);
 
                     let value = row
                         .get(ci)
@@ -1246,6 +1236,7 @@ impl NoriaConnector {
                     &mut uq,
                     &mut None::<std::iter::Empty<DfValue>>,
                     schema,
+                    self.dialect,
                 )?
             };
 
@@ -1290,8 +1281,13 @@ impl NoriaConnector {
                 unsupported!();
             };
             let coerced_params =
-                utils::coerce_params(params, &SqlQuery::Update(q.clone()), schema)?;
-            utils::extract_update(q, coerced_params.map(|p| p.into_iter()), schema)?
+                utils::coerce_params(params, &SqlQuery::Update(q.clone()), schema, self.dialect)?;
+            utils::extract_update(
+                q,
+                coerced_params.map(|p| p.into_iter()),
+                schema,
+                self.dialect,
+            )?
         };
 
         trace!("update::update");
@@ -1328,7 +1324,7 @@ impl NoriaConnector {
                 unsupported!();
             };
             let coerced_params =
-                utils::coerce_params(params, &SqlQuery::Delete(q.clone()), schema)?;
+                utils::coerce_params(params, &SqlQuery::Delete(q.clone()), schema, self.dialect)?;
             utils::extract_delete(q, coerced_params.map(|p| p.into_iter()), schema)?
         };
 
@@ -1500,11 +1496,8 @@ impl NoriaConnector {
 
         info!(view = %Sensitive(&q.definition), name = %q.name, "view::create");
 
-        let changelist = ChangeList::from_change(
-            Change::CreateView(q.clone()),
-            Dialect::DEFAULT_MYSQL, /* TODO(ENG-1418) */
-        )
-        .with_schema_search_path(self.schema_search_path.clone());
+        let changelist = ChangeList::from_change(Change::CreateView(q.clone()), self.dialect)
+            .with_schema_search_path(self.schema_search_path.clone());
 
         noria_await!(
             self.inner.get_mut().await?,
