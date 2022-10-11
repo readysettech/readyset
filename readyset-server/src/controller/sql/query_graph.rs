@@ -797,6 +797,10 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
         unsupported!("SELECT statements with no tables are unsupported")
     }
 
+    if st.having.is_some() {
+        unsupported!("SELECT statements with a HAVING clause are unsupported")
+    }
+
     // a handy closure for making new relation nodes
     let new_node = |rel: Relation,
                     preds: Vec<Expr>,
