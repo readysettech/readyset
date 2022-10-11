@@ -17,6 +17,7 @@ use readyset::metrics::recorded;
 use readyset::recipe::changelist::ChangeList;
 use readyset::replication::{ReplicationOffset, ReplicationOffsets};
 use readyset::ReadySetResult;
+use readyset_data::Dialect;
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, info_span, warn};
 use tracing_futures::Instrument;
@@ -183,15 +184,16 @@ impl MySqlReplicator {
                 create_table.clone(),
                 nom_sql::Dialect::MySQL,
             );
-            if let Err(err) = future::ready(ChangeList::try_from(create_table))
-                .and_then(|changelist| async {
-                    noria
-                        .extend_recipe_no_leader_ready(
-                            changelist.with_schema_search_path(vec![db.clone()]),
-                        )
-                        .await
-                })
-                .await
+            if let Err(err) =
+                future::ready(ChangeList::from_str(create_table, Dialect::DEFAULT_MYSQL))
+                    .and_then(|changelist| async {
+                        noria
+                            .extend_recipe_no_leader_ready(
+                                changelist.with_schema_search_path(vec![db.clone()]),
+                            )
+                            .await
+                    })
+                    .await
             {
                 error!(%err, "Error extending CREATE TABLE, table will not be used");
                 // Prevent the table from being snapshotted as well
@@ -213,15 +215,16 @@ impl MySqlReplicator {
                     create_view.clone(),
                     nom_sql::Dialect::MySQL,
                 );
-                if let Err(err) = future::ready(ChangeList::try_from(create_view))
-                    .and_then(|changelist| async {
-                        noria
-                            .extend_recipe_no_leader_ready(
-                                changelist.with_schema_search_path(vec![db.clone()]),
-                            )
-                            .await
-                    })
-                    .await
+                if let Err(err) =
+                    future::ready(ChangeList::from_str(create_view, Dialect::DEFAULT_MYSQL))
+                        .and_then(|changelist| async {
+                            noria
+                                .extend_recipe_no_leader_ready(
+                                    changelist.with_schema_search_path(vec![db.clone()]),
+                                )
+                                .await
+                        })
+                        .await
                 {
                     error!(%view, %err, "Error extending CREATE VIEW, view will not be used");
                 }

@@ -20,6 +20,7 @@ use readyset::metrics::recorded::{self, SnapshotStatusTag};
 use readyset::recipe::changelist::{Change, ChangeList};
 use readyset::replication::{ReplicationOffset, ReplicationOffsets};
 use readyset::{ReadySetError, ReadySetHandle, ReadySetResult, Table, TableOperation};
+use readyset_data::Dialect;
 use readyset_errors::{internal_err, invalid_err};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 use tokio::sync::Notify;
@@ -79,6 +80,8 @@ pub struct NoriaAdapter {
     noria: ReadySetHandle,
     /// The binlog reader
     connector: Box<dyn Connector + Send + Sync>,
+    /// The SQL dialect to pass to ReadySet when applying DDL changes
+    dialect: Dialect,
     /// A map of cached table mutators
     mutator_map: HashMap<Relation, Option<Table>>,
     /// A HashSet of tables we've already warned about not existing
@@ -305,6 +308,7 @@ impl NoriaAdapter {
             warned_missing_tables: HashSet::new(),
             table_filter,
             supports_resnapshot: true,
+            dialect: Dialect::DEFAULT_MYSQL,
         };
 
         let mut current_pos: ReplicationOffset = pos.try_into()?;
@@ -490,6 +494,7 @@ impl NoriaAdapter {
             warned_missing_tables: HashSet::new(),
             table_filter,
             supports_resnapshot: true,
+            dialect: Dialect::DEFAULT_POSTGRESQL,
         };
 
         if min_pos != max_pos {
@@ -509,7 +514,7 @@ impl NoriaAdapter {
         ddl: String,
         pos: ReplicationOffset,
     ) -> ReadySetResult<()> {
-        let mut changelist: ChangeList = match ddl.try_into() {
+        let mut changelist: ChangeList = match ChangeList::from_str(ddl, self.dialect) {
             Ok(changelist) => changelist,
             Err(e) => {
                 error!(error = %e, "Error extending recipe, DDL statement will not be used");

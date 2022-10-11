@@ -6,7 +6,7 @@ use std::borrow::Cow;
 
 use serde::{Deserialize, Serialize};
 
-use crate::recipe::changelist::ChangeList;
+pub use crate::recipe::changelist::ChangeList;
 use crate::ReplicationOffset;
 
 /// Represents a request to extend a recipe
@@ -22,10 +22,10 @@ pub struct ExtendRecipeSpec<'a> {
     pub require_leader_ready: bool,
 }
 
-impl<'a> Default for ExtendRecipeSpec<'a> {
-    fn default() -> Self {
-        ExtendRecipeSpec {
-            changes: Default::default(),
+impl<'a> From<ChangeList> for ExtendRecipeSpec<'a> {
+    fn from(changes: ChangeList) -> Self {
+        Self {
+            changes,
             replication_offset: None,
             require_leader_ready: true,
         }

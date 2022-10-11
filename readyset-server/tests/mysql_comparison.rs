@@ -10,7 +10,8 @@ use std::{io, panic, thread, time};
 
 use mysql::prelude::Queryable;
 use mysql::{OptsBuilder, Params};
-use readyset_data::DfValue;
+use readyset_data::{DfValue, Dialect};
+use readyset_server::recipe::changelist::ChangeList;
 use readyset_server::Builder;
 use serde::Deserialize;
 
@@ -271,7 +272,7 @@ async fn check_query(
         .collect();
 
     let mut g = Builder::default().start_local().await.unwrap();
-    g.extend_recipe(queries.join("\n").try_into().unwrap())
+    g.extend_recipe(ChangeList::from_str(queries.join("\n"), Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
 

@@ -14,7 +14,8 @@ use dataflow::utils::make_columns;
 use readyset::consensus::StandaloneAuthority;
 use readyset::get_metric;
 use readyset::metrics::{recorded, DumpedMetricValue, MetricsDump};
-use readyset_data::DfValue;
+use readyset::recipe::changelist::ChangeList;
+use readyset_data::{DfValue, Dialect};
 use rusty_fork::rusty_fork_test;
 
 use crate::integration_utils::*;
@@ -230,18 +231,33 @@ async fn it_works_basic_standalone_impl() {
 
     let mut g = start_standalone().await.unwrap();
 
-    g.extend_recipe("CREATE TABLE a (a int PRIMARY KEY, b int)".parse().unwrap())
-        .await
-        .unwrap();
-
-    g.extend_recipe("CREATE TABLE b (a int PRIMARY KEY, b int)".parse().unwrap())
-        .await
-        .unwrap();
+    g.extend_recipe(
+        ChangeList::from_str(
+            "CREATE TABLE a (a int PRIMARY KEY, b int)",
+            Dialect::DEFAULT_MYSQL,
+        )
+        .unwrap(),
+    )
+    .await
+    .unwrap();
 
     g.extend_recipe(
-        "CREATE VIEW c AS SELECT a,b FROM a WHERE a = ? UNION SELECT a,b FROM b WHERE a = ? ORDER BY b"
-            .parse()
-            .unwrap(),
+        ChangeList::from_str(
+            "CREATE TABLE b (a int PRIMARY KEY, b int)",
+            Dialect::DEFAULT_MYSQL,
+        )
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+
+    g.extend_recipe(
+        ChangeList::from_str(
+            "CREATE VIEW c AS SELECT a,b FROM a WHERE a = ? UNION \
+             SELECT a,b FROM b WHERE a = ? ORDER BY b",
+            Dialect::DEFAULT_MYSQL,
+        )
+        .unwrap(),
     )
     .await
     .unwrap();

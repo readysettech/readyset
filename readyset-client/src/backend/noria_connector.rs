@@ -15,7 +15,7 @@ use nom_sql::{
 };
 use readyset::consistency::Timestamp;
 use readyset::internal::LocalNodeIndex;
-use readyset::recipe::changelist::{Change, ChangeList};
+use readyset::recipe::changelist::{Change, ChangeList, IntoChanges};
 use readyset::results::{ResultIterator, Results};
 use readyset::{
     ColumnSchema, KeyColumnIdx, KeyComparison, ReadQuery, ReaderAddress, ReadySetError,
@@ -926,17 +926,17 @@ impl NoriaConnector {
     /// Calls the `extend_recipe` endpoint on ReadySet with the given query.
     pub(crate) async fn handle_table_operation<C>(
         &mut self,
-        changelist: C,
+        changes: C,
     ) -> ReadySetResult<QueryResult<'_>>
     where
-        ChangeList: From<C>,
+        C: IntoChanges,
     {
         // TODO(malte): we should perhaps check our usual caches here, rather than just blindly
         // doing a migration on ReadySet ever time. On the other hand, CREATE TABLE is rare...
         noria_await!(
             self.inner.get_mut().await?,
             self.inner.get_mut().await?.noria.extend_recipe(
-                ChangeList::from(changelist)
+                ChangeList::from_changes(changes, Dialect::DEFAULT_MYSQL /* TODO(ENG-1418) */)
                     .with_schema_search_path(self.schema_search_path.clone())
             )
         )?;
@@ -984,11 +984,10 @@ impl NoriaConnector {
         });
         let schema_search_path =
             override_schema_search_path.unwrap_or_else(|| self.schema_search_path.clone());
-        let changelist = ChangeList::from_change(Change::create_cache(
-            name.clone(),
-            statement.clone(),
-            always,
-        ))
+        let changelist = ChangeList::from_change(
+            Change::create_cache(name.clone(), statement.clone(), always),
+            Dialect::DEFAULT_MYSQL, /* TODO(ENG-1418) */
+        )
         .with_schema_search_path(schema_search_path.clone());
 
         noria_await!(
@@ -1027,11 +1026,10 @@ impl NoriaConnector {
                         info!(query = %Sensitive(q), name = %qname, "adding ad-hoc query");
                     }
 
-                    let changelist = ChangeList::from_change(Change::create_cache(
-                        qname.clone(),
-                        q.clone(),
-                        false,
-                    ))
+                    let changelist = ChangeList::from_change(
+                        Change::create_cache(qname.clone(), q.clone(), false),
+                        Dialect::DEFAULT_MYSQL, /* TODO(ENG-1418) */
+                    )
                     .with_schema_search_path(self.schema_search_path.clone());
 
                     if let Err(e) = noria_await!(
@@ -1500,8 +1498,11 @@ impl NoriaConnector {
 
         info!(view = %Sensitive(&q.definition), name = %q.name, "view::create");
 
-        let changelist = ChangeList::from_change(Change::CreateView(q.clone()))
-            .with_schema_search_path(self.schema_search_path.clone());
+        let changelist = ChangeList::from_change(
+            Change::CreateView(q.clone()),
+            Dialect::DEFAULT_MYSQL, /* TODO(ENG-1418) */
+        )
+        .with_schema_search_path(self.schema_search_path.clone());
 
         noria_await!(
             self.inner.get_mut().await?,

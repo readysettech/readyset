@@ -1,7 +1,8 @@
 use ::readyset::get_metric;
 use ::readyset::metrics::{recorded, DumpedMetricValue};
+use ::readyset::recipe::changelist::ChangeList;
 use launchpad::eventually;
-use readyset_data::DfValue;
+use readyset_data::{DfValue, Dialect};
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
 use serial_test::serial;
@@ -24,13 +25,15 @@ async fn query_failure_recovery_with_volume_id() {
     deployment
         .leader_handle()
         .extend_recipe(
-            "
+            ChangeList::from_str(
+                "
       CREATE TABLE t1 (id_1 int, id_2 int, val_1 int);
       CREATE CACHE q FROM
         SELECT *
-        FROM t1;"
-                .parse()
-                .unwrap(),
+        FROM t1;",
+                Dialect::DEFAULT_MYSQL,
+            )
+            .unwrap(),
         )
         .await
         .unwrap();
@@ -99,11 +102,13 @@ async fn balance_base_table_domains() {
     deployment
         .leader_handle()
         .extend_recipe(
-            "
+            ChangeList::from_str(
+                "
         CREATE TABLE t1 (id INT PRIMARY KEY);
-        CREATE TABLE t2 (id INT PRIMARY KEY);"
-                .parse()
-                .unwrap(),
+        CREATE TABLE t2 (id INT PRIMARY KEY);",
+                Dialect::DEFAULT_MYSQL,
+            )
+            .unwrap(),
         )
         .await
         .unwrap();
@@ -236,10 +241,12 @@ async fn replicated_readers() {
     let lh = deployment.leader_handle();
 
     lh.extend_recipe(
-        "CREATE TABLE t (id int, val int);
-         CREATE CACHE q FROM SELECT id, sum(val) FROM t WHERE id = ? GROUP BY id;"
-            .parse()
-            .unwrap(),
+        ChangeList::from_str(
+            "CREATE TABLE t (id int, val int);
+         CREATE CACHE q FROM SELECT id, sum(val) FROM t WHERE id = ? GROUP BY id;",
+            Dialect::DEFAULT_MYSQL,
+        )
+        .unwrap(),
     )
     .await
     .unwrap();
@@ -319,14 +326,16 @@ async fn replicated_readers_with_unions() {
     let lh = deployment.leader_handle();
 
     lh.extend_recipe(
-        "CREATE TABLE t (id int, val1 int, val2 int);
+        ChangeList::from_str(
+            "CREATE TABLE t (id int, val1 int, val2 int);
          CREATE CACHE q FROM
          SELECT count(*) FROM t
          WHERE id = ?
            AND (val1 = 1 OR val1 = 2)
-           AND (val2 = 1 OR val2 = 2);"
-            .parse()
-            .unwrap(),
+           AND (val2 = 1 OR val2 = 2);",
+            Dialect::DEFAULT_MYSQL,
+        )
+        .unwrap(),
     )
     .await
     .unwrap();
@@ -379,13 +388,15 @@ async fn no_readers_worker_doesnt_get_readers() {
     let lh = deployment.leader_handle();
 
     lh.extend_recipe(
-        "CREATE TABLE t (id int, val1 int, val2 int);
+        ChangeList::from_str(
+            "CREATE TABLE t (id int, val1 int, val2 int);
          CREATE CACHE q0 FROM SELECT id FROM t WHERE id = ?;
          CREATE CACHE q1 FROM SELECT val1 FROM t WHERE id = ?;
          CREATE CACHE q2 FROM SELECT val2 FROM t WHERE id = ?;
-         CREATE CACHE q3 FROM SELECT id, val1, val2 FROM t WHERE id = ?;"
-            .parse()
-            .unwrap(),
+         CREATE CACHE q3 FROM SELECT id, val1, val2 FROM t WHERE id = ?;",
+            Dialect::DEFAULT_MYSQL,
+        )
+        .unwrap(),
     )
     .await
     .unwrap();

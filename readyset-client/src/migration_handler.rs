@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
+use dataflow_expression::Dialect;
 use launchpad::redacted::Sensitive;
 use metrics::{counter, register_counter};
 use readyset::query::{MigrationState, Query};
@@ -266,11 +267,10 @@ where
         }
         let qname =
             utils::generate_query_name(&view_request.statement, &view_request.schema_search_path);
-        let changelist = ChangeList::from_change(Change::create_cache(
-            qname,
-            view_request.statement.clone(),
-            false,
-        ))
+        let changelist = ChangeList::from_change(
+            Change::create_cache(qname, view_request.statement.clone(), false),
+            Dialect::DEFAULT_MYSQL, /* TODO(ENG-1418) */
+        )
         .with_schema_search_path(view_request.schema_search_path.clone());
         match controller.dry_run(changelist).await {
             Ok(_) => {

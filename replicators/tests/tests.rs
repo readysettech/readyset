@@ -12,7 +12,7 @@ use nom_sql::Relation;
 use readyset::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use readyset::recipe::changelist::ChangeList;
 use readyset::{ReadySetError, ReadySetHandle, ReadySetResult};
-use readyset_data::{Collation, DfValue, TinyText};
+use readyset_data::{Collation, DfValue, Dialect, TinyText};
 use readyset_server::Builder;
 use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer, TelemetrySender};
 use replicators::NoriaAdapter;
@@ -1008,7 +1008,11 @@ async fn replication_filter_inner(url: &str) -> ReadySetResult<()> {
 
     ctx.noria
         .extend_recipe(
-            ChangeList::from_str("CREATE VIEW public.t4_view AS SELECT * FROM noria2.t4;").unwrap(),
+            ChangeList::from_str(
+                "CREATE VIEW public.t4_view AS SELECT * FROM noria2.t4;",
+                Dialect::DEFAULT_MYSQL,
+            )
+            .unwrap(),
         )
         .await
         .unwrap();
@@ -1088,7 +1092,11 @@ async fn replication_all_schemas_inner(url: &str) -> ReadySetResult<()> {
 
     ctx.noria
         .extend_recipe(
-            ChangeList::from_str("CREATE VIEW public.t4_view AS SELECT * FROM noria2.t4;").unwrap(),
+            ChangeList::from_str(
+                "CREATE VIEW public.t4_view AS SELECT * FROM noria2.t4;",
+                Dialect::DEFAULT_MYSQL,
+            )
+            .unwrap(),
         )
         .await
         .unwrap();

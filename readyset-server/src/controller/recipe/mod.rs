@@ -178,6 +178,7 @@ impl Recipe {
         let ChangeList {
             changes,
             schema_search_path,
+            ..
         } = changelist;
 
         for change in changes {

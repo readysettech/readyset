@@ -1069,13 +1069,13 @@ async fn handle_controller_request(
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
 
     use launchpad::eventually;
     use nom_sql::{parse_select_statement, Dialect};
     use readyset::recipe::changelist::ChangeList;
     use readyset::replication::ReplicationOffset;
     use readyset::{KeyCount, ViewCreateRequest};
+    use readyset_data::Dialect as DataDialect;
 
     use crate::integration_utils::start_simple;
 
@@ -1084,10 +1084,12 @@ mod tests {
         let mut noria = start_simple("remove_query").await;
         noria
             .extend_recipe(
-                "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);
-                 CREATE CACHE test_query FROM SELECT * FROM users;"
-                    .parse()
-                    .unwrap(),
+                ChangeList::from_str(
+                    "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);
+                 CREATE CACHE test_query FROM SELECT * FROM users;",
+                    DataDialect::DEFAULT_MYSQL,
+                )
+                .unwrap(),
             )
             .await
             .unwrap();
@@ -1106,11 +1108,13 @@ mod tests {
         let mut noria = start_simple("remove_all_queries").await;
         noria
             .extend_recipe(
-                "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);
+                ChangeList::from_str(
+                    "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);
                  CREATE CACHE q1 FROM SELECT id FROM users;
-                 CREATE CACHE q2 FROM SELECT name FROM users where id = ?;"
-                    .parse()
-                    .unwrap(),
+                 CREATE CACHE q2 FROM SELECT name FROM users where id = ?;",
+                    DataDialect::DEFAULT_MYSQL,
+                )
+                .unwrap(),
             )
             .await
             .unwrap();
@@ -1140,11 +1144,13 @@ mod tests {
             .unwrap();
         noria
             .extend_recipe(
-                "CREATE TABLE t1 (id int);
+                ChangeList::from_str(
+                    "CREATE TABLE t1 (id int);
                      CREATE TABLE t2 (id int);
-                     CREATE TABLE t3 (id int);"
-                    .parse()
-                    .unwrap(),
+                     CREATE TABLE t3 (id int);",
+                    DataDialect::DEFAULT_MYSQL,
+                )
+                .unwrap(),
             )
             .await
             .unwrap();
@@ -1180,10 +1186,12 @@ mod tests {
 
         noria
             .extend_recipe(
-                "CREATE TABLE key_count_test (id INT PRIMARY KEY, stuff TEXT);
-                 CREATE CACHE q1 FROM SELECT * FROM key_count_test;"
-                    .parse()
-                    .unwrap(),
+                ChangeList::from_str(
+                    "CREATE TABLE key_count_test (id INT PRIMARY KEY, stuff TEXT);
+                 CREATE CACHE q1 FROM SELECT * FROM key_count_test;",
+                    DataDialect::DEFAULT_MYSQL,
+                )
+                .unwrap(),
             )
             .await
             .unwrap();
@@ -1233,6 +1241,7 @@ mod tests {
             .extend_recipe(
                 ChangeList::from_str(
                     "CREATE TABLE t1 (x int); CREATE CACHE FROM SELECT * FROM t1;",
+                    DataDialect::DEFAULT_MYSQL,
                 )
                 .unwrap()
                 .with_schema_search_path(schema_search_path.clone()),
@@ -1273,7 +1282,10 @@ mod tests {
 
         // A change in schema_search_path that *does* change the semantics
         noria
-            .extend_recipe(ChangeList::from_str("CREATE TABLE s2.t1 (x int)").unwrap())
+            .extend_recipe(
+                ChangeList::from_str("CREATE TABLE s2.t1 (x int)", DataDialect::DEFAULT_MYSQL)
+                    .unwrap(),
+            )
             .await
             .unwrap();
 

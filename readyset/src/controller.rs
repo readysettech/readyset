@@ -533,10 +533,7 @@ impl ReadySetHandle {
         &mut self,
         changes: ChangeList,
     ) -> impl Future<Output = ReadySetResult<()>> + '_ {
-        let request = ExtendRecipeSpec {
-            changes,
-            ..Default::default()
-        };
+        let request = ExtendRecipeSpec::from(changes);
 
         self.rpc("dry_run", request, self.migration_timeout)
     }
@@ -548,10 +545,7 @@ impl ReadySetHandle {
         &mut self,
         changes: ChangeList,
     ) -> impl Future<Output = ReadySetResult<()>> + '_ {
-        let request = ExtendRecipeSpec {
-            changes,
-            ..Default::default()
-        };
+        let request = ExtendRecipeSpec::from(changes);
 
         self.rpc("extend_recipe", request, self.migration_timeout)
     }
@@ -564,9 +558,8 @@ impl ReadySetHandle {
         changes: ChangeList,
     ) -> impl Future<Output = ReadySetResult<()>> + '_ {
         let request = ExtendRecipeSpec {
-            changes,
             require_leader_ready: false,
-            ..Default::default()
+            ..changes.into()
         };
 
         self.rpc("extend_recipe", request, self.migration_timeout)

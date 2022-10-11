@@ -46,6 +46,7 @@ use readyset::replication::{ReplicationOffset, ReplicationOffsets};
 use readyset::{
     NodeSize, ReadySetError, ReadySetResult, ViewCreateRequest, ViewFilter, ViewRequest, ViewSchema,
 };
+use readyset_data::Dialect;
 use readyset_errors::{internal, internal_err, invariant_eq, NodeType};
 use regex::Regex;
 use serde::de::DeserializeOwned;
@@ -1175,10 +1176,13 @@ impl DfState {
             Some(name) => name,
         };
 
-        let changelist = ChangeList::from_change(Change::Drop {
-            name: name.clone(),
-            if_exists: false,
-        });
+        let changelist = ChangeList::from_change(
+            Change::Drop {
+                name: name.clone(),
+                if_exists: false,
+            },
+            Dialect::DEFAULT_MYSQL,
+        );
 
         if let Err(error) = self.apply_recipe(changelist, false).await {
             error!(%error, "Failed to apply recipe");
@@ -1196,10 +1200,13 @@ impl DfState {
                 name: n.clone(),
                 if_exists: true,
             })
-            .collect();
+            .collect::<Vec<_>>();
 
-        self.apply_recipe(ChangeList::from_changes(changes), false)
-            .await
+        self.apply_recipe(
+            ChangeList::from_changes(changes, Dialect::DEFAULT_MYSQL),
+            false,
+        )
+        .await
     }
 
     /// Runs all the necessary steps to recover the full [`DfState`], when said state only

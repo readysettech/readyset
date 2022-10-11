@@ -30,9 +30,8 @@
 //     a. Some queries do not parse the `statement_terminator` at the end, but some do.
 //     b. The `statement_terminator` matches whitespaces, semicolons, line ending and eof. For
 //    simplicity, it should only match semicolons (or semicolons and eof, at most).
-use std::convert::TryFrom;
-use std::str::FromStr;
 
+use dataflow_expression::Dialect;
 use nom_sql::{
     AlterTableStatement, CacheInner, CreateCacheStatement, CreateTableStatement,
     CreateViewStatement, DropTableStatement, DropViewStatement, Relation, SelectStatement,
@@ -43,7 +42,7 @@ use serde::{Deserialize, Serialize};
 
 /// The specification for a list of changes that must be made
 /// to the MIR and dataflow graphs.
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChangeList {
     /// The list of changes to be made.
     ///
@@ -52,20 +51,87 @@ pub struct ChangeList {
 
     /// The schema search path to use to resolve table references within the changelist
     pub schema_search_path: Vec<SqlIdentifier>,
+
+    /// The SQL dialect to use for all types and expressions in queries added by this ChangeList
+    pub dialect: Dialect,
 }
 
-impl TryFrom<String> for ChangeList {
-    type Error = ReadySetError;
+/// Types that can be converted directly into a list of [`Change`]s. Used to type-overload
+/// [`ChangeList::from_changes`]
+pub trait IntoChanges {
+    /// Convert this value into a list of [`Change`]s
+    fn into_changes(self) -> Vec<Change>;
+}
 
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        value.as_str().parse()
+impl IntoChanges for CreateTableStatement {
+    fn into_changes(self) -> Vec<Change> {
+        vec![Change::CreateTable(self)]
     }
 }
 
-impl FromStr for ChangeList {
-    type Err = ReadySetError;
+impl IntoChanges for DropTableStatement {
+    fn into_changes(self) -> Vec<Change> {
+        self.tables
+            .into_iter()
+            .map(|name| Change::Drop {
+                name,
+                if_exists: self.if_exists,
+            })
+            .collect()
+    }
+}
 
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
+impl IntoChanges for DropViewStatement {
+    fn into_changes(self) -> Vec<Change> {
+        self.views
+            .into_iter()
+            .map(|name| Change::Drop {
+                name,
+                if_exists: self.if_exists,
+            })
+            .collect()
+    }
+}
+
+impl IntoChanges for AlterTableStatement {
+    fn into_changes(self) -> Vec<Change> {
+        vec![Change::AlterTable(self)]
+    }
+}
+
+impl IntoChanges for Vec<Change> {
+    fn into_changes(self) -> Vec<Change> {
+        self
+    }
+}
+
+impl IntoIterator for ChangeList {
+    type Item = Change;
+    type IntoIter = std::vec::IntoIter<Change>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.changes.into_iter()
+    }
+}
+
+impl ChangeList {
+    /// Construct a new empty `ChangeList` with the given [`Dialect`]
+    pub fn new(dialect: Dialect) -> Self {
+        Self {
+            changes: vec![],
+            schema_search_path: vec![],
+            dialect,
+        }
+    }
+
+    /// Parse a `ChangeList` from the given SQL string, formatted using the canonical SQL dialect,
+    /// but using the given [`Dialect`] for expression evaluation semantics.
+    pub fn from_str<S>(s: S, dialect: Dialect) -> ReadySetResult<Self>
+    where
+        S: AsRef<str>,
+    {
+        let value = s.as_ref();
+
         // We separate the queries first, so that we can parse them one by
         // one and get a correct error message when an individual query fails to be
         // parsed.
@@ -143,80 +209,24 @@ impl FromStr for ChangeList {
         Ok(ChangeList {
             changes,
             schema_search_path: vec![],
+            dialect,
         })
     }
-}
 
-impl From<CreateTableStatement> for ChangeList {
-    fn from(cts: CreateTableStatement) -> Self {
-        ChangeList {
-            changes: vec![Change::CreateTable(cts)],
-            schema_search_path: vec![],
-        }
-    }
-}
-
-impl From<DropTableStatement> for ChangeList {
-    fn from(dts: DropTableStatement) -> Self {
-        ChangeList {
-            changes: dts
-                .tables
-                .into_iter()
-                .map(|name| Change::Drop {
-                    name,
-                    if_exists: dts.if_exists,
-                })
-                .collect(),
-            schema_search_path: vec![],
-        }
-    }
-}
-
-impl From<DropViewStatement> for ChangeList {
-    fn from(dvs: DropViewStatement) -> Self {
-        ChangeList {
-            changes: dvs
-                .views
-                .into_iter()
-                .map(|name| Change::Drop {
-                    name,
-                    if_exists: dvs.if_exists,
-                })
-                .collect(),
-            schema_search_path: vec![],
-        }
-    }
-}
-
-impl From<AlterTableStatement> for ChangeList {
-    fn from(ats: AlterTableStatement) -> Self {
-        ChangeList {
-            changes: vec![Change::AlterTable(ats)],
-            schema_search_path: vec![],
-        }
-    }
-}
-
-impl IntoIterator for ChangeList {
-    type Item = Change;
-    type IntoIter = std::vec::IntoIter<Change>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.changes.into_iter()
-    }
-}
-
-impl ChangeList {
-    /// Construct a new `ChangeList` from the given single change
-    pub fn from_change(change: Change) -> Self {
-        Self::from_changes(vec![change])
+    /// Construct a new `ChangeList` from the given single change and [`Dialect`]
+    pub fn from_change(change: Change, dialect: Dialect) -> Self {
+        Self::from_changes(vec![change], dialect)
     }
 
-    /// Construct a new `ChangeList` with the given list of changes
-    pub fn from_changes(changes: Vec<Change>) -> Self {
+    /// Construct a new `ChangeList` with the given list of changes and [`Dialect`]
+    pub fn from_changes<C>(changes: C, dialect: Dialect) -> Self
+    where
+        C: IntoChanges,
+    {
         Self {
-            changes,
+            changes: changes.into_changes(),
             schema_search_path: vec![],
+            dialect,
         }
     }
 
@@ -366,7 +376,7 @@ mod tests {
         let queries =
             "  CREATE CACHE q_0 FROM SELECT a FROM b;     CREATE CACHE q_1 FROM SELECT x FROM y;   ";
 
-        let changelist: ChangeList = queries.parse().unwrap();
+        let changelist = ChangeList::from_str(queries, Dialect::DEFAULT_MYSQL).unwrap();
         assert_eq!(
             changelist
                 .changes
@@ -390,7 +400,7 @@ mod tests {
         let queries = "  CREATE CACHE q_0 FROM SELECT a FROM b;\
                       CREATE CACHE q_1 FROM SELECT x FROM y;";
 
-        let changelist: ChangeList = queries.parse().unwrap();
+        let changelist = ChangeList::from_str(queries, Dialect::DEFAULT_MYSQL).unwrap();
         assert_eq!(
             changelist
                 .changes
@@ -413,7 +423,7 @@ mod tests {
     fn it_handles_missing_semicolon() {
         let queries = "CREATE CACHE q_0 FROM SELECT a FROM b;\nCREATE VIEW q_1 AS SELECT x FROM y";
 
-        let changelist = ChangeList::from_str(queries).unwrap();
+        let changelist = ChangeList::from_str(queries, Dialect::DEFAULT_MYSQL).unwrap();
         assert_eq!(
             changelist
                 .changes

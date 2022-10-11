@@ -12,7 +12,7 @@ use postgres_types::{accepts, FromSql, Kind, Type};
 use readyset::metrics::recorded;
 use readyset::recipe::changelist::ChangeList;
 use readyset::{ReadySetError, ReadySetResult};
-use readyset_data::DfValue;
+use readyset_data::{DfValue, Dialect as DataDialect};
 use readyset_errors::{internal, internal_err, unsupported};
 use tokio_postgres as pgsql;
 use tracing::{debug, error, info, info_span, trace, Instrument};
@@ -461,9 +461,12 @@ impl<'a> PostgresReplicator<'a> {
             debug!(%create_table, "Extending recipe");
             create_schema.add_table_create(create_table.name.to_string(), create_table.to_string());
 
-            match future::ready(create_table.to_string().try_into())
-                .and_then(|changelist| self.noria.extend_recipe_no_leader_ready(changelist))
-                .await
+            match future::ready(ChangeList::from_str(
+                create_table.to_string(),
+                DataDialect::DEFAULT_POSTGRESQL,
+            ))
+            .and_then(|changelist| self.noria.extend_recipe_no_leader_ready(changelist))
+            .await
             {
                 Ok(_) => tables.push(create_table),
                 Err(error) => {
@@ -491,14 +494,15 @@ impl<'a> PostgresReplicator<'a> {
 
             if let Err(err) = self
                 .noria
-                .extend_recipe_no_leader_ready(ChangeList::try_from(view)?.with_schema_search_path(
-                    vec![
-                        // TODO(grfn): Currently we statically only replicate from the public
-                        // schema - once we start replicating from other
-                        // schemas this should be determined dynamically
-                        "public".into(),
-                    ],
-                ))
+                .extend_recipe_no_leader_ready(
+                    ChangeList::from_str(view, DataDialect::DEFAULT_POSTGRESQL)?
+                        .with_schema_search_path(vec![
+                            // TODO(grfn): Currently we statically only replicate from the public
+                            // schema - once we start replicating from other
+                            // schemas this should be determined dynamically
+                            "public".into(),
+                        ]),
+                )
                 .await
             {
                 error!(%err, "Error extending CREATE VIEW, view will not be used");
