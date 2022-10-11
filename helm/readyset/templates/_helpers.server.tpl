@@ -220,7 +220,7 @@ ReadySet server, main configuration envionment variables.
 - name: LOG_LEVEL
   value: "info,readyset_client=trace,readyset_server=trace"
 # Database ReadySet is proxying to
-- name: REPLICATION_URL
+- name: UPSTREAM_DB_URL
   valueFrom:
     secretKeyRef:
       name: {{ .csecrets.replicationUrl.secretName }}

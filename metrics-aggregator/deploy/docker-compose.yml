@@ -41,7 +41,7 @@ services:
       LISTEN_ADDRESS: 0.0.0.0
       EXTERNAL_ADDRESS: readyset-server
       NORIA_DEPLOYMENT: frameworktests
-      REPLICATION_URL: mysql://root:root@mysql/test
+      UPSTREAM_DB_URL: mysql://root:root@mysql/test
       LOG_LEVEL: trace
     links:
       - mysql
