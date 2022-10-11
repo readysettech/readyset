@@ -92,7 +92,7 @@ use readyset::{ColumnSchema, ViewCreateRequest};
 use readyset_client_metrics::{
     recorded, EventType, QueryDestination, QueryExecutionEvent, SqlQueryType,
 };
-use readyset_data::DfValue;
+use readyset_data::{Collation, DfType, DfValue};
 use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
 use readyset_errors::{internal, internal_err, unsupported, ReadySetResult};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
@@ -1575,15 +1575,11 @@ where
         &mut self,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         let create_dummy_column = |n: &str| ColumnSchema {
-            spec: nom_sql::ColumnSpecification {
-                column: nom_sql::Column {
-                    name: n.into(),
-                    table: None,
-                },
-                sql_type: nom_sql::SqlType::Text,
-                constraints: vec![],
-                comment: None,
+            column: nom_sql::Column {
+                name: n.into(),
+                table: None,
             },
+            column_type: DfType::Text(Collation::default()),
             base: None,
         };
 

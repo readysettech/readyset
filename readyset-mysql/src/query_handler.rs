@@ -3,16 +3,13 @@ use std::collections::HashSet;
 use std::str::FromStr;
 
 use lazy_static::lazy_static;
-use nom_sql::{
-    Column, ColumnSpecification, Expr, FieldDefinitionExpr, Literal, SqlIdentifier, SqlQuery,
-    SqlType, VariableScope,
-};
+use nom_sql::{Column, Expr, FieldDefinitionExpr, Literal, SqlIdentifier, SqlQuery, VariableScope};
 use readyset::results::Results;
 use readyset::{ColumnSchema, ReadySetError};
 use readyset_client::backend::noria_connector::QueryResult;
 use readyset_client::backend::SelectSchema;
 use readyset_client::{QueryHandler, SetBehavior};
-use readyset_data::DfValue;
+use readyset_data::{DfType, DfValue};
 use readyset_errors::ReadySetResult;
 use tracing::warn;
 
@@ -856,15 +853,11 @@ impl QueryHandler for MySqlQueryHandler {
                     SelectSchema {
                         use_bogo: false,
                         schema: Cow::Owned(vec![ColumnSchema {
-                            spec: ColumnSpecification {
-                                sql_type: SqlType::UnsignedInt(Some(8)),
-                                constraints: Vec::new(),
-                                column: Column {
-                                    name: field_name.clone(),
-                                    table: None,
-                                },
-                                comment: None,
+                            column: Column {
+                                name: field_name.clone(),
+                                table: None,
                             },
+                            column_type: DfType::UnsignedInt,
                             base: None,
                         }]),
                         columns: Cow::Owned(vec![field_name]),

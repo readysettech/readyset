@@ -1,5 +1,5 @@
 use dataflow::prelude::*;
-use nom_sql::{Column, ColumnSpecification};
+use nom_sql::Column;
 use readyset::{ColumnBase, ColumnSchema};
 use readyset_data::DfType;
 use tracing::trace;
@@ -68,6 +68,7 @@ fn get_base_for_column(
                         .as_ref()
                         .unwrap()
                         .clone(),
+                    constraints: schema.fields[col_index].constraints.clone(),
                 }));
             }
         }
@@ -102,25 +103,12 @@ pub(super) fn column_schema(
         }
     }
 
-    // XXX: Lossy conversion. This is fine for now since column info is already broken.
-    // TODO(ENG-1836): Make return value use `DfType`.
-    let col_type = match col_type.to_sql_type() {
-        Some(ty) => ty,
-        None => return Ok(None),
-    };
-
-    // found something, so return a ColumnSpecification
-    let cs = ColumnSpecification::new(
-        Column {
+    Ok(Some(ColumnSchema {
+        base: col_base,
+        column: Column {
             name: vn.columns()[column_index].name().into(),
             table: Some(vn.name().clone()),
         },
-        // ? in case we found no schema for this column
-        col_type,
-    );
-
-    Ok(Some(ColumnSchema {
-        spec: cs,
-        base: col_base,
+        column_type: col_type.clone(),
     }))
 }

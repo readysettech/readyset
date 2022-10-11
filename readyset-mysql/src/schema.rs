@@ -1,6 +1,7 @@
 #![warn(clippy::panic)]
 
 use nom_sql::{self, ColumnConstraint, Relation, SqlType};
+use readyset::ColumnSchema;
 use readyset_errors::{unsupported, ReadySetResult};
 
 use crate::constants::DEFAULT_CHARACTER_SET;
@@ -30,13 +31,17 @@ pub(crate) fn is_subtype(c1: mysql_srv::ColumnType, c2: mysql_srv::ColumnType) -
     )
 }
 
-pub(crate) fn convert_column(
-    col: &nom_sql::ColumnSpecification,
-) -> ReadySetResult<mysql_srv::Column> {
+pub(crate) fn convert_column(col: &ColumnSchema) -> ReadySetResult<mysql_srv::Column> {
     let mut colflags = mysql_srv::ColumnFlags::empty();
     use mysql_srv::ColumnType::*;
 
-    let coltype = match col.sql_type {
+    // TODO: Just pattern match on the DfType directly
+    let sql_type = col.column_type.to_sql_type().unwrap_or(
+        // Null (the only place where mysql can get an Unknown type) can be any type, but we pick
+        // TEXT here as a default
+        SqlType::Text,
+    );
+    let coltype = match sql_type {
         SqlType::MediumText => MYSQL_TYPE_VAR_STRING,
         SqlType::LongText => MYSQL_TYPE_BLOB,
         SqlType::Text => MYSQL_TYPE_BLOB,
@@ -126,7 +131,7 @@ pub(crate) fn convert_column(
         SqlType::PassThrough(_) => unsupported!("MySQL does not support PassThrough types"),
     };
 
-    for c in &col.constraints {
+    for c in col.base.iter().flat_map(|b| &b.constraints) {
         match *c {
             ColumnConstraint::AutoIncrement => {
                 colflags |= mysql_srv::ColumnFlags::AUTO_INCREMENT_FLAG;
@@ -145,7 +150,7 @@ pub(crate) fn convert_column(
     }
 
     // TODO: All columns have a default display length, so `column_length` should not be an option.
-    let column_length = match col.sql_type {
+    let column_length = match sql_type {
         SqlType::Char(l)
         | SqlType::VarChar(l)
         | SqlType::Int(l)

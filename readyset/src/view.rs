@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use array2::Array2;
 use async_bincode::{AsyncBincodeStream, AsyncDestination};
-use dataflow_expression::Expr as DfExpr;
+use dataflow_expression::{Dialect, Expr as DfExpr};
 use futures_util::future::TryFutureExt;
 use futures_util::stream::futures_unordered::FuturesUnordered;
 use futures_util::stream::{StreamExt, TryStreamExt};
@@ -20,13 +20,14 @@ use futures_util::{future, ready};
 use launchpad::intervals::{cmp_start_end, BoundPair};
 use launchpad::redacted::Sensitive;
 use nom_sql::{
-    BinaryOperator, Column, ColumnSpecification, Relation, SelectStatement, SqlIdentifier, SqlType,
+    BinaryOperator, Column, ColumnConstraint, ColumnSpecification, Relation, SelectStatement,
+    SqlIdentifier,
 };
 use petgraph::graph::NodeIndex;
 use proptest::arbitrary::Arbitrary;
 use rand::prelude::IteratorRandom;
 use rand::thread_rng;
-use readyset_data::DfValue;
+use readyset_data::{DfType, DfValue};
 use readyset_errors::{
     internal_err, rpc_err, unsupported, view_err, ReadySetError, ReadySetResult,
 };
@@ -137,13 +138,17 @@ pub struct ColumnBase {
     pub column: SqlIdentifier,
     /// The name of the base table for this column
     pub table: Relation,
+    /// A list of constraints on the column
+    pub constraints: Vec<ColumnConstraint>,
 }
 
 /// Combines the specification for a columns with its base name
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ColumnSchema {
-    /// The specification for the column
-    pub spec: ColumnSpecification,
+    /// The name of the column
+    pub column: Column,
+    /// The column's type
+    pub column_type: DfType,
     /// If the column is an alias, this field represents its base column
     pub base: Option<ColumnBase>,
 }
@@ -151,13 +156,15 @@ pub struct ColumnSchema {
 impl ColumnSchema {
     /// Create a new ColumnSchema from a ColumnSpecification representing a column directly in a
     /// base table with the given name.
-    pub fn from_base(spec: ColumnSpecification, table: Relation) -> Self {
+    pub fn from_base(spec: ColumnSpecification, table: Relation, dialect: Dialect) -> Self {
         Self {
             base: Some(ColumnBase {
                 column: spec.column.name.clone(),
                 table,
+                constraints: spec.constraints,
             }),
-            spec,
+            column: spec.column,
+            column_type: DfType::from_sql_type(&spec.sql_type, dialect),
         }
     }
 }
@@ -236,14 +243,14 @@ impl ViewSchema {
     }
 
     /// Return a vector specifiying the types of the columns for the requested indices
-    pub fn col_types<I>(&self, indices: I, schema_type: SchemaType) -> ReadySetResult<Vec<&SqlType>>
+    pub fn col_types<I>(&self, indices: I, schema_type: SchemaType) -> ReadySetResult<Vec<&DfType>>
     where
         I: IntoIterator<Item = usize>,
     {
         let schema = self.schema(schema_type);
         indices
             .into_iter()
-            .map(|i| schema.get(i).map(|c| &c.spec.sql_type))
+            .map(|i| schema.get(i).map(|c| &c.column_type))
             .collect::<Option<Vec<_>>>()
             .ok_or_else(|| internal_err!("Schema expects valid column indices"))
     }
@@ -261,7 +268,7 @@ impl ViewSchema {
         let mut by_name = HashMap::new();
         let mut by_base_name = HashMap::new();
         for cs in self.schema(schema_type) {
-            by_name.insert(&cs.spec.column.name, cs);
+            by_name.insert(&cs.column.name, cs);
             if let Some(base) = &cs.base {
                 by_base_name.insert(&base.column, cs);
             }
@@ -293,7 +300,7 @@ impl ViewSchema {
 
         cols.map(|c| {
             schema.iter().position(|e| {
-                e.spec.column.name == c.name
+                e.column.name == c.name
                     || e.base.as_ref().map(|b| b.column == c.name).unwrap_or(false)
             })
         })
@@ -304,8 +311,8 @@ impl ViewSchema {
 
 impl ColumnSchema {
     /// Consume the schema, returning the type for the column
-    pub fn take_type(self) -> SqlType {
-        self.spec.sql_type
+    pub fn into_type(self) -> DfType {
+        self.column_type
     }
 }
 

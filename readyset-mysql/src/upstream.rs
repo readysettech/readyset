@@ -91,7 +91,7 @@ fn schema_column_match(schema: &[ColumnSchema], columns: &[Column]) -> Result<()
 
     if cfg!(feature = "schema-check") {
         for (sch, col) in schema.iter().zip(columns.iter()) {
-            let noria_column_type = convert_column(&sch.spec)?.coltype;
+            let noria_column_type = convert_column(sch)?.coltype;
             if !is_subtype(noria_column_type, col.column_type()) {
                 return Err(Error::ReadySet(ReadySetError::WrongColumnType(
                     format!("{:?}", col.column_type()),
@@ -387,6 +387,7 @@ impl UpstreamDatabase for MySqlUpstream {
 mod tests {
     use mysql_srv::ColumnType;
     use nom_sql::{Column as NomColumn, ColumnSpecification, SqlType};
+    use readyset_data::Dialect;
 
     use super::*;
 
@@ -411,16 +412,19 @@ mod tests {
             ColumnSchema::from_base(
                 ColumnSpecification::new(test_column(), SqlType::VarChar(Some(10))),
                 "table1".into(),
+                Dialect::DEFAULT_MYSQL,
             ),
             ColumnSchema::from_base(
                 ColumnSpecification::new(test_column(), SqlType::Double),
                 "table1".into(),
+                Dialect::DEFAULT_MYSQL,
             ),
         ];
 
         let schema_spec = vec![ColumnSchema::from_base(
             ColumnSpecification::new(test_column(), SqlType::Int(None)),
             "table1".into(),
+            Dialect::DEFAULT_MYSQL,
         )];
 
         assert!(s.compare(&schema_spec, &param_specs).is_ok());
@@ -439,11 +443,13 @@ mod tests {
         let param_specs = vec![ColumnSchema::from_base(
             ColumnSpecification::new(test_column(), SqlType::VarChar(Some(10))),
             "table1".into(),
+            Dialect::DEFAULT_MYSQL,
         )];
 
         let schema_spec = vec![ColumnSchema::from_base(
             ColumnSpecification::new(test_column(), SqlType::Int(None)),
             "table1".into(),
+            Dialect::DEFAULT_MYSQL,
         )];
 
         assert!(s.compare(&schema_spec, &param_specs).is_err());

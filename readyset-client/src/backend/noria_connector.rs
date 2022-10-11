@@ -11,7 +11,7 @@ use launchpad::redacted::Sensitive;
 use nom_sql::analysis::visit::Visitor;
 use nom_sql::{
     self, BinaryOperator, ColumnConstraint, DeleteStatement, Expr, InsertStatement, Literal,
-    Relation, SelectStatement, SqlIdentifier, SqlQuery, SqlType, UnaryOperator, UpdateStatement,
+    Relation, SelectStatement, SqlIdentifier, SqlQuery, UnaryOperator, UpdateStatement,
 };
 use readyset::consistency::Timestamp;
 use readyset::internal::LocalNodeIndex;
@@ -22,7 +22,7 @@ use readyset::{
     ReadySetHandle, ReadySetResult, SchemaType, Table, TableOperation, View, ViewCreateRequest,
     ViewPlaceholder, ViewQuery, ViewSchema,
 };
-use readyset_data::{DfType, DfValue, Dialect};
+use readyset_data::{Collation, DfType, DfValue, Dialect};
 use readyset_errors::ReadySetError::PreparedStatementMissing;
 use readyset_errors::{
     internal, internal_err, invariant_eq, table_err, unsupported, unsupported_err,
@@ -525,39 +525,27 @@ impl NoriaConnector {
             use_bogo: false,
             schema: Cow::Owned(vec![
                 ColumnSchema {
-                    spec: nom_sql::ColumnSpecification {
-                        column: nom_sql::Column {
-                            name: "name".into(),
-                            table: None,
-                        },
-                        sql_type: nom_sql::SqlType::Text,
-                        constraints: vec![],
-                        comment: None,
+                    column: nom_sql::Column {
+                        name: "name".into(),
+                        table: None,
                     },
+                    column_type: DfType::Text(Collation::default()),
                     base: None,
                 },
                 ColumnSchema {
-                    spec: nom_sql::ColumnSpecification {
-                        column: nom_sql::Column {
-                            name: "query".into(),
-                            table: None,
-                        },
-                        sql_type: nom_sql::SqlType::Text,
-                        constraints: vec![],
-                        comment: None,
+                    column: nom_sql::Column {
+                        name: "query".into(),
+                        table: None,
                     },
+                    column_type: DfType::Text(Collation::default()),
                     base: None,
                 },
                 ColumnSchema {
-                    spec: nom_sql::ColumnSpecification {
-                        column: nom_sql::Column {
-                            name: "always".into(),
-                            table: None,
-                        },
-                        sql_type: nom_sql::SqlType::Text,
-                        constraints: vec![],
-                        comment: None,
+                    column: nom_sql::Column {
+                        name: "always".into(),
+                        table: None,
                     },
+                    column_type: DfType::Text(Collation::default()),
                     base: None,
                 },
             ]),
@@ -663,7 +651,13 @@ impl NoriaConnector {
             .ok_or_else(|| internal_err!("Could not find schema for table {}", q.table.name))?
             .fields
             .iter()
-            .map(|cs| ColumnSchema::from_base(cs.clone(), q.table.clone()))
+            .map(|cs| {
+                ColumnSchema::from_base(
+                    cs.clone(),
+                    q.table.clone(),
+                    Dialect::DEFAULT_MYSQL, /* TODO(ENG-1418) */
+                )
+            })
             .collect::<Vec<_>>();
 
         if q.fields.is_none() {
@@ -688,7 +682,7 @@ impl NoriaConnector {
                     schema
                         .iter()
                         .cloned()
-                        .find(|mc| c.name == mc.spec.column.name)
+                        .find(|mc| c.name == mc.column.name)
                         .ok_or_else(|| internal_err!("column '{}' missing in mutator schema", c))
                 })
                 .collect::<ReadySetResult<Vec<_>>>()?
@@ -830,7 +824,13 @@ impl NoriaConnector {
                     // and name - just check name here
                     .find(|f| f.column.name == c.name)
                     .cloned()
-                    .map(|cs| ColumnSchema::from_base(cs, q.table.clone()))
+                    .map(|cs| {
+                        ColumnSchema::from_base(
+                            cs,
+                            q.table.clone(),
+                            Dialect::DEFAULT_MYSQL, /* TODO(ENG-1418) */
+                        )
+                    })
                     .ok_or_else(|| internal_err!("Unknown column {}", c))
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -891,7 +891,13 @@ impl NoriaConnector {
                     // and name - just check name here
                     .find(|f| f.column.name == c.name)
                     .cloned()
-                    .map(|cs| ColumnSchema::from_base(cs, q.table.clone()))
+                    .map(|cs| {
+                        ColumnSchema::from_base(
+                            cs,
+                            q.table.clone(),
+                            Dialect::DEFAULT_MYSQL, /* TODO(ENG-1418) */
+                        )
+                    })
                     .ok_or_else(|| internal_err!("Unknown column {}", c))
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -1355,13 +1361,9 @@ impl NoriaConnector {
 
         let limit_columns: Vec<_> = utils::get_limit_parameters(&statement)
             .into_iter()
-            .map(|c| ColumnSchema {
-                spec: nom_sql::ColumnSpecification {
-                    column: c,
-                    sql_type: nom_sql::SqlType::UnsignedBigInt(None),
-                    constraints: vec![],
-                    comment: None,
-                },
+            .map(|column| ColumnSchema {
+                column,
+                column_type: DfType::UnsignedBigInt,
                 base: None,
             })
             .collect();
@@ -1393,7 +1395,7 @@ impl NoriaConnector {
             .into_iter()
             .map(|cs| {
                 let mut cs = cs.clone();
-                cs.spec.column.table = Some(qname.clone());
+                cs.column.table = Some(qname.clone());
                 cs
             })
             .collect();
@@ -1551,9 +1553,6 @@ fn build_view_query(
     ticket: Option<Timestamp>,
     read_behavior: ReadBehavior,
 ) -> ReadySetResult<ViewQuery> {
-    // TODO(ENG-1418): Propagate dialect info.
-    let dialect = Dialect::DEFAULT_MYSQL;
-
     let projected_schema = getter_schema.schema(SchemaType::ProjectedSchema);
 
     let (limit, offset) = processed_query_params.limit_offset_params(params)?;
@@ -1582,12 +1581,11 @@ fn build_view_query(
             }
             let column = projected_schema
                 .iter()
-                .position(|x| x.spec.column.name == col.name)
+                .position(|x| x.column.name == col.name)
                 .ok_or_else(|| ReadySetError::NoSuchColumn(col.name.to_string()))?;
 
             let key_type = key_types.remove(idx);
-            let target_type = DfType::from_sql_type(key_type, dialect);
-            let value = key[idx].coerce_to(&target_type, &DfType::Unknown)?; // No from_ty, key values are literals
+            let value = key[idx].coerce_to(key_type, &DfType::Unknown)?; // No from_ty, key values are literals
 
             if !key.is_empty() {
                 // the LIKE/ILIKE isn't our only key, add the rest back to `keys`
@@ -1600,12 +1598,12 @@ fn build_view_query(
             Ok(DfExpr::Op {
                 left: Box::new(DfExpr::Column {
                     index: column,
-                    ty: DfType::from_sql_type(key_type, dialect),
+                    ty: key_type.clone(),
                 }),
                 op: *op,
                 right: Box::new(DfExpr::Literal {
                     val: value,
-                    ty: DfType::from_sql_type(key_type, dialect),
+                    ty: key_type.clone(),
                 }),
                 ty: DfType::Bool,
             })
@@ -1625,7 +1623,7 @@ fn build_view_query(
         let binop_to_use = unique_binops.next().unwrap_or(BinaryOperator::Equal);
         let mixed_binops = unique_binops.next().is_some();
 
-        let key_types: HashMap<usize, &SqlType> = key_map
+        let key_types: HashMap<usize, &DfType> = key_map
             .iter()
             .zip(key_types)
             .map(|((_, key_column_idx), key_type)| (*key_column_idx, key_type))
@@ -1652,21 +1650,19 @@ fn build_view_query(
                                 None => continue,
                             };
 
-                            let target_type = DfType::from_sql_type(key_type, dialect);
-
                             // parameter numbering is 1-based, but vecs are 0-based, so subtract 1
                             // also, no from_ty since the key value is a literal
-                            let value = key[*idx - 1].coerce_to(&target_type, &DfType::Unknown)?;
+                            let value = key[*idx - 1].coerce_to(key_type, &DfType::Unknown)?;
 
                             let make_op = |op| DfExpr::Op {
                                 left: Box::new(DfExpr::Column {
                                     index: *key_column_idx,
-                                    ty: DfType::from_sql_type(key_type, dialect),
+                                    ty: key_type.clone(),
                                 }),
                                 op,
                                 right: Box::new(DfExpr::Literal {
                                     val: value.clone(),
-                                    ty: DfType::from_sql_type(key_type, dialect),
+                                    ty: key_type.clone(),
                                 }),
                                 ty: DfType::Bool, // TODO: infer type
                             };
@@ -1719,14 +1715,13 @@ fn build_view_query(
                         }
                         ViewPlaceholder::Between(lower_idx, upper_idx) => {
                             let key_type = key_types[key_column_idx];
-                            let target_type = DfType::from_sql_type(key_type, dialect);
 
                             // parameter numbering is 1-based, but vecs are 0-based, so subtract 1
                             // also, no from_ty since the key value is a literal
                             let lower_value =
-                                key[*lower_idx - 1].coerce_to(&target_type, &DfType::Unknown)?;
+                                key[*lower_idx - 1].coerce_to(key_type, &DfType::Unknown)?;
                             let upper_value =
-                                key[*upper_idx - 1].coerce_to(&target_type, &DfType::Unknown)?;
+                                key[*upper_idx - 1].coerce_to(key_type, &DfType::Unknown)?;
                             let (lower_key, upper_key) =
                                 bounds.get_or_insert_with(Default::default);
                             lower_key.push(lower_value);
@@ -1930,9 +1925,7 @@ mod tests {
 
     mod build_view_query {
         use lazy_static::lazy_static;
-        use nom_sql::{
-            parse_query, Column, ColumnSpecification, Dialect, SelectStatement, SqlType,
-        };
+        use nom_sql::{parse_query, Column, Dialect, SelectStatement};
         use readyset::ColumnBase;
 
         use super::*;
@@ -1941,65 +1934,53 @@ mod tests {
             static ref SCHEMA: ViewSchema = ViewSchema::new(
                 vec![
                     ColumnSchema {
-                        spec: ColumnSpecification {
-                            column: Column {
-                                name: "x".into(),
-                                table: Some("t".into()),
-                            },
-                            sql_type: SqlType::Int(None),
-                            constraints: vec![],
-                            comment: None,
+                        column: Column {
+                            name: "x".into(),
+                            table: Some("t".into()),
                         },
+                        column_type: DfType::Int,
                         base: Some(ColumnBase {
                             table: "t".into(),
                             column: "x".into(),
+                            constraints: vec![],
                         }),
                     },
                     ColumnSchema {
-                        spec: ColumnSpecification {
-                            column: Column {
-                                name: "y".into(),
-                                table: Some("t".into()),
-                            },
-                            sql_type: SqlType::Text,
-                            constraints: vec![],
-                            comment: None,
+                        column: Column {
+                            name: "y".into(),
+                            table: Some("t".into()),
                         },
+                        column_type: DfType::Text(Collation::default()),
                         base: Some(ColumnBase {
                             table: "t".into(),
                             column: "y".into(),
+                            constraints: vec![],
                         }),
                     }
                 ],
                 vec![
                     ColumnSchema {
-                        spec: ColumnSpecification {
-                            column: Column {
-                                name: "x".into(),
-                                table: Some("t".into()),
-                            },
-                            sql_type: SqlType::Int(None),
-                            constraints: vec![],
-                            comment: None,
+                        column: Column {
+                            name: "x".into(),
+                            table: Some("t".into()),
                         },
+                        column_type: DfType::Int,
                         base: Some(ColumnBase {
                             table: "t".into(),
                             column: "x".into(),
+                            constraints: vec![],
                         }),
                     },
                     ColumnSchema {
-                        spec: ColumnSpecification {
-                            column: Column {
-                                name: "y".into(),
-                                table: Some("t".into()),
-                            },
-                            sql_type: SqlType::Text,
-                            constraints: vec![],
-                            comment: None,
+                        column: Column {
+                            name: "y".into(),
+                            table: Some("t".into()),
                         },
+                        column_type: DfType::Text(Collation::default()),
                         base: Some(ColumnBase {
                             table: "t".into(),
                             column: "y".into(),
+                            constraints: vec![],
                         }),
                     }
                 ],

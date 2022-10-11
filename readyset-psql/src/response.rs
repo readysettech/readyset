@@ -1,12 +1,12 @@
 use std::borrow::Cow;
 use std::convert::{TryFrom, TryInto};
 
-use nom_sql::{ColumnSpecification, SqlType};
 use psql_srv as ps;
 use psql_srv::Column;
 use readyset::results::{ResultIterator, Results};
 use readyset::ColumnSchema;
 use readyset_client::backend::{self as cl, noria_connector, SinglePrepareResult, UpstreamPrepare};
+use readyset_data::{Collation, DfType};
 use upstream::StatementMeta;
 
 use crate::resultset::Resultset;
@@ -88,13 +88,11 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                     schema: Cow::Owned(
                         vars.iter()
                             .map(|v| ColumnSchema {
-                                spec: ColumnSpecification::new(
-                                    nom_sql::Column {
-                                        name: v.name.clone(),
-                                        table: None,
-                                    },
-                                    SqlType::Text,
-                                ),
+                                column: nom_sql::Column {
+                                    name: v.name.clone(),
+                                    table: None,
+                                },
+                                column_type: DfType::Text(Collation::default()),
                                 base: None,
                             })
                             .collect(),
@@ -119,23 +117,19 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                     use_bogo: false,
                     schema: Cow::Owned(vec![
                         ColumnSchema {
-                            spec: ColumnSpecification::new(
-                                nom_sql::Column {
-                                    name: "name".into(),
-                                    table: None,
-                                },
-                                SqlType::Text,
-                            ),
+                            column: nom_sql::Column {
+                                name: "name".into(),
+                                table: None,
+                            },
+                            column_type: DfType::Text(Collation::default()),
                             base: None,
                         },
                         ColumnSchema {
-                            spec: ColumnSpecification::new(
-                                nom_sql::Column {
-                                    name: "value".into(),
-                                    table: None,
-                                },
-                                SqlType::Text,
-                            ),
+                            column: nom_sql::Column {
+                                name: "value".into(),
+                                table: None,
+                            },
+                            column_type: DfType::Text(Collation::default()),
                             base: None,
                         },
                     ]),

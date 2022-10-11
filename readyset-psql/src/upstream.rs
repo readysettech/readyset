@@ -5,7 +5,7 @@ use std::str::FromStr;
 
 use async_trait::async_trait;
 use futures::TryStreamExt;
-use nom_sql::SqlIdentifier;
+use nom_sql::{SqlIdentifier, SqlType};
 use pgsql::config::Host;
 use pgsql::types::Type;
 use pgsql::{GenericResult, Row};
@@ -65,7 +65,8 @@ fn schema_column_match(schema: &[ColumnSchema], columns: &[Type]) -> Result<(), 
 
     if cfg!(feature = "schema-check") {
         for (sch, col) in schema.iter().zip(columns.iter()) {
-            let noria_type = type_to_pgsql(&sch.spec.sql_type)?;
+            let noria_type =
+                type_to_pgsql(&sch.column_type.to_sql_type().unwrap_or(SqlType::Text))?;
             if &noria_type != col {
                 return Err(Error::ReadySet(ReadySetError::WrongColumnType(
                     col.to_string(),
@@ -323,6 +324,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
 #[cfg(test)]
 mod tests {
     use nom_sql::{Column as NomColumn, ColumnSpecification, SqlType};
+    use readyset_data::Dialect;
 
     use super::*;
 
@@ -347,16 +349,19 @@ mod tests {
             ColumnSchema::from_base(
                 ColumnSpecification::new(test_column(), SqlType::Bool),
                 "table1".into(),
+                Dialect::DEFAULT_POSTGRESQL,
             ),
             ColumnSchema::from_base(
                 ColumnSpecification::new(test_column(), SqlType::BigInt(Some(10))),
                 "table1".into(),
+                Dialect::DEFAULT_POSTGRESQL,
             ),
         ];
 
         let schema_spec = vec![ColumnSchema::from_base(
             ColumnSpecification::new(test_column(), SqlType::VarChar(Some(8))),
             "table1".into(),
+            Dialect::DEFAULT_POSTGRESQL,
         )];
 
         assert!(s.compare(&schema_spec, &param_specs).is_ok());
@@ -375,11 +380,13 @@ mod tests {
         let param_specs = vec![ColumnSchema::from_base(
             ColumnSpecification::new(test_column(), SqlType::Bool),
             "table1".into(),
+            Dialect::DEFAULT_POSTGRESQL,
         )];
 
         let schema_spec = vec![ColumnSchema::from_base(
             ColumnSpecification::new(test_column(), SqlType::VarChar(Some(8))),
             "table1".into(),
+            Dialect::DEFAULT_POSTGRESQL,
         )];
 
         assert!(s.compare(&schema_spec, &param_specs).is_err());

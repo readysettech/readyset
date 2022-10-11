@@ -18,8 +18,11 @@ impl<'a> TryFrom<SelectSchema<'a>> for Vec<ps::Column> {
             .iter()
             .map(|c| {
                 Ok(ps::Column {
-                    name: c.spec.column.name.to_string(),
-                    col_type: type_to_pgsql(&c.spec.sql_type)?,
+                    name: c.column.name.to_string(),
+                    col_type: type_to_pgsql(
+                        // TODO: Just make type_to_pgsql take a DfType
+                        &c.column_type.to_sql_type().unwrap_or(SqlType::Text),
+                    )?,
                 })
             })
             .collect()
@@ -35,7 +38,12 @@ impl<'a> TryFrom<NoriaSchema<'a>> for Vec<pgsql::types::Type> {
         value
             .0
             .iter()
-            .map(|c| type_to_pgsql(&c.spec.sql_type))
+            .map(|c| {
+                type_to_pgsql(
+                    // TODO: Just make type_to_pgsql take a DfType
+                    &c.column_type.to_sql_type().unwrap_or(SqlType::Text),
+                )
+            })
             .collect()
     }
 }
@@ -47,8 +55,11 @@ impl<'a> TryFrom<NoriaSchema<'a>> for Vec<ps::Column> {
         s.0.iter()
             .map(|c| {
                 Ok(ps::Column {
-                    name: c.spec.column.name.to_string(),
-                    col_type: type_to_pgsql(&c.spec.sql_type)?,
+                    name: c.column.name.to_string(),
+                    col_type: type_to_pgsql(
+                        // TODO: Just make type_to_pgsql take a DfType
+                        &c.column_type.to_sql_type().unwrap_or(SqlType::Text),
+                    )?,
                 })
             })
             .collect()

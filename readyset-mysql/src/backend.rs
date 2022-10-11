@@ -17,7 +17,7 @@ use readyset_client::backend::noria_connector::MetaVariable;
 use readyset_client::backend::{
     noria_connector, QueryResult, SinglePrepareResult, UpstreamPrepare,
 };
-use readyset_data::{Collation, DfType, DfValue, DfValueKind, Dialect};
+use readyset_data::{Collation, DfType, DfValue, DfValueKind};
 use readyset_errors::{internal, internal_err, ReadySetError};
 use streaming_iterator::StreamingIterator;
 use tokio::io::{self, AsyncWrite};
@@ -243,7 +243,7 @@ macro_rules! convert_columns {
     ($columns: expr, $results: expr) => {{
         match $columns
             .into_iter()
-            .map(|c| convert_column(&c.spec))
+            .map(|c| convert_column(&c))
             .collect::<Result<Vec<_>, _>>()
         {
             Ok(res) => res,
@@ -334,9 +334,7 @@ where
                             let ty = schema
                                 .schema
                                 .get(coli)
-                                .map(|cs| {
-                                    DfType::from_sql_type(&cs.spec.sql_type, Dialect::DEFAULT_MYSQL)
-                                })
+                                .map(|cs| cs.column_type.clone())
                                 .unwrap_or_default();
 
                             if let Err(e) = write_column(&mut rw, &row[coli], c, &ty).await {
@@ -550,9 +548,7 @@ where
                         let column_types = schema
                             .schema
                             .iter()
-                            .map(|cs| {
-                                DfType::from_sql_type(&cs.spec.sql_type, Dialect::DEFAULT_MYSQL)
-                            })
+                            .map(|cs| cs.column_type.clone())
                             .collect();
 
                         let preencoded_schema =

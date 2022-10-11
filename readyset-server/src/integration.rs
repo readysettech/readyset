@@ -4261,8 +4261,6 @@ async fn simple_pagination() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn correct_nested_view_schema() {
-    use nom_sql::{ColumnSpecification, SqlType};
-
     let r_txt = "CREATE TABLE votes (story int, user int);
                  CREATE TABLE stories (id int, content text);
                  CREATE CACHE swvc FROM
@@ -4283,16 +4281,19 @@ async fn correct_nested_view_schema() {
     let q = g.view("swvc").await.unwrap();
 
     let expected_schema = vec![
-        ColumnSpecification::new("swvc.id".try_into().unwrap(), SqlType::Int(None)),
-        ColumnSpecification::new("swvc.content".try_into().unwrap(), SqlType::Text),
-        ColumnSpecification::new("swvc.vc".try_into().unwrap(), SqlType::BigInt(None)),
+        ("swvc.id".try_into().unwrap(), DfType::Int),
+        (
+            "swvc.content".try_into().unwrap(),
+            DfType::Text(Collation::default()),
+        ),
+        ("swvc.vc".try_into().unwrap(), DfType::BigInt),
     ];
     assert_eq!(
         q.schema()
             .unwrap()
             .schema(SchemaType::ProjectedSchema)
             .iter()
-            .map(|cs| cs.spec.clone())
+            .map(|cs| (cs.column.clone(), cs.column_type.clone()))
             .collect::<Vec<_>>(),
         expected_schema
     );
@@ -6188,14 +6189,12 @@ async fn simple_enum() {
         .col_types([0], SchemaType::ReturnedSchema)
         .unwrap()[0];
 
-    let result_type = DfType::from_sql_type(result_type, readyset_data::Dialect::DEFAULT_MYSQL);
-
     assert_eq!(result.len(), 3);
 
     assert_eq!(
         result[0][0],
         DfValue::from("purple")
-            .coerce_to(&result_type, &DfType::Unknown)
+            .coerce_to(result_type, &DfType::Unknown)
             .unwrap()
     );
     assert_eq!(

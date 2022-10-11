@@ -2,6 +2,7 @@ use std::convert::TryFrom;
 use std::iter;
 use std::sync::Arc;
 
+use nom_sql::SqlType;
 use psql_srv as ps;
 use readyset::results::{ResultIterator, Results};
 use readyset_data::DfValue;
@@ -46,7 +47,7 @@ impl Resultset {
                         .0
                         .columns
                         .iter()
-                        .position(|name| col.spec.column.name == name)
+                        .position(|name| col.column.name == name)
                         .ok_or_else(|| ps::Error::InternalError("inconsistent schema".to_string()))
                 })
                 .collect::<Result<Vec<usize>, ps::Error>>()?,
@@ -57,7 +58,13 @@ impl Resultset {
                 .0
                 .schema
                 .iter()
-                .map(|c| type_to_pgsql(&c.spec.sql_type))
+                .map(|c| {
+                    // TODO: make `type_to_pgsql` just take a DfType
+                    type_to_pgsql(&c.column_type.to_sql_type().unwrap_or(
+                        // The default postgres type for UNKNOWN is Text
+                        SqlType::Text,
+                    ))
+                })
                 .collect::<Result<Vec<_>, _>>()?,
         );
         Ok(Resultset {
@@ -125,10 +132,9 @@ mod tests {
     use std::borrow::Cow;
     use std::convert::TryFrom;
 
-    use nom_sql::{ColumnSpecification, SqlType};
     use readyset::ColumnSchema;
     use readyset_client::backend as cl;
-    use readyset_data::DfValue;
+    use readyset_data::{Collation, DfType, DfValue};
 
     use super::*;
 
@@ -149,12 +155,8 @@ mod tests {
         let schema = SelectSchema(cl::SelectSchema {
             use_bogo: false,
             schema: Cow::Owned(vec![ColumnSchema {
-                spec: ColumnSpecification {
-                    column: "tab1.col1".into(),
-                    sql_type: SqlType::BigInt(None),
-                    comment: None,
-                    constraints: vec![],
-                },
+                column: "tab1.col1".into(),
+                column_type: DfType::BigInt,
                 base: None,
             }]),
             columns: Cow::Owned(vec!["col1".into()]),
@@ -171,12 +173,8 @@ mod tests {
         let schema = SelectSchema(cl::SelectSchema {
             use_bogo: false,
             schema: Cow::Owned(vec![ColumnSchema {
-                spec: ColumnSpecification {
-                    column: "tab1.col1".into(),
-                    sql_type: SqlType::BigInt(None),
-                    comment: None,
-                    constraints: vec![],
-                },
+                column: "tab1.col1".into(),
+                column_type: DfType::BigInt,
                 base: None,
             }]),
             columns: Cow::Owned(vec!["col1".into()]),
@@ -198,12 +196,8 @@ mod tests {
         let schema = SelectSchema(cl::SelectSchema {
             use_bogo: false,
             schema: Cow::Owned(vec![ColumnSchema {
-                spec: ColumnSpecification {
-                    column: "tab1.col1".into(),
-                    sql_type: SqlType::BigInt(None),
-                    comment: None,
-                    constraints: vec![],
-                },
+                column: "tab1.col1".into(),
+                column_type: DfType::BigInt,
                 base: None,
             }]),
             columns: Cow::Owned(vec!["col1".into()]),
@@ -226,21 +220,13 @@ mod tests {
             use_bogo: true,
             schema: Cow::Owned(vec![
                 ColumnSchema {
-                    spec: ColumnSpecification {
-                        column: "tab1.col1".into(),
-                        sql_type: SqlType::BigInt(None),
-                        comment: None,
-                        constraints: vec![],
-                    },
+                    column: "tab1.col1".into(),
+                    column_type: DfType::BigInt,
                     base: None,
                 },
                 ColumnSchema {
-                    spec: ColumnSpecification {
-                        column: "tab1.col2".into(),
-                        sql_type: SqlType::Text,
-                        comment: None,
-                        constraints: vec![],
-                    },
+                    column: "tab1.col2".into(),
+                    column_type: DfType::Text(Collation::default()),
                     base: None,
                 },
             ]),
@@ -282,21 +268,13 @@ mod tests {
             use_bogo: true,
             schema: Cow::Owned(vec![
                 ColumnSchema {
-                    spec: ColumnSpecification {
-                        column: "tab1.col1".into(),
-                        sql_type: SqlType::BigInt(None),
-                        comment: None,
-                        constraints: vec![],
-                    },
+                    column: "tab1.col1".into(),
+                    column_type: DfType::BigInt,
                     base: None,
                 },
                 ColumnSchema {
-                    spec: ColumnSpecification {
-                        column: "tab1.col2".into(),
-                        sql_type: SqlType::Text,
-                        comment: None,
-                        constraints: vec![],
-                    },
+                    column: "tab1.col2".into(),
+                    column_type: DfType::Text(Collation::default()),
                     base: None,
                 },
             ]),
