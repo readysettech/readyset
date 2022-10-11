@@ -22,15 +22,15 @@ pub const VERSION_STR_ONELINE: &str = const_str::concat!(
     "{\
 release-version: ",
     RELEASE_VERSION,
-    "commit_id: ",
+    ", commit_id: ",
     COMMIT_ID,
-    "platform: ",
+    ", platform: ",
     PLATFORM,
-    "rustc_version: ",
+    ", rustc_version: ",
     RUSTC_VERSION,
-    "profile: ",
+    ", profile: ",
     PROFILE,
-    "opt_level: ",
+    ", opt_level: ",
     OPT_LEVEL,
     "}"
 );
