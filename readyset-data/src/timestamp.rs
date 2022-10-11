@@ -471,10 +471,9 @@ impl Arbitrary for TimestampTz {
 #[cfg(test)]
 mod tests {
     use chrono::TimeZone;
-    use nom_sql::Dialect;
 
     use super::*;
-    use crate::{Collation, DfType};
+    use crate::{Collation, DfType, Dialect};
 
     #[test]
     fn timestamp_coercion() {
@@ -586,7 +585,7 @@ mod tests {
                     &DfType::Unknown
                 )
                 .unwrap()
-                .coerce_to(&DfType::Json(Dialect::MySQL), &DfType::Unknown)
+                .coerce_to(&DfType::Json(Dialect::DEFAULT_MYSQL), &DfType::Unknown)
                 .unwrap()
             ),
             "\"2022-02-09 13:14:15.169000\""

@@ -2,10 +2,10 @@ use std::fmt;
 
 use enum_kinds::EnumKind;
 use itertools::Itertools;
-use nom_sql::{Dialect, EnumType, Literal, SqlIdentifier, SqlType};
+use nom_sql::{EnumType, Literal, SqlIdentifier, SqlType};
 use serde::{Deserialize, Serialize};
 
-use crate::Collation;
+use crate::{Collation, Dialect};
 
 /// Dataflow runtime representation of [`SqlType`].
 ///
@@ -196,7 +196,6 @@ impl DfType {
 
     /// Internal implementation of `from_sql_type` to avoid monormorphizing two large functions.
     fn from_sql_type_impl(ty: &SqlType, dialect: Dialect) -> Self {
-        use Dialect::*;
         use SqlType::*;
 
         match *ty {
@@ -208,10 +207,7 @@ impl DfType {
             // FIXME(ENG-1650): Convert to `tinyint(1)` for MySQL.
             Bool => Self::Bool,
 
-            Serial => match dialect {
-                MySQL => Self::UnsignedBigInt,
-                PostgreSQL => Self::Int,
-            },
+            Serial => dialect.serial_type(),
             BigSerial => Self::BigInt,
 
             Int(_) => Self::Int,
@@ -224,15 +220,8 @@ impl DfType {
             UnsignedBigInt(_) => Self::UnsignedBigInt,
 
             Double => Self::Double,
-            Float => match dialect {
-                MySQL => Self::Float(dialect),
-                PostgreSQL => Self::Double,
-            },
-            Real => match dialect {
-                // TODO: Handle `real_as_float` mode.
-                MySQL => Self::Double,
-                PostgreSQL => Self::Float(dialect),
-            },
+            Float => dialect.float_type(),
+            Real => dialect.real_type(),
 
             // Decimal and Numeric are semantically aliases.
             Numeric(prec) => {
@@ -314,8 +303,7 @@ impl DfType {
             Self::BigInt => BigInt(None),
             Self::UnsignedBigInt => UnsignedBigInt(None),
 
-            Self::Float(Dialect::MySQL) => Float,
-            Self::Float(Dialect::PostgreSQL) => Real,
+            Self::Float(dialect) => dialect.sql_float_type(),
             Self::Double => Double,
 
             Self::Numeric { prec, scale } => Numeric(Some((prec, Some(scale)))),
@@ -327,8 +315,7 @@ impl DfType {
 
             Self::Binary(n) => Binary(Some(n)),
             Self::VarBinary(n) => VarBinary(n),
-            Self::Blob(Dialect::MySQL) => Blob,
-            Self::Blob(Dialect::PostgreSQL) => ByteArray,
+            Self::Blob(dialect) => dialect.sql_blob_type(),
 
             Self::Bit(n) => Bit(Some(n)),
             Self::VarBit(n) => VarBit(n),
@@ -370,9 +357,9 @@ impl DfType {
         use DfType::*;
 
         match *self {
-            Binary(_) | VarBinary(_) | Date => Some(Dialect::MySQL),
+            Binary(_) | VarBinary(_) | Date => Some(Dialect::DEFAULT_MYSQL),
             Array(_) | TimestampTz { .. } | Jsonb | Inet | Uuid | MacAddr | PassThrough(_) => {
-                Some(Dialect::PostgreSQL)
+                Some(Dialect::DEFAULT_POSTGRESQL)
             }
 
             Float(d) | Enum(.., d) | Char(.., d) | Blob(d) | Json(d) => Some(d),
@@ -713,8 +700,11 @@ mod tests {
                 DfType::UnsignedSmallInt,
                 Some(SqlType::UnsignedSmallInt(None)),
             ),
-            (DfType::Float(Dialect::MySQL), Some(SqlType::Float)),
-            (DfType::Float(Dialect::PostgreSQL), Some(SqlType::Real)),
+            (DfType::Float(Dialect::DEFAULT_MYSQL), Some(SqlType::Float)),
+            (
+                DfType::Float(Dialect::DEFAULT_POSTGRESQL),
+                Some(SqlType::Real),
+            ),
             (DfType::Double, Some(SqlType::Double)),
             (
                 DfType::Numeric {
@@ -725,19 +715,22 @@ mod tests {
             ),
             (DfType::Text(Collation::default()), Some(SqlType::Text)),
             (
-                DfType::Char(len, Collation::default(), Dialect::MySQL),
+                DfType::Char(len, Collation::default(), Dialect::DEFAULT_MYSQL),
                 Some(SqlType::Char(Some(len))),
             ),
             (
-                DfType::Char(len, Collation::default(), Dialect::PostgreSQL),
+                DfType::Char(len, Collation::default(), Dialect::DEFAULT_POSTGRESQL),
                 Some(SqlType::Char(Some(len))),
             ),
             (
                 DfType::VarChar(len, Collation::default()),
                 Some(SqlType::VarChar(Some(len))),
             ),
-            (DfType::Blob(Dialect::MySQL), Some(SqlType::Blob)),
-            (DfType::Blob(Dialect::PostgreSQL), Some(SqlType::ByteArray)),
+            (DfType::Blob(Dialect::DEFAULT_MYSQL), Some(SqlType::Blob)),
+            (
+                DfType::Blob(Dialect::DEFAULT_POSTGRESQL),
+                Some(SqlType::ByteArray),
+            ),
             (DfType::Binary(len), Some(SqlType::Binary(Some(len)))),
             (DfType::VarBinary(len), Some(SqlType::VarBinary(len))),
             (DfType::Bit(len), Some(SqlType::Bit(Some(len)))),
@@ -759,8 +752,11 @@ mod tests {
             (DfType::MacAddr, Some(SqlType::MacAddr)),
             (DfType::Inet, Some(SqlType::Inet)),
             (DfType::Uuid, Some(SqlType::Uuid)),
-            (DfType::Json(Dialect::MySQL), Some(SqlType::Json)),
-            (DfType::Json(Dialect::PostgreSQL), Some(SqlType::Json)),
+            (DfType::Json(Dialect::DEFAULT_MYSQL), Some(SqlType::Json)),
+            (
+                DfType::Json(Dialect::DEFAULT_POSTGRESQL),
+                Some(SqlType::Json),
+            ),
             (DfType::Jsonb, Some(SqlType::Jsonb)),
         ];
 

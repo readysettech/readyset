@@ -120,7 +120,8 @@ mod tests {
     use std::convert::TryInto;
 
     use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
-    use nom_sql::{parse_expr, Dialect, SqlType};
+    use nom_sql::Dialect::*;
+    use nom_sql::{parse_expr, SqlType};
     use readyset_data::DfType;
     use readyset_errors::internal;
     use Expr::*;
@@ -129,9 +130,13 @@ mod tests {
     use crate::utils::{make_column, make_literal};
 
     #[track_caller]
-    pub(crate) fn eval_expr(expr: &str, dialect: Dialect) -> DfValue {
+    pub(crate) fn eval_expr(expr: &str, dialect: nom_sql::Dialect) -> DfValue {
         let ast = parse_expr(dialect, expr).unwrap();
-        let expr = Expr::lower(ast, dialect, |_| internal!()).unwrap();
+        let expr_dialect = match dialect {
+            PostgreSQL => crate::Dialect::DEFAULT_POSTGRESQL,
+            MySQL => crate::Dialect::DEFAULT_MYSQL,
+        };
+        let expr = Expr::lower(ast, expr_dialect, |_| internal!()).unwrap();
         expr.eval::<DfValue>(&[]).unwrap()
     }
 

@@ -230,24 +230,6 @@ impl Dialect {
             Ok((i, (Some(limit), Some(offset))))
         }
     }
-
-    /// Returns the default subsecond digit count for time types.
-    ///
-    /// This value is also known as fractional second precision (FSP), and can be queried via
-    /// `datetime_precision` in [`information_schema.columns`](https://dev.mysql.com/doc/refman/8.0/en/information-schema-columns-table.html).
-    #[inline]
-    pub fn default_subsecond_digits(self) -> u16 {
-        match self {
-            // https://dev.mysql.com/doc/refman/8.0/en/date-and-time-type-syntax.html
-            // "If omitted, the default precision is 0. (This differs from the standard SQL default
-            // of 6, for compatibility with previous MySQL versions.)"
-            Self::MySQL => 0,
-
-            // https://www.postgresql.org/docs/current/datatype-datetime.html
-            // "By default, there is no explicit bound on precision", so the max value is used.
-            Self::PostgreSQL => 6,
-        }
-    }
 }
 
 #[cfg(test)]

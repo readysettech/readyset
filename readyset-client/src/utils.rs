@@ -3,11 +3,11 @@ use std::convert::{TryFrom, TryInto};
 
 use launchpad::hash::hash;
 use nom_sql::{
-    BinaryOperator, Column, ColumnConstraint, CreateTableStatement, DeleteStatement, Dialect, Expr,
+    BinaryOperator, Column, ColumnConstraint, CreateTableStatement, DeleteStatement, Expr,
     InsertStatement, Literal, SelectStatement, SqlIdentifier, SqlQuery, TableKey, UpdateStatement,
 };
 use readyset::{Modification, Operation};
-use readyset_data::{DfType, DfValue};
+use readyset_data::{DfType, DfValue, Dialect};
 use readyset_errors::{
     bad_request_err, invariant, invariant_eq, unsupported, unsupported_err, ReadySetResult,
 };
@@ -421,7 +421,7 @@ where
     I: Iterator<Item = DfValue>,
 {
     // TODO(ENG-1418): Propagate dialect info.
-    let dialect = Dialect::MySQL;
+    let dialect = Dialect::DEFAULT_MYSQL;
 
     let mut updates = Vec::new();
     for (i, field) in schema.fields.iter().enumerate() {
@@ -538,7 +538,7 @@ pub(crate) fn coerce_params(
     schema: &CreateTableStatement,
 ) -> ReadySetResult<Option<Vec<DfValue>>> {
     // TODO(ENG-1418): Propagate dialect info.
-    let dialect = Dialect::MySQL;
+    let dialect = Dialect::DEFAULT_MYSQL;
 
     if let Some(prms) = params {
         let mut coerced_params = vec![];

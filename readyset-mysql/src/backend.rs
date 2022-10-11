@@ -13,12 +13,11 @@ use mysql_srv::{
     CachedSchema, Column, ColumnFlags, ColumnType, InitWriter, MsqlSrvError, MySqlShim,
     QueryResultWriter, RowWriter, StatementMetaWriter,
 };
-use nom_sql::Dialect;
 use readyset_client::backend::noria_connector::MetaVariable;
 use readyset_client::backend::{
     noria_connector, QueryResult, SinglePrepareResult, UpstreamPrepare,
 };
-use readyset_data::{Collation, DfType, DfValue, DfValueKind};
+use readyset_data::{Collation, DfType, DfValue, DfValueKind, Dialect};
 use readyset_errors::{internal, internal_err, ReadySetError};
 use streaming_iterator::StreamingIterator;
 use tokio::io::{self, AsyncWrite};
@@ -335,7 +334,9 @@ where
                             let ty = schema
                                 .schema
                                 .get(coli)
-                                .map(|cs| DfType::from_sql_type(&cs.spec.sql_type, Dialect::MySQL))
+                                .map(|cs| {
+                                    DfType::from_sql_type(&cs.spec.sql_type, Dialect::DEFAULT_MYSQL)
+                                })
                                 .unwrap_or_default();
 
                             if let Err(e) = write_column(&mut rw, &row[coli], c, &ty).await {
@@ -549,7 +550,9 @@ where
                         let column_types = schema
                             .schema
                             .iter()
-                            .map(|cs| DfType::from_sql_type(&cs.spec.sql_type, Dialect::MySQL))
+                            .map(|cs| {
+                                DfType::from_sql_type(&cs.spec.sql_type, Dialect::DEFAULT_MYSQL)
+                            })
                             .collect();
 
                         let preencoded_schema =

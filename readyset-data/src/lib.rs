@@ -19,7 +19,7 @@ use itertools::Itertools;
 use launchpad::arbitrary::{arbitrary_decimal, arbitrary_duration};
 use mysql_time::MySqlTime;
 use ndarray::{ArrayD, IxDyn};
-use nom_sql::{Dialect, Double, Float, Literal, SqlType};
+use nom_sql::{Double, Float, Literal, SqlType};
 use proptest::prelude::{prop_oneof, Arbitrary};
 use readyset_errors::{internal, invalid_err, unsupported, ReadySetError, ReadySetResult};
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
@@ -30,6 +30,7 @@ use uuid::Uuid;
 
 mod array;
 mod collation;
+pub mod dialect;
 mod r#enum;
 mod float;
 mod integer;
@@ -40,6 +41,7 @@ mod r#type;
 
 pub use crate::array::Array;
 pub use crate::collation::Collation;
+pub use crate::dialect::Dialect;
 pub use crate::r#type::{DfType, PgTypeCategory};
 pub use crate::text::{Text, TinyText};
 pub use crate::timestamp::{TimestampTz, TIMESTAMP_FORMAT, TIMESTAMP_PARSE_FORMAT};
@@ -384,7 +386,7 @@ impl DfValue {
         use DfType::*;
 
         // TODO(ENG-1853): Remove dialect once `to_sql_type` is removed.
-        let dialect = Dialect::MySQL;
+        let dialect = Dialect::DEFAULT_MYSQL;
 
         match self {
             Self::None | Self::PassThrough(_) | Self::Max => Unknown,
@@ -456,10 +458,9 @@ impl DfValue {
     /// use std::convert::TryFrom;
     ///
     /// use chrono::NaiveDate;
-    /// use nom_sql::Dialect;
-    /// use readyset_data::{DfType, DfValue};
+    /// use readyset_data::{DfType, DfValue, Dialect};
     ///
-    /// let subsecond_digits = Dialect::MySQL.default_subsecond_digits();
+    /// let subsecond_digits = Dialect::DEFAULT_MYSQL.default_subsecond_digits();
     /// let text = DfValue::from("2021-01-26 10:20:37");
     /// let timestamp = text
     ///     .coerce_to(&DfType::Timestamp { subsecond_digits }, &DfType::Unknown)
@@ -3311,7 +3312,7 @@ mod tests {
 
         #[proptest]
         fn parse_timestamps(#[strategy(arbitrary_naive_date_time())] ndt: NaiveDateTime) {
-            let subsecond_digits = Dialect::MySQL.default_subsecond_digits();
+            let subsecond_digits = Dialect::DEFAULT_MYSQL.default_subsecond_digits();
             let expected = DfValue::from(ndt);
             let input = DfValue::from(ndt.format(crate::timestamp::TIMESTAMP_FORMAT).to_string());
 
@@ -3324,7 +3325,7 @@ mod tests {
 
         #[proptest]
         fn parse_times(#[strategy(arbitrary_naive_time())] nt: NaiveTime) {
-            let subsecond_digits = Dialect::MySQL.default_subsecond_digits();
+            let subsecond_digits = Dialect::DEFAULT_MYSQL.default_subsecond_digits();
             let expected = DfValue::from(nt);
             let input = DfValue::from(nt.format(TIME_FORMAT).to_string());
             let result = input
@@ -3335,7 +3336,7 @@ mod tests {
 
         #[proptest]
         fn parse_datetimes(#[strategy(arbitrary_naive_date())] nd: NaiveDate) {
-            let subsecond_digits = Dialect::MySQL.default_subsecond_digits();
+            let subsecond_digits = Dialect::DEFAULT_MYSQL.default_subsecond_digits();
             let dt = NaiveDateTime::new(nd, NaiveTime::from_hms(12, 0, 0));
             let expected = DfValue::from(dt);
             let input = DfValue::from(dt.format(crate::timestamp::TIMESTAMP_FORMAT).to_string());
@@ -3357,7 +3358,7 @@ mod tests {
 
         #[test]
         fn timestamp_surjections() {
-            let subsecond_digits = Dialect::MySQL.default_subsecond_digits();
+            let subsecond_digits = Dialect::DEFAULT_MYSQL.default_subsecond_digits();
             let input = DfValue::from(NaiveDate::from_ymd(2021, 3, 17).and_hms(11, 34, 56));
             assert_eq!(
                 input.coerce_to(&DfType::Date, &DfType::Unknown).unwrap(),
@@ -3377,7 +3378,7 @@ mod tests {
             subsecond_digits: Option<u16>,
         ) {
             let subsecond_digits =
-                subsecond_digits.unwrap_or(Dialect::MySQL.default_subsecond_digits());
+                subsecond_digits.unwrap_or(Dialect::DEFAULT_MYSQL.default_subsecond_digits());
             let input = DfValue::from(ndt);
             assert_eq!(
                 input
@@ -3445,12 +3446,17 @@ mod tests {
 
         real_conversion!(float_to_double, f32, f64, DfType::Double);
 
-        real_conversion!(double_to_float, f64, f32, DfType::Float(Dialect::MySQL));
+        real_conversion!(
+            double_to_float,
+            f64,
+            f32,
+            DfType::Float(Dialect::DEFAULT_MYSQL)
+        );
 
         #[proptest]
         fn char_equal_length(#[strategy("a{1,30}")] text: String) {
             let input = DfValue::from(text.as_str());
-            let dialect = Dialect::MySQL;
+            let dialect = Dialect::DEFAULT_MYSQL;
             let intermediate = DfType::Char(
                 u16::try_from(text.len()).unwrap(),
                 Collation::default(),
@@ -3464,7 +3470,7 @@ mod tests {
         fn text_to_json() {
             let input = DfValue::from("{\"name\": \"John Doe\", \"age\": 43, \"phones\": [\"+44 1234567\", \"+44 2345678\"] }");
             let result = input
-                .coerce_to(&DfType::Json(Dialect::MySQL), &DfType::Unknown)
+                .coerce_to(&DfType::Json(Dialect::DEFAULT_MYSQL), &DfType::Unknown)
                 .unwrap();
             assert_eq!(input, result);
 
@@ -3472,7 +3478,7 @@ mod tests {
             assert_eq!(input, result);
 
             let input = DfValue::from("not a json");
-            let result = input.coerce_to(&DfType::Json(Dialect::MySQL), &DfType::Unknown);
+            let result = input.coerce_to(&DfType::Json(Dialect::DEFAULT_MYSQL), &DfType::Unknown);
             result.unwrap_err();
 
             let result = input.coerce_to(&DfType::Jsonb, &DfType::Unknown);
@@ -3504,7 +3510,7 @@ mod tests {
             assert_eq!(
                 DfValue::from(20070523i64)
                     .coerce_to(
-                        &DfType::Char(10, Collation::default(), Dialect::MySQL),
+                        &DfType::Char(10, Collation::default(), Dialect::DEFAULT_MYSQL),
                         &DfType::Unknown
                     )
                     .unwrap(),
@@ -3514,7 +3520,7 @@ mod tests {
 
         #[test]
         fn int_to_date_time() {
-            let subsecond_digits = Dialect::MySQL.default_subsecond_digits();
+            let subsecond_digits = Dialect::DEFAULT_MYSQL.default_subsecond_digits();
 
             assert_eq!(
                 DfValue::from(20070523i64)
@@ -3653,7 +3659,7 @@ mod tests {
             let variants = ["red", "yellow", "green"];
             let enum_ty = DfType::from_enum_variants(
                 variants.iter().map(|s| Literal::String(s.to_string())),
-                Dialect::MySQL,
+                Dialect::DEFAULT_MYSQL,
             );
 
             // Test conversions from enums to strings
@@ -3742,7 +3748,7 @@ mod tests {
 
             let result = DfValue::Int(2)
                 .coerce_to(
-                    &DfType::Char(3, Collation::default(), Dialect::MySQL),
+                    &DfType::Char(3, Collation::default(), Dialect::DEFAULT_MYSQL),
                     &enum_ty,
                 )
                 .unwrap();
@@ -3755,7 +3761,7 @@ mod tests {
 
             let result = DfValue::Int(2)
                 .coerce_to(
-                    &DfType::Char(10, Collation::default(), Dialect::MySQL),
+                    &DfType::Char(10, Collation::default(), Dialect::DEFAULT_MYSQL),
                     &enum_ty,
                 )
                 .unwrap();
@@ -3764,7 +3770,7 @@ mod tests {
             let no_change_tys = [
                 DfType::VarChar(10, Collation::default()),
                 // FIXME(ENG-1839)
-                // DfType::Char(None, Collation::default(), Dialect::MySQL),
+                // DfType::Char(None, Collation::default(), Dialect::DEFAULT_MYSQL),
                 DfType::Text(Collation::default()),
             ];
 

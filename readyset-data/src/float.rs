@@ -268,11 +268,10 @@ pub(crate) fn coerce_decimal(
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::Dialect;
     use test_strategy::proptest;
 
     use super::*;
-    use crate::Collation;
+    use crate::{Collation, Dialect};
 
     #[proptest]
     fn float_to_tinyint(val: f32) {
@@ -404,7 +403,7 @@ mod tests {
         assert_eq!(
             DfValue::Double(1e4)
                 .coerce_to(
-                    &DfType::Char(8, Collation::default(), Dialect::MySQL),
+                    &DfType::Char(8, Collation::default(), Dialect::DEFAULT_MYSQL),
                     &DfType::Unknown
                 )
                 .unwrap(),
@@ -423,7 +422,7 @@ mod tests {
     fn float_to_json() {
         assert_eq!(
             DfValue::Double(-5000.0)
-                .coerce_to(&DfType::Json(Dialect::MySQL), &DfType::Unknown)
+                .coerce_to(&DfType::Json(Dialect::DEFAULT_MYSQL), &DfType::Unknown)
                 .unwrap(),
             DfValue::from("-5000")
         );

@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
-use nom_sql::{ColumnSpecification, Dialect, Relation, SqlIdentifier};
+use nom_sql::{ColumnSpecification, Relation, SqlIdentifier};
 use readyset::consistency::Timestamp;
-use readyset_data::DfType;
+use readyset_data::{DfType, Dialect};
 use serde::{Deserialize, Serialize};
 
 use crate::ops;

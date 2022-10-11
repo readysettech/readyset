@@ -4,10 +4,10 @@ use std::sync::Arc;
 
 use bit_vec::BitVec;
 use mysql_time::MySqlTime;
-use nom_sql::{Dialect, SqlIdentifier};
+use nom_sql::SqlIdentifier;
 use postgres_types::Kind;
 use readyset::ReadySetError;
-use readyset_data::{Array, Collation, DfType, DfValue};
+use readyset_data::{Array, Collation, DfType, DfValue, Dialect};
 use rust_decimal::prelude::FromStr;
 use rust_decimal::Decimal;
 use tokio_postgres as pgsql;
@@ -354,7 +354,7 @@ impl wal::TupleData {
 
                     let val = match spec.data_type.kind() {
                         Kind::Array(member_type) => {
-                            let dialect = Dialect::PostgreSQL;
+                            let dialect = Dialect::DEFAULT_POSTGRESQL;
                             let subsecond_digits = dialect.default_subsecond_digits();
 
                             let target_type = DfType::Array(Box::new(match *member_type {

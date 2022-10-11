@@ -584,12 +584,11 @@ impl TextCoerce for Text {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::Dialect;
     use proptest::prop_assume;
     use test_strategy::proptest;
 
     use super::*;
-    use crate::Collation;
+    use crate::{Collation, Dialect};
 
     mod len_and_collation {
         use super::*;
@@ -660,7 +659,7 @@ mod tests {
         let text = DfValue::from("abcdefgh");
         assert_eq!(
             text.coerce_to(
-                &DfType::Char(10, Collation::default(), Dialect::MySQL),
+                &DfType::Char(10, Collation::default(), Dialect::DEFAULT_MYSQL),
                 &DfType::Unknown
             )
             .unwrap(),
@@ -668,7 +667,7 @@ mod tests {
         );
         assert_eq!(
             text.coerce_to(
-                &DfType::Char(4, Collation::default(), Dialect::MySQL),
+                &DfType::Char(4, Collation::default(), Dialect::DEFAULT_MYSQL),
                 &DfType::Unknown
             )
             .unwrap(),
@@ -730,7 +729,7 @@ mod tests {
         // TEXT to FLOAT
         assert_eq!(
             DfValue::from("50")
-                .coerce_to(&DfType::Float(Dialect::MySQL), &DfType::Unknown)
+                .coerce_to(&DfType::Float(Dialect::DEFAULT_MYSQL), &DfType::Unknown)
                 .unwrap(),
             DfValue::Float(50.0),
         );
@@ -828,7 +827,7 @@ mod tests {
             ["red", "yellow", "green"]
                 .map(|s| Literal::String(s.to_string()))
                 .into(),
-            Dialect::MySQL,
+            Dialect::DEFAULT_MYSQL,
         );
         assert_eq!(
             DfValue::from("green")

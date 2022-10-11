@@ -11,8 +11,10 @@ use std::{fmt, iter};
 use itertools::Itertools;
 use launchpad::redacted::Sensitive;
 use nom_sql::{
-    BinaryOperator, Column, Dialect, Expr as AstExpr, FunctionExpr, InValue, SqlType, UnaryOperator,
+    BinaryOperator, Column, Expr as AstExpr, FunctionExpr, InValue, SqlType, UnaryOperator,
 };
+use readyset_data::dialect::SqlEngine;
+pub use readyset_data::Dialect;
 use readyset_data::{Collation, DfType, DfValue};
 use readyset_errors::{internal, invalid_err, unsupported, ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
@@ -222,12 +224,12 @@ impl BuiltinFunction {
                 let arg_tys = iter::once(arg1.ty())
                     .chain(rest_args.iter().map(|arg| arg.ty()))
                     .collect::<Vec<_>>();
-                let (compare_as, ty) = match dialect {
-                    Dialect::PostgreSQL => {
+                let (compare_as, ty) = match dialect.engine() {
+                    SqlEngine::PostgreSQL => {
                         let ty = unify_postgres_types(arg_tys)?;
                         (ty.clone(), ty)
                     }
-                    Dialect::MySQL => {
+                    SqlEngine::MySQL => {
                         // TODO(ENG-1911): What are the rules for MySQL's return type inference?
                         // The documentation just says "The return type of LEAST() is the aggregated
                         // type of the comparison argument types."
@@ -482,7 +484,7 @@ impl Expr {
                 let is_string_literal = lit.is_string();
                 let val: DfValue = lit.try_into()?;
                 // TODO: Infer type from SQL
-                let ty = if is_string_literal && dialect == Dialect::PostgreSQL {
+                let ty = if is_string_literal && dialect.engine() == SqlEngine::PostgreSQL {
                     DfType::Unknown
                 } else {
                     val.infer_dataflow_type()
@@ -730,7 +732,7 @@ mod tests {
     use super::*;
 
     mod lower {
-        use nom_sql::{parse_expr, Float, Literal};
+        use nom_sql::{parse_expr, Dialect as ParserDialect, Float, Literal};
 
         use super::*;
 
@@ -742,14 +744,14 @@ mod tests {
             //  unknown
 
             let input = AstExpr::Literal("abc".into());
-            let result = Expr::lower(input, Dialect::PostgreSQL, |_| internal!()).unwrap();
+            let result = Expr::lower(input, Dialect::DEFAULT_POSTGRESQL, |_| internal!()).unwrap();
             assert_eq!(result.ty(), &DfType::Unknown);
         }
 
         #[test]
         fn simple_column_reference() {
             let input = AstExpr::Column("t.x".into());
-            let result = Expr::lower(input, Dialect::MySQL, |c| {
+            let result = Expr::lower(input, Dialect::DEFAULT_MYSQL, |c| {
                 if c == "t.x".into() {
                     Ok((0, DfType::Int))
                 } else {
@@ -773,7 +775,7 @@ mod tests {
                 arguments: vec![AstExpr::Column("t.x".into()), AstExpr::Literal(2.into())],
             });
 
-            let result = Expr::lower(input, Dialect::MySQL, |c| {
+            let result = Expr::lower(input, Dialect::DEFAULT_MYSQL, |c| {
                 if c == "t.x".into() {
                     Ok((0, DfType::Int))
                 } else {
@@ -802,8 +804,8 @@ mod tests {
 
         #[test]
         fn call_concat_with_texts() {
-            let input = parse_expr(Dialect::MySQL, "concat('My', 'SQ', 'L')").unwrap();
-            let res = Expr::lower(input, Dialect::MySQL, |_| internal!()).unwrap();
+            let input = parse_expr(ParserDialect::MySQL, "concat('My', 'SQ', 'L')").unwrap();
+            let res = Expr::lower(input, Dialect::DEFAULT_MYSQL, |_| internal!()).unwrap();
             assert_eq!(
                 res,
                 Expr::Call {
@@ -830,8 +832,8 @@ mod tests {
 
         #[test]
         fn substring_from_for() {
-            let input = parse_expr(Dialect::MySQL, "substr(col from 1 for 7)").unwrap();
-            let res = Expr::lower(input, Dialect::MySQL, |c| {
+            let input = parse_expr(ParserDialect::MySQL, "substr(col from 1 for 7)").unwrap();
+            let res = Expr::lower(input, Dialect::DEFAULT_MYSQL, |c| {
                 if c == "col".into() {
                     Ok((0, DfType::Text(Collation::Citext)))
                 } else {
@@ -863,8 +865,8 @@ mod tests {
 
         #[test]
         fn substr_regular() {
-            let input = parse_expr(Dialect::MySQL, "substr('abcdefghi', 1, 7)").unwrap();
-            let res = Expr::lower(input, Dialect::MySQL, |_| internal!()).unwrap();
+            let input = parse_expr(ParserDialect::MySQL, "substr('abcdefghi', 1, 7)").unwrap();
+            let res = Expr::lower(input, Dialect::DEFAULT_MYSQL, |_| internal!()).unwrap();
             assert_eq!(
                 res,
                 Expr::Call {
@@ -889,8 +891,8 @@ mod tests {
 
         #[test]
         fn substring_regular() {
-            let input = parse_expr(Dialect::MySQL, "substring('abcdefghi', 1, 7)").unwrap();
-            let res = Expr::lower(input, Dialect::MySQL, |_| internal!()).unwrap();
+            let input = parse_expr(ParserDialect::MySQL, "substring('abcdefghi', 1, 7)").unwrap();
+            let res = Expr::lower(input, Dialect::DEFAULT_MYSQL, |_| internal!()).unwrap();
             assert_eq!(
                 res,
                 Expr::Call {
@@ -915,14 +917,13 @@ mod tests {
 
         #[test]
         fn substring_without_string_arg() {
-            let input = parse_expr(Dialect::MySQL, "substring(123 from 2)").unwrap();
-            let res = Expr::lower(input, Dialect::MySQL, |_| internal!()).unwrap();
+            let input = parse_expr(ParserDialect::MySQL, "substring(123 from 2)").unwrap();
+            let res = Expr::lower(input, Dialect::DEFAULT_MYSQL, |_| internal!()).unwrap();
             assert_eq!(res.ty(), &DfType::Text(Collation::default()));
         }
 
         #[test]
         fn greatest_inferred_type() {
-            use Dialect::*;
             use Literal::Null;
 
             #[track_caller]
@@ -937,21 +938,25 @@ mod tests {
 
             infers_type(
                 vec![Null, Null],
-                PostgreSQL,
-                DfType::Text(Collation::default()),
-            );
-
-            infers_type(vec!["123".into(), 23.into()], PostgreSQL, DfType::BigInt);
-
-            infers_type(
-                vec!["123".into(), "456".into()],
-                PostgreSQL,
+                Dialect::DEFAULT_POSTGRESQL,
                 DfType::Text(Collation::default()),
             );
 
             infers_type(
+                vec!["123".into(), 23.into()],
+                Dialect::DEFAULT_POSTGRESQL,
+                DfType::BigInt,
+            );
+
+            infers_type(
                 vec!["123".into(), "456".into()],
-                PostgreSQL,
+                Dialect::DEFAULT_POSTGRESQL,
+                DfType::Text(Collation::default()),
+            );
+
+            infers_type(
+                vec!["123".into(), "456".into()],
+                Dialect::DEFAULT_POSTGRESQL,
                 DfType::Text(Collation::default()),
             );
 
@@ -963,14 +968,18 @@ mod tests {
                         precision: 2,
                     }),
                 ],
-                PostgreSQL,
+                Dialect::DEFAULT_POSTGRESQL,
                 // TODO: should actually be DfType::Numeric { prec: 10, scale: 0 }, but our type
                 // inference for float literals in pg is (currently) wrong
-                DfType::Float(Dialect::MySQL),
+                DfType::Float(Dialect::DEFAULT_MYSQL),
             );
 
-            infers_type(vec![Null, 23.into()], MySQL, DfType::BigInt);
-            infers_type(vec![Null, Null], MySQL, DfType::Binary(0));
+            infers_type(
+                vec![Null, 23.into()],
+                Dialect::DEFAULT_MYSQL,
+                DfType::BigInt,
+            );
+            infers_type(vec![Null, Null], Dialect::DEFAULT_MYSQL, DfType::Binary(0));
 
             infers_type(
                 vec![
@@ -980,7 +989,7 @@ mod tests {
                         precision: 2,
                     }),
                 ],
-                MySQL,
+                Dialect::DEFAULT_MYSQL,
                 DfType::Text(Collation::default()),
             );
 
@@ -1000,7 +1009,6 @@ mod tests {
 
         #[test]
         fn greatest_compare_as() {
-            use Dialect::*;
             use Literal::Null;
 
             #[track_caller]
@@ -1022,27 +1030,36 @@ mod tests {
 
             compares_as(
                 vec![Null, Null],
-                PostgreSQL,
+                Dialect::DEFAULT_POSTGRESQL,
                 DfType::Text(Collation::default()),
             );
-            compares_as(vec![Null, Null], MySQL, DfType::Unknown);
-            compares_as(vec![Null, "a".into(), "b".into()], MySQL, DfType::Unknown);
+            compares_as(vec![Null, Null], Dialect::DEFAULT_MYSQL, DfType::Unknown);
             compares_as(
                 vec![Null, "a".into(), "b".into()],
-                PostgreSQL,
+                Dialect::DEFAULT_MYSQL,
+                DfType::Unknown,
+            );
+            compares_as(
+                vec![Null, "a".into(), "b".into()],
+                Dialect::DEFAULT_POSTGRESQL,
                 DfType::Text(Collation::default()),
             );
-            compares_as(vec![12u64.into(), (-123).into()], MySQL, DfType::BigInt);
+            compares_as(
+                vec![12u64.into(), (-123).into()],
+                Dialect::DEFAULT_MYSQL,
+                DfType::BigInt,
+            );
             // TODO(ENG-1909)
-            // compares_as(vec![12u64.into(), (-123).into()], PostgreSQL, DfType::Int);
+            // compares_as(vec![12u64.into(), (-123).into()], Dialect::DEFAULT_POSTGRESQL,
+            // DfType::Int);
             compares_as(
                 vec![12u64.into(), "123".into()],
-                MySQL,
+                Dialect::DEFAULT_MYSQL,
                 DfType::Text(Collation::default()),
             );
             compares_as(
                 vec!["A".into(), "b".into(), 1.into()],
-                MySQL,
+                Dialect::DEFAULT_MYSQL,
                 DfType::Text(Collation::default()),
             );
         }

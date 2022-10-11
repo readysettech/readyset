@@ -453,19 +453,20 @@ impl BuiltinFunction {
 mod tests {
     use chrono::{NaiveTime, Timelike};
     use launchpad::arbitrary::arbitrary_timestamp_naive_date_time;
-    use nom_sql::Dialect;
+    use nom_sql::Dialect::*;
     use readyset_data::Collation;
     use test_strategy::proptest;
 
     use super::*;
     use crate::eval::tests::eval_expr;
     use crate::utils::{make_call, make_column, make_literal};
+    use crate::Dialect;
 
     #[test]
     fn eval_call_convert_tz() {
         let expr = make_call(BuiltinFunction::ConvertTZ {
             args: [make_column(0), make_column(1), make_column(2)],
-            subsecond_digits: Dialect::MySQL.default_subsecond_digits(),
+            subsecond_digits: Dialect::DEFAULT_MYSQL.default_subsecond_digits(),
         });
         let datetime = NaiveDateTime::new(
             NaiveDate::from_ymd(2003, 10, 12),
@@ -1283,26 +1284,26 @@ mod tests {
 
     #[test]
     fn greatest_mysql() {
-        assert_eq!(eval_expr("greatest(1, 2, 3)", Dialect::MySQL), 3.into());
+        assert_eq!(eval_expr("greatest(1, 2, 3)", MySQL), 3.into());
         assert_eq!(
-            eval_expr("greatest(123, '23')", Dialect::MySQL),
+            eval_expr("greatest(123, '23')", MySQL),
             23.into() // TODO(ENG-1911) this should be a string!
         );
         assert_eq!(
-            eval_expr("greatest(1.23, '23')", Dialect::MySQL),
+            eval_expr("greatest(1.23, '23')", MySQL),
             (23.0).try_into().unwrap()
         );
     }
 
     #[test]
     fn least_mysql() {
-        assert_eq!(eval_expr("least(1, 2, 3)", Dialect::MySQL), 1u64.into());
+        assert_eq!(eval_expr("least(1, 2, 3)", MySQL), 1u64.into());
         assert_eq!(
-            eval_expr("least(123, '23')", Dialect::MySQL),
+            eval_expr("least(123, '23')", MySQL),
             123.into() // TODO(ENG-1911) this should be a string!
         );
         assert_eq!(
-            eval_expr("least(1.23, '23')", Dialect::MySQL),
+            eval_expr("least(1.23, '23')", MySQL),
             (1.23_f64).try_into().unwrap() // TODO(ENG-1911) this should be a string!
         );
     }
@@ -1311,30 +1312,21 @@ mod tests {
     #[ignore = "ENG-1909"]
     fn greatest_mysql_ints_and_floats() {
         assert_eq!(
-            eval_expr("greatest(1, 2.5, 3)", Dialect::MySQL),
+            eval_expr("greatest(1, 2.5, 3)", MySQL),
             (3.0f64).try_into().unwrap()
         );
     }
 
     #[test]
     fn greatest_postgresql() {
-        assert_eq!(eval_expr("greatest(1,2,3)", Dialect::PostgreSQL), 3.into());
-        assert_eq!(
-            eval_expr("greatest(123, '23')", Dialect::PostgreSQL),
-            123.into()
-        );
-        assert_eq!(
-            eval_expr("greatest(23, '123')", Dialect::PostgreSQL),
-            123.into()
-        );
+        assert_eq!(eval_expr("greatest(1,2,3)", PostgreSQL), 3.into());
+        assert_eq!(eval_expr("greatest(123, '23')", PostgreSQL), 123.into());
+        assert_eq!(eval_expr("greatest(23, '123')", PostgreSQL), 123.into());
     }
 
     #[test]
     fn least_postgresql() {
-        assert_eq!(eval_expr("least(1,2,3)", Dialect::PostgreSQL), 1.into());
-        assert_eq!(
-            eval_expr("least(123, '23')", Dialect::PostgreSQL),
-            23.into()
-        );
+        assert_eq!(eval_expr("least(1,2,3)", PostgreSQL), 1.into());
+        assert_eq!(eval_expr("least(123, '23')", PostgreSQL), 23.into());
     }
 }

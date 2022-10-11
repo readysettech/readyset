@@ -10,9 +10,8 @@ use itertools::Itertools;
 use launchpad::redacted::Sensitive;
 use nom_sql::analysis::visit::Visitor;
 use nom_sql::{
-    self, BinaryOperator, ColumnConstraint, DeleteStatement, Dialect, Expr, InsertStatement,
-    Literal, Relation, SelectStatement, SqlIdentifier, SqlQuery, SqlType, UnaryOperator,
-    UpdateStatement,
+    self, BinaryOperator, ColumnConstraint, DeleteStatement, Expr, InsertStatement, Literal,
+    Relation, SelectStatement, SqlIdentifier, SqlQuery, SqlType, UnaryOperator, UpdateStatement,
 };
 use readyset::consistency::Timestamp;
 use readyset::internal::LocalNodeIndex;
@@ -23,7 +22,7 @@ use readyset::{
     ReadySetHandle, ReadySetResult, SchemaType, Table, TableOperation, View, ViewCreateRequest,
     ViewPlaceholder, ViewQuery, ViewSchema,
 };
-use readyset_data::{DfType, DfValue};
+use readyset_data::{DfType, DfValue, Dialect};
 use readyset_errors::ReadySetError::PreparedStatementMissing;
 use readyset_errors::{
     internal, internal_err, invariant_eq, table_err, unsupported, unsupported_err,
@@ -1088,7 +1087,7 @@ impl NoriaConnector {
         data: Vec<Vec<DfValue>>,
     ) -> ReadySetResult<QueryResult<'_>> {
         // TODO(ENG-1418): Propagate dialect info.
-        let dialect = Dialect::MySQL;
+        let dialect = Dialect::DEFAULT_MYSQL;
 
         let table = &q.table;
 
@@ -1552,7 +1551,7 @@ fn build_view_query(
     read_behavior: ReadBehavior,
 ) -> ReadySetResult<ViewQuery> {
     // TODO(ENG-1418): Propagate dialect info.
-    let dialect = Dialect::MySQL;
+    let dialect = Dialect::DEFAULT_MYSQL;
 
     let projected_schema = getter_schema.schema(SchemaType::ProjectedSchema);
 

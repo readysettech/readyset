@@ -25,7 +25,7 @@ use dataflow::utils::{dataflow_column, make_columns};
 use dataflow::{DurabilityMode, Expr as DfExpr, PersistenceParameters, ReaderProcessing};
 use futures::StreamExt;
 use itertools::Itertools;
-use nom_sql::{parse_query, BinaryOperator, Dialect, OrderType, Relation, SqlQuery};
+use nom_sql::{parse_query, BinaryOperator, OrderType, Relation, SqlQuery};
 use readyset::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use readyset::consistency::Timestamp;
 use readyset::internal::LocalNodeIndex;
@@ -3489,7 +3489,7 @@ async fn finkelstein1982_queries() {
 
         // Add them one by one
         for q in lines.iter() {
-            let q = parse_query(Dialect::MySQL, q).unwrap();
+            let q = parse_query(nom_sql::Dialect::MySQL, q).unwrap();
             match q {
                 SqlQuery::CreateTable(stmt) => {
                     inc.add_table(inc.rewrite(stmt, &[], None).unwrap(), mig)
@@ -6049,7 +6049,7 @@ async fn simple_enum() {
         .col_types([0], SchemaType::ReturnedSchema)
         .unwrap()[0];
 
-    let result_type = DfType::from_sql_type(result_type, Dialect::MySQL);
+    let result_type = DfType::from_sql_type(result_type, readyset_data::Dialect::DEFAULT_MYSQL);
 
     assert_eq!(result.len(), 3);
 

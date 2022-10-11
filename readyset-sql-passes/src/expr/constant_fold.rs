@@ -1,6 +1,6 @@
 use dataflow_expression::Expr as DataflowExpr;
 use nom_sql::analysis::visit::{self, Visitor};
-use nom_sql::{Dialect, Expr, Literal};
+use nom_sql::{Expr, Literal};
 use readyset_data::DfValue;
 use readyset_errors::{internal, ReadySetResult};
 
@@ -9,7 +9,7 @@ use readyset_errors::{internal, ReadySetResult};
 /// Returns an error if the expression evaluation failed, or if the expression is not constant
 fn const_eval(expr: &Expr) -> ReadySetResult<Literal> {
     // TODO(ENG-1418): Propagate dialect info.
-    let dialect = Dialect::MySQL;
+    let dialect = dataflow_expression::Dialect::DEFAULT_MYSQL;
 
     let dataflow_expr =
         DataflowExpr::lower(expr.clone(), dialect, |_| internal!("Can't resolve column"))?;

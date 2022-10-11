@@ -21,13 +21,11 @@ use mir::node::node_inner::MirNodeInner;
 use mir::node::{GroupedNodeType, MirNode};
 use mir::query::{MirQuery, QueryFlowParts};
 use mir::{Column, FlowNode, MirNodeRef};
-use nom_sql::{
-    ColumnConstraint, ColumnSpecification, Dialect, Expr, OrderType, Relation, SqlIdentifier,
-};
+use nom_sql::{ColumnConstraint, ColumnSpecification, Expr, OrderType, Relation, SqlIdentifier};
 use petgraph::graph::NodeIndex;
 use readyset::internal::{Index, IndexType};
 use readyset::ViewPlaceholder;
-use readyset_data::{Collation, DfType};
+use readyset_data::{Collation, DfType, Dialect};
 use readyset_errors::{
     internal, internal_err, invariant, invariant_eq, unsupported, ReadySetError, ReadySetResult,
 };
@@ -394,7 +392,7 @@ fn adapt_base_node(
     remove: &[ColumnSpecification],
 ) -> ReadySetResult<FlowNode> {
     // TODO(ENG-1418): Propagate dialect info.
-    let dialect = Dialect::MySQL;
+    let dialect = Dialect::DEFAULT_MYSQL;
 
     let na = match over_node.borrow().flow_node {
         None => internal!("adapted base node must have a flow node already!"),
@@ -456,7 +454,7 @@ fn make_base_node(
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<FlowNode> {
     // TODO(ENG-1418): Propagate dialect info.
-    let dialect = Dialect::MySQL;
+    let dialect = Dialect::DEFAULT_MYSQL;
 
     // remember the absolute base column ID for potential later removal
     for (i, cs) in column_specs.iter_mut().enumerate() {
@@ -922,7 +920,7 @@ fn lower_expression(
     parent_cols: &[DfColumn],
 ) -> ReadySetResult<DfExpr> {
     // TODO(ENG-1418): Propagate dialect info.
-    let dialect = Dialect::MySQL;
+    let dialect = Dialect::DEFAULT_MYSQL;
 
     DfExpr::lower(expr, dialect, |nom_sql::Column { name, table, .. }| {
         let index = parent
