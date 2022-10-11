@@ -31,12 +31,12 @@
 //!
 //! * Explicit migrations: only `CREATE CACHE` and `CREATE VIEW` will cause migrations.
 //! A `CREATE PREPARED STATEMENT` will not cause a migration, and queries will go to upstream
-//! fallback. Enabled with the `--explicit-migrations` flag. However if a migration already
+//! fallback. Enabled with the `--query-caching=explicit` argument. However if a migration already
 //! happened, we will use it.
 //! * Async migration: prepared statements will be put in a [`QueryStatusCache`] and another
 //! thread will perform migrations in the background. Once a statement finished migration it
 //! will execute on ReadySet, while it is waiting for a migration to happen it will execute on
-//! fallback. Enabled with the `--async-migrations` flag.
+//! fallback. Enabled with the `--query-caching=async` flag.
 //! * In request path: migrations will happen when either `CREATE CACHE` or
 //! `CREATE PREPARED STATEMENT` are called. It is also the only available option when a
 //! upstream fallback is not available.
@@ -595,10 +595,10 @@ pub enum MigrationMode {
     /// migrated yet, send it to fallback if fallback exists, otherwise reject
     /// the query.
     ///
-    /// This mode is used when something other operation is performing the
-    /// migrations and updating a queries migration status. Either
-    /// --async-migrations which runs migrations in a separate thread,
-    /// or --explicit-migrations which enables special syntax to perform
+    /// This mode is used when some other operation is performing the
+    /// migrations and updating a query's migration status. Either
+    /// --query-caching=async which runs migrations in a separate thread,
+    /// or --query-caching=explicit which enables special syntax to perform
     /// migrations "CREATE CACHE ..." may be used.
     OutOfBand,
 }

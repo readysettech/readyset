@@ -187,9 +187,14 @@ pub struct Options {
     #[clap(long, env = "ALLOW_UNAUTHENTICATED_CONNECTIONS")]
     allow_unauthenticated_connections: bool,
 
-    /// Run migrations in a separate thread off of the serving path.
-    #[clap(long, env = "ASYNC_MIGRATIONS", requires("upstream-db-url"))]
-    async_migrations: bool,
+    /// Specify the migration mode for ReadySet to use
+    #[clap(
+        long,
+        env = "QUERY_CACHING",
+        default_value = "inrequestpath",
+        possible_values = &["inrequestpath", "explicit", "async"]
+    )]
+    query_caching: MigrationStyle,
 
     /// Sets the maximum time in minutes that we will retry migrations for in the
     /// migration handler. If this time is reached, the query will be exclusively
@@ -276,11 +281,6 @@ pub struct Options {
         parse(try_from_str)
     )]
     unsupported_set_mode: UnsupportedSetMode,
-
-    /// Only run migrations through CREATE CACHE statements. Async migrations are not
-    /// supported in this case.
-    #[clap(long, env = "EXPLICIT_MIGRATIONS", conflicts_with = "async-migrations")]
-    explicit_migrations: bool,
 
     // TODO(DAN): require explicit migrations
     /// Specifies the polling interval in seconds for requesting views from the Leader.
@@ -540,13 +540,8 @@ where
             ReadBehavior::Blocking
         };
 
-        let migration_style = if options.async_migrations {
-            MigrationStyle::Async
-        } else if options.explicit_migrations {
-            MigrationStyle::Explicit
-        } else {
-            MigrationStyle::InRequestPath
-        };
+        let migration_style = options.query_caching;
+
         rs_connect.in_scope(|| info!(?migration_style));
 
         let query_status_cache: &'static _ =
@@ -575,11 +570,11 @@ where
             })
             .map_err(|error| warn!(%error, "Failed to initialize telemetry sender"));
 
-        let migration_mode = if options.async_migrations || options.explicit_migrations {
-            MigrationMode::OutOfBand
-        } else {
-            MigrationMode::InRequestPath
+        let migration_mode = match migration_style {
+            MigrationStyle::Async | MigrationStyle::Explicit => MigrationMode::OutOfBand,
+            MigrationStyle::InRequestPath => MigrationMode::InRequestPath,
         };
+
         rs_connect.in_scope(|| info!(?migration_mode));
 
         // Spawn a task for handling this adapter's HTTP request server.
@@ -641,7 +636,7 @@ where
             let loop_interval = options.migration_task_interval;
             let max_retry = options.max_processing_minutes;
             let validate_queries = options.validate_queries;
-            let dry_run = options.explicit_migrations;
+            let dry_run = matches!(migration_style, MigrationStyle::Explicit);
             let upstream_config = options.server_worker_options.replicator_config.clone();
             let expr_dialect = self.expr_dialect;
             let fallback_cache = fallback_cache.clone();
@@ -713,7 +708,7 @@ where
             rt.handle().spawn(abort_on_panic(fut));
         }
 
-        if options.explicit_migrations {
+        if matches!(migration_style, MigrationStyle::Explicit) {
             rs_connect.in_scope(|| info!("Spawning explicit migrations task"));
             let rh = rh.clone();
             let loop_interval = options.views_polling_interval;
@@ -1152,7 +1147,7 @@ mod tests {
             "--allow-unauthenticated-connections",
             "--upstream-db-url",
             "mysql://root:password@mysql:3306/readyset",
-            "--async-migrations",
+            "--query-caching=async",
         ]);
 
         assert_eq!(opts.max_processing_minutes, 15);

@@ -3,8 +3,10 @@
 //! ReadySet.
 use std::borrow::Borrow;
 use std::hash::Hash;
+use std::str::FromStr;
 use std::time::{Duration, Instant};
 
+use anyhow::anyhow;
 use dashmap::DashMap;
 use launchpad::hash::hash;
 use readyset::query::*;
@@ -372,15 +374,29 @@ impl QueryStatusCache {
 }
 
 /// MigrationStyle is used to communicate which style of managing migrations we have configured.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum MigrationStyle {
-    /// Async migrations are enabled in the adapter by passing the --async-migrations flag.
+    /// Async migrations are enabled in the adapter by setting the --query-caching argument to
+    /// async
     Async,
-    /// Explicit migrations are enabled in the adapter by passing the --explicit-migrations flag.
+    /// Explicit migrations are enabled in the adapter by setting the --query-caching argument to
+    /// explicit
     Explicit,
     /// InRequestPath is the style of managing migrations when neither async nor explicit
     /// migrations have been enabled.
     InRequestPath,
+}
+
+impl FromStr for MigrationStyle {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "inrequestpath" => Ok(MigrationStyle::InRequestPath),
+            "async" => Ok(MigrationStyle::Async),
+            "explicit" => Ok(MigrationStyle::Explicit),
+            other => Err(anyhow!("Invalid option specified: {}", other)),
+        }
+    }
 }
 
 #[cfg(test)]

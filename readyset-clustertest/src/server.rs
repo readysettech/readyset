@@ -256,7 +256,7 @@ impl AdapterBuilder {
     }
 
     pub fn async_migrations(mut self, migration_task_interval: u64) -> Self {
-        self.args.push("--async-migrations".to_string());
+        self.args.push("--query-caching=async".to_string());
         self.push_arg(
             "--migration-task-interval",
             &migration_task_interval.to_string(),
@@ -264,7 +264,7 @@ impl AdapterBuilder {
     }
 
     pub fn explicit_migrations(mut self, dry_run_task_interval: u64) -> Self {
-        self.args.push("--explicit-migrations".to_string());
+        self.args.push("--query-caching=explicit".to_string());
         self.push_arg(
             "--migration-task-interval",
             &dry_run_task_interval.to_string(),
