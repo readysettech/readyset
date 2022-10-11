@@ -191,7 +191,8 @@ impl TestBuilder {
                     Default::default()
                 };
 
-                let rh = ReadySetHandle::new(authority).await;
+                let mut rh = ReadySetHandle::new(authority).await;
+                let server_supports_pagination = rh.supports_pagination().await.unwrap();
                 let noria = NoriaConnector::new(
                     rh,
                     auto_increments,
@@ -199,6 +200,7 @@ impl TestBuilder {
                     self.read_behavior,
                     A::EXPR_DIALECT,
                     schema_search_path,
+                    server_supports_pagination,
                 )
                 .await;
 

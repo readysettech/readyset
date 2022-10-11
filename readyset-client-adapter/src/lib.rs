@@ -617,7 +617,7 @@ where
 
         if let MigrationMode::OutOfBand = migration_mode {
             set_failpoint!("adapter-out-of-band");
-            let rh = rh.clone();
+            let mut rh = rh.clone();
             let (auto_increments, query_cache) = (auto_increments.clone(), query_cache.clone());
             let shutdown_recv = shutdown_sender.subscribe();
             let loop_interval = options.migration_task_interval;
@@ -651,6 +651,11 @@ where
                     Default::default()
                 };
 
+                let server_supports_pagination = rh
+                    .supports_pagination()
+                    .await
+                    .expect("Failed to query readyset-server for pagination support status");
+
                 //TODO(DAN): allow compatibility with async and explicit migrations
                 let noria =
                     NoriaConnector::new(
@@ -660,6 +665,7 @@ where
                         noria_read_behavior,
                         expr_dialect,
                         schema_search_path,
+                        server_supports_pagination,
                     )
                     .instrument(connection.in_scope(|| {
                         span!(Level::DEBUG, "Building migration task noria connector")
@@ -772,6 +778,12 @@ where
 
         health_reporter.set_state(AdapterState::Healthy);
 
+        let server_supports_pagination = {
+            let mut rh = rh.clone();
+            rt.block_on(async { rh.supports_pagination().await })?
+        };
+        rs_connect.in_scope(|| info!(supported = %server_supports_pagination));
+
         let expr_dialect = self.expr_dialect;
         while let Some(Ok(s)) = rt.block_on(listener.next()) {
             let connection = span!(Level::DEBUG, "connection", addr = ?s.peer_addr().unwrap());
@@ -861,6 +873,7 @@ where
                                     r,
                                     expr_dialect,
                                     ssp,
+                                    server_supports_pagination,
                                 )
                                 .instrument(debug_span!("Building noria connector"))
                                 .await;

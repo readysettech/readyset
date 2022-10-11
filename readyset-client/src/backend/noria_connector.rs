@@ -29,7 +29,7 @@ use readyset_errors::{
 };
 use readyset_server::worker::readers::{CallResult, ReadRequestHandler};
 use readyset_sql_passes::anonymize::anonymize_literals;
-use tracing::{debug, error, info, instrument, trace};
+use tracing::{error, info, instrument, trace};
 use vec1::vec1;
 
 use crate::backend::SelectSchema;
@@ -102,16 +102,13 @@ macro_rules! noria_await {
 }
 
 impl NoriaBackendInner {
-    async fn new(mut ch: ReadySetHandle) -> ReadySetResult<Self> {
-        let server_supports_pagination = ch.supports_pagination().await?;
-        debug!(supported = %server_supports_pagination, "Check backend pagination support");
-
-        Ok(NoriaBackendInner {
+    async fn new(ch: ReadySetHandle, server_supports_pagination: bool) -> Self {
+        NoriaBackendInner {
             tables: BTreeMap::new(),
             views: BTreeMap::new(),
             noria: ch,
             server_supports_pagination,
-        })
+        }
     }
 
     async fn get_noria_table(&mut self, table: &Relation) -> ReadySetResult<&mut Table> {
@@ -467,6 +464,7 @@ impl NoriaConnector {
         read_behavior: ReadBehavior,
         dialect: Dialect,
         schema_search_path: Vec<SqlIdentifier>,
+        server_supports_pagination: bool,
     ) -> Self {
         NoriaConnector::new_with_local_reads(
             ch,
@@ -476,10 +474,12 @@ impl NoriaConnector {
             None,
             dialect,
             schema_search_path,
+            server_supports_pagination,
         )
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn new_with_local_reads(
         ch: ReadySetHandle,
         auto_increments: Arc<RwLock<HashMap<Relation, atomic::AtomicUsize>>>,
@@ -488,15 +488,13 @@ impl NoriaConnector {
         read_request_handler: Option<ReadRequestHandler>,
         dialect: Dialect,
         schema_search_path: Vec<SqlIdentifier>,
+        server_supports_pagination: bool,
     ) -> Self {
-        let backend = NoriaBackendInner::new(ch).await;
-        if let Err(e) = &backend {
-            error!(%e, "Error creating a noria backend");
-        }
+        let backend = NoriaBackendInner::new(ch, server_supports_pagination).await;
 
         NoriaConnector {
             inner: NoriaBackend {
-                inner: backend.ok(),
+                inner: Some(backend),
             },
             auto_increments,
             view_cache: ViewCache::new(query_cache),

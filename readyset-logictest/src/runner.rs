@@ -514,7 +514,9 @@ impl TestScript {
         };
         let addr = listener.local_addr().unwrap();
 
-        let rh = ReadySetHandle::new(authority).await;
+        let mut rh = ReadySetHandle::new(authority).await;
+
+        let server_supports_pagination = rh.supports_pagination().await.unwrap();
 
         let task = tokio::spawn(async move {
             let (s, _) = listener.accept().await.unwrap();
@@ -529,6 +531,7 @@ impl TestScript {
                     DatabaseType::PostgreSQL => readyset_data::Dialect::DEFAULT_POSTGRESQL,
                 },
                 Default::default(),
+                server_supports_pagination,
             )
             .await;
             let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
