@@ -22,6 +22,8 @@ use nom::combinator::{complete, eof, map, map_opt, map_parser, opt, peek, recogn
 use nom::multi::{count, many0, many1, many_till};
 use nom::sequence::{pair, preceded, terminated, tuple};
 use nom::IResult;
+use nom_locate::LocatedSpan;
+use nom_sql::to_nom_result;
 use nom_sql::whitespace::whitespace1;
 use readyset_data::TIMESTAMP_PARSE_FORMAT;
 
@@ -36,7 +38,7 @@ fn comment(i: &[u8]) -> IResult<&[u8], ()> {
 
 fn skipif(i: &[u8]) -> IResult<&[u8], Conditional> {
     let (i, _) = tag("skipif")(i)?;
-    let (i, _) = whitespace1(i)?;
+    let (i, _) = to_nom_result(whitespace1(LocatedSpan::new(i)))?;
     let (i, name) = map(alphanumeric1, String::from_utf8_lossy)(i)?;
     let (i, _) = opt(comment)(i)?;
     Ok((i, Conditional::SkipIf(name.to_string())))
@@ -44,7 +46,7 @@ fn skipif(i: &[u8]) -> IResult<&[u8], Conditional> {
 
 fn onlyif(i: &[u8]) -> IResult<&[u8], Conditional> {
     let (i, _) = tag("onlyif")(i)?;
-    let (i, _) = whitespace1(i)?;
+    let (i, _) = to_nom_result(whitespace1(LocatedSpan::new(i)))?;
     let (i, name) = map(alphanumeric1, String::from_utf8_lossy)(i)?;
     let (i, _) = opt(comment)(i)?;
     Ok((i, Conditional::OnlyIf(name.to_string())))
@@ -67,7 +69,7 @@ fn conditionals(i: &[u8]) -> IResult<&[u8], Vec<Conditional>> {
 
 fn statement_header(i: &[u8]) -> IResult<&[u8], StatementResult> {
     let (i, _) = tag("statement")(i)?;
-    let (i, _) = whitespace1(i)?;
+    let (i, _) = to_nom_result(whitespace1(LocatedSpan::new(i)))?;
 
     alt((
         map(tag("ok"), |_| StatementResult::Ok),
@@ -223,9 +225,9 @@ fn value(i: &[u8]) -> IResult<&[u8], Value> {
 
 fn positional_param(i: &[u8]) -> IResult<&[u8], Value> {
     let (i, _) = tag("?")(i)?;
-    let (i, _) = whitespace1(i)?;
+    let (i, _) = to_nom_result(whitespace1(LocatedSpan::new(i)))?;
     let (i, _) = tag("=")(i)?;
-    let (i, _) = whitespace1(i)?;
+    let (i, _) = to_nom_result(whitespace1(LocatedSpan::new(i)))?;
     let (i, value) = value(i)?;
 
     Ok((i, value))
@@ -238,9 +240,9 @@ fn positional_params(i: &[u8]) -> IResult<&[u8], QueryParams> {
 fn numbered_param(i: &[u8]) -> IResult<&[u8], (u32, Value)> {
     let (i, _) = tag("$")(i)?;
     let (i, digit) = map_parser(digit1, nom::character::complete::u32)(i)?;
-    let (i, _) = whitespace1(i)?;
+    let (i, _) = to_nom_result(whitespace1(LocatedSpan::new(i)))?;
     let (i, _) = tag("=")(i)?;
-    let (i, _) = whitespace1(i)?;
+    let (i, _) = to_nom_result(whitespace1(LocatedSpan::new(i)))?;
     let (i, value) = value(i)?;
 
     Ok((i, (digit, value)))
@@ -325,7 +327,7 @@ fn hash_threshold(i: &[u8]) -> IResult<&[u8], Record> {
 
 fn sleep(i: &[u8]) -> IResult<&[u8], Record> {
     let (i, _) = tag("sleep")(i)?;
-    let (i, _) = whitespace1(i)?;
+    let (i, _) = to_nom_result(whitespace1(LocatedSpan::new(i)))?;
     let (i, len) = map_parser(digit1, nom::character::complete::u64)(i)?;
     Ok((i, Record::Sleep(len)))
 }
@@ -351,7 +353,13 @@ pub fn record(i: &[u8]) -> IResult<&[u8], Record> {
 }
 
 pub fn ignore(i: &[u8]) -> IResult<&[u8], ()> {
-    map(opt(many1(alt((comment, map(whitespace1, |_| ()))))), |_| ())(i)
+    map(
+        opt(many1(alt((
+            comment,
+            map(|i| to_nom_result(whitespace1(LocatedSpan::new(i))), |_| ()),
+        )))),
+        |_| (),
+    )(i)
 }
 
 pub fn records(i: &[u8]) -> IResult<&[u8], Vec<Record>> {

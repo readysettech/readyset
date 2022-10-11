@@ -10,14 +10,16 @@ use std::ops::{Range, RangeFrom, RangeTo};
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case, take_until};
 use nom::character::complete::{line_ending, not_line_ending};
-use nom::combinator::value;
-use nom::error::ParseError;
+use nom::combinator::{map, value};
 use nom::multi::{many0, many1};
 use nom::sequence::delimited;
 use nom::{
-    AsChar, Compare, FindSubstring, FindToken, IResult, InputIter, InputLength, InputTake,
-    InputTakeAtPosition, Slice,
+    AsBytes, AsChar, Compare, FindSubstring, FindToken, InputIter, InputLength, InputTake,
+    InputTakeAtPosition, Offset, Slice,
 };
+use nom_locate::LocatedSpan;
+
+use crate::NomSqlResult;
 
 /// Recognizes a multiline comment of the form `/* ... */`, skipping the `/*` and `*/`,
 /// to return the comment content.
@@ -27,10 +29,12 @@ use nom::{
 /// ```
 /// # use nom::error::ErrorKind;
 /// # use nom::{Err, IResult, Needed};
+/// use nom_locate::LocatedSpan;
 /// use nom_sql::whitespace::multiline_comment;
+/// use nom_sql::{to_nom_result, NomSqlResult};
 ///
 /// fn parser(input: &str) -> IResult<&str, &str> {
-///     multiline_comment(input)
+///     to_nom_result(multiline_comment(LocatedSpan::new(input)))
 /// }
 ///
 /// assert_eq!(
@@ -43,11 +47,21 @@ use nom::{
 ///     Err(Err::Error(nom::error::Error::new("Z21c", ErrorKind::Tag)))
 /// );
 /// ```
-pub fn multiline_comment<I, E: ParseError<I>>(input: I) -> IResult<I, I, E>
+pub fn multiline_comment<I>(input: LocatedSpan<I>) -> NomSqlResult<I, I>
 where
-    I: InputTake + Compare<&'static str> + FindSubstring<&'static str>,
+    I: InputTake
+        + Compare<&'static str>
+        + FindSubstring<&'static str>
+        + Slice<RangeFrom<usize>>
+        + Offset
+        + AsBytes
+        + Slice<RangeTo<usize>>
+        + Copy,
 {
-    delimited(tag_no_case("/*"), take_until("*/"), tag_no_case("*/"))(input)
+    map(
+        delimited(tag_no_case("/*"), take_until("*/"), tag_no_case("*/")),
+        |input: LocatedSpan<I>| *input,
+    )(input)
 }
 
 /// Recognizes a EOL style comment of the form `# ...` (in case the start tag is '#'), skipping the
@@ -57,10 +71,12 @@ where
 ///
 /// ```
 /// # use nom::{Err, error::ErrorKind, IResult, Needed};
+/// use nom_locate::LocatedSpan;
 /// use nom_sql::whitespace::eol_comment;
+/// use nom_sql::{to_nom_result, NomSqlResult};
 ///
 /// fn parser(input: &str) -> IResult<&str, &str> {
-///     eol_comment("#")(input)
+///     to_nom_result(eol_comment("#")(LocatedSpan::new(input)))
 /// }
 ///
 /// assert_eq!(
@@ -73,24 +89,33 @@ where
 ///     Err(Err::Error(nom::error::Error::new("\rZ21c", ErrorKind::Tag)))
 /// );
 /// ```
-pub fn eol_comment<'a, I, T, E: ParseError<I>>(tag: T) -> impl Fn(I) -> IResult<I, I, E>
+pub fn eol_comment<'a, I, T>(tag: T) -> impl Fn(LocatedSpan<I>) -> NomSqlResult<I, I>
 where
-    I: InputTake
-        + InputTakeAtPosition
+    I: AsBytes
+        + Clone
         + Compare<&'static str>
         + Compare<T>
         + FindSubstring<&'a str>
-        + Slice<Range<usize>>
-        + Slice<RangeTo<usize>>
-        + Slice<RangeFrom<usize>>
         + InputIter
         + InputLength
-        + Clone,
+        + InputTake
+        + InputTakeAtPosition
+        + Offset
+        + Slice<Range<usize>>
+        + Slice<RangeTo<usize>>
+        + Slice<RangeFrom<usize>>,
+    LocatedSpan<I>: Compare<T>,
     <I as InputIter>::Item: AsChar,
     &'a str: FindToken<<I as InputTakeAtPosition>::Item>,
     T: InputLength + Clone,
 {
-    move |input: I| delimited(tag_no_case(tag.clone()), not_line_ending, line_ending)(input)
+    move |input: LocatedSpan<I>| {
+        delimited(
+            tag_no_case(tag.clone()),
+            map(not_line_ending, |input: LocatedSpan<I>| (*input).clone()),
+            line_ending,
+        )(input)
+    }
 }
 
 /// Recognizes what we consider a whitespace in SQL. A whitespace can be:
@@ -110,10 +135,12 @@ where
 /// ```
 /// # use nom::error::ErrorKind;
 /// # use nom::{Err, IResult, Needed};
+/// use nom_locate::LocatedSpan;
 /// use nom_sql::whitespace::whitespace;
+/// use nom_sql::{to_nom_result, NomSqlResult};
 ///
 /// fn parser(input: &str) -> IResult<&str, &str> {
-///     whitespace(input)
+///     to_nom_result(whitespace(LocatedSpan::new(input)))
 /// }
 ///
 /// assert_eq!(parser(" \t\r\n21c"), Ok(("\t\r\n21c", "")));
@@ -127,20 +154,23 @@ where
 /// );
 /// assert_eq!(parser("# comment\nZ21c"), Ok(("Z21c", " comment")));
 /// ```
-pub fn whitespace<I, T, E: ParseError<I>>(input: I) -> IResult<I, I, E>
+pub fn whitespace<I, T>(input: LocatedSpan<I>) -> NomSqlResult<I, I>
 where
-    I: InputTake
-        + InputTakeAtPosition<Item = T>
+    I: AsBytes
+        + Clone
+        + Copy
         + Compare<&'static str>
+        + Default
         + FindSubstring<&'static str>
+        + InputIter
+        + InputLength
+        + InputTake
+        + InputTakeAtPosition<Item = T>
+        + Offset
         + Slice<RangeFrom<usize>>
         + Slice<Range<usize>>
         + Slice<RangeTo<usize>>
-        + Slice<RangeFrom<usize>>
-        + InputIter
-        + InputLength
-        + Default
-        + Clone,
+        + Slice<RangeFrom<usize>>,
     <I as InputIter>::Item: AsChar + Clone,
     &'static str: FindToken<<I as InputTakeAtPosition>::Item>,
 {
@@ -162,10 +192,12 @@ where
 /// ```
 /// # use nom::error::ErrorKind;
 /// # use nom::{Err, IResult, Needed};
+/// use nom_locate::LocatedSpan;
 /// use nom_sql::whitespace::whitespace0;
+/// use nom_sql::{to_nom_result, NomSqlResult};
 ///
 /// fn parser(input: &str) -> IResult<&str, Vec<&str>> {
-///     whitespace0(input)
+///     to_nom_result(whitespace0(LocatedSpan::new(input)))
 /// }
 ///
 /// assert_eq!(parser(" \t\r\n21c"), Ok(("21c", vec![])));
@@ -179,20 +211,23 @@ where
 ///     Ok(("Z21c", vec![" comment", " other comment "]))
 /// );
 /// ```
-pub fn whitespace0<I, T, E: ParseError<I>>(input: I) -> IResult<I, Vec<I>, E>
+pub fn whitespace0<I, T>(input: LocatedSpan<I>) -> NomSqlResult<I, Vec<I>>
 where
-    I: InputTake
-        + InputTakeAtPosition<Item = T>
+    I: AsBytes
+        + Clone
+        + Copy
         + Compare<&'static str>
+        + Default
         + FindSubstring<&'static str>
-        + Slice<Range<usize>>
-        + Slice<RangeTo<usize>>
-        + Slice<RangeFrom<usize>>
         + InputIter
         + InputLength
-        + Default
-        + Clone
-        + PartialEq,
+        + InputTake
+        + InputTakeAtPosition<Item = T>
+        + Offset
+        + PartialEq
+        + Slice<Range<usize>>
+        + Slice<RangeTo<usize>>
+        + Slice<RangeFrom<usize>>,
     <I as InputIter>::Item: AsChar + Clone,
     &'static str: FindToken<<I as InputTakeAtPosition>::Item>,
 {
@@ -209,10 +244,12 @@ where
 /// ```
 /// # use nom::error::ErrorKind;
 /// # use nom::{Err, IResult, Needed};
+/// use nom_locate::LocatedSpan;
 /// use nom_sql::whitespace::whitespace1;
+/// use nom_sql::{to_nom_result, NomSqlResult};
 ///
 /// fn parser(input: &str) -> IResult<&str, Vec<&str>> {
-///     whitespace1(input)
+///     to_nom_result(whitespace1(LocatedSpan::new(input)))
 /// }
 ///
 /// assert_eq!(parser(" \t\r\n21c"), Ok(("21c", vec![])));
@@ -229,19 +266,23 @@ where
 ///     Ok(("Z21c", vec![" comment", " other comment "]))
 /// );
 /// ```
-pub fn whitespace1<I, T, E: ParseError<I>>(input: I) -> IResult<I, Vec<I>, E>
+pub fn whitespace1<I, T>(input: LocatedSpan<I>) -> NomSqlResult<I, Vec<I>>
 where
-    I: InputTake
-        + InputTakeAtPosition<Item = T>
+    I: AsBytes
+        + Clone
+        + Copy
         + Compare<&'static str>
+        + Default
         + FindSubstring<&'static str>
-        + Slice<Range<usize>>
-        + Slice<RangeTo<usize>>
-        + Slice<RangeFrom<usize>>
         + InputIter
         + InputLength
-        + Default
-        + Clone,
+        + InputTake
+        + InputTakeAtPosition<Item = T>
+        + Offset
+        + PartialEq
+        + Slice<Range<usize>>
+        + Slice<RangeTo<usize>>
+        + Slice<RangeFrom<usize>>,
     <I as InputIter>::Item: AsChar + Clone,
     &'static str: FindToken<<I as InputTakeAtPosition>::Item>,
 {
@@ -254,8 +295,10 @@ where
 #[cfg(test)]
 mod tests {
     use nom::error::ErrorKind;
+    use nom::IResult;
 
     use super::*;
+    use crate::to_nom_result;
 
     macro_rules! error {
         ($input:expr, $err_kind: expr) => {
@@ -266,7 +309,7 @@ mod tests {
     #[test]
     fn test_multiline_comment() {
         fn parser(input: &str) -> IResult<&str, &str> {
-            multiline_comment(input)
+            to_nom_result(multiline_comment(LocatedSpan::new(input)))
         }
 
         assert_eq!(
@@ -286,7 +329,7 @@ mod tests {
         fn parser(
             tag: &'static str,
         ) -> impl Fn(&'static str) -> IResult<&'static str, &'static str> {
-            move |input| eol_comment(tag)(input)
+            move |input| to_nom_result(eol_comment(tag)(LocatedSpan::new(input)))
         }
 
         // New line
@@ -343,7 +386,7 @@ mod tests {
     #[test]
     fn test_whitespace() {
         fn parser(input: &str) -> IResult<&str, &str> {
-            whitespace(input)
+            to_nom_result(whitespace(LocatedSpan::new(input)))
         }
         // whitespace characters
         assert_eq!(parser(" \t\n\r21c"), Ok(("\t\n\r21c", "")));
@@ -367,7 +410,7 @@ mod tests {
         // eol comments
         assert_eq!(
             parser("# this is an example comment    \r21c"),
-            error!("# this is an example comment    \r21c", ErrorKind::Tag)
+            error!(" this is an example comment    \r21c", ErrorKind::Tag)
         );
         assert_eq!(parser("# comment\nZ21c"), Ok(("Z21c", " comment")));
         assert_eq!(parser("# comment\r\nZ21c"), Ok(("Z21c", " comment")));
@@ -377,7 +420,7 @@ mod tests {
     #[test]
     fn test_whitespace0() {
         fn parser(input: &str) -> IResult<&str, Vec<&str>> {
-            whitespace0(input)
+            to_nom_result(whitespace0(LocatedSpan::new(input)))
         }
         assert_eq!(parser(" \t\n\r21c"), Ok(("21c", vec![])));
         assert_eq!(parser("21c"), Ok(("21c", vec![])));
@@ -405,7 +448,7 @@ mod tests {
     #[test]
     fn test_whitespace1() {
         fn parser(input: &str) -> IResult<&str, Vec<&str>> {
-            whitespace1(input)
+            to_nom_result(whitespace1(LocatedSpan::new(input)))
         }
         assert_eq!(parser(" \t\r\n21c"), Ok(("21c", vec![])));
         assert_eq!(parser("21c"), error!("21c", ErrorKind::Tag));
@@ -424,7 +467,7 @@ mod tests {
         // eol comments
         assert_eq!(
             parser("# this is an example comment    \r21c"),
-            error!("# this is an example comment    \r21c", ErrorKind::Tag)
+            error!(" this is an example comment    \r21c", ErrorKind::Tag)
         );
         assert_eq!(parser("# comment\nZ21c"), Ok(("Z21c", vec![" comment"])));
         assert_eq!(parser("# comment\r\nZ21c"), Ok(("Z21c", vec![" comment"])));

@@ -2,6 +2,7 @@ use std::borrow::Borrow;
 use std::collections::{BTreeMap, BTreeSet};
 
 use launchpad::redacted::RedactedString;
+use nom_locate::LocatedSpan;
 use nom_sql::{replicator_table_list, Dialect, SqlIdentifier};
 use readyset::{ReadySetError, ReadySetResult};
 
@@ -70,14 +71,16 @@ impl TableFilter {
             return Ok(Self::for_all_tables());
         }
 
-        let replicate_list = match replicator_table_list(dialect)(replicated.as_bytes()) {
-            Ok((rem, tables)) if rem.is_empty() => tables,
-            _ => {
-                return Err(ReadySetError::ReplicationFailed(
-                    "Unable to parse replicated tables list".to_string(),
-                ))
-            }
-        };
+        // TODO(alex) Propagate nom-sql error position info?
+        let replicate_list =
+            match replicator_table_list(dialect)(LocatedSpan::new(replicated.as_bytes())) {
+                Ok((rem, tables)) if rem.is_empty() => tables,
+                _ => {
+                    return Err(ReadySetError::ReplicationFailed(
+                        "Unable to parse replicated tables list".to_string(),
+                    ))
+                }
+            };
 
         for table in replicate_list {
             let table_name = table.name;

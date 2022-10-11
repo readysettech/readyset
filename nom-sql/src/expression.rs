@@ -10,7 +10,8 @@ use nom::character::complete::char;
 use nom::combinator::{complete, map, opt};
 use nom::multi::{many0, separated_list0};
 use nom::sequence::{delimited, pair, preceded, terminated, tuple};
-use nom::{IResult, Parser};
+use nom::Parser;
+use nom_locate::LocatedSpan;
 use pratt::{Affix, Associativity, PrattParser, Precedence};
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
@@ -22,7 +23,7 @@ use crate::select::nested_selection;
 use crate::set::{variable_scope_prefix, Variable};
 use crate::sql_type::{mysql_int_cast_targets, type_identifier};
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Column, Dialect, Literal, SelectStatement, SqlIdentifier, SqlType};
+use crate::{Column, Dialect, Literal, NomSqlResult, SelectStatement, SqlIdentifier, SqlType};
 
 /// Function call expressions
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
@@ -432,7 +433,7 @@ enum TokenTree {
 // should parse the same as:
 //     (foo between (1 + 2) and 8) and bar
 
-fn infix_no_and_or(i: &[u8]) -> IResult<&[u8], TokenTree> {
+fn infix_no_and_or(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], TokenTree> {
     let (i, operator) = alt((
         map(terminated(tag_no_case("like"), whitespace1), |_| {
             BinaryOperator::Like
@@ -484,7 +485,7 @@ fn infix_no_and_or(i: &[u8]) -> IResult<&[u8], TokenTree> {
     Ok((i, TokenTree::Infix(operator)))
 }
 
-fn infix(i: &[u8]) -> IResult<&[u8], TokenTree> {
+fn infix(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], TokenTree> {
     complete(alt((
         map(terminated(tag_no_case("and"), whitespace1), |_| {
             TokenTree::Infix(BinaryOperator::And)
@@ -496,7 +497,7 @@ fn infix(i: &[u8]) -> IResult<&[u8], TokenTree> {
     )))(i)
 }
 
-fn prefix(i: &[u8]) -> IResult<&[u8], TokenTree> {
+fn prefix(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], TokenTree> {
     map(
         alt((
             map(complete(char('-')), |_| UnaryOperator::Neg),
@@ -508,7 +509,9 @@ fn prefix(i: &[u8]) -> IResult<&[u8], TokenTree> {
     )(i)
 }
 
-fn primary_inner(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TokenTree> {
+fn primary_inner(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], TokenTree> {
     move |i| {
         alt((
             move |i| {
@@ -529,7 +532,7 @@ fn primary_inner(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TokenTree
     }
 }
 
-fn primary(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TokenTree> {
+fn primary(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], TokenTree> {
     move |i| {
         let (i, expr) = primary_inner(dialect)(i)?;
         let (i, t) = opt(move |i| {
@@ -549,7 +552,8 @@ fn primary(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TokenTree> {
 
 fn rest(
     dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<(TokenTree, Vec<TokenTree>, TokenTree)>> {
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<(TokenTree, Vec<TokenTree>, TokenTree)>>
+{
     move |i| {
         many0(move |i| {
             let (i, _) = whitespace0(i)?;
@@ -564,7 +568,9 @@ fn rest(
     }
 }
 
-fn token_tree(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<TokenTree>> {
+fn token_tree(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<TokenTree>> {
     move |i| {
         let (i, prefix) = many0(prefix)(i)?;
         let (i, primary) = primary(dialect)(i)?;
@@ -582,7 +588,8 @@ fn token_tree(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<TokenTre
 
 fn rest_no_and_or(
     dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<(TokenTree, Vec<TokenTree>, TokenTree)>> {
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<(TokenTree, Vec<TokenTree>, TokenTree)>>
+{
     move |i| {
         many0(tuple((
             preceded(whitespace0, infix_no_and_or),
@@ -592,7 +599,9 @@ fn rest_no_and_or(
     }
 }
 
-fn token_tree_no_and_or(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<TokenTree>> {
+fn token_tree_no_and_or(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<TokenTree>> {
     move |i| {
         let (i, prefix) = many0(prefix)(i)?;
         let (i, primary) = primary(dialect)(i)?;
@@ -712,7 +721,7 @@ where
     }
 }
 
-fn in_lhs(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
+fn in_lhs(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Expr> {
     move |i| {
         alt((
             map(function_expr(dialect), Expr::Call),
@@ -723,7 +732,7 @@ fn in_lhs(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
     }
 }
 
-fn in_rhs(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], InValue> {
+fn in_rhs(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], InValue> {
     move |i| {
         alt((
             map(nested_selection(dialect), |sel| {
@@ -737,7 +746,7 @@ fn in_rhs(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], InValue> {
     }
 }
 
-fn in_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
+fn in_expr(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Expr> {
     move |i| {
         let (i, lhs) = terminated(in_lhs(dialect), whitespace1)(i)?;
 
@@ -762,7 +771,7 @@ fn in_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
     }
 }
 
-fn between_operand(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
+fn between_operand(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Expr> {
     move |i| {
         alt((
             parenthesized_expr(dialect),
@@ -774,7 +783,7 @@ fn between_operand(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
     }
 }
 
-fn between_max(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
+fn between_max(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Expr> {
     move |i| {
         alt((
             map(token_tree_no_and_or(dialect), |tt| {
@@ -785,7 +794,7 @@ fn between_max(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
     }
 }
 
-fn between_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
+fn between_expr(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Expr> {
     move |i| {
         let (i, operand) = map(between_operand(dialect), Box::new)(i)?;
         let (i, _) = whitespace1(i)?;
@@ -810,7 +819,7 @@ fn between_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
     }
 }
 
-fn exists_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
+fn exists_expr(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Expr> {
     move |i| {
         let (i, _) = tag_no_case("exists")(i)?;
         let (i, _) = whitespace0(i)?;
@@ -825,7 +834,7 @@ fn exists_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
     }
 }
 
-fn cast(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
+fn cast(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Expr> {
     move |i| {
         let (i, _) = tag_no_case("cast")(i)?;
         let (i, _) = whitespace0(i)?;
@@ -860,7 +869,7 @@ fn cast(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
     }
 }
 
-fn nested_select(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
+fn nested_select(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Expr> {
     move |i| {
         let (i, _) = char('(')(i)?;
         let (i, _) = whitespace0(i)?;
@@ -872,7 +881,9 @@ fn nested_select(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
     }
 }
 
-fn parenthesized_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
+fn parenthesized_expr(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Expr> {
     move |i| {
         let (i, _) = char('(')(i)?;
         let (i, _) = whitespace0(i)?;
@@ -884,7 +895,9 @@ fn parenthesized_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr
     }
 }
 
-pub(crate) fn scoped_var(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Variable> {
+pub(crate) fn scoped_var(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Variable> {
     move |i| {
         let (i, scope) = variable_scope_prefix(i)?;
         let (i, name) = dialect
@@ -897,7 +910,9 @@ pub(crate) fn scoped_var(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], V
 }
 
 // Expressions without (binary or unary) operators
-pub(crate) fn simple_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
+pub(crate) fn simple_expr(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Expr> {
     move |i| {
         alt((
             parenthesized_expr(dialect),
@@ -915,7 +930,9 @@ pub(crate) fn simple_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], 
     }
 }
 
-pub(crate) fn expression(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
+pub(crate) fn expression(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Expr> {
     move |i| {
         alt((
             map(token_tree(dialect), |tt| {
@@ -929,10 +946,12 @@ pub(crate) fn expression(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], E
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::to_nom_result;
 
     #[test]
     fn column_then_column() {
-        let (rem, res) = expression(Dialect::MySQL)(b"x y").unwrap();
+        let (rem, res) =
+            to_nom_result(expression(Dialect::MySQL)(LocatedSpan::new(b"x y"))).unwrap();
         assert_eq!(res, Expr::Column("x".into()));
         assert_eq!(rem, b" y");
     }
@@ -941,8 +960,12 @@ mod tests {
         use super::*;
 
         pub fn parses_same(dialect: Dialect, implicit: &str, explicit: &str) {
-            let implicit_res = expression(dialect)(implicit.as_bytes()).unwrap().1;
-            let explicit_res = expression(dialect)(explicit.as_bytes()).unwrap().1;
+            let implicit_res = expression(dialect)(LocatedSpan::new(implicit.as_bytes()))
+                .unwrap()
+                .1;
+            let explicit_res = expression(dialect)(LocatedSpan::new(explicit.as_bytes()))
+                .unwrap()
+                .1;
             assert_eq!(implicit_res, explicit_res);
         }
 
@@ -975,7 +998,7 @@ mod tests {
 
         #[test]
         fn postgres_cast() {
-            let res = expression(Dialect::PostgreSQL)(br#"-128::INTEGER"#);
+            let res = expression(Dialect::PostgreSQL)(LocatedSpan::new(br#"-128::INTEGER"#));
             assert_eq!(
                 res.unwrap().1,
                 Expr::UnaryOp {
@@ -988,7 +1011,7 @@ mod tests {
                 }
             );
 
-            let res = expression(Dialect::PostgreSQL)(br#"515*128::TEXT"#);
+            let res = expression(Dialect::PostgreSQL)(LocatedSpan::new(br#"515*128::TEXT"#));
             assert_eq!(
                 res.unwrap().1,
                 Expr::BinaryOp {
@@ -1002,7 +1025,7 @@ mod tests {
                 }
             );
 
-            let res = expression(Dialect::PostgreSQL)(br#"(515*128)::TEXT"#);
+            let res = expression(Dialect::PostgreSQL)(LocatedSpan::new(br#"(515*128)::TEXT"#));
             assert_eq!(
                 res.unwrap().1,
                 Expr::Cast {
@@ -1016,7 +1039,9 @@ mod tests {
                 },
             );
 
-            let res = expression(Dialect::PostgreSQL)(br#"200*postgres.column::DOUBLE PRECISION"#);
+            let res = expression(Dialect::PostgreSQL)(LocatedSpan::new(
+                br#"200*postgres.column::DOUBLE PRECISION"#,
+            ));
             assert_eq!(
                 res.unwrap().1,
                 Expr::BinaryOp {
@@ -1033,7 +1058,7 @@ mod tests {
 
         #[test]
         fn mysql_cast() {
-            let res = expression(Dialect::MySQL)(br#"CAST(-128 AS UNSIGNED)"#);
+            let res = expression(Dialect::MySQL)(LocatedSpan::new(br#"CAST(-128 AS UNSIGNED)"#));
             assert_eq!(
                 res.unwrap().1,
                 Expr::Cast {
@@ -1050,7 +1075,7 @@ mod tests {
 
     mod conditions {
         use super::*;
-        use crate::{FieldDefinitionExpr, ItemPlaceholder, TableExpr};
+        use crate::{to_nom_result, FieldDefinitionExpr, ItemPlaceholder, TableExpr};
 
         fn columns(cols: &[&str]) -> Vec<FieldDefinitionExpr> {
             cols.iter()
@@ -1083,7 +1108,7 @@ mod tests {
         }
 
         fn x_equality_variable_placeholder(cond: &str, literal: Literal) {
-            let res = expression(Dialect::MySQL)(cond.as_bytes());
+            let res = expression(Dialect::MySQL)(LocatedSpan::new(cond.as_bytes()));
             assert_eq!(
                 res.unwrap().1,
                 Expr::BinaryOp {
@@ -1106,7 +1131,7 @@ mod tests {
         fn simple_arithmetic_expression() {
             let cond = "x + 3";
 
-            let res = expression(Dialect::MySQL)(cond.as_bytes());
+            let res = expression(Dialect::MySQL)(LocatedSpan::new(cond.as_bytes()));
             assert_eq!(
                 res.unwrap().1,
                 x_operator_value(BinaryOperator::Add, 3_u32.into())
@@ -1117,7 +1142,7 @@ mod tests {
         fn simple_arithmetic_expression_with_parenthesis() {
             let cond = "( x - 2 )";
 
-            let res = expression(Dialect::MySQL)(cond.as_bytes());
+            let res = expression(Dialect::MySQL)(LocatedSpan::new(cond.as_bytes()));
             assert_eq!(
                 res.unwrap().1,
                 x_operator_value(BinaryOperator::Subtract, 2_u32.into())
@@ -1128,7 +1153,7 @@ mod tests {
         fn parenthetical_arithmetic_expression() {
             let cond = "( x * 5 )";
 
-            let res = expression(Dialect::MySQL)(cond.as_bytes());
+            let res = expression(Dialect::MySQL)(LocatedSpan::new(cond.as_bytes()));
             assert_eq!(
                 res.unwrap().1,
                 x_operator_value(BinaryOperator::Multiply, 5_u32.into())
@@ -1139,7 +1164,7 @@ mod tests {
         fn expression_with_arithmetics() {
             let cond = "x * 3 = 21";
 
-            let res = expression(Dialect::MySQL)(cond.as_bytes());
+            let res = expression(Dialect::MySQL)(LocatedSpan::new(cond.as_bytes()));
             assert_eq!(
                 res.unwrap().1,
                 Expr::BinaryOp {
@@ -1153,7 +1178,7 @@ mod tests {
         fn expression_with_arithmetics_and_parenthesis() {
             let cond = "(x - 7 = 15)";
 
-            let res = expression(Dialect::MySQL)(cond.as_bytes());
+            let res = expression(Dialect::MySQL)(LocatedSpan::new(cond.as_bytes()));
             assert_eq!(
                 res.unwrap().1,
                 Expr::BinaryOp {
@@ -1168,7 +1193,7 @@ mod tests {
         fn expression_with_arithmetics_in_parenthesis() {
             let cond = "( x + 2) = 15";
 
-            let res = expression(Dialect::MySQL)(cond.as_bytes());
+            let res = expression(Dialect::MySQL)(LocatedSpan::new(cond.as_bytes()));
             assert_eq!(
                 res.unwrap().1,
                 Expr::BinaryOp {
@@ -1183,7 +1208,7 @@ mod tests {
         fn expression_with_arithmetics_in_parenthesis_in_both_side() {
             let cond = "( x + 2) =(x*3)";
 
-            let res = expression(Dialect::MySQL)(cond.as_bytes());
+            let res = expression(Dialect::MySQL)(LocatedSpan::new(cond.as_bytes()));
             assert_eq!(
                 res.unwrap().1,
                 Expr::BinaryOp {
@@ -1199,7 +1224,7 @@ mod tests {
             let cond1 = "foo >= 42";
             let cond2 = "foo <= 5";
 
-            let res1 = expression(Dialect::MySQL)(cond1.as_bytes());
+            let res1 = expression(Dialect::MySQL)(LocatedSpan::new(cond1.as_bytes()));
             assert_eq!(
                 res1.unwrap().1,
                 Expr::BinaryOp {
@@ -1209,7 +1234,7 @@ mod tests {
                 }
             );
 
-            let res2 = expression(Dialect::MySQL)(cond2.as_bytes());
+            let res2 = expression(Dialect::MySQL)(LocatedSpan::new(cond2.as_bytes()));
             assert_eq!(
                 res2.unwrap().1,
                 Expr::BinaryOp {
@@ -1224,7 +1249,7 @@ mod tests {
         fn empty_string_literal() {
             let cond = "foo = ''";
 
-            let res = expression(Dialect::MySQL)(cond.as_bytes());
+            let res = expression(Dialect::MySQL)(LocatedSpan::new(cond.as_bytes()));
             assert_eq!(
                 res.unwrap().1,
                 Expr::BinaryOp {
@@ -1271,7 +1296,7 @@ mod tests {
                 rhs: Box::new(right),
             };
 
-            let res = expression(Dialect::MySQL)(cond.as_bytes());
+            let res = expression(Dialect::MySQL)(LocatedSpan::new(cond.as_bytes()));
             assert_eq!(res.unwrap().1, complete);
         }
 
@@ -1311,7 +1336,7 @@ mod tests {
                 rhs: Box::new(right),
             };
 
-            let res = expression(Dialect::MySQL)(cond.as_bytes());
+            let res = expression(Dialect::MySQL)(LocatedSpan::new(cond.as_bytes()));
             assert_eq!(res.unwrap().1, complete);
         }
 
@@ -1340,7 +1365,7 @@ mod tests {
                 rhs: Box::new(right),
             };
 
-            let res = expression(Dialect::MySQL)(cond.as_bytes());
+            let res = expression(Dialect::MySQL)(LocatedSpan::new(cond.as_bytes()));
             assert_eq!(res.unwrap().1, complete);
         }
 
@@ -1351,7 +1376,7 @@ mod tests {
 
             let cond = "bar in (select col from foo)";
 
-            let res = expression(Dialect::MySQL)(cond.as_bytes());
+            let res = expression(Dialect::MySQL)(LocatedSpan::new(cond.as_bytes()));
 
             let nested_select = Box::new(SelectStatement {
                 tables: vec![TableExpr::from(Relation::from("foo"))],
@@ -1375,7 +1400,7 @@ mod tests {
 
             let cond = "exists (  select col from foo  )";
 
-            let res = expression(Dialect::MySQL)(cond.as_bytes());
+            let res = expression(Dialect::MySQL)(LocatedSpan::new(cond.as_bytes()));
 
             let nested_select = Box::new(SelectStatement {
                 tables: vec![TableExpr::from(Relation::from("foo"))],
@@ -1395,7 +1420,7 @@ mod tests {
 
             let cond = "not exists (select col from foo)";
 
-            let res = expression(Dialect::MySQL)(cond.as_bytes());
+            let res = expression(Dialect::MySQL)(LocatedSpan::new(cond.as_bytes()));
 
             let nested_select = Box::new(SelectStatement {
                 tables: vec![TableExpr::from(Relation::from("foo"))],
@@ -1418,7 +1443,7 @@ mod tests {
 
             let cond = "paperId in (select paperId from PaperConflict) and size > 0";
 
-            let res = expression(Dialect::MySQL)(cond.as_bytes());
+            let res = expression(Dialect::MySQL)(LocatedSpan::new(cond.as_bytes()));
 
             let nested_select = Box::new(SelectStatement {
                 tables: vec![TableExpr::from(Relation::from("PaperConflict"))],
@@ -1451,7 +1476,7 @@ mod tests {
         fn in_list_of_values() {
             let cond = "bar in (0, 1)";
 
-            let res = expression(Dialect::MySQL)(cond.as_bytes());
+            let res = expression(Dialect::MySQL)(LocatedSpan::new(cond.as_bytes()));
 
             let expected = Expr::In {
                 lhs: Box::new(Expr::Column("bar".into())),
@@ -1469,7 +1494,7 @@ mod tests {
         fn is_null() {
             let cond = "bar IS NULL";
 
-            let res = expression(Dialect::MySQL)(cond.as_bytes());
+            let res = expression(Dialect::MySQL)(LocatedSpan::new(cond.as_bytes()));
 
             let expected = Expr::BinaryOp {
                 lhs: Box::new(Expr::Column("bar".into())),
@@ -1483,7 +1508,7 @@ mod tests {
         fn is_not_null() {
             let cond = "bar IS NOT NULL";
 
-            let res = expression(Dialect::MySQL)(cond.as_bytes());
+            let res = expression(Dialect::MySQL)(LocatedSpan::new(cond.as_bytes()));
             let expected = Expr::BinaryOp {
                 lhs: Box::new(Expr::Column("bar".into())),
                 op: BinaryOperator::IsNot,
@@ -1495,7 +1520,7 @@ mod tests {
         #[test]
         fn not_in_comparison() {
             let qs1 = b"id not in (1,2)";
-            let res1 = expression(Dialect::MySQL)(qs1);
+            let res1 = expression(Dialect::MySQL)(LocatedSpan::new(qs1));
 
             let c1 = res1.unwrap().1;
             let expected1 = Expr::In {
@@ -1521,7 +1546,8 @@ mod tests {
                 max: Box::new(Expr::Literal(2_u32.into())),
                 negated: false,
             };
-            let (remaining, result) = expression(Dialect::MySQL)(qs).unwrap();
+            let (remaining, result) =
+                to_nom_result(expression(Dialect::MySQL)(LocatedSpan::new(qs))).unwrap();
             assert_eq!(std::str::from_utf8(remaining).unwrap(), "");
             assert_eq!(result, expected);
         }
@@ -1535,7 +1561,8 @@ mod tests {
                 max: Box::new(Expr::Literal(2_u32.into())),
                 negated: true,
             };
-            let (remaining, result) = expression(Dialect::MySQL)(qs).unwrap();
+            let (remaining, result) =
+                to_nom_result(expression(Dialect::MySQL)(LocatedSpan::new(qs))).unwrap();
             assert_eq!(std::str::from_utf8(remaining).unwrap(), "");
             assert_eq!(result, expected);
         }
@@ -1555,7 +1582,8 @@ mod tests {
                 max: Box::new(Expr::Literal(2_u32.into())),
                 negated: false,
             };
-            let (remaining, result) = expression(Dialect::MySQL)(qs).unwrap();
+            let (remaining, result) =
+                to_nom_result(expression(Dialect::MySQL)(LocatedSpan::new(qs))).unwrap();
             assert_eq!(String::from_utf8_lossy(remaining), "");
             assert_eq!(result, expected);
         }
@@ -1577,7 +1605,7 @@ mod tests {
                 }),
                 negated: false,
             };
-            let res = expression(Dialect::MySQL)(qs);
+            let res = to_nom_result(expression(Dialect::MySQL)(LocatedSpan::new(qs)));
             let (remaining, result) = res.unwrap();
             assert_eq!(std::str::from_utf8(remaining).unwrap(), "");
             eprintln!("{}", result);
@@ -1594,7 +1622,8 @@ mod tests {
                     ItemPlaceholder::QuestionMark,
                 ))),
             };
-            let (remaining, result) = expression(Dialect::MySQL)(qs).unwrap();
+            let (remaining, result) =
+                to_nom_result(expression(Dialect::MySQL)(LocatedSpan::new(qs))).unwrap();
             assert_eq!(std::str::from_utf8(remaining).unwrap(), "");
             assert_eq!(result, expected);
         }
@@ -1610,7 +1639,8 @@ mod tests {
                     rhs: Box::new(Expr::Column("y".into())),
                 }),
             };
-            let (remaining, result) = expression(Dialect::MySQL)(qs).unwrap();
+            let (remaining, result) =
+                to_nom_result(expression(Dialect::MySQL)(LocatedSpan::new(qs))).unwrap();
             assert_eq!(std::str::from_utf8(remaining).unwrap(), "");
             assert_eq!(result, expected);
         }
@@ -1618,6 +1648,7 @@ mod tests {
 
     mod negation {
         use super::*;
+        use crate::to_nom_result;
 
         #[test]
         fn neg_integer() {
@@ -1626,7 +1657,8 @@ mod tests {
                 op: UnaryOperator::Neg,
                 rhs: Box::new(Expr::Literal(Literal::UnsignedInteger(256))),
             };
-            let (remaining, result) = expression(Dialect::MySQL)(qs).unwrap();
+            let (remaining, result) =
+                to_nom_result(expression(Dialect::MySQL)(LocatedSpan::new(qs))).unwrap();
             assert_eq!(std::str::from_utf8(remaining).unwrap(), "");
             assert_eq!(result, expected);
         }
@@ -1642,7 +1674,8 @@ mod tests {
                     rhs: Box::new(Expr::Column("y".into())),
                 }),
             };
-            let (remaining, result) = expression(Dialect::MySQL)(qs).unwrap();
+            let (remaining, result) =
+                to_nom_result(expression(Dialect::MySQL)(LocatedSpan::new(qs))).unwrap();
             assert_eq!(std::str::from_utf8(remaining).unwrap(), "");
             assert_eq!(result, expected);
         }
@@ -1657,7 +1690,8 @@ mod tests {
                     rhs: Box::new(Expr::Column("id".into())),
                 }),
             };
-            let (remaining, result) = expression(Dialect::MySQL)(qs).unwrap();
+            let (remaining, result) =
+                to_nom_result(expression(Dialect::MySQL)(LocatedSpan::new(qs))).unwrap();
             assert_eq!(std::str::from_utf8(remaining).unwrap(), "");
             assert_eq!(result, expected);
         }
@@ -1672,7 +1706,8 @@ mod tests {
                     rhs: Box::new(Expr::Literal(Literal::UnsignedInteger(1))),
                 }),
             };
-            let (remaining, result) = expression(Dialect::MySQL)(qs).unwrap();
+            let (remaining, result) =
+                to_nom_result(expression(Dialect::MySQL)(LocatedSpan::new(qs))).unwrap();
             assert_eq!(std::str::from_utf8(remaining).unwrap(), "");
             assert_eq!(result, expected);
         }
@@ -1687,7 +1722,8 @@ mod tests {
                     rhs: Box::new(Expr::Literal(Literal::UnsignedInteger(1))),
                 }),
             };
-            let (remaining, result) = expression(Dialect::MySQL)(qs).unwrap();
+            let (remaining, result) =
+                to_nom_result(expression(Dialect::MySQL)(LocatedSpan::new(qs))).unwrap();
             assert_eq!(std::str::from_utf8(remaining).unwrap(), "");
             assert_eq!(result, expected);
         }
@@ -1716,7 +1752,7 @@ mod tests {
 
         mod conditions {
             use super::*;
-            use crate::ItemPlaceholder;
+            use crate::{to_nom_result, ItemPlaceholder};
 
             #[test]
             fn complex_bracketing() {
@@ -1730,7 +1766,9 @@ mod tests {
                     OR `saldo` >= 0 ) \
                     AND `read_ribbons`.`user_id` = ?";
 
-                let res = expression(Dialect::MySQL)(cond.as_bytes());
+                let res = to_nom_result(expression(Dialect::MySQL)(LocatedSpan::new(
+                    cond.as_bytes(),
+                )));
                 let expected = Expr::BinaryOp {
                     op: BinaryOperator::And,
                     lhs: Box::new(Expr::BinaryOp {
@@ -1820,7 +1858,7 @@ mod tests {
                 let cond1 = "foo = 42";
                 let cond2 = "foo = \"hello\"";
 
-                let res1 = expression(Dialect::MySQL)(cond1.as_bytes());
+                let res1 = expression(Dialect::MySQL)(LocatedSpan::new(cond1.as_bytes()));
                 assert_eq!(
                     res1.unwrap().1,
                     Expr::BinaryOp {
@@ -1830,7 +1868,7 @@ mod tests {
                     }
                 );
 
-                let res2 = expression(Dialect::MySQL)(cond2.as_bytes());
+                let res2 = expression(Dialect::MySQL)(LocatedSpan::new(cond2.as_bytes()));
                 assert_eq!(
                     res2.unwrap().1,
                     Expr::BinaryOp {
@@ -1866,7 +1904,7 @@ mod tests {
 
         mod conditions {
             use super::*;
-            use crate::ItemPlaceholder;
+            use crate::{to_nom_result, ItemPlaceholder};
 
             #[test]
             fn complex_bracketing() {
@@ -1880,7 +1918,9 @@ mod tests {
                     OR \"saldo\" >= 0 ) \
                     AND \"read_ribbons\".\"user_id\" = ?";
 
-                let res = expression(Dialect::PostgreSQL)(cond.as_bytes());
+                let res = to_nom_result(expression(Dialect::PostgreSQL)(LocatedSpan::new(
+                    cond.as_bytes(),
+                )));
                 let expected = Expr::BinaryOp {
                     op: BinaryOperator::And,
                     lhs: Box::new(Expr::BinaryOp {
@@ -1970,7 +2010,7 @@ mod tests {
                 let cond1 = "foo = 42";
                 let cond2 = "foo = 'hello'";
 
-                let res1 = expression(Dialect::PostgreSQL)(cond1.as_bytes());
+                let res1 = expression(Dialect::PostgreSQL)(LocatedSpan::new(cond1.as_bytes()));
                 assert_eq!(
                     res1.unwrap().1,
                     Expr::BinaryOp {
@@ -1980,7 +2020,7 @@ mod tests {
                     }
                 );
 
-                let res2 = expression(Dialect::PostgreSQL)(cond2.as_bytes());
+                let res2 = expression(Dialect::PostgreSQL)(LocatedSpan::new(cond2.as_bytes()));
                 assert_eq!(
                     res2.unwrap().1,
                     Expr::BinaryOp {

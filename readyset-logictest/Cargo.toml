@@ -19,6 +19,7 @@ tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", fe
 postgres-native-tls = { git = "https://github.com/readysettech/rust-postgres.git" }
 native-tls = "0.2.7"
 nom = "7.1"
+nom_locate = "4.0.0"
 tokio = { version = "1.15", features = ["signal", "rt-multi-thread", "time", "net"] }
 itertools = "0.10.0"
 maplit = "1.0.2"

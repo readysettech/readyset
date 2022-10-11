@@ -4,11 +4,11 @@ use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::{map, opt};
 use nom::sequence::tuple;
-use nom::IResult;
+use nom_locate::LocatedSpan;
 use serde::{Deserialize, Serialize};
 
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::Dialect;
+use crate::{Dialect, NomSqlResult};
 
 // TODO(peter): Handle dialect differences.
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -42,7 +42,7 @@ impl fmt::Display for RollbackStatement {
 // TODO(peter): Handle dialect differences.
 pub fn start_transaction(
     _: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], StartTransactionStatement> {
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], StartTransactionStatement> {
     move |i| {
         let (remaining_input, (_, _)) = tuple((
             whitespace0,
@@ -78,7 +78,7 @@ pub fn start_transaction(
 // [AND [NO] CHAIN] [[NO] RELEASE]
 // [PostgreSQL](https://www.postgresql.org/docs/current/sql-commit.html) allows:
 // [ AND [ NO ] CHAIN ]
-pub fn commit(d: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CommitStatement> {
+pub fn commit(d: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CommitStatement> {
     move |i| {
         let (remaining_input, (_, _)) = match d {
             Dialect::MySQL => tuple((
@@ -106,7 +106,9 @@ pub fn commit(d: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CommitStatement> {
 
 // Parse rule for a COMMIT query.
 // TODO(peter): Handle dialect differences.
-pub fn rollback(_: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], RollbackStatement> {
+pub fn rollback(
+    _: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], RollbackStatement> {
     move |i| {
         let (remaining_input, (_, _)) = tuple((
             whitespace0,
@@ -128,7 +130,7 @@ mod tests {
     fn start_transaction_simple() {
         let qstring = "START TRANSACTION";
 
-        let res = start_transaction(Dialect::MySQL)(qstring.as_bytes());
+        let res = start_transaction(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
         assert_eq!(res.unwrap().1, StartTransactionStatement,);
     }
 
@@ -136,16 +138,16 @@ mod tests {
     fn start_transaction_complex() {
         let qstring = "    START       TRANSACTION   ";
 
-        let res = start_transaction(Dialect::MySQL)(qstring.as_bytes());
+        let res = start_transaction(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
         assert_eq!(res.unwrap().1, StartTransactionStatement,);
 
         let qstring = "    BEGIN       WORK   ";
 
-        let res = start_transaction(Dialect::MySQL)(qstring.as_bytes());
+        let res = start_transaction(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
         assert_eq!(res.unwrap().1, StartTransactionStatement,);
         let qstring = "    BEGIN    ";
 
-        let res = start_transaction(Dialect::MySQL)(qstring.as_bytes());
+        let res = start_transaction(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
         assert_eq!(res.unwrap().1, StartTransactionStatement,);
     }
 
@@ -153,12 +155,12 @@ mod tests {
     fn commit_complex() {
         let qstring = "    COMMIT";
 
-        let res = commit(Dialect::MySQL)(qstring.as_bytes());
+        let res = commit(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
         assert_eq!(res.unwrap().1, CommitStatement,);
 
         let qstring = "    COMMIT       WORK   ";
 
-        let res = commit(Dialect::MySQL)(qstring.as_bytes());
+        let res = commit(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
         assert_eq!(res.unwrap().1, CommitStatement,);
     }
 
@@ -166,32 +168,32 @@ mod tests {
     fn commit_postgres() {
         let qstring = "    COMMIT";
 
-        let res = commit(Dialect::PostgreSQL)(qstring.as_bytes());
+        let res = commit(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
         assert_eq!(res.unwrap().1, CommitStatement,);
 
         let qstring = "    COMMIT       WORK   ";
 
-        let res = commit(Dialect::PostgreSQL)(qstring.as_bytes());
+        let res = commit(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
         assert_eq!(res.unwrap().1, CommitStatement,);
 
         let qstring = "    COMMIT       TRANSACTION   ";
 
-        let res = commit(Dialect::PostgreSQL)(qstring.as_bytes());
+        let res = commit(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
         assert_eq!(res.unwrap().1, CommitStatement,);
 
         let qstring = "    END";
 
-        let res = commit(Dialect::PostgreSQL)(qstring.as_bytes());
+        let res = commit(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
         assert_eq!(res.unwrap().1, CommitStatement,);
 
         let qstring = "    END       WORK   ";
 
-        let res = commit(Dialect::PostgreSQL)(qstring.as_bytes());
+        let res = commit(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
         assert_eq!(res.unwrap().1, CommitStatement,);
 
         let qstring = "    END       TRANSACTION   ";
 
-        let res = commit(Dialect::PostgreSQL)(qstring.as_bytes());
+        let res = commit(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
         assert_eq!(res.unwrap().1, CommitStatement,);
     }
 
@@ -199,12 +201,12 @@ mod tests {
     fn rollback_complex() {
         let qstring = "    ROLLBACK ";
 
-        let res = rollback(Dialect::MySQL)(qstring.as_bytes());
+        let res = rollback(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
         assert_eq!(res.unwrap().1, RollbackStatement,);
 
         let qstring = "    ROLLBACK       WORK   ";
 
-        let res = rollback(Dialect::MySQL)(qstring.as_bytes());
+        let res = rollback(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
         assert_eq!(res.unwrap().1, RollbackStatement,);
     }
 }

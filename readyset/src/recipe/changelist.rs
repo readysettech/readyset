@@ -32,6 +32,7 @@
 //    simplicity, it should only match semicolons (or semicolons and eof, at most).
 
 use dataflow_expression::Dialect;
+use nom_locate::LocatedSpan;
 use nom_sql::{
     AlterTableStatement, CacheInner, CreateCacheStatement, CreateTableStatement,
     CreateViewStatement, DropTableStatement, DropViewStatement, Relation, SelectStatement,
@@ -144,19 +145,20 @@ impl ChangeList {
             };
         }
 
-        let queries = match parse::separate_queries(value) {
+        // TODO(alex) Include nom-sql error position info in ReadySetError::UnparseableQuery?
+        let queries = match parse::separate_queries(LocatedSpan::new(value.as_bytes())) {
             Result::Err(nom::Err::Error(e)) => {
-                return mk_error!(e.input);
+                return mk_error!(std::str::from_utf8(&e.input).unwrap());
             }
             Result::Err(nom::Err::Failure(e)) => {
-                return mk_error!(e.input);
+                return mk_error!(std::str::from_utf8(&e.input).unwrap());
             }
             Result::Err(_) => {
                 return mk_error!(value);
             }
             Result::Ok((remainder, parsed)) => {
                 if !remainder.is_empty() {
-                    return mk_error!(remainder);
+                    return mk_error!(std::str::from_utf8(&remainder).unwrap());
                 }
                 parsed
             }
@@ -164,12 +166,16 @@ impl ChangeList {
         let changes = queries.into_iter().fold(
             Ok(Vec::new()),
             |acc: ReadySetResult<Vec<Change>>, query| match parse::query_expr(query) {
-                Result::Err(nom::Err::Error(e)) => mk_error!(e.input),
-                Result::Err(nom::Err::Failure(e)) => mk_error!(e.input),
+                Result::Err(nom::Err::Error(e)) => {
+                    mk_error!(std::str::from_utf8(&e.input).unwrap())
+                }
+                Result::Err(nom::Err::Failure(e)) => {
+                    mk_error!(std::str::from_utf8(&e.input).unwrap())
+                }
                 Result::Err(_) => mk_error!(value),
                 Result::Ok((remainder, parsed)) => {
                     if !remainder.is_empty() {
-                        return mk_error!(remainder);
+                        return mk_error!(std::str::from_utf8(&remainder).unwrap());
                     }
                     acc.and_then(|mut changes| {
                         match parsed {
@@ -317,36 +323,24 @@ mod parse {
     use nom::error::ErrorKind;
     use nom::multi::many1;
     use nom::sequence::{delimited, terminated};
+    use nom::InputTake;
+    use nom_locate::LocatedSpan;
     use nom_sql::whitespace::whitespace0;
-    use nom_sql::{sql_query, Dialect, SqlQuery};
+    use nom_sql::{sql_query, Dialect, NomSqlError, NomSqlResult, SqlQuery};
 
     /// The canonical SQL dialect used for central ReadySet server recipes. All direct clients of
     /// readyset-server must use this dialect for their SQL recipes, and all adapters and client
     /// libraries must translate into this dialect as part of handling requests from users
     const CANONICAL_DIALECT: Dialect = Dialect::MySQL;
 
-    pub(super) fn query_expr(input: &str) -> nom::IResult<&str, SqlQuery> {
+    pub(super) fn query_expr(input: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlQuery> {
         let (input, _) = whitespace0(input)?;
-        let (input, expr) = match sql_query(CANONICAL_DIALECT)(input.as_bytes()) {
-            Ok((i, e)) => Ok((std::str::from_utf8(i).unwrap(), e)),
-            Err(nom::Err::Incomplete(n)) => Err(nom::Err::Incomplete(n)),
-            Err(nom::Err::Error(nom::error::Error { input, code })) => {
-                Err(nom::Err::Error(nom::error::Error {
-                    input: std::str::from_utf8(input).unwrap(),
-                    code,
-                }))
-            }
-            Err(nom::Err::Failure(nom::error::Error { input, code })) => {
-                Err(nom::Err::Error(nom::error::Error {
-                    input: std::str::from_utf8(input).unwrap(),
-                    code,
-                }))
-            }
-        }?;
-        Ok((input, expr))
+        sql_query(CANONICAL_DIALECT)(input)
     }
 
-    pub(super) fn separate_queries(queries: &str) -> nom::IResult<&str, Vec<&str>> {
+    pub(super) fn separate_queries(
+        queries: LocatedSpan<&[u8]>,
+    ) -> NomSqlResult<&[u8], Vec<LocatedSpan<&[u8]>>> {
         many1(delimited(
             whitespace0,
             // We only accept SQL queries that end with a semicolon.
@@ -355,15 +349,18 @@ mod parse {
         ))(queries)
     }
 
-    fn ends_in_semicolon_or_eof(input: &str) -> nom::IResult<&str, &str> {
+    fn ends_in_semicolon_or_eof(
+        input: LocatedSpan<&[u8]>,
+    ) -> NomSqlResult<&[u8], LocatedSpan<&[u8]>> {
         match recognize(terminated(take_until(";"), tag(";")))(input) {
-            Ok(res) => Ok(res),
-            Err(nom::Err::Error(nom::error::Error {
-                code: ErrorKind::TakeUntil,
+            Ok((input, output)) => Ok((input, output)),
+            Err(nom::Err::Error(NomSqlError {
+                kind: ErrorKind::TakeUntil,
                 ..
             })) if !input.is_empty() => {
                 // We didn't find a semicolon, so the rest of the input is a query.
-                Ok(("", input))
+                let (output, input) = input.take_split(0);
+                Ok((input, output))
             }
             Err(e) => Err(e),
         }

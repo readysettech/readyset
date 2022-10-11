@@ -8,7 +8,7 @@ use nom::character::complete::digit1;
 use nom::combinator::{map, map_res, opt};
 use nom::multi::{separated_list0, separated_list1};
 use nom::sequence::{delimited, preceded, terminated, tuple};
-use nom::IResult;
+use nom_locate::LocatedSpan;
 use serde::{Deserialize, Serialize};
 
 use crate::column::{column_specification, Column, ColumnSpecification};
@@ -23,7 +23,7 @@ use crate::order::{order_type, OrderType};
 use crate::select::{nested_selection, selection, SelectStatement};
 use crate::table::{table_reference, Relation};
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, SqlIdentifier};
+use crate::{Dialect, NomSqlResult, SqlIdentifier};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct CreateTableStatement {
@@ -167,13 +167,16 @@ impl fmt::Display for CreateCacheStatement {
 #[allow(clippy::type_complexity)]
 pub fn index_col_name(
     dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], (Column, Option<u16>, Option<OrderType>)> {
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], (Column, Option<u16>, Option<OrderType>)> {
     move |i| {
         let (remaining_input, (column, len_u8, order)) = tuple((
             terminated(column_identifier_no_alias(dialect), whitespace0),
             opt(delimited(
                 tag("("),
-                map_res(map_res(digit1, str::from_utf8), u16::from_str),
+                map_res(
+                    map_res(digit1, |i: LocatedSpan<&[u8]>| str::from_utf8(&i)),
+                    u16::from_str,
+                ),
                 tag(")"),
             )),
             opt(order_type),
@@ -184,7 +187,9 @@ pub fn index_col_name(
 }
 
 // Helper for list of index columns
-pub fn index_col_list(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Column>> {
+pub fn index_col_list(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<Column>> {
     move |i| {
         separated_list0(
             ws_sep_comma,
@@ -198,9 +203,11 @@ pub fn index_col_list(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<
 }
 
 // Parse rule for an individual key specification.
-pub fn key_specification(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
+pub fn key_specification(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], TableKey> {
     move |i| {
-        debug_print("before key_specification", i);
+        debug_print("before key_specification", &i);
         let (i, table_key) = alt((
             check_constraint(dialect),
             full_text_key(dialect),
@@ -209,14 +216,14 @@ pub fn key_specification(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], T
             key_or_index(dialect),
             foreign_key(dialect),
         ))(i)?;
-        debug_print("after key_specification", i);
+        debug_print("after key_specification", &i);
         Ok((i, table_key))
     }
 }
 
-fn full_text_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
+fn full_text_key(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], TableKey> {
     move |i| {
-        debug_print("before full_text_key", i);
+        debug_print("before full_text_key", &i);
         let (remaining_input, (_, _, _, _, index_name, _, columns)) = tuple((
             tag_no_case("fulltext"),
             whitespace1,
@@ -231,7 +238,7 @@ fn full_text_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey>
             ),
         ))(i)?;
 
-        debug_print("after full_text_key", remaining_input);
+        debug_print("after full_text_key", &remaining_input);
         Ok((
             remaining_input,
             TableKey::FulltextKey {
@@ -242,9 +249,9 @@ fn full_text_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey>
     }
 }
 
-fn primary_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
+fn primary_key(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], TableKey> {
     move |i| {
-        debug_print("before primary_key", i);
+        debug_print("before primary_key", &i);
         let (i, constraint_name) = constraint_identifier(dialect)(i)?;
         let (i, _) = whitespace0(i)?;
         let (remaining_input, (_, index_name, _, columns, _)) = tuple((
@@ -262,7 +269,7 @@ fn primary_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
             )),
         ))(i)?;
 
-        debug_print("after primary_key", i);
+        debug_print("after primary_key", &i);
         Ok((
             remaining_input,
             TableKey::PrimaryKey {
@@ -274,7 +281,7 @@ fn primary_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
     }
 }
 
-fn referential_action(i: &[u8]) -> IResult<&[u8], ReferentialAction> {
+fn referential_action(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ReferentialAction> {
     alt((
         map(tag_no_case("cascade"), |_| ReferentialAction::Cascade),
         map(
@@ -295,10 +302,10 @@ fn referential_action(i: &[u8]) -> IResult<&[u8], ReferentialAction> {
 
 fn constraint_identifier(
     dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], Option<SqlIdentifier>> {
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Option<SqlIdentifier>> {
     // [CONSTRAINT [identifier]]
     move |i| {
-        debug_print("before constraint_identifier: ", i);
+        debug_print("before constraint_identifier: ", &i);
         let (i, name) = map(
             opt(preceded(
                 tuple((tag_no_case("constraint"), whitespace1)),
@@ -307,15 +314,15 @@ fn constraint_identifier(
             |n| n.flatten(),
         )(i)?;
 
-        debug_print("after constraint_identifier: ", i);
+        debug_print("after constraint_identifier: ", &i);
 
         Ok((i, name))
     }
 }
 
-fn foreign_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
+fn foreign_key(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], TableKey> {
     move |i| {
-        debug_print("before foreign_key", i);
+        debug_print("before foreign_key", &i);
         let (i, constraint_name) = constraint_identifier(dialect)(i)?;
 
         // FOREIGN KEY identifier
@@ -369,7 +376,7 @@ fn foreign_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
 
             referential_action(i)
         })(i)?;
-        debug_print("after foreign_key", i);
+        debug_print("after foreign_key", &i);
 
         Ok((
             i,
@@ -386,23 +393,23 @@ fn foreign_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
     }
 }
 
-fn index_type(i: &[u8]) -> IResult<&[u8], IndexType> {
+fn index_type(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], IndexType> {
     alt((
         map(tag_no_case("btree"), |_| IndexType::BTree),
         map(tag_no_case("hash"), |_| IndexType::Hash),
     ))(i)
 }
 
-fn using_index(i: &[u8]) -> IResult<&[u8], IndexType> {
+fn using_index(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], IndexType> {
     let (i, _) = whitespace1(i)?;
     let (i, _) = tag_no_case("using")(i)?;
     let (i, _) = whitespace1(i)?;
     index_type(i)
 }
 
-fn unique(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
+fn unique(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], TableKey> {
     move |i| {
-        debug_print("before unique", i);
+        debug_print("before unique", &i);
         let (i, constraint_name) = constraint_identifier(dialect)(i)?;
         let (i, _) = whitespace0(i)?;
         let (i, _) = tag_no_case("unique")(i)?;
@@ -419,7 +426,7 @@ fn unique(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
             tag(")"),
         )(i)?;
         let (i, index_type) = opt(using_index)(i)?;
-        debug_print("after unique", i);
+        debug_print("after unique", &i);
 
         Ok((
             i,
@@ -433,9 +440,9 @@ fn unique(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
     }
 }
 
-fn key_or_index(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
+fn key_or_index(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], TableKey> {
     move |i| {
-        debug_print("before key_or_index", i);
+        debug_print("before key_or_index", &i);
         let (i, constraint_name) = constraint_identifier(dialect)(i)?;
 
         let (i, _) = whitespace0(i)?;
@@ -449,7 +456,7 @@ fn key_or_index(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> 
         )(i)?;
         let (i, index_type) = opt(using_index)(i)?;
 
-        debug_print("after key_or_index", i);
+        debug_print("after key_or_index", &i);
         Ok((
             i,
             TableKey::Key {
@@ -462,9 +469,11 @@ fn key_or_index(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> 
     }
 }
 
-fn check_constraint(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
+fn check_constraint(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], TableKey> {
     move |i| {
-        debug_print("before check_constraint", i);
+        debug_print("before check_constraint", &i);
         let (i, constraint_name) = constraint_identifier(dialect)(i)?;
         let (i, _) = whitespace0(i)?;
         let (i, _) = tag_no_case("check")(i)?;
@@ -492,25 +501,29 @@ fn check_constraint(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableK
                 enforced,
             },
         ));
-        debug_print("after check_constraint", i);
+        debug_print("after check_constraint", &i);
         res
     }
 }
 
 // Parse rule for a comma-separated list.
-pub fn key_specification_list(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<TableKey>> {
+pub fn key_specification_list(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<TableKey>> {
     move |i| separated_list1(ws_sep_comma, key_specification(dialect))(i)
 }
 
 // Parse rule for a comma-separated list of fields.
 pub fn field_specification_list(
     dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<ColumnSpecification>> {
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<ColumnSpecification>> {
     move |i| separated_list1(ws_sep_comma, column_specification(dialect))(i)
 }
 
 /// Parse rule for a SQL CREATE TABLE query.
-pub fn create_table(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CreateTableStatement> {
+pub fn create_table(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CreateTableStatement> {
     move |i| {
         let (i, _) = tag_no_case("create")(i)?;
         let (i, _) = whitespace1(i)?;
@@ -545,7 +558,7 @@ pub fn create_table(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Create
 
 // Parse the optional CREATE VIEW parameters and discard, ideally we would want to check user
 // permissions
-pub fn create_view_params(i: &[u8]) -> IResult<&[u8], ()> {
+pub fn create_view_params(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ()> {
     /*
     [ALGORITHM = {UNDEFINED | MERGE | TEMPTABLE}]
     [DEFINER = user]
@@ -591,7 +604,7 @@ pub fn create_view_params(i: &[u8]) -> IResult<&[u8], ()> {
     )(i)
 }
 
-fn or_replace(i: &[u8]) -> IResult<&[u8], ()> {
+fn or_replace(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ()> {
     let (i, _) = tag_no_case("or")(i)?;
     let (i, _) = whitespace1(i)?;
     let (i, _) = tag_no_case("replace")(i)?;
@@ -599,7 +612,9 @@ fn or_replace(i: &[u8]) -> IResult<&[u8], ()> {
 }
 
 // Parse rule for a SQL CREATE VIEW query.
-pub fn view_creation(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CreateViewStatement> {
+pub fn view_creation(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CreateViewStatement> {
     /*
        CREATE
        [OR REPLACE]
@@ -650,7 +665,9 @@ pub fn view_creation(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Creat
 
 /// Extract the [`SelectStatement`] or Query ID from a CREATE CACHE statement. Query ID is
 /// parsed as a SqlIdentifier
-pub fn cached_query_inner(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CacheInner> {
+pub fn cached_query_inner(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CacheInner> {
     move |i| {
         alt((
             map(map(selection(dialect), Box::new), CacheInner::from),
@@ -662,7 +679,7 @@ pub fn cached_query_inner(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], 
 /// Parse a [`CreateCacheStatement`]
 pub fn create_cached_query(
     dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], CreateCacheStatement> {
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CreateCacheStatement> {
     move |i| {
         let (i, _) = tag_no_case("create")(i)?;
         let (i, _) = whitespace1(i)?;
@@ -698,7 +715,7 @@ mod tests {
         // because it is never validly the end of a query
         let qstring = "id bigint(20), name varchar(255),";
 
-        let res = field_specification_list(Dialect::MySQL)(qstring.as_bytes());
+        let res = field_specification_list(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             vec![
@@ -712,7 +729,7 @@ mod tests {
     fn simple_create() {
         let qstring = "CREATE TABLE if Not  ExistS users (id bigint(20), name varchar(255), email varchar(255));";
 
-        let res = create_table(Dialect::MySQL)(qstring.as_bytes());
+        let res = create_table(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             CreateTableStatement {
@@ -732,7 +749,7 @@ mod tests {
     #[test]
     fn create_without_space_after_tablename() {
         let qstring = "CREATE TABLE t(x integer);";
-        let res = create_table(Dialect::MySQL)(qstring.as_bytes());
+        let res = create_table(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             CreateTableStatement {
@@ -751,7 +768,7 @@ mod tests {
     #[test]
     fn create_tablename_with_schema() {
         let qstring = "CREATE TABLE db1.t(x integer);";
-        let res = create_table(Dialect::MySQL)(qstring.as_bytes());
+        let res = create_table(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             CreateTableStatement {
@@ -776,7 +793,7 @@ mod tests {
         let qstring = "CREATE TABLE users (id bigint(20), name varchar(255), email varchar(255), \
                        PRIMARY KEY (id));";
 
-        let res = create_table(Dialect::MySQL)(qstring.as_bytes());
+        let res = create_table(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             CreateTableStatement {
@@ -800,7 +817,7 @@ mod tests {
         let qstring = "CREATE TABLE users (id bigint(20), name varchar(255), email varchar(255), \
                        UNIQUE KEY id_k (id));";
 
-        let res = create_table(Dialect::MySQL)(qstring.as_bytes());
+        let res = create_table(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             CreateTableStatement {
@@ -829,7 +846,7 @@ mod tests {
 
         let qstring = "CREATE VIEW v AS SELECT * FROM users UNION SELECT * FROM old_users;";
 
-        let res = view_creation(Dialect::MySQL)(qstring.as_bytes());
+        let res = view_creation(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             CreateViewStatement {
@@ -872,7 +889,7 @@ mod tests {
           constraint users_group foreign key (group_id) references `groups` (id)
         ) AUTO_INCREMENT=1000";
 
-        let (rem, res) = create_table(Dialect::MySQL)(qstring).unwrap();
+        let (rem, res) = create_table(Dialect::MySQL)(LocatedSpan::new(qstring)).unwrap();
         assert!(rem.is_empty());
         assert_eq!(
             res,
@@ -919,7 +936,7 @@ mod tests {
                         FOREIGN KEY (customer_id) REFERENCES customers(id) )
                         AUTO_INCREMENT = 10";
 
-        let (rem, res) = create_table(Dialect::MySQL)(qstring).unwrap();
+        let (rem, res) = create_table(Dialect::MySQL)(LocatedSpan::new(qstring)).unwrap();
         assert!(rem.is_empty());
         let non_null_col = |n: &str, t: SqlType| {
             ColumnSpecification::with_constraints(n.into(), t, vec![ColumnConstraint::NotNull])
@@ -978,7 +995,7 @@ mod tests {
                         FOREIGN KEY order_customer (purchaser) REFERENCES customers(id),
                         FOREIGN KEY ordered_product (product_id) REFERENCES products(id) )";
 
-        let (rem, res) = create_table(Dialect::MySQL)(qstring).unwrap();
+        let (rem, res) = create_table(Dialect::MySQL)(LocatedSpan::new(qstring)).unwrap();
         assert!(rem.is_empty());
 
         assert_eq!(
@@ -1041,7 +1058,7 @@ mod tests {
                         email VARCHAR(255) NOT NULL UNIQUE KEY )
                         AUTO_INCREMENT=1001";
 
-        let (rem, res) = create_table(Dialect::MySQL)(qstring).unwrap();
+        let (rem, res) = create_table(Dialect::MySQL)(LocatedSpan::new(qstring)).unwrap();
         assert!(rem.is_empty());
 
         assert_eq!(
@@ -1158,18 +1175,20 @@ mod tests {
         use super::*;
         use crate::column::Column;
         use crate::table::Relation;
-        use crate::{ColumnConstraint, Literal, SqlType, TableExpr};
+        use crate::{to_nom_result, ColumnConstraint, Literal, SqlType, TableExpr};
 
         #[test]
         fn create_view_with_security_params() {
             let qstring = "CREATE ALGORITHM=UNDEFINED DEFINER=`mysqluser`@`%` SQL SECURITY DEFINER VIEW `myquery2` AS SELECT * FROM employees";
-            view_creation(Dialect::MySQL)(qstring.as_bytes()).unwrap();
+            view_creation(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes())).unwrap();
         }
 
         #[test]
         fn double_precision_column() {
-            let (rem, res) =
-                create_table(Dialect::MySQL)(b"create table t(x double precision)").unwrap();
+            let (rem, res) = to_nom_result(create_table(Dialect::MySQL)(LocatedSpan::new(
+                b"create table t(x double precision)",
+            )))
+            .unwrap();
             assert_eq!(str::from_utf8(rem).unwrap(), "");
             assert_eq!(
                 res,
@@ -1199,7 +1218,7 @@ mod tests {
                        `object_repr` varchar(200) NOT NULL,
                        `action_flag` smallint UNSIGNED NOT NULL,
                        `change_message` longtext NOT NULL);";
-            let res = create_table(Dialect::MySQL)(qstring.as_bytes());
+            let res = create_table(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(
                 res.unwrap().1,
                 CreateTableStatement {
@@ -1254,7 +1273,7 @@ mod tests {
             let qstring = "CREATE TABLE `auth_group` (
                        `id` integer AUTO_INCREMENT NOT NULL PRIMARY KEY,
                        `name` varchar(80) NOT NULL UNIQUE)";
-            let res = create_table(Dialect::MySQL)(qstring.as_bytes());
+            let res = create_table(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(
                 res.unwrap().1,
                 CreateTableStatement {
@@ -1292,7 +1311,7 @@ mod tests {
                         `id` INT AUTO_INCREMENT NOT NULL PRIMARY KEY, \
                         `name` VARCHAR(80) NOT NULL UNIQUE)\
                         ENGINE=InnoDB, AUTO_INCREMENT=495209, DEFAULT CHARSET=utf8mb4, COLLATE=utf8mb4_unicode_ci";
-            let res = create_table(Dialect::MySQL)(qstring.as_bytes());
+            let res = create_table(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(res.unwrap().1.to_string(), expected);
         }
 
@@ -1303,7 +1322,7 @@ mod tests {
 
             let qstring = "CREATE VIEW v AS SELECT * FROM users WHERE username = \"bob\";";
 
-            let res = view_creation(Dialect::MySQL)(qstring.as_bytes());
+            let res = view_creation(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(
                 res.unwrap().1,
                 CreateViewStatement {
@@ -1328,7 +1347,7 @@ mod tests {
         fn format_create_view() {
             let qstring = "CREATE VIEW `v` AS SELECT * FROM `t`;";
             let expected = "CREATE VIEW `v` AS SELECT * FROM `t`";
-            let res = view_creation(Dialect::MySQL)(qstring.as_bytes());
+            let res = view_creation(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(res.unwrap().1.to_string(), expected);
         }
 
@@ -1437,7 +1456,7 @@ mod tests {
             INDEX `thread_id`  (`thread_id`),
             INDEX `index_comments_on_user_id`  (`user_id`))
             ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
-            let res = create_table(Dialect::MySQL)(qstring.as_bytes());
+            let res = create_table(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(
                 res.unwrap().1,
                 CreateTableStatement {
@@ -1504,7 +1523,7 @@ mod tests {
             let qstring =
                 "CREATE TABLE user_newtalk (  user_id int(5) NOT NULL default '0',  user_ip \
                        varchar(40) NOT NULL default '') TYPE=MyISAM;";
-            let res = create_table(Dialect::MySQL)(qstring.as_bytes());
+            let res = create_table(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(
                 res.unwrap().1,
                 CreateTableStatement {
@@ -1557,9 +1576,9 @@ mod tests {
                         user_editcount int,
                         user_password_expires varbinary(14) DEFAULT NULL
                        ) ENGINE=, DEFAULT CHARSET=utf8";
-            if let Err(nom::Err::Error(nom::error::Error { input, .. })) =
-                create_table(Dialect::MySQL)(qstring.as_bytes())
-            {
+            if let Err(nom::Err::Error(nom::error::Error { input, .. })) = to_nom_result(
+                create_table(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes())),
+            ) {
                 panic!("{}", std::str::from_utf8(input).unwrap());
             }
         }
@@ -1574,7 +1593,7 @@ mod tests {
  iw_local bool NOT NULL,
  iw_trans tinyint NOT NULL default 0
  ) ENGINE=, DEFAULT CHARSET=utf8";
-            create_table(Dialect::MySQL)(qstring.as_bytes()).unwrap();
+            create_table(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes())).unwrap();
         }
 
         #[test]
@@ -1594,7 +1613,7 @@ mod tests {
           KEY `el_index_60` (`el_index_60`,`el_id`),
           KEY `el_from_index_60` (`el_from`,`el_index_60`,`el_id`)
         )";
-            create_table(Dialect::MySQL)(qstring.as_bytes()).unwrap();
+            create_table(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes())).unwrap();
         }
 
         #[test]
@@ -1648,12 +1667,14 @@ mod tests {
         use super::*;
         use crate::column::Column;
         use crate::table::Relation;
-        use crate::{ColumnConstraint, Literal, SqlType};
+        use crate::{to_nom_result, ColumnConstraint, Literal, SqlType};
 
         #[test]
         fn double_precision_column() {
-            let (rem, res) =
-                create_table(Dialect::PostgreSQL)(b"create table t(x double precision)").unwrap();
+            let (rem, res) = to_nom_result(create_table(Dialect::PostgreSQL)(LocatedSpan::new(
+                b"create table t(x double precision)",
+            )))
+            .unwrap();
             assert_eq!(str::from_utf8(rem).unwrap(), "");
             assert_eq!(
                 res,
@@ -1675,7 +1696,7 @@ mod tests {
         #[test]
         fn create_with_non_reserved_identifier() {
             let qstring = "CREATE TABLE groups ( id integer );";
-            let res = create_table(Dialect::PostgreSQL)(qstring.as_bytes());
+            let res = create_table(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(
                 res.unwrap().1,
                 CreateTableStatement {
@@ -1694,7 +1715,7 @@ mod tests {
         #[test]
         fn create_with_reserved_identifier() {
             let qstring = "CREATE TABLE select ( id integer );";
-            let res = create_table(Dialect::PostgreSQL)(qstring.as_bytes());
+            let res = create_table(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
             res.unwrap_err();
         }
 
@@ -1709,7 +1730,7 @@ mod tests {
                        \"object_repr\" varchar(200) NOT NULL,
                        \"action_flag\" smallint UNSIGNED NOT NULL,
                        \"change_message\" longtext NOT NULL);";
-            let res = create_table(Dialect::PostgreSQL)(qstring.as_bytes());
+            let res = create_table(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(
                 res.unwrap().1,
                 CreateTableStatement {
@@ -1764,7 +1785,7 @@ mod tests {
             let qstring = "CREATE TABLE \"auth_group\" (
                        \"id\" integer AUTO_INCREMENT NOT NULL PRIMARY KEY,
                        \"name\" varchar(80) NOT NULL UNIQUE)";
-            let res = create_table(Dialect::PostgreSQL)(qstring.as_bytes());
+            let res = create_table(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(
                 res.unwrap().1,
                 CreateTableStatement {
@@ -1801,7 +1822,7 @@ mod tests {
             let expected = "CREATE TABLE `auth_group` (\
                         `id` INT AUTO_INCREMENT NOT NULL PRIMARY KEY, \
                         `name` VARCHAR(80) NOT NULL UNIQUE)";
-            let res = create_table(Dialect::PostgreSQL)(qstring.as_bytes());
+            let res = create_table(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(res.unwrap().1.to_string(), expected);
         }
 
@@ -1812,7 +1833,7 @@ mod tests {
 
             let qstring = "CREATE VIEW v AS SELECT * FROM users WHERE username = 'bob';";
 
-            let res = view_creation(Dialect::PostgreSQL)(qstring.as_bytes());
+            let res = view_creation(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(
                 res.unwrap().1,
                 CreateViewStatement {
@@ -1837,7 +1858,7 @@ mod tests {
         fn format_create_view() {
             let qstring = "CREATE VIEW \"v\" AS SELECT * FROM \"t\";";
             let expected = "CREATE VIEW `v` AS SELECT * FROM `t`";
-            let res = view_creation(Dialect::PostgreSQL)(qstring.as_bytes());
+            let res = view_creation(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(res.unwrap().1.to_string(), expected);
         }
 
@@ -1853,7 +1874,7 @@ mod tests {
             INDEX \"thread_id\"  (\"thread_id\"),
             INDEX \"index_comments_on_user_id\"  (\"user_id\"))
             ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
-            let res = create_table(Dialect::PostgreSQL)(qstring.as_bytes());
+            let res = create_table(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(
                 res.unwrap().1,
                 CreateTableStatement {
@@ -1920,7 +1941,7 @@ mod tests {
             let qstring =
                 "CREATE TABLE user_newtalk (  user_id int(5) NOT NULL default '0',  user_ip \
                        varchar(40) NOT NULL default '') TYPE=MyISAM;";
-            let res = create_table(Dialect::PostgreSQL)(qstring.as_bytes());
+            let res = create_table(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(
                 res.unwrap().1,
                 CreateTableStatement {
@@ -1973,7 +1994,7 @@ mod tests {
                         user_editcount int,
                         user_password_expires varbinary(14) DEFAULT NULL
                        ) ENGINE=, DEFAULT CHARSET=utf8";
-            create_table(Dialect::PostgreSQL)(qstring.as_bytes()).unwrap();
+            create_table(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes())).unwrap();
         }
 
         #[test]
@@ -1986,7 +2007,7 @@ mod tests {
  iw_local bool NOT NULL,
  iw_trans tinyint NOT NULL default 0
  ) ENGINE=, DEFAULT CHARSET=utf8";
-            create_table(Dialect::PostgreSQL)(qstring.as_bytes()).unwrap();
+            create_table(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes())).unwrap();
         }
 
         #[test]
@@ -2005,7 +2026,7 @@ mod tests {
           KEY \"el_index_60\" (\"el_index_60\",\"el_id\"),
           KEY \"el_from_index_60\" (\"el_from\",\"el_index_60\",\"el_id\")
         )";
-            create_table(Dialect::PostgreSQL)(qstring.as_bytes()).unwrap();
+            create_table(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes())).unwrap();
         }
     }
 

@@ -6,15 +6,15 @@ use nom::bytes::complete::tag_no_case;
 use nom::combinator::{map, opt};
 use nom::multi::separated_list1;
 use nom::sequence::preceded;
-use nom::IResult;
+use nom_locate::LocatedSpan;
 use serde::{Deserialize, Serialize};
 
 use crate::common::{statement_terminator, ws_sep_comma};
 use crate::table::{table_list, table_reference, Relation};
 use crate::whitespace::whitespace1;
-use crate::Dialect;
+use crate::{Dialect, NomSqlResult};
 
-fn if_exists(i: &[u8]) -> IResult<&[u8], bool> {
+fn if_exists(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], bool> {
     map(
         opt(|i| {
             let (i, _) = tag_no_case("if")(i)?;
@@ -26,7 +26,7 @@ fn if_exists(i: &[u8]) -> IResult<&[u8], bool> {
     )(i)
 }
 
-fn restrict_cascade(i: &[u8]) -> IResult<&[u8], (bool, bool)> {
+fn restrict_cascade(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], (bool, bool)> {
     let (i, restrict) = opt(preceded(whitespace1, tag_no_case("restrict")))(i)?;
     let (i, cascade) = opt(preceded(whitespace1, tag_no_case("cascade")))(i)?;
     Ok((i, (restrict.is_some(), cascade.is_some())))
@@ -55,7 +55,9 @@ impl Display for DropTableStatement {
     }
 }
 
-pub fn drop_table(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], DropTableStatement> {
+pub fn drop_table(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], DropTableStatement> {
     move |i| {
         let (i, _) = tag_no_case("drop")(i)?;
         let (i, _) = whitespace1(i)?;
@@ -81,7 +83,9 @@ impl Display for DropCacheStatement {
     }
 }
 
-pub fn drop_cached_query(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], DropCacheStatement> {
+pub fn drop_cached_query(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], DropCacheStatement> {
     move |i| {
         let (i, _) = tag_no_case("drop")(i)?;
         let (i, _) = whitespace1(i)?;
@@ -109,7 +113,9 @@ impl Display for DropViewStatement {
     }
 }
 
-pub fn drop_view(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], DropViewStatement> {
+pub fn drop_view(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], DropViewStatement> {
     move |i| {
         let (i, _) = tag_no_case("drop")(i)?;
         let (i, _) = whitespace1(i)?;
@@ -132,7 +138,7 @@ impl Display for DropAllCachesStatement {
     }
 }
 
-pub fn drop_all_caches(i: &[u8]) -> IResult<&[u8], DropAllCachesStatement> {
+pub fn drop_all_caches(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], DropAllCachesStatement> {
     let (i, _) = tag_no_case("drop")(i)?;
     let (i, _) = whitespace1(i)?;
     let (i, _) = tag_no_case("all")(i)?;
@@ -149,7 +155,7 @@ mod tests {
     #[test]
     fn simple_drop_table() {
         let qstring = "DROP TABLE users;";
-        let res = drop_table(Dialect::MySQL)(qstring.as_bytes());
+        let res = drop_table(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             DropTableStatement {
@@ -163,7 +169,7 @@ mod tests {
     fn format_drop_table() {
         let qstring = "DROP TABLE IF EXISTS users,posts;";
         let expected = "DROP TABLE IF EXISTS `users`, `posts`";
-        let res = drop_table(Dialect::MySQL)(qstring.as_bytes());
+        let res = drop_table(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
         assert_eq!(res.unwrap().1.to_string(), expected);
     }
 

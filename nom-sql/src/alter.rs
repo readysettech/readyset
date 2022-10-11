@@ -8,7 +8,7 @@ use nom::bytes::complete::tag_no_case;
 use nom::combinator::{map, opt};
 use nom::multi::separated_list0;
 use nom::sequence::{preceded, terminated};
-use nom::IResult;
+use nom_locate::LocatedSpan;
 use serde::{Deserialize, Serialize};
 
 use crate::column::{column_specification, ColumnSpecification};
@@ -17,7 +17,7 @@ use crate::create::key_specification;
 use crate::literal::literal;
 use crate::table::{table_reference, Relation};
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, Literal, SqlIdentifier};
+use crate::{Dialect, Literal, NomSqlResult, SqlIdentifier};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum AlterColumnOperation {
@@ -141,7 +141,9 @@ impl fmt::Display for AlterTableStatement {
     }
 }
 
-fn add_column(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], AlterTableDefinition> {
+fn add_column(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AlterTableDefinition> {
     move |i| {
         let (i, _) = tag_no_case("add")(i)?;
         let (i, _) = opt(preceded(whitespace1, tag_no_case("column")))(i)?;
@@ -153,28 +155,32 @@ fn add_column(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], AlterTableDe
     }
 }
 
-fn add_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], AlterTableDefinition> {
+fn add_key(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AlterTableDefinition> {
     move |i| {
-        debug_print("before add_key", i);
+        debug_print("before add_key", &i);
         let (i, _) = tag_no_case("add")(i)?;
         let (i, _) = whitespace1(i)?;
 
         let (i, alter_table_def) = map(key_specification(dialect), |k| {
             AlterTableDefinition::AddKey(k)
         })(i)?;
-        debug_print("after add_key", i);
+        debug_print("after add_key", &i);
         Ok((i, alter_table_def))
     }
 }
 
-fn drop_behavior(i: &[u8]) -> IResult<&[u8], DropBehavior> {
+fn drop_behavior(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], DropBehavior> {
     alt((
         map(tag_no_case("cascade"), |_| DropBehavior::Cascade),
         map(tag_no_case("restrict"), |_| DropBehavior::Restrict),
     ))(i)
 }
 
-fn drop_column(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], AlterTableDefinition> {
+fn drop_column(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AlterTableDefinition> {
     move |i| {
         let (i, _) = tag_no_case("drop")(i)?;
         let (i, _) = whitespace1(i)?;
@@ -188,7 +194,9 @@ fn drop_column(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], AlterTableD
     }
 }
 
-fn set_default(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], AlterColumnOperation> {
+fn set_default(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AlterColumnOperation> {
     move |i| {
         let (i, _) = opt(terminated(tag_no_case("set"), whitespace1))(i)?;
         let (i, _) = tag_no_case("default")(i)?;
@@ -200,7 +208,7 @@ fn set_default(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], AlterColumn
     }
 }
 
-fn drop_default(i: &[u8]) -> IResult<&[u8], AlterColumnOperation> {
+fn drop_default(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AlterColumnOperation> {
     let (i, _) = tag_no_case("drop")(i)?;
     let (i, _) = whitespace1(i)?;
     let (i, _) = tag_no_case("default")(i)?;
@@ -210,11 +218,13 @@ fn drop_default(i: &[u8]) -> IResult<&[u8], AlterColumnOperation> {
 
 fn alter_column_operation(
     dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], AlterColumnOperation> {
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AlterColumnOperation> {
     move |i| alt((set_default(dialect), drop_default))(i)
 }
 
-fn alter_column(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], AlterTableDefinition> {
+fn alter_column(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AlterTableDefinition> {
     move |i| {
         let (i, _) = tag_no_case("alter")(i)?;
         let (i, _) = whitespace1(i)?;
@@ -229,7 +239,9 @@ fn alter_column(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], AlterTable
     }
 }
 
-fn change_column(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], AlterTableDefinition> {
+fn change_column(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AlterTableDefinition> {
     move |i| {
         let (i, _) = tag_no_case("change")(i)?;
         let (i, _) = opt(preceded(whitespace1, tag_no_case("column")))(i)?;
@@ -243,7 +255,9 @@ fn change_column(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], AlterTabl
     }
 }
 
-fn modify_column(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], AlterTableDefinition> {
+fn modify_column(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AlterTableDefinition> {
     // TODO: FIRST, AFTER col_name
     move |i| {
         let (i, _) = tag_no_case("modify")(i)?;
@@ -259,7 +273,9 @@ fn modify_column(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], AlterTabl
     }
 }
 
-fn rename_column(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], AlterTableDefinition> {
+fn rename_column(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AlterTableDefinition> {
     move |i| {
         let (i, _) = tag_no_case("rename")(i)?;
         let (i, _) = whitespace1(i)?;
@@ -274,7 +290,9 @@ fn rename_column(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], AlterTabl
     }
 }
 
-fn drop_constraint(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], AlterTableDefinition> {
+fn drop_constraint(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AlterTableDefinition> {
     move |i| {
         let (i, _) = tag_no_case("drop")(i)?;
         let (i, _) = whitespace1(i)?;
@@ -298,7 +316,7 @@ fn drop_constraint(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], AlterTa
 
 fn alter_table_definition(
     dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], AlterTableDefinition> {
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AlterTableDefinition> {
     move |i| {
         alt((
             add_column(dialect),
@@ -315,7 +333,7 @@ fn alter_table_definition(
 
 pub fn alter_table_statement(
     dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], AlterTableStatement> {
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AlterTableStatement> {
     move |i| {
         let (i, _) = tag_no_case("alter")(i)?;
         let (i, _) = whitespace1(i)?;
@@ -403,7 +421,7 @@ mod tests {
             ],
             only: false,
         };
-        let result = alter_table_statement(Dialect::MySQL)(qstring);
+        let result = alter_table_statement(Dialect::MySQL)(LocatedSpan::new(qstring));
         assert_eq!(result.unwrap().1, expected);
     }
 
@@ -431,7 +449,8 @@ mod tests {
                 })],
                 only: false,
             };
-            let result = alter_table_statement(Dialect::MySQL)(qstring.as_bytes());
+            let result =
+                alter_table_statement(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(result.unwrap().1, expected);
         }
 
@@ -465,7 +484,8 @@ mod tests {
                 ],
                 only: false,
             };
-            let result = alter_table_statement(Dialect::MySQL)(qstring.as_bytes());
+            let result =
+                alter_table_statement(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(result.unwrap().1, expected);
         }
 
@@ -483,7 +503,8 @@ mod tests {
                 }],
                 only: false,
             };
-            let result = alter_table_statement(Dialect::MySQL)(qstring.as_bytes());
+            let result =
+                alter_table_statement(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(result.unwrap().1, expected);
         }
 
@@ -501,7 +522,8 @@ mod tests {
                 }],
                 only: false,
             };
-            let result = alter_table_statement(Dialect::MySQL)(qstring.as_bytes());
+            let result =
+                alter_table_statement(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(result.unwrap().1, expected);
         }
 
@@ -521,7 +543,8 @@ mod tests {
                 }],
                 only: false,
             };
-            let result = alter_table_statement(Dialect::MySQL)(qstring.as_bytes());
+            let result =
+                alter_table_statement(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(result.unwrap().1, expected);
         }
 
@@ -539,7 +562,8 @@ mod tests {
                 }],
                 only: false,
             };
-            let result = alter_table_statement(Dialect::MySQL)(qstring.as_bytes());
+            let result =
+                alter_table_statement(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(result.unwrap().1, expected);
         }
 
@@ -706,7 +730,7 @@ mod tests {
         #[test]
         fn error_on_only() {
             let qstring = "ALTER TABLE ONLY \"t\" DROP COLUMN c";
-            let res = alter_table_statement(Dialect::MySQL)(qstring.as_bytes());
+            let res = alter_table_statement(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
             assert!(res.is_err());
         }
     }
@@ -734,7 +758,8 @@ mod tests {
                 })],
                 only: false,
             };
-            let result = alter_table_statement(Dialect::PostgreSQL)(qstring.as_bytes());
+            let result =
+                alter_table_statement(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(result.unwrap().1, expected);
         }
 
@@ -768,7 +793,8 @@ mod tests {
                 ],
                 only: false,
             };
-            let result = alter_table_statement(Dialect::PostgreSQL)(qstring.as_bytes());
+            let result =
+                alter_table_statement(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(result.unwrap().1, expected);
         }
 
@@ -786,7 +812,8 @@ mod tests {
                 }],
                 only: false,
             };
-            let result = alter_table_statement(Dialect::PostgreSQL)(qstring.as_bytes());
+            let result =
+                alter_table_statement(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(result.unwrap().1, expected);
         }
 
@@ -804,7 +831,8 @@ mod tests {
                 }],
                 only: false,
             };
-            let result = alter_table_statement(Dialect::PostgreSQL)(qstring.as_bytes());
+            let result =
+                alter_table_statement(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(result.unwrap().1, expected);
         }
 
@@ -824,7 +852,8 @@ mod tests {
                 }],
                 only: false,
             };
-            let result = alter_table_statement(Dialect::PostgreSQL)(qstring.as_bytes());
+            let result =
+                alter_table_statement(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(result.unwrap().1, expected);
         }
 
@@ -842,7 +871,8 @@ mod tests {
                 }],
                 only: false,
             };
-            let result = alter_table_statement(Dialect::PostgreSQL)(qstring.as_bytes());
+            let result =
+                alter_table_statement(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(result.unwrap().1, expected);
         }
 
@@ -860,7 +890,8 @@ mod tests {
                 }],
                 only: true,
             };
-            let res = alter_table_statement(Dialect::PostgreSQL)(qstring.as_bytes());
+            let res =
+                alter_table_statement(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(res.unwrap().1, expected);
         }
 
@@ -880,9 +911,12 @@ mod tests {
                 }],
                 only: false,
             };
-            let res1 = alter_table_statement(Dialect::PostgreSQL)(qstring1.as_bytes());
-            let res2 = alter_table_statement(Dialect::PostgreSQL)(qstring2.as_bytes());
-            let res3 = alter_table_statement(Dialect::PostgreSQL)(qstring3.as_bytes());
+            let res1 =
+                alter_table_statement(Dialect::PostgreSQL)(LocatedSpan::new(qstring1.as_bytes()));
+            let res2 =
+                alter_table_statement(Dialect::PostgreSQL)(LocatedSpan::new(qstring2.as_bytes()));
+            let res3 =
+                alter_table_statement(Dialect::PostgreSQL)(LocatedSpan::new(qstring3.as_bytes()));
             assert_eq!(res1.unwrap().1, expected);
             expected.definitions[0] = AlterTableDefinition::DropConstraint {
                 name: "c".into(),
@@ -912,7 +946,8 @@ mod tests {
                 definitions: vec![AlterTableDefinition::AddKey(table_key)],
                 only: false,
             };
-            let res1 = alter_table_statement(Dialect::PostgreSQL)(qstring.as_bytes());
+            let res1 =
+                alter_table_statement(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(res1.unwrap().1, expected);
         }
 

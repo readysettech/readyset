@@ -2,7 +2,7 @@ use std::{fmt, str};
 
 use nom::branch::alt;
 use nom::combinator::map;
-use nom::IResult;
+use nom_locate::LocatedSpan;
 use serde::{Deserialize, Serialize};
 
 use crate::alter::{alter_table_statement, AlterTableStatement};
@@ -30,7 +30,7 @@ use crate::transaction::{
 use crate::update::{updating, UpdateStatement};
 use crate::use_statement::{use_statement, UseStatement};
 use crate::whitespace::whitespace0;
-use crate::{Dialect, DropAllCachesStatement, Expr, TableKey};
+use crate::{Dialect, DropAllCachesStatement, Expr, NomSqlResult, TableKey};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)]
@@ -128,9 +128,9 @@ impl SqlQuery {
     }
 }
 
-pub fn sql_query(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlQuery> {
+pub fn sql_query(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlQuery> {
     move |i| {
-        // Ignore preceeding whitespace or comments
+        // Ignore preceding whitespace or comments
         let (i, _) = whitespace0(i)?;
         alt((
             map(create_table(dialect), SqlQuery::CreateTable),
@@ -164,7 +164,7 @@ macro_rules! export_parser {
         where
             T: AsRef<[u8]>,
         {
-            match $parser(dialect)(input.as_ref()) {
+            match $parser(dialect)(LocatedSpan::new(input.as_ref())) {
                 Ok((_, o)) => Ok(o),
                 Err(_) => Err("failed to parse query"),
             }

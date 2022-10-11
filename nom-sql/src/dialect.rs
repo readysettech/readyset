@@ -9,14 +9,14 @@ use nom::combinator::{map, map_res, not, opt, peek};
 use nom::error::ErrorKind;
 use nom::multi::fold_many0;
 use nom::sequence::{delimited, preceded};
-use nom::IResult;
+use nom_locate::LocatedSpan;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::keywords::{sql_keyword, sql_keyword_or_builtin_function, POSTGRES_NOT_RESERVED};
 use crate::literal::{raw_string_literal, QuotingStyle};
 use crate::whitespace::whitespace0;
-use crate::{literal, Literal, SqlIdentifier};
+use crate::{literal, Literal, NomSqlError, NomSqlResult, SqlIdentifier};
 
 #[inline]
 fn is_sql_identifier(chr: u8) -> bool {
@@ -24,18 +24,18 @@ fn is_sql_identifier(chr: u8) -> bool {
 }
 
 /// Byte array literal value (PostgreSQL)
-fn raw_hex_bytes_psql(input: &[u8]) -> IResult<&[u8], Vec<u8>> {
+fn raw_hex_bytes_psql(input: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<u8>> {
     delimited(tag("E'\\\\x"), hex_bytes, tag("'::bytea"))(input)
 }
 
 /// Blob literal value (MySQL)
-fn raw_hex_bytes_mysql(input: &[u8]) -> IResult<&[u8], Vec<u8>> {
+fn raw_hex_bytes_mysql(input: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<u8>> {
     delimited(tag("X'"), hex_bytes, tag("'"))(input)
 }
 
-fn hex_bytes(input: &[u8]) -> IResult<&[u8], Vec<u8>> {
+fn hex_bytes(input: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<u8>> {
     fold_many0(
-        map_res(take(2_usize), hex::decode),
+        map_res(take(2_usize), |i: LocatedSpan<&[u8]>| hex::decode(*i)),
         Vec::new,
         |mut acc: Vec<u8>, bytes: Vec<u8>| {
             acc.extend(bytes);
@@ -45,11 +45,11 @@ fn hex_bytes(input: &[u8]) -> IResult<&[u8], Vec<u8>> {
 }
 
 /// Bit vector literal value (PostgreSQL)
-fn raw_bit_vector_psql(input: &[u8]) -> IResult<&[u8], BitVec> {
+fn raw_bit_vector_psql(input: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], BitVec> {
     delimited(tag_no_case("b'"), bits, tag("'"))(input)
 }
 
-fn bits(input: &[u8]) -> IResult<&[u8], BitVec> {
+fn bits(input: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], BitVec> {
     fold_many0(
         map(alt((char('0'), char('1'))), |i: char| i == '1'),
         BitVec::new,
@@ -96,7 +96,7 @@ impl FromStr for Dialect {
 
 impl Dialect {
     /// Parse a SQL identifier using this Dialect
-    pub fn identifier(self) -> impl for<'a> Fn(&'a [u8]) -> IResult<&'a [u8], SqlIdentifier> {
+    pub fn identifier(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlIdentifier> {
         move |i| match self {
             Dialect::MySQL => map_res(
                 alt((
@@ -107,14 +107,14 @@ impl Dialect {
                     delimited(tag("`"), take_while1(|c| c != 0 && c != b'`'), tag("`")),
                     delimited(tag("["), take_while1(is_sql_identifier), tag("]")),
                 )),
-                |v| str::from_utf8(v).map(Into::into),
+                |v| str::from_utf8(&v).map(Into::into),
             )(i),
             Dialect::PostgreSQL => alt((
                 map_res(
                     preceded(
                         not(map_res(peek(sql_keyword_or_builtin_function), |i| {
                             if POSTGRES_NOT_RESERVED.contains(&i.to_ascii_uppercase()[..]) {
-                                Err(nom::Err::Error((i, ErrorKind::IsNot)))
+                                Err(())
                             } else {
                                 Ok(i)
                             }
@@ -122,21 +122,21 @@ impl Dialect {
                         take_while1(is_sql_identifier),
                     ),
                     |v| {
-                        str::from_utf8(v)
+                        str::from_utf8(&v)
                             .map(str::to_ascii_lowercase)
                             .map(Into::into)
                     },
                 ),
                 map_res(
                     delimited(tag("\""), take_while1(|c| c != 0 && c != b'"'), tag("\"")),
-                    |v| str::from_utf8(v).map(Into::into),
+                    |v: LocatedSpan<&[u8]>| str::from_utf8(&v).map(Into::into),
                 ),
             ))(i),
         }
     }
 
     /// Parse a SQL function identifier using this Dialect
-    pub fn function_identifier(self) -> impl for<'a> Fn(&'a [u8]) -> IResult<&'a [u8], &'a str> {
+    pub fn function_identifier(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], &str> {
         move |i| match self {
             Dialect::MySQL => map_res(
                 alt((
@@ -144,14 +144,14 @@ impl Dialect {
                     delimited(tag("`"), take_while1(is_sql_identifier), tag("`")),
                     delimited(tag("["), take_while1(is_sql_identifier), tag("]")),
                 )),
-                str::from_utf8,
+                |i| str::from_utf8(&i),
             )(i),
             Dialect::PostgreSQL => map_res(
                 alt((
                     preceded(not(peek(sql_keyword)), take_while1(is_sql_identifier)),
                     delimited(tag("\""), take_while1(is_sql_identifier), tag("\"")),
                 )),
-                str::from_utf8,
+                |i| str::from_utf8(&i),
             )(i),
         }
     }
@@ -165,7 +165,7 @@ impl Dialect {
     }
 
     /// Parse the raw (byte) content of a string literal using this Dialect
-    pub fn string_literal(self) -> impl for<'a> Fn(&'a [u8]) -> IResult<&'a [u8], Vec<u8>> {
+    pub fn string_literal(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<u8>> {
         move |i| match self {
             // Currently we allow escape sequences in all string constants. If we support postgres'
             // standard_conforming_strings setting, then the below should be changed to check for
@@ -181,19 +181,14 @@ impl Dialect {
         }
     }
 
-    pub fn utf8_string_literal(self) -> impl Fn(&[u8]) -> IResult<&[u8], String> {
-        move |i| {
-            map_res(self.string_literal(), |bytes| {
-                String::from_utf8(bytes)
-                    .map_err(|_| nom::Err::Error(nom::error::Error::new(i, ErrorKind::Fail)))
-            })(i)
-        }
+    pub fn utf8_string_literal(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], String> {
+        move |i| map_res(self.string_literal(), String::from_utf8)(i)
     }
 
     /// Parse the raw (byte) content of a bytes literal using this Dialect.
     // TODO(fran): Improve this. This is very naive, and for Postgres specifically, it only
     //  parses the hex-formatted byte array. We need to also add support for the escaped format.
-    pub fn bytes_literal(self) -> impl for<'a> Fn(&'a [u8]) -> IResult<&'a [u8], Vec<u8>> {
+    pub fn bytes_literal(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<u8>> {
         move |i| match self {
             Dialect::PostgreSQL => raw_hex_bytes_psql(i),
             Dialect::MySQL => raw_hex_bytes_mysql(i),
@@ -201,23 +196,27 @@ impl Dialect {
     }
 
     /// Parse the raw (byte) content of a bit vector literal using this Dialect.
-    pub fn bitvec_literal(self) -> impl for<'a> Fn(&'a [u8]) -> IResult<&'a [u8], BitVec> {
-        move |i| match self {
-            Dialect::PostgreSQL => raw_bit_vector_psql(i),
-            Dialect::MySQL => Err(nom::Err::Error(nom::error::Error::new(
-                i,
-                nom::error::ErrorKind::Many0,
-            ))),
+    pub fn bitvec_literal(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], BitVec> {
+        move |input| match self {
+            Dialect::PostgreSQL => raw_bit_vector_psql(input),
+            Dialect::MySQL => Err(nom::Err::Error(NomSqlError {
+                input,
+                kind: nom::error::ErrorKind::Many0,
+            })),
         }
     }
 
     /// Parses the MySQL specific `{offset}, {limit}` part in a `LIMIT` clause
     pub fn offset_limit(
         self,
-    ) -> impl Fn(&[u8]) -> IResult<&[u8], (Option<Literal>, Option<Literal>)> {
+    ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], (Option<Literal>, Option<Literal>)>
+    {
         move |i| {
             if self == Dialect::PostgreSQL {
-                return Err(nom::Err::Error(nom::error::Error::new(i, ErrorKind::Fail)));
+                return Err(nom::Err::Error(NomSqlError {
+                    input: i,
+                    kind: ErrorKind::Fail,
+                }));
             }
 
             let (i, _) = whitespace0(i)?;
@@ -238,6 +237,7 @@ mod tests {
 
     mod mysql {
         use super::*;
+        use crate::to_nom_result;
 
         #[test]
         fn sql_identifiers() {
@@ -250,14 +250,14 @@ mod tests {
             let id7 = b"`state-province`";
             let id8 = b"`state\0province`";
 
-            Dialect::MySQL.identifier()(id1).unwrap();
-            Dialect::MySQL.identifier()(id2).unwrap();
-            Dialect::MySQL.identifier()(id3).unwrap();
-            Dialect::MySQL.identifier()(id4).unwrap_err();
-            Dialect::MySQL.identifier()(id5).unwrap_err();
-            Dialect::MySQL.identifier()(id6).unwrap();
-            Dialect::MySQL.identifier()(id7).unwrap();
-            Dialect::MySQL.identifier()(id8).unwrap_err();
+            Dialect::MySQL.identifier()(LocatedSpan::new(id1)).unwrap();
+            Dialect::MySQL.identifier()(LocatedSpan::new(id2)).unwrap();
+            Dialect::MySQL.identifier()(LocatedSpan::new(id3)).unwrap();
+            Dialect::MySQL.identifier()(LocatedSpan::new(id4)).unwrap_err();
+            Dialect::MySQL.identifier()(LocatedSpan::new(id5)).unwrap_err();
+            Dialect::MySQL.identifier()(LocatedSpan::new(id6)).unwrap();
+            Dialect::MySQL.identifier()(LocatedSpan::new(id7)).unwrap();
+            Dialect::MySQL.identifier()(LocatedSpan::new(id8)).unwrap_err();
         }
 
         #[test]
@@ -265,7 +265,7 @@ mod tests {
             let all_escaped = br#"\0\'\"\b\n\r\t\Z\\\%\_"#;
             for quote in [&b"'"[..], &b"\""[..]].iter() {
                 let quoted = &[quote, &all_escaped[..], quote].concat();
-                let res = Dialect::MySQL.string_literal()(quoted);
+                let res = to_nom_result(Dialect::MySQL.string_literal()(LocatedSpan::new(quoted)));
                 let expected = "\0\'\"\x7F\n\r\t\x1a\\%_".as_bytes().to_vec();
                 assert_eq!(res, Ok((&b""[..], expected)));
             }
@@ -273,37 +273,44 @@ mod tests {
 
         #[test]
         fn literal_string_charset() {
-            let res = Dialect::MySQL.string_literal()(b"_utf8mb4'noria'");
+            let res = to_nom_result(Dialect::MySQL.string_literal()(LocatedSpan::new(
+                b"_utf8mb4'noria'",
+            )));
             let expected = b"noria".to_vec();
             assert_eq!(res, Ok((&b""[..], expected)));
         }
 
         #[test]
         fn literal_string_double_quote() {
-            let res = Dialect::MySQL.string_literal()(br#""a""b""#);
+            let res = to_nom_result(Dialect::MySQL.string_literal()(LocatedSpan::new(
+                br#""a""b""#,
+            )));
             let expected = r#"a"b"#.as_bytes().to_vec();
             assert_eq!(res, Ok((&b""[..], expected)));
         }
 
         #[test]
         fn bytes_parsing() {
-            let res = Dialect::MySQL.bytes_literal()(b"X'0008275c6480'");
+            let res = to_nom_result(Dialect::MySQL.bytes_literal()(LocatedSpan::new(
+                b"X'0008275c6480'",
+            )));
             let expected = vec![0, 8, 39, 92, 100, 128];
             assert_eq!(res, Ok((&b""[..], expected)));
 
             // Empty
-            let res = Dialect::MySQL.bytes_literal()(b"X''");
+            let res = to_nom_result(Dialect::MySQL.bytes_literal()(LocatedSpan::new(b"X''")));
             let expected = vec![];
             assert_eq!(res, Ok((&b""[..], expected)));
 
             // Malformed string
-            let res = Dialect::MySQL.bytes_literal()(b"''");
+            let res = Dialect::MySQL.bytes_literal()(LocatedSpan::new(b"''"));
             res.unwrap_err();
         }
     }
 
     mod postgres {
         use super::*;
+        use crate::to_nom_result;
 
         #[test]
         fn sql_identifiers() {
@@ -315,13 +322,15 @@ mod tests {
             let id6 = b"\"primary\"";
             let id7 = b"\"state-province\"";
 
-            Dialect::PostgreSQL.identifier()(id1).unwrap();
-            Dialect::PostgreSQL.identifier()(id2).unwrap();
-            Dialect::PostgreSQL.identifier()(id3).unwrap();
-            Dialect::PostgreSQL.identifier()(id4).unwrap_err();
-            Dialect::PostgreSQL.identifier()(id5).unwrap_err();
-            Dialect::PostgreSQL.identifier()(id6).unwrap();
-            Dialect::PostgreSQL.identifier()(id7).unwrap();
+            Dialect::PostgreSQL.identifier()(LocatedSpan::new(id1)).unwrap();
+            Dialect::PostgreSQL.identifier()(LocatedSpan::new(id2)).unwrap();
+            Dialect::PostgreSQL.identifier()(LocatedSpan::new(id3)).unwrap();
+            Dialect::PostgreSQL.identifier()(LocatedSpan::new(id4)).unwrap_err();
+            Dialect::PostgreSQL.identifier()(LocatedSpan::new(id5)).unwrap_err();
+            Dialect::PostgreSQL.identifier()(LocatedSpan::new(id6)).unwrap();
+            Dialect::PostgreSQL.identifier()(LocatedSpan::new(id7)).unwrap();
+
+            Dialect::PostgreSQL.identifier()(LocatedSpan::new(b"groups")).unwrap();
         }
 
         #[test]
@@ -330,9 +339,24 @@ mod tests {
             let id2 = b"foO";
             let id3 = br#""foO""#;
 
-            assert_eq!(Dialect::PostgreSQL.identifier()(id1).unwrap().1, "foo");
-            assert_eq!(Dialect::PostgreSQL.identifier()(id2).unwrap().1, "foo");
-            assert_eq!(Dialect::PostgreSQL.identifier()(id3).unwrap().1, "foO");
+            assert_eq!(
+                Dialect::PostgreSQL.identifier()(LocatedSpan::new(id1))
+                    .unwrap()
+                    .1,
+                "foo"
+            );
+            assert_eq!(
+                Dialect::PostgreSQL.identifier()(LocatedSpan::new(id2))
+                    .unwrap()
+                    .1,
+                "foo"
+            );
+            assert_eq!(
+                Dialect::PostgreSQL.identifier()(LocatedSpan::new(id3))
+                    .unwrap()
+                    .1,
+                "foO"
+            );
         }
 
         #[test]
@@ -340,7 +364,9 @@ mod tests {
             let all_escaped = br#"\0\'\"\b\n\r\t\Z\\\%\_"#;
             let quote = &b"'"[..];
             let quoted = &[quote, &all_escaped[..], quote].concat();
-            let res = Dialect::PostgreSQL.string_literal()(quoted);
+            let res = to_nom_result(Dialect::PostgreSQL.string_literal()(LocatedSpan::new(
+                quoted,
+            )));
             let expected = "\0\'\"\x7F\n\r\t\x1a\\%_".as_bytes().to_vec();
             assert_eq!(res, Ok((&b""[..], expected)));
         }
@@ -349,24 +375,30 @@ mod tests {
         fn literal_string_with_escape_character() {
             let lit = b"E'string'";
             assert_eq!(
-                Dialect::PostgreSQL.string_literal()(lit).unwrap().1,
+                Dialect::PostgreSQL.string_literal()(LocatedSpan::new(lit))
+                    .unwrap()
+                    .1,
                 b"string"
             );
         }
 
         #[test]
         fn bytes_parsing() {
-            let res = Dialect::PostgreSQL.bytes_literal()(b"E'\\\\x0008275c6480'::bytea");
+            let res = to_nom_result(Dialect::PostgreSQL.bytes_literal()(LocatedSpan::new(
+                b"E'\\\\x0008275c6480'::bytea",
+            )));
             let expected = vec![0, 8, 39, 92, 100, 128];
             assert_eq!(res, Ok((&b""[..], expected)));
 
             // Empty
-            let res = Dialect::PostgreSQL.bytes_literal()(b"E'\\\\x'::bytea");
+            let res = to_nom_result(Dialect::PostgreSQL.bytes_literal()(LocatedSpan::new(
+                b"E'\\\\x'::bytea",
+            )));
             let expected = vec![];
             assert_eq!(res, Ok((&b""[..], expected)));
 
             // Malformed string
-            let res = Dialect::PostgreSQL.bytes_literal()(b"E'\\\\'::btea");
+            let res = Dialect::PostgreSQL.bytes_literal()(LocatedSpan::new(b"E'\\\\'::btea"));
             res.unwrap_err();
         }
     }

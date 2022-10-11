@@ -3,13 +3,13 @@ use std::{fmt, str};
 use itertools::Itertools;
 use nom::bytes::complete::tag_no_case;
 use nom::multi::separated_list1;
-use nom::IResult;
+use nom_locate::LocatedSpan;
 use serde::{Deserialize, Serialize};
 
 use crate::common::ws_sep_comma;
 use crate::table::{table_reference, Relation};
 use crate::whitespace::whitespace1;
-use crate::Dialect;
+use crate::{Dialect, NomSqlResult};
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct RenameTableStatement {
@@ -26,7 +26,9 @@ impl fmt::Display for RenameTableStatement {
     }
 }
 
-pub fn rename_table(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], RenameTableStatement> {
+pub fn rename_table(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], RenameTableStatement> {
     move |i| {
         let (i, _) = tag_no_case("rename")(i)?;
         let (i, _) = whitespace1(i)?;
@@ -51,7 +53,7 @@ impl fmt::Display for RenameTableOperation {
 
 fn rename_table_operation(
     dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], RenameTableOperation> {
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], RenameTableOperation> {
     move |i| {
         let (i, from) = table_reference(dialect)(i)?;
         let (i, _) = whitespace1(i)?;

@@ -1,11 +1,11 @@
 use std::fmt;
 
 use nom::bytes::complete::tag_no_case;
-use nom::IResult;
+use nom_locate::LocatedSpan;
 use serde::{Deserialize, Serialize};
 
 use crate::whitespace::whitespace1;
-use crate::{Dialect, SqlIdentifier};
+use crate::{Dialect, NomSqlResult, SqlIdentifier};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct UseStatement {
@@ -24,7 +24,9 @@ impl fmt::Display for UseStatement {
     }
 }
 
-pub fn use_statement(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], UseStatement> {
+pub fn use_statement(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], UseStatement> {
     move |i| {
         let (i, _) = tag_no_case("use")(i)?;
         let (i, _) = whitespace1(i)?;
@@ -43,16 +45,16 @@ mod tests {
         let qstring2 = "use `db2`";
         let qstring3 = "USE `test`";
         let qstring4 = "use noria";
-        let res1 = use_statement(Dialect::MySQL)(qstring1.as_bytes())
+        let res1 = use_statement(Dialect::MySQL)(LocatedSpan::new(qstring1.as_bytes()))
             .unwrap()
             .1;
-        let res2 = use_statement(Dialect::MySQL)(qstring2.as_bytes())
+        let res2 = use_statement(Dialect::MySQL)(LocatedSpan::new(qstring2.as_bytes()))
             .unwrap()
             .1;
-        let res3 = use_statement(Dialect::MySQL)(qstring3.as_bytes())
+        let res3 = use_statement(Dialect::MySQL)(LocatedSpan::new(qstring3.as_bytes()))
             .unwrap()
             .1;
-        let res4 = use_statement(Dialect::MySQL)(qstring4.as_bytes())
+        let res4 = use_statement(Dialect::MySQL)(LocatedSpan::new(qstring4.as_bytes()))
             .unwrap()
             .1;
         assert_eq!(res1, UseStatement::from_database("db1".into()));

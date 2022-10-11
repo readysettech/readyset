@@ -7,14 +7,15 @@ use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::{map, opt};
 use nom::multi::separated_list1;
 use nom::sequence::{terminated, tuple};
-use nom::{IResult, Parser};
+use nom::Parser;
+use nom_locate::LocatedSpan;
 use serde::{Deserialize, Serialize};
 
 use crate::common::statement_terminator;
 use crate::expression::expression;
 use crate::literal::literal;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, Expr, Literal, SqlIdentifier};
+use crate::{Dialect, Expr, Literal, NomSqlError, NomSqlResult, SqlIdentifier};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum SetStatement {
@@ -58,7 +59,7 @@ impl Display for PostgresParameterScope {
     }
 }
 
-fn postgres_parameter_scope(i: &[u8]) -> IResult<&[u8], PostgresParameterScope> {
+fn postgres_parameter_scope(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], PostgresParameterScope> {
     alt((
         map(tag_no_case("session"), |_| PostgresParameterScope::Session),
         map(tag_no_case("local"), |_| PostgresParameterScope::Local),
@@ -80,7 +81,9 @@ impl Display for SetPostgresParameterValue {
     }
 }
 
-fn set_postgres_parameter_value(i: &[u8]) -> IResult<&[u8], SetPostgresParameterValue> {
+fn set_postgres_parameter_value(
+    i: LocatedSpan<&[u8]>,
+) -> NomSqlResult<&[u8], SetPostgresParameterValue> {
     alt((
         map(tag_no_case("default"), |_| {
             SetPostgresParameterValue::Default
@@ -153,7 +156,9 @@ impl Display for PostgresParameterValue {
     }
 }
 
-fn postgres_parameter_value_inner(i: &[u8]) -> IResult<&[u8], PostgresParameterValueInner> {
+fn postgres_parameter_value_inner(
+    i: LocatedSpan<&[u8]>,
+) -> NomSqlResult<&[u8], PostgresParameterValueInner> {
     alt((
         map(
             literal(Dialect::PostgreSQL),
@@ -169,7 +174,7 @@ fn postgres_parameter_value_inner(i: &[u8]) -> IResult<&[u8], PostgresParameterV
     ))(i)
 }
 
-fn postgres_parameter_value(i: &[u8]) -> IResult<&[u8], PostgresParameterValue> {
+fn postgres_parameter_value(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], PostgresParameterValue> {
     let (i, vals) = separated_list1(
         terminated(tag(","), whitespace0),
         postgres_parameter_value_inner,
@@ -205,7 +210,7 @@ impl Display for VariableScope {
     }
 }
 
-pub(crate) fn variable_scope_prefix(i: &[u8]) -> IResult<&[u8], VariableScope> {
+pub(crate) fn variable_scope_prefix(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], VariableScope> {
     alt((
         map(tag_no_case("@@LOCAL."), |_| VariableScope::Local),
         map(tag_no_case("@@GLOBAL."), |_| VariableScope::Global),
@@ -294,7 +299,7 @@ impl Display for SetPostgresParameter {
     }
 }
 
-fn set_variable_scope_prefix(i: &[u8]) -> IResult<&[u8], VariableScope> {
+fn set_variable_scope_prefix(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], VariableScope> {
     alt((
         variable_scope_prefix,
         map(terminated(tag_no_case("GLOBAL"), whitespace1), |_| {
@@ -311,7 +316,7 @@ fn set_variable_scope_prefix(i: &[u8]) -> IResult<&[u8], VariableScope> {
 
 /// check for one of three ways to specify scope and reformat to a single formatting. Returns none
 /// if scope is not specified
-fn variable(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Variable> {
+fn variable(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Variable> {
     move |i| {
         let (i, scope) = set_variable_scope_prefix
             .or(|i| Ok((i, VariableScope::Local)))
@@ -324,7 +329,7 @@ fn variable(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Variable> {
     }
 }
 
-pub fn set(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SetStatement> {
+pub fn set(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SetStatement> {
     move |i| {
         let (i, _) = tag_no_case("set")(i)?;
         let (i, _) = whitespace1(i)?;
@@ -335,10 +340,10 @@ pub fn set(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SetStatement> {
                         .map(SetStatement::PostgresParameter)
                         .parse(i)
                 } else {
-                    Err(nom::Err::Error(nom::error::Error::new(
-                        i,
-                        nom::error::ErrorKind::Tag,
-                    )))
+                    Err(nom::Err::Error(NomSqlError {
+                        input: i,
+                        kind: nom::error::ErrorKind::Tag,
+                    }))
                 }
             },
             map(set_variables(dialect), SetStatement::Variable),
@@ -349,7 +354,9 @@ pub fn set(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SetStatement> {
     }
 }
 
-fn set_variable(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], (Variable, Expr)> {
+fn set_variable(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], (Variable, Expr)> {
     move |i| {
         let (i, variable) = variable(dialect)(i)?;
         let (i, _) = whitespace0(i)?;
@@ -360,7 +367,9 @@ fn set_variable(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], (Variable,
     }
 }
 
-fn set_variables(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SetVariables> {
+fn set_variables(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SetVariables> {
     move |i| {
         let (remaining_input, variables) = terminated(
             separated_list1(
@@ -374,7 +383,7 @@ fn set_variables(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SetVariab
     }
 }
 
-fn set_names(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SetNames> {
+fn set_names(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SetNames> {
     move |i| {
         let (i, _) = tag_no_case("names")(i)?;
         let (i, _) = whitespace1(i)?;
@@ -391,7 +400,7 @@ fn set_names(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SetNames> {
     }
 }
 
-fn set_postgres_parameter(i: &[u8]) -> IResult<&[u8], SetPostgresParameter> {
+fn set_postgres_parameter(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SetPostgresParameter> {
     let (i, scope) = opt(terminated(postgres_parameter_scope, whitespace1))(i)?;
     let (i, name) = Dialect::PostgreSQL.identifier()(i)?;
     let (i, _) = whitespace0(i)?;
@@ -409,7 +418,7 @@ mod tests {
     #[test]
     fn simple_set() {
         let qstring = "SET SQL_AUTO_IS_NULL = 0;";
-        let res = set(Dialect::MySQL)(qstring.as_bytes());
+        let res = set(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             SetStatement::Variable(SetVariables {
@@ -427,7 +436,7 @@ mod tests {
     #[test]
     fn user_defined_vars() {
         let qstring = "SET @var = 123;";
-        let res = set(Dialect::MySQL)(qstring.as_bytes());
+        let res = set(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             SetStatement::Variable(SetVariables {
@@ -446,7 +455,7 @@ mod tests {
     fn format_set() {
         let qstring = "set autocommit=1";
         let expected = "SET @@LOCAL.autocommit = 1";
-        let res = set(Dialect::MySQL)(qstring.as_bytes());
+        let res = set(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
         assert_eq!(res.unwrap().1.to_string(), expected);
     }
 
@@ -467,9 +476,9 @@ mod tests {
         let qstring2 = "set @@var = 1";
         let qstring3 = "set SeSsion var = 1";
         let expected = "SET @@SESSION.var = 1";
-        let res1 = set(Dialect::MySQL)(qstring1.as_bytes());
-        let res2 = set(Dialect::MySQL)(qstring2.as_bytes());
-        let res3 = set(Dialect::MySQL)(qstring3.as_bytes());
+        let res1 = set(Dialect::MySQL)(LocatedSpan::new(qstring1.as_bytes()));
+        let res2 = set(Dialect::MySQL)(LocatedSpan::new(qstring2.as_bytes()));
+        let res3 = set(Dialect::MySQL)(LocatedSpan::new(qstring3.as_bytes()));
         assert_eq!(res1.unwrap().1.to_string(), expected);
         assert_eq!(res2.unwrap().1.to_string(), expected);
         assert_eq!(res3.unwrap().1.to_string(), expected);
@@ -480,8 +489,8 @@ mod tests {
         let qstring1 = "set lOcal var = 2";
         let qstring2 = "set @@local.var = 2";
         let expected = "SET @@LOCAL.var = 2";
-        let res1 = set(Dialect::MySQL)(qstring1.as_bytes());
-        let res2 = set(Dialect::MySQL)(qstring2.as_bytes());
+        let res1 = set(Dialect::MySQL)(LocatedSpan::new(qstring1.as_bytes()));
+        let res2 = set(Dialect::MySQL)(LocatedSpan::new(qstring2.as_bytes()));
         assert_eq!(res1.unwrap().1.to_string(), expected);
         assert_eq!(res2.unwrap().1.to_string(), expected);
     }
@@ -490,8 +499,12 @@ mod tests {
     fn set_names() {
         let qstring1 = "SET NAMES 'iso8660'";
         let qstring2 = "set names 'utf8mb4' collate 'utf8mb4_unicode_ci'";
-        let res1 = set(Dialect::MySQL)(qstring1.as_bytes()).unwrap().1;
-        let res2 = set(Dialect::MySQL)(qstring2.as_bytes()).unwrap().1;
+        let res1 = set(Dialect::MySQL)(LocatedSpan::new(qstring1.as_bytes()))
+            .unwrap()
+            .1;
+        let res2 = set(Dialect::MySQL)(LocatedSpan::new(qstring2.as_bytes()))
+            .unwrap()
+            .1;
         assert_eq!(
             res1,
             SetStatement::Names(SetNames {
@@ -511,7 +524,7 @@ mod tests {
     #[test]
     fn expression_set() {
         let qstring = "SET @myvar = 100 + 200;";
-        let res = set(Dialect::MySQL)(qstring.as_bytes());
+        let res = set(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             SetStatement::Variable(SetVariables {
@@ -533,7 +546,7 @@ mod tests {
     #[test]
     fn list_set() {
         let qstring = "SET @myvar = 100 + 200, @@notmyvar = 'value', @@Global.g = @@global.V;";
-        let res = set(Dialect::MySQL)(qstring.as_bytes());
+        let res = set(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             SetStatement::Variable(SetVariables {

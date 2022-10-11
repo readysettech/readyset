@@ -1,7 +1,7 @@
 #[cfg(test)]
 macro_rules! test_parse {
     ($parser: expr, $src: expr) => {{
-        let res = $parser($src);
+        let res = crate::to_nom_result($parser(nom_locate::LocatedSpan::new($src)));
         assert!(
             res.is_ok(),
             "res.err = {}",

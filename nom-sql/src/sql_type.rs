@@ -10,7 +10,7 @@ use nom::combinator::{map, map_parser, not, opt};
 use nom::error::{ErrorKind, ParseError};
 use nom::multi::{fold_many0, separated_list0};
 use nom::sequence::{delimited, preceded, terminated, tuple};
-use nom::IResult;
+use nom_locate::LocatedSpan;
 use proptest::strategy::Strategy;
 use proptest::{prelude as prop, prop_oneof};
 use serde::{Deserialize, Serialize};
@@ -19,7 +19,7 @@ use triomphe::ThinArc;
 
 use crate::common::{ws_sep_comma, Sign};
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{literal, Dialect, Literal, SqlIdentifier};
+use crate::{literal, Dialect, Literal, NomSqlResult, SqlIdentifier};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize, Arbitrary)]
 pub enum SqlType {
@@ -231,7 +231,7 @@ impl FromStr for SqlType {
     type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        type_identifier(Dialect::MySQL)(s.as_bytes())
+        type_identifier(Dialect::MySQL)(LocatedSpan::new(s.as_bytes()))
             .map(|(_, s)| s)
             .map_err(|_| "failed to parse")
     }
@@ -305,8 +305,8 @@ impl Serialize for EnumType {
     }
 }
 
-fn digit_as_u16(len: &[u8]) -> IResult<&[u8], u16> {
-    match str::from_utf8(len) {
+fn digit_as_u16(len: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], u16> {
+    match str::from_utf8(&len) {
         Ok(s) => match u16::from_str(s) {
             Ok(v) => Ok((len, v)),
             Err(_) => Err(nom::Err::Error(ParseError::from_error_kind(
@@ -321,8 +321,8 @@ fn digit_as_u16(len: &[u8]) -> IResult<&[u8], u16> {
     }
 }
 
-fn digit_as_u8(len: &[u8]) -> IResult<&[u8], u8> {
-    match str::from_utf8(len) {
+fn digit_as_u8(len: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], u8> {
+    match str::from_utf8(&len) {
         Ok(s) => match u8::from_str(s) {
             Ok(v) => Ok((len, v)),
             Err(_) => Err(nom::Err::Error(ParseError::from_error_kind(
@@ -337,7 +337,7 @@ fn digit_as_u8(len: &[u8]) -> IResult<&[u8], u8> {
     }
 }
 
-fn precision_helper(i: &[u8]) -> IResult<&[u8], (u8, Option<u8>)> {
+fn precision_helper(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], (u8, Option<u8>)> {
     let (remaining_input, (m, d)) = tuple((
         digit1,
         opt(preceded(tag(","), preceded(whitespace0, digit1))),
@@ -354,15 +354,15 @@ fn precision_helper(i: &[u8]) -> IResult<&[u8], (u8, Option<u8>)> {
     Ok((remaining_input, (m, d)))
 }
 
-pub fn precision(i: &[u8]) -> IResult<&[u8], (u8, Option<u8>)> {
+pub fn precision(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], (u8, Option<u8>)> {
     delimited(tag("("), precision_helper, tag(")"))(i)
 }
 
-pub fn numeric_precision(i: &[u8]) -> IResult<&[u8], (u16, Option<u8>)> {
+pub fn numeric_precision(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], (u16, Option<u8>)> {
     delimited(tag("("), numeric_precision_inner, tag(")"))(i)
 }
 
-pub fn numeric_precision_inner(i: &[u8]) -> IResult<&[u8], (u16, Option<u8>)> {
+pub fn numeric_precision_inner(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], (u16, Option<u8>)> {
     let (remaining_input, (m, _, d)) = tuple((
         digit1,
         whitespace0,
@@ -375,18 +375,18 @@ pub fn numeric_precision_inner(i: &[u8]) -> IResult<&[u8], (u16, Option<u8>)> {
         .map(|v| (remaining_input, (m, v.map(|digit| digit.1))))
 }
 
-fn opt_signed(i: &[u8]) -> IResult<&[u8], Option<Sign>> {
+fn opt_signed(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Option<Sign>> {
     opt(alt((
         map(tag_no_case("unsigned"), |_| Sign::Unsigned),
         map(tag_no_case("signed"), |_| Sign::Signed),
     )))(i)
 }
 
-fn delim_digit(i: &[u8]) -> IResult<&[u8], &[u8]> {
+fn delim_digit(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], LocatedSpan<&[u8]>> {
     delimited(tag("("), digit1, tag(")"))(i)
 }
 
-fn delim_u16(i: &[u8]) -> IResult<&[u8], u16> {
+fn delim_u16(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], u16> {
     map_parser(delim_digit, digit_as_u16)(i)
 }
 
@@ -394,8 +394,8 @@ fn int_type<'a, F, G>(
     tag: &str,
     mk_unsigned: F,
     mk_signed: G,
-    i: &'a [u8],
-) -> IResult<&'a [u8], SqlType>
+    i: LocatedSpan<&'a [u8]>,
+) -> NomSqlResult<&'a [u8], SqlType>
 where
     F: Fn(Option<u16>) -> SqlType + 'static,
     G: Fn(Option<u16>) -> SqlType + 'static,
@@ -413,7 +413,7 @@ where
 // TODO(malte): not strictly ok to treat DECIMAL and NUMERIC as identical; the
 // former has "at least" M precision, the latter "exactly".
 // See https://dev.mysql.com/doc/refman/5.7/en/precision-math-decimal-characteristics.html
-fn decimal_or_numeric(i: &[u8]) -> IResult<&[u8], SqlType> {
+fn decimal_or_numeric(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlType> {
     let (i, _) = alt((tag_no_case("decimal"), tag_no_case("numeric")))(i)?;
     let (i, precision) = opt(precision)(i)?;
     let (i, _) = whitespace0(i)?;
@@ -427,7 +427,7 @@ fn decimal_or_numeric(i: &[u8]) -> IResult<&[u8], SqlType> {
     }
 }
 
-fn opt_without_time_zone(i: &[u8]) -> IResult<&[u8], ()> {
+fn opt_without_time_zone(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ()> {
     map(
         opt(preceded(
             whitespace1,
@@ -443,7 +443,7 @@ fn opt_without_time_zone(i: &[u8]) -> IResult<&[u8], ()> {
     )(i)
 }
 
-fn enum_type(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlType> {
+fn enum_type(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlType> {
     move |i| {
         let (i, _) = tag_no_case("enum")(i)?;
         let (i, _) = whitespace0(i)?;
@@ -459,7 +459,9 @@ fn enum_type(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlType> {
 // `alt` has an upper limit on the number of items it supports in tuples, so we have to split out
 // the parsing for types into 3 separate functions
 // (see https://github.com/Geal/nom/pull/1556)
-fn type_identifier_part1(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlType> {
+fn type_identifier_part1(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlType> {
     move |i| {
         alt((
             |i| int_type("tinyint", SqlType::UnsignedTinyInt, SqlType::TinyInt, i),
@@ -538,14 +540,14 @@ fn type_identifier_part1(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], S
                         // The alt expects the same type to be returned for both entries,
                         // so both have to be tuples with same number of elements
                         tuple((
-                            tag_no_case("varchar"),
+                            map(tag_no_case("varchar"), |i: LocatedSpan<&[u8]>| *i),
                             map(whitespace0, |_| "".as_bytes()),
                             map(whitespace0, |_| "".as_bytes()),
                         )),
                         tuple((
-                            tag_no_case("character"),
+                            map(tag_no_case("character"), |i: LocatedSpan<&[u8]>| *i),
                             map(whitespace1, |_| "".as_bytes()),
-                            tag_no_case("varying"),
+                            map(tag_no_case("varying"), |i: LocatedSpan<&[u8]>| *i),
                         )),
                     )),
                     opt(delim_u16),
@@ -567,7 +569,7 @@ fn type_identifier_part1(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], S
     }
 }
 
-fn type_identifier_part2(i: &[u8]) -> IResult<&[u8], SqlType> {
+fn type_identifier_part2(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlType> {
     alt((
         map(
             terminated(tag_no_case("time"), opt_without_time_zone),
@@ -623,7 +625,9 @@ fn type_identifier_part2(i: &[u8]) -> IResult<&[u8], SqlType> {
     ))(i)
 }
 
-fn type_identifier_part3(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlType> {
+fn type_identifier_part3(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlType> {
     move |i| {
         alt((
             map(tag_no_case("citext"), |_| SqlType::Citext),
@@ -640,7 +644,9 @@ fn type_identifier_part3(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], S
     }
 }
 
-fn other_type(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], crate::SqlIdentifier> {
+fn other_type(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], crate::SqlIdentifier> {
     move |i| match dialect {
         Dialect::PostgreSQL => dialect.identifier()(i),
         Dialect::MySQL => Err(nom::Err::Error(ParseError::from_error_kind(
@@ -650,7 +656,7 @@ fn other_type(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], crate::SqlId
     }
 }
 
-fn array_suffix(i: &[u8]) -> IResult<&[u8], ()> {
+fn array_suffix(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ()> {
     let (i, _) = tag("[")(i)?;
     let (i, _) = opt(whitespace0)(i)?;
     let (i, _len) = opt(digit1)(i)?;
@@ -659,7 +665,9 @@ fn array_suffix(i: &[u8]) -> IResult<&[u8], ()> {
     Ok((i, ()))
 }
 
-fn type_identifier_no_arrays(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlType> {
+fn type_identifier_no_arrays(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlType> {
     move |i| {
         alt((
             type_identifier_part1(dialect),
@@ -670,7 +678,9 @@ fn type_identifier_no_arrays(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8
 }
 
 // A SQL type specifier.
-pub fn type_identifier(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlType> {
+pub fn type_identifier(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlType> {
     move |i| {
         // need to pull a bit of a trick here to properly recursive-descent arrays since they're a
         // suffix. First, we parse the type, then we parse any number of `[]` or `[<n>]` suffixes,
@@ -686,7 +696,7 @@ pub fn type_identifier(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Sql
 
 /// For CASTs to integer types, MySQL does not support its own standard type names, and instead
 /// only supports a handful of CAST-specific keywords; this function returns a parser for them.
-pub fn mysql_int_cast_targets() -> impl Fn(&[u8]) -> IResult<&[u8], SqlType> {
+pub fn mysql_int_cast_targets() -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlType> {
     move |i| {
         alt((
             map(
@@ -720,15 +730,15 @@ mod tests {
         let type2 = "bigint(20) unsigned";
         let type3 = "bigint(20) signed";
 
-        let res = type_identifier(Dialect::MySQL)(type0.as_bytes());
+        let res = type_identifier(Dialect::MySQL)(LocatedSpan::new(type0.as_bytes()));
         assert_eq!(res.unwrap().1, SqlType::BigInt(Some(20)));
-        let res = type_identifier(Dialect::MySQL)(type1.as_bytes());
+        let res = type_identifier(Dialect::MySQL)(LocatedSpan::new(type1.as_bytes()));
         assert_eq!(res.unwrap().1, SqlType::VarChar(Some(255)));
-        let res = type_identifier(Dialect::MySQL)(type2.as_bytes());
+        let res = type_identifier(Dialect::MySQL)(LocatedSpan::new(type2.as_bytes()));
         assert_eq!(res.unwrap().1, SqlType::UnsignedBigInt(Some(20)));
-        let res = type_identifier(Dialect::MySQL)(type3.as_bytes());
+        let res = type_identifier(Dialect::MySQL)(LocatedSpan::new(type3.as_bytes()));
         assert_eq!(res.unwrap().1, SqlType::BigInt(Some(20)));
-        let res = type_identifier(Dialect::MySQL)(type2.as_bytes());
+        let res = type_identifier(Dialect::MySQL)(LocatedSpan::new(type2.as_bytes()));
         assert_eq!(res.unwrap().1, SqlType::UnsignedBigInt(Some(20)));
 
         let ok = [
@@ -742,7 +752,11 @@ mod tests {
 
         let res_ok: Vec<_> = ok
             .iter()
-            .map(|t| type_identifier(Dialect::MySQL)(t.as_bytes()).unwrap().1)
+            .map(|t| {
+                type_identifier(Dialect::MySQL)(LocatedSpan::new(t.as_bytes()))
+                    .unwrap()
+                    .1
+            })
             .collect();
 
         assert_eq!(
@@ -767,7 +781,7 @@ mod tests {
     #[test]
     fn json_type() {
         for dialect in [Dialect::MySQL, Dialect::PostgreSQL] {
-            let res = type_identifier(dialect)(b"json");
+            let res = type_identifier(dialect)(LocatedSpan::new(b"json"));
             assert!(res.is_ok());
             assert_eq!(res.unwrap().1, SqlType::Json);
         }
@@ -796,7 +810,7 @@ mod tests {
         #[test]
         fn double_with_lens() {
             let qs = b"double(16,12)";
-            let res = type_identifier(Dialect::MySQL)(qs);
+            let res = type_identifier(Dialect::MySQL)(LocatedSpan::new(qs));
             assert!(res.is_ok());
             assert_eq!(res.unwrap().1, SqlType::Double);
         }
@@ -808,7 +822,7 @@ mod tests {
         #[test]
         fn numeric() {
             let qs = b"NUMERIC";
-            let res = type_identifier(Dialect::PostgreSQL)(qs);
+            let res = type_identifier(Dialect::PostgreSQL)(LocatedSpan::new(qs));
             assert!(res.is_ok());
             assert_eq!(res.unwrap().1, SqlType::Numeric(None));
         }
@@ -816,7 +830,7 @@ mod tests {
         #[test]
         fn numeric_with_precision() {
             let qs = b"NUMERIC(10)";
-            let res = type_identifier(Dialect::PostgreSQL)(qs);
+            let res = type_identifier(Dialect::PostgreSQL)(LocatedSpan::new(qs));
             assert!(res.is_ok());
             assert_eq!(res.unwrap().1, SqlType::Numeric(Some((10, None))));
         }
@@ -824,7 +838,7 @@ mod tests {
         #[test]
         fn numeric_with_precision_and_scale() {
             let qs = b"NUMERIC(10, 20)";
-            let res = type_identifier(Dialect::PostgreSQL)(qs);
+            let res = type_identifier(Dialect::PostgreSQL)(LocatedSpan::new(qs));
             assert!(res.is_ok());
             assert_eq!(res.unwrap().1, SqlType::Numeric(Some((10, Some(20)))));
         }
@@ -973,7 +987,7 @@ mod tests {
         #[test]
         fn character_with_length() {
             let qs = b"character(16)";
-            let res = type_identifier(Dialect::PostgreSQL)(qs);
+            let res = type_identifier(Dialect::PostgreSQL)(LocatedSpan::new(qs));
             assert!(res.is_ok());
             assert_eq!(res.unwrap().1, SqlType::Char(Some(16)));
         }

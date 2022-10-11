@@ -3,7 +3,7 @@ use std::{fmt, str};
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::sequence::tuple;
-use nom::IResult;
+use nom_locate::LocatedSpan;
 use serde::{Deserialize, Serialize};
 
 use crate::column::Column;
@@ -11,7 +11,7 @@ use crate::common::{assignment_expr_list, statement_terminator};
 use crate::select::where_clause;
 use crate::table::{table_reference, Relation};
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, Expr};
+use crate::{Dialect, Expr, NomSqlResult};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct UpdateStatement {
@@ -41,7 +41,9 @@ impl fmt::Display for UpdateStatement {
     }
 }
 
-pub fn updating(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], UpdateStatement> {
+pub fn updating(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], UpdateStatement> {
     move |i| {
         let (remaining_input, (_, _, table, _, _, _, fields, _, where_clause, _)) = tuple((
             tag_no_case("update"),
@@ -77,7 +79,7 @@ mod tests {
     fn simple_update() {
         let qstring = "UPDATE users SET id = 42, name = 'test'";
 
-        let res = updating(Dialect::MySQL)(qstring.as_bytes());
+        let res = updating(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             UpdateStatement {
@@ -95,7 +97,7 @@ mod tests {
     fn update_with_where_clause() {
         let qstring = "UPDATE users SET id = 42, name = 'test' WHERE id = 1";
 
-        let res = updating(Dialect::MySQL)(qstring.as_bytes());
+        let res = updating(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
         let expected_left = Expr::Column(Column::from("id"));
         let expected_where_cond = Some(Expr::BinaryOp {
             lhs: Box::new(expected_left),
@@ -119,7 +121,7 @@ mod tests {
     fn format_update_with_where_clause() {
         let qstring = "UPDATE users SET id = 42, name = 'test' WHERE id = 1";
         let expected = "UPDATE `users` SET `id` = 42, `name` = 'test' WHERE (`id` = 1)";
-        let res = updating(Dialect::MySQL)(qstring.as_bytes());
+        let res = updating(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
         assert_eq!(res.unwrap().1.to_string(), expected);
     }
 
@@ -127,7 +129,7 @@ mod tests {
     fn update_with_arithmetic_and_where() {
         let qstring = "UPDATE users SET karma = karma + 1 WHERE users.id = ?;";
 
-        let res = updating(Dialect::MySQL)(qstring.as_bytes());
+        let res = updating(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
         let expected_where_cond = Some(Expr::BinaryOp {
             lhs: Box::new(Expr::Column(Column::from("users.id"))),
             rhs: Box::new(Expr::Literal(Literal::Placeholder(
@@ -164,7 +166,7 @@ mod tests {
             let qstring =
                 "UPDATE `stories` SET `hotness` = -19216.5479744 WHERE `stories`.`id` = ?";
 
-            let res = updating(Dialect::MySQL)(qstring.as_bytes());
+            let res = updating(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
             let expected_left = Expr::Column(Column::from("stories.id"));
             let expected_where_cond = Some(Expr::BinaryOp {
                 lhs: Box::new(expected_left),
@@ -196,7 +198,7 @@ mod tests {
         fn update_with_arithmetic() {
             let qstring = "UPDATE users SET karma = karma + 1;";
 
-            let res = updating(Dialect::MySQL)(qstring.as_bytes());
+            let res = updating(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(
                 res.unwrap().1,
                 UpdateStatement {
@@ -255,7 +257,7 @@ mod tests {
             let qstring =
                 "UPDATE \"stories\" SET \"hotness\" = -19216.5479744 WHERE \"stories\".\"id\" = ?";
 
-            let res = updating(Dialect::PostgreSQL)(qstring.as_bytes());
+            let res = updating(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
             let expected_left = Expr::Column(Column::from("stories.id"));
             let expected_where_cond = Some(Expr::BinaryOp {
                 lhs: Box::new(expected_left),
@@ -287,7 +289,7 @@ mod tests {
         fn update_with_arithmetic() {
             let qstring = "UPDATE users SET karma = karma + 1;";
 
-            let res = updating(Dialect::PostgreSQL)(qstring.as_bytes());
+            let res = updating(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(
                 res.unwrap().1,
                 UpdateStatement {

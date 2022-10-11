@@ -5,14 +5,14 @@ use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::{map, opt};
 use nom::multi::many1;
 use nom::sequence::{delimited, preceded, tuple};
-use nom::IResult;
+use nom_locate::LocatedSpan;
 use serde::{Deserialize, Serialize};
 
 use crate::common::{opt_delimited, terminated_with_statement_terminator};
 use crate::order::{order_clause, OrderClause};
 use crate::select::{limit_offset_clause, nested_selection, SelectStatement};
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, Literal};
+use crate::{Dialect, Literal, NomSqlResult};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]
 pub enum CompoundSelectOperator {
@@ -63,7 +63,7 @@ impl fmt::Display for CompoundSelectStatement {
 }
 
 // Parse compound operator
-fn compound_op(i: &[u8]) -> IResult<&[u8], CompoundSelectOperator> {
+fn compound_op(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CompoundSelectOperator> {
     alt((
         map(
             preceded(
@@ -97,7 +97,8 @@ fn compound_op(i: &[u8]) -> IResult<&[u8], CompoundSelectOperator> {
 
 fn other_selects(
     dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], (Option<CompoundSelectOperator>, SelectStatement)> {
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], (Option<CompoundSelectOperator>, SelectStatement)>
+{
     move |i| {
         let (remaining_input, (_, op, _, select)) = tuple((
             whitespace0,
@@ -116,14 +117,14 @@ fn other_selects(
 
 pub fn compound_selection(
     dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], CompoundSelectStatement> {
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CompoundSelectStatement> {
     move |i| terminated_with_statement_terminator(nested_compound_selection(dialect))(i)
 }
 
 // Parse compound selection
 pub fn nested_compound_selection(
     dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], CompoundSelectStatement> {
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CompoundSelectStatement> {
     move |i| {
         let (remaining_input, (first_select, other_selects, _, order, limit_offset)) =
             tuple((
@@ -159,14 +160,14 @@ mod tests {
     use crate::column::Column;
     use crate::common::FieldDefinitionExpr;
     use crate::table::Relation;
-    use crate::{Expr, Literal, TableExpr};
+    use crate::{to_nom_result, Expr, Literal, TableExpr};
 
     #[test]
     fn union() {
         let qstr = "SELECT id, 1 FROM Vote UNION SELECT id, stars from Rating;";
         let qstr2 = "(SELECT id, 1 FROM Vote) UNION (SELECT id, stars from Rating);";
-        let res = nested_compound_selection(Dialect::MySQL)(qstr.as_bytes());
-        let res2 = nested_compound_selection(Dialect::MySQL)(qstr2.as_bytes());
+        let res = nested_compound_selection(Dialect::MySQL)(LocatedSpan::new(qstr.as_bytes()));
+        let res2 = nested_compound_selection(Dialect::MySQL)(LocatedSpan::new(qstr2.as_bytes()));
 
         let first_select = SelectStatement {
             tables: vec![TableExpr::from(Relation::from("Vote"))],
@@ -203,9 +204,15 @@ mod tests {
         let qstr = "SELECT id, 1 FROM Vote);";
         let qstr2 = "(SELECT id, 1 FROM Vote;";
         let qstr3 = "SELECT id, 1 FROM Vote) UNION (SELECT id, stars from Rating;";
-        let res = nested_compound_selection(Dialect::MySQL)(qstr.as_bytes());
-        let res2 = nested_compound_selection(Dialect::MySQL)(qstr2.as_bytes());
-        let res3 = nested_compound_selection(Dialect::MySQL)(qstr3.as_bytes());
+        let res = to_nom_result(nested_compound_selection(Dialect::MySQL)(LocatedSpan::new(
+            qstr.as_bytes(),
+        )));
+        let res2 = to_nom_result(nested_compound_selection(Dialect::MySQL)(LocatedSpan::new(
+            qstr2.as_bytes(),
+        )));
+        let res3 = to_nom_result(nested_compound_selection(Dialect::MySQL)(LocatedSpan::new(
+            qstr3.as_bytes(),
+        )));
 
         assert!(&res.is_err());
         assert_eq!(
@@ -238,7 +245,7 @@ mod tests {
         let qstr = "SELECT id, 1 FROM Vote \
                     UNION SELECT id, stars from Rating \
                     UNION DISTINCT SELECT 42, 5 FROM Vote;";
-        let res = nested_compound_selection(Dialect::MySQL)(qstr.as_bytes());
+        let res = nested_compound_selection(Dialect::MySQL)(LocatedSpan::new(qstr.as_bytes()));
 
         let first_select = SelectStatement {
             tables: vec![TableExpr::from(Relation::from("Vote"))],
@@ -282,7 +289,7 @@ mod tests {
     #[test]
     fn union_all() {
         let qstr = "SELECT id, 1 FROM Vote UNION ALL SELECT id, stars from Rating;";
-        let res = nested_compound_selection(Dialect::MySQL)(qstr.as_bytes());
+        let res = nested_compound_selection(Dialect::MySQL)(LocatedSpan::new(qstr.as_bytes()));
 
         let first_select = SelectStatement {
             tables: vec![TableExpr::from(Relation::from("Vote"))],

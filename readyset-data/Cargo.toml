@@ -28,6 +28,7 @@ enum-kinds = "0.5.1"
 ndarray = { version = "0.15.4", features = ["serde"] }
 fallible-iterator = "0.2.0" # Only for internals of ToSql impls
 nom = "7.1"
+nom_locate = "4.0.0"
 
 # Local dependencies
 nom-sql = { path = "../nom-sql" }

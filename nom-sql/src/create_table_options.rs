@@ -6,16 +6,15 @@ use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::character::complete::{alphanumeric1, digit1};
 use nom::combinator::{map, map_res, opt};
-use nom::error::ParseError;
 use nom::multi::separated_list0;
 use nom::sequence::{separated_pair, tuple};
-use nom::IResult;
+use nom_locate::LocatedSpan;
 use serde::{Deserialize, Serialize};
 
 use crate::common::{ws_sep_comma, ws_sep_equals};
 use crate::literal::integer_literal;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, Literal, SqlIdentifier};
+use crate::{Dialect, Literal, NomSqlResult, SqlIdentifier};
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
 pub enum CharsetName {
@@ -72,18 +71,22 @@ impl fmt::Display for CreateTableOption {
     }
 }
 
-pub fn table_options(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<CreateTableOption>> {
+pub fn table_options(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<CreateTableOption>> {
     move |i| { separated_list0(table_options_separator, create_option(dialect)) }(i)
 }
 
-fn table_options_separator(i: &[u8]) -> IResult<&[u8], ()> {
+fn table_options_separator(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ()> {
     map(
         alt((map(whitespace1, |_| "".as_bytes()), ws_sep_comma)),
         |_| (),
     )(i)
 }
 
-fn create_option(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CreateTableOption> {
+fn create_option(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CreateTableOption> {
     move |i| {
         alt((
             map(create_option_type, |_| CreateTableOption::Other),
@@ -103,13 +106,13 @@ fn create_option(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CreateTab
 
 /// Helper to parse equals-separated create option pairs.
 /// Throws away the create option and value
-pub fn create_option_equals_pair<'a, I, O1, O2, E: ParseError<I>, F, G>(
+pub fn create_option_equals_pair<I, O1, O2, F, G>(
     mut first: F,
     mut second: G,
-) -> impl FnMut(I) -> IResult<I, O2, E>
+) -> impl FnMut(LocatedSpan<I>) -> NomSqlResult<I, O2>
 where
-    F: FnMut(I) -> IResult<I, O1, E>,
-    G: FnMut(I) -> IResult<I, O2, E>,
+    F: FnMut(LocatedSpan<I>) -> NomSqlResult<I, O1>,
+    G: FnMut(LocatedSpan<I>) -> NomSqlResult<I, O2>,
     I: nom::InputTakeAtPosition
         + nom::InputTake
         + nom::Compare<&'static str>
@@ -119,14 +122,17 @@ where
         + nom::Slice<RangeFrom<usize>>
         + nom::InputIter
         + nom::InputLength
+        + nom::AsBytes
+        + nom::Offset
         + Default
         + Clone
+        + Copy
         + PartialEq,
     &'static str: nom::FindToken<<I as nom::InputTakeAtPosition>::Item>,
     <I as nom::InputIter>::Item: nom::AsChar + Clone,
     <I as nom::InputTakeAtPosition>::Item: nom::AsChar + Clone,
 {
-    move |i: I| {
+    move |i: LocatedSpan<I>| {
         let (i, _o1) = first(i)?;
         let (i, _) = ws_sep_equals(i)?;
         second(i)
@@ -135,13 +141,13 @@ where
 
 /// Helper to parse space-separated create option pairs.
 /// Throws away the create option and value
-pub fn create_option_spaced_pair<I, O1, O2, E: ParseError<I>, F, G>(
+pub fn create_option_spaced_pair<I, O1, O2, F, G>(
     mut first: F,
     mut second: G,
-) -> impl FnMut(I) -> IResult<I, O2, E>
+) -> impl FnMut(LocatedSpan<I>) -> NomSqlResult<I, O2>
 where
-    F: FnMut(I) -> IResult<I, O1, E>,
-    G: FnMut(I) -> IResult<I, O2, E>,
+    F: FnMut(LocatedSpan<I>) -> NomSqlResult<I, O1>,
+    G: FnMut(LocatedSpan<I>) -> NomSqlResult<I, O2>,
     I: nom::InputTakeAtPosition
         + nom::InputTake
         + nom::Compare<&'static str>
@@ -151,51 +157,68 @@ where
         + nom::Slice<RangeFrom<usize>>
         + nom::InputIter
         + nom::InputLength
+        + nom::AsBytes
+        + nom::Offset
         + Default
-        + Clone,
+        + Clone
+        + Copy
+        + PartialEq,
     &'static str: nom::FindToken<<I as nom::InputTakeAtPosition>::Item>,
     <I as nom::InputIter>::Item: nom::AsChar + Clone,
     <I as nom::InputTakeAtPosition>::Item: nom::AsChar + Clone,
 {
-    move |i: I| {
+    move |i: LocatedSpan<I>| {
         let (i, _o1) = first(i)?;
         let (i, _) = whitespace1(i)?;
         second(i)
     }
 }
 
-fn create_option_type(i: &[u8]) -> IResult<&[u8], &[u8]> {
-    create_option_equals_pair(tag_no_case("type"), alphanumeric1)(i)
-}
-
-fn create_option_pack_keys(i: &[u8]) -> IResult<&[u8], &[u8]> {
+fn create_option_type(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], &[u8]> {
     create_option_equals_pair(
-        tag_no_case("pack_keys"),
-        alt((tag("0"), tag("1"), tag("default"))),
+        tag_no_case("type"),
+        map(alphanumeric1, |i: LocatedSpan<&[u8]>| *i),
     )(i)
 }
 
-fn create_option_engine(i: &[u8]) -> IResult<&[u8], CreateTableOption> {
+fn create_option_pack_keys(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], &[u8]> {
+    map(
+        create_option_equals_pair(
+            tag_no_case("pack_keys"),
+            alt((tag("0"), tag("1"), tag("default"))),
+        ),
+        |i: LocatedSpan<&[u8]>| *i,
+    )(i)
+}
+
+fn create_option_engine(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CreateTableOption> {
     map(
         create_option_equals_pair(
             tag_no_case("engine"),
-            opt(map_res(alphanumeric1, std::str::from_utf8)),
+            opt(map_res(alphanumeric1, |i: LocatedSpan<&[u8]>| {
+                std::str::from_utf8(&i)
+            })),
         ),
         |l| CreateTableOption::Engine(l.map(str::to_string)),
     )(i)
 }
 
-fn create_option_auto_increment(i: &[u8]) -> IResult<&[u8], CreateTableOption> {
+fn create_option_auto_increment(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CreateTableOption> {
     map(
         create_option_equals_pair(
             tag_no_case("auto_increment"),
-            map_res(map_res(digit1, std::str::from_utf8), u64::from_str),
+            map_res(
+                map_res(digit1, |i: LocatedSpan<&[u8]>| std::str::from_utf8(&i)),
+                u64::from_str,
+            ),
         ),
         CreateTableOption::AutoIncrement,
     )(i)
 }
 
-fn charset_name(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CharsetName> {
+fn charset_name(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CharsetName> {
     move |i| {
         alt((
             map(dialect.identifier(), CharsetName::Unquoted),
@@ -206,12 +229,12 @@ fn charset_name(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CharsetNam
     }
 }
 
-fn charset_prefix(i: &[u8]) -> IResult<&[u8], &[u8]> {
+fn charset_prefix(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], &[u8]> {
     let (i, _) = whitespace0(i)?;
     let (i, _) = tag_no_case("default")(i)?;
     let (i, _) = whitespace0(i)?;
     alt((
-        tag_no_case("charset"),
+        map(tag_no_case("charset"), |i: LocatedSpan<&[u8]>| *i),
         map(
             separated_pair(tag_no_case("character"), whitespace1, tag_no_case("set")),
             |_| "".as_bytes(),
@@ -222,7 +245,7 @@ fn charset_prefix(i: &[u8]) -> IResult<&[u8], &[u8]> {
 
 fn create_option_default_charset(
     dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], CreateTableOption> {
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CreateTableOption> {
     move |i| {
         map(
             alt((
@@ -234,7 +257,9 @@ fn create_option_default_charset(
     }
 }
 
-fn collation_name(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CollationName> {
+fn collation_name(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CollationName> {
     move |i| {
         alt((
             map(dialect.identifier(), CollationName::Unquoted),
@@ -245,7 +270,9 @@ fn collation_name(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Collatio
     }
 }
 
-fn create_option_collate(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CreateTableOption> {
+fn create_option_collate(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CreateTableOption> {
     move |i| {
         alt((
             map(
@@ -260,7 +287,9 @@ fn create_option_collate(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], C
     }
 }
 
-fn create_option_comment(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CreateTableOption> {
+fn create_option_comment(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CreateTableOption> {
     move |i| {
         map(
             map_res(
@@ -275,33 +304,36 @@ fn create_option_comment(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], C
     }
 }
 
-fn create_option_max_rows(i: &[u8]) -> IResult<&[u8], Literal> {
+fn create_option_max_rows(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Literal> {
     create_option_equals_pair(tag_no_case("max_rows"), integer_literal)(i)
 }
 
-fn create_option_avg_row_length(i: &[u8]) -> IResult<&[u8], Literal> {
+fn create_option_avg_row_length(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Literal> {
     create_option_equals_pair(tag_no_case("avg_row_length"), integer_literal)(i)
 }
 
-fn create_option_row_format(i: &[u8]) -> IResult<&[u8], &[u8]> {
+fn create_option_row_format(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], &[u8]> {
     tuple((
         tag_no_case("row_format"),
         whitespace0,
         opt(tag("=")),
         whitespace0,
-        alt((
-            tag_no_case("DEFAULT"),
-            tag_no_case("DYNAMIC"),
-            tag_no_case("FIXED"),
-            tag_no_case("COMPRESSED"),
-            tag_no_case("REDUNDANT"),
-            tag_no_case("COMPACT"),
-        )),
+        map(
+            alt((
+                tag_no_case("DEFAULT"),
+                tag_no_case("DYNAMIC"),
+                tag_no_case("FIXED"),
+                tag_no_case("COMPRESSED"),
+                tag_no_case("REDUNDANT"),
+                tag_no_case("COMPACT"),
+            )),
+            |i: LocatedSpan<&[u8]>| *i,
+        ),
     ))(i)
     .map(|(i, t)| (i, t.4))
 }
 
-fn create_option_key_block_size(i: &[u8]) -> IResult<&[u8], Literal> {
+fn create_option_key_block_size(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Literal> {
     tuple((
         tag_no_case("key_block_size"),
         whitespace0,
@@ -315,11 +347,14 @@ fn create_option_key_block_size(i: &[u8]) -> IResult<&[u8], Literal> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::to_nom_result;
 
     fn should_parse_all(qstring: &str, cmp: Vec<CreateTableOption>) {
         assert_eq!(
             Ok((&b""[..], cmp)),
-            table_options(Dialect::MySQL)(qstring.as_bytes())
+            to_nom_result(table_options(Dialect::MySQL)(LocatedSpan::new(
+                qstring.as_bytes()
+            )))
         )
     }
 

@@ -7,13 +7,13 @@ use nom::bytes::complete::tag_no_case;
 use nom::combinator::{map, opt};
 use nom::multi::separated_list1;
 use nom::sequence::preceded;
-use nom::IResult;
+use nom_locate::LocatedSpan;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
 use crate::common::{field_reference, ws_sep_comma};
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, FieldReference};
+use crate::{Dialect, FieldReference, NomSqlResult};
 
 #[derive(
     Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize, Arbitrary,
@@ -71,7 +71,7 @@ impl fmt::Display for OrderClause {
     }
 }
 
-pub fn order_type(i: &[u8]) -> IResult<&[u8], OrderType> {
+pub fn order_type(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], OrderType> {
     alt((
         map(tag_no_case("desc"), |_| OrderType::OrderDescending),
         map(tag_no_case("asc"), |_| OrderType::OrderAscending),
@@ -80,7 +80,7 @@ pub fn order_type(i: &[u8]) -> IResult<&[u8], OrderType> {
 
 fn order_field(
     dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], (FieldReference, Option<OrderType>)> {
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], (FieldReference, Option<OrderType>)> {
     move |i| {
         let (i, field) = field_reference(dialect)(i)?;
         let (i, ord_typ) = opt(preceded(whitespace1, order_type))(i)?;
@@ -89,7 +89,9 @@ fn order_field(
 }
 
 // Parse ORDER BY clause
-pub fn order_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], OrderClause> {
+pub fn order_clause(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], OrderClause> {
     move |i| {
         let (i, _) = whitespace0(i)?;
         let (i, _) = tag_no_case("order")(i)?;
@@ -136,9 +138,9 @@ mod tests {
             order_by: vec![(FieldReference::Expr(Expr::Column("name".into())), None)],
         };
 
-        let res1 = selection(Dialect::MySQL)(qstring1.as_bytes());
-        let res2 = selection(Dialect::MySQL)(qstring2.as_bytes());
-        let res3 = selection(Dialect::MySQL)(qstring3.as_bytes());
+        let res1 = selection(Dialect::MySQL)(LocatedSpan::new(qstring1.as_bytes()));
+        let res2 = selection(Dialect::MySQL)(LocatedSpan::new(qstring2.as_bytes()));
+        let res3 = selection(Dialect::MySQL)(LocatedSpan::new(qstring3.as_bytes()));
         assert_eq!(res1.unwrap().1.order, Some(expected_ord1));
         assert_eq!(res2.unwrap().1.order, Some(expected_ord2));
         assert_eq!(res3.unwrap().1.order, Some(expected_ord3));

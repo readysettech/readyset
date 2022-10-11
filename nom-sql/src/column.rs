@@ -6,14 +6,14 @@ use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::{map, opt};
 use nom::multi::many0;
 use nom::sequence::{delimited, preceded, tuple};
-use nom::IResult;
+use nom_locate::LocatedSpan;
 use serde::{Deserialize, Serialize};
 
 use crate::common::{column_identifier_no_alias, parse_comment};
 use crate::expression::expression;
 use crate::sql_type::type_identifier;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, Expr, Literal, Relation, SqlIdentifier, SqlType};
+use crate::{Dialect, Expr, Literal, NomSqlResult, Relation, SqlIdentifier, SqlType};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct Column {
@@ -145,7 +145,9 @@ impl ColumnSpecification {
     }
 }
 
-fn default(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], ColumnConstraint> {
+fn default(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ColumnConstraint> {
     move |i| {
         let (i, _) = whitespace0(i)?;
         let (i, _) = tag_no_case("default")(i)?;
@@ -157,7 +159,7 @@ fn default(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], ColumnConstrain
     }
 }
 
-pub fn on_update_current_timestamp(i: &[u8]) -> IResult<&[u8], ColumnConstraint> {
+pub fn on_update_current_timestamp(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ColumnConstraint> {
     let (i, _) = tag_no_case("on")(i)?;
     let (i, _) = whitespace1(i)?;
     let (i, _) = tag_no_case("update")(i)?;
@@ -172,7 +174,9 @@ pub fn on_update_current_timestamp(i: &[u8]) -> IResult<&[u8], ColumnConstraint>
     Ok((i, ColumnConstraint::OnUpdateCurrentTimestamp))
 }
 
-pub fn column_constraint(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], ColumnConstraint> {
+pub fn column_constraint(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ColumnConstraint> {
     move |i| {
         let not_null = map(
             delimited(whitespace0, tag_no_case("not null"), whitespace0),
@@ -236,7 +240,7 @@ pub fn column_constraint(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], C
 /// Parse rule for a column specification
 pub fn column_specification(
     dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], ColumnSpecification> {
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ColumnSpecification> {
     move |i| {
         let (remaining_input, (column, field_type, constraints, comment)) = tuple((
             column_identifier_no_alias(dialect),
@@ -276,9 +280,9 @@ mod tests {
 
         #[test]
         fn multiple_constraints() {
-            let (_, res) = column_specification(Dialect::MySQL)(
+            let (_, res) = column_specification(Dialect::MySQL)(LocatedSpan::new(
                 b"`created_at` timestamp NOT NULL DEFAULT current_timestamp()",
-            )
+            ))
             .unwrap();
             assert_eq!(
                 res,
@@ -303,7 +307,9 @@ mod tests {
         #[test]
         fn null_round_trip() {
             let input = b"`c` INT(32) NULL";
-            let cspec = column_specification(Dialect::MySQL)(input).unwrap().1;
+            let cspec = column_specification(Dialect::MySQL)(LocatedSpan::new(input))
+                .unwrap()
+                .1;
             let res = cspec.to_string();
             assert_eq!(res, String::from_utf8(input.to_vec()).unwrap());
         }
@@ -311,7 +317,9 @@ mod tests {
         #[test]
         fn default_booleans() {
             let input = b"`c` bool DEFAULT FALSE";
-            let cspec = column_specification(Dialect::MySQL)(input).unwrap().1;
+            let cspec = column_specification(Dialect::MySQL)(LocatedSpan::new(input))
+                .unwrap()
+                .1;
             assert_eq!(cspec.constraints.len(), 1);
             assert!(matches!(
                 cspec.constraints[0],
@@ -319,7 +327,9 @@ mod tests {
             ));
 
             let input = b"`c` bool DEFAULT true";
-            let cspec = column_specification(Dialect::MySQL)(input).unwrap().1;
+            let cspec = column_specification(Dialect::MySQL)(LocatedSpan::new(input))
+                .unwrap()
+                .1;
             assert_eq!(cspec.constraints.len(), 1);
             assert!(matches!(
                 cspec.constraints[0],
@@ -334,9 +344,9 @@ mod tests {
 
         #[test]
         fn multiple_constraints() {
-            let (_, res) = column_specification(Dialect::PostgreSQL)(
+            let (_, res) = column_specification(Dialect::PostgreSQL)(LocatedSpan::new(
                 b"\"created_at\" timestamp NOT NULL DEFAULT current_timestamp()",
-            )
+            ))
             .unwrap();
             assert_eq!(
                 res,
@@ -360,9 +370,10 @@ mod tests {
 
         #[test]
         fn default_now() {
-            let (_, res1) =
-                column_specification(Dialect::PostgreSQL)(b"c timestamp NOT NULL DEFAULT NOW()")
-                    .unwrap();
+            let (_, res1) = column_specification(Dialect::PostgreSQL)(LocatedSpan::new(
+                b"c timestamp NOT NULL DEFAULT NOW()",
+            ))
+            .unwrap();
 
             assert_eq!(
                 res1,

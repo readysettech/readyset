@@ -7,7 +7,7 @@ use nom::combinator::{map, opt};
 use nom::error::ErrorKind;
 use nom::multi::{many0, separated_list1};
 use nom::sequence::{delimited, preceded, terminated, tuple};
-use nom::IResult;
+use nom_locate::LocatedSpan;
 use serde::{Deserialize, Serialize};
 
 use crate::common::{
@@ -20,7 +20,10 @@ use crate::literal::literal;
 use crate::order::{order_clause, OrderClause};
 use crate::table::{table_expr, table_expr_list};
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, Expr, FieldReference, FunctionExpr, Literal, SqlIdentifier, TableExpr};
+use crate::{
+    Dialect, Expr, FieldReference, FunctionExpr, Literal, NomSqlError, NomSqlResult, SqlIdentifier,
+    TableExpr,
+};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Default, Serialize, Deserialize)]
 pub struct GroupByClause {
@@ -166,7 +169,7 @@ impl fmt::Display for SelectStatement {
     }
 }
 
-fn having_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
+fn having_clause(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Expr> {
     move |i| {
         let (i, _) = whitespace0(i)?;
         let (i, _) = tag_no_case("having")(i)?;
@@ -178,8 +181,10 @@ fn having_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
 }
 
 // Parse GROUP BY clause
-pub fn group_by_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], GroupByClause> {
-    move |i| -> Result<(&[u8], GroupByClause), _> {
+pub fn group_by_clause(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], GroupByClause> {
+    move |i| {
         let (i, _) = whitespace0(i)?;
         let (i, _) = tag_no_case("group")(i)?;
         let (i, _) = whitespace1(i)?;
@@ -190,7 +195,7 @@ pub fn group_by_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Gro
     }
 }
 
-fn offset_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Literal> {
+fn offset_clause(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Literal> {
     move |i| {
         let (i, _) = whitespace0(i)?;
         let (i, _) = tag_no_case("offset")(i)?;
@@ -202,7 +207,7 @@ fn offset_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Literal> 
 // Parses a generic SQL `{limit} [OFFSET {offset}]`
 fn limit_offset_generic(
     dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], (Option<Literal>, Option<Literal>)> {
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], (Option<Literal>, Option<Literal>)> {
     move |i| {
         let (i, limit) = literal(dialect)(i)?;
         let (i, offset) = opt(offset_clause(dialect))(i)?;
@@ -213,7 +218,7 @@ fn limit_offset_generic(
 // Parse LIMIT [OFFSET] clause
 fn limit_offset(
     dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], (Option<Literal>, Option<Literal>)> {
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], (Option<Literal>, Option<Literal>)> {
     move |i| {
         let (i, _) = whitespace0(i)?;
         let (i, _) = tag_no_case("limit")(i)?;
@@ -227,7 +232,7 @@ fn limit_offset(
 // Parse LIMIT [OFFSET] clause or a bare OFFSET clause
 pub(crate) fn limit_offset_clause(
     dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], (Option<Literal>, Option<Literal>)> {
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], (Option<Literal>, Option<Literal>)> {
     move |i| {
         alt((
             limit_offset(dialect),
@@ -236,7 +241,9 @@ pub(crate) fn limit_offset_clause(
     }
 }
 
-fn join_constraint(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], JoinConstraint> {
+fn join_constraint(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], JoinConstraint> {
     move |i| {
         let using_clause = map(
             tuple((
@@ -267,7 +274,7 @@ fn join_constraint(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], JoinCon
 }
 
 // Parse JOIN clause
-fn join_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], JoinClause> {
+fn join_clause(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], JoinClause> {
     move |i| {
         let (remaining_input, (_, _natural, operator, _, right, _, constraint)) = tuple((
             whitespace0,
@@ -290,7 +297,7 @@ fn join_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], JoinClause>
     }
 }
 
-fn join_rhs(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], JoinRightSide> {
+fn join_rhs(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], JoinRightSide> {
     move |i| {
         let nested_select = map(
             tuple((
@@ -313,7 +320,7 @@ fn join_rhs(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], JoinRightSide>
 }
 
 // Parse WHERE clause of a selection
-pub fn where_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
+pub fn where_clause(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Expr> {
     move |i| {
         let (remaining_input, (_, _, _, where_condition)) = tuple((
             whitespace0,
@@ -327,7 +334,9 @@ pub fn where_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> 
 }
 
 // Parse rule for a SQL selection query.
-pub fn selection(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SelectStatement> {
+pub fn selection(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SelectStatement> {
     move |i| terminated_with_statement_terminator(nested_selection(dialect))(i)
 }
 
@@ -381,7 +390,9 @@ impl FromClause {
     }
 }
 
-fn nested_select(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FromClause> {
+fn nested_select(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], FromClause> {
     move |i| {
         let (i, _) = tag("(")(i)?;
         let (i, _) = whitespace0(i)?;
@@ -394,7 +405,9 @@ fn nested_select(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FromClaus
     }
 }
 
-fn from_clause_join(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FromClause> {
+fn from_clause_join(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], FromClause> {
     move |i| {
         let (i, _) = whitespace0(i)?;
         let (i, lhs) = nested_from_clause(dialect)(i)?;
@@ -410,7 +423,9 @@ fn from_clause_join(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FromCl
     }
 }
 
-fn nested_from_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FromClause> {
+fn nested_from_clause(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], FromClause> {
     move |i| {
         alt((
             delimited(tag("("), from_clause_join(dialect), tag(")")),
@@ -420,7 +435,9 @@ fn nested_from_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], From
     }
 }
 
-fn from_clause_tree(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FromClause> {
+fn from_clause_tree(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], FromClause> {
     move |i| {
         alt((
             delimited(tag("("), from_clause_join(dialect), tag(")")),
@@ -431,7 +448,7 @@ fn from_clause_tree(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FromCl
     }
 }
 
-fn from_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FromClause> {
+fn from_clause(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], FromClause> {
     move |i| {
         let (i, _) = whitespace0(i)?;
         let (i, _) = tag_no_case("from")(i)?;
@@ -440,7 +457,7 @@ fn from_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FromClause>
     }
 }
 
-fn cte(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CommonTableExpr> {
+fn cte(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CommonTableExpr> {
     move |i| {
         let (i, name) = dialect.identifier()(i)?;
         let (i, _) = whitespace1(i)?;
@@ -457,7 +474,9 @@ fn cte(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CommonTableExpr> {
     }
 }
 
-fn ctes(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<CommonTableExpr>> {
+fn ctes(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<CommonTableExpr>> {
     move |i| {
         let (i, _) = tag_no_case("with")(i)?;
         let (i, _) = whitespace1(i)?;
@@ -468,7 +487,9 @@ fn ctes(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<CommonTableExp
     }
 }
 
-pub fn nested_selection(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SelectStatement> {
+pub fn nested_selection(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SelectStatement> {
     move |i| {
         let (i, ctes) = opt(ctes(dialect))(i)?;
         let (i, _) = tag_no_case("select")(i)?;
@@ -512,9 +533,12 @@ pub fn nested_selection(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Se
         if let Some((from, extra_joins, where_clause, having, group_by, order, limit, offset)) =
             from_clause
         {
-            let (tables, mut join) = from
-                .into_tables_and_joins()
-                .map_err(|_| nom::Err::Error(nom::error::Error::new(i, ErrorKind::Tag)))?;
+            let (tables, mut join) = from.into_tables_and_joins().map_err(|_| {
+                nom::Err::Error(NomSqlError {
+                    input: i,
+                    kind: ErrorKind::Tag,
+                })
+            })?;
 
             join.extend(extra_joins);
 
@@ -538,7 +562,9 @@ mod tests {
     use crate::column::Column;
     use crate::common::FieldDefinitionExpr;
     use crate::table::Relation;
-    use crate::{BinaryOperator, Expr, FunctionExpr, InValue, ItemPlaceholder, SqlType};
+    use crate::{
+        to_nom_result, BinaryOperator, Expr, FunctionExpr, InValue, ItemPlaceholder, SqlType,
+    };
 
     fn columns(cols: &[&str]) -> Vec<FieldDefinitionExpr> {
         cols.iter()
@@ -550,7 +576,7 @@ mod tests {
     fn simple_select() {
         let qstring = "SELECT id, name FROM users;";
 
-        let res = selection(Dialect::MySQL)(qstring.as_bytes());
+        let res = selection(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             SelectStatement {
@@ -564,14 +590,14 @@ mod tests {
     #[test]
     fn select_without_table() {
         let qstring = "SELECT * FROM;";
-        let res = selection(Dialect::MySQL)(qstring.as_bytes());
+        let res = selection(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
         assert!(res.is_err(), "!{:?}.is_err()", res);
     }
 
     #[test]
     fn bare_expression_select() {
         let qstring = "SELECT 1";
-        let res = selection(Dialect::MySQL)(qstring.as_bytes());
+        let res = selection(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             SelectStatement {
@@ -588,7 +614,7 @@ mod tests {
     fn more_involved_select() {
         let qstring = "SELECT users.id, users.name FROM users;";
 
-        let res = selection(Dialect::MySQL)(qstring.as_bytes());
+        let res = selection(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             SelectStatement {
@@ -603,7 +629,7 @@ mod tests {
     fn select_all() {
         let qstring = "SELECT * FROM users;";
 
-        let res = selection(Dialect::MySQL)(qstring.as_bytes());
+        let res = selection(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             SelectStatement {
@@ -636,7 +662,7 @@ mod tests {
     fn spaces_optional() {
         let qstring = "SELECT id,name FROM users;";
 
-        let res = selection(Dialect::MySQL)(qstring.as_bytes());
+        let res = selection(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             SelectStatement {
@@ -653,8 +679,8 @@ mod tests {
         let qstring_uc = "SELECT id, name FROM users;";
 
         assert_eq!(
-            selection(Dialect::MySQL)(qstring_lc.as_bytes()).unwrap(),
-            selection(Dialect::MySQL)(qstring_uc.as_bytes()).unwrap()
+            selection(Dialect::MySQL)(LocatedSpan::new(qstring_lc.as_bytes())).unwrap(),
+            selection(Dialect::MySQL)(LocatedSpan::new(qstring_uc.as_bytes())).unwrap()
         );
     }
 
@@ -664,9 +690,18 @@ mod tests {
         let qstring_nosem = "select id, name from users";
         let qstring_linebreak = "select id, name from users\n";
 
-        let r1 = selection(Dialect::MySQL)(qstring_sem.as_bytes()).unwrap();
-        let r2 = selection(Dialect::MySQL)(qstring_nosem.as_bytes()).unwrap();
-        let r3 = selection(Dialect::MySQL)(qstring_linebreak.as_bytes()).unwrap();
+        let r1 = to_nom_result(selection(Dialect::MySQL)(LocatedSpan::new(
+            qstring_sem.as_bytes(),
+        )))
+        .unwrap();
+        let r2 = to_nom_result(selection(Dialect::MySQL)(LocatedSpan::new(
+            qstring_nosem.as_bytes(),
+        )))
+        .unwrap();
+        let r3 = to_nom_result(selection(Dialect::MySQL)(LocatedSpan::new(
+            qstring_linebreak.as_bytes(),
+        )))
+        .unwrap();
         assert_eq!(r1, r2);
         assert_eq!(r2, r3);
     }
@@ -696,7 +731,7 @@ mod tests {
     }
 
     fn where_clause_with_variable_placeholder(qstring: &str, literal: Literal) {
-        let res = selection(Dialect::MySQL)(qstring.as_bytes());
+        let res = selection(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
 
         let expected_where_cond = Some(Expr::BinaryOp {
             lhs: Box::new(Expr::Column("email".into())),
@@ -723,7 +758,7 @@ mod tests {
         let res1 = test_parse!(selection(Dialect::MySQL), qstring1.as_bytes());
         let res2 = test_parse!(selection(Dialect::MySQL), qstring2.as_bytes());
         let res3 = test_parse!(selection(Dialect::MySQL), qstring3.as_bytes());
-        let res3_pgsql = selection(Dialect::PostgreSQL)(qstring3.as_bytes());
+        let res3_pgsql = selection(Dialect::PostgreSQL)(LocatedSpan::new(qstring3.as_bytes()));
 
         assert_eq!(res1.limit, Some(10_u32.into()));
         assert_eq!(res1.offset, None);
@@ -850,7 +885,7 @@ mod tests {
     fn distinct() {
         let qstring = "select distinct tag from PaperTag where paperId=?;";
 
-        let res = selection(Dialect::MySQL)(qstring.as_bytes());
+        let res = selection(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
         let expected_where_cond = Some(Expr::BinaryOp {
             lhs: Box::new(Expr::Column("paperId".into())),
             op: BinaryOperator::Equal,
@@ -874,7 +909,7 @@ mod tests {
     fn simple_condition_expr() {
         let qstring = "select infoJson from PaperStorage where paperId=? and paperStorageId=?;";
 
-        let res = selection(Dialect::MySQL)(qstring.as_bytes());
+        let res = selection(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
 
         let left_comp = Box::new(Expr::BinaryOp {
             lhs: Box::new(Expr::Column(Column::from("paperId"))),
@@ -909,7 +944,7 @@ mod tests {
     #[test]
     fn where_and_limit_clauses() {
         let qstring = "select * from users where id = ? limit 10\n";
-        let res = selection(Dialect::MySQL)(qstring.as_bytes());
+        let res = selection(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
 
         let ct = Expr::BinaryOp {
             lhs: Box::new(Expr::Column(Column::from("id"))),
@@ -945,7 +980,7 @@ mod tests {
     fn aggregation_column() {
         let qstring = "SELECT max(addr_id) FROM address;";
 
-        let res = selection(Dialect::MySQL)(qstring.as_bytes());
+        let res = selection(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
         let agg_expr = FunctionExpr::Max(Box::new(Expr::Column(Column::from("addr_id"))));
         assert_eq!(
             res.unwrap().1,
@@ -961,7 +996,7 @@ mod tests {
     fn aggregation_column_with_alias() {
         let qstring = "SELECT max(addr_id) AS max_addr FROM address;";
 
-        let res = selection(Dialect::MySQL)(qstring.as_bytes());
+        let res = selection(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
         let agg_expr = FunctionExpr::Max(Box::new(Expr::Column(Column::from("addr_id"))));
         let expected_stmt = SelectStatement {
             tables: vec![TableExpr::from(Relation::from("address"))],
@@ -978,7 +1013,7 @@ mod tests {
     fn count_all() {
         let qstring = "SELECT COUNT(*) FROM votes GROUP BY aid;";
 
-        let res = selection(Dialect::MySQL)(qstring.as_bytes());
+        let res = selection(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
         let agg_expr = FunctionExpr::CountStar;
         let expected_stmt = SelectStatement {
             tables: vec![TableExpr::from(Relation::from("votes"))],
@@ -995,7 +1030,7 @@ mod tests {
     fn count_distinct() {
         let qstring = "SELECT COUNT(DISTINCT vote_id) FROM votes GROUP BY aid;";
 
-        let res = selection(Dialect::MySQL)(qstring.as_bytes());
+        let res = selection(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
         let agg_expr = FunctionExpr::Count {
             expr: Box::new(Expr::Column(Column::from("vote_id"))),
             distinct: true,
@@ -1015,7 +1050,7 @@ mod tests {
     fn count_filter() {
         let qstring =
             "SELECT COUNT(CASE WHEN vote_id > 10 THEN vote_id END) FROM votes GROUP BY aid;";
-        let res = selection(Dialect::MySQL)(qstring.as_bytes());
+        let res = selection(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
 
         let filter_cond = Expr::BinaryOp {
             lhs: Box::new(Expr::Column(Column::from("vote_id"))),
@@ -1045,7 +1080,7 @@ mod tests {
     fn sum_filter() {
         let qstring = "SELECT SUM(CASE WHEN sign = 1 THEN vote_id END) FROM votes GROUP BY aid;";
 
-        let res = selection(Dialect::MySQL)(qstring.as_bytes());
+        let res = selection(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
 
         let filter_cond = Expr::BinaryOp {
             lhs: Box::new(Expr::Column(Column::from("sign"))),
@@ -1076,7 +1111,7 @@ mod tests {
         let qstring =
             "SELECT SUM(CASE WHEN sign = 1 THEN vote_id ELSE 6 END) FROM votes GROUP BY aid;";
 
-        let res = selection(Dialect::MySQL)(qstring.as_bytes());
+        let res = selection(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
 
         let filter_cond = Expr::BinaryOp {
             lhs: Box::new(Expr::Column(Column::from("sign"))),
@@ -1109,7 +1144,7 @@ mod tests {
             FROM votes
             GROUP BY votes.comment_id;";
 
-        let res = selection(Dialect::MySQL)(qstring.as_bytes());
+        let res = selection(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
 
         let filter_cond = Expr::BinaryOp {
             lhs: Box::new(Expr::BinaryOp {
@@ -1152,7 +1187,7 @@ mod tests {
     fn generic_function_query() {
         let qstring = "SELECT coalesce(a, b,c) as x,d FROM sometable;";
 
-        let res = selection(Dialect::MySQL)(qstring.as_bytes());
+        let res = selection(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
         let agg_expr = FunctionExpr::Call {
             name: "coalesce".into(),
             arguments: vec![
@@ -1192,7 +1227,7 @@ mod tests {
         let qstring = "SELECT * FROM item, author WHERE item.i_a_id = author.a_id AND \
                        item.i_subject = ? ORDER BY item.i_title limit 50;";
 
-        let res = selection(Dialect::MySQL)(qstring.as_bytes());
+        let res = selection(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
         let expected_where_cond = Some(Expr::BinaryOp {
             lhs: Box::new(Expr::BinaryOp {
                 lhs: Box::new(Expr::Column(Column::from("item.i_a_id"))),
@@ -1233,7 +1268,7 @@ mod tests {
     fn simple_joins() {
         let qstring = "select paperId from PaperConflict join PCMember using (contactId);";
 
-        let res = selection(Dialect::MySQL)(qstring.as_bytes());
+        let res = selection(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
         let expected_stmt = SelectStatement {
             tables: vec![TableExpr::from(Relation::from("PaperConflict"))],
             fields: columns(&["paperId"]),
@@ -1255,7 +1290,7 @@ mod tests {
                        join PaperReview on PCMember.contactId=PaperReview.contactId \
                        order by contactId;";
 
-        let res = selection(Dialect::MySQL)(qstring.as_bytes());
+        let res = selection(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
         let expected = SelectStatement {
             tables: vec![TableExpr::from(Relation::from("PCMember"))],
             fields: columns(&["PCMember.contactId"]),
@@ -1292,7 +1327,7 @@ mod tests {
                        (contactId) left join ChairAssistant using (contactId) left join Chair \
                        using (contactId) where ContactInfo.contactId=?;";
 
-        let res = selection(Dialect::MySQL)(qstring.as_bytes());
+        let res = selection(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
         let ct = Expr::BinaryOp {
             lhs: Box::new(Expr::Column(Column::from("ContactInfo.contactId"))),
             rhs: Box::new(Expr::Literal(Literal::Placeholder(
@@ -1336,7 +1371,7 @@ mod tests {
                     WHERE orders.o_c_id IN (SELECT o_c_id FROM orders, order_line \
                     WHERE orders.o_id = order_line.ol_o_id);";
 
-        let res = selection(Dialect::MySQL)(qstr.as_bytes());
+        let res = selection(Dialect::MySQL)(LocatedSpan::new(qstr.as_bytes()));
         let inner_where_clause = Expr::BinaryOp {
             lhs: Box::new(Expr::Column(Column::from("orders.o_id"))),
             op: BinaryOperator::Equal,
@@ -1379,7 +1414,7 @@ mod tests {
                     WHERE orders.o_id = order_line.ol_o_id \
                     AND orders.o_id > (SELECT MAX(o_id) FROM orders));";
 
-        let res = selection(Dialect::MySQL)(qstr.as_bytes());
+        let res = selection(Dialect::MySQL)(LocatedSpan::new(qstr.as_bytes()));
 
         let agg_expr = FunctionExpr::Max(Box::new(Expr::Column(Column::from("o_id"))));
         let recursive_select = SelectStatement {
@@ -1439,16 +1474,16 @@ mod tests {
     fn join_against_nested_select() {
         let t1 = b"(SELECT ol_i_id FROM order_line) AS ids";
 
-        join_rhs(Dialect::MySQL)(t1).unwrap();
+        join_rhs(Dialect::MySQL)(LocatedSpan::new(t1)).unwrap();
 
         let t1 = b"JOIN (SELECT ol_i_id FROM order_line) AS ids ON (orders.o_id = ids.ol_i_id)";
 
-        join_clause(Dialect::MySQL)(t1).unwrap();
+        join_clause(Dialect::MySQL)(LocatedSpan::new(t1)).unwrap();
 
         let qstr_with_alias = "SELECT o_id, ol_i_id FROM orders JOIN \
                                (SELECT ol_i_id FROM order_line) AS ids \
                                ON (orders.o_id = ids.ol_i_id);";
-        let res = selection(Dialect::MySQL)(qstr_with_alias.as_bytes());
+        let res = selection(Dialect::MySQL)(LocatedSpan::new(qstr_with_alias.as_bytes()));
 
         // N.B.: Don't alias the inner select to `inner`, which is, well, a SQL keyword!
         let inner_select = SelectStatement {
@@ -1478,7 +1513,7 @@ mod tests {
     #[test]
     fn project_arithmetic_expressions() {
         let qstr = "SELECT MAX(o_id)-3333 FROM orders;";
-        let res = selection(Dialect::MySQL)(qstr.as_bytes());
+        let res = selection(Dialect::MySQL)(LocatedSpan::new(qstr.as_bytes()));
 
         let expected = SelectStatement {
             tables: vec![TableExpr::from(Relation::from("orders"))],
@@ -1498,7 +1533,7 @@ mod tests {
     #[test]
     fn project_arithmetic_expressions_with_aliases() {
         let qstr = "SELECT max(o_id) * 2 as double_max FROM orders;";
-        let res = selection(Dialect::MySQL)(qstr.as_bytes());
+        let res = selection(Dialect::MySQL)(LocatedSpan::new(qstr.as_bytes()));
 
         let expected = SelectStatement {
             tables: vec![TableExpr::from(Relation::from("orders"))],
@@ -1521,7 +1556,7 @@ mod tests {
     #[test]
     fn where_call_in_list() {
         let qstr = b"SELECT * FROM x WHERE AVG(y) IN (?, ?, ?)";
-        let res = selection(Dialect::MySQL)(qstr);
+        let res = selection(Dialect::MySQL)(LocatedSpan::new(qstr));
         let (rem, res) = res.unwrap();
         assert!(rem.is_empty());
         assert_eq!(
@@ -1545,7 +1580,7 @@ mod tests {
     #[test]
     fn alias_cast() {
         let qstr = "SELECT id, CAST(created_at AS date) AS created_day FROM users WHERE id = ?;";
-        let res = selection(Dialect::MySQL)(qstr.as_bytes());
+        let res = selection(Dialect::MySQL)(LocatedSpan::new(qstr.as_bytes()));
         assert!(res.is_ok(), "!{:?}.is_ok()", res);
         assert_eq!(
             res.unwrap().1,
@@ -1578,7 +1613,7 @@ mod tests {
     fn simple_cte() {
         let qstr = b"WITH max_val AS (SELECT max(value) as value FROM t1)
             SELECT name FROM t2 JOIN max_val ON max_val.value = t2.value";
-        let res = selection(Dialect::MySQL)(qstr);
+        let res = selection(Dialect::MySQL)(LocatedSpan::new(qstr));
         assert!(res.is_ok(), "error parsing query: {}", res.err().unwrap());
         let (rem, query) = res.unwrap();
         assert!(rem.is_empty());
@@ -1594,7 +1629,7 @@ mod tests {
             SELECT name FROM t2
             JOIN max_val ON max_val.value = t2.max_value
             JOIN min_val ON min_val.value = t2.min_value";
-        let res = selection(Dialect::MySQL)(qstr);
+        let res = selection(Dialect::MySQL)(LocatedSpan::new(qstr));
         assert!(res.is_ok(), "error parsing query: {}", res.err().unwrap());
         let (rem, query) = res.unwrap();
         assert!(rem.is_empty());
@@ -1662,7 +1697,7 @@ mod tests {
         #[test]
         fn alias_generic_function() {
             let qstr = "SELECT id, coalesce(a, \"b\",c) AS created_day FROM users;";
-            let res = selection(Dialect::MySQL)(qstr.as_bytes());
+            let res = selection(Dialect::MySQL)(LocatedSpan::new(qstr.as_bytes()));
             assert!(res.is_ok(), "!{:?}.is_ok()", res);
             assert_eq!(
                 res.unwrap().1,
@@ -1694,7 +1729,7 @@ mod tests {
             // TODO: doesn't support selecting literals without a FROM clause, which is still valid
             // SQL        let qstring = "SELECT NULL, 1, \"foo\";";
 
-            let res = selection(Dialect::MySQL)(qstring.as_bytes());
+            let res = selection(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(
                 res.unwrap().1,
                 SelectStatement {
@@ -1722,7 +1757,7 @@ mod tests {
                     JOIN `django_content_type`
                       ON ( `auth_permission`.`content_type_id` = `django_content_type`.`id` )
                     WHERE `auth_permission`.`content_type_id` IN (0);";
-            let res = selection(Dialect::MySQL)(qstr.as_bytes());
+            let res = selection(Dialect::MySQL)(LocatedSpan::new(qstr.as_bytes()));
 
             let expected_where_clause = Some(Expr::In {
                 lhs: Box::new(Expr::Column(Column::from(
@@ -1794,7 +1829,7 @@ mod tests {
         #[test]
         fn alias_generic_function() {
             let qstr = "SELECT id, coalesce(a, 'b',c) AS created_day FROM users;";
-            let res = selection(Dialect::PostgreSQL)(qstr.as_bytes());
+            let res = selection(Dialect::PostgreSQL)(LocatedSpan::new(qstr.as_bytes()));
             assert!(res.is_ok(), "!{:?}.is_ok()", res);
             assert_eq!(
                 res.unwrap().1,
@@ -1826,7 +1861,7 @@ mod tests {
             // TODO: doesn't support selecting literals without a FROM clause, which is still valid
             // SQL        let qstring = "SELECT NULL, 1, \"foo\";";
 
-            let res = selection(Dialect::PostgreSQL)(qstring.as_bytes());
+            let res = selection(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(
                 res.unwrap().1,
                 SelectStatement {
@@ -1854,7 +1889,7 @@ mod tests {
                     JOIN \"django_content_type\"
                       ON ( \"auth_permission\".\"content_type_id\" = \"django_content_type\".\"id\" )
                     WHERE \"auth_permission\".\"content_type_id\" IN (0);";
-            let res = selection(Dialect::PostgreSQL)(qstr.as_bytes());
+            let res = selection(Dialect::PostgreSQL)(LocatedSpan::new(qstr.as_bytes()));
 
             let expected_where_clause = Some(Expr::In {
                 lhs: Box::new(Expr::Column(Column::from(

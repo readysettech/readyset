@@ -4,11 +4,12 @@ use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::{map, opt};
 use nom::sequence::{terminated, tuple};
-use nom::IResult;
+use nom_locate::LocatedSpan;
 use serde::{Deserialize, Serialize};
 
 use crate::common::statement_terminator;
 use crate::whitespace::whitespace1;
+use crate::NomSqlResult;
 
 /// EXPLAIN statements
 ///
@@ -36,7 +37,7 @@ impl Display for ExplainStatement {
     }
 }
 
-fn explain_graphviz(i: &[u8]) -> IResult<&[u8], ExplainStatement> {
+fn explain_graphviz(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ExplainStatement> {
     let (i, simplified) = opt(terminated(tag_no_case("simplified"), whitespace1))(i)?;
     let (i, _) = tag_no_case("graphviz")(i)?;
     Ok((
@@ -47,7 +48,7 @@ fn explain_graphviz(i: &[u8]) -> IResult<&[u8], ExplainStatement> {
     ))
 }
 
-pub(crate) fn explain_statement(i: &[u8]) -> IResult<&[u8], ExplainStatement> {
+pub(crate) fn explain_statement(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ExplainStatement> {
     let (i, _) = tag_no_case("explain")(i)?;
     let (i, _) = whitespace1(i)?;
     let (i, stmt) = alt((
@@ -68,7 +69,9 @@ mod tests {
     #[test]
     fn explain_graphviz() {
         assert_eq!(
-            explain_statement(b"explain graphviz;").unwrap().1,
+            explain_statement(LocatedSpan::new(b"explain graphviz;"))
+                .unwrap()
+                .1,
             ExplainStatement::Graphviz { simplified: false }
         );
     }
@@ -76,7 +79,9 @@ mod tests {
     #[test]
     fn explain_last_statement() {
         assert_eq!(
-            explain_statement(b"explain last statement;").unwrap().1,
+            explain_statement(LocatedSpan::new(b"explain last statement;"))
+                .unwrap()
+                .1,
             ExplainStatement::LastStatement
         );
     }

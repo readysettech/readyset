@@ -4,13 +4,13 @@ use itertools::Itertools;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::map;
-use nom::IResult;
+use nom_locate::LocatedSpan;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
 use crate::column::Column;
 use crate::select::SelectStatement;
-use crate::{Expr, SqlIdentifier, TableExpr};
+use crate::{Expr, NomSqlResult, SqlIdentifier, TableExpr};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum JoinRightSide {
@@ -94,7 +94,7 @@ impl fmt::Display for JoinConstraint {
 }
 
 // Parse binary comparison operators
-pub fn join_operator(i: &[u8]) -> IResult<&[u8], JoinOperator> {
+pub fn join_operator(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], JoinOperator> {
     alt((
         map(tag_no_case("join"), |_| JoinOperator::Join),
         map(tag_no_case("left join"), |_| JoinOperator::LeftJoin),
@@ -122,7 +122,7 @@ mod tests {
         let expected = "SELECT `tags`.* FROM `tags` \
                        INNER JOIN `taggings` ON (`tags`.`id` = `taggings`.`tag_id`)";
 
-        let res = selection(Dialect::MySQL)(qstring.as_bytes());
+        let res = selection(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
 
         let join_cond = Expr::BinaryOp {
             lhs: Box::new(Expr::Column(Column::from("tags.id"))),

@@ -4,7 +4,7 @@ use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::opt;
 use nom::multi::separated_list1;
 use nom::sequence::{delimited, preceded, terminated, tuple};
-use nom::IResult;
+use nom_locate::LocatedSpan;
 use serde::{Deserialize, Serialize};
 
 use crate::column::Column;
@@ -13,7 +13,7 @@ use crate::common::{
 };
 use crate::table::{table_reference, Relation};
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, Expr};
+use crate::{Dialect, Expr, NomSqlResult};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct InsertStatement {
@@ -57,7 +57,7 @@ impl fmt::Display for InsertStatement {
     }
 }
 
-fn fields(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Column>> {
+fn fields(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<Column>> {
     move |i| {
         delimited(
             preceded(tag("("), whitespace0),
@@ -67,7 +67,7 @@ fn fields(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Column>> {
     }
 }
 
-fn data(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Expr>> {
+fn data(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<Expr>> {
     move |i| {
         delimited(
             terminated(tag("("), whitespace0),
@@ -77,7 +77,9 @@ fn data(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Expr>> {
     }
 }
 
-fn on_duplicate(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<(Column, Expr)>> {
+fn on_duplicate(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<(Column, Expr)>> {
     move |i| {
         preceded(
             whitespace0,
@@ -91,7 +93,9 @@ fn on_duplicate(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<(Colum
 
 // Parse rule for a SQL insert query.
 // TODO(malte): support REPLACE, nested selection, DEFAULT VALUES
-pub fn insertion(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], InsertStatement> {
+pub fn insertion(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], InsertStatement> {
     move |i| {
         let (
             remaining_input,
@@ -138,7 +142,7 @@ mod tests {
     fn insert_with_parameters() {
         let qstring = "INSERT INTO users (id, name) VALUES (?, ?);";
 
-        let res = insertion(Dialect::MySQL)(qstring.as_bytes());
+        let res = insertion(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
         assert_eq!(
             res.unwrap().1,
             InsertStatement {
@@ -165,7 +169,7 @@ mod tests {
         fn simple_insert() {
             let qstring = "INSERT INTO users VALUES (42, \"test\");";
 
-            let res = insertion(Dialect::MySQL)(qstring.as_bytes());
+            let res = insertion(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(
                 res.unwrap().1,
                 InsertStatement {
@@ -212,7 +216,7 @@ mod tests {
         fn insert_with_field_names() {
             let qstring = "INSERT INTO users (id, name) VALUES (42, 'test');";
 
-            let res = insertion(Dialect::MySQL)(qstring.as_bytes());
+            let res = insertion(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(
                 res.unwrap().1,
                 InsertStatement {
@@ -233,7 +237,7 @@ mod tests {
         fn insert_without_spaces() {
             let qstring = "INSERT INTO users(id, name) VALUES(42, 'test');";
 
-            let res = insertion(Dialect::MySQL)(qstring.as_bytes());
+            let res = insertion(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(
                 res.unwrap().1,
                 InsertStatement {
@@ -253,7 +257,7 @@ mod tests {
         fn simple_insert_schema() {
             let qstring = "INSERT INTO db1.users VALUES (42, \"test\");";
 
-            let res = insertion(Dialect::MySQL)(qstring.as_bytes());
+            let res = insertion(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(
                 res.unwrap().1,
                 InsertStatement {
@@ -276,7 +280,7 @@ mod tests {
         fn multi_insert() {
             let qstring = "INSERT INTO users (id, name) VALUES (42, \"test\"),(21, \"test2\");";
 
-            let res = insertion(Dialect::MySQL)(qstring.as_bytes());
+            let res = insertion(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(
                 res.unwrap().1,
                 InsertStatement {
@@ -297,7 +301,7 @@ mod tests {
             let qstring = "INSERT INTO keystores (`key`, `value`) VALUES ($1, :2) \
                        ON DUPLICATE KEY UPDATE `value` = `value` + 1";
 
-            let res = insertion(Dialect::MySQL)(qstring.as_bytes());
+            let res = insertion(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(
                 res.unwrap().1,
                 InsertStatement {
@@ -324,7 +328,7 @@ mod tests {
         fn insert_with_leading_value_whitespace() {
             let qstring = "INSERT INTO users (id, name) VALUES ( 42, \"test\");";
 
-            let res = insertion(Dialect::MySQL)(qstring.as_bytes());
+            let res = insertion(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(
                 res.unwrap().1,
                 InsertStatement {
@@ -360,7 +364,7 @@ mod tests {
         fn simple_insert() {
             let qstring = "INSERT INTO users VALUES (42, 'test');";
 
-            let res = insertion(Dialect::PostgreSQL)(qstring.as_bytes());
+            let res = insertion(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(
                 res.unwrap().1,
                 InsertStatement {
@@ -380,7 +384,7 @@ mod tests {
         fn complex_insert() {
             let qstring = "INSERT INTO users VALUES (42, 'test', 'test', CURRENT_TIMESTAMP);";
 
-            let res = insertion(Dialect::PostgreSQL)(qstring.as_bytes());
+            let res = insertion(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(
                 res.unwrap().1,
                 InsertStatement {
@@ -405,7 +409,7 @@ mod tests {
         fn insert_with_field_names() {
             let qstring = "INSERT INTO users (id, name) VALUES (42, 'test');";
 
-            let res = insertion(Dialect::PostgreSQL)(qstring.as_bytes());
+            let res = insertion(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(
                 res.unwrap().1,
                 InsertStatement {
@@ -426,7 +430,7 @@ mod tests {
         fn insert_without_spaces() {
             let qstring = "INSERT INTO users(id, name) VALUES(42, 'test');";
 
-            let res = insertion(Dialect::PostgreSQL)(qstring.as_bytes());
+            let res = insertion(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(
                 res.unwrap().1,
                 InsertStatement {
@@ -446,7 +450,7 @@ mod tests {
         fn simple_insert_schema() {
             let qstring = "INSERT INTO db1.users VALUES (42, 'test');";
 
-            let res = insertion(Dialect::PostgreSQL)(qstring.as_bytes());
+            let res = insertion(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(
                 res.unwrap().1,
                 InsertStatement {
@@ -469,7 +473,7 @@ mod tests {
         fn multi_insert() {
             let qstring = "INSERT INTO users (id, name) VALUES (42, 'test'),(21, 'test2');";
 
-            let res = insertion(Dialect::PostgreSQL)(qstring.as_bytes());
+            let res = insertion(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(
                 res.unwrap().1,
                 InsertStatement {
@@ -490,7 +494,7 @@ mod tests {
             let qstring = "INSERT INTO keystores (\"key\", \"value\") VALUES ($1, :2) \
                        ON DUPLICATE KEY UPDATE \"value\" = \"value\" + 1";
 
-            let res = insertion(Dialect::PostgreSQL)(qstring.as_bytes());
+            let res = insertion(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(
                 res.unwrap().1,
                 InsertStatement {
@@ -517,7 +521,7 @@ mod tests {
         fn insert_with_leading_value_whitespace() {
             let qstring = "INSERT INTO users (id, name) VALUES ( 42, 'test');";
 
-            let res = insertion(Dialect::PostgreSQL)(qstring.as_bytes());
+            let res = insertion(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(
                 res.unwrap().1,
                 InsertStatement {

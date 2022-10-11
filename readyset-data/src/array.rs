@@ -4,6 +4,8 @@ use std::str::FromStr;
 
 use fallible_iterator::FallibleIterator;
 use ndarray::{ArrayBase, ArrayD, Data, IxDyn, RawData};
+use nom_locate::LocatedSpan;
+use nom_sql::NomSqlError;
 use postgres_protocol::types::ArrayDimension;
 use proptest::arbitrary::Arbitrary;
 use proptest::prop_oneof;
@@ -205,12 +207,12 @@ impl FromStr for Array {
             message,
         };
 
-        let (rem, res) = parse::array(s.as_bytes()).map_err(|e| {
+        let (rem, res) = parse::array(LocatedSpan::new(s.as_bytes())).map_err(|e| {
             mk_err(match e {
                 nom::Err::Incomplete(n) => format!("Incomplete input; needed {:?}", n),
-                nom::Err::Error(nom::error::Error { input, code })
-                | nom::Err::Failure(nom::error::Error { input, code }) => {
-                    format!("{:?}: at {}", code, String::from_utf8_lossy(input))
+                nom::Err::Error(NomSqlError { input, kind })
+                | nom::Err::Failure(NomSqlError { input, kind }) => {
+                    format!("{:?}: at {}", kind, String::from_utf8_lossy(&input))
                 }
             })
         })?;
@@ -372,8 +374,8 @@ mod parse {
     use nom::error::ErrorKind;
     use nom::multi::{many1, separated_list1};
     use nom::sequence::{delimited, pair, preceded, terminated, tuple};
-    use nom::IResult;
-    use nom_sql::{embedded_literal, Dialect, QuotingStyle};
+    use nom_locate::LocatedSpan;
+    use nom_sql::{embedded_literal, Dialect, NomSqlError, NomSqlResult, QuotingStyle};
 
     use super::Array;
     use crate::DfValue;
@@ -427,8 +429,13 @@ mod parse {
         }
     }
 
-    pub(super) fn array(i: &[u8]) -> IResult<&[u8], Array> {
-        let fail = || nom::Err::Error(nom::error::Error::new(i, ErrorKind::Fail));
+    pub(super) fn array(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Array> {
+        let fail = || {
+            nom::Err::Error(NomSqlError {
+                input: i,
+                kind: ErrorKind::Fail,
+            })
+        };
 
         let (i, _) = multispace0(i)?;
         let (i, bounds) = opt(terminated(
@@ -472,14 +479,14 @@ mod parse {
         ))
     }
 
-    fn bounds(i: &[u8]) -> IResult<&[u8], Bounds> {
+    fn bounds(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Bounds> {
         map(
             many1(delimited(multispace0, single_dimension_bounds, multispace0)),
             Bounds,
         )(i)
     }
 
-    fn single_dimension_bounds(i: &[u8]) -> IResult<&[u8], (i32, i32)> {
+    fn single_dimension_bounds(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], (i32, i32)> {
         // intentionally no spaces here, as postgresql doesn't allow spaces within bounds
         let (i, _) = tag("[")(i)?;
         let (i, lower) = bound_value(i)?;
@@ -489,13 +496,13 @@ mod parse {
         Ok((i, (lower, upper)))
     }
 
-    fn bound_value(i: &[u8]) -> IResult<&[u8], i32> {
+    fn bound_value(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], i32> {
         let (i, sign) = opt(tag("-"))(i)?;
         let (i, num) = map_parser(digit1, nom::character::complete::i32)(i)?;
         Ok((i, if sign.is_some() { -num } else { num }))
     }
 
-    fn array_or_nested(i: &[u8]) -> IResult<&[u8], ArrayOrNested> {
+    fn array_or_nested(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ArrayOrNested> {
         let (i, _) = multispace0(i)?;
         let (i, _) = tag("{")(i)?;
         let (i, _) = multispace0(i)?;
@@ -518,7 +525,7 @@ mod parse {
         Ok((i, res))
     }
 
-    fn literal(i: &[u8]) -> IResult<&[u8], DfValue> {
+    fn literal(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], DfValue> {
         alt((
             map(
                 terminated(
@@ -534,9 +541,9 @@ mod parse {
         ))(i)
     }
 
-    fn unquoted_string_literal(i: &[u8]) -> IResult<&[u8], DfValue> {
+    fn unquoted_string_literal(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], DfValue> {
         let (i, _) = not(peek(tag("\"")))(i)?;
-        map(is_not("{},\"\\"), DfValue::from)(i)
+        map(is_not("{},\"\\"), |i: LocatedSpan<_>| DfValue::from(*i))(i)
     }
 }
 

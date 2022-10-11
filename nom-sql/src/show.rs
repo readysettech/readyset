@@ -4,12 +4,12 @@ use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::{map, opt};
 use nom::sequence::tuple;
-use nom::IResult;
+use nom_locate::LocatedSpan;
 use serde::{Deserialize, Serialize};
 
 use crate::expression::expression;
 use crate::whitespace::whitespace1;
-use crate::{Dialect, Expr};
+use crate::{Dialect, Expr, NomSqlResult};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum ShowStatement {
@@ -35,7 +35,7 @@ impl fmt::Display for ShowStatement {
     }
 }
 
-pub fn show(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], ShowStatement> {
+pub fn show(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ShowStatement> {
     move |i| {
         let (i, _) = tag_no_case("show")(i)?;
         let (i, _) = whitespace1(i)?;
@@ -86,7 +86,7 @@ impl fmt::Display for Tables {
     }
 }
 
-fn show_tables(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Tables> {
+fn show_tables(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Tables> {
     move |i| {
         let (i, full) = map(opt(tuple((tag_no_case("full"), whitespace1))), |full| {
             full.is_some()
@@ -128,7 +128,9 @@ impl fmt::Display for FilterPredicate {
     }
 }
 
-fn filter_predicate(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FilterPredicate> {
+fn filter_predicate(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], FilterPredicate> {
     move |i| {
         let (i, _) = whitespace1(i)?;
         let (i, predicate) = alt((
@@ -157,11 +159,21 @@ mod tests {
         let qstring3 = "SHOW TABLES FROM db1";
         let qstring4 = "SHOW TABLES LIKE 'm%'";
         let qstring5 = "SHOW TABLES FROM db1 WHERE Tables_in_db1 = 't1'";
-        let res1 = show(Dialect::MySQL)(qstring1.as_bytes()).unwrap().1;
-        let res2 = show(Dialect::MySQL)(qstring2.as_bytes()).unwrap().1;
-        let res3 = show(Dialect::MySQL)(qstring3.as_bytes()).unwrap().1;
-        let res4 = show(Dialect::MySQL)(qstring4.as_bytes()).unwrap().1;
-        let res5 = show(Dialect::MySQL)(qstring5.as_bytes()).unwrap().1;
+        let res1 = show(Dialect::MySQL)(LocatedSpan::new(qstring1.as_bytes()))
+            .unwrap()
+            .1;
+        let res2 = show(Dialect::MySQL)(LocatedSpan::new(qstring2.as_bytes()))
+            .unwrap()
+            .1;
+        let res3 = show(Dialect::MySQL)(LocatedSpan::new(qstring3.as_bytes()))
+            .unwrap()
+            .1;
+        let res4 = show(Dialect::MySQL)(LocatedSpan::new(qstring4.as_bytes()))
+            .unwrap()
+            .1;
+        let res5 = show(Dialect::MySQL)(LocatedSpan::new(qstring5.as_bytes()))
+            .unwrap()
+            .1;
         assert_eq!(
             res1,
             ShowStatement::Tables(Tables {
@@ -212,8 +224,12 @@ mod tests {
     fn show_events() {
         let qstring1 = "SHOW EVENTS";
         let qstring2 = "SHOW\tEVENTS";
-        let res1 = show(Dialect::MySQL)(qstring1.as_bytes()).unwrap().1;
-        let res2 = show(Dialect::MySQL)(qstring2.as_bytes()).unwrap().1;
+        let res1 = show(Dialect::MySQL)(LocatedSpan::new(qstring1.as_bytes()))
+            .unwrap()
+            .1;
+        let res2 = show(Dialect::MySQL)(LocatedSpan::new(qstring2.as_bytes()))
+            .unwrap()
+            .1;
         assert_eq!(res1, ShowStatement::Events);
         assert_eq!(res2, ShowStatement::Events);
     }
@@ -221,9 +237,13 @@ mod tests {
     #[test]
     fn show_caches() {
         let qstring1 = "SHOW CACHES";
-        let res1 = show(Dialect::MySQL)(qstring1.as_bytes()).unwrap().1;
+        let res1 = show(Dialect::MySQL)(LocatedSpan::new(qstring1.as_bytes()))
+            .unwrap()
+            .1;
         let qstring2 = "SHOW\tCACHES\t";
-        let res2 = show(Dialect::MySQL)(qstring2.as_bytes()).unwrap().1;
+        let res2 = show(Dialect::MySQL)(LocatedSpan::new(qstring2.as_bytes()))
+            .unwrap()
+            .1;
         assert_eq!(res1, ShowStatement::CachedQueries);
         assert_eq!(res2, ShowStatement::CachedQueries);
     }
@@ -231,9 +251,13 @@ mod tests {
     #[test]
     fn show_proxied_queries() {
         let qstring1 = "SHOW PROXIED QUERIES";
-        let res1 = show(Dialect::MySQL)(qstring1.as_bytes()).unwrap().1;
+        let res1 = show(Dialect::MySQL)(LocatedSpan::new(qstring1.as_bytes()))
+            .unwrap()
+            .1;
         let qstring2 = "SHOW\tPROXIED\tQUERIES";
-        let res2 = show(Dialect::MySQL)(qstring2.as_bytes()).unwrap().1;
+        let res2 = show(Dialect::MySQL)(LocatedSpan::new(qstring2.as_bytes()))
+            .unwrap()
+            .1;
         assert_eq!(res1, ShowStatement::ProxiedQueries);
         assert_eq!(res2, ShowStatement::ProxiedQueries);
     }
@@ -241,9 +265,13 @@ mod tests {
     #[test]
     fn show_replication_status() {
         let qstring1 = "SHOW READYSET STATUS";
-        let res1 = show(Dialect::MySQL)(qstring1.as_bytes()).unwrap().1;
+        let res1 = show(Dialect::MySQL)(LocatedSpan::new(qstring1.as_bytes()))
+            .unwrap()
+            .1;
         let qstring2 = "SHOW\tREADYSET\tSTATUS";
-        let res2 = show(Dialect::MySQL)(qstring2.as_bytes()).unwrap().1;
+        let res2 = show(Dialect::MySQL)(LocatedSpan::new(qstring2.as_bytes()))
+            .unwrap()
+            .1;
         assert_eq!(res1, ShowStatement::ReadySetStatus);
         assert_eq!(res2, ShowStatement::ReadySetStatus);
     }
@@ -252,9 +280,13 @@ mod tests {
     fn show_readyset_version() {
         for dialect in [Dialect::MySQL, Dialect::PostgreSQL] {
             let qstring1 = "SHOW READYSET VERSION";
-            let res1 = show(dialect)(qstring1.as_bytes()).unwrap().1;
+            let res1 = show(dialect)(LocatedSpan::new(qstring1.as_bytes()))
+                .unwrap()
+                .1;
             let qstring2 = "SHOW\tREADYSET\tVERSION";
-            let res2 = show(dialect)(qstring2.as_bytes()).unwrap().1;
+            let res2 = show(dialect)(LocatedSpan::new(qstring2.as_bytes()))
+                .unwrap()
+                .1;
             assert_eq!(res1, ShowStatement::ReadySetVersion);
             assert_eq!(res2, ShowStatement::ReadySetVersion);
         }
