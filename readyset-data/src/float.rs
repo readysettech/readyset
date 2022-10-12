@@ -58,7 +58,7 @@ pub(crate) fn coerce_f64(val: f64, to_ty: &DfType, from_ty: &DfType) -> ReadySet
 
         DfType::Double => Ok(DfValue::Double(val)),
 
-        DfType::Float(_) => {
+        DfType::Float => {
             let val = val as f32;
             if val.is_infinite() {
                 return Err(bounds_err());
@@ -115,7 +115,7 @@ pub(crate) fn coerce_f64(val: f64, to_ty: &DfType, from_ty: &DfType) -> ReadySet
             Ok(val.into())
         }
 
-        DfType::Blob(_) => Ok(DfValue::ByteArray(val.to_string().into_bytes().into())),
+        DfType::Blob => Ok(DfValue::ByteArray(val.to_string().into_bytes().into())),
 
         DfType::VarBinary(l) => {
             let mut val = val.to_string();
@@ -193,7 +193,7 @@ pub(crate) fn coerce_decimal(
         DfType::BigInt => val.to_i64().ok_or_else(err).map(DfValue::from),
         DfType::UnsignedBigInt => val.to_u64().ok_or_else(err).map(DfValue::from),
 
-        DfType::Float(_) => val
+        DfType::Float => val
             .to_f32()
             .and_then(|v| if v.is_finite() { Some(v) } else { None })
             .ok_or_else(err)
@@ -223,7 +223,7 @@ pub(crate) fn coerce_decimal(
             Ok(val.into())
         }
 
-        DfType::Blob(_) => Ok(DfValue::ByteArray(val.to_string().into_bytes().into())),
+        DfType::Blob => Ok(DfValue::ByteArray(val.to_string().into_bytes().into())),
 
         DfType::VarBinary(l) => {
             let mut val = val.to_string();

@@ -971,7 +971,7 @@ mod tests {
                 Dialect::DEFAULT_POSTGRESQL,
                 // TODO: should actually be DfType::Numeric { prec: 10, scale: 0 }, but our type
                 // inference for float literals in pg is (currently) wrong
-                DfType::Float(Dialect::DEFAULT_MYSQL),
+                DfType::Float,
             );
 
             infers_type(

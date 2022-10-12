@@ -361,7 +361,7 @@ impl TimestampTz {
             }),
 
             DfType::Double => Ok(DfValue::Double(self.datetime_as_int() as _)),
-            DfType::Float(_) => Ok(DfValue::Float(self.datetime_as_int() as _)),
+            DfType::Float => Ok(DfValue::Float(self.datetime_as_int() as _)),
 
             DfType::Numeric { .. } => Ok(DfValue::Numeric(std::sync::Arc::new(
                 self.datetime_as_int().into(),
@@ -381,7 +381,7 @@ impl TimestampTz {
                 Ok(string.into())
             }
 
-            DfType::Blob(_) => Ok(DfValue::ByteArray(std::sync::Arc::new(
+            DfType::Blob => Ok(DfValue::ByteArray(std::sync::Arc::new(
                 self.to_string().as_bytes().into(),
             ))),
 

@@ -1,4 +1,3 @@
-use nom_sql::SqlType;
 use serde::{Deserialize, Serialize};
 
 use crate::DfType;
@@ -63,7 +62,7 @@ impl Dialect {
     /// Return the [`DfType`] corresponding to the SQL `FLOAT` type for this dialect
     pub(crate) fn float_type(&self) -> DfType {
         match self.engine {
-            SqlEngine::MySQL => DfType::Float(*self),
+            SqlEngine::MySQL => DfType::Float,
             SqlEngine::PostgreSQL => DfType::Double,
         }
     }
@@ -73,7 +72,7 @@ impl Dialect {
         // TODO: Handle `real_as_float` mode.
         match self.engine {
             SqlEngine::PostgreSQL => DfType::Double,
-            SqlEngine::MySQL => DfType::Float(*self),
+            SqlEngine::MySQL => DfType::Float,
         }
     }
 
@@ -82,26 +81,6 @@ impl Dialect {
         match self.engine {
             SqlEngine::MySQL => DfType::UnsignedBigInt,
             SqlEngine::PostgreSQL => DfType::Int,
-        }
-    }
-}
-
-/// Conversion to [`SqlType`], to be removed once we remove [`DfType::to_sql_type`]
-// TODO: remove this once we get rid of `DfType::to_sql_type`
-impl Dialect {
-    /// Returns the AST [`SqlType`] corresponding the ReadySet `Float` type for this dialect
-    pub(crate) fn sql_float_type(&self) -> SqlType {
-        match self.engine {
-            SqlEngine::MySQL => SqlType::Float,
-            SqlEngine::PostgreSQL => SqlType::Real,
-        }
-    }
-
-    /// Returns the AST [`SqlType`] corresponding the ReadySet `Blob` type for this dialect
-    pub(crate) fn sql_blob_type(&self) -> SqlType {
-        match self.engine {
-            SqlEngine::MySQL => SqlType::Blob,
-            SqlEngine::PostgreSQL => SqlType::ByteArray,
         }
     }
 }

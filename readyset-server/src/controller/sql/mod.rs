@@ -3655,10 +3655,10 @@ mod tests {
                 if matches!(g[idx].as_internal(), Some(NodeOperator::TopK(_))) {
                     let text = DfType::Text(Collation::default());
                     let truth = vec![
-                        &DfType::Int,                               // a
-                        &DfType::Float(DataDialect::DEFAULT_MYSQL), // b
-                        &text,                                      // c
-                        &DfType::BigInt,                            // bogokey projection
+                        &DfType::Int,    // a
+                        &DfType::Float,  // b
+                        &text,           // c
+                        &DfType::BigInt, // bogokey projection
                     ];
                     let types = g[idx].columns().iter().map(|c| c.ty()).collect::<Vec<_>>();
                     assert_eq!(truth, types);
@@ -3719,9 +3719,9 @@ mod tests {
                 if matches!(g[idx].as_internal(), Some(NodeOperator::Filter(_))) {
                     let text = DfType::Text(Collation::default());
                     let truth = vec![
-                        &DfType::Int,                               // a
-                        &DfType::Float(DataDialect::DEFAULT_MYSQL), // b
-                        &text,                                      // c
+                        &DfType::Int,   // a
+                        &DfType::Float, // b
+                        &text,          // c
                     ];
                     let types = g[idx].columns().iter().map(|c| c.ty()).collect::<Vec<_>>();
                     assert_eq!(truth, types);
@@ -3788,8 +3788,8 @@ mod tests {
                     assert_eq!(truth, types);
                 } else if matches!(g[idx].as_internal(), Some(NodeOperator::Extremum(_))) {
                     let truth = vec![
-                        &DfType::BigInt,                            // bogokey
-                        &DfType::Float(DataDialect::DEFAULT_MYSQL), // max(t1.b)
+                        &DfType::BigInt, // bogokey
+                        &DfType::Float,  // max(t1.b)
                     ];
                     let types = g[idx].columns().iter().map(|c| c.ty()).collect::<Vec<_>>();
                     assert_eq!(truth, types);
@@ -3874,14 +3874,11 @@ mod tests {
                 if matches!(g[idx].as_internal(), Some(NodeOperator::Join(_))) {
                     let text = DfType::Text(Collation::default());
                     let truth = vec![
-                        &DfType::Int,                               // t1.a
-                        &DfType::Float(DataDialect::DEFAULT_MYSQL), // t1.b
-                        &text,                                      // t1.c
-                        &DfType::Int,                               // t2.a
-                        &DfType::Float(DataDialect::DEFAULT_MYSQL), /* t2.b
-                                                                     * The rhs of the ON clause
-                                                                     * is
-                                                                     * omitted! */
+                        &DfType::Int,   // t1.a
+                        &DfType::Float, // t1.b
+                        &text,          // t1.c
+                        &DfType::Int,   // t2.a
+                        &DfType::Float, // t2.b The rhs of the ON clause is omitted!
                     ];
                     let types = g[idx].columns().iter().map(|c| c.ty()).collect::<Vec<_>>();
                     assert_eq!(truth, types);

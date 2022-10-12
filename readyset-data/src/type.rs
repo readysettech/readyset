@@ -59,8 +59,7 @@ pub enum DfType {
     /// This is either:
     /// - [MySQL `float`](https://dev.mysql.com/doc/refman/8.0/en/floating-point-types.html).
     /// - [PostgreSQL `real`](https://www.postgresql.org/docs/current/datatype-numeric.html#DATATYPE-FLOAT)
-    // TODO(ENG-1853): Remove dialect once `to_sql_type` is removed.
-    Float(Dialect),
+    Float,
 
     /// [`f64`]: a IEEE 754 floating-point 64-bit real value.
     ///
@@ -106,9 +105,8 @@ pub enum DfType {
 
     /// [MySQL `blob`](https://dev.mysql.com/doc/refman/8.0/en/blob.html) or
     /// [PostgreSQL `bytea`](https://www.postgresql.org/docs/current/datatype-binary.html).
-    // TODO(ENG-1853): Remove dialect once `to_sql_type` is removed.
     #[doc(alias = "bytea")]
-    Blob(Dialect),
+    Blob,
 
     /// MySQL `binary(n)`: fixed-length binary string.
     Binary(u16),
@@ -243,7 +241,7 @@ impl DfType {
             VarChar(Some(len)) => Self::VarChar(len, Collation::default()),
             Char(len) => Self::Char(len.unwrap_or(1), Collation::default(), dialect),
 
-            Blob | TinyBlob | MediumBlob | LongBlob | ByteArray => Self::Blob(dialect),
+            Blob | TinyBlob | MediumBlob | LongBlob | ByteArray => Self::Blob,
             VarBinary(len) => Self::VarBinary(len),
             Binary(len) => Self::Binary(len.unwrap_or(1)),
 
@@ -275,69 +273,6 @@ impl DfType {
             PassThrough(ref id) => Self::PassThrough(id.to_owned()),
         }
     }
-
-    /// Attempts to convert back to a [`SqlType`].
-    ///
-    /// This is a lossy conversion: calling [`DfType::from_sql_type`] on the result may not produce
-    /// the same exact type as `self`.
-    ///
-    /// This method is not inlined because it is commonly called, so we don't want to duplicate code
-    /// such as any generated jump table.
-    // TODO(ENG-1853): Once we have a `DfType`, we should not need to round-trip back to `SqlType`.
-    pub fn to_sql_type(&self) -> Option<SqlType> {
-        use SqlType::*;
-
-        Some(match *self {
-            Self::Unknown => return None,
-
-            Self::Array(ref ty) => Array(Box::new(ty.to_sql_type()?)),
-
-            Self::Bool => Bool,
-
-            Self::TinyInt => TinyInt(None),
-            Self::UnsignedTinyInt => UnsignedTinyInt(None),
-            Self::SmallInt => SmallInt(None),
-            Self::UnsignedSmallInt => UnsignedSmallInt(None),
-            Self::Int => Int(None),
-            Self::UnsignedInt => UnsignedInt(None),
-            Self::BigInt => BigInt(None),
-            Self::UnsignedBigInt => UnsignedBigInt(None),
-
-            Self::Float(dialect) => dialect.sql_float_type(),
-            Self::Double => Double,
-
-            Self::Numeric { prec, scale } => Numeric(Some((prec, Some(scale)))),
-
-            Self::Char(n, ..) => Char(Some(n)),
-            Self::VarChar(n, ..) => VarChar(Some(n)),
-            Self::Text(Collation::Utf8) => Text,
-            Self::Text(Collation::Citext) => Citext,
-
-            Self::Binary(n) => Binary(Some(n)),
-            Self::VarBinary(n) => VarBinary(n),
-            Self::Blob(dialect) => dialect.sql_blob_type(),
-
-            Self::Bit(n) => Bit(Some(n)),
-            Self::VarBit(n) => VarBit(n),
-
-            Self::Date => Date,
-            Self::DateTime { subsecond_digits } => DateTime(Some(subsecond_digits)),
-            Self::Time { .. } => Time,
-            Self::Timestamp { .. } => Timestamp,
-            Self::TimestampTz { .. } => TimestampTz,
-
-            Self::MacAddr => MacAddr,
-            Self::Inet => Inet,
-            Self::Uuid => Uuid,
-
-            // PERF: Cloning enum types is O(1).
-            Self::Enum(ref ty, _) => Enum(ty.clone()),
-
-            Self::Json(_) => Json,
-            Self::Jsonb => Jsonb,
-            Self::PassThrough(ref t) => SqlType::PassThrough(t.to_owned()),
-        })
-    }
 }
 
 impl DfType {
@@ -362,9 +297,11 @@ impl DfType {
                 Some(Dialect::DEFAULT_POSTGRESQL)
             }
 
-            Float(d) | Enum(.., d) | Char(.., d) | Blob(d) | Json(d) => Some(d),
+            Enum(.., d) | Char(.., d) | Json(d) => Some(d),
 
-            Unknown
+            Blob
+            | Float
+            | Unknown
             | Bool
             | Int
             | TinyInt
@@ -400,13 +337,13 @@ impl DfType {
             | DfType::UnsignedTinyInt
             | DfType::SmallInt
             | DfType::UnsignedSmallInt
-            | DfType::Float(_)
+            | DfType::Float
             | DfType::Double
             | DfType::Numeric { .. } => PgTypeCategory::Numeric,
             DfType::Text(_) | DfType::Char(_, _, _) | DfType::VarChar(_, _) => {
                 PgTypeCategory::String
             }
-            DfType::Blob(_)
+            DfType::Blob
             | DfType::Binary(_)
             | DfType::VarBinary(_)
             | DfType::Bit(_)
@@ -502,7 +439,7 @@ impl DfType {
     /// Returns `true` if this is any IEEE 754 floating-point type.
     #[inline]
     pub fn is_any_float(&self) -> bool {
-        matches!(*self, Self::Float(_) | Self::Double)
+        matches!(*self, Self::Float | Self::Double)
     }
 
     /// Returns the deepest nested type in [`DfType::Array`], otherwise returns `self`.
@@ -627,11 +564,10 @@ impl fmt::Display for DfType {
             | Self::UnsignedInt
             | Self::BigInt
             | Self::UnsignedBigInt
-            | Self::Float(_)
+            | Self::Float
             | Self::Double
             | Self::Text { .. }
-            // XXX: Should we take into account PostgreSQL and use "ByteArray" or "ByteA"?
-            | Self::Blob(_)
+            | Self::Blob
             | Self::VarBit(None)
             | Self::Date
             | Self::Inet
@@ -649,10 +585,18 @@ impl fmt::Display for DfType {
             | Self::VarBinary(n)
             | Self::Bit(n)
             | Self::VarBit(Some(n))
-            | Self::DateTime { subsecond_digits: n }
-            | Self::Time { subsecond_digits: n }
-            | Self::Timestamp { subsecond_digits: n }
-            | Self::TimestampTz { subsecond_digits: n } => write!(f, "{kind:?}({n})"),
+            | Self::DateTime {
+                subsecond_digits: n,
+            }
+            | Self::Time {
+                subsecond_digits: n,
+            }
+            | Self::Timestamp {
+                subsecond_digits: n,
+            }
+            | Self::TimestampTz {
+                subsecond_digits: n,
+            } => write!(f, "{kind:?}({n})"),
 
             Self::Enum(ref variants, _) => write!(f, "{kind:?}({})", variants.iter().join(", ")),
             Self::Numeric { prec, scale } => write!(f, "{kind:?}({prec}, {scale})"),
@@ -674,103 +618,6 @@ mod tests {
             for dimen in 0..=5 {
                 let arr = ty.clone().nest_in_array(dimen);
                 assert_eq!(arr.innermost_array_type(), &ty);
-            }
-        }
-    }
-
-    #[test]
-    fn to_sql_type() {
-        let len: u16 = 42;
-        let subsecond_digits: u16 = 6;
-
-        let cases: &[(DfType, Option<SqlType>)] = &[
-            (DfType::Unknown, None),
-            (DfType::Bool, Some(SqlType::Bool)),
-            (DfType::Int, Some(SqlType::Int(None))),
-            (DfType::UnsignedInt, Some(SqlType::UnsignedInt(None))),
-            (DfType::BigInt, Some(SqlType::BigInt(None))),
-            (DfType::UnsignedBigInt, Some(SqlType::UnsignedBigInt(None))),
-            (DfType::TinyInt, Some(SqlType::TinyInt(None))),
-            (
-                DfType::UnsignedTinyInt,
-                Some(SqlType::UnsignedTinyInt(None)),
-            ),
-            (DfType::SmallInt, Some(SqlType::SmallInt(None))),
-            (
-                DfType::UnsignedSmallInt,
-                Some(SqlType::UnsignedSmallInt(None)),
-            ),
-            (DfType::Float(Dialect::DEFAULT_MYSQL), Some(SqlType::Float)),
-            (
-                DfType::Float(Dialect::DEFAULT_POSTGRESQL),
-                Some(SqlType::Real),
-            ),
-            (DfType::Double, Some(SqlType::Double)),
-            (
-                DfType::Numeric {
-                    prec: 42,
-                    scale: 42,
-                },
-                Some(SqlType::Numeric(Some((42, Some(42))))),
-            ),
-            (DfType::Text(Collation::default()), Some(SqlType::Text)),
-            (
-                DfType::Char(len, Collation::default(), Dialect::DEFAULT_MYSQL),
-                Some(SqlType::Char(Some(len))),
-            ),
-            (
-                DfType::Char(len, Collation::default(), Dialect::DEFAULT_POSTGRESQL),
-                Some(SqlType::Char(Some(len))),
-            ),
-            (
-                DfType::VarChar(len, Collation::default()),
-                Some(SqlType::VarChar(Some(len))),
-            ),
-            (DfType::Blob(Dialect::DEFAULT_MYSQL), Some(SqlType::Blob)),
-            (
-                DfType::Blob(Dialect::DEFAULT_POSTGRESQL),
-                Some(SqlType::ByteArray),
-            ),
-            (DfType::Binary(len), Some(SqlType::Binary(Some(len)))),
-            (DfType::VarBinary(len), Some(SqlType::VarBinary(len))),
-            (DfType::Bit(len), Some(SqlType::Bit(Some(len)))),
-            (DfType::VarBit(Some(len)), Some(SqlType::VarBit(Some(len)))),
-            (DfType::Date, Some(SqlType::Date)),
-            (
-                DfType::DateTime { subsecond_digits },
-                Some(SqlType::DateTime(Some(subsecond_digits))),
-            ),
-            (DfType::Time { subsecond_digits }, Some(SqlType::Time)),
-            (
-                DfType::Timestamp { subsecond_digits },
-                Some(SqlType::Timestamp),
-            ),
-            (
-                DfType::TimestampTz { subsecond_digits },
-                Some(SqlType::TimestampTz),
-            ),
-            (DfType::MacAddr, Some(SqlType::MacAddr)),
-            (DfType::Inet, Some(SqlType::Inet)),
-            (DfType::Uuid, Some(SqlType::Uuid)),
-            (DfType::Json(Dialect::DEFAULT_MYSQL), Some(SqlType::Json)),
-            (
-                DfType::Json(Dialect::DEFAULT_POSTGRESQL),
-                Some(SqlType::Json),
-            ),
-            (DfType::Jsonb, Some(SqlType::Jsonb)),
-        ];
-
-        // Immediate conversion.
-        for (df_type, sql_type) in cases {
-            assert_eq!(&df_type.to_sql_type(), sql_type);
-        }
-
-        // Nested array conversion.
-        for (df_type, sql_type) in cases {
-            for dimen in 1..=5 {
-                let df_type = df_type.clone().nest_in_array(dimen);
-                let sql_type = sql_type.clone().map(|ty| ty.nest_in_array(dimen));
-                assert_eq!(df_type.to_sql_type(), sql_type);
             }
         }
     }

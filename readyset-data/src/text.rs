@@ -398,7 +398,7 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
                 Ok(DfValue::from(&str[..l as usize]))
             }
 
-            DfType::Blob(_) => Ok(DfValue::ByteArray(str.as_bytes().to_vec().into())),
+            DfType::Blob => Ok(DfValue::ByteArray(str.as_bytes().to_vec().into())),
 
             DfType::Binary(l) if l as usize == str.len() => {
                 // Binary is sufficent to store whole string
@@ -514,7 +514,7 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
                 Err(e) => Err(Self::coerce_err(to_ty, e)),
             },
 
-            DfType::Float(_) => str
+            DfType::Float => str
                 .parse::<f32>()
                 .map_err(|e| Self::coerce_err(to_ty, e))?
                 .try_into(),
@@ -729,7 +729,7 @@ mod tests {
         // TEXT to FLOAT
         assert_eq!(
             DfValue::from("50")
-                .coerce_to(&DfType::Float(Dialect::DEFAULT_MYSQL), &DfType::Unknown)
+                .coerce_to(&DfType::Float, &DfType::Unknown)
                 .unwrap(),
             DfValue::Float(50.0),
         );

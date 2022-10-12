@@ -62,12 +62,12 @@ pub(crate) fn convert_column(col: &ColumnSchema) -> ReadySetResult<mysql_srv::Co
         }
         DfType::Bool => MYSQL_TYPE_BIT,
         DfType::DateTime { .. } => MYSQL_TYPE_DATETIME,
-        DfType::Blob(..) => MYSQL_TYPE_BLOB,
+        DfType::Blob => MYSQL_TYPE_BLOB,
         DfType::Char(..) => {
             // TODO(grfn): I'm not sure if this is right
             MYSQL_TYPE_STRING
         }
-        DfType::Float(..) => MYSQL_TYPE_FLOAT,
+        DfType::Float => MYSQL_TYPE_FLOAT,
         DfType::Double => MYSQL_TYPE_DOUBLE,
         DfType::Date => MYSQL_TYPE_DATE,
         DfType::Timestamp { .. } => MYSQL_TYPE_TIMESTAMP,

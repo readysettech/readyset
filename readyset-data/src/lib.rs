@@ -386,14 +386,11 @@ impl DfValue {
     pub fn infer_dataflow_type(&self) -> DfType {
         use DfType::*;
 
-        // TODO(ENG-1853): Remove dialect once `to_sql_type` is removed.
-        let dialect = Dialect::DEFAULT_MYSQL;
-
         match self {
             Self::None | Self::PassThrough(_) | Self::Max => Unknown,
             Self::Int(_) => BigInt,
             Self::UnsignedInt(_) => UnsignedBigInt,
-            Self::Float(_) => Float(dialect),
+            Self::Float(_) => Float,
             Self::Double(_) => Double,
             Self::Text(t) => DfType::Text(t.collation()),
             Self::TinyText(t) => DfType::Text(t.collation()),
@@ -407,9 +404,9 @@ impl DfValue {
             }
             Self::Time(_) => Time {
                 // TODO(ENG-1833): Make this based off of the time value.
-                subsecond_digits: dialect.default_subsecond_digits(),
+                subsecond_digits: 0,
             },
-            Self::ByteArray(_) => Blob(dialect),
+            Self::ByteArray(_) => Blob,
             Self::Numeric(_) => DfType::DEFAULT_NUMERIC,
             Self::BitVector(_) => VarBit(None),
             Self::Array(array) => Array(Box::new(
@@ -3294,12 +3291,7 @@ mod tests {
 
         real_conversion!(float_to_double, f32, f64, DfType::Double);
 
-        real_conversion!(
-            double_to_float,
-            f64,
-            f32,
-            DfType::Float(Dialect::DEFAULT_MYSQL)
-        );
+        real_conversion!(double_to_float, f64, f32, DfType::Float);
 
         #[proptest]
         fn char_equal_length(#[strategy("a{1,30}")] text: String) {

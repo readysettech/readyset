@@ -78,7 +78,7 @@ where
         DfType::BigInt => i64::try_from(val).map_err(|_| err()).map(DfValue::from),
         DfType::UnsignedBigInt => u64::try_from(val).map_err(|_| err()).map(DfValue::from),
 
-        DfType::Float(_) => Ok(DfValue::Float(val.to_f32())),
+        DfType::Float => Ok(DfValue::Float(val.to_f32())),
         DfType::Double => Ok(DfValue::Double(val.to_f64())),
 
         DfType::Text(collation) => Ok(DfValue::from_str_and_collation(&val.to_string(), collation)),
@@ -96,7 +96,7 @@ where
             Ok(val.into())
         }
 
-        DfType::Blob(_) => Ok(val.to_string().into_bytes().into()),
+        DfType::Blob => Ok(val.to_string().into_bytes().into()),
 
         DfType::VarBinary(l) => {
             let mut val = val.to_string();
