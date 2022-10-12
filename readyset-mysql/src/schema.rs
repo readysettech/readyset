@@ -1,7 +1,8 @@
 #![warn(clippy::panic)]
 
-use nom_sql::{self, ColumnConstraint, Relation, SqlType};
+use nom_sql::{self, ColumnConstraint, Relation};
 use readyset::ColumnSchema;
+use readyset_data::DfType;
 use readyset_errors::{unsupported, ReadySetResult};
 
 use crate::constants::DEFAULT_CHARACTER_SET;
@@ -35,100 +36,76 @@ pub(crate) fn convert_column(col: &ColumnSchema) -> ReadySetResult<mysql_srv::Co
     let mut colflags = mysql_srv::ColumnFlags::empty();
     use mysql_srv::ColumnType::*;
 
-    // TODO: Just pattern match on the DfType directly
-    let sql_type = col.column_type.to_sql_type().unwrap_or(
-        // Null (the only place where mysql can get an Unknown type) can be any type, but we pick
-        // TEXT here as a default
-        SqlType::Text,
-    );
-    let coltype = match sql_type {
-        SqlType::MediumText => MYSQL_TYPE_VAR_STRING,
-        SqlType::LongText => MYSQL_TYPE_BLOB,
-        SqlType::Text => MYSQL_TYPE_BLOB,
-        SqlType::VarChar(_) => MYSQL_TYPE_VAR_STRING,
-        SqlType::Int(_) => MYSQL_TYPE_LONG,
-        SqlType::UnsignedInt(_) => {
+    let coltype = match col.column_type {
+        DfType::Unknown => MYSQL_TYPE_UNKNOWN,
+        DfType::Text(_) => MYSQL_TYPE_BLOB,
+        DfType::VarChar(..) => MYSQL_TYPE_VAR_STRING,
+        DfType::Int => MYSQL_TYPE_LONG,
+        DfType::UnsignedInt => {
             colflags |= mysql_srv::ColumnFlags::UNSIGNED_FLAG;
             MYSQL_TYPE_LONG
         }
-        SqlType::BigInt(_) => MYSQL_TYPE_LONGLONG,
-        SqlType::UnsignedBigInt(_) => {
+        DfType::BigInt => MYSQL_TYPE_LONGLONG,
+        DfType::UnsignedBigInt => {
             colflags |= mysql_srv::ColumnFlags::UNSIGNED_FLAG;
             MYSQL_TYPE_LONGLONG
         }
-        SqlType::TinyInt(_) => MYSQL_TYPE_TINY,
-        SqlType::UnsignedTinyInt(_) => {
+        DfType::TinyInt => MYSQL_TYPE_TINY,
+        DfType::UnsignedTinyInt => {
             colflags |= mysql_srv::ColumnFlags::UNSIGNED_FLAG;
             MYSQL_TYPE_TINY
         }
-        SqlType::SmallInt(_) => MYSQL_TYPE_SHORT,
-        SqlType::UnsignedSmallInt(_) => {
+        DfType::SmallInt => MYSQL_TYPE_SHORT,
+        DfType::UnsignedSmallInt => {
             colflags |= mysql_srv::ColumnFlags::UNSIGNED_FLAG;
             MYSQL_TYPE_SHORT
         }
-        SqlType::Bool => MYSQL_TYPE_BIT,
-        SqlType::DateTime(_) => MYSQL_TYPE_DATETIME,
-        SqlType::Float => MYSQL_TYPE_FLOAT,
-        SqlType::Decimal(_, _) => MYSQL_TYPE_NEWDECIMAL,
-        SqlType::Char(_) => {
+        DfType::Bool => MYSQL_TYPE_BIT,
+        DfType::DateTime { .. } => MYSQL_TYPE_DATETIME,
+        DfType::Blob(..) => MYSQL_TYPE_BLOB,
+        DfType::Char(..) => {
             // TODO(grfn): I'm not sure if this is right
             MYSQL_TYPE_STRING
         }
-        SqlType::Blob => MYSQL_TYPE_BLOB,
-        SqlType::LongBlob => MYSQL_TYPE_LONG_BLOB,
-        SqlType::MediumBlob => MYSQL_TYPE_MEDIUM_BLOB,
-        SqlType::TinyBlob => MYSQL_TYPE_TINY_BLOB,
-        SqlType::Double => MYSQL_TYPE_DOUBLE,
-        SqlType::Real => {
-            // a generous reading of
-            // https://dev.mysql.com/doc/refman/8.0/en/floating-point-types.html seems to
-            // indicate that real is equivalent to float
-            // TODO(grfn): Make sure that's the case
-            MYSQL_TYPE_FLOAT
-        }
-        SqlType::TinyText => MYSQL_TYPE_BLOB,
-        SqlType::Date => MYSQL_TYPE_DATE,
-        SqlType::Timestamp => MYSQL_TYPE_TIMESTAMP,
-        SqlType::TimestampTz => {
+        DfType::Float(..) => MYSQL_TYPE_FLOAT,
+        DfType::Double => MYSQL_TYPE_DOUBLE,
+        DfType::Date => MYSQL_TYPE_DATE,
+        DfType::Timestamp { .. } => MYSQL_TYPE_TIMESTAMP,
+        DfType::TimestampTz { .. } => {
             unsupported!("MySQL does not support the timestamp with time zone type")
         }
-        SqlType::Binary(_) => {
+        DfType::Binary(_) => {
             // TODO(grfn): I don't know if this is right
             colflags |= mysql_srv::ColumnFlags::BINARY_FLAG;
             MYSQL_TYPE_STRING
         }
-        SqlType::VarBinary(_) => {
+        DfType::VarBinary(_) => {
             // TODO(grfn): I don't know if this is right
             colflags |= mysql_srv::ColumnFlags::BINARY_FLAG;
             MYSQL_TYPE_VAR_STRING
         }
-        SqlType::Enum(_) => {
+        DfType::Enum(..) => {
             // TODO(grfn): I don't know if this is right
             colflags |= mysql_srv::ColumnFlags::ENUM_FLAG;
             MYSQL_TYPE_VAR_STRING
         }
-        SqlType::Time => MYSQL_TYPE_TIME,
-        SqlType::Json => MYSQL_TYPE_JSON,
-        SqlType::ByteArray => MYSQL_TYPE_BLOB,
-        SqlType::Numeric(_) => MYSQL_TYPE_DECIMAL,
-        SqlType::MacAddr => unsupported!("MySQL does not support the MACADDR type"),
-        SqlType::Inet => unsupported!("MySQL does not support the INET type"),
-        SqlType::Uuid => unsupported!("MySQL does not support the UUID type"),
-        SqlType::Jsonb => unsupported!("MySQL does not support the JSONB type"),
-        SqlType::Bit(size_opt) => {
-            let size = size_opt.unwrap_or(1);
+        DfType::Time { .. } => MYSQL_TYPE_TIME,
+        DfType::Json(..) => MYSQL_TYPE_JSON,
+        DfType::Numeric { .. } => MYSQL_TYPE_DECIMAL,
+        DfType::MacAddr => unsupported!("MySQL does not support the MACADDR type"),
+        DfType::Inet => unsupported!("MySQL does not support the INET type"),
+        DfType::Uuid => unsupported!("MySQL does not support the UUID type"),
+        DfType::Jsonb => unsupported!("MySQL does not support the JSONB type"),
+        DfType::Bit(size) => {
             if size < 64 {
                 MYSQL_TYPE_BIT
             } else {
                 unsupported!("MySQL bit type cannot have a size bigger than 64")
             }
         }
-        SqlType::VarBit(_) => unsupported!("MySQL does not support the bit varying type"),
-        SqlType::Serial => MYSQL_TYPE_LONG,
-        SqlType::BigSerial => MYSQL_TYPE_LONGLONG,
-        SqlType::Citext => unsupported!("MySQL does not support CITEXT"),
-        SqlType::Array(_) => unsupported!("MySQL does not support arrays"),
-        SqlType::PassThrough(_) => unsupported!("MySQL does not support PassThrough types"),
+        DfType::VarBit(_) => unsupported!("MySQL does not support the bit varying type"),
+        DfType::Array(_) => unsupported!("MySQL does not support arrays"),
+        DfType::PassThrough(_) => unsupported!("MySQL does not support PassThrough types"),
     };
 
     for c in col.base.iter().flat_map(|b| &b.constraints) {
@@ -150,17 +127,12 @@ pub(crate) fn convert_column(col: &ColumnSchema) -> ReadySetResult<mysql_srv::Co
     }
 
     // TODO: All columns have a default display length, so `column_length` should not be an option.
-    let column_length = match sql_type {
-        SqlType::Char(l)
-        | SqlType::VarChar(l)
-        | SqlType::Int(l)
-        | SqlType::UnsignedInt(l)
-        | SqlType::BigInt(l)
-        | SqlType::UnsignedBigInt(l)
-        | SqlType::TinyInt(l)
-        | SqlType::UnsignedTinyInt(l)
-        | SqlType::SmallInt(l)
-        | SqlType::UnsignedSmallInt(l) => l.map(|l| l.into()),
+    let column_length = match col.column_type {
+        DfType::Char(l, ..)
+        | DfType::VarChar(l, ..)
+        | DfType::Binary(l)
+        | DfType::VarBinary(l)
+        | DfType::Bit(l) => Some(l.into()),
         _ => None,
     };
 
