@@ -20,10 +20,6 @@ name = "view_checker"
 path = "src/view_checker.rs"
 
 [[bin]]
-name = "query_installer"
-path = "src/query_installer.rs"
-
-[[bin]]
 name = "metrics_dump"
 path = "src/metrics_dump.rs"
 
