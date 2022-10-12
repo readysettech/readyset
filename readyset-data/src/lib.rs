@@ -561,6 +561,18 @@ impl DfValue {
         }
     }
 
+    /// If `self` represents any integer value, returns the integer.
+    ///
+    /// The returned integer is in the range of [`i64::MIN`] through [`u64::MAX`].
+    #[inline]
+    pub fn as_int(&self) -> Option<i128> {
+        match *self {
+            Self::Int(i) => Some(i.into()),
+            Self::UnsignedInt(i) => Some(i.into()),
+            _ => None,
+        }
+    }
+
     /// If `self` represents a string value, returns a reference to that string, otherwise returns
     /// `None`.
     pub fn as_str(&self) -> Option<&str> {
@@ -1376,14 +1388,14 @@ impl TryFrom<&'_ DfValue> for i128 {
     type Error = ReadySetError;
 
     fn try_from(data: &'_ DfValue) -> Result<Self, Self::Error> {
-        match *data {
-            DfValue::Int(s) => Ok(i128::from(s)),
-            DfValue::UnsignedInt(s) => Ok(i128::from(s)),
-            _ => Err(Self::Error::DfValueConversionError {
+        if let Some(i) = data.as_int() {
+            Ok(i)
+        } else {
+            Err(ReadySetError::DfValueConversionError {
                 src_type: "DfValue".to_string(),
                 target_type: "i128".to_string(),
                 details: "".to_string(),
-            }),
+            })
         }
     }
 }
