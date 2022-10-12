@@ -42,6 +42,7 @@ use metrics::{counter, histogram};
 use nom_sql::Relation;
 use readyset::metrics::recorded;
 use readyset::{KeyColumnIdx, ReadySetError, ViewPlaceholder};
+use readyset_data::Dialect;
 use tracing::{debug, debug_span, error, info, info_span, instrument, trace};
 
 use crate::controller::migrate::materialization::InvalidEdge;
@@ -434,11 +435,24 @@ pub struct Migration<'df> {
     pub(super) columns: Vec<(NodeIndex, ColumnChange)>,
     pub(super) readers: HashMap<NodeIndex, NodeIndex>,
     pub(super) worker: Option<WorkerIdentifier>,
+    pub(super) dialect: Dialect,
 
     pub(super) start: Instant,
 }
 
 impl<'df> Migration<'df> {
+    pub(super) fn new(dataflow_state: &'df mut DfState, dialect: Dialect) -> Self {
+        Self {
+            dataflow_state,
+            changes: Default::default(),
+            columns: Default::default(),
+            readers: Default::default(),
+            worker: None,
+            dialect,
+            start: Instant::now(),
+        }
+    }
+
     /// Add the given `Ingredient` to the dataflow graph.
     ///
     /// The returned identifier can later be used to refer to the added ingredient.

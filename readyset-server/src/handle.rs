@@ -4,6 +4,7 @@ use std::sync::Arc;
 use dataflow::prelude::*;
 use readyset::consensus::Authority;
 use readyset::prelude::*;
+use readyset_data::Dialect;
 use reqwest::Url;
 use stream_cancel::Trigger;
 use tokio::sync::mpsc::Sender;
@@ -80,6 +81,8 @@ impl Handle {
         }
     }
 
+    /// Perform a migration to alter the state of the graph in the controller, using the MySQL
+    /// dialect to normalize all queries
     #[doc(hidden)]
     pub async fn migrate<F, T>(&mut self, f: F) -> T
     where
@@ -100,6 +103,9 @@ impl Handle {
             .unwrap()
             .send(HandleRequest::PerformMigration {
                 func: b,
+                // This function is only used in tests at the moment, so we just hardcode the MySQL
+                // dialect
+                dialect: Dialect::DEFAULT_MYSQL,
                 done_tx: fin_tx,
             })
             .await

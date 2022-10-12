@@ -130,6 +130,7 @@ impl SqlIncorporator {
         &self,
         stmt: S,
         search_path: &[SqlIdentifier],
+        dialect: Dialect,
         invalidating_tables: Option<&mut Vec<Relation>>,
     ) -> ReadySetResult<S>
     where
@@ -139,7 +140,7 @@ impl SqlIncorporator {
             view_schemas: &self.view_schemas,
             base_schemas: &self.base_schemas,
             search_path,
-            dialect: Dialect::DEFAULT_MYSQL, // TODO(ENG-1418)
+            dialect,
             invalidating_tables,
         })
     }
@@ -685,6 +686,7 @@ impl SqlIncorporator {
                             query,
                             &[], /* Don't need a schema search path since we're only resolving
                                   * one (already qualified) table */
+                            mig.dialect,
                             None,
                         )?,
                         true,
@@ -906,6 +908,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
                 )
                 .unwrap(),
@@ -928,7 +931,8 @@ mod tests {
                         parse_select_statement(Dialect::MySQL, "SELECT users.id from users;")
                             .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig
@@ -956,7 +960,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig
@@ -973,6 +978,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
                 )
                 .unwrap(),
@@ -1011,7 +1017,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig,
@@ -1028,6 +1035,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
                 )
                 .unwrap(),
@@ -1067,7 +1075,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig,
@@ -1084,6 +1093,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
                 )
                 .unwrap(),
@@ -1131,7 +1141,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig,
@@ -1163,7 +1174,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig,
@@ -1194,6 +1206,7 @@ mod tests {
                 inc.rewrite(
                     parse_select_statement(Dialect::MySQL, q).unwrap(),
                     &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
                 )
                 .unwrap(),
@@ -1232,7 +1245,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig,
@@ -1264,6 +1278,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
                 )
                 .unwrap(),
@@ -1298,7 +1313,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig
@@ -1366,7 +1382,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig,
@@ -1381,6 +1398,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
                 )
                 .unwrap(),
@@ -1399,6 +1417,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
                 )
                 .unwrap(),
@@ -1428,7 +1447,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig,
@@ -1460,6 +1480,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
                 )
                 .unwrap(),
@@ -1477,6 +1498,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
                 )
                 .unwrap(),
@@ -1496,6 +1518,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
                 )
                 .unwrap(),
@@ -1525,7 +1548,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig,
@@ -1557,6 +1581,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
                 )
                 .unwrap(),
@@ -1577,6 +1602,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
                 )
                 .unwrap(),
@@ -1601,6 +1627,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
                 )
                 .unwrap(),
@@ -1634,7 +1661,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig,
@@ -1648,6 +1676,7 @@ mod tests {
                 inc.rewrite(
                     parse_select_statement(Dialect::MySQL, "SELECT id, name FROM users;").unwrap(),
                     &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
                 )
                 .unwrap(),
@@ -1682,6 +1711,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
                 )
                 .unwrap(),
@@ -1717,6 +1747,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
                 )
                 .unwrap(),
@@ -1763,7 +1794,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig,
@@ -1780,6 +1812,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
                 )
                 .unwrap(),
@@ -1809,6 +1842,7 @@ mod tests {
                 inc.rewrite(
                     parse_select_statement(Dialect::MySQL, "SELECT id, name FROM users;").unwrap(),
                     &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
                 )
                 .unwrap(),
@@ -1853,7 +1887,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig,
@@ -1870,6 +1905,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
                 )
                 .unwrap(),
@@ -1904,6 +1940,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
                 )
                 .unwrap(),
@@ -1949,7 +1986,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig
@@ -1980,6 +2018,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
                 )
                 .unwrap(),
@@ -2024,7 +2063,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig
@@ -2055,6 +2095,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
                 )
                 .unwrap(),
@@ -2099,7 +2140,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig
@@ -2131,6 +2173,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
                 )
                 .unwrap(),
@@ -2176,7 +2219,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig,
@@ -2208,6 +2252,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
                 )
                 .unwrap(),
@@ -2253,7 +2298,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig,
@@ -2285,6 +2331,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
                 )
                 .unwrap(),
@@ -2328,7 +2375,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig,
@@ -2358,6 +2406,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
                 )
                 .unwrap(),
@@ -2421,7 +2470,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig,
@@ -2451,6 +2501,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
                 )
                 .unwrap(),
@@ -2483,7 +2534,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig,
@@ -2513,6 +2565,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
                 )
                 .unwrap(),
@@ -2562,7 +2615,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig,
@@ -2636,7 +2690,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig,
@@ -2651,7 +2706,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig
@@ -2666,7 +2722,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig,
@@ -2684,6 +2741,7 @@ mod tests {
                 inc.rewrite(
                     parse_select_statement(Dialect::MySQL, q).unwrap(),
                     &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
                 )
                 .unwrap(),
@@ -2738,7 +2796,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig,
@@ -2753,7 +2812,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig
@@ -2768,7 +2828,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig,
@@ -2786,6 +2847,7 @@ mod tests {
                 inc.rewrite(
                     parse_select_statement(Dialect::MySQL, q).unwrap(),
                     &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
                 )
                 .unwrap(),
@@ -2829,7 +2891,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig,
@@ -2844,7 +2907,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig,
@@ -2858,6 +2922,7 @@ mod tests {
                 inc.rewrite(
                     parse_select_statement(Dialect::MySQL, q).unwrap(),
                     &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
                 )
                 .unwrap(),
@@ -2914,7 +2979,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig
@@ -2932,6 +2998,7 @@ mod tests {
                 inc.rewrite(
                     parse_select_statement(Dialect::MySQL, q).unwrap(),
                     &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
                 )
                 .unwrap(),
@@ -2971,7 +3038,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig,
@@ -2984,6 +3052,7 @@ mod tests {
                     parse_select_statement(Dialect::MySQL, "SELECT users.name, 1 FROM users;")
                         .unwrap(),
                     &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
                 )
                 .unwrap(),
@@ -3016,7 +3085,8 @@ mod tests {
                         parse_create_table(Dialect::MySQL, "CREATE TABLE users (id int, age int);")
                             .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig
@@ -3032,6 +3102,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
                 )
                 .unwrap(),
@@ -3069,7 +3140,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig,
@@ -3085,6 +3157,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
                 )
                 .unwrap(),
@@ -3125,7 +3198,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig,
@@ -3140,7 +3214,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig,
@@ -3157,6 +3232,7 @@ mod tests {
                     inc.rewrite(
                         parse_select_statement(Dialect::MySQL, q).unwrap(),
                         &[],
+                        DataDialect::DEFAULT_MYSQL,
                         None,
                     )
                     .unwrap(),
@@ -3196,7 +3272,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig,
@@ -3211,7 +3288,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig,
@@ -3225,7 +3303,8 @@ mod tests {
                     inc.rewrite(
                         parse_select_statement(Dialect::MySQL, "SELECT * FROM users;").unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig
@@ -3243,6 +3322,7 @@ mod tests {
                 inc.rewrite(
                     parse_select_statement(Dialect::MySQL, q).unwrap(),
                     &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
                 )
                 .unwrap(),
@@ -3282,7 +3362,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig,
@@ -3335,7 +3416,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig,
@@ -3367,6 +3449,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
                 )
                 .unwrap(),
@@ -3385,6 +3468,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
                 )
                 .unwrap(),
@@ -3411,6 +3495,7 @@ mod tests {
                     parse_create_table(Dialect::MySQL, "CREATE TABLE things (id int primary key);")
                         .unwrap(),
                     &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
                 )
                 .unwrap(),
@@ -3429,6 +3514,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
                 )
                 .unwrap(),
@@ -3458,7 +3544,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig,
@@ -3474,6 +3561,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
                 )
                 .unwrap(),
@@ -3492,6 +3580,7 @@ mod tests {
                     )
                     .unwrap(),
                     &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
                 )
                 .unwrap(),
@@ -3506,6 +3595,7 @@ mod tests {
                 inc.rewrite(
                     parse_select_statement(Dialect::MySQL, "SELECT tq2.id FROM tq2;").unwrap(),
                     &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
                 )
                 .unwrap(),
@@ -3537,7 +3627,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig
@@ -3551,6 +3642,7 @@ mod tests {
                         parse_select_statement(Dialect::MySQL, "SELECT t1.a from t1 LIMIT 3")
                             .unwrap(),
                         &[],
+                        DataDialect::DEFAULT_MYSQL,
                         None,
                     )
                     .unwrap(),
@@ -3596,7 +3688,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig
@@ -3613,6 +3706,7 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
+                        DataDialect::DEFAULT_MYSQL,
                         None,
                     )
                     .unwrap(),
@@ -3657,7 +3751,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig,
@@ -3674,6 +3769,7 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
+                        DataDialect::DEFAULT_MYSQL,
                         None,
                     )
                     .unwrap(),
@@ -3731,7 +3827,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig
@@ -3746,7 +3843,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig
@@ -3763,6 +3861,7 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
+                        DataDialect::DEFAULT_MYSQL,
                         None,
                     )
                     .unwrap(),
@@ -3813,7 +3912,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig
@@ -3828,7 +3928,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig
@@ -3845,6 +3946,7 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
+                        DataDialect::DEFAULT_MYSQL,
                         None,
                     )
                     .unwrap(),
@@ -3886,7 +3988,8 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
-                        None
+                        DataDialect::DEFAULT_MYSQL,
+                        None,
                     )
                     .unwrap(),
                     mig
@@ -3903,6 +4006,7 @@ mod tests {
                         )
                         .unwrap(),
                         &[],
+                        DataDialect::DEFAULT_MYSQL,
                         None,
                     )
                     .unwrap(),

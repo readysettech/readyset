@@ -13,12 +13,12 @@
 //! to manipulate it in a thread-safe way.
 
 use std::borrow::Cow;
+use std::cell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::net::SocketAddr;
 use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Instant;
-use std::{cell, time};
 
 use array2::Array2;
 use common::IndexPair;
@@ -280,11 +280,11 @@ impl DfState {
     pub(super) fn view_statuses(
         &self,
         queries: Vec<ViewCreateRequest>,
-        _dialect: Dialect,
+        dialect: Dialect,
     ) -> Vec<bool> {
         queries
             .into_iter()
-            .map(|query| self.recipe.contains(query).unwrap_or(false))
+            .map(|query| self.recipe.contains(query, dialect).unwrap_or(false))
             .collect()
     }
 
@@ -819,20 +819,18 @@ impl DfState {
 
     /// Perform a new query schema migration.
     #[instrument(level = "info", name = "migrate", skip(self, f))]
-    pub(crate) async fn migrate<F, T>(&mut self, dry_run: bool, f: F) -> Result<T, ReadySetError>
+    pub(crate) async fn migrate<F, T>(
+        &mut self,
+        dry_run: bool,
+        dialect: Dialect,
+        f: F,
+    ) -> Result<T, ReadySetError>
     where
         F: FnOnce(&mut Migration<'_>) -> T,
     {
         info!("starting migration");
         gauge!(recorded::CONTROLLER_MIGRATION_IN_PROGRESS, 1.0);
-        let mut m = Migration {
-            dataflow_state: self,
-            changes: Default::default(),
-            columns: Default::default(),
-            readers: Default::default(),
-            worker: None,
-            start: time::Instant::now(),
-        };
+        let mut m = Migration::new(self, dialect);
         let r = f(&mut m);
         m.commit(dry_run).await?;
         info!("finished migration");
@@ -1133,7 +1131,9 @@ impl DfState {
         let mut new = self.recipe.clone();
 
         let r = self
-            .migrate(dry_run, |mig| new.activate(mig, changelist))
+            .migrate(dry_run, changelist.dialect, |mig| {
+                new.activate(mig, changelist)
+            })
             .await?;
 
         match r {

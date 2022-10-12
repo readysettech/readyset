@@ -6,6 +6,7 @@ use petgraph::graph::NodeIndex;
 use petgraph::visit::Bfs;
 use readyset::recipe::changelist::{Change, ChangeList};
 use readyset::ViewCreateRequest;
+use readyset_data::Dialect;
 use readyset_errors::{
     internal, internal_err, invariant, invariant_eq, ReadySetError, ReadySetResult,
 };
@@ -178,13 +179,13 @@ impl Recipe {
         let ChangeList {
             changes,
             schema_search_path,
-            ..
+            dialect,
         } = changelist;
 
         for change in changes {
             match change {
                 Change::CreateTable(mut cts) => {
-                    cts = self.inc.rewrite(cts, &schema_search_path, None)?;
+                    cts = self.inc.rewrite(cts, &schema_search_path, dialect, None)?;
                     match self.registry.get(&cts.table) {
                         Some(RecipeExpr::Table(current_cts)) => {
                             // Table already exists, so check if it has been changed.
@@ -232,6 +233,7 @@ impl Recipe {
                     stmt = self.inc.rewrite(
                         stmt,
                         &schema_search_path,
+                        dialect,
                         None, /* Views in SQL resolve tables at creation time, so we don't
                                * want to invalidate them if tables get created like we do
                                * for queries */
@@ -253,6 +255,7 @@ impl Recipe {
                             let stmt = self.inc.rewrite(
                                 stmt.clone(),
                                 &schema_search_path,
+                                dialect,
                                 Some(&mut invalidating_tables),
                             )?;
                             (stmt, invalidating_tables)
@@ -569,14 +572,18 @@ impl Recipe {
         }
     }
 
-    /// Returns `true` if, after rewriting, `self` contains a query that is semantically equivalent
-    /// to the given `query`.
+    /// Returns `true` if, after rewriting according to `dialect`, `self` contains a query that is
+    /// semantically equivalent to the given `query`.
     ///
     /// Returns an error if rewriting fails for any reason
-    pub(crate) fn contains(&self, query: ViewCreateRequest) -> ReadySetResult<bool> {
-        let statement = self
-            .inc
-            .rewrite(query.statement, &query.schema_search_path, None)?;
+    pub(crate) fn contains(
+        &self,
+        query: ViewCreateRequest,
+        dialect: Dialect,
+    ) -> ReadySetResult<bool> {
+        let statement =
+            self.inc
+                .rewrite(query.statement, &query.schema_search_path, dialect, None)?;
         Ok(self.registry.contains(&statement))
     }
 }

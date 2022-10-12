@@ -23,6 +23,7 @@ use readyset::consensus::{
 use readyset::failpoints;
 use readyset::metrics::recorded;
 use readyset::ControllerDescriptor;
+use readyset_data::Dialect;
 use readyset_errors::{internal, internal_err, ReadySetError};
 use readyset_telemetry_reporter::TelemetrySender;
 use serde::de::DeserializeOwned;
@@ -220,6 +221,8 @@ pub enum HandleRequest {
                 + Send
                 + 'static,
         >,
+        /// The SQL dialect to use for all migrated queries and types
+        dialect: Dialect,
         /// The result of the migration gets sent down here.
         done_tx: tokio::sync::oneshot::Sender<ReadySetResult<()>>,
     },
@@ -370,12 +373,16 @@ impl Controller {
                     warn!("readiness query sender hung up!");
                 }
             }
-            HandleRequest::PerformMigration { func, done_tx } => {
+            HandleRequest::PerformMigration {
+                func,
+                dialect,
+                done_tx,
+            } => {
                 let mut guard = self.inner.write().await;
                 if let Some(ref mut inner) = *guard {
                     let mut writer = inner.dataflow_state_handle.write().await;
                     let ds = writer.as_mut();
-                    let ret = ds.migrate(false, move |m| func(m)).await?;
+                    let ret = ds.migrate(false, dialect, move |m| func(m)).await?;
                     inner
                         .dataflow_state_handle
                         .commit(writer, &self.authority)

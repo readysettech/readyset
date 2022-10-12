@@ -391,9 +391,6 @@ fn adapt_base_node(
     add: &[ColumnSpecification],
     remove: &[ColumnSpecification],
 ) -> ReadySetResult<FlowNode> {
-    // TODO(ENG-1418): Propagate dialect info.
-    let dialect = Dialect::DEFAULT_MYSQL;
-
     let na = match over_node.borrow().flow_node {
         None => internal!("adapted base node must have a flow node already!"),
         Some(ref flow_node) => flow_node.address(),
@@ -407,8 +404,11 @@ fn adapt_base_node(
                 break;
             }
         }
-        let column_id =
-            mig.add_column(na, DfColumn::from_spec(a.clone(), dialect), default_value)?;
+        let column_id = mig.add_column(
+            na,
+            DfColumn::from_spec(a.clone(), mig.dialect),
+            default_value,
+        )?;
 
         // store the new column ID in the column specs for this node
         for &mut (ref cs, ref mut cid) in column_specs.iter_mut() {
@@ -453,9 +453,6 @@ fn make_base_node(
     unique_keys: &[Box<[Column]>],
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<FlowNode> {
-    // TODO(ENG-1418): Propagate dialect info.
-    let dialect = Dialect::DEFAULT_MYSQL;
-
     // remember the absolute base column ID for potential later removal
     for (i, cs) in column_specs.iter_mut().enumerate() {
         cs.1 = Some(i);
@@ -463,7 +460,7 @@ fn make_base_node(
 
     let columns: Vec<DfColumn> = column_specs
         .iter()
-        .map(|&(ref cs, _)| DfColumn::from_spec(cs.clone(), dialect))
+        .map(|&(ref cs, _)| DfColumn::from_spec(cs.clone(), mig.dialect))
         .collect();
 
     // note that this defaults to a "None" (= NULL) default value for columns that do not have one
@@ -580,7 +577,7 @@ fn make_filter_node(
     let parent_na = parent.borrow().flow_node_addr()?;
     #[allow(clippy::indexing_slicing)] // just got the address
     let mut parent_cols = mig.dataflow_state.ingredients[parent_na].columns().to_vec();
-    let filter_conditions = lower_expression(&parent, conditions, &parent_cols)?;
+    let filter_conditions = lower_expression(&parent, conditions, &parent_cols, mig.dialect)?;
 
     set_names(&column_names(columns), &mut parent_cols)?;
 
@@ -918,10 +915,8 @@ fn lower_expression(
     parent: &MirNodeRef,
     expr: Expr,
     parent_cols: &[DfColumn],
+    dialect: Dialect,
 ) -> ReadySetResult<DfExpr> {
-    // TODO(ENG-1418): Propagate dialect info.
-    let dialect = Dialect::DEFAULT_MYSQL;
-
     DfExpr::lower(expr, dialect, |nom_sql::Column { name, table, .. }| {
         let index = parent
             .borrow()
@@ -979,7 +974,7 @@ fn make_project_node(
 
     let projected_expressions: Vec<DfExpr> = expressions
         .iter()
-        .map(|(_, e)| lower_expression(&parent, e.clone(), parent_cols))
+        .map(|(_, e)| lower_expression(&parent, e.clone(), parent_cols, mig.dialect))
         .collect::<Result<Vec<_>, _>>()?;
 
     let col_names = source_columns
