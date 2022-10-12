@@ -5,7 +5,7 @@ use std::str::FromStr;
 
 use async_trait::async_trait;
 use futures::TryStreamExt;
-use nom_sql::{SqlIdentifier, SqlType};
+use nom_sql::SqlIdentifier;
 use pgsql::config::Host;
 use pgsql::types::Type;
 use pgsql::{GenericResult, Row};
@@ -65,8 +65,7 @@ fn schema_column_match(schema: &[ColumnSchema], columns: &[Type]) -> Result<(), 
 
     if cfg!(feature = "schema-check") {
         for (sch, col) in schema.iter().zip(columns.iter()) {
-            let noria_type =
-                type_to_pgsql(&sch.column_type.to_sql_type().unwrap_or(SqlType::Text))?;
+            let noria_type = type_to_pgsql(&sch.column_type)?;
             if &noria_type != col {
                 return Err(Error::ReadySet(ReadySetError::WrongColumnType(
                     col.to_string(),

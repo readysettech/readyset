@@ -2,7 +2,6 @@ use std::convert::TryFrom;
 use std::iter;
 use std::sync::Arc;
 
-use nom_sql::SqlType;
 use psql_srv as ps;
 use readyset::results::{ResultIterator, Results};
 use readyset_data::DfValue;
@@ -58,13 +57,7 @@ impl Resultset {
                 .0
                 .schema
                 .iter()
-                .map(|c| {
-                    // TODO: make `type_to_pgsql` just take a DfType
-                    type_to_pgsql(&c.column_type.to_sql_type().unwrap_or(
-                        // The default postgres type for UNKNOWN is Text
-                        SqlType::Text,
-                    ))
-                })
+                .map(|c| type_to_pgsql(&c.column_type))
                 .collect::<Result<Vec<_>, _>>()?,
         );
         Ok(Resultset {

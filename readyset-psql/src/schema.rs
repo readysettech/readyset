@@ -1,7 +1,7 @@
 use std::convert::TryFrom;
 
-use nom_sql::SqlType;
 use readyset_client::backend as cl;
+use readyset_data::{Collation, DfType};
 use readyset_errors::unsupported;
 use {psql_srv as ps, tokio_postgres as pgsql};
 
@@ -19,10 +19,7 @@ impl<'a> TryFrom<SelectSchema<'a>> for Vec<ps::Column> {
             .map(|c| {
                 Ok(ps::Column {
                     name: c.column.name.to_string(),
-                    col_type: type_to_pgsql(
-                        // TODO: Just make type_to_pgsql take a DfType
-                        &c.column_type.to_sql_type().unwrap_or(SqlType::Text),
-                    )?,
+                    col_type: type_to_pgsql(&c.column_type)?,
                 })
             })
             .collect()
@@ -38,12 +35,7 @@ impl<'a> TryFrom<NoriaSchema<'a>> for Vec<pgsql::types::Type> {
         value
             .0
             .iter()
-            .map(|c| {
-                type_to_pgsql(
-                    // TODO: Just make type_to_pgsql take a DfType
-                    &c.column_type.to_sql_type().unwrap_or(SqlType::Text),
-                )
-            })
+            .map(|c| type_to_pgsql(&c.column_type))
             .collect()
     }
 }
@@ -56,17 +48,14 @@ impl<'a> TryFrom<NoriaSchema<'a>> for Vec<ps::Column> {
             .map(|c| {
                 Ok(ps::Column {
                     name: c.column.name.to_string(),
-                    col_type: type_to_pgsql(
-                        // TODO: Just make type_to_pgsql take a DfType
-                        &c.column_type.to_sql_type().unwrap_or(SqlType::Text),
-                    )?,
+                    col_type: type_to_pgsql(&c.column_type)?,
                 })
             })
             .collect()
     }
 }
 
-pub fn type_to_pgsql(col_type: &SqlType) -> Result<pgsql::types::Type, Error> {
+pub fn type_to_pgsql(col_type: &DfType) -> Result<pgsql::types::Type, Error> {
     use pgsql::types::Type;
 
     macro_rules! unsupported_type {
@@ -76,95 +65,88 @@ pub fn type_to_pgsql(col_type: &SqlType) -> Result<pgsql::types::Type, Error> {
     }
 
     match *col_type {
-        SqlType::Bool => Ok(Type::BOOL),
-        SqlType::Char(_) => Ok(Type::CHAR),
-        SqlType::VarChar(_) => Ok(Type::VARCHAR),
-        SqlType::Int(_) => Ok(Type::INT4),
-        SqlType::BigInt(_) => Ok(Type::INT8),
-        SqlType::SmallInt(_) => Ok(Type::INT2),
-        SqlType::Real => Ok(Type::FLOAT4),
-        SqlType::Float => Ok(Type::FLOAT8),
-        SqlType::Double => Ok(Type::FLOAT8),
-        SqlType::Text => Ok(Type::TEXT),
-        SqlType::Citext => Ok(Type::TEXT), // TODO: is this right?
-        SqlType::Timestamp => Ok(Type::TIMESTAMP),
-        SqlType::TimestampTz => Ok(Type::TIMESTAMPTZ),
-        SqlType::Json => Ok(Type::JSON),
-        SqlType::Jsonb => Ok(Type::JSONB),
-        SqlType::Date => Ok(Type::DATE),
-        SqlType::Time => Ok(Type::TIME),
-        SqlType::UnsignedInt(_) => unsupported_type!(),
-        SqlType::UnsignedBigInt(_) => unsupported_type!(),
-        SqlType::TinyInt(_) => Ok(Type::CHAR),
-        SqlType::UnsignedTinyInt(_) => unsupported_type!(),
-        SqlType::UnsignedSmallInt(_) => unsupported_type!(),
-        // Temporary workaround until we use `DfType` here and propagate dialect info (ENG-1418).
-        SqlType::Blob => Ok(Type::BYTEA),
-        SqlType::LongBlob => unsupported_type!(),
-        SqlType::MediumBlob => unsupported_type!(),
-        SqlType::TinyBlob => unsupported_type!(),
-        SqlType::TinyText => unsupported_type!(),
-        SqlType::MediumText => unsupported_type!(),
-        SqlType::LongText => unsupported_type!(),
-        SqlType::DateTime(_) => unsupported_type!(),
-        SqlType::Binary(_) => unsupported_type!(),
-        SqlType::VarBinary(_) => unsupported_type!(),
-        SqlType::Enum(_) => unsupported_type!(),
-        SqlType::Decimal(_, _) => Ok(Type::NUMERIC),
-        SqlType::ByteArray => Ok(Type::BYTEA),
-        SqlType::Numeric(_) => Ok(Type::NUMERIC),
-        SqlType::MacAddr => Ok(Type::MACADDR),
-        SqlType::Inet => Ok(Type::INET),
-        SqlType::Uuid => Ok(Type::UUID),
-        SqlType::Bit(_) => Ok(Type::BIT),
-        SqlType::VarBit(_) => Ok(Type::VARBIT),
-        SqlType::Serial => Ok(Type::INT4),
-        SqlType::BigSerial => Ok(Type::INT8),
-        SqlType::Array(box SqlType::Bool) => Ok(Type::BOOL_ARRAY),
-        SqlType::Array(box SqlType::Char(_)) => Ok(Type::CHAR_ARRAY),
-        SqlType::Array(box SqlType::VarChar(_)) => Ok(Type::VARCHAR_ARRAY),
-        SqlType::Array(box SqlType::Int(_)) => Ok(Type::INT4_ARRAY),
-        SqlType::Array(box SqlType::BigInt(_)) => Ok(Type::INT8_ARRAY),
-        SqlType::Array(box SqlType::SmallInt(_)) => Ok(Type::INT2_ARRAY),
-        SqlType::Array(box SqlType::Real) => Ok(Type::FLOAT4_ARRAY),
-        SqlType::Array(box SqlType::Double) => Ok(Type::FLOAT8_ARRAY),
-        SqlType::Array(box SqlType::Text) => Ok(Type::TEXT_ARRAY),
-        SqlType::Array(box SqlType::Citext) => Ok(Type::TEXT_ARRAY),
-        SqlType::Array(box SqlType::Timestamp) => Ok(Type::TIMESTAMP_ARRAY),
-        SqlType::Array(box SqlType::TimestampTz) => Ok(Type::TIMESTAMPTZ_ARRAY),
-        SqlType::Array(box SqlType::Json) => Ok(Type::JSON_ARRAY),
-        SqlType::Array(box SqlType::Jsonb) => Ok(Type::JSONB_ARRAY),
-        SqlType::Array(box SqlType::Date) => Ok(Type::DATE_ARRAY),
-        SqlType::Array(box SqlType::Time) => Ok(Type::TIME_ARRAY),
-        SqlType::Array(box SqlType::UnsignedInt(_)) => unsupported_type!(),
-        SqlType::Array(box SqlType::UnsignedBigInt(_)) => unsupported_type!(),
-        SqlType::Array(box SqlType::TinyInt(_)) => Ok(Type::CHAR),
-        SqlType::Array(box SqlType::UnsignedTinyInt(_)) => unsupported_type!(),
-        SqlType::Array(box SqlType::UnsignedSmallInt(_)) => unsupported_type!(),
-        SqlType::Array(box SqlType::Blob) => unsupported_type!(),
-        SqlType::Array(box SqlType::LongBlob) => unsupported_type!(),
-        SqlType::Array(box SqlType::MediumBlob) => unsupported_type!(),
-        SqlType::Array(box SqlType::TinyBlob) => unsupported_type!(),
-        SqlType::Array(box SqlType::Float) => unsupported_type!(),
-        SqlType::Array(box SqlType::TinyText) => unsupported_type!(),
-        SqlType::Array(box SqlType::MediumText) => unsupported_type!(),
-        SqlType::Array(box SqlType::LongText) => unsupported_type!(),
-        SqlType::Array(box SqlType::DateTime(_)) => unsupported_type!(),
-        SqlType::Array(box SqlType::Binary(_)) => unsupported_type!(),
-        SqlType::Array(box SqlType::VarBinary(_)) => unsupported_type!(),
-        SqlType::Array(box SqlType::Enum(_)) => unsupported_type!(),
-        SqlType::Array(box SqlType::Decimal(_, _)) => Ok(Type::NUMERIC_ARRAY),
-        SqlType::Array(box SqlType::ByteArray) => Ok(Type::BYTEA_ARRAY),
-        SqlType::Array(box SqlType::Numeric(_)) => Ok(Type::NUMERIC_ARRAY),
-        SqlType::Array(box SqlType::MacAddr) => Ok(Type::MACADDR_ARRAY),
-        SqlType::Array(box SqlType::Inet) => Ok(Type::INET_ARRAY),
-        SqlType::Array(box SqlType::Uuid) => Ok(Type::UUID_ARRAY),
-        SqlType::Array(box SqlType::Bit(_)) => Ok(Type::BIT_ARRAY),
-        SqlType::Array(box SqlType::VarBit(_)) => Ok(Type::VARBIT_ARRAY),
-        SqlType::Array(box SqlType::Serial) => Ok(Type::INT4_ARRAY),
-        SqlType::Array(box SqlType::BigSerial) => Ok(Type::INT8_ARRAY),
-        SqlType::Array(box SqlType::Array(_)) => unsupported_type!(),
-        SqlType::Array(box SqlType::PassThrough(_)) => unsupported_type!(),
-        SqlType::PassThrough(_) => unsupported_type!(),
+        DfType::Unknown => Ok(Type::TEXT), // The default type for "unknown" in pgsql is TEXT
+        DfType::Bool => Ok(Type::BOOL),
+        DfType::Char(..) => Ok(Type::CHAR),
+        DfType::VarChar(_, Collation::Utf8) => Ok(Type::VARCHAR),
+        DfType::VarChar(_, Collation::Citext) => {
+            // TODO: use the right CITEXT type
+            Ok(Type::VARCHAR)
+        }
+        DfType::Int => Ok(Type::INT4),
+        DfType::BigInt => Ok(Type::INT8),
+        DfType::SmallInt => Ok(Type::INT2),
+        DfType::Float(..) => Ok(Type::FLOAT4),
+        DfType::Double => Ok(Type::FLOAT8),
+        DfType::Text(Collation::Utf8) => Ok(Type::TEXT),
+        DfType::Text(Collation::Citext) => Ok(Type::TEXT), // TODO: use the right CITEXT type
+        DfType::Timestamp { .. } => Ok(Type::TIMESTAMP),
+        DfType::TimestampTz { .. } => Ok(Type::TIMESTAMPTZ),
+        DfType::Json(..) => Ok(Type::JSON),
+        DfType::Jsonb => Ok(Type::JSONB),
+        DfType::Date => Ok(Type::DATE),
+        DfType::Time { .. } => Ok(Type::TIME),
+        DfType::UnsignedInt => unsupported_type!(),
+        DfType::UnsignedBigInt => unsupported_type!(),
+        DfType::TinyInt => Ok(Type::CHAR),
+        DfType::UnsignedTinyInt => unsupported_type!(),
+        DfType::UnsignedSmallInt => unsupported_type!(),
+        DfType::Blob(..) => Ok(Type::BYTEA),
+        DfType::DateTime { .. } => unsupported_type!(),
+        DfType::Binary(_) => unsupported_type!(),
+        DfType::VarBinary(_) => unsupported_type!(),
+        DfType::Enum(..) => unsupported_type!(),
+        DfType::Numeric { .. } => Ok(Type::NUMERIC),
+        DfType::MacAddr => Ok(Type::MACADDR),
+        DfType::Inet => Ok(Type::INET),
+        DfType::Uuid => Ok(Type::UUID),
+        DfType::Bit(_) => Ok(Type::BIT),
+        DfType::VarBit(_) => Ok(Type::VARBIT),
+        DfType::Array(box DfType::Unknown) => {
+            // The default type for "unknown" in pgsql is TEXT
+            Ok(Type::TEXT)
+        }
+        DfType::Array(box DfType::Bool) => Ok(Type::BOOL_ARRAY),
+        DfType::Array(box DfType::Char(..)) => Ok(Type::CHAR_ARRAY),
+        DfType::Array(box DfType::VarChar(_, Collation::Utf8)) => Ok(Type::VARCHAR_ARRAY),
+        DfType::Array(box DfType::VarChar(_, Collation::Citext)) => {
+            // TODO: use the right CITEXT type
+            Ok(Type::VARCHAR_ARRAY)
+        }
+        DfType::Array(box DfType::Int) => Ok(Type::INT4_ARRAY),
+        DfType::Array(box DfType::BigInt) => Ok(Type::INT8_ARRAY),
+        DfType::Array(box DfType::SmallInt) => Ok(Type::INT2_ARRAY),
+        DfType::Array(box DfType::Float(..)) => Ok(Type::FLOAT4_ARRAY),
+        DfType::Array(box DfType::Double) => Ok(Type::FLOAT8_ARRAY),
+        DfType::Array(box DfType::Text(Collation::Utf8)) => Ok(Type::TEXT_ARRAY),
+        DfType::Array(box DfType::Text(Collation::Citext)) => {
+            // TODO: use the right CITEXT_ARRAY type
+            Ok(Type::TEXT_ARRAY)
+        }
+        DfType::Array(box DfType::Timestamp { .. }) => Ok(Type::TIMESTAMP_ARRAY),
+        DfType::Array(box DfType::TimestampTz { .. }) => Ok(Type::TIMESTAMPTZ_ARRAY),
+        DfType::Array(box DfType::Json(..)) => Ok(Type::JSON_ARRAY),
+        DfType::Array(box DfType::Jsonb) => Ok(Type::JSONB_ARRAY),
+        DfType::Array(box DfType::Date) => Ok(Type::DATE_ARRAY),
+        DfType::Array(box DfType::Time { .. }) => Ok(Type::TIME_ARRAY),
+        DfType::Array(box DfType::UnsignedInt) => unsupported_type!(),
+        DfType::Array(box DfType::UnsignedBigInt) => unsupported_type!(),
+        DfType::Array(box DfType::TinyInt) => Ok(Type::CHAR),
+        DfType::Array(box DfType::UnsignedTinyInt) => unsupported_type!(),
+        DfType::Array(box DfType::UnsignedSmallInt) => unsupported_type!(),
+        DfType::Array(box DfType::Blob(..)) => unsupported_type!(),
+        DfType::Array(box DfType::DateTime { .. }) => unsupported_type!(),
+        DfType::Array(box DfType::Binary(_)) => unsupported_type!(),
+        DfType::Array(box DfType::VarBinary(_)) => unsupported_type!(),
+        DfType::Array(box DfType::Enum(..)) => unsupported_type!(),
+        DfType::Array(box DfType::Numeric { .. }) => Ok(Type::NUMERIC_ARRAY),
+        DfType::Array(box DfType::MacAddr) => Ok(Type::MACADDR_ARRAY),
+        DfType::Array(box DfType::Inet) => Ok(Type::INET_ARRAY),
+        DfType::Array(box DfType::Uuid) => Ok(Type::UUID_ARRAY),
+        DfType::Array(box DfType::Bit(_)) => Ok(Type::BIT_ARRAY),
+        DfType::Array(box DfType::VarBit(_)) => Ok(Type::VARBIT_ARRAY),
+        DfType::Array(box DfType::Array(_)) => unsupported_type!(),
+        DfType::Array(box DfType::PassThrough(_)) => unsupported_type!(),
+        DfType::PassThrough(_) => unsupported_type!(),
     }
 }
