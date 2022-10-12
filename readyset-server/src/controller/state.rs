@@ -277,7 +277,11 @@ impl DfState {
             .collect()
     }
 
-    pub(super) fn view_statuses(&self, queries: Vec<ViewCreateRequest>) -> Vec<bool> {
+    pub(super) fn view_statuses(
+        &self,
+        queries: Vec<ViewCreateRequest>,
+        _dialect: Dialect,
+    ) -> Vec<bool> {
         queries
             .into_iter()
             .map(|query| self.recipe.contains(query).unwrap_or(false))

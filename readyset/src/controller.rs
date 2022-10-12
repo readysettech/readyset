@@ -354,8 +354,9 @@ impl ReadySetHandle {
     pub async fn view_statuses(
         &mut self,
         queries: Vec<ViewCreateRequest>,
+        dialect: dataflow_expression::Dialect,
     ) -> ReadySetResult<Vec<bool>> {
-        self.rpc("view_statuses", queries, self.request_timeout)
+        self.rpc("view_statuses", (queries, dialect), self.request_timeout)
             .await
     }
 

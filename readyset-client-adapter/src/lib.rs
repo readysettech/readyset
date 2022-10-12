@@ -699,11 +699,13 @@ where
             let rh = rh.clone();
             let loop_interval = options.views_polling_interval;
             let shutdown_recv = shutdown_sender.subscribe();
+            let expr_dialect = self.expr_dialect;
             let fut = async move {
                 let mut views_synchronizer = ViewsSynchronizer::new(
                     rh,
                     query_status_cache,
                     std::time::Duration::from_secs(loop_interval),
+                    expr_dialect,
                     shutdown_recv,
                 );
                 views_synchronizer.run().await

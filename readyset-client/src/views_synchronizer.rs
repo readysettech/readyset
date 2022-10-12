@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use dataflow_expression::Dialect;
 use readyset::query::MigrationState;
 use readyset::ReadySetHandle;
 use tokio::select;
@@ -14,6 +15,8 @@ pub struct ViewsSynchronizer {
     query_status_cache: &'static QueryStatusCache,
     /// The interval between subsequent pollings of the Leader for migrated queries
     poll_interval: std::time::Duration,
+    /// Dialect to pass to ReadySet to control the expression semantics used for all queries
+    dialect: Dialect,
     /// Receiver to return the shutdown signal on
     shutdown_recv: tokio::sync::broadcast::Receiver<()>,
 }
@@ -23,12 +26,14 @@ impl ViewsSynchronizer {
         controller: ReadySetHandle,
         query_status_cache: &'static QueryStatusCache,
         poll_interval: std::time::Duration,
+        dialect: Dialect,
         shutdown_recv: tokio::sync::broadcast::Receiver<()>,
     ) -> Self {
         ViewsSynchronizer {
             controller,
             query_status_cache,
             poll_interval,
+            dialect,
             shutdown_recv,
         }
     }
@@ -58,7 +63,11 @@ impl ViewsSynchronizer {
             .filter_map(|(q, _)| q.into_parsed().map(Arc::unwrap_or_clone))
             .collect::<Vec<_>>();
 
-        match self.controller.view_statuses(queries.clone()).await {
+        match self
+            .controller
+            .view_statuses(queries.clone(), self.dialect)
+            .await
+        {
             Ok(statuses) => {
                 for (query, migrated) in queries.into_iter().zip(statuses) {
                     trace!(

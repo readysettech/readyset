@@ -272,10 +272,10 @@ impl Leader {
                     return_serialized!(ds.verbose_views())
                 }
                 (&Method::POST, "/view_statuses") => {
-                    let body = bincode::deserialize(&body)?;
+                    let (queries, dialect) = bincode::deserialize(&body)?;
                     let ds = futures::executor::block_on(self.dataflow_state_handle.read());
                     check_quorum!(ds);
-                    return_serialized!(ds.view_statuses(body))
+                    return_serialized!(ds.view_statuses(queries, dialect))
                 }
                 (&Method::GET | &Method::POST, "/instances") => {
                     let ds = futures::executor::block_on(self.dataflow_state_handle.read());

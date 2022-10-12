@@ -1229,10 +1229,13 @@ mod tests {
         let schema_search_path = vec!["s1".into()];
 
         let res1 = noria
-            .view_statuses(vec![
-                ViewCreateRequest::new(query1.clone(), schema_search_path.clone()),
-                ViewCreateRequest::new(query2.clone(), schema_search_path.clone()),
-            ])
+            .view_statuses(
+                vec![
+                    ViewCreateRequest::new(query1.clone(), schema_search_path.clone()),
+                    ViewCreateRequest::new(query2.clone(), schema_search_path.clone()),
+                ],
+                DataDialect::DEFAULT_MYSQL,
+            )
             .await
             .unwrap();
         assert_eq!(res1, vec![false, false]);
@@ -1250,10 +1253,13 @@ mod tests {
             .unwrap();
 
         let res2 = noria
-            .view_statuses(vec![
-                ViewCreateRequest::new(query1.clone(), schema_search_path.clone()),
-                ViewCreateRequest::new(query2.clone(), schema_search_path.clone()),
-            ])
+            .view_statuses(
+                vec![
+                    ViewCreateRequest::new(query1.clone(), schema_search_path.clone()),
+                    ViewCreateRequest::new(query2.clone(), schema_search_path.clone()),
+                ],
+                DataDialect::DEFAULT_MYSQL,
+            )
             .await
             .unwrap();
         assert_eq!(res2, vec![true, false]);
@@ -1261,10 +1267,13 @@ mod tests {
         // A syntactically distinct, but semantically equivalent query
         let query1_equivalent = parse_select_statement(Dialect::MySQL, "SELECT x FROM t1").unwrap();
         let res3 = noria
-            .view_statuses(vec![ViewCreateRequest::new(
-                query1_equivalent,
-                schema_search_path.clone(),
-            )])
+            .view_statuses(
+                vec![ViewCreateRequest::new(
+                    query1_equivalent,
+                    schema_search_path.clone(),
+                )],
+                DataDialect::DEFAULT_MYSQL,
+            )
             .await
             .unwrap();
         assert_eq!(res3, vec![true]);
@@ -1272,10 +1281,13 @@ mod tests {
         // A change in schema_search_path that doesn't change the semantics
         let query1_equivalent = parse_select_statement(Dialect::MySQL, "SELECT x FROM t1").unwrap();
         let res3 = noria
-            .view_statuses(vec![ViewCreateRequest::new(
-                query1_equivalent,
-                vec!["s2".into(), "s1".into()],
-            )])
+            .view_statuses(
+                vec![ViewCreateRequest::new(
+                    query1_equivalent,
+                    vec!["s2".into(), "s1".into()],
+                )],
+                DataDialect::DEFAULT_MYSQL,
+            )
             .await
             .unwrap();
         assert_eq!(res3, vec![true]);
@@ -1291,10 +1303,13 @@ mod tests {
 
         let query1_equivalent = parse_select_statement(Dialect::MySQL, "SELECT x FROM t1").unwrap();
         let res3 = noria
-            .view_statuses(vec![ViewCreateRequest::new(
-                query1_equivalent,
-                vec!["s2".into(), "s1".into()],
-            )])
+            .view_statuses(
+                vec![ViewCreateRequest::new(
+                    query1_equivalent,
+                    vec!["s2".into(), "s1".into()],
+                )],
+                DataDialect::DEFAULT_MYSQL,
+            )
             .await
             .unwrap();
         assert_eq!(res3, vec![false]);
