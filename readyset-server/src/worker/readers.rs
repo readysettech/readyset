@@ -10,7 +10,9 @@ use std::time::Duration;
 use async_bincode::AsyncBincodeStream;
 use bincode::Options;
 use dataflow::prelude::*;
-use dataflow::{Expr as DfExpr, LookupError, ReaderMap, Readers, SingleReadHandle};
+use dataflow::{
+    Expr as DfExpr, LookupError, ReaderMap, ReaderUpdatedNotifier, Readers, SingleReadHandle,
+};
 use failpoint_macros::set_failpoint;
 use futures_util::future::TryFutureExt;
 use futures_util::stream::{StreamExt, TryStreamExt};
@@ -36,13 +38,8 @@ use tokio_tower::multiplex::server;
 use tower::Service;
 use tracing::{error, instrument, warn};
 
-/// Retry reads every this often.
+/// Retry consistency missed reads every this often.
 const RETRY_TIMEOUT: Duration = Duration::from_micros(100);
-
-/// If a blocking reader finds itself waiting this long for a backfill to complete, it will
-/// re-issue the replay request. To avoid the system falling over if replays are slow for a little
-/// while, waiting readers will use exponential backoff on this delay if they continue to miss.
-const TRIGGER_TIMEOUT_MS: u64 = 20;
 
 const WAIT_BEFORE_WARNING: Duration = Duration::from_secs(7);
 
@@ -209,15 +206,16 @@ impl ReadRequestHandler {
 
         let consistency_miss = !has_sufficient_timestamp(reader, &timestamp);
 
-        let keys_to_replay = match reader.get_multi(&key_comparisons) {
+        let (keys_to_replay, receiver) = match reader.get_multi_with_notifier(&key_comparisons) {
             Err(LookupError::NotReady) => reply_with_error!(ReadySetError::ViewNotYetAvailable),
             Err(LookupError::Destroyed) => reply_with_error!(ReadySetError::ViewDestroyed),
             Err(LookupError::Error(e)) => reply_with_error!(e),
             // We missed some keys
-            Err(LookupError::Miss(misses)) => misses,
+            Err(LookupError::Miss((misses, _))) if consistency_miss => (misses, None),
+            Err(LookupError::Miss((misses, notifier))) => (misses, Some(notifier)),
             // We hit on all keys, but there is a consistency miss. This just counts as a miss,
             // but no keys needs triggering.
-            Ok(_) if consistency_miss => vec![],
+            Ok(_) if consistency_miss => (vec![], None),
             Ok(hit) => {
                 // We hit on all keys, and there is no consistency miss, can return results
                 // immediately
@@ -249,8 +247,6 @@ impl ReadRequestHandler {
             reply_with_ok!(LookupResult::NonBlockingMiss);
         } else {
             let (tx, rx) = oneshot::channel();
-            let trigger = Duration::from_millis(TRIGGER_TIMEOUT_MS);
-            let now = time::Instant::now();
 
             let r = self.wait.send((
                 BlockingRead {
@@ -258,9 +254,7 @@ impl ReadRequestHandler {
                     target,
                     key_comparisons,
                     truth: self.global_readers.clone(),
-                    trigger_timeout: trigger,
-                    next_trigger: now,
-                    first: now,
+                    first: time::Instant::now(),
                     warned: false,
                     limit,
                     offset,
@@ -268,6 +262,8 @@ impl ReadRequestHandler {
                     timestamp,
                     upquery_timeout: self.upquery_timeout,
                     raw_result,
+                    receiver,
+                    eviction_epoch: reader.eviction_epoch(),
                 },
                 tx,
             ));
@@ -347,16 +343,26 @@ pub async fn retry_misses(mut rx: UnboundedReceiver<(BlockingRead, Ack)>) {
     let mut reader_cache: ReaderMap = Default::default();
 
     while let Some((mut pending, ack)) = rx.recv().await {
-        // A blocking read always comes immediately after a miss, so no reason to retry it
-        // right away, better to wait a bit
-        tokio::time::sleep(RETRY_TIMEOUT / 4).await;
         loop {
+            if let Some(recv) = &mut pending.receiver {
+                // If a receiever is available (on miss) then we simply wait for a notification that
+                // a hole has been filled, then recheck
+                let _ = recv.recv().await;
+                while !recv.is_empty() {
+                    // This drains all the messages from the notifier so we don't get woken right up
+                    // again
+                    let _ = recv.try_recv();
+                }
+            } else {
+                // For consistency misses we don't get notifications, so check periodically
+                tokio::time::sleep(RETRY_TIMEOUT).await;
+            }
+
             if let Poll::Ready(res) = pending.check(&mut reader_cache) {
                 upquery_hist.record(pending.first.elapsed().as_micros() as f64);
                 let _ = ack.send(res);
                 break;
             }
-            tokio::time::sleep(RETRY_TIMEOUT).await;
         }
     }
 }
@@ -439,13 +445,13 @@ pub struct BlockingRead {
     limit: Option<usize>,
     offset: Option<usize>,
     filter: Option<DfExpr>,
-    trigger_timeout: Duration,
-    next_trigger: time::Instant,
     first: time::Instant,
     warned: bool,
     timestamp: Option<Timestamp>,
     upquery_timeout: Duration,
     raw_result: bool,
+    receiver: Option<ReaderUpdatedNotifier>,
+    eviction_epoch: usize,
 }
 
 impl std::fmt::Debug for BlockingRead {
@@ -454,10 +460,9 @@ impl std::fmt::Debug for BlockingRead {
             .field("tag", &self.tag)
             .field("target", &self.target)
             .field("key_comparisons", &self.key_comparisons)
-            .field("trigger_timeout", &self.trigger_timeout)
-            .field("next_trigger", &self.next_trigger)
             .field("first", &self.first)
             .field("timestamp", &self.timestamp)
+            .field("eviction_epoch", &self.eviction_epoch)
             .finish()
     }
 }
@@ -472,16 +477,13 @@ impl BlockingRead {
             readers.get(target).unwrap().clone()
         });
 
-        let now = time::Instant::now();
-        let next_trigger = self.next_trigger;
-
         let consistency_miss = !has_sufficient_timestamp(reader, &self.timestamp);
 
         let still_waiting = match reader.get_multi(&self.key_comparisons) {
             // We hit on all keys, but there is a consistency miss. This just counts as a miss,
             // but no keys needs triggering.
             Ok(_) if consistency_miss => vec![],
-            Err(LookupError::Miss(misses)) => misses,
+            Err(LookupError::Miss((misses, _))) => misses,
             Err(_) => return Poll::Ready(Err(ReadySetError::ServerShuttingDown)),
             Ok(hit) => {
                 // We hit on all keys, and there is no consistency miss, can return results
@@ -515,19 +517,16 @@ impl BlockingRead {
             self.warned = true;
         }
 
-        // If the map is sufficiently up to date to serve the query, we start looking up
-        // keys.
-        if now > next_trigger {
+        let cur_eviction_epoch = reader.eviction_epoch();
+        // Only retrigger if there was an eviction since we last checked
+        if cur_eviction_epoch > self.eviction_epoch {
+            self.eviction_epoch = cur_eviction_epoch;
             // Retrigger all un-read keys. Its possible they could have been filled and then
             // evicted again without us reading it.
             if !reader.trigger(still_waiting.into_iter().map(|v| v.into_owned())) {
                 // server is shutting down and won't do the backfill
                 return Poll::Ready(Err(ReadySetError::ServerShuttingDown));
             }
-
-            self.trigger_timeout =
-                Duration::min(self.trigger_timeout * 2, self.upquery_timeout / 20);
-            self.next_trigger = now + self.trigger_timeout;
         }
 
         if self.first.elapsed() > self.upquery_timeout {

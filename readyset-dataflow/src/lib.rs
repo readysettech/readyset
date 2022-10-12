@@ -42,7 +42,7 @@ use std::sync::{Arc, Mutex};
 use readyset::ReaderAddress;
 use serde::{Deserialize, Serialize};
 
-pub use crate::backlog::{LookupError, SingleReadHandle};
+pub use crate::backlog::{LookupError, ReaderUpdatedNotifier, SingleReadHandle};
 
 /// A [`ReaderMap`] maps a [`ReaderAddress`] to the [`SingleReadHandle`] to access the reader at
 /// that address.

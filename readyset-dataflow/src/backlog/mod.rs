@@ -15,6 +15,13 @@ use vec1::Vec1;
 pub use self::multir::LookupError;
 use crate::prelude::*;
 
+/// The kind of reader update notification, currently the eviction epoch of the writer
+pub(crate) type ReaderNotification = usize;
+/// The type we can await for changes in the reader for
+pub type ReaderUpdatedNotifier = tokio::sync::broadcast::Receiver<ReaderNotification>;
+/// The type we can send reader update notifications
+pub(crate) type ReaderUpdatedSender = tokio::sync::broadcast::Sender<ReaderNotification>;
+
 pub(crate) trait Trigger =
     Fn(&mut dyn Iterator<Item = KeyComparison>) -> bool + 'static + Send + Sync;
 
@@ -129,6 +136,8 @@ fn new_inner(
         _ => make!(Many),
     };
 
+    let (notifier, receiver) = tokio::sync::broadcast::channel(1);
+
     let w = WriteHandle {
         partial: trigger.is_some(),
         handle: w,
@@ -136,6 +145,8 @@ fn new_inner(
         cols,
         contiguous,
         mem_size: 0,
+        notifier,
+        eviction_epoch: 0,
     };
 
     let r = SingleReadHandle {
@@ -143,6 +154,8 @@ fn new_inner(
         trigger,
         index,
         post_lookup: post_processing,
+        receiver,
+        eviction_epoch: 0,
     };
 
     (r, w)
@@ -166,6 +179,10 @@ pub(crate) struct WriteHandle {
     index: Index,
     contiguous: bool,
     mem_size: usize,
+    /// The notifier can be used to notify readers that are waiting on changes
+    notifier: ReaderUpdatedSender,
+    /// How many eviction rounds this handle had
+    eviction_epoch: usize,
 }
 
 type Key<'a> = Cow<'a, [DfValue]>;
@@ -253,7 +270,7 @@ impl WriteHandle {
 
     pub(crate) fn interval_difference(&self, key: KeyComparison) -> Option<Vec<KeyComparison>> {
         match self.handle.read().get_multi(&[key]) {
-            Err(LookupError::Miss(misses)) => {
+            Err(LookupError::Miss((misses, _))) => {
                 Some(misses.into_iter().map(|c| c.into_owned()).collect())
             }
             _ => None,
@@ -379,6 +396,20 @@ impl WriteHandle {
         self.handle.insert_range(range);
         Ok(())
     }
+
+    /// Increment the eviction epoch, and notify readers
+    pub(crate) fn notify_readers_of_eviction(&mut self) -> ReadySetResult<()> {
+        self.eviction_epoch += 1;
+        self.notify_readers()
+    }
+
+    /// Notify readers with the current eviction epoch
+    pub(crate) fn notify_readers(&mut self) -> ReadySetResult<()> {
+        self.notifier
+            .send(self.eviction_epoch)
+            .map_err(|_| ReadySetError::ReaderNotFound)?;
+        Ok(())
+    }
 }
 
 impl SizeOf for WriteHandle {
@@ -398,12 +429,28 @@ impl SizeOf for WriteHandle {
 }
 
 /// Handle to get the state of a single shard of a reader.
-#[derive(Clone)]
 pub struct SingleReadHandle {
     handle: multir::Handle,
     trigger: Option<Arc<dyn Trigger>>,
     index: Index,
     pub post_lookup: PostLookup,
+    /// Receives a notification whenever the [`WriteHandle`] is updated after filling an upquery
+    receiver: ReaderUpdatedNotifier,
+    /// Caches the eviction epoch of the associated [`WriteHandle`]
+    eviction_epoch: usize,
+}
+
+impl Clone for SingleReadHandle {
+    fn clone(&self) -> Self {
+        Self {
+            handle: self.handle.clone(),
+            trigger: self.trigger.clone(),
+            index: self.index.clone(),
+            post_lookup: self.post_lookup.clone(),
+            receiver: self.receiver.resubscribe(),
+            eviction_epoch: self.eviction_epoch,
+        }
+    }
 }
 
 impl std::fmt::Debug for SingleReadHandle {
@@ -445,11 +492,27 @@ impl SingleReadHandle {
         }
     }
 
+    /// Lookup a list of keys under the same reader guard
     pub fn get_multi<'a>(
         &self,
         keys: &'a [KeyComparison],
     ) -> Result<SharedResults, LookupError<'a>> {
         match self.handle.get_multi(keys) {
+            Err(e) if e.is_miss() && self.trigger.is_none() => Ok(SharedResults::default()),
+            r => r,
+        }
+    }
+
+    /// Lookup a list of keys under the same reader guard. If missed, will include a notifier that
+    /// can tell us when a new hole was filled in the map.
+    pub fn get_multi_with_notifier<'a>(
+        &self,
+        keys: &'a [KeyComparison],
+    ) -> Result<SharedResults, LookupError<'a, ReaderUpdatedNotifier>> {
+        match self
+            .handle
+            .get_multi_and_map_error(keys, || self.receiver.resubscribe())
+        {
             Err(e) if e.is_miss() && self.trigger.is_none() => Ok(SharedResults::default()),
             r => r,
         }
@@ -474,6 +537,16 @@ impl SingleReadHandle {
     /// Returns true if the corresponding write handle to our read handle has been dropped
     pub fn was_dropped(&self) -> bool {
         self.handle.was_dropped()
+    }
+
+    pub fn eviction_epoch(&mut self) -> usize {
+        while !self.receiver.is_empty() {
+            if let Ok(epoch) = self.receiver.try_recv() {
+                self.eviction_epoch = epoch
+            }
+        }
+
+        self.eviction_epoch
     }
 }
 
@@ -648,7 +721,7 @@ mod tests {
         w.swap();
 
         match r.get(&[1.into()]) {
-            Err(LookupError::Miss(mut misses)) => {
+            Err(LookupError::Miss((mut misses, _))) => {
                 assert_eq!(
                     misses.pop().unwrap().into_owned().equal().unwrap(),
                     &vec1![1.into()]

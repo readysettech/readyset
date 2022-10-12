@@ -487,6 +487,7 @@ impl Node {
                         state.mark_hole(k)?;
                     }
                     state.swap();
+                    state.notify_readers_of_eviction()?;
                 }
             }
             NodeType::Ingress => {}

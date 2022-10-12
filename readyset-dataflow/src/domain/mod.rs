@@ -2859,6 +2859,7 @@ impl Domain {
                         // we filled a hole! swap the reader.
                         if let Some(wh) = self.reader_write_handles.get_mut(segment.node) {
                             wh.swap();
+                            wh.notify_readers()?;
                         }
 
                         // and also unmark the replay request
@@ -3746,6 +3747,7 @@ impl Domain {
                     } else if let Some(state) = self.reader_write_handles.get_mut(node) {
                         freed += state.evict_bytes(num_bytes as usize);
                         state.swap();
+                        state.notify_readers_of_eviction()?;
                     } else if let Some(EvictBytesResult {
                         index,
                         keys_evicted,

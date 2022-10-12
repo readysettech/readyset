@@ -44,7 +44,7 @@ pub(super) enum Handle {
 
 /// An error that could occur during an equality or range lookup to a reader node.
 #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
-pub enum LookupError<'a> {
+pub enum LookupError<'a, T = ()> {
     /// The map is not ready to accept queries
     NotReady,
     /// The map has been destroyed
@@ -52,10 +52,10 @@ pub enum LookupError<'a> {
     /// Some other error occurred during the lookup
     Error(ReadySetError),
     /// Some of the keys in the lookup missed, list of the keys included
-    Miss(Vec<Cow<'a, KeyComparison>>),
+    Miss((Vec<Cow<'a, KeyComparison>>, T)),
 }
 
-impl<'a> From<reader_map::Error> for LookupError<'a> {
+impl<'a, T> From<reader_map::Error> for LookupError<'a, T> {
     fn from(e: reader_map::Error) -> Self {
         match e {
             reader_map::Error::NotPublished => Self::NotReady,
@@ -64,17 +64,26 @@ impl<'a> From<reader_map::Error> for LookupError<'a> {
     }
 }
 
-impl<'a> From<ReadySetError> for LookupError<'a> {
+impl<'a, T> From<ReadySetError> for LookupError<'a, T> {
     fn from(err: ReadySetError) -> Self {
         Self::Error(err)
     }
 }
 
-impl<'a> LookupError<'a> {
+impl<'a, T> LookupError<'a, T> {
     /// Returns `true` if this `LookupError` represents a miss on a key, `false` if it represents a
     /// not-ready or destroyed map
     pub fn is_miss(&self) -> bool {
         matches!(self, LookupError::Miss(_))
+    }
+
+    pub fn map<T2, F: Fn(T) -> T2>(self, m: F) -> LookupError<'a, T2> {
+        match self {
+            LookupError::NotReady => LookupError::NotReady,
+            LookupError::Destroyed => LookupError::Destroyed,
+            LookupError::Error(err) => LookupError::Error(err),
+            LookupError::Miss((misses, meta)) => LookupError::Miss((misses, m(meta))),
+        }
     }
 }
 
@@ -100,10 +109,11 @@ impl Handle {
         }
     }
 
-    fn get_multi_single_handle<'a>(
+    fn get_multi_single_handle<'a, T, F: Fn() -> T>(
         handle: &HandleSingle,
         keys: &'a [KeyComparison],
-    ) -> Result<SharedResults, LookupError<'a>> {
+        miss_meta: F,
+    ) -> Result<SharedResults, LookupError<'a, T>> {
         let mut prev_keys = HashSet::new();
         let mut hits = SharedResults::with_capacity(keys.len());
         let mut misses = Vec::new();
@@ -142,16 +152,17 @@ impl Handle {
         }
 
         if !misses.is_empty() {
-            Err(LookupError::Miss(misses))
+            Err(LookupError::Miss((misses, miss_meta())))
         } else {
             Ok(hits)
         }
     }
 
-    fn get_multi_many_handle<'a>(
+    fn get_multi_many_handle<'a, T, F: Fn() -> T>(
         handle: &HandleMany,
         keys: &'a [KeyComparison],
-    ) -> Result<SharedResults, LookupError<'a>> {
+        miss_meta: F,
+    ) -> Result<SharedResults, LookupError<'a, T>> {
         let mut prev_keys = HashSet::new();
         let mut hits = SharedResults::with_capacity(keys.len());
         let mut misses = Vec::new();
@@ -191,7 +202,7 @@ impl Handle {
         }
 
         if !misses.is_empty() {
-            Err(LookupError::Miss(misses))
+            Err(LookupError::Miss((misses, miss_meta())))
         } else {
             Ok(hits)
         }
@@ -204,8 +215,23 @@ impl Handle {
         keys: &'a [KeyComparison],
     ) -> Result<SharedResults, LookupError<'a>> {
         match self {
-            Handle::Single(h) => Self::get_multi_single_handle(h, keys),
-            Handle::Many(h) => Self::get_multi_many_handle(h, keys),
+            Handle::Single(h) => Self::get_multi_single_handle(h, keys, || {}),
+            Handle::Many(h) => Self::get_multi_many_handle(h, keys, || {}),
+        }
+    }
+
+    /// Retreive results for multiple keys from the map under the same read guard, assuring that all
+    /// of the values refer to the same state map. If the get misses, the provided closure will be
+    /// used to map the results of the miss, also under the same read guard, ensuring no writer swap
+    /// took place between the miss and the closure being called.
+    pub(super) fn get_multi_and_map_error<'a, T, F: Fn() -> T>(
+        &self,
+        keys: &'a [KeyComparison],
+        miss_meta: F,
+    ) -> Result<SharedResults, LookupError<'a, T>> {
+        match self {
+            Handle::Single(h) => Self::get_multi_single_handle(h, keys, miss_meta),
+            Handle::Many(h) => Self::get_multi_many_handle(h, keys, miss_meta),
         }
     }
 
@@ -214,18 +240,20 @@ impl Handle {
             Handle::Single(h) => {
                 let map = h.enter()?;
                 let v = map.get(&key[0]).ok_or_else(|| {
-                    LookupError::Miss(vec![Cow::Owned(KeyComparison::Equal(
-                        vec1![key[0].clone()],
-                    ))])
+                    LookupError::Miss((
+                        vec![Cow::Owned(KeyComparison::Equal(vec1![key[0].clone()]))],
+                        (),
+                    ))
                 })?;
                 Ok(v.as_ref().clone())
             }
             Handle::Many(h) => {
                 let map = h.enter()?;
                 let v = map.get(key).ok_or_else(|| {
-                    LookupError::Miss(vec![Cow::Owned(KeyComparison::Equal(
-                        key.try_into().unwrap(),
-                    ))])
+                    LookupError::Miss((
+                        vec![Cow::Owned(KeyComparison::Equal(key.try_into().unwrap()))],
+                        (),
+                    ))
                 })?;
                 Ok(v.as_ref().clone())
             }
