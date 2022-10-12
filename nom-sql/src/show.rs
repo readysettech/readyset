@@ -18,6 +18,7 @@ pub enum ShowStatement {
     CachedQueries,
     ProxiedQueries,
     ReadySetStatus,
+    ReadySetVersion,
 }
 
 impl fmt::Display for ShowStatement {
@@ -29,6 +30,7 @@ impl fmt::Display for ShowStatement {
             Self::CachedQueries => write!(f, "CACHES"),
             Self::ProxiedQueries => write!(f, "PROXIED QUERIES"),
             Self::ReadySetStatus => write!(f, "READYSET STATUS"),
+            Self::ReadySetVersion => write!(f, "READYSET VERSION"),
         }
     }
 }
@@ -44,10 +46,16 @@ pub fn show(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], ShowStatement>
                 tuple((tag_no_case("proxied"), whitespace1, tag_no_case("queries"))),
                 |_| ShowStatement::ProxiedQueries,
             ),
-            map(
-                tuple((tag_no_case("readyset"), whitespace1, tag_no_case("status"))),
-                |_| ShowStatement::ReadySetStatus,
-            ),
+            alt((
+                map(
+                    tuple((tag_no_case("readyset"), whitespace1, tag_no_case("status"))),
+                    |_| ShowStatement::ReadySetStatus,
+                ),
+                map(
+                    tuple((tag_no_case("readyset"), whitespace1, tag_no_case("version"))),
+                    |_| ShowStatement::ReadySetVersion,
+                ),
+            )),
             map(show_tables(dialect), ShowStatement::Tables),
             map(tag_no_case("events"), |_| ShowStatement::Events),
         ))(i)?;
@@ -238,5 +246,17 @@ mod tests {
         let res2 = show(Dialect::MySQL)(qstring2.as_bytes()).unwrap().1;
         assert_eq!(res1, ShowStatement::ReadySetStatus);
         assert_eq!(res2, ShowStatement::ReadySetStatus);
+    }
+
+    #[test]
+    fn show_readyset_version() {
+        for dialect in [Dialect::MySQL, Dialect::PostgreSQL] {
+            let qstring1 = "SHOW READYSET VERSION";
+            let res1 = show(dialect)(qstring1.as_bytes()).unwrap().1;
+            let qstring2 = "SHOW\tREADYSET\tVERSION";
+            let res2 = show(dialect)(qstring2.as_bytes()).unwrap().1;
+            assert_eq!(res1, ShowStatement::ReadySetVersion);
+            assert_eq!(res2, ShowStatement::ReadySetVersion);
+        }
     }
 }
