@@ -19,6 +19,7 @@ mod util;
 
 use std::collections::{HashMap, HashSet};
 
+use dataflow_expression::Dialect;
 pub use nom_sql::analysis::{contains_aggregate, is_aggregate};
 use nom_sql::{
     CompoundSelectStatement, CreateTableStatement, CreateViewStatement, Relation,
@@ -57,6 +58,9 @@ pub struct RewriteContext<'a> {
 
     /// Ordered list of schema names to search in when resolving schema names of tables
     pub search_path: &'a [SqlIdentifier],
+
+    /// SQL dialect to use for all expressions and types within the query
+    pub dialect: Dialect,
 
     /// Optional list of tables which, if created, should invalidate this query.
     ///
@@ -110,7 +114,7 @@ impl Rewrite for CreateTableStatement {
 impl Rewrite for SelectStatement {
     fn rewrite(self, context: &mut RewriteContext) -> ReadySetResult<Self> {
         self.rewrite_between()
-            .scalar_optimize_expressions()
+            .scalar_optimize_expressions(context.dialect)
             .strip_post_filters()
             .resolve_schemas(
                 context.tables(),

@@ -16,6 +16,7 @@ use nom_sql::{
 };
 use petgraph::graph::NodeIndex;
 use readyset::internal::IndexType;
+use readyset_data::Dialect;
 use readyset_errors::{internal_err, invalid_err, unsupported, ReadySetError, ReadySetResult};
 use readyset_sql_passes::alias_removal::TableAliasRewrite;
 use readyset_sql_passes::{contains_aggregate, AliasRemoval, Rewrite, RewriteContext};
@@ -138,6 +139,7 @@ impl SqlIncorporator {
             view_schemas: &self.view_schemas,
             base_schemas: &self.base_schemas,
             search_path,
+            dialect: Dialect::DEFAULT_MYSQL, // TODO(ENG-1418)
             invalidating_tables,
         })
     }

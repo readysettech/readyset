@@ -1,4 +1,4 @@
-use dataflow_expression::Expr as DataflowExpr;
+use dataflow_expression::{Dialect, Expr as DataflowExpr};
 use nom_sql::analysis::visit::{self, Visitor};
 use nom_sql::{Expr, Literal};
 use readyset_data::DfValue;
@@ -7,17 +7,16 @@ use readyset_errors::{internal, ReadySetResult};
 /// Statically evaluate the given expression, returning a literal value representing the result.
 ///
 /// Returns an error if the expression evaluation failed, or if the expression is not constant
-fn const_eval(expr: &Expr) -> ReadySetResult<Literal> {
-    // TODO(ENG-1418): Propagate dialect info.
-    let dialect = dataflow_expression::Dialect::DEFAULT_MYSQL;
-
+fn const_eval(expr: &Expr, dialect: Dialect) -> ReadySetResult<Literal> {
     let dataflow_expr =
         DataflowExpr::lower(expr.clone(), dialect, |_| internal!("Can't resolve column"))?;
     let res = dataflow_expr.eval::<DfValue>(&[])?;
     res.try_into()
 }
 
-struct ConstantFoldVisitor;
+struct ConstantFoldVisitor {
+    dialect: Dialect,
+}
 
 impl<'ast> Visitor<'ast> for ConstantFoldVisitor {
     type Error = !;
@@ -32,7 +31,7 @@ impl<'ast> Visitor<'ast> for ConstantFoldVisitor {
         // constant-valued; we just try to evaluate it in a context where we return errors for
         // column references and placeholders, and then only use the result if that error doesn't
         // happen.
-        match const_eval(expr) {
+        match const_eval(expr, self.dialect) {
             Ok(res) => {
                 *expr = Expr::Literal(res);
                 Ok(())
@@ -57,20 +56,20 @@ impl<'ast> Visitor<'ast> for ConstantFoldVisitor {
 /// ```sql
 /// x = ifnull(y, 21)
 /// ```
-pub fn constant_fold_expr(expr: &mut Expr) {
-    let Ok(()) = ConstantFoldVisitor.visit_expr(expr);
+pub fn constant_fold_expr(expr: &mut Expr, dialect: Dialect) {
+    let Ok(()) = ConstantFoldVisitor { dialect }.visit_expr(expr);
 }
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{parse_expr, Dialect};
+    use nom_sql::parse_expr;
 
     use super::*;
 
     fn rewrites_to(input: &str, expected: &str) {
-        let mut expr = parse_expr(Dialect::MySQL, input).unwrap();
-        let expected = parse_expr(Dialect::MySQL, expected).unwrap();
-        constant_fold_expr(&mut expr);
+        let mut expr = parse_expr(nom_sql::Dialect::MySQL, input).unwrap();
+        let expected = parse_expr(nom_sql::Dialect::MySQL, expected).unwrap();
+        constant_fold_expr(&mut expr, Dialect::DEFAULT_MYSQL);
         assert_eq!(
             expr.to_string(),
             expected.to_string(),
