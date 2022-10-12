@@ -950,74 +950,51 @@ where
 impl TryFrom<i128> for DfValue {
     type Error = ReadySetError;
 
-    fn try_from(s: i128) -> Result<Self, Self::Error> {
-        if s >= std::i64::MIN.into() && s <= std::i64::MAX.into() {
-            Ok(DfValue::Int(s as i64))
-        } else if s >= std::u64::MIN.into() && s <= std::u64::MAX.into() {
-            Ok(DfValue::UnsignedInt(s as u64))
+    fn try_from(i: i128) -> Result<Self, Self::Error> {
+        if let Ok(i) = i64::try_from(i) {
+            Ok(i.into())
+        } else if let Ok(i) = u64::try_from(i) {
+            Ok(i.into())
         } else {
-            Err(Self::Error::DfValueConversionError {
+            Err(ReadySetError::DfValueConversionError {
                 src_type: "i128".to_string(),
                 target_type: "DfValue".to_string(),
-                details: "".to_string(),
+                details: "unsupported".to_string(),
             })
         }
     }
 }
 
-impl From<i64> for DfValue {
-    fn from(s: i64) -> Self {
-        DfValue::Int(s)
-    }
+macro_rules! signed_integer_into_value {
+    ($int:ty) => {
+        impl From<$int> for DfValue {
+            #[inline]
+            fn from(i: $int) -> Self {
+                Self::Int(i as i64)
+            }
+        }
+    };
+    ($($int:ty),+) => {
+        $(signed_integer_into_value!($int);)+
+    };
 }
 
-impl From<u64> for DfValue {
-    fn from(s: u64) -> Self {
-        DfValue::UnsignedInt(s)
-    }
+macro_rules! unsigned_integer_into_value {
+    ($int:ty) => {
+        impl From<$int> for DfValue {
+            #[inline]
+            fn from(i: $int) -> Self {
+                Self::UnsignedInt(i as u64)
+            }
+        }
+    };
+    ($($int:ty),+) => {
+        $(unsigned_integer_into_value!($int);)+
+    };
 }
 
-impl From<i8> for DfValue {
-    fn from(s: i8) -> Self {
-        DfValue::Int(s.into())
-    }
-}
-
-impl From<u8> for DfValue {
-    fn from(s: u8) -> Self {
-        DfValue::UnsignedInt(s.into())
-    }
-}
-
-impl From<i16> for DfValue {
-    fn from(s: i16) -> Self {
-        DfValue::Int(s.into())
-    }
-}
-
-impl From<u16> for DfValue {
-    fn from(s: u16) -> Self {
-        DfValue::UnsignedInt(s.into())
-    }
-}
-
-impl From<i32> for DfValue {
-    fn from(s: i32) -> Self {
-        DfValue::Int(s as _)
-    }
-}
-
-impl From<u32> for DfValue {
-    fn from(s: u32) -> Self {
-        DfValue::UnsignedInt(s as _)
-    }
-}
-
-impl From<usize> for DfValue {
-    fn from(s: usize) -> Self {
-        DfValue::UnsignedInt(s as u64)
-    }
-}
+signed_integer_into_value!(isize, i64, i32, i16, i8);
+unsigned_integer_into_value!(usize, u64, u32, u16, u8);
 
 impl TryFrom<f32> for DfValue {
     type Error = ReadySetError;
