@@ -17,6 +17,7 @@ use enum_kinds::EnumKind;
 use eui48::{MacAddress, MacAddressFormat};
 use itertools::Itertools;
 use launchpad::arbitrary::{arbitrary_decimal, arbitrary_duration};
+use launchpad::redacted::Sensitive;
 use mysql_time::MySqlTime;
 use ndarray::{ArrayD, IxDyn};
 use nom_sql::{Double, Float, Literal, SqlType};
@@ -1368,186 +1369,44 @@ impl TryFrom<DfValue> for Vec<u8> {
     }
 }
 
-impl TryFrom<DfValue> for i128 {
-    type Error = ReadySetError;
+/// Implements `TryFrom<&DfValue>` and `TryFrom<DfValue>` for an integer type using its
+/// `TryFrom<i128>` implementation.
+macro_rules! integer_try_from {
+    ($int:ty) => {
+        impl TryFrom<&DfValue> for $int {
+            type Error = ReadySetError;
 
-    fn try_from(data: DfValue) -> Result<Self, Self::Error> {
-        <i128>::try_from(&data)
-    }
-}
+            fn try_from(data: &DfValue) -> Result<Self, Self::Error> {
+                let error = |details: String| ReadySetError::DfValueConversionError {
+                    src_type: "DfValue".to_owned(),
+                    target_type: stringify!($int).to_owned(),
+                    details,
+                };
 
-impl TryFrom<DfValue> for i64 {
-    type Error = ReadySetError;
-
-    fn try_from(data: DfValue) -> Result<i64, Self::Error> {
-        <i64>::try_from(&data)
-    }
-}
-
-impl TryFrom<&'_ DfValue> for i128 {
-    type Error = ReadySetError;
-
-    fn try_from(data: &'_ DfValue) -> Result<Self, Self::Error> {
-        if let Some(i) = data.as_int() {
-            Ok(i)
-        } else {
-            Err(ReadySetError::DfValueConversionError {
-                src_type: "DfValue".to_string(),
-                target_type: "i128".to_string(),
-                details: "".to_string(),
-            })
+                data.as_int()
+                    .ok_or_else(|| error("unsupported".to_owned()))
+                    .and_then(|i| {
+                        Self::try_from(i)
+                            .map_err(|_| error(format!("out of bounds {}", Sensitive(&i))))
+                    })
+            }
         }
-    }
-}
 
-impl TryFrom<&'_ DfValue> for i64 {
-    type Error = ReadySetError;
+        impl TryFrom<DfValue> for $int {
+            type Error = ReadySetError;
 
-    fn try_from(data: &'_ DfValue) -> Result<Self, Self::Error> {
-        match *data {
-            DfValue::UnsignedInt(s) => {
-                if s as i128 >= std::i64::MIN.into() && s as i128 <= std::i64::MAX.into() {
-                    Ok(s as i64)
-                } else {
-                    Err(Self::Error::DfValueConversionError {
-                        src_type: "DfValue".to_string(),
-                        target_type: "i64".to_string(),
-                        details: format!("Out of bounds {}", s),
-                    })
-                }
+            #[inline]
+            fn try_from(data: DfValue) -> Result<Self, Self::Error> {
+                Self::try_from(&data)
             }
-            DfValue::Int(s) => Ok(s),
-            _ => Err(Self::Error::DfValueConversionError {
-                src_type: "DfValue".to_string(),
-                target_type: "i64".to_string(),
-                details: "".to_string(),
-            }),
         }
-    }
+    };
+    ($($int:ty),+) => {
+        $(integer_try_from!($int);)+
+    };
 }
 
-impl TryFrom<DfValue> for u64 {
-    type Error = ReadySetError;
-
-    fn try_from(data: DfValue) -> Result<Self, Self::Error> {
-        <u64>::try_from(&data)
-    }
-}
-
-impl TryFrom<&'_ DfValue> for u64 {
-    type Error = ReadySetError;
-
-    fn try_from(data: &'_ DfValue) -> Result<Self, Self::Error> {
-        match *data {
-            DfValue::UnsignedInt(s) => Ok(s),
-            DfValue::Int(s) => {
-                if s as i128 >= std::u64::MIN.into() && s as i128 <= std::u64::MAX.into() {
-                    Ok(s as u64)
-                } else {
-                    Err(Self::Error::DfValueConversionError {
-                        src_type: "DfValue".to_string(),
-                        target_type: "u64".to_string(),
-                        details: "Out of bounds".to_string(),
-                    })
-                }
-            }
-
-            _ => Err(Self::Error::DfValueConversionError {
-                src_type: "DfValue".to_string(),
-                target_type: "u64".to_string(),
-                details: "".to_string(),
-            }),
-        }
-    }
-}
-
-impl TryFrom<DfValue> for i32 {
-    type Error = ReadySetError;
-
-    fn try_from(data: DfValue) -> Result<Self, Self::Error> {
-        <i32>::try_from(&data)
-    }
-}
-
-impl TryFrom<&'_ DfValue> for i32 {
-    type Error = ReadySetError;
-
-    fn try_from(data: &'_ DfValue) -> Result<Self, Self::Error> {
-        match *data {
-            DfValue::UnsignedInt(s) => {
-                if s as i128 >= std::i32::MIN.into() && s as i128 <= std::i32::MAX.into() {
-                    Ok(s as i32)
-                } else {
-                    Err(Self::Error::DfValueConversionError {
-                        src_type: "DfValue".to_string(),
-                        target_type: "i32".to_string(),
-                        details: "out of bounds".to_string(),
-                    })
-                }
-            }
-            DfValue::Int(s) => {
-                if s as i128 >= std::i32::MIN.into() && s as i128 <= std::i32::MAX.into() {
-                    Ok(s as i32)
-                } else {
-                    Err(Self::Error::DfValueConversionError {
-                        src_type: "DfValue".to_string(),
-                        target_type: "i32".to_string(),
-                        details: "out of bounds".to_string(),
-                    })
-                }
-            }
-
-            _ => Err(Self::Error::DfValueConversionError {
-                src_type: "DfValue".to_string(),
-                target_type: "i32".to_string(),
-                details: "".to_string(),
-            }),
-        }
-    }
-}
-
-impl TryFrom<DfValue> for u32 {
-    type Error = ReadySetError;
-    fn try_from(data: DfValue) -> Result<Self, Self::Error> {
-        <u32>::try_from(&data)
-    }
-}
-
-impl TryFrom<&'_ DfValue> for u32 {
-    type Error = ReadySetError;
-
-    fn try_from(data: &'_ DfValue) -> Result<Self, Self::Error> {
-        match *data {
-            DfValue::UnsignedInt(s) => {
-                if s as i128 >= std::u32::MIN.into() && s as i128 <= std::u32::MAX.into() {
-                    Ok(s as u32)
-                } else {
-                    Err(Self::Error::DfValueConversionError {
-                        src_type: "DfValue".to_string(),
-                        target_type: "u32".to_string(),
-                        details: "out of bounds".to_string(),
-                    })
-                }
-            }
-            DfValue::Int(s) => {
-                if s as i128 >= std::u32::MIN.into() && s as i128 <= std::u32::MAX.into() {
-                    Ok(s as u32)
-                } else {
-                    Err(Self::Error::DfValueConversionError {
-                        src_type: "DfValue".to_string(),
-                        target_type: "u32".to_string(),
-                        details: "out of bounds".to_string(),
-                    })
-                }
-            }
-            _ => Err(Self::Error::DfValueConversionError {
-                src_type: "DfValue".to_string(),
-                target_type: "u32".to_string(),
-                details: "".to_string(),
-            }),
-        }
-    }
-}
+integer_try_from!(usize, isize, u128, i128, u64, i64, u32, i32, u16, i16, u8, i8);
 
 impl TryFrom<DfValue> for f32 {
     type Error = ReadySetError;
