@@ -216,7 +216,7 @@ readyset:
     image:
 
       # -- Container image repository to use for ReadySet server.
-      repository: public.ecr.aws/z3o1l5n4/readyset-server # TODO: s/z3o1l5n4/readyset when name is approved
+      repository: public.ecr.aws/readyset/readyset-server
 
       # -- Container image tag to use for ReadySet server.
       #tag: "release-bcbe5d9ca1a15a35fc317a14ca5e8fe958570b9d"
@@ -414,7 +414,7 @@ readyset:
     image:
 
       # -- Image repository to use for ReadySet adapter containers.
-      repository: public.ecr.aws/z3o1l5n4/readyset-adapter # TODO: s/z301l5n4/readyset when name is approved
+      repository: public.ecr.aws/readyset/readyset-adapter
 
       # -- Image tag to use for ReadySet adapter containers.
       tag: "latest"
