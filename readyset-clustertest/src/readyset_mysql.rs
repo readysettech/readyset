@@ -177,6 +177,7 @@ async fn async_migrations_confidence_check() {
 }
 
 #[clustertest]
+#[ignore = "Flaky test (ENG-1929)"]
 async fn failure_during_query() {
     let mut deployment = readyset_mysql("ct_failure_during_query")
         .with_servers(2, ServerParams::default())
