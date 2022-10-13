@@ -1521,6 +1521,7 @@ async fn view_connection_churn() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "Flaky test (ENG-1931)"]
 async fn table_connection_churn() {
     let authority_store = Arc::new(LocalAuthorityStore::new());
     let authority = Arc::new(Authority::from(LocalAuthority::new_with_store(
