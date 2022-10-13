@@ -1225,6 +1225,13 @@ async fn show_readyset_status() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn show_readyset_version() {
+    let (opts, _handle) = setup().await;
+    let conn = connect(opts).await;
+    assert!(conn.simple_query("SHOW READYSET VERSION;").await.is_ok())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn schema_qualifier() {
     let (opts, _handle) = setup().await;
     let conn = connect(opts).await;

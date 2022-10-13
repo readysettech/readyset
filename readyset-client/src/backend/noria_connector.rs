@@ -214,6 +214,9 @@ pub enum QueryResult<'a> {
     Meta(Vec<MetaVariable>),
     /// A table of variables returned as a response to a SHOW READYSET STATUS query.
     MetaVariables(Vec<MetaVariable>),
+    /// A table of variables returned as a response to a SHOW READYSET STATUS query.
+    /// The first MetaVariable serves as the column headers
+    MetaWithHeader(Vec<MetaVariable>),
 }
 
 impl<'a> QueryResult<'a> {
@@ -262,6 +265,7 @@ impl<'a> QueryResult<'a> {
             QueryResult::Delete { num_rows_deleted } => QueryResult::Delete { num_rows_deleted },
             QueryResult::Meta(meta) => QueryResult::Meta(meta),
             QueryResult::MetaVariables(vec) => QueryResult::MetaVariables(vec),
+            QueryResult::MetaWithHeader(vec) => QueryResult::MetaWithHeader(vec),
         }
     }
 }

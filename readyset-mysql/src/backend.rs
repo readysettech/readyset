@@ -213,6 +213,40 @@ async fn write_meta_variables<W: AsyncWrite + Unpin>(
     writer.finish().await
 }
 
+/// Writes a Vec of [`MetaVariable`] as a table with a single row, where the column names correspond
+/// to the variable names and the row values correspond to the variable values
+/// The first item in vars serves as the column headers
+async fn write_meta_with_header<W: AsyncWrite + Unpin>(
+    vars: Vec<MetaVariable>,
+    results: QueryResultWriter<'_, W>,
+) -> io::Result<()> {
+    let cols = vec![
+        Column {
+            table: "".to_owned(),
+            column: vars[0].name.to_string(),
+            coltype: ColumnType::MYSQL_TYPE_STRING,
+            column_length: None,
+            colflags: ColumnFlags::empty(),
+            character_set: DEFAULT_CHARACTER_SET,
+        },
+        Column {
+            table: "".to_owned(),
+            column: vars[0].value.to_string(),
+            coltype: ColumnType::MYSQL_TYPE_STRING,
+            column_length: None,
+            colflags: ColumnFlags::empty(),
+            character_set: DEFAULT_CHARACTER_SET,
+        },
+    ];
+    let mut writer = results.start(&cols).await?;
+    for v in vars.into_iter().skip(1) {
+        writer.write_col(v.name.as_str())?;
+        writer.write_col(v.value)?;
+        writer.end_row().await?;
+    }
+    writer.finish().await
+}
+
 pub struct Backend {
     /// Handle to the backing noria client
     noria: readyset_client::Backend<MySqlUpstream, MySqlQueryHandler>,
@@ -322,6 +356,9 @@ where
         noria_connector::QueryResult::Meta(vars) => write_meta_table(vars, writer).await,
         noria_connector::QueryResult::MetaVariables(vars) => {
             write_meta_variables(vars, writer).await
+        }
+        noria_connector::QueryResult::MetaWithHeader(vars) => {
+            write_meta_with_header(vars, writer).await
         }
         noria_connector::QueryResult::Select { mut rows, schema } => {
             let mysql_schema = convert_columns!(schema.schema, writer);

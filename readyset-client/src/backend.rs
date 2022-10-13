@@ -97,6 +97,7 @@ use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
 use readyset_errors::{internal, internal_err, unsupported, ReadySetResult};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 use readyset_tracing::instrument_root;
+use readyset_version::READYSET_VERSION;
 use timestamp_service::client::{TimestampClient, WriteId, WriteKey};
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::{error, instrument, trace, warn};
@@ -110,6 +111,7 @@ use crate::{rewrite, QueryHandler, UpstreamDatabase};
 
 pub mod noria_connector;
 
+use self::noria_connector::MetaVariable;
 pub use self::noria_connector::NoriaConnector;
 
 /// Query metadata used to plan query prepare
@@ -1692,6 +1694,7 @@ where
                 self.noria.verbose_views().await
             }
             SqlQuery::Show(ShowStatement::ReadySetStatus) => self.noria.readyset_status().await,
+            SqlQuery::Show(ShowStatement::ReadySetVersion) => readyset_version(),
             SqlQuery::Show(ShowStatement::ProxiedQueries) => {
                 // Log a telemetry event
                 if let Some(ref telemetry_sender) = self.telemetry_sender {
@@ -2252,7 +2255,7 @@ where
         match self.state.parsed_query_cache.entry(query.to_owned()) {
             Entry::Occupied(entry) => Ok(entry.get().clone()),
             Entry::Vacant(entry) => {
-                trace!("Parsing query");
+                trace!(%query, "Parsing query");
                 match nom_sql::parse_query(self.settings.dialect, query) {
                     Ok(parsed_query) => Ok(entry.insert(parsed_query).clone()),
                     Err(_) => Err(ReadySetError::UnparseableQuery {
@@ -2301,4 +2304,13 @@ fn log_query(
             warn!("Error logging query with query logging enabled: {}", e);
         }
     }
+}
+
+fn readyset_version() -> ReadySetResult<noria_connector::QueryResult<'static>> {
+    Ok(noria_connector::QueryResult::MetaWithHeader(
+        <Vec<(String, String)>>::from(READYSET_VERSION.clone())
+            .into_iter()
+            .map(MetaVariable::from)
+            .collect(),
+    ))
 }

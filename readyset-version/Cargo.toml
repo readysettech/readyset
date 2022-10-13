@@ -9,3 +9,4 @@ edition = "2021"
 
 [dependencies]
 const-str = "0.5"
+serde = "1.0.130"

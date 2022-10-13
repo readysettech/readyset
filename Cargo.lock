@@ -3821,6 +3821,7 @@ dependencies = [
  "readyset-sql-passes",
  "readyset-telemetry-reporter",
  "readyset-tracing",
+ "readyset-version",
  "regex",
  "rust_decimal",
  "serde",
@@ -4434,6 +4435,7 @@ name = "readyset-version"
 version = "0.1.0"
 dependencies = [
  "const-str",
+ "serde",
 ]
 
 [[package]]

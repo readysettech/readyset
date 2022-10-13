@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::convert::{TryFrom, TryInto};
 
+use nom_sql::SqlIdentifier;
 use psql_srv as ps;
 use psql_srv::Column;
 use readyset::results::{ResultIterator, Results};
@@ -137,6 +138,45 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                 });
                 let mut rows: Vec<Vec<readyset_data::DfValue>> = Vec::new();
                 for v in vars {
+                    rows.push(vec![v.name.as_str().into(), v.value.into()]);
+                }
+
+                let resultset = Resultset::try_new(
+                    ResultIterator::owned(vec![Results::new(rows)]),
+                    &select_schema,
+                )?;
+                Ok(Select {
+                    schema: select_schema.try_into()?,
+                    resultset,
+                })
+            }
+            Noria(NoriaResult::MetaWithHeader(vars)) => {
+                let (col1_header, col2_header): (SqlIdentifier, SqlIdentifier) =
+                    (vars[0].name.clone(), vars[0].value.clone().into());
+                let select_schema = SelectSchema(readyset_client::backend::SelectSchema {
+                    use_bogo: false,
+                    schema: Cow::Owned(vec![
+                        ColumnSchema {
+                            column: nom_sql::Column {
+                                name: col1_header.clone(),
+                                table: None,
+                            },
+                            column_type: DfType::Text(Collation::default()),
+                            base: None,
+                        },
+                        ColumnSchema {
+                            column: nom_sql::Column {
+                                name: col2_header.clone(),
+                                table: None,
+                            },
+                            column_type: DfType::Text(Collation::default()),
+                            base: None,
+                        },
+                    ]),
+                    columns: Cow::Owned(vec![col1_header, col2_header]),
+                });
+                let mut rows: Vec<Vec<readyset_data::DfValue>> = Vec::new();
+                for v in vars.into_iter().skip(1) {
                     rows.push(vec![v.name.as_str().into(), v.value.into()]);
                 }
 

@@ -18,6 +18,7 @@ use readyset_server::Handle;
 use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer, TelemetryReporter};
 
 async fn setup() -> (mysql_async::Opts, Handle) {
+    readyset_tracing::init_test_logging();
     TestBuilder::default().build::<MySQLAdapter>().await
 }
 
@@ -1632,6 +1633,15 @@ async fn show_readyset_status() {
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
     let ret: Vec<mysql::Row> = conn.query("SHOW READYSET STATUS;").await.unwrap();
     assert!(ReadySetStatus::try_from(ret).is_ok());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn show_readyset_version() {
+    let (opts, _handle) = setup().await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    conn.query_drop("SHOW READYSET VERSION;")
+        .await
+        .expect("should be OK");
 }
 
 #[tokio::test(flavor = "multi_thread")]
