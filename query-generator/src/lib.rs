@@ -1043,7 +1043,8 @@ impl From<TableSpec> for CreateTableStatement {
                 .collect(),
             keys: spec.primary_key.map(|cn| {
                 vec![TableKey::PrimaryKey {
-                    name: None,
+                    index_name: None,
+                    constraint_name: None,
                     columns: vec![cn.into()],
                 }]
             }),

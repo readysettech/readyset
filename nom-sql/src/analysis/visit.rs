@@ -676,13 +676,18 @@ pub fn walk_table_key<'a, V: Visitor<'a>>(
     table_key: &'a mut TableKey,
 ) -> Result<(), V::Error> {
     match table_key {
-        TableKey::PrimaryKey { name: _, columns } => {
+        TableKey::PrimaryKey {
+            constraint_name: _,
+            index_name: _,
+            columns,
+        } => {
             for column in columns {
                 visitor.visit_column(column)?;
             }
         }
         TableKey::UniqueKey {
-            name: _,
+            constraint_name: _,
+            index_name: _,
             columns,
             index_type: _,
         } => {
@@ -690,13 +695,17 @@ pub fn walk_table_key<'a, V: Visitor<'a>>(
                 visitor.visit_column(column)?;
             }
         }
-        TableKey::FulltextKey { name: _, columns } => {
+        TableKey::FulltextKey {
+            index_name: _,
+            columns,
+        } => {
             for column in columns {
                 visitor.visit_column(column)?;
             }
         }
         TableKey::Key {
-            name: _,
+            constraint_name: _,
+            index_name: _,
             columns,
             index_type: _,
         } => {
@@ -705,7 +714,7 @@ pub fn walk_table_key<'a, V: Visitor<'a>>(
             }
         }
         TableKey::ForeignKey {
-            name: _,
+            constraint_name: _,
             index_name: _,
             columns,
             target_table,
@@ -722,7 +731,7 @@ pub fn walk_table_key<'a, V: Visitor<'a>>(
             }
         }
         TableKey::CheckConstraint {
-            name: _,
+            constraint_name: _,
             expr,
             enforced: _,
         } => {

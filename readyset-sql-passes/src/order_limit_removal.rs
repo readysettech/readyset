@@ -199,12 +199,14 @@ mod tests {
         let fields = vec![col1.clone(), col2, col3, col4.clone()];
         let keys = Some(vec![
             TableKey::UniqueKey {
-                name: None,
+                index_name: None,
+                constraint_name: None,
                 columns: vec![col4.column],
                 index_type: None,
             },
             TableKey::PrimaryKey {
-                name: None,
+                index_name: None,
+                constraint_name: None,
                 columns: vec![col1.column],
             },
         ]);
@@ -329,7 +331,8 @@ mod tests {
         .unwrap();
         // compound Primary
         let keys = Some(vec![TableKey::PrimaryKey {
-            name: None,
+            constraint_name: None,
+            index_name: None,
             columns: vec![col1.clone(), col2.clone()],
         }]);
         base_schema.get_mut(&Relation::from("t")).unwrap().keys = keys;
@@ -342,7 +345,8 @@ mod tests {
         );
         // compound Unique
         let keys = Some(vec![TableKey::UniqueKey {
-            name: None,
+            constraint_name: None,
+            index_name: None,
             columns: vec![col1, col2],
             index_type: None,
         }]);

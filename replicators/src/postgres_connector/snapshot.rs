@@ -644,7 +644,8 @@ mod tests {
             constraints: vec![ConstraintEntry {
                 name: "ar_internal_metadata_pkey".into(),
                 definition: TableKey::PrimaryKey {
-                    name: None,
+                    constraint_name: None,
+                    index_name: None,
                     columns: vec![Column {
                         name: "key".into(),
                         table: None,
@@ -666,8 +667,13 @@ mod tests {
         assert_eq!(create_table.keys.as_ref().unwrap().len(), 1);
         let pkey = create_table.keys.as_ref().unwrap().first().unwrap();
         match pkey {
-            TableKey::PrimaryKey { name, columns } => {
-                assert!(name.is_none());
+            TableKey::PrimaryKey {
+                constraint_name,
+                index_name,
+                columns,
+            } => {
+                assert!(constraint_name.is_none());
+                assert!(index_name.is_none());
                 assert_eq!(columns.len(), 1);
                 assert_eq!(columns.first().unwrap().name, "key");
             }

@@ -19,12 +19,14 @@ impl KeyDefinitionCoalescing for CreateTableStatement {
         if !pk.is_empty() {
             self.keys = match self.keys {
                 None => Some(vec![TableKey::PrimaryKey {
-                    name: None,
+                    index_name: None,
+                    constraint_name: None,
                     columns: pk,
                 }]),
                 Some(mut ks) => {
                     let new_key = TableKey::PrimaryKey {
-                        name: None,
+                        index_name: None,
+                        constraint_name: None,
                         columns: pk,
                     };
                     if !ks.contains(&new_key) {
@@ -82,7 +84,8 @@ mod tests {
         assert_eq!(
             ctq.keys,
             Some(vec![TableKey::PrimaryKey {
-                name: None,
+                index_name: None,
+                constraint_name: None,
                 columns: vec![Column::from("t.id")]
             }])
         );

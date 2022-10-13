@@ -12,7 +12,7 @@ use nom::IResult;
 use serde::{Deserialize, Serialize};
 
 use crate::column::{column_specification, ColumnSpecification};
-use crate::common::{statement_terminator, ws_sep_comma, TableKey};
+use crate::common::{debug_print, statement_terminator, ws_sep_comma, TableKey};
 use crate::create::key_specification;
 use crate::literal::literal;
 use crate::table::{table_reference, Relation};
@@ -155,12 +155,15 @@ fn add_column(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], AlterTableDe
 
 fn add_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], AlterTableDefinition> {
     move |i| {
+        debug_print("before add_key", i);
         let (i, _) = tag_no_case("add")(i)?;
         let (i, _) = whitespace1(i)?;
 
-        map(key_specification(dialect), |k| {
+        let (i, alter_table_def) = map(key_specification(dialect), |k| {
             AlterTableDefinition::AddKey(k)
-        })(i)
+        })(i)?;
+        debug_print("after add_key", i);
+        Ok((i, alter_table_def))
     }
 }
 
@@ -616,13 +619,15 @@ mod tests {
         #[test]
         fn flarum_alter_2() {
             let qstring = b"alter table `posts_likes` add primary key `posts_likes_post_id_user_id_primary`(`post_id`, `user_id`)";
+
             let res = test_parse!(alter_table_statement(Dialect::MySQL), qstring);
             assert_eq!(
                 res,
                 AlterTableStatement {
                     table: Relation::from("posts_likes"),
                     definitions: vec![AlterTableDefinition::AddKey(TableKey::PrimaryKey {
-                        name: Some("posts_likes_post_id_user_id_primary".into()),
+                        constraint_name: None,
+                        index_name: Some("posts_likes_post_id_user_id_primary".into()),
                         columns: vec![Column::from("post_id"), Column::from("user_id"),],
                     })],
                     only: false,
@@ -639,7 +644,8 @@ mod tests {
                 AlterTableStatement {
                     table: Relation::from("flags"),
                     definitions: vec![AlterTableDefinition::AddKey(TableKey::Key {
-                        name: Some("flags_created_at_index".into()),
+                        constraint_name: None,
+                        index_name: Some("flags_created_at_index".into()),
                         columns: vec![Column::from("created_at")],
                         index_type: None,
                     })],
@@ -657,7 +663,7 @@ mod tests {
                 AlterTableStatement {
                     table: Relation::from("flags"),
                     definitions: vec![AlterTableDefinition::AddKey(TableKey::ForeignKey {
-                        name: Some("flags_post_id_foreign".into()),
+                        constraint_name: Some("flags_post_id_foreign".into()),
                         index_name: None,
                         columns: vec![Column::from("post_id")],
                         target_table: Relation::from("posts"),
@@ -707,7 +713,7 @@ mod tests {
 
     mod postgres {
         use super::*;
-        use crate::{Column, SqlType};
+        use crate::{Column, IndexType, SqlType};
 
         #[test]
         fn parse_add_column() {
@@ -888,6 +894,128 @@ mod tests {
                 drop_behavior: None,
             };
             assert_eq!(res3.unwrap().1, expected);
+        }
+
+        fn setup_alter_key() -> (Option<SqlIdentifier>, Vec<Column>) {
+            (
+                Some("key_name".into()),
+                vec!["t1.c1".into(), "t2.c2".into()],
+            )
+        }
+
+        fn check_add_constraint(qstring: &str, table_key: TableKey) {
+            let expected = AlterTableStatement {
+                table: Relation {
+                    name: "t".into(),
+                    schema: None,
+                },
+                definitions: vec![AlterTableDefinition::AddKey(table_key)],
+                only: false,
+            };
+            let res1 = alter_table_statement(Dialect::PostgreSQL)(qstring.as_bytes());
+            assert_eq!(res1.unwrap().1, expected);
+        }
+
+        #[test]
+        fn parse_alter_add_constraint_key() {
+            let (index_name, columns) = setup_alter_key();
+            let qstring = "ALTER TABLE t ADD CONSTRAINT c KEY key_name (t1.c1, t2.c2)";
+            check_add_constraint(
+                qstring,
+                TableKey::Key {
+                    index_name,
+                    constraint_name: Some("c".into()),
+                    columns,
+                    index_type: None,
+                },
+            );
+        }
+
+        #[test]
+        fn parse_alter_add_index_type_constraint_key() {
+            let (index_name, columns) = setup_alter_key();
+            let index_type = Some(IndexType::BTree);
+            let qstring = "ALTER TABLE t ADD CONSTRAINT c KEY key_name (t1.c1, t2.c2) USING BTREE";
+            check_add_constraint(
+                qstring,
+                TableKey::Key {
+                    index_name,
+                    constraint_name: Some("c".into()),
+                    columns,
+                    index_type,
+                },
+            );
+        }
+
+        #[test]
+        fn parse_alter_add_constraint_primary_key() {
+            let (index_name, columns) = setup_alter_key();
+            let qstring = "ALTER TABLE t ADD CONSTRAINT c PRIMARY KEY key_name (t1.c1, t2.c2)";
+            check_add_constraint(
+                qstring,
+                TableKey::PrimaryKey {
+                    constraint_name: Some("c".into()),
+                    index_name,
+                    columns,
+                },
+            );
+        }
+
+        #[test]
+        fn parse_alter_add_constraint_unique_key() {
+            let (index_name, columns) = setup_alter_key();
+            let qstring = "ALTER TABLE t ADD CONSTRAINT c UNIQUE KEY key_name (t1.c1, t2.c2)";
+            check_add_constraint(
+                qstring,
+                TableKey::UniqueKey {
+                    constraint_name: Some("c".into()),
+                    index_name,
+                    columns,
+                    index_type: None,
+                },
+            );
+        }
+
+        #[test]
+        fn parse_alter_add_constraint_unique_key_index_type() {
+            let (index_name, columns) = setup_alter_key();
+            let index_type = Some(IndexType::Hash);
+            let qstring =
+                "ALTER TABLE t ADD CONSTRAINT c UNIQUE KEY key_name (t1.c1, t2.c2) USING HASH";
+            check_add_constraint(
+                qstring,
+                TableKey::UniqueKey {
+                    constraint_name: Some("c".into()),
+                    index_name,
+                    columns,
+                    index_type,
+                },
+            );
+        }
+
+        #[test]
+        fn parse_alter_add_constraint_foreign_key() {
+            let (index_name, columns) = setup_alter_key();
+            let target_table = Relation {
+                schema: None,
+                name: "t1".into(),
+            };
+            let target_columns: Vec<Column> =
+                ["t1.c1", "t1.c2"].into_iter().map(|c| c.into()).collect();
+
+            let qstring = "ALTER TABLE t ADD CONSTRAINT c FOREIGN KEY key_name (t1.c1, t2.c2) REFERENCES t1 (t1.c1, t1.c2)";
+            check_add_constraint(
+                qstring,
+                TableKey::ForeignKey {
+                    constraint_name: Some("c".into()),
+                    index_name,
+                    columns,
+                    target_table,
+                    target_columns,
+                    on_delete: None,
+                    on_update: None,
+                },
+            );
         }
     }
 }

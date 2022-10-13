@@ -257,15 +257,47 @@ impl<'ast> Visitor<'ast> for AnonymizeVisitor<'_> {
         &mut self,
         table_key: &'ast mut nom_sql::TableKey,
     ) -> Result<(), Self::Error> {
-        if let Some(ref mut name) = match table_key {
-            nom_sql::TableKey::PrimaryKey { ref mut name, .. }
-            | nom_sql::TableKey::UniqueKey { ref mut name, .. }
-            | nom_sql::TableKey::FulltextKey { ref mut name, .. }
-            | nom_sql::TableKey::Key { ref mut name, .. }
-            | nom_sql::TableKey::ForeignKey { ref mut name, .. }
-            | nom_sql::TableKey::CheckConstraint { ref mut name, .. } => name,
-        } {
-            self.anonymize_sql_identifier(name);
+        match table_key {
+            nom_sql::TableKey::PrimaryKey {
+                ref mut constraint_name,
+                ref mut index_name,
+                ..
+            }
+            | nom_sql::TableKey::UniqueKey {
+                ref mut constraint_name,
+                ref mut index_name,
+                ..
+            }
+            | nom_sql::TableKey::Key {
+                ref mut constraint_name,
+                ref mut index_name,
+                ..
+            }
+            | nom_sql::TableKey::ForeignKey {
+                ref mut constraint_name,
+                ref mut index_name,
+                ..
+            } => {
+                if let Some(ref mut constraint_name) = constraint_name {
+                    self.anonymize_sql_identifier(constraint_name);
+                }
+                if let Some(ref mut index_name) = index_name {
+                    self.anonymize_sql_identifier(index_name);
+                }
+            }
+            nom_sql::TableKey::FulltextKey { index_name, .. } => {
+                if let Some(ref mut index_name) = index_name {
+                    self.anonymize_sql_identifier(index_name);
+                }
+            }
+            nom_sql::TableKey::CheckConstraint {
+                ref mut constraint_name,
+                ..
+            } => {
+                if let Some(ref mut constraint_name) = constraint_name {
+                    self.anonymize_sql_identifier(constraint_name);
+                }
+            }
         }
 
         walk_table_key(self, table_key)

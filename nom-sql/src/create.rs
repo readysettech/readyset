@@ -13,8 +13,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::column::{column_specification, Column, ColumnSpecification};
 use crate::common::{
-    column_identifier_no_alias, if_not_exists, statement_terminator, ws_sep_comma, IndexType,
-    ReferentialAction, TableKey,
+    column_identifier_no_alias, debug_print, if_not_exists, statement_terminator, ws_sep_comma,
+    IndexType, ReferentialAction, TableKey,
 };
 use crate::compound_select::{nested_compound_selection, CompoundSelectStatement};
 use crate::create_table_options::{table_options, CreateTableOption};
@@ -200,20 +200,24 @@ pub fn index_col_list(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<
 // Parse rule for an individual key specification.
 pub fn key_specification(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
     move |i| {
-        alt((
+        debug_print("before key_specification", i);
+        let (i, table_key) = alt((
             check_constraint(dialect),
             full_text_key(dialect),
             primary_key(dialect),
             unique(dialect),
             key_or_index(dialect),
             foreign_key(dialect),
-        ))(i)
+        ))(i)?;
+        debug_print("after key_specification", i);
+        Ok((i, table_key))
     }
 }
 
 fn full_text_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
     move |i| {
-        let (remaining_input, (_, _, _, _, name, _, columns)) = tuple((
+        debug_print("before full_text_key", i);
+        let (remaining_input, (_, _, _, _, index_name, _, columns)) = tuple((
             tag_no_case("fulltext"),
             whitespace1,
             alt((tag_no_case("key"), tag_no_case("index"))),
@@ -227,28 +231,23 @@ fn full_text_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey>
             ),
         ))(i)?;
 
-        match name {
-            Some(name) => Ok((
-                remaining_input,
-                TableKey::FulltextKey {
-                    name: Some(name),
-                    columns,
-                },
-            )),
-            None => Ok((
-                remaining_input,
-                TableKey::FulltextKey {
-                    name: None,
-                    columns,
-                },
-            )),
-        }
+        debug_print("after full_text_key", remaining_input);
+        Ok((
+            remaining_input,
+            TableKey::FulltextKey {
+                index_name,
+                columns,
+            },
+        ))
     }
 }
 
 fn primary_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
     move |i| {
-        let (remaining_input, (_, name, _, columns, _)) = tuple((
+        debug_print("before primary_key", i);
+        let (i, constraint_name) = constraint_identifier(dialect)(i)?;
+        let (i, _) = whitespace0(i)?;
+        let (remaining_input, (_, index_name, _, columns, _)) = tuple((
             tag_no_case("primary key"),
             opt(preceded(whitespace1, dialect.identifier())),
             whitespace0,
@@ -263,7 +262,15 @@ fn primary_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
             )),
         ))(i)?;
 
-        Ok((remaining_input, TableKey::PrimaryKey { name, columns }))
+        debug_print("after primary_key", i);
+        Ok((
+            remaining_input,
+            TableKey::PrimaryKey {
+                constraint_name,
+                index_name,
+                columns,
+            },
+        ))
     }
 }
 
@@ -286,17 +293,30 @@ fn referential_action(i: &[u8]) -> IResult<&[u8], ReferentialAction> {
     ))(i)
 }
 
-fn foreign_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
+fn constraint_identifier(
+    dialect: Dialect,
+) -> impl Fn(&[u8]) -> IResult<&[u8], Option<SqlIdentifier>> {
+    // [CONSTRAINT [identifier]]
     move |i| {
-        // constraint users_group foreign key (group_id) references `groups` (id),
-        // CONSTRAINT identifier
+        debug_print("before constraint_identifier: ", i);
         let (i, name) = map(
-            opt(move |i| {
-                let (i, _) = tag_no_case("constraint")(i)?;
-                opt(preceded(whitespace1, dialect.identifier()))(i)
-            }),
+            opt(preceded(
+                tuple((tag_no_case("constraint"), whitespace1)),
+                opt(dialect.identifier()),
+            )),
             |n| n.flatten(),
         )(i)?;
+
+        debug_print("after constraint_identifier: ", i);
+
+        Ok((i, name))
+    }
+}
+
+fn foreign_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
+    move |i| {
+        debug_print("before foreign_key", i);
+        let (i, constraint_name) = constraint_identifier(dialect)(i)?;
 
         // FOREIGN KEY identifier
         let (i, _) = whitespace0(i)?;
@@ -304,6 +324,8 @@ fn foreign_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
         let (i, _) = whitespace0(i)?;
         let (i, _) = tag_no_case("key")(i)?;
         let (i, _) = whitespace1(i)?;
+
+        // (index_name)
         let (i, index_name) = opt(terminated(dialect.identifier(), whitespace1))(i)?;
 
         // (columns)
@@ -347,11 +369,12 @@ fn foreign_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
 
             referential_action(i)
         })(i)?;
+        debug_print("after foreign_key", i);
 
         Ok((
             i,
             TableKey::ForeignKey {
-                name,
+                constraint_name,
                 index_name,
                 columns,
                 target_table,
@@ -379,13 +402,16 @@ fn using_index(i: &[u8]) -> IResult<&[u8], IndexType> {
 
 fn unique(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
     move |i| {
+        debug_print("before unique", i);
+        let (i, constraint_name) = constraint_identifier(dialect)(i)?;
+        let (i, _) = whitespace0(i)?;
         let (i, _) = tag_no_case("unique")(i)?;
         let (i, _) = opt(preceded(
             whitespace1,
             alt((tag_no_case("key"), tag_no_case("index"))),
         ))(i)?;
         let (i, _) = whitespace0(i)?;
-        let (i, name) = opt(dialect.identifier())(i)?;
+        let (i, index_name) = opt(dialect.identifier())(i)?;
         let (i, _) = whitespace0(i)?;
         let (i, columns) = delimited(
             tag("("),
@@ -393,11 +419,13 @@ fn unique(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
             tag(")"),
         )(i)?;
         let (i, index_type) = opt(using_index)(i)?;
+        debug_print("after unique", i);
 
         Ok((
             i,
             TableKey::UniqueKey {
-                name,
+                constraint_name,
+                index_name,
                 columns,
                 index_type,
             },
@@ -407,8 +435,12 @@ fn unique(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
 
 fn key_or_index(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
     move |i| {
+        debug_print("before key_or_index", i);
+        let (i, constraint_name) = constraint_identifier(dialect)(i)?;
+
+        let (i, _) = whitespace0(i)?;
         let (i, _) = alt((tag_no_case("key"), tag_no_case("index")))(i)?;
-        let (i, name) = opt(preceded(whitespace1, dialect.identifier()))(i)?;
+        let (i, index_name) = opt(preceded(whitespace1, dialect.identifier()))(i)?;
         let (i, _) = whitespace0(i)?;
         let (i, columns) = delimited(
             tag("("),
@@ -417,10 +449,12 @@ fn key_or_index(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> 
         )(i)?;
         let (i, index_type) = opt(using_index)(i)?;
 
+        debug_print("after key_or_index", i);
         Ok((
             i,
             TableKey::Key {
-                name,
+                constraint_name,
+                index_name,
                 columns,
                 index_type,
             },
@@ -430,13 +464,9 @@ fn key_or_index(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> 
 
 fn check_constraint(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
     move |i| {
-        let (i, name) = map(
-            opt(preceded(
-                terminated(tag_no_case("constraint"), whitespace1),
-                opt(terminated(dialect.identifier(), whitespace1)),
-            )),
-            Option::flatten,
-        )(i)?;
+        debug_print("before check_constraint", i);
+        let (i, constraint_name) = constraint_identifier(dialect)(i)?;
+        let (i, _) = whitespace0(i)?;
         let (i, _) = tag_no_case("check")(i)?;
         let (i, _) = whitespace1(i)?;
         let (i, expr) = delimited(
@@ -454,14 +484,16 @@ fn check_constraint(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableK
             ),
         ))(i)?;
 
-        Ok((
+        let res = Ok((
             i,
             TableKey::CheckConstraint {
-                name,
+                constraint_name,
                 expr,
                 enforced,
             },
-        ))
+        ));
+        debug_print("after check_constraint", i);
+        res
     }
 }
 
@@ -755,7 +787,8 @@ mod tests {
                     ColumnSpecification::new(Column::from("email"), SqlType::VarChar(Some(255))),
                 ],
                 keys: Some(vec![TableKey::PrimaryKey {
-                    name: None,
+                    constraint_name: None,
+                    index_name: None,
                     columns: vec![Column::from("id")]
                 }]),
                 if_not_exists: false,
@@ -778,7 +811,8 @@ mod tests {
                     ColumnSpecification::new(Column::from("email"), SqlType::VarChar(Some(255))),
                 ],
                 keys: Some(vec![TableKey::UniqueKey {
-                    name: Some("id_k".into()),
+                    constraint_name: None,
+                    index_name: Some("id_k".into()),
                     columns: vec![Column::from("id")],
                     index_type: None
                 },]),
@@ -850,11 +884,12 @@ mod tests {
                 ],
                 keys: Some(vec![
                     TableKey::PrimaryKey {
-                        name: None,
+                        constraint_name: None,
+                        index_name: None,
                         columns: vec!["id".into()],
                     },
                     TableKey::ForeignKey {
-                        name: Some("users_group".into()),
+                        constraint_name: Some("users_group".into()),
                         columns: vec!["group_id".into()],
                         target_table: "groups".into(),
                         target_columns: vec!["id".into()],
@@ -919,7 +954,7 @@ mod tests {
                     ),
                 ],
                 keys: Some(vec![TableKey::ForeignKey {
-                    name: None,
+                    constraint_name: None,
                     columns: vec!["customer_id".into()],
                     target_table: "customers".into(),
                     target_columns: vec!["id".into()],
@@ -973,7 +1008,7 @@ mod tests {
                 ],
                 keys: Some(vec![
                     TableKey::ForeignKey {
-                        name: None,
+                        constraint_name: None,
                         columns: vec!["purchaser".into()],
                         target_table: "customers".into(),
                         target_columns: vec!["id".into()],
@@ -982,7 +1017,7 @@ mod tests {
                         on_update: None,
                     },
                     TableKey::ForeignKey {
-                        name: None,
+                        constraint_name: None,
                         columns: vec!["product_id".into()],
                         target_table: "products".into(),
                         target_columns: vec!["id".into()],
@@ -1053,7 +1088,8 @@ mod tests {
         assert_eq!(
             res.keys,
             Some(vec![TableKey::Key {
-                name: Some("age_key".into()),
+                constraint_name: None,
+                index_name: Some("age_key".into()),
                 columns: vec!["age".into()],
                 index_type: Some(IndexType::BTree),
             }])
@@ -1064,11 +1100,11 @@ mod tests {
     fn check_constraint_no_name() {
         let qs: &[&[u8]] = &[b"CHECK (x > 1)", b"CONSTRAINT CHECK (x > 1)"];
         for q in qs {
-            let res = test_parse!(key_specification(Dialect::MySQL), q);
+            let res = test_parse!(key_specification(Dialect::PostgreSQL), q);
             assert_eq!(
                 res,
                 TableKey::CheckConstraint {
-                    name: None,
+                    constraint_name: None,
                     expr: Expr::BinaryOp {
                         lhs: Box::new(Expr::Column("x".into())),
                         op: BinaryOperator::Greater,
@@ -1087,7 +1123,7 @@ mod tests {
         assert_eq!(
             res,
             TableKey::CheckConstraint {
-                name: Some("foo".into()),
+                constraint_name: Some("foo".into()),
                 expr: Expr::BinaryOp {
                     lhs: Box::new(Expr::Column("x".into())),
                     op: BinaryOperator::Greater,
@@ -1105,7 +1141,7 @@ mod tests {
         assert_eq!(
             res,
             TableKey::CheckConstraint {
-                name: Some("foo".into()),
+                constraint_name: Some("foo".into()),
                 expr: Expr::BinaryOp {
                     lhs: Box::new(Expr::Column("x".into())),
                     op: BinaryOperator::Greater,
@@ -1420,31 +1456,36 @@ mod tests {
                     ],
                     keys: Some(vec![
                         TableKey::FulltextKey {
-                            name: Some("index_comments_on_comment".into()),
+                            index_name: Some("index_comments_on_comment".into()),
                             columns: vec![Column::from("comment")]
                         },
                         TableKey::Key {
-                            name: Some("confidence_idx".into()),
+                            constraint_name: None,
+                            index_name: Some("confidence_idx".into()),
                             columns: vec![Column::from("confidence")],
                             index_type: None
                         },
                         TableKey::UniqueKey {
-                            name: Some("short_id".into()),
+                            constraint_name: None,
+                            index_name: Some("short_id".into()),
                             columns: vec![Column::from("short_id")],
                             index_type: None
                         },
                         TableKey::Key {
-                            name: Some("story_id_short_id".into()),
+                            constraint_name: None,
+                            index_name: Some("story_id_short_id".into()),
                             columns: vec![Column::from("story_id"), Column::from("short_id")],
                             index_type: None
                         },
                         TableKey::Key {
-                            name: Some("thread_id".into()),
+                            constraint_name: None,
+                            index_name: Some("thread_id".into()),
                             columns: vec![Column::from("thread_id")],
                             index_type: None,
                         },
                         TableKey::Key {
-                            name: Some("index_comments_on_user_id".into()),
+                            constraint_name: None,
+                            index_name: Some("index_comments_on_user_id".into()),
                             columns: vec![Column::from("user_id")],
                             index_type: None
                         },
@@ -1831,31 +1872,36 @@ mod tests {
                     ],
                     keys: Some(vec![
                         TableKey::FulltextKey {
-                            name: Some("index_comments_on_comment".into()),
+                            index_name: Some("index_comments_on_comment".into()),
                             columns: vec![Column::from("comment")]
                         },
                         TableKey::Key {
-                            name: Some("confidence_idx".into()),
+                            constraint_name: None,
+                            index_name: Some("confidence_idx".into()),
                             columns: vec![Column::from("confidence")],
                             index_type: None
                         },
                         TableKey::UniqueKey {
-                            name: Some("short_id".into()),
+                            constraint_name: None,
+                            index_name: Some("short_id".into()),
                             columns: vec![Column::from("short_id")],
                             index_type: None,
                         },
                         TableKey::Key {
-                            name: Some("story_id_short_id".into()),
+                            constraint_name: None,
+                            index_name: Some("story_id_short_id".into()),
                             columns: vec![Column::from("story_id"), Column::from("short_id")],
                             index_type: None
                         },
                         TableKey::Key {
-                            name: Some("thread_id".into()),
+                            constraint_name: None,
+                            index_name: Some("thread_id".into()),
                             columns: vec![Column::from("thread_id")],
                             index_type: None
                         },
                         TableKey::Key {
-                            name: Some("index_comments_on_user_id".into()),
+                            constraint_name: None,
+                            index_name: Some("index_comments_on_user_id".into()),
                             columns: vec![Column::from("user_id")],
                             index_type: None
                         },
@@ -2051,26 +2097,30 @@ mod tests {
                 ],
                 keys: Some(vec![
                     TableKey::PrimaryKey {
-                        name: None,
+                        constraint_name: None,
+                        index_name: None,
                         columns: vec!["id".into()]
                     },
                     TableKey::UniqueKey {
-                        name: Some("access_tokens_token_unique".into()),
+                        constraint_name: None,
+                        index_name: Some("access_tokens_token_unique".into()),
                         columns: vec!["token".into()],
                         index_type: None,
                     },
                     TableKey::Key {
-                        name: Some("access_tokens_user_id_foreign".into()),
+                        constraint_name: None,
+                        index_name: Some("access_tokens_user_id_foreign".into()),
                         columns: vec!["user_id".into()],
                         index_type: None,
                     },
                     TableKey::Key {
-                        name: Some("access_tokens_type_index".into()),
+                        constraint_name: None,
+                        index_name: Some("access_tokens_type_index".into()),
                         columns: vec!["type".into()],
                         index_type: None,
                     },
                     TableKey::ForeignKey {
-                        name: Some("access_tokens_user_id_foreign".into()),
+                        constraint_name: Some("access_tokens_user_id_foreign".into()),
                         columns: vec!["user_id".into()],
                         target_table: "users".into(),
                         target_columns: vec!["id".into()],

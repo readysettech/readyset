@@ -314,11 +314,13 @@ mod tests {
                     stmt.keys.unwrap(),
                     vec![
                         TableKey::PrimaryKey {
-                            name: None,
+                            constraint_name: None,
+                            index_name: None,
                             columns: vec!["id".into()]
                         },
                         TableKey::UniqueKey {
-                            name: None,
+                            constraint_name: None,
+                            index_name: None,
                             columns: vec!["value".into()],
                             index_type: None
                         }

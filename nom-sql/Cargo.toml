@@ -41,3 +41,6 @@ criterion = { version = "0.3", features = ["html_reports"] }
 [[bench]]
 name = "analysis"
 harness = false
+
+[features]
+debug = []

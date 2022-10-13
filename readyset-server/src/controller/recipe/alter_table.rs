@@ -195,11 +195,12 @@ mod tests {
             .unwrap()
         {
             TableKey::UniqueKey {
-                name,
+                constraint_name: _,
+                index_name,
                 columns,
                 index_type,
             } => {
-                assert_eq!(name.clone().unwrap(), SqlIdentifier::from("new_key"));
+                assert_eq!(index_name.clone().unwrap(), SqlIdentifier::from("new_key"));
                 assert_eq!(columns.len(), 1);
                 let column_spec = &columns[0];
                 assert_eq!(column_spec.name, "id");

@@ -22,6 +22,14 @@ use crate::table::Relation;
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Expr, FunctionExpr, Literal, SqlIdentifier};
 
+#[cfg(feature = "debug")]
+pub fn debug_print(tag: &str, i: &[u8]) {
+    eprintln!("{}: {}", tag, String::from_utf8_lossy(i))
+}
+
+#[cfg(not(feature = "debug"))]
+pub fn debug_print(_tag: &str, _i: &[u8]) {}
+
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum IndexType {
     BTree,
@@ -65,25 +73,28 @@ impl fmt::Display for ReferentialAction {
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum TableKey {
     PrimaryKey {
-        name: Option<SqlIdentifier>,
+        constraint_name: Option<SqlIdentifier>,
+        index_name: Option<SqlIdentifier>,
         columns: Vec<Column>,
     },
     UniqueKey {
-        name: Option<SqlIdentifier>,
+        constraint_name: Option<SqlIdentifier>,
+        index_name: Option<SqlIdentifier>,
         columns: Vec<Column>,
         index_type: Option<IndexType>,
     },
     FulltextKey {
-        name: Option<SqlIdentifier>,
+        index_name: Option<SqlIdentifier>,
         columns: Vec<Column>,
     },
     Key {
-        name: Option<SqlIdentifier>,
+        constraint_name: Option<SqlIdentifier>,
+        index_name: Option<SqlIdentifier>,
         columns: Vec<Column>,
         index_type: Option<IndexType>,
     },
     ForeignKey {
-        name: Option<SqlIdentifier>,
+        constraint_name: Option<SqlIdentifier>,
         index_name: Option<SqlIdentifier>,
         columns: Vec<Column>,
         target_table: Relation,
@@ -92,45 +103,77 @@ pub enum TableKey {
         on_update: Option<ReferentialAction>,
     },
     CheckConstraint {
-        name: Option<SqlIdentifier>,
+        // NOTE: MySQL dosn't allow the `CONSTRAINT (name)` prefix for a CHECK, but Postgres does
+        constraint_name: Option<SqlIdentifier>,
         expr: Expr,
         enforced: Option<bool>,
     },
 }
 
+impl TableKey {
+    pub fn constraint_name(&self) -> &Option<SqlIdentifier> {
+        match self {
+            TableKey::PrimaryKey {
+                constraint_name, ..
+            }
+            | TableKey::UniqueKey {
+                constraint_name, ..
+            }
+            | TableKey::Key {
+                constraint_name, ..
+            }
+            | TableKey::ForeignKey {
+                constraint_name, ..
+            }
+            | TableKey::CheckConstraint {
+                constraint_name, ..
+            } => constraint_name,
+            TableKey::FulltextKey { .. } => &None,
+        }
+    }
+}
+
 impl fmt::Display for TableKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if let Some(constraint_name) = self.constraint_name() {
+            write!(f, "CONSTRAINT `{constraint_name}` ")?;
+        }
         match self {
-            TableKey::PrimaryKey { name, columns } => {
+            TableKey::PrimaryKey {
+                index_name,
+                columns,
+                ..
+            } => {
                 write!(f, "PRIMARY KEY ")?;
-                if let Some(name) = name {
-                    write!(f, "`{}` ", name)?;
+                if let Some(index_name) = index_name {
+                    write!(f, "`{}` ", index_name)?;
                 }
                 write!(
                     f,
                     "({})",
                     columns
                         .iter()
-                        .map(|c| format!("`{}`", c.name))
+                        .map(|c| format!("{}", c))
                         .collect::<Vec<_>>()
                         .join(", ")
                 )
             }
             TableKey::UniqueKey {
-                name,
+                index_name,
                 columns,
                 index_type,
+                ..
             } => {
                 write!(f, "UNIQUE KEY ")?;
-                if let Some(ref name) = *name {
-                    write!(f, "`{}` ", name)?;
+                if let Some(ref index_name) = *index_name {
+                    write!(f, "`{}` ", index_name)?;
                 }
                 write!(
                     f,
                     "({})",
                     columns
                         .iter()
-                        .map(|c| format!("`{}`", c.name))
+                        .map(|c| format!("{}", c))
                         .collect::<Vec<_>>()
                         .join(", ")
                 )?;
@@ -139,36 +182,40 @@ impl fmt::Display for TableKey {
                 }
                 Ok(())
             }
-            TableKey::FulltextKey { name, columns } => {
+            TableKey::FulltextKey {
+                index_name,
+                columns,
+            } => {
                 write!(f, "FULLTEXT KEY ")?;
-                if let Some(ref name) = *name {
-                    write!(f, "`{}` ", name)?;
+                if let Some(ref index_name) = *index_name {
+                    write!(f, "`{index_name}` ")?;
                 }
                 write!(
                     f,
                     "({})",
                     columns
                         .iter()
-                        .map(|c| format!("`{}`", c.name))
+                        .map(|c| format!("{}", c))
                         .collect::<Vec<_>>()
                         .join(", ")
                 )
             }
             TableKey::Key {
-                name,
+                index_name,
                 columns,
                 index_type,
+                ..
             } => {
                 write!(f, "KEY ")?;
-                if let Some(name) = name {
-                    write!(f, "`{name}` ")?;
+                if let Some(index_name) = index_name {
+                    write!(f, "`{index_name}` ")?;
                 }
                 write!(
                     f,
                     "({})",
                     columns
                         .iter()
-                        .map(|c| format!("`{}`", c.name))
+                        .map(|c| format!("{}", c))
                         .collect::<Vec<_>>()
                         .join(", ")
                 )?;
@@ -178,25 +225,21 @@ impl fmt::Display for TableKey {
                 Ok(())
             }
             TableKey::ForeignKey {
-                name,
                 index_name,
                 columns: column,
                 target_table,
                 target_columns: target_column,
                 on_delete,
                 on_update,
+                ..
             } => {
                 write!(
                     f,
-                    "CONSTRAINT `{}` FOREIGN KEY {}({}) REFERENCES {} ({})",
-                    name.as_deref().unwrap_or(""),
+                    "FOREIGN KEY {} ({}) REFERENCES {} ({})",
                     index_name.as_deref().unwrap_or(""),
-                    column.iter().map(|c| format!("`{}`", c.name)).join(", "),
+                    column.iter().map(|c| format!("{}", c)).join(", "),
                     target_table,
-                    target_column
-                        .iter()
-                        .map(|c| format!("`{}`", c.name))
-                        .join(", ")
+                    target_column.iter().map(|c| format!("{}", c)).join(", ")
                 )?;
                 if let Some(on_delete) = on_delete {
                     write!(f, " ON DELETE {}", on_delete)?;
@@ -206,16 +249,12 @@ impl fmt::Display for TableKey {
                 }
                 Ok(())
             }
-            TableKey::CheckConstraint {
-                name,
-                expr,
-                enforced,
-            } => {
-                write!(f, "CONSTRAINT",)?;
-                if let Some(name) = name {
-                    write!(f, " `{}`", name)?;
-                }
+            TableKey::CheckConstraint { expr, enforced, .. } => {
+                // NOTE: MySQL does not allow an optional 'CONSTRAINT' here and expects only "ADD
+                // CHECK" https://dev.mysql.com/doc/refman/5.7/en/alter-table.html
 
+                // Postgres is fine with it, but since this is our own display, leave it out.
+                // https://www.postgresql.org/docs/current/sql-altertable.html
                 write!(f, " CHECK {}", expr)?;
 
                 if let Some(enforced) = enforced {

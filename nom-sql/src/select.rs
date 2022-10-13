@@ -1894,6 +1894,7 @@ mod tests {
         fn flarum_select_roundtrip_1() {
             let qstr = "select exists(select * from `groups` where `id` = ?) as `exists`";
             let res = test_parse!(selection(Dialect::MySQL), qstr.as_bytes());
+            dbg!(&res);
             let qstr = res.to_string();
             println!("{}", qstr);
             assert_eq!(
