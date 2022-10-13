@@ -218,6 +218,7 @@ async fn failure_during_query() {
 }
 
 #[clustertest]
+#[ignore = "Flaky test (ENG-1930)"]
 async fn query_cached_view_after_failure() {
     let mut deployment = readyset_mysql("ct_query_view_after_failure")
         .add_server(ServerParams::default())
