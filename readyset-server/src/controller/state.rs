@@ -1135,7 +1135,8 @@ impl DfState {
         match r {
             Ok(_) => self.recipe = new,
             Err(ref e) => {
-                error!(error = %e, "failed to apply recipe");
+                tracing::
+                    warn!(error = %e, "failed to apply recipe. Will retry periodically up to max_processing_mintues.");
             }
         }
 

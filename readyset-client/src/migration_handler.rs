@@ -268,6 +268,11 @@ where
         if Instant::now() - *start_time > self.max_retry {
             // We've exceeded the max amount of times we'll try running dry runs with this query.
             // It's probably unsupported, but we'll allow a proper migration determine that.
+            tracing::error!(
+                "Max retry time of {:?} exceeded for dry run migration. {:?} is probably unsupported",
+                self.max_retry,
+                view_request.to_anonymized_string()
+            );
             return;
         }
         let qname =

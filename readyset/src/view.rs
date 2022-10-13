@@ -31,6 +31,7 @@ use readyset_data::{DfType, DfValue};
 use readyset_errors::{
     internal_err, rpc_err, unsupported, view_err, ReadySetError, ReadySetResult,
 };
+use readyset_sql_passes::anonymize::{Anonymize, Anonymizer};
 use readyset_tracing::presampled::instrument_if_enabled;
 use readyset_tracing::propagation::Instrumented;
 use serde::{Deserialize, Serialize};
@@ -88,6 +89,18 @@ impl ViewCreateRequest {
             statement,
             schema_search_path,
         }
+    }
+
+    /// Anonymize the statement and schema_search_path of the ViewCreateRequest in place
+    pub fn to_anonymized_string(&self) -> String {
+        let mut anon = self.clone();
+        let mut anonymizer = Anonymizer::new();
+        anon.statement.anonymize(&mut anonymizer);
+        for id in anon.schema_search_path.iter_mut() {
+            id.anonymize(&mut anonymizer);
+        }
+
+        format!("{:?}", anon)
     }
 }
 
