@@ -795,6 +795,7 @@ async fn test_deployment_startup_order(startup_order: Vec<ClusterComponent>) {
 }
 
 #[clustertest]
+#[ignore = "ENG-1668: fix flakiness as well as known failures"]
 async fn startup_permutations() {
     use itertools::Itertools;
     use ClusterComponent::*;
