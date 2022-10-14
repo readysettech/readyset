@@ -1,7 +1,7 @@
 use std::collections::{hash_map, HashMap, HashSet};
 use std::convert::TryInto;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use database_utils::{DatabaseURL, UpstreamConfig};
@@ -33,6 +33,8 @@ use crate::postgres_connector::{
     PostgresReplicator, PostgresWalConnector, PUBLICATION_NAME, REPLICATION_SLOT,
 };
 use crate::table_filter::TableFilter;
+
+const WAIT_BEFORE_RESNAPSHOT: Duration = Duration::from_secs(3);
 
 const RESNAPSHOT_SLOT: &str = "readyset_resnapshot";
 
@@ -152,7 +154,10 @@ impl NoriaAdapter {
             }
         } {
             match err {
-                ReadySetError::ResnapshotNeeded => resnapshot = true,
+                ReadySetError::ResnapshotNeeded => {
+                    tokio::time::sleep(WAIT_BEFORE_RESNAPSHOT).await;
+                    resnapshot = true;
+                }
                 err => return Err(err),
             }
         }
