@@ -1,5 +1,9 @@
+#[cfg(feature = "fallback_cache")]
+use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::convert::TryInto;
+#[cfg(feature = "fallback_cache")]
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -394,6 +398,54 @@ impl UpstreamDatabase for MySqlUpstream {
         })
     }
 
+    #[cfg(feature = "fallback_cache")]
+    async fn execute<'a>(
+        &'a mut self,
+        id: u32,
+        params: &[DfValue],
+    ) -> Result<Self::QueryResult<'a>, Error> {
+        if let Some(ref cache) = self.fallback_cache {
+            let mut s = DefaultHasher::new();
+            (id, params).hash(&mut s);
+            let hash = format!("{:x}", s.finish());
+            if let Some(query_r) = cache.get(&hash) {
+                return Ok(query_r.into());
+            }
+            let params = dt_to_value_params(params)?;
+            let result = self
+                .conn
+                .exec_iter(
+                    self.prepared_statements.get(&id).ok_or(Error::ReadySet(
+                        ReadySetError::PreparedStatementMissing { statement_id: id },
+                    ))?,
+                    params,
+                )
+                .await?;
+            let r = handle_query_result!(result);
+            match r {
+                Ok(query_result @ QueryResult::ReadResult { .. }) => {
+                    let cached_result: CachedReadResult = query_result.async_try_into().await?;
+                    cache.insert(hash, cached_result.clone());
+                    Ok(cached_result.into())
+                }
+                _ => r,
+            }
+        } else {
+            let params = dt_to_value_params(params)?;
+            let result = self
+                .conn
+                .exec_iter(
+                    self.prepared_statements.get(&id).ok_or(Error::ReadySet(
+                        ReadySetError::PreparedStatementMissing { statement_id: id },
+                    ))?,
+                    params,
+                )
+                .await?;
+            handle_query_result!(result)
+        }
+    }
+
+    #[cfg(not(feature = "fallback_cache"))]
     async fn execute<'a>(
         &'a mut self,
         id: u32,
