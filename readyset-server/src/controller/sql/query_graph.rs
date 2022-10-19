@@ -3,8 +3,8 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::hash::{Hash, Hasher};
-use std::mem;
 use std::vec::Vec;
+use std::{iter, mem};
 
 use common::IndexType;
 use nom_sql::analysis::ReferredColumns;
@@ -420,7 +420,10 @@ impl Hash for QueryGraph {
 }
 
 /// Splits top level conjunctions into multiple predicates
-fn split_conjunctions(ces: Vec<Expr>) -> Vec<Expr> {
+fn split_conjunctions<'a, T>(ces: T) -> Vec<Expr>
+where
+    T: Iterator<Item = &'a Expr>,
+{
     let mut new_ces = Vec::new();
     for ce in ces {
         match ce {
@@ -429,8 +432,8 @@ fn split_conjunctions(ces: Vec<Expr>) -> Vec<Expr> {
                 lhs,
                 rhs,
             } => {
-                new_ces.extend(split_conjunctions(vec![*lhs.clone()]));
-                new_ces.extend(split_conjunctions(vec![*rhs.clone()]));
+                new_ces.extend(split_conjunctions(iter::once(&**lhs)));
+                new_ces.extend(split_conjunctions(iter::once(&**rhs)));
             }
             _ => {
                 new_ces.push(ce.clone());
@@ -1017,7 +1020,7 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
         )?;
 
         for (_, ces) in local_predicates.iter_mut() {
-            *ces = split_conjunctions(ces.clone());
+            *ces = split_conjunctions(ces.iter());
         }
 
         // 1. Add local predicates for each node that has them
