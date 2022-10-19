@@ -253,6 +253,8 @@ pub struct QueryGraph {
     pub join_order: Vec<JoinRef>,
     /// Global predicates (not associated with a particular relation)
     pub global_predicates: Vec<Expr>,
+    /// HAVING predicates (like global predicates, but applied after aggregate functions)
+    pub having_predicates: Vec<Expr>,
     /// The pagination (order, limit, offset) for the query, if any
     pub pagination: Option<Pagination>,
 }
@@ -415,6 +417,7 @@ impl Hash for QueryGraph {
         self.columns.hash(state);
         self.join_order.hash(state);
         self.global_predicates.hash(state);
+        self.having_predicates.hash(state);
         self.pagination.hash(state);
     }
 }
@@ -1104,6 +1107,11 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
         qg.global_predicates = global_predicates;
     }
 
+    // Add HAVING predicates
+    if let Some(having_expr) = st.having.as_ref() {
+        qg.having_predicates = split_conjunctions(iter::once(having_expr));
+    }
+
     for field in st.fields.iter() {
         match field {
             FieldDefinitionExpr::All | FieldDefinitionExpr::AllInTable(_) => {
@@ -1354,6 +1362,19 @@ mod tests {
                     column: agg_column
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn having_predicates() {
+        let qg = make_query_graph("select t.x from t having t.x > 2;");
+        assert_eq!(
+            qg.having_predicates,
+            vec![Expr::BinaryOp {
+                lhs: Box::new(Expr::Column("t.x".into())),
+                op: BinaryOperator::Greater,
+                rhs: Box::new(Expr::Literal(Literal::UnsignedInteger(2)))
+            }]
         );
     }
 
