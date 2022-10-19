@@ -55,4 +55,4 @@ vertical_tests = []
 # Redact the display of strings marked sensitive from logs and error messages
 redact_sensitive = ["launchpad/redact_sensitive"]
 failure_injection = ["readyset-client-adapter/failure_injection", "fail/failpoints"]
-
+fallback_cache = ["readyset-client-adapter/fallback_cache", "readyset-client/fallback_cache"]

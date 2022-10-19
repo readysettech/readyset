@@ -3,7 +3,9 @@ use std::convert::TryInto;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures_util::{Stream, StreamExt};
+use futures_util::Stream;
+#[cfg(feature = "fallback_cache")]
+use futures_util::StreamExt;
 use mysql_async::consts::{CapabilityFlags, StatusFlags};
 use mysql_async::prelude::Queryable;
 use mysql_async::{
@@ -81,6 +83,7 @@ impl<'a> From<CachedReadResult> for QueryResult<'a> {
     }
 }
 
+#[cfg(feature = "fallback_cache")]
 impl<'a> QueryResult<'a> {
     /// Can convert a stream ReadResult into a CachedReadResult.
     async fn async_try_into(self) -> Result<CachedReadResult, Error> {
@@ -121,6 +124,7 @@ pub struct MySqlUpstream {
     conn: Conn,
     prepared_statements: HashMap<StatementID, mysql_async::Statement>,
     upstream_config: UpstreamConfig,
+    #[cfg(feature = "fallback_cache")]
     fallback_cache: Option<FallbackCache<CachedReadResult>>,
 }
 
@@ -233,17 +237,17 @@ macro_rules! handle_query_result {
     }};
 }
 
-#[async_trait]
-impl UpstreamDatabase for MySqlUpstream {
-    type QueryResult<'a> = QueryResult<'a>;
-    type CachedReadResult = CachedReadResult;
-    type StatementMeta = StatementMeta;
-    type Error = Error;
-
-    async fn connect(
+impl MySqlUpstream {
+    async fn connect_inner(
         upstream_config: UpstreamConfig,
-        fallback_cache: Option<FallbackCache<Self::CachedReadResult>>,
-    ) -> Result<Self, Error> {
+    ) -> Result<
+        (
+            Conn,
+            HashMap<StatementID, mysql_async::Statement>,
+            UpstreamConfig,
+        ),
+        Error,
+    > {
         // CLIENT_SESSION_TRACK is required for GTID information to be sent in OK packets on commits
         // GTID information is used for RYW
         // Currently this causes rows affected to return an incorrect result, so this is feature
@@ -281,11 +285,43 @@ impl UpstreamDatabase for MySqlUpstream {
         };
         span.in_scope(|| info!("Established connection to upstream"));
         let prepared_statements = HashMap::new();
+        Ok((conn, prepared_statements, upstream_config))
+    }
+}
+
+#[async_trait]
+impl UpstreamDatabase for MySqlUpstream {
+    type QueryResult<'a> = QueryResult<'a>;
+    type CachedReadResult = CachedReadResult;
+    type StatementMeta = StatementMeta;
+    type Error = Error;
+
+    #[cfg(feature = "fallback_cache")]
+    async fn connect(
+        upstream_config: UpstreamConfig,
+        fallback_cache: Option<FallbackCache<Self::CachedReadResult>>,
+    ) -> Result<Self, Error> {
+        let (conn, prepared_statements, upstream_config) =
+            Self::connect_inner(upstream_config).await?;
         Ok(Self {
             conn,
             prepared_statements,
             upstream_config,
             fallback_cache,
+        })
+    }
+
+    #[cfg(not(feature = "fallback_cache"))]
+    async fn connect(
+        upstream_config: UpstreamConfig,
+        _: Option<FallbackCache<Self::CachedReadResult>>,
+    ) -> Result<Self, Error> {
+        let (conn, prepared_statements, upstream_config) =
+            Self::connect_inner(upstream_config).await?;
+        Ok(Self {
+            conn,
+            prepared_statements,
+            upstream_config,
         })
     }
 
@@ -297,6 +333,7 @@ impl UpstreamDatabase for MySqlUpstream {
         self.conn.opts().db_name()
     }
 
+    #[cfg(feature = "fallback_cache")]
     async fn reset(&mut self) -> Result<(), Error> {
         let opts = self.conn.opts().clone();
         let conn = Conn::new(opts).await?;
@@ -315,6 +352,24 @@ impl UpstreamDatabase for MySqlUpstream {
                 prepared_statements,
                 upstream_config,
                 fallback_cache,
+            },
+        );
+        let _ = old_self.conn.disconnect().await as Result<(), _>;
+        Ok(())
+    }
+
+    #[cfg(not(feature = "fallback_cache"))]
+    async fn reset(&mut self) -> Result<(), Error> {
+        let opts = self.conn.opts().clone();
+        let conn = Conn::new(opts).await?;
+        let prepared_statements = HashMap::new();
+        let upstream_config = self.upstream_config.clone();
+        let old_self = std::mem::replace(
+            self,
+            Self {
+                conn,
+                prepared_statements,
+                upstream_config,
             },
         );
         let _ = old_self.conn.disconnect().await as Result<(), _>;
@@ -357,6 +412,7 @@ impl UpstreamDatabase for MySqlUpstream {
         handle_query_result!(result)
     }
 
+    #[cfg(feature = "fallback_cache")]
     async fn query<'a, S>(&'a mut self, query: S) -> Result<Self::QueryResult<'a>, Error>
     where
         S: AsRef<str> + Send + Sync + 'a,
@@ -380,6 +436,15 @@ impl UpstreamDatabase for MySqlUpstream {
             let result = self.conn.query_iter(query).await?;
             handle_query_result!(result)
         }
+    }
+
+    #[cfg(not(feature = "fallback_cache"))]
+    async fn query<'a, S>(&'a mut self, query: S) -> Result<Self::QueryResult<'a>, Error>
+    where
+        S: AsRef<str> + Send + Sync + 'a,
+    {
+        let result = self.conn.query_iter(query).await?;
+        handle_query_result!(result)
     }
 
     /// Executes the given query on the mysql backend.

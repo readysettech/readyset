@@ -622,7 +622,7 @@ where
             FallbackCache<
                 <<H as ConnectionHandler>::UpstreamDatabase as UpstreamDatabase>::CachedReadResult,
             >,
-        > = if options.enable_fallback_cache {
+        > = if cfg!(feature = "fallback_cache") && options.enable_fallback_cache {
             Some(FallbackCache::new())
         } else {
             None
