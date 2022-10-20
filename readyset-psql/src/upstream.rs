@@ -12,7 +12,7 @@ use pgsql::{GenericResult, Row, SimpleQueryMessage};
 use psql_srv::Column;
 use readyset::ColumnSchema;
 use readyset_client::fallback_cache::FallbackCache;
-use readyset_client::upstream_database::NoriaCompare;
+use readyset_client::upstream_database::{NoriaCompare, UpstreamDestination};
 use readyset_client::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
 use readyset_data::DfValue;
 use readyset_errors::{unsupported, ReadySetError};
@@ -47,6 +47,8 @@ pub enum QueryResult {
     Command,
     SimpleQuery(Vec<SimpleQueryMessage>),
 }
+
+impl UpstreamDestination for QueryResult {}
 
 #[derive(Debug, Clone)]
 pub struct StatementMeta {

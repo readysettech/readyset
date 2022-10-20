@@ -16,3 +16,6 @@ nom-sql = { path = "../nom-sql" }
 
 [lib]
 path = "src/lib.rs"
+
+[features]
+fallback_cache = []

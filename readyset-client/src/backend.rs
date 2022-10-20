@@ -107,7 +107,7 @@ use crate::query_handler::SetBehavior;
 use crate::query_status_cache::QueryStatusCache;
 use crate::upstream_database::NoriaCompare;
 pub use crate::upstream_database::UpstreamPrepare;
-use crate::{rewrite, QueryHandler, UpstreamDatabase};
+use crate::{rewrite, QueryHandler, UpstreamDatabase, UpstreamDestination};
 
 pub mod noria_connector;
 
@@ -763,9 +763,14 @@ where
         let upstream = upstream.ok_or_else(|| {
             ReadySetError::Internal("This case requires an upstream connector".to_string())
         })?;
-        event.destination = Some(QueryDestination::Upstream);
         let _t = event.start_upstream_timer();
-        upstream.query(query).await.map(QueryResult::Upstream)
+        let result = upstream.query(query).await;
+        drop(_t);
+        event.destination = Some(match &result {
+            Ok(qr) => qr.destination(),
+            Err(_) => QueryDestination::Upstream,
+        });
+        result.map(QueryResult::Upstream)
     }
 
     /// Prepares query on the mysql_backend, if present, when it cannot be parsed or prepared by

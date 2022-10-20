@@ -5,6 +5,7 @@ use async_trait::async_trait;
 pub use database_utils::UpstreamConfig;
 use nom_sql::SqlIdentifier;
 use readyset::ColumnSchema;
+use readyset_client_metrics::QueryDestination;
 use readyset_data::DfValue;
 use readyset_errors::ReadySetError;
 
@@ -42,6 +43,12 @@ pub trait IsFatalError {
     fn is_fatal(&self) -> bool;
 }
 
+pub trait UpstreamDestination {
+    fn destination(&self) -> QueryDestination {
+        QueryDestination::Upstream
+    }
+}
+
 /// A connector to some kind of upstream database which can be used for passthrough write queries
 /// and fallback read queries.
 ///
@@ -58,7 +65,7 @@ pub trait UpstreamDatabase: Sized + Send {
     /// This type is used as the value inside of [`QueryResult::Upstream`][]
     ///
     /// [`QueryResult::Upstream`]: crate::backend::QueryResult::Upstream
-    type QueryResult<'a>: Debug
+    type QueryResult<'a>: Debug + UpstreamDestination
     where
         Self: 'a;
 

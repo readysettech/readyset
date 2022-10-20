@@ -19,8 +19,9 @@ use nom_sql::SqlIdentifier;
 use pin_project::pin_project;
 use readyset::ColumnSchema;
 use readyset_client::fallback_cache::FallbackCache;
-use readyset_client::upstream_database::NoriaCompare;
+use readyset_client::upstream_database::{NoriaCompare, UpstreamDestination};
 use readyset_client::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
+use readyset_client_metrics::QueryDestination;
 use readyset_data::DfValue;
 use readyset_errors::{internal_err, ReadySetError};
 use tracing::{error, info, info_span, Instrument};
@@ -72,6 +73,22 @@ pub enum QueryResult<'a> {
     Command {
         status_flags: StatusFlags,
     },
+}
+
+impl<'a> UpstreamDestination for QueryResult<'a> {
+    #[cfg(feature = "fallback_cache")]
+    fn destination(&self) -> QueryDestination {
+        if matches!(self, QueryResult::CachedReadResult(..)) {
+            QueryDestination::FallbackCache
+        } else {
+            QueryDestination::Upstream
+        }
+    }
+
+    #[cfg(not(feature = "fallback_cache"))]
+    fn destination(&self) -> QueryDestination {
+        QueryDestination::Upstream
+    }
 }
 
 #[derive(Debug, Clone)]

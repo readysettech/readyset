@@ -41,4 +41,4 @@ health-reporter = { path = "../health-reporter" }
 
 [features]
 failure_injection = ["fail/failpoints"]
-fallback_cache = ["readyset-client/fallback_cache"]
+fallback_cache = ["readyset-client/fallback_cache", "readyset-client-metrics/fallback_cache"]
