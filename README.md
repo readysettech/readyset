@@ -27,42 +27,22 @@ ReadySet is a lightweight SQL caching engine that precomputes frequently-accesse
 </p>
 <br>
 
-ReadySet acts as both a SQL cache and a proxy– when you first connect ReadySet to your application, it defaults to proxying all of your queries to your backing database, so it doesn't change the behavior of your application.
+ReadySet acts as both a SQL cache and a proxy. When you first connect ReadySet to your application, it defaults to proxying all of your queries to your backing database, so it doesn't change the behavior of your application.
 
 From there, you can monitor the performance of your queries using the ReadySet dashboard, and cache a subset of them in ReadySet. ReadySet automatically keeps cached results up-to-date over time as the underlying data in your database changes, so there's no need to write cache maintenance logic.
 
-
 ## Getting Started
 
-### Try ReadySet in 5 mins
-The ReadySet orchestrator is a command line tool that uses Docker Compose to spin up a ReadySet instance on your local machine. The following command downloads and runs the ReadySet orchestrator:
+Integrating with ReadySet is straight-forward:
 
-```
-bash -c "$(curl -sSL https://launch.readyset.io)"
-```
-The orchestrator will prompt you to select a wire protocol, and to connect ReadySet to an existing database (or create a new one).
+1. Deploy ReadySet and connect it to your MySQL or Postgres database.
+2. Change your application's connection string to point at ReadySet.
+3. Profile queries in the ReadySet Dashboard.
+4. Cache queries using ReadySet's custom SQL commands.
 
-### Connect to ReadySet
+To run through this process on your local machine, see the [Quickstart](https://docs.readyset.io/guides/quickstart/).
 
-- **To connect to ReadySet via the MySQL or Postgres command line**, run the command that the orchestrator prints after successfully deploying a ReadySet instance.
-- **To connect ReadySet to your application**, use the ReadySet connection string (printed by the orchestrator after successfully deploying ReadySet) in the same way you would if it were a MySQL or Postgres connection string. Check out our [docs](https://docs.readyset.io/connecting) for more information.
-
-Once you connect to ReadySet, you can start issuing queries as you would with a traditional database.
-
-### Monitor Query Performance
-
-By default, all queries sent to ReadySet are proxied to the backing database. You can see the current list of proxied queries and their performance profiles via the ReadySet dashboard which is accessible on `http://localhost:4000`.
-
-
-### Cache Queries
-ReadySet supports caching both prepared statements (i.e. parameterized queries) and one-off queries. To cache a query in ReadySet, you’ll need either the query ID (which can be found in the dashboard, or by running `SHOW CACHES`) or the full query text (i.e. the `SELECT` statement).
-
-From there, you can run `CREATE CACHE FROM <query ID>` or `CREATE CACHE FROM <select statement>` via the MySQL or Postgres client.
-
-#### Write Handling
-You can either send writes to ReadySet or directly to your backing database. If you send ReadySet a write, it will be proxied to your backing database.  ReadySet waits to receive updates from your database's bin logs before updating the cached state to reflect those writes.
-
-**Note:** The ReadySet Orchestrator is updated frequently with releases built off our internal ReadySet repository. Because of this, the orchestrator may have features not yet in our public repo. We're working on making our live codebase available on Github.
+To run through this process in a cloud environment, see [Deploy with Kubernetes](https://docs.readyset.io/guides/deploy-readyset-kubernetes/) or [Deploy with ReadySet Cloud](https://docs.readyset.io/guides/deploy-readyset-cloud/).
 
 ## FAQs
 **Q: How does ReadySet work under the hood?**
