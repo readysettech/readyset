@@ -103,6 +103,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3c07dab4369547dbe5114677b33fbbf724971019f3818172d59a97a61c774ffd"
 
 [[package]]
+name = "assert_unordered"
+version = "0.3.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1c74323b7881323eb351134e08ee5331594826789557afef8e309baf481b2264"
+dependencies = [
+ "ansi_term 0.12.1",
+]
+
+[[package]]
 name = "async-bincode"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4264,6 +4273,7 @@ dependencies = [
  "anyhow",
  "array2",
  "assert_approx_eq",
+ "assert_unordered",
  "async-bincode",
  "backtrace",
  "bincode",

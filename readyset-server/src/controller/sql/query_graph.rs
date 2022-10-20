@@ -7,6 +7,7 @@ use std::vec::Vec;
 use std::{iter, mem};
 
 use common::IndexType;
+use nom_sql::analysis::visit::{walk_expr, Visitor};
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
     BinaryOperator, Column, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, InValue,
@@ -749,6 +750,60 @@ fn collect_join_predicates(cond: Expr, out: &mut Vec<JoinPredicate>) -> ReadySet
     }
 }
 
+/// Processes the provided HAVING expression by extracting aggregates, splitting predicates, and
+/// replacing aggregates in predicates with column references.
+///
+/// Note that `aggregates` is an out parameter; the return value of the function is the modified
+/// predicate Expr values, and the extracted aggregates are saved separately in the `aggregates`
+/// map.
+fn extract_having_aggregates(
+    having_expr: &Expr,
+    aggregates: &mut HashMap<FunctionExpr, SqlIdentifier>,
+) -> Vec<Expr> {
+    let mut having_predicates = split_conjunctions(iter::once(having_expr));
+
+    #[derive(Default)]
+    struct AggregateFinder {
+        result: Vec<(FunctionExpr, SqlIdentifier)>,
+    }
+
+    impl<'ast> Visitor<'ast> for AggregateFinder {
+        type Error = !;
+
+        fn visit_expr(&mut self, expr: &'ast mut Expr) -> Result<(), Self::Error> {
+            if matches!(expr, Expr::Call(fun) if is_aggregate(fun)) {
+                let name: SqlIdentifier = expr.to_string().into();
+                let col_expr = Expr::Column(nom_sql::Column {
+                    name: name.clone(),
+                    table: None,
+                });
+                let agg_expr = mem::replace(expr, col_expr);
+                let Expr::Call(fun) = agg_expr else { unreachable!("Checked matches above") };
+                self.result.push((fun, name));
+                Ok(())
+            } else {
+                walk_expr(self, expr)
+            }
+        }
+
+        fn visit_select_statement(
+            &mut self,
+            _: &'ast mut SelectStatement,
+        ) -> Result<(), Self::Error> {
+            // Don't walk into subqueries
+            Ok(())
+        }
+    }
+
+    let mut af = AggregateFinder::default();
+    for pred in having_predicates.iter_mut() {
+        let _ = af.visit_expr(pred);
+    }
+    aggregates.extend(af.result);
+
+    having_predicates
+}
+
 /// Convert limit and offset fields to an optional constant numeric limit and optional placeholder
 /// for the offset
 pub(crate) fn extract_limit_offset(
@@ -1107,9 +1162,11 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
         qg.global_predicates = global_predicates;
     }
 
-    // Add HAVING predicates
+    // Add HAVING predicates and aggregates. Note that unlike below for selected columns, we don't
+    // add any found aggregate functions in the HAVING clause to qg.columns, since we don't want to
+    // necessarily return these in the query results.
     if let Some(having_expr) = st.having.as_ref() {
-        qg.having_predicates = split_conjunctions(iter::once(having_expr));
+        qg.having_predicates = extract_having_aggregates(having_expr, &mut qg.aggregates);
     }
 
     for field in st.fields.iter() {
@@ -1287,6 +1344,7 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
 #[allow(clippy::panic)]
 #[cfg(test)]
 mod tests {
+    use assert_unordered::assert_eq_unordered;
     use nom_sql::{parse_query, Dialect, FunctionExpr, SqlQuery};
 
     use super::*;
@@ -1366,7 +1424,7 @@ mod tests {
     }
 
     #[test]
-    fn having_predicates() {
+    fn having_predicates_and_aggregates() {
         let qg = make_query_graph("select t.x from t having t.x > 2;");
         assert_eq!(
             qg.having_predicates,
@@ -1376,6 +1434,53 @@ mod tests {
                 rhs: Box::new(Expr::Literal(Literal::UnsignedInteger(2)))
             }]
         );
+        assert_eq!(qg.aggregates, HashMap::new());
+
+        let qg = make_query_graph(
+            "select t.x, sum(t.y) from t group by t.x having min(t.y) > 1 and sum(t.y) > 3;",
+        );
+        assert_eq_unordered!(
+            qg.having_predicates,
+            vec![
+                Expr::BinaryOp {
+                    lhs: Box::new(Expr::Column(Column {
+                        name: "min(`t`.`y`)".into(),
+                        table: None
+                    })),
+                    op: BinaryOperator::Greater,
+                    rhs: Box::new(Expr::Literal(Literal::UnsignedInteger(1)))
+                },
+                Expr::BinaryOp {
+                    lhs: Box::new(Expr::Column(Column {
+                        name: "sum(`t`.`y`)".into(),
+                        table: None
+                    })),
+                    op: BinaryOperator::Greater,
+                    rhs: Box::new(Expr::Literal(Literal::UnsignedInteger(3)))
+                },
+            ]
+        );
+
+        let expected_aggs = [
+            (
+                FunctionExpr::Min(Box::new(Expr::Column(Column {
+                    name: "y".into(),
+                    table: Some("t".into()),
+                }))),
+                "min(`t`.`y`)".into(),
+            ),
+            (
+                FunctionExpr::Sum {
+                    expr: Box::new(Expr::Column(Column {
+                        name: "y".into(),
+                        table: Some("t".into()),
+                    })),
+                    distinct: false,
+                },
+                "sum(`t`.`y`)".into(),
+            ),
+        ];
+        assert_eq!(qg.aggregates, HashMap::from(expected_aggs));
     }
 
     #[test]
