@@ -1758,7 +1758,21 @@ impl SqlToMirConverter {
 
             new_node_count += func_nodes.len();
 
-            // 9. Get the final node
+            // 9. Add predicate nodes for HAVING after GROUP BY nodes
+            for (i, p) in qg.having_predicates.iter().enumerate() {
+                let Some(parent) = prev_node else { internal!() };
+                let hp_name =
+                    format!("q_{:x}_h{}_{}", qg.signature().hash, new_node_count, i).into();
+                let pns = self.make_predicate_nodes(hp_name, parent, p, 0)?;
+
+                invariant!(!pns.is_empty());
+                new_node_count += pns.len();
+                #[allow(clippy::unwrap_used)] // checked above
+                prev_node = Some(pns.iter().last().unwrap().clone());
+                predicate_nodes.extend(pns);
+            }
+
+            // 10. Get the final node
             let mut final_node: MirNodeRef = match prev_node {
                 Some(n) => n,
                 None => {
@@ -1774,7 +1788,7 @@ impl SqlToMirConverter {
                 }
             };
 
-            // 10. Potentially insert TopK or Paginate node below the final node
+            // 11. Potentially insert TopK or Paginate node below the final node
             // XXX(malte): this adds a bogokey if there are no parameter columns to do the TopK
             // over, but we could end up in a stick place if we reconcile/combine multiple
             // queries (due to compound select queries) that do not all have the bogokey!
@@ -1846,7 +1860,7 @@ impl SqlToMirConverter {
             nodes_added.extend(func_nodes);
             nodes_added.extend(predicate_nodes);
 
-            // 10. Generate leaf views that expose the query result
+            // 12. Generate leaf views that expose the query result
             let mut projected_columns: Vec<Column> = qg
                 .columns
                 .iter()
