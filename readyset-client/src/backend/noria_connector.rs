@@ -551,7 +551,7 @@ impl NoriaConnector {
                 },
                 ColumnSchema {
                     column: nom_sql::Column {
-                        name: "always".into(),
+                        name: "fallback behavior".into(),
                         table: None,
                     },
                     column_type: DfType::DEFAULT_TEXT,
@@ -559,7 +559,11 @@ impl NoriaConnector {
                 },
             ]),
 
-            columns: Cow::Owned(vec!["name".into(), "query".into(), "always".into()]),
+            columns: Cow::Owned(vec![
+                "name".into(),
+                "query".into(),
+                "fallback behavior".into(),
+            ]),
         };
         let data = views
             .into_iter()
@@ -568,7 +572,11 @@ impl NoriaConnector {
                 vec![
                     DfValue::from(n.to_string()),
                     DfValue::from(q.to_string()),
-                    DfValue::from(if always { "yes" } else { "no" }),
+                    DfValue::from(if always {
+                        "no fallback"
+                    } else {
+                        "fallback allowed"
+                    }),
                 ]
             })
             .collect::<Vec<_>>();

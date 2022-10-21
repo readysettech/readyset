@@ -1600,7 +1600,7 @@ async fn create_query_cache_where_in() {
     let queries: Vec<(String, String, String)> = conn.query("SHOW CACHES;").await.unwrap();
     assert!(queries
         .iter()
-        .any(|(query_name, _, always)| query_name == "`test`" && always == "no"));
+        .any(|(query_name, _, always)| query_name == "`test`" && always == "fallback allowed"));
 
     conn.query_drop("CREATE CACHE test FROM SELECT id FROM t WHERE id IN (?, ?);")
         .await
@@ -1624,7 +1624,7 @@ async fn show_caches_with_always() {
     let queries: Vec<(String, String, String)> = conn.query("SHOW CACHES;").await.unwrap();
     assert!(queries
         .iter()
-        .any(|(query_name, _, always)| query_name == "`test_always`" && always == "yes"));
+        .any(|(query_name, _, always)| query_name == "`test_always`" && always == "no fallback"));
 }
 
 #[tokio::test(flavor = "multi_thread")]
