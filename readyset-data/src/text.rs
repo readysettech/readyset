@@ -12,7 +12,7 @@ use readyset_errors::{ReadySetError, ReadySetResult};
 
 use crate::{Array, Collation, DfType, DfValue};
 
-const TINYTEXT_WIDTH: usize = 14;
+pub(crate) const TINYTEXT_WIDTH: usize = 14;
 
 /// A nibble of [`Collation`], and a nibble of length (since length can never be greater than
 /// [`TINYTEXT_WIDTH`])
@@ -395,7 +395,9 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
                 // String is too long, so have to truncate and allocate a new one
                 // TODO: can we do something smarter, like keep a len field, and clone the existing
                 // Arc?
-                Ok(DfValue::from(&str[..l as usize]))
+                // TODO: avoiding the extra String allocation here would be *nice*, but it's
+                // annoying
+                Ok(DfValue::from(str.chars().take(l as _).collect::<String>()))
             }
 
             DfType::Blob => Ok(DfValue::ByteArray(str.as_bytes().to_vec().into())),

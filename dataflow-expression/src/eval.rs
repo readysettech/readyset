@@ -229,6 +229,14 @@ mod tests {
     }
 
     #[test]
+    fn cast_to_char_with_multibyte_truncation() {
+        assert_eq!(
+            eval_expr("CAST('é' AS CHAR(1))", nom_sql::Dialect::MySQL),
+            DfValue::from("é")
+        );
+    }
+
+    #[test]
     fn value_truthiness() {
         assert_eq!(
             Expr::Op {
