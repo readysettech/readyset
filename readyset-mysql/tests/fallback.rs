@@ -701,3 +701,29 @@ async fn invalid_sql_parsing_failed_doesnt_show_proxied() {
 
     assert!(proxied_queries.is_empty());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn switch_database_with_use() {
+    let (opts, _handle) = setup().await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+
+    conn.query_drop("DROP DATABASE IF EXISTS s1;")
+        .await
+        .unwrap();
+    conn.query_drop("DROP DATABASE IF EXISTS s2;")
+        .await
+        .unwrap();
+    conn.query_drop("CREATE DATABASE s1;").await.unwrap();
+    conn.query_drop("CREATE DATABASE s2;").await.unwrap();
+    conn.query_drop("CREATE TABLE s1.t (a int)").await.unwrap();
+    conn.query_drop("CREATE TABLE s2.t (b int)").await.unwrap();
+    conn.query_drop("CREATE TABLE s2.t2 (c int)").await.unwrap();
+
+    conn.query_drop("USE s1;").await.unwrap();
+    conn.query_drop("SELECT a FROM t").await.unwrap();
+
+    conn.query_drop("USE s2;").await.unwrap();
+    conn.query_drop("SELECT b FROM t").await.unwrap();
+    conn.query_drop("SELECT c FROM t2").await.unwrap();
+}

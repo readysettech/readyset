@@ -1939,18 +1939,22 @@ where
     async fn query_adhoc_non_select<'a>(
         noria: &'a mut NoriaConnector,
         mut upstream: Option<&'a mut DB>,
-        query: &'a str,
+        raw_query: &'a str,
         event: &mut QueryExecutionEvent,
-        parse_result: SqlQuery,
+        query: SqlQuery,
         settings: &BackendSettings,
         state: &mut BackendState<DB>,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
-        let parsed_query = &parse_result;
-
-        match &parse_result {
-            SqlQuery::Set(s) => {
-                Self::handle_set(noria, upstream.as_mut(), settings, state, query, s, event)?
-            }
+        match &query {
+            SqlQuery::Set(s) => Self::handle_set(
+                noria,
+                upstream.as_mut(),
+                settings,
+                state,
+                raw_query,
+                s,
+                event,
+            )?,
             SqlQuery::Use(UseStatement { database }) => {
                 noria.set_schema_search_path(vec![database.clone()])
             }
@@ -1961,7 +1965,7 @@ where
             // Upstream reads are tried when noria reads produce an error. Upstream writes are done
             // by default when the upstream connector is present.
             if let Some(upstream) = upstream {
-                match parsed_query {
+                match query {
                     SqlQuery::Select(_) => unreachable!("read path returns prior"),
                     SqlQuery::Insert(InsertStatement { table: t, .. })
                     | SqlQuery::Update(UpdateStatement { table: t, .. })
@@ -1973,7 +1977,7 @@ where
                         let query_result = if cfg!(feature = "ryw") {
                             if let Some(timestamp_service) = &mut state.timestamp_client {
                                 let (query_result, identifier) =
-                                    upstream.handle_ryw_write(query).await?;
+                                    upstream.handle_ryw_write(raw_query).await?;
 
                                 // TODO(andrew): Move table name to table index conversion to
                                 // timestamp service https://app.clubhouse.io/readysettech/story/331
@@ -1994,10 +1998,10 @@ where
                                     Some(Timestamp::join(current_ticket, &new_timestamp));
                                 Ok(query_result)
                             } else {
-                                upstream.query(query).await
+                                upstream.query(raw_query).await
                             }
                         } else {
-                            upstream.query(query).await
+                            upstream.query(raw_query).await
                         };
 
                         query_result.map(QueryResult::Upstream)
@@ -2009,25 +2013,24 @@ where
                     | SqlQuery::CreateTable(_)
                     | SqlQuery::DropTable(_)
                     | SqlQuery::DropView(_)
-                    | SqlQuery::AlterTable(_) => {
+                    | SqlQuery::AlterTable(_)
+                    | SqlQuery::Use(_) => {
                         event.sql_type = SqlQueryType::Other;
-                        upstream.query(query).await.map(QueryResult::Upstream)
+                        upstream.query(raw_query).await.map(QueryResult::Upstream)
                     }
                     SqlQuery::RenameTable(_) => {
-                        unsupported!("{} not yet supported", parsed_query.query_type());
+                        unsupported!("{} not yet supported", query.query_type());
                     }
                     SqlQuery::Set(_) | SqlQuery::CompoundSelect(_) | SqlQuery::Show(_) => {
                         event.sql_type = SqlQueryType::Other;
-                        upstream.query(query).await.map(QueryResult::Upstream)
+                        upstream.query(raw_query).await.map(QueryResult::Upstream)
                     }
-                    SqlQuery::StartTransaction(_)
-                    | SqlQuery::Commit(_)
-                    | SqlQuery::Rollback(_)
-                    | SqlQuery::Use(_) => {
+
+                    SqlQuery::StartTransaction(_) | SqlQuery::Commit(_) | SqlQuery::Rollback(_) => {
                         Self::handle_transaction_boundaries(
                             Some(upstream),
                             &mut state.proxy_state,
-                            parsed_query,
+                            &query,
                         )
                         .await
                     }
@@ -2047,7 +2050,7 @@ where
                 event.destination = Some(QueryDestination::Readyset);
                 let start = Instant::now();
 
-                let res = match parsed_query {
+                let res = match &query {
                     SqlQuery::Select(_) => unreachable!("read path returns prior"),
                     // CREATE VIEW will still trigger migrations with epxlicit-migrations enabled
                     SqlQuery::CreateView(q) => noria.handle_create_view(q).await,
