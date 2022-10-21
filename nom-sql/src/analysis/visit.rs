@@ -15,8 +15,8 @@ use crate::{
     ExplainStatement, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, GroupByClause,
     InValue, InsertStatement, JoinClause, JoinConstraint, JoinRightSide, Literal, OrderClause,
     Relation, SelectSpecification, SelectStatement, SetNames, SetPostgresParameter, SetStatement,
-    SetVariables, ShowStatement, SqlQuery, SqlType, TableExpr, TableKey, UpdateStatement,
-    UseStatement,
+    SetVariables, ShowStatement, SqlIdentifier, SqlQuery, SqlType, TableExpr, TableKey,
+    UpdateStatement, UseStatement,
 };
 
 /// Each method of the `Visitor` trait is a hook to be potentially overridden when recursively
@@ -73,8 +73,15 @@ pub trait Visitor<'ast>: Sized {
     /// Errors that can be thrown during execution of this visitor
     type Error;
 
-    fn visit_table(&mut self, _table: &'ast mut Relation) -> Result<(), Self::Error> {
+    fn visit_sql_identifier(
+        &mut self,
+        _sql_ident: &'ast mut SqlIdentifier,
+    ) -> Result<(), Self::Error> {
         Ok(())
+    }
+
+    fn visit_table(&mut self, table: &'ast mut Relation) -> Result<(), Self::Error> {
+        walk_relation(self, table)
     }
 
     fn visit_literal(&mut self, _literal: &'ast mut Literal) -> Result<(), Self::Error> {
@@ -89,8 +96,8 @@ pub trait Visitor<'ast>: Sized {
         walk_column(self, column)
     }
 
-    fn visit_variable(&mut self, _variable: &'ast mut Variable) -> Result<(), Self::Error> {
-        Ok(())
+    fn visit_variable(&mut self, variable: &'ast mut Variable) -> Result<(), Self::Error> {
+        self.visit_sql_identifier(&mut variable.name)
     }
 
     fn visit_table_expr(&mut self, table_expr: &'ast mut TableExpr) -> Result<(), Self::Error> {
@@ -296,9 +303,9 @@ pub trait Visitor<'ast>: Sized {
 
     fn visit_set_postgres_parameter(
         &mut self,
-        _set_postgres_parameter: &'ast mut SetPostgresParameter,
+        set_postgres_parameter: &'ast mut SetPostgresParameter,
     ) -> Result<(), Self::Error> {
-        Ok(())
+        self.visit_sql_identifier(&mut set_postgres_parameter.name)
     }
 
     fn visit_start_transaction_statement(
@@ -345,9 +352,9 @@ pub trait Visitor<'ast>: Sized {
 
     fn visit_drop_cache_statement(
         &mut self,
-        _drop_cache_statement: &'ast mut DropCacheStatement,
+        drop_cache_statement: &'ast mut DropCacheStatement,
     ) -> Result<(), Self::Error> {
-        Ok(())
+        walk_relation(self, &mut drop_cache_statement.name)
     }
 
     fn visit_drop_all_caches_statement(
@@ -366,9 +373,9 @@ pub trait Visitor<'ast>: Sized {
 
     fn visit_use_statement(
         &mut self,
-        _use_statement: &'ast mut UseStatement,
+        use_statement: &'ast mut UseStatement,
     ) -> Result<(), Self::Error> {
-        Ok(())
+        self.visit_sql_identifier(&mut use_statement.database)
     }
 
     fn visit_show_statement(
@@ -486,6 +493,7 @@ pub fn walk_common_table_expr<'ast, V: Visitor<'ast>>(
     visitor: &mut V,
     cte: &'ast mut CommonTableExpr,
 ) -> Result<(), V::Error> {
+    visitor.visit_sql_identifier(&mut cte.name)?;
     visitor.visit_select_statement(&mut cte.statement)
 }
 
@@ -496,7 +504,13 @@ pub fn walk_field_definition_expr<'ast, V: Visitor<'ast>>(
     match fde {
         FieldDefinitionExpr::All => Ok(()),
         FieldDefinitionExpr::AllInTable(t) => visitor.visit_table(t),
-        FieldDefinitionExpr::Expr { expr, .. } => visitor.visit_expr(expr),
+        FieldDefinitionExpr::Expr { expr, alias } => {
+            visitor.visit_expr(expr)?;
+            if let Some(alias) = alias {
+                visitor.visit_sql_identifier(alias)?;
+            }
+            Ok(())
+        }
     }
 }
 
@@ -585,10 +599,21 @@ pub fn walk_offset_clause<'ast, V: Visitor<'ast>>(
     Ok(())
 }
 
+pub fn walk_relation<'ast, V: Visitor<'ast>>(
+    visitor: &mut V,
+    relation: &'ast mut Relation,
+) -> Result<(), V::Error> {
+    if let Some(schema) = &mut relation.schema {
+        visitor.visit_sql_identifier(schema)?;
+    }
+    visitor.visit_sql_identifier(&mut relation.name)
+}
+
 pub fn walk_column<'ast, V: Visitor<'ast>>(
     visitor: &mut V,
     column: &'ast mut Column,
 ) -> Result<(), V::Error> {
+    visitor.visit_sql_identifier(&mut column.name)?;
     if let Some(table) = &mut column.table {
         visitor.visit_table(table)?;
     }
@@ -599,7 +624,11 @@ pub fn walk_table_expr<'ast, V: Visitor<'ast>>(
     visitor: &mut V,
     table_expr: &'ast mut TableExpr,
 ) -> Result<(), V::Error> {
-    visitor.visit_table(&mut table_expr.table)
+    visitor.visit_table(&mut table_expr.table)?;
+    if let Some(ref mut alias) = table_expr.alias {
+        visitor.visit_sql_identifier(alias)?;
+    }
+    Ok(())
 }
 
 pub fn walk_select_statement<'ast, V: Visitor<'ast>>(
@@ -677,51 +706,80 @@ pub fn walk_table_key<'a, V: Visitor<'a>>(
 ) -> Result<(), V::Error> {
     match table_key {
         TableKey::PrimaryKey {
-            constraint_name: _,
-            index_name: _,
+            constraint_name,
+            index_name,
             columns,
         } => {
+            if let Some(constraint_name) = constraint_name {
+                visitor.visit_sql_identifier(constraint_name)?;
+            }
+
+            if let Some(index_name) = index_name {
+                visitor.visit_sql_identifier(index_name)?;
+            }
+
             for column in columns {
                 visitor.visit_column(column)?;
             }
         }
         TableKey::UniqueKey {
-            constraint_name: _,
-            index_name: _,
+            constraint_name,
+            index_name,
             columns,
             index_type: _,
         } => {
+            if let Some(constraint_name) = constraint_name {
+                visitor.visit_sql_identifier(constraint_name)?;
+            }
+            if let Some(index_name) = index_name {
+                visitor.visit_sql_identifier(index_name)?;
+            }
             for column in columns {
                 visitor.visit_column(column)?;
             }
         }
         TableKey::FulltextKey {
-            index_name: _,
+            index_name,
             columns,
         } => {
+            if let Some(index_name) = index_name {
+                visitor.visit_sql_identifier(index_name)?;
+            }
             for column in columns {
                 visitor.visit_column(column)?;
             }
         }
         TableKey::Key {
-            constraint_name: _,
-            index_name: _,
+            constraint_name,
+            index_name,
             columns,
             index_type: _,
         } => {
+            if let Some(constraint_name) = constraint_name {
+                visitor.visit_sql_identifier(constraint_name)?;
+            }
+            if let Some(index_name) = index_name {
+                visitor.visit_sql_identifier(index_name)?;
+            }
             for column in columns {
                 visitor.visit_column(column)?;
             }
         }
         TableKey::ForeignKey {
-            constraint_name: _,
-            index_name: _,
+            constraint_name,
+            index_name,
             columns,
             target_table,
             target_columns,
             on_delete: _,
             on_update: _,
         } => {
+            if let Some(constraint_name) = constraint_name {
+                visitor.visit_sql_identifier(constraint_name)?;
+            }
+            if let Some(index_name) = index_name {
+                visitor.visit_sql_identifier(index_name)?;
+            }
             for column in columns {
                 visitor.visit_column(column)?;
             }
@@ -731,10 +789,13 @@ pub fn walk_table_key<'a, V: Visitor<'a>>(
             }
         }
         TableKey::CheckConstraint {
-            constraint_name: _,
+            constraint_name,
             expr,
             enforced: _,
         } => {
+            if let Some(constraint_name) = constraint_name {
+                visitor.visit_sql_identifier(constraint_name)?;
+            }
             visitor.visit_expr(expr)?;
         }
     }
@@ -762,6 +823,8 @@ pub fn walk_create_view_statement<'a, V: Visitor<'a>>(
     visitor: &mut V,
     create_view_statement: &'a mut CreateViewStatement,
 ) -> Result<(), V::Error> {
+    walk_relation(visitor, &mut create_view_statement.name)?;
+
     for column in &mut create_view_statement.fields {
         visitor.visit_column(column)?;
     }

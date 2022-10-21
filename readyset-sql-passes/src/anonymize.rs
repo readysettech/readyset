@@ -4,10 +4,7 @@
 
 use std::collections::HashMap;
 
-use nom_sql::analysis::visit::{
-    walk_column, walk_common_table_expr, walk_create_view_statement, walk_table_expr,
-    walk_table_key, Visitor,
-};
+use nom_sql::analysis::visit::Visitor;
 use nom_sql::{
     CreateTableOption, CreateTableStatement, CreateViewStatement, Literal, SelectStatement,
     SqlIdentifier,
@@ -148,21 +145,16 @@ impl AnonymizeVisitor<'_> {
     pub fn anonymize_sql_identifier(&mut self, sql_ident: &mut SqlIdentifier) {
         sql_ident.anonymize(self.anonymizer);
     }
-
-    fn anonymize_relation(&mut self, relation: &mut nom_sql::Relation) {
-        if let Some(ref mut schema) = relation.schema {
-            self.anonymize_sql_identifier(schema);
-        }
-
-        self.anonymize_sql_identifier(&mut relation.name);
-    }
 }
 
 impl<'ast> Visitor<'ast> for AnonymizeVisitor<'_> {
     type Error = !;
 
-    fn visit_table(&mut self, table: &'ast mut nom_sql::Relation) -> Result<(), Self::Error> {
-        self.anonymize_relation(table);
+    fn visit_sql_identifier(
+        &mut self,
+        sql_ident: &'ast mut SqlIdentifier,
+    ) -> Result<(), Self::Error> {
+        self.anonymize_sql_identifier(sql_ident);
         Ok(())
     }
 
@@ -170,11 +162,6 @@ impl<'ast> Visitor<'ast> for AnonymizeVisitor<'_> {
         if !matches!(literal, Literal::Placeholder(_)) {
             *literal = Literal::String("<anonymized>".to_owned());
         }
-        Ok(())
-    }
-
-    fn visit_variable(&mut self, variable: &'ast mut nom_sql::Variable) -> Result<(), Self::Error> {
-        self.anonymize_sql_identifier(&mut variable.name);
         Ok(())
     }
 
@@ -191,22 +178,6 @@ impl<'ast> Visitor<'ast> for AnonymizeVisitor<'_> {
             | CreateTableOption::Charset(_)
             | CreateTableOption::Other => {}
         }
-        Ok(())
-    }
-
-    fn visit_set_postgres_parameter(
-        &mut self,
-        set_postgres_parameter: &'ast mut nom_sql::SetPostgresParameter,
-    ) -> Result<(), Self::Error> {
-        self.anonymize_sql_identifier(&mut set_postgres_parameter.name);
-        Ok(())
-    }
-
-    fn visit_use_statement(
-        &mut self,
-        use_statement: &'ast mut nom_sql::UseStatement,
-    ) -> Result<(), Self::Error> {
-        self.anonymize_sql_identifier(&mut use_statement.database);
         Ok(())
     }
 
@@ -227,96 +198,6 @@ impl<'ast> Visitor<'ast> for AnonymizeVisitor<'_> {
             | nom_sql::ShowStatement::ReadySetStatus
             | nom_sql::ShowStatement::ReadySetVersion => {}
         }
-        Ok(())
-    }
-
-    fn visit_column(&mut self, column: &'ast mut nom_sql::Column) -> Result<(), Self::Error> {
-        column.name.anonymize(self.anonymizer);
-        walk_column(self, column)
-    }
-
-    fn visit_table_expr(
-        &mut self,
-        table_expr: &'ast mut nom_sql::TableExpr,
-    ) -> Result<(), Self::Error> {
-        let res = walk_table_expr(self, table_expr);
-        if let Some(ref mut alias) = table_expr.alias {
-            self.anonymize_sql_identifier(alias);
-        }
-        res
-    }
-
-    fn visit_common_table_expr(
-        &mut self,
-        cte: &'ast mut nom_sql::CommonTableExpr,
-    ) -> Result<(), Self::Error> {
-        self.anonymize_sql_identifier(&mut cte.name);
-        walk_common_table_expr(self, cte)
-    }
-
-    fn visit_table_key(
-        &mut self,
-        table_key: &'ast mut nom_sql::TableKey,
-    ) -> Result<(), Self::Error> {
-        match table_key {
-            nom_sql::TableKey::PrimaryKey {
-                ref mut constraint_name,
-                ref mut index_name,
-                ..
-            }
-            | nom_sql::TableKey::UniqueKey {
-                ref mut constraint_name,
-                ref mut index_name,
-                ..
-            }
-            | nom_sql::TableKey::Key {
-                ref mut constraint_name,
-                ref mut index_name,
-                ..
-            }
-            | nom_sql::TableKey::ForeignKey {
-                ref mut constraint_name,
-                ref mut index_name,
-                ..
-            } => {
-                if let Some(ref mut constraint_name) = constraint_name {
-                    self.anonymize_sql_identifier(constraint_name);
-                }
-                if let Some(ref mut index_name) = index_name {
-                    self.anonymize_sql_identifier(index_name);
-                }
-            }
-            nom_sql::TableKey::FulltextKey { index_name, .. } => {
-                if let Some(ref mut index_name) = index_name {
-                    self.anonymize_sql_identifier(index_name);
-                }
-            }
-            nom_sql::TableKey::CheckConstraint {
-                ref mut constraint_name,
-                ..
-            } => {
-                if let Some(ref mut constraint_name) = constraint_name {
-                    self.anonymize_sql_identifier(constraint_name);
-                }
-            }
-        }
-
-        walk_table_key(self, table_key)
-    }
-
-    fn visit_create_view_statement(
-        &mut self,
-        create_view_statement: &'ast mut CreateViewStatement,
-    ) -> Result<(), Self::Error> {
-        self.anonymize_relation(&mut create_view_statement.name);
-        walk_create_view_statement(self, create_view_statement)
-    }
-
-    fn visit_drop_cache_statement(
-        &mut self,
-        drop_cache_statement: &'ast mut nom_sql::DropCacheStatement,
-    ) -> Result<(), Self::Error> {
-        self.anonymize_relation(&mut drop_cache_statement.name);
         Ok(())
     }
 }
@@ -412,6 +293,17 @@ mod tests {
         let expected = parse_create_view_statement(
             "CREATE VIEW anon_id_0 AS SELECT * FROM anon_id_1 WHERE anon_id_2 = \"<anonymized>\";",
         );
+
+        create_view.anonymize(&mut anonymizer);
+
+        assert_eq!(create_view, expected);
+    }
+
+    #[test]
+    fn anonymize_select_with_as() {
+        let mut anonymizer = Anonymizer::new();
+        let mut create_view = parse_select_statement("SELECT foo AS renamed_foo FROM bar");
+        let expected = parse_select_statement("SELECT `anon_id_1` AS `anon_id_2` FROM `anon_id_0`");
 
         create_view.anonymize(&mut anonymizer);
 
