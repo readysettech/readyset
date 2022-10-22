@@ -197,6 +197,10 @@ impl BuiltinFunction {
                 let ty = base_time.ty().clone();
                 (Self::Addtime(base_time, next_arg()?), ty)
             }
+            "date_format" => (
+                Self::DateFormat(next_arg()?, next_arg()?),
+                DfType::DEFAULT_TEXT,
+            ),
             "round" => {
                 let expr = next_arg()?;
                 let prec = args.next().unwrap_or(Expr::Literal {

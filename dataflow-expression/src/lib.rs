@@ -43,6 +43,8 @@ pub enum BuiltinFunction {
     Timediff(Expr, Expr),
     /// [`addtime`](https://dev.mysql.com/doc/refman/8.0/en/date-and-time-functions.html#function_addtime)
     Addtime(Expr, Expr),
+    /// [`date_format`](https://dev.mysql.com/doc/refman/8.0/en/date-and-time-functions.html#function_date-format)
+    DateFormat(Expr, Expr),
     /// [`round`](https://dev.mysql.com/doc/refman/8.0/en/mathematical-functions.html#function_round)
     Round(Expr, Expr),
     /// [`json_typeof`](https://www.postgresql.org/docs/current/functions-json.html)
@@ -96,6 +98,7 @@ impl BuiltinFunction {
             Month { .. } => "month",
             Timediff { .. } => "timediff",
             Addtime { .. } => "addtime",
+            DateFormat { .. } => "date_format",
             Round { .. } => "round",
             JsonTypeof { .. } => "json_typeof",
             JsonbTypeof { .. } => "jsonb_typeof",
@@ -135,6 +138,9 @@ impl fmt::Display for BuiltinFunction {
                 write!(f, "({}, {})", arg1, arg2)
             }
             Addtime(arg1, arg2) => {
+                write!(f, "({}, {})", arg1, arg2)
+            }
+            DateFormat(arg1, arg2) => {
                 write!(f, "({}, {})", arg1, arg2)
             }
             Round(arg1, precision) => {

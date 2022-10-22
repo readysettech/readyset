@@ -1,8 +1,9 @@
 use std::borrow::Borrow;
 use std::cmp::Ordering;
+use std::fmt::Write;
 use std::ops::{Add, Div, Mul, Sub};
 
-use chrono::{Datelike, LocalResult, NaiveDate, NaiveDateTime, TimeZone};
+use chrono::{Datelike, LocalResult, Month, NaiveDate, NaiveDateTime, TimeZone, Timelike, Weekday};
 use chrono_tz::Tz;
 use maths::int::integer_rnd;
 use mysql_time::MySqlTime;
@@ -114,6 +115,221 @@ fn addtime_datetime(time1: &NaiveDateTime, time2: &MySqlTime) -> NaiveDateTime {
 
 fn addtime_times(time1: &MySqlTime, time2: &MySqlTime) -> MySqlTime {
     time1.add(*time2)
+}
+
+/// Format the given time value according to the given `format_string`, using the [MySQL date
+/// formatting rules][mysql-docs]. Since these rules don't match up well with anything available in
+/// the Rust crate ecosystem, this is done manually.
+///
+/// [mysql-docs]: https://dev.mysql.com/doc/refman/8.0/en/date-and-time-functions.html#function_date-format
+fn mysql_date_format<T>(time: T, format_string: &str) -> ReadySetResult<String>
+where
+    T: Timelike + Datelike,
+{
+    /// Calcluate the week (and year!) number of a date-like value according to the ...algorithm...
+    /// that MySQL uses. Returns a tuple of (week number, year), since in some operating modes a day
+    /// may be part of the first week of the next year, or last week of the previous year.
+    ///
+    /// The actual algorithm here, and the arguments passed, are pretty close to a line-for-line
+    /// translation of what MySQL uses, hence being quite impressively unidiomatic Rust: basically,
+    /// I'd recommend thinking of this function and all of its callers as a black-box, at least for
+    /// the time being (until we can dedicate the energy to actually understand what's going on
+    /// here)
+    fn week_and_year<T>(
+        time: &T,
+        monday_first: bool,
+        mut week_year: bool,
+        first_weekday: bool,
+    ) -> (u32, i32)
+    where
+        T: Datelike,
+    {
+        fn days_in_year(year: i32) -> i32 {
+            if (year & 3) == 0 && ((year % 100 != 0) || (year % 400 == 0 && year != 0)) {
+                366
+            } else {
+                365
+            }
+        }
+
+        let mut days;
+        let daynr = time.num_days_from_ce();
+        let mut first_daynr = time
+            .with_day(1)
+            .unwrap()
+            .with_month(1)
+            .unwrap()
+            .num_days_from_ce() as i32;
+        let mut weekday = if monday_first {
+            time.weekday().num_days_from_monday()
+        } else {
+            time.weekday().num_days_from_sunday()
+        } as i32;
+        let mut year = time.year();
+
+        if time.month() == 1 && time.day() <= (7 - weekday) as u32 {
+            if !week_year && ((first_weekday && weekday != 0) || (!first_weekday && weekday >= 4)) {
+                return (0, year);
+            }
+            week_year = true;
+            year -= 1;
+            days = days_in_year(year) as i32;
+            first_daynr -= days as i32;
+            weekday = (weekday + 53 * 7 - days) % 7;
+        }
+
+        if (first_weekday && weekday != 0) || (!first_weekday && weekday >= 4) {
+            days = daynr - (first_daynr + (7 - weekday))
+        } else {
+            days = daynr - (first_daynr - weekday)
+        }
+
+        if week_year && days >= 52 * 7 {
+            weekday = (weekday + days_in_year(year)) % 7;
+            if (!first_weekday && weekday < 4) || (first_weekday && weekday == 0) {
+                year += 1;
+                return (1, year);
+            }
+        }
+
+        ((days / 7 + 1) as u32, year)
+    }
+
+    // | %a   | Abbreviated weekday name (Sun..Sat)
+    // | %b   | Abbreviated month name (Jan..Dec)
+    // | %c   | Month, numeric (0..12)
+    // | %D   | Day of the month with English suffix (0th, 1st, 2nd, 3rd, …)
+    // | %d   | Day of the month, numeric (00..31)
+    // | %e   | Day of the month, numeric (0..31)
+    // | %f   | Microseconds (000000..999999)
+    // | %H   | Hour (00..23)
+    // | %h   | Hour (01..12)
+    // | %I   | Hour (01..12)
+    // | %i   | Minutes, numeric (00..59)
+    // | %j   | Day of year (001..366)
+    // | %k   | Hour (0..23)
+    // | %l   | Hour (1..12)
+    // | %M   | Month name (January..December)
+    // | %m   | Month, numeric (00..12)
+    // | %p   | AM or PM
+    // | %r   | Time, 12-hour (hh:mm:ss followed by AM or PM)
+    // | %S   | Seconds (00..59)
+    // | %s   | Seconds (00..59)
+    // | %T   | Time, 24-hour (hh:mm:ss)
+    // | %U   | Week (00..53), where Sunday is the first day of the week; WEEK() mode 0
+    // | %u   | Week (00..53), where Monday is the first day of the week; WEEK() mode 1
+    // | %V   | Week (01..53), where Sunday is the first day of the week; WEEK() mode 2;used with %X
+    // | %v   | Week (01..53), where Monday is the first day of the week; WEEK() mode 3;used with %x
+    // | %W   | Weekday name (Sunday..Saturday)
+    // | %w   | Day of the week (0=Sunday..6=Saturday)
+    // | %X   | Year for the week where Sunday is the first day of the week, numeric, four digits
+    // | %x   | Year for the week, where Monday is the first day of the week, numeric, four digits
+    // | %Y   | Year, numeric, four digits
+    // | %y   | Year, numeric (two digits)
+    // | %%   | A literal % character
+    // | %x   | x, for any “x” not listed above
+    let mut res = String::with_capacity(format_string.len().next_power_of_two());
+    let mut chars = format_string.chars();
+    while let Some(c) = chars.next() {
+        if c == '%' {
+            let Some(format_spec) = chars.next() else {
+                res.push(c);
+                break;
+            };
+
+            match format_spec {
+                'a' => write!(res, "{}", time.weekday()).unwrap(),
+                'b' => write!(
+                    res,
+                    "{}",
+                    &Month::from_u32(time.month()).unwrap().name()[..3]
+                )
+                .unwrap(),
+                'c' => write!(res, "{}", time.month()).unwrap(),
+                'D' => {
+                    let dom = time.day();
+                    write!(res, "{dom}").unwrap();
+                    write!(
+                        res,
+                        "{}",
+                        match res.as_str() {
+                            "11" | "12" | "13" => "th",
+                            _ => match res.chars().last().unwrap() {
+                                '1' => "st",
+                                '2' => "nd",
+                                '3' => "rd",
+                                _ => "th",
+                            },
+                        }
+                    )
+                    .unwrap()
+                }
+                'd' => write!(res, "{:02}", time.day()).unwrap(),
+                'e' => write!(res, "{}", time.day()).unwrap(),
+                'f' => {
+                    write!(res, "{:06.0}", time.nanosecond() / 1000).unwrap();
+                }
+                'H' => write!(res, "{:02}", time.hour()).unwrap(),
+                'h' => write!(res, "{:02}", time.hour12().1).unwrap(),
+                'I' => write!(res, "{:02}", time.hour12().1).unwrap(),
+                'i' => write!(res, "{:02}", time.minute()).unwrap(),
+                'j' => write!(res, "{:03}", time.ordinal()).unwrap(),
+                'k' => write!(res, "{}", time.hour()).unwrap(),
+                'l' => write!(res, "{}", time.hour12().1).unwrap(),
+                'M' => write!(res, "{}", Month::from_u32(time.month()).unwrap().name()).unwrap(),
+                'm' => write!(res, "{:02}", time.month()).unwrap(),
+                'p' => {
+                    if time.hour() >= 12 {
+                        res.push_str("PM");
+                    } else {
+                        res.push_str("AM");
+                    }
+                }
+                'r' => write!(
+                    res,
+                    "{:02}:{:02}:{:02} {}",
+                    time.hour12().1,
+                    time.minute(),
+                    time.second(),
+                    if time.hour12().0 { "PM" } else { "AM" }
+                )
+                .unwrap(),
+                'S' | 's' => write!(res, "{:02}", time.second()).unwrap(),
+                'T' => write!(
+                    res,
+                    "{:02}:{:02}:{:02}",
+                    time.hour(),
+                    time.minute(),
+                    time.second()
+                )
+                .unwrap(),
+                'U' => write!(res, "{:02}", week_and_year(&time, false, false, false).0).unwrap(),
+                'u' => write!(res, "{:02}", week_and_year(&time, true, false, false).0).unwrap(),
+                'V' => write!(res, "{:02}", week_and_year(&time, false, true, true).0).unwrap(),
+                'v' => write!(res, "{:02}", week_and_year(&time, true, true, false).0).unwrap(),
+                'W' => res.push_str(match time.weekday() {
+                    Weekday::Mon => "Monday",
+                    Weekday::Tue => "Tuesday",
+                    Weekday::Wed => "Wednesday",
+                    Weekday::Thu => "Thursday",
+                    Weekday::Fri => "Friday",
+                    Weekday::Sat => "Saturday",
+                    Weekday::Sun => "Sunday",
+                }),
+                'w' => write!(res, "{}", time.weekday().num_days_from_sunday()).unwrap(),
+                'X' => write!(res, "{:02}", week_and_year(&time, false, true, true).1).unwrap(),
+                'x' => write!(res, "{:02}", week_and_year(&time, true, true, false).1).unwrap(),
+                'Y' => write!(res, "{:04}", time.year()).unwrap(),
+                'y' => write!(res, "{:02}", time.year() % 100).unwrap(),
+                '%' => res.push('%'),
+                c => res.push(c),
+            }
+        } else {
+            res.push(c);
+        }
+    }
+
+    Ok(res)
 }
 
 fn greatest_or_least<F, D>(
@@ -248,6 +464,17 @@ impl BuiltinFunction {
                         &(MySqlTime::try_from(&time_param1)?),
                         &(MySqlTime::try_from(&time_param2)?),
                     )))
+                }
+            }
+            BuiltinFunction::DateFormat(arg1, arg2) => {
+                let date = get_time_or_default(&arg1.eval(record)?, arg1.ty());
+                let format_string_v =
+                    try_cast_or_none!(arg2.eval(record)?, &DfType::DEFAULT_TEXT, arg2.ty());
+                let format_str: &str = (&format_string_v).try_into()?;
+                if let Ok(t) = NaiveDateTime::try_from(&date) {
+                    Ok(mysql_date_format(t, format_str)?.into())
+                } else {
+                    Ok(DfValue::None)
                 }
             }
             BuiltinFunction::Round(arg1, arg2) => {
@@ -466,11 +693,15 @@ impl BuiltinFunction {
 mod tests {
     use chrono::{NaiveTime, Timelike};
     use launchpad::arbitrary::arbitrary_timestamp_naive_date_time;
+    use lazy_static::lazy_static;
+    use nom_sql::parse_expr;
     use nom_sql::Dialect::*;
+    use readyset_errors::internal;
     use test_strategy::proptest;
 
     use super::*;
     use crate::eval::tests::eval_expr;
+    use crate::lower::tests::resolve_columns;
     use crate::utils::{make_call, make_column, make_literal};
     use crate::Dialect;
 
@@ -1359,6 +1590,136 @@ mod tests {
         assert_eq!(
             eval_expr("split_part('a.b.c', '.', -4)", PostgreSQL),
             "".into()
+        );
+    }
+
+    #[track_caller]
+    fn date_format(time: &str, fmt: &str) -> DfValue {
+        lazy_static! {
+            static ref EXPR: Expr = {
+                let ast = parse_expr(MySQL, "date_format(t, f)").unwrap();
+                Expr::lower(
+                    ast,
+                    Dialect::DEFAULT_MYSQL,
+                    resolve_columns(|c| match c.name.as_str() {
+                        "t" => Ok((0, DfType::DEFAULT_TEXT)),
+                        "f" => Ok((1, DfType::DEFAULT_TEXT)),
+                        _ => internal!(),
+                    }),
+                )
+                .unwrap()
+            };
+        }
+        EXPR.eval(&[DfValue::from(time), DfValue::from(fmt)])
+            .unwrap()
+    }
+
+    #[test]
+    fn date_format_with_datetimes() {
+        assert_eq!(
+            date_format("2003-01-02 10:11:12.000000", "%y-%m-%d %h:%i:%s"),
+            "03-01-02 10:11:12".into()
+        );
+        assert_eq!(
+            date_format("2003-01-02 08:11:02.123456", "%y-%m-%d %h:%i:%s.%f"),
+            "03-01-02 08:11:02.123456".into()
+        );
+        assert_eq!(
+            date_format("2003-01-02 08:11:02.000006", "%y-%m-%d %h:%i:%s.%f"),
+            "03-01-02 08:11:02.000006".into()
+        );
+        assert_eq!(
+            date_format("0003-01-02 08:11:02.000000", "%Y-%m-%d %h:%i:%s.%f"),
+            "0003-01-02 08:11:02.000000".into()
+        );
+        assert_eq!(
+            date_format("2003-01-02 08:11:02.000000", "%y-%m-%d %h:%i:%s.%f"),
+            "03-01-02 08:11:02.000000".into()
+        );
+        assert_eq!(
+            date_format("2003-01-02 01:11:12.123450", "%Y-%m-%d %h:%i:%s.%f%p"),
+            "2003-01-02 01:11:12.123450AM".into()
+        );
+        assert_eq!(
+            date_format("2003-01-02 00:11:12.123450", "%Y-%m-%d %h:%i:%s.%f%p"),
+            "2003-01-02 12:11:12.123450AM".into()
+        );
+        assert_eq!(
+            date_format("2003-01-02 10:11:12.000000", "%f"),
+            "000000".into()
+        );
+        assert_eq!(
+            date_format("2003-01-02 23:11:12.000000", "%Y-%m-%d %h:%i:%s%p"),
+            "2003-01-02 11:11:12PM".into()
+        );
+        assert_eq!(
+            date_format("2001-01-15 12:59:58.000000", "%d-%m-%Y %h:%i:%s"),
+            "15-01-2001 12:59:58".into()
+        );
+        assert_eq!(
+            date_format("2001-09-15 00:00:00.000000", "%d %M %Y"),
+            "15 September 2001".into()
+        );
+        assert_eq!(
+            date_format("2001-09-15 00:00:00.000000", "%d %b %Y"),
+            "15 Sep 2001".into()
+        );
+        assert_eq!(
+            date_format("2001-05-15 00:00:00.000000", "%d %b %Y"),
+            "15 May 2001".into()
+        );
+        assert_eq!(
+            date_format("2001-05-15 00:00:00.000000", "%w %d %b %y"),
+            "2 15 May 01".into()
+        );
+        assert_eq!(
+            date_format("2002-01-01 00:00:00.000000", "%W %u %Y"),
+            "Tuesday 01 2002".into()
+        );
+        assert_eq!(
+            date_format("1998-12-31 00:00:00.000000", "%W %u %y"),
+            "Thursday 53 98".into()
+        );
+        assert_eq!(
+            date_format("2001-01-07 00:00:00.000000", "%w %v %x"),
+            "0 01 2001".into()
+        );
+        assert_eq!(
+            date_format("2002-01-01 00:00:00.000000", "%w %v %x"),
+            "2 01 2002".into()
+        );
+        assert_eq!(
+            date_format("2004-02-29 00:00:00.000000", "%j %y"),
+            "060 04".into()
+        );
+        assert_eq!(
+            date_format("1998-12-31 00:00:00.000000", "%w %u %y"),
+            "4 53 98".into()
+        );
+        assert_eq!(
+            date_format("2001-01-15 00:00:00.000000", "%d-%m-%y %h:%i:%s"),
+            "15-01-01 12:00:00".into()
+        );
+        assert_eq!(
+            date_format("2020-01-15 00:00:00.000000", "%d-%m-%y"),
+            "15-01-20".into()
+        );
+        assert_eq!(
+            date_format("2001-01-15 00:00:00.000000", "%d-%y-%c"),
+            "15-01-1".into()
+        );
+        assert_eq!(date_format("2002-01-01", "%D"), "1st".into());
+        assert_eq!(date_format("2002-01-31", "%D"), "31st".into());
+        assert_eq!(date_format("2002-01-22", "%D"), "22nd".into());
+        assert_eq!(date_format("2002-01-11", "%D"), "11th".into());
+        assert_eq!(date_format("2002-01-12", "%D"), "12th".into());
+        assert_eq!(date_format("2002-01-13", "%D"), "13th".into());
+        assert_eq!(date_format("2002-01-13", "%e"), "13".into());
+        assert_eq!(date_format("2002-01-01", "%e"), "1".into());
+        assert_eq!(date_format("2002-01-01 01:15:45.123456", "%I"), "01".into());
+        assert_eq!(
+            date_format("2002-01-01 12:15:45.123456", "%D %H %I %k %l %r %S %T %X"),
+            "1st 12 12 12 12 12:15:45 PM 45 12:15:45 2001".into()
         );
     }
 }
