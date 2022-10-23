@@ -61,6 +61,9 @@ pub enum BuiltinFunction {
     /// * [Postgres](https://www.postgresql.org/docs/9.1/functions-string.html)
     Substring(Expr, Option<Expr>, Option<Expr>),
 
+    /// [`split_part`](https://www.postgresql.org/docs/current/functions-string.html)
+    SplitPart(Expr, Expr, Expr),
+
     /// `greatest`:
     ///
     /// * [MySQL](https://dev.mysql.com/doc/refman/8.0/en/comparison-operators.html#function_greatest)
@@ -216,6 +219,10 @@ impl BuiltinFunction {
                     ty,
                 )
             }
+            "split_part" => (
+                Self::SplitPart(next_arg()?, next_arg()?, next_arg()?),
+                DfType::DEFAULT_TEXT,
+            ),
             "greatest" | "least" => {
                 // The type inference rules for GREATEST and LEAST are the same, so this block
                 // covers both then dispatches for the actual function construction at the end
@@ -281,6 +288,7 @@ impl BuiltinFunction {
             Coalesce { .. } => "coalesce",
             Concat { .. } => "concat",
             Substring { .. } => "substring",
+            SplitPart { .. } => "split_part",
             Greatest { .. } => "greatest",
             Least { .. } => "least",
         }
@@ -340,6 +348,7 @@ impl fmt::Display for BuiltinFunction {
                 }
                 write!(f, ")")
             }
+            SplitPart(string, delimiter, field) => write!(f, "({string}, {delimiter}, {field})"),
             Greatest { args, .. } | Least { args, .. } => {
                 write!(f, "({})", args.iter().join(", "))
             }

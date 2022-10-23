@@ -9,7 +9,7 @@ use launchpad::redacted::Sensitive;
 use maths::int::integer_rnd;
 use mysql_time::MySqlTime;
 use readyset_data::{DfType, DfValue};
-use readyset_errors::{ReadySetError, ReadySetResult};
+use readyset_errors::{invalid_err, ReadySetError, ReadySetResult};
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 use rust_decimal::Decimal;
 use vec1::Vec1;
@@ -436,6 +436,38 @@ impl BuiltinFunction {
                     .take(len as _)
                     .collect::<String>()
                     .into())
+            }
+            BuiltinFunction::SplitPart(string, delimiter, field) => {
+                let string = non_null!(string.eval(record)?)
+                    .coerce_to(&DfType::DEFAULT_TEXT, string.ty())?;
+                let delimiter = non_null!(delimiter.eval(record)?)
+                    .coerce_to(&DfType::DEFAULT_TEXT, delimiter.ty())?;
+                let field = <i64>::try_from(
+                    non_null!(field.eval(record)?).coerce_to(&DfType::Int, field.ty())?,
+                )?;
+
+                let mut parts = <&str>::try_from(&string)?.split(<&str>::try_from(&delimiter)?);
+                match field.cmp(&0) {
+                    Ordering::Less => {
+                        let parts = parts.collect::<Vec<_>>();
+                        let rfield = -field as usize;
+                        if rfield >= parts.len() {
+                            return Ok("".into());
+                        }
+                        Ok(parts
+                            .get(parts.len() - rfield)
+                            .copied()
+                            .unwrap_or("")
+                            .into())
+                    }
+                    Ordering::Equal => Err(invalid_err!("field position must not be zero")),
+                    Ordering::Greater => {
+                        Ok(parts
+                            .nth((field - 1/* 1-indexed */).try_into().unwrap())
+                            .unwrap_or("")
+                            .into())
+                    }
+                }
             }
             BuiltinFunction::Greatest { args, compare_as } => {
                 greatest_or_least(args, record, compare_as, ty, |v1, v2| v1 > v2)
@@ -1325,5 +1357,25 @@ mod tests {
     fn least_postgresql() {
         assert_eq!(eval_expr("least(1,2,3)", PostgreSQL), 1.into());
         assert_eq!(eval_expr("least(123, '23')", PostgreSQL), 23.into());
+    }
+
+    #[test]
+    fn split_part() {
+        assert_eq!(
+            eval_expr("split_part('abc~@~def~@~ghi', '~@~', 2)", PostgreSQL),
+            "def".into()
+        );
+        assert_eq!(
+            eval_expr("split_part('a.b.c', '.', 4)", PostgreSQL),
+            "".into()
+        );
+        assert_eq!(
+            eval_expr("split_part('a.b.c', '.', -1)", PostgreSQL),
+            "c".into()
+        );
+        assert_eq!(
+            eval_expr("split_part('a.b.c', '.', -4)", PostgreSQL),
+            "".into()
+        );
     }
 }
