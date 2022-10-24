@@ -1758,7 +1758,7 @@ impl Domain {
 
                 let start = time::Instant::now();
                 self.total_replay_time.start();
-                info!("starting replay");
+                info!(%from, "starting replay");
 
                 // we know that the node is materialized, as the migration coordinator
                 // picks path that originate with materialized nodes. if this weren't the
