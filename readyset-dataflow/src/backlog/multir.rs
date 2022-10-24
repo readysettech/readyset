@@ -125,6 +125,11 @@ impl Handle {
                 continue;
             }
             match key {
+                KeyComparison::Equal(k) if k.iter().any(|v| v.is_none()) => {
+                    // NULL can never compare equal to anything, so if the key contains nulls we can
+                    // short-circuit with an empty result set without actually doing a lookup
+                    hits.push(Default::default())
+                }
                 KeyComparison::Equal(k) => match map.get(&k[0]) {
                     Some(v) => hits.push(v.as_ref().clone()),
                     None => misses.push(Cow::Borrowed(key)),
@@ -174,6 +179,11 @@ impl Handle {
                 continue;
             }
             match key {
+                KeyComparison::Equal(k) if k.iter().any(|v| v.is_none()) => {
+                    // NULL can never compare equal to anything, so if the key contains nulls we can
+                    // short-circuit with an empty result set without actually doing a lookup
+                    hits.push(Default::default())
+                }
                 KeyComparison::Equal(k) => match map.get(k.as_slice()) {
                     Some(v) => hits.push(v.as_ref().clone()),
                     None => misses.push(Cow::Borrowed(key)),

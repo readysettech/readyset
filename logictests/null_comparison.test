@@ -33,3 +33,11 @@ left join t2 on t1.id = t2.id
 where t1.v1 = t2.v;
 ----
 1
+
+query I nosort
+select id from t1 where v1 = null;
+----
+
+query I nosort
+select id from t1 where v1 = null and v2 = 3;
+----
