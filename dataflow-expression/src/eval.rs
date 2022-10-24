@@ -1,5 +1,4 @@
 use std::borrow::Borrow;
-use std::convert::TryFrom;
 
 use nom_sql::BinaryOperator;
 use readyset_data::{DfType, DfValue};
@@ -46,32 +45,34 @@ impl Expr {
                 let left = left.eval(record)?;
                 let right = right.eval(record)?;
 
-                macro_rules! like {
-                    ($case_sensitivity: expr, $negated: expr) => {{
-                        match (
-                            left.coerce_to(&DfType::DEFAULT_TEXT, left_ty),
-                            right.coerce_to(&DfType::DEFAULT_TEXT, right_ty),
-                        ) {
-                            (Ok(left), Ok(right)) => {
-                                // NOTE(grfn): At some point, we may want to optimize this to
-                                // pre-cache the LikePattern if the value is constant, since
-                                // constructing a new LikePattern can be kinda slow
-                                let pat = LikePattern::new(
-                                    // unwrap: we just coerced it to Text, so it's definitely a string
-                                    String::try_from(right).unwrap().as_str(),
-                                    $case_sensitivity,
-                                );
-                                let matches =
-                                    // unwrap: we just coerced it to Text, so it's definitely a string
-                                    pat.matches(String::try_from(left).unwrap().as_str());
-                                Ok(if $negated { !matches } else { matches }.into())
+                let like = |case_sensitivity, negated| -> bool {
+                    match (
+                        left.coerce_to(&DfType::DEFAULT_TEXT, left_ty),
+                        right.coerce_to(&DfType::DEFAULT_TEXT, right_ty),
+                    ) {
+                        (Ok(left), Ok(right)) => {
+                            // unwrap: we just coerced these to Text, so they're definitely strings.
+                            let left = left.as_str().unwrap();
+                            let right = right.as_str().unwrap();
+
+                            // NOTE(grfn): At some point, we may want to optimize this to pre-cache
+                            // the LikePattern if the value is constant, since constructing a new
+                            // LikePattern can be kinda slow.
+                            let pat = LikePattern::new(right, case_sensitivity);
+
+                            let matches = pat.matches(left);
+
+                            if negated {
+                                !matches
+                            } else {
+                                matches
                             }
-                            // Anything that isn't Text or text-coercible can never be LIKE
-                            // anything, so we return true if not negated, false otherwise
-                            _ => Ok(DfValue::from(!$negated)),
                         }
-                    }};
-                }
+                        // Anything that isn't Text or text-coercible can never be LIKE anything, so
+                        // we return true if not negated or false otherwise.
+                        _ => !negated,
+                    }
+                };
 
                 match op {
                     Add => Ok((non_null!(left) + non_null!(right))?),
@@ -88,10 +89,10 @@ impl Expr {
                     LessOrEqual => Ok((non_null!(left) <= non_null!(right)).into()),
                     Is => Ok((left == right).into()),
                     IsNot => Ok((left != right).into()),
-                    Like => like!(CaseSensitive, false),
-                    NotLike => like!(CaseSensitive, true),
-                    ILike => like!(CaseInsensitive, false),
-                    NotILike => like!(CaseInsensitive, true),
+                    Like => Ok(like(CaseSensitive, false).into()),
+                    NotLike => Ok(like(CaseSensitive, true).into()),
+                    ILike => Ok(like(CaseInsensitive, false).into()),
+                    NotILike => Ok(like(CaseInsensitive, true).into()),
                 }
             }
             Cast { expr, ty, .. } => {
