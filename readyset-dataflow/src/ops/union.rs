@@ -318,6 +318,29 @@ impl Ingredient for Union {
         }
     }
 
+    fn replace_sibling(&mut self, from_idx: NodeIndex, to_idx: NodeIndex) {
+        match &mut self.emit {
+            Emit::AllFrom(p, _) => {
+                if p.as_global() == from_idx {
+                    *p = to_idx.into();
+                }
+            }
+            Emit::Project {
+                emit,
+                emit_l: _,
+                cols,
+                cols_l: _,
+            } => {
+                if let Some(val) = emit.remove(&from_idx.into()) {
+                    emit.insert(to_idx.into(), val);
+                }
+                if let Some(val) = cols.remove(&from_idx.into()) {
+                    cols.insert(to_idx.into(), val);
+                }
+            }
+        }
+    }
+
     fn on_commit(&mut self, me: NodeIndex, remap: &HashMap<NodeIndex, IndexPair>) {
         self.me = Some(me);
         match self.emit {

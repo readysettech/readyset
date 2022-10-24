@@ -234,6 +234,8 @@ impl Ingredient for TopK {
         vec![self.src.as_global()]
     }
 
+    impl_replace_sibling!(src);
+
     fn on_commit(&mut self, us: NodeIndex, remap: &HashMap<NodeIndex, IndexPair>) {
         // who's our parent really?
         self.src.remap(remap);

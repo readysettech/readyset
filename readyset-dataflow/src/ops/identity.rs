@@ -32,6 +32,8 @@ impl Ingredient for Identity {
 
     fn on_connected(&mut self, _: &Graph) {}
 
+    impl_replace_sibling!(src);
+
     fn on_commit(&mut self, _: NodeIndex, remap: &HashMap<NodeIndex, IndexPair>) {
         self.src.remap(remap);
     }

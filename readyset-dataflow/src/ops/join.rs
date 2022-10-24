@@ -240,6 +240,8 @@ impl Ingredient for Join {
 
     fn on_connected(&mut self, _g: &Graph) {}
 
+    impl_replace_sibling!(left, right);
+
     fn on_commit(&mut self, _: NodeIndex, remap: &HashMap<NodeIndex, IndexPair>) {
         self.left.remap(remap);
         self.right.remap(remap);

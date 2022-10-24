@@ -162,6 +162,8 @@ impl Ingredient for Paginate {
         vec![self.src.as_global()]
     }
 
+    impl_replace_sibling!(src);
+
     fn on_connected(&mut self, graph: &Graph) {
         self.page_number_col = Some(graph[self.src.as_global()].columns().len());
     }

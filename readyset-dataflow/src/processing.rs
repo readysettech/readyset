@@ -565,6 +565,31 @@ impl<'a> IngredientLookupResult<'a> {
     }
 }
 
+/// Generate an implementation of [`Ingredient::replace_sibling`] that remaps indices given by
+/// named fields on `self`.
+///
+/// For example, if `MyOp` has a field called `src`, a correct implementation of
+/// [`Ingredient::replace_sibling`] can be given by:
+///
+/// ```ignore
+/// impl Ingredient for MyOp {
+///     // ...
+///     impl_replace_sibling!(src);
+///     // ...
+/// }
+/// ```
+macro_rules! impl_replace_sibling {
+    ($($field:ident),+) => {
+        fn replace_sibling(&mut self, from_idx: NodeIndex, to_idx: NodeIndex) {
+            $(
+                if self.$field.as_global() == from_idx {
+                    self.$field = to_idx.into()
+                }
+            )+
+        }
+    };
+}
+
 pub(crate) trait Ingredient
 where
     Self: Send,
@@ -685,6 +710,12 @@ where
     /// All its ancestors are present, but this node and its children may not have been connected
     /// yet.
     fn on_connected(&mut self, _graph: &Graph) {}
+
+    /// Swap out the given `from_idx` with `to_idx` in any state stored within this node.
+    ///
+    /// This method may be called any number of times after `on_connected` is called. If it is
+    /// called after `on_commit` was already called, `on_commit` will be called again.
+    fn replace_sibling(&mut self, from_idx: NodeIndex, to_idx: NodeIndex);
 
     /// Called when a domain is finalized and is about to be booted.
     ///

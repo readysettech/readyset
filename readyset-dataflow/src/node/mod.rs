@@ -189,6 +189,13 @@ impl Node {
         }
     }
 
+    pub fn replace_sibling(&mut self, from_idx: NodeIndex, to_idx: NodeIndex) {
+        assert!(!self.taken);
+        if let Some(n) = self.as_mut_internal() {
+            Ingredient::replace_sibling(n, from_idx, to_idx);
+        }
+    }
+
     pub fn on_commit(&mut self, remap: &HashMap<NodeIndex, IndexPair>) {
         // this is *only* overwritten for these asserts.
         assert!(!self.taken);

@@ -144,6 +144,9 @@ impl Ingredient for NodeOperator {
     fn on_connected(&mut self, graph: &Graph) {
         impl_ingredient_fn_mut!(self, on_connected, graph)
     }
+    fn replace_sibling(&mut self, from_idx: NodeIndex, to_idx: NodeIndex) {
+        impl_ingredient_fn_mut!(self, replace_sibling, from_idx, to_idx)
+    }
     fn on_commit(&mut self, you: NodeIndex, remap: &HashMap<NodeIndex, IndexPair>) {
         impl_ingredient_fn_mut!(self, on_commit, you, remap)
     }

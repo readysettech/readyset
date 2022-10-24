@@ -174,6 +174,8 @@ where
         self.out_key = (0..self.group_by.len()).collect();
     }
 
+    impl_replace_sibling!(src);
+
     fn on_commit(&mut self, us: NodeIndex, remap: &HashMap<NodeIndex, IndexPair>) {
         // who's our parent really?
         self.src.remap(remap);

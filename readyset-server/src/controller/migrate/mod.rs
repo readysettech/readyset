@@ -1068,6 +1068,7 @@ fn plan_add_nodes(
                     // add to graph
                     let idx = dataflow_state.ingredients.add_node(duplicate_node);
                     local_redundant_partial.insert(parent, idx);
+                    dataflow_state.ingredients[child].replace_sibling(parent, idx);
                     (idx, true)
                 };
 

@@ -39,6 +39,8 @@ impl Ingredient for Filter {
         vec![self.src.as_global()]
     }
 
+    impl_replace_sibling!(src);
+
     fn on_commit(&mut self, _: NodeIndex, remap: &HashMap<NodeIndex, IndexPair>) {
         self.src.remap(remap);
     }

@@ -24,6 +24,9 @@
 #![deny(unused_extern_crates, macro_use_extern_crate)]
 #![allow(clippy::redundant_closure)]
 
+#[macro_use]
+mod processing;
+
 pub(crate) mod backlog;
 pub mod node;
 pub mod ops;
@@ -33,7 +36,6 @@ pub mod utils;
 
 mod domain;
 mod node_map;
-mod processing;
 
 use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};

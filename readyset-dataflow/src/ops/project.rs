@@ -133,6 +133,8 @@ impl Ingredient for Project {
         self.cols = g[self.src.as_global()].columns().len();
     }
 
+    impl_replace_sibling!(src);
+
     fn on_commit(&mut self, us: NodeIndex, remap: &HashMap<NodeIndex, IndexPair>) {
         self.src.remap(remap);
         self.us = Some(remap[&us]);
