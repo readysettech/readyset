@@ -4309,8 +4309,6 @@ async fn correct_nested_view_schema() {
     );
 }
 
-// FIXME: The test is disabled because join column projection does not work correctly.
-#[ignore]
 #[tokio::test(flavor = "multi_thread")]
 async fn join_column_projection() {
     let mut g = start_simple_unsharded("join_column_projection").await;
@@ -4344,7 +4342,6 @@ async fn join_column_projection() {
             "u_id",
             "u_name",
             "email",
-            "bogokey"
         ]
     );
 
@@ -4359,7 +4356,6 @@ async fn join_column_projection() {
             "u_id",
             "u_name",
             "email",
-            "bogokey"
         ]
     );
 
@@ -4374,7 +4370,6 @@ async fn join_column_projection() {
             "u_id",
             "u_name",
             "email",
-            "bogokey"
         ]
     );
 }
