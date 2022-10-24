@@ -270,6 +270,17 @@ impl MigrationState {
     }
 }
 
+impl Display for MigrationState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MigrationState::Pending => write!(f, "pending"),
+            MigrationState::Successful => write!(f, "successful"),
+            MigrationState::Unsupported => write!(f, "unsupported"),
+            MigrationState::DryRunSucceeded => write!(f, "dry run succeeded"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 /// ExecutionInfo contains the current ExecutionState of the query along with the last time the
 /// state was transitioned.

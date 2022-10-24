@@ -93,6 +93,7 @@ pub struct Telemetry {
     pub query_id: Option<String>,
     pub schema: Option<String>,
     pub proxied_query: Option<String>,
+    pub migration_status: Option<String>,
 }
 
 impl TelemetryBuilder {

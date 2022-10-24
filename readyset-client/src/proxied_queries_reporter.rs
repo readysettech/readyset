@@ -40,7 +40,10 @@ impl ProxiedQueriesReporter {
                 let anon_q = query.query.to_anonymized_string(&mut anonymizer);
                 Some((
                     TelemetryEvent::ProxiedQuery,
-                    TelemetryBuilder::new().proxied_query(anon_q).build(),
+                    TelemetryBuilder::new()
+                        .proxied_query(anon_q)
+                        .migration_status(query.status.migration_state.to_string())
+                        .build(),
                 ))
             }
         }

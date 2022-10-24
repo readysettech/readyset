@@ -1803,9 +1803,14 @@ async fn test_proxied_queries_telemetry() {
         .first()
         .cloned()
         .expect("should have 1 element");
+    sleep().await;
 
     assert_eq!(
         telemetry.proxied_query,
         Some("SELECT * FROM `anon_id_0`".to_string())
     );
+
+    // We don't actually run dry run migrations, so just check that this field is populated
+    // with its initial value
+    assert_eq!(telemetry.migration_status, Some("pending".to_string()));
 }
