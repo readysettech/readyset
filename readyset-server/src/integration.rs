@@ -8244,11 +8244,18 @@ async fn partial_ingress_above_full_reader() {
 async fn reroutes_recursively() {
     readyset_tracing::init_test_logging();
     let mut g = start_simple_unsharded("reroutes_twice").await;
+
     let sql = "
         create table t1 (a int, b int);
         create table t2 (c int, d int);
         create table t3 (e int, f int);
         create table t4 (g int, h int);
+        ";
+    g.extend_recipe(ChangeList::from_str(sql, Dialect::DEFAULT_MYSQL).unwrap())
+        .await
+        .unwrap();
+
+    let sql = "
         CREATE CACHE q1 FROM SELECT t2.c, t2.d, t3.e, t3.f FROM t2 INNER JOIN t3 ON t2.c = t3.e WHERE t2.c = ?;
         CREATE CACHE q2 FROM SELECT t1.a, t1.b, q1.c, q1.d FROM t1 INNER JOIN q1 on t1.a = q1.c WHERE t1.b = ?;
         CREATE CACHE q3 FROM SELECT t4.g, t4.h, q2.a, q2.b FROM t4 INNER JOIN q2 on t4.g = q2.a WHERE t4.g = ?;

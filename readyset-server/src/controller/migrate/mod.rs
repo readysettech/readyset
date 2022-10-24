@@ -910,16 +910,24 @@ fn plan_add_nodes(
                         "node" => nnodes.to_string()
                     );
                 }
-                let mut ip: IndexPair = ni.into();
-                ip.set_local(LocalNodeIndex::make(nnodes as u32));
-                #[allow(clippy::indexing_slicing)] // Ingredients must contain NodeIndex
-                dataflow_state.ingredients[ni].set_finalized_addr(ip);
                 dataflow_state
                     .remap
                     .entry(*domain)
                     .or_insert_with(HashMap::new)
-                    .insert(ni, ip);
-                nnodes += 1;
+                    .entry(ni)
+                    .or_insert_with(|| {
+                        // Only make a new local index for the node if it doesn't already have one,
+                        // which can happen if we've added an existing node to `new_nodes` due to
+                        // remapping (see [remap-nodes], below)
+                        let mut ip: IndexPair = ni.into();
+                        ip.set_local(LocalNodeIndex::make(nnodes as u32));
+
+                        #[allow(clippy::indexing_slicing)] // Ingredients must contain NodeIndex
+                        dataflow_state.ingredients[ni].set_finalized_addr(ip);
+
+                        nnodes += 1;
+                        ip
+                    });
             }
 
             // Initialize each new node
@@ -1044,6 +1052,9 @@ fn plan_add_nodes(
         dataflow_state
             .materializations
             .extend(&mut dataflow_state.ingredients, &new_nodes)?;
+
+        // Check to see if we've just tried to add a fully materialized node below an existing
+        // partially materialized node
         if let Some(InvalidEdge { parent, child }) = dataflow_state
             .materializations
             .validate(&dataflow_state.ingredients, &new_nodes)?
@@ -1054,23 +1065,30 @@ fn plan_add_nodes(
                 "rerouting full node found below partial node",
             );
 
-            // Find fully materialized equivalent of parent or create one
-            let (duplicate_index, is_new) =
-                if let Some(idx) = dataflow_state.materializations.get_redundant(&parent) {
-                    (*idx, false)
-                } else if let Some(idx) = local_redundant_partial.get(&parent) {
-                    (*idx, false)
-                } else {
-                    // create new node in the same domain as old
-                    // we just found the parent in Materializations::validate()
-                    #[allow(clippy::indexing_slicing)]
-                    let duplicate_node = dataflow_state.ingredients[parent].duplicate();
-                    // add to graph
-                    let idx = dataflow_state.ingredients.add_node(duplicate_node);
-                    local_redundant_partial.insert(parent, idx);
-                    dataflow_state.ingredients[child].replace_sibling(parent, idx);
-                    (idx, true)
-                };
+            // Try to find an existing fully materialized equivalent of that partially materialized
+            // parent
+            let (duplicate_index, is_new) = if let Some(idx) =
+                dataflow_state.materializations.get_redundant(&parent)
+            {
+                (*idx, false)
+            } else if let Some(idx) = local_redundant_partial.get(&parent) {
+                (*idx, false)
+            } else {
+                // [remap-nodes]
+                // If we cant find one, create a new node in the same domain as old
+
+                // we just found the parent in Materializations::validate()
+                #[allow(clippy::indexing_slicing)]
+                let duplicate_node = dataflow_state.ingredients[parent].duplicate();
+                // add to graph
+                let idx = dataflow_state.ingredients.add_node(duplicate_node);
+                local_redundant_partial.insert(parent, idx);
+                // Add the child node to `new_nodes`, so that on the next iteration of the loop we
+                // make sure that any lookup obligations into the duplicated parent are satisfied
+                new_nodes.insert(child);
+                dataflow_state.ingredients[child].replace_sibling(parent, idx);
+                (idx, true)
+            };
 
             dataflow_state
                 .ingredients
