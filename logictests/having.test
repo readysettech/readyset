@@ -1,8 +1,8 @@
 statement ok
-create table t (x int);
+create table t (x int, y int);
 
 statement ok
-insert into t (x) values (1), (1), (1), (2), (3), (3);
+insert into t values (1, 1), (1, 2), (1, 3), (2, 4), (3, 10), (3, 20);
 
 query II rowsort
 select x, count(*) from t group by x;
@@ -14,8 +14,43 @@ select x, count(*) from t group by x;
 3
 2
 
-query II nosort
+query II rowsort
 select x, count(*) from t group by x having count(*) > 2;
+----
+1
+3
+
+query I nosort
+select x from t group by x having count(*) > 2;
+----
+1
+
+query I nosort
+select x from t group by x having count(*) + 1 = 4
+----
+1
+
+query I nosort
+select count(*) from t group by x having count(*) + 1 = 4
+----
+3
+
+query II rowsort
+select x, sum(y) from t group by x having count(y) > 1
+----
+1
+6
+3
+30
+
+query II rowsort
+select x, avg(y) from t group by x having count(y) > 1 and sum(y) < 30
+----
+1
+2
+
+query II rowsort
+select x, count(y) from t group by x having x = 1
 ----
 1
 3
