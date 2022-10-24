@@ -169,6 +169,9 @@ pub enum DfType {
 
 /// Defaults.
 impl DfType {
+    /// [`DfType::Text`] with the default collation.
+    pub const DEFAULT_TEXT: Self = Self::Text(Collation::Utf8);
+
     pub const DEFAULT_NUMERIC: Self = Self::Numeric {
         prec: Self::DEFAULT_NUMERIC_PREC,
         scale: Self::DEFAULT_NUMERIC_SCALE,
@@ -235,9 +238,7 @@ impl DfType {
             // Character string types.
             //
             // `varchar` by itself is an error in MySQL but synonymous with `text` in PostgreSQL.
-            Text | TinyText | MediumText | LongText | VarChar(None) => {
-                Self::Text(Collation::default())
-            }
+            Text | TinyText | MediumText | LongText | VarChar(None) => Self::DEFAULT_TEXT,
             VarChar(Some(len)) => Self::VarChar(len, Collation::default()),
             Char(len) => Self::Char(len.unwrap_or(1), Collation::default(), dialect),
 
@@ -610,11 +611,7 @@ mod tests {
 
     #[test]
     fn innermost_array_type() {
-        for ty in [
-            DfType::Text(Collation::default()),
-            DfType::Bool,
-            DfType::Double,
-        ] {
+        for ty in [DfType::DEFAULT_TEXT, DfType::Bool, DfType::Double] {
             for dimen in 0..=5 {
                 let arr = ty.clone().nest_in_array(dimen);
                 assert_eq!(arr.innermost_array_type(), &ty);

@@ -374,21 +374,21 @@ mod tests {
     fn float_to_text() {
         assert_eq!(
             DfValue::Double(312.0)
-                .coerce_to(&DfType::Text(Collation::default()), &DfType::Unknown)
+                .coerce_to(&DfType::DEFAULT_TEXT, &DfType::Unknown)
                 .unwrap(),
             DfValue::from("312")
         );
 
         assert_eq!(
             DfValue::Double(312.222222)
-                .coerce_to(&DfType::Text(Collation::default()), &DfType::Unknown)
+                .coerce_to(&DfType::DEFAULT_TEXT, &DfType::Unknown)
                 .unwrap(),
             DfValue::from("312.222222")
         );
 
         assert_eq!(
             DfValue::Double(1e4)
-                .coerce_to(&DfType::Text(Collation::default()), &DfType::Unknown)
+                .coerce_to(&DfType::DEFAULT_TEXT, &DfType::Unknown)
                 .unwrap(),
             DfValue::from("10000")
         );
@@ -412,7 +412,7 @@ mod tests {
 
         assert_eq!(
             DfValue::Double(-1.0 / 3.0)
-                .coerce_to(&DfType::Text(Collation::default()), &DfType::Unknown)
+                .coerce_to(&DfType::DEFAULT_TEXT, &DfType::Unknown)
                 .unwrap(),
             DfValue::from("-0.3333333333333333")
         );

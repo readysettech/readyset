@@ -15,7 +15,7 @@ use nom_sql::{
 };
 use readyset_data::dialect::SqlEngine;
 pub use readyset_data::Dialect;
-use readyset_data::{Collation, DfType, DfValue};
+use readyset_data::{DfType, DfValue};
 use readyset_errors::{internal, invalid_err, unsupported, ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
 use vec1::Vec1;
@@ -176,14 +176,14 @@ impl BuiltinFunction {
                 (
                     Self::JsonTypeof(next_arg()?),
                     // Always returns text containing the JSON type.
-                    DfType::Text(Collation::default()),
+                    DfType::DEFAULT_TEXT,
                 )
             }
             "jsonb_typeof" => {
                 (
                     Self::JsonbTypeof(next_arg()?),
                     // Always returns text containing the JSON type.
-                    DfType::Text(Collation::default()),
+                    DfType::DEFAULT_TEXT,
                 )
             }
             "coalesce" => {
@@ -208,7 +208,7 @@ impl BuiltinFunction {
                 let ty = if string.ty().is_any_text() {
                     string.ty().clone()
                 } else {
-                    DfType::Text(Collation::default())
+                    DfType::DEFAULT_TEXT
                 };
 
                 (
@@ -634,7 +634,7 @@ impl Expr {
 /// [pg-docs]: https://www.postgresql.org/docs/current/typeconv-union-case.html
 fn unify_postgres_types(types: Vec<&DfType>) -> ReadySetResult<DfType> {
     let Some(first_ty) = types.first() else {
-        return Ok(DfType::Text(Collation::default()))
+        return Ok(DfType::DEFAULT_TEXT)
     };
 
     // > 1. If all inputs are of the same type, and it is not unknown, resolve as that type.
@@ -651,7 +651,7 @@ fn unify_postgres_types(types: Vec<&DfType>) -> ReadySetResult<DfType> {
     // > string category). Otherwise, unknown inputs are ignored for the purposes of the remaining
     // > rules.
     let Some(first_known_type) = types.iter().find(|t| t.is_known()) else {
-        return Ok(DfType::Text(Collation::default()));
+        return Ok(DfType::DEFAULT_TEXT);
     };
 
     // > 4. If the non-unknown inputs are not all of the same type category, fail.
@@ -719,7 +719,7 @@ fn mysql_least_greatest_compare_as(arg_types: Vec<&DfType>) -> DfType {
         }
 
         if has_strings && has_numbers {
-            return DfType::Text(Collation::default());
+            return DfType::DEFAULT_TEXT;
         }
     }
 
@@ -733,6 +733,7 @@ mod tests {
 
     mod lower {
         use nom_sql::{parse_expr, Dialect as ParserDialect, Float, Literal};
+        use readyset_data::Collation;
 
         use super::*;
 
@@ -812,20 +813,20 @@ mod tests {
                     func: Box::new(BuiltinFunction::Concat(
                         Expr::Literal {
                             val: "My".into(),
-                            ty: DfType::Text(Collation::default()),
+                            ty: DfType::DEFAULT_TEXT,
                         },
                         vec![
                             Expr::Literal {
                                 val: "SQ".into(),
-                                ty: DfType::Text(Collation::default()),
+                                ty: DfType::DEFAULT_TEXT,
                             },
                             Expr::Literal {
                                 val: "L".into(),
-                                ty: DfType::Text(Collation::default()),
+                                ty: DfType::DEFAULT_TEXT,
                             },
                         ],
                     )),
-                    ty: DfType::Text(Collation::default()),
+                    ty: DfType::DEFAULT_TEXT,
                 }
             );
         }
@@ -873,7 +874,7 @@ mod tests {
                     func: Box::new(BuiltinFunction::Substring(
                         Expr::Literal {
                             val: "abcdefghi".into(),
-                            ty: DfType::Text(Collation::default())
+                            ty: DfType::DEFAULT_TEXT
                         },
                         Some(Expr::Literal {
                             val: 1.into(),
@@ -884,7 +885,7 @@ mod tests {
                             ty: DfType::UnsignedBigInt
                         })
                     )),
-                    ty: DfType::Text(Collation::default())
+                    ty: DfType::DEFAULT_TEXT
                 }
             )
         }
@@ -899,7 +900,7 @@ mod tests {
                     func: Box::new(BuiltinFunction::Substring(
                         Expr::Literal {
                             val: "abcdefghi".into(),
-                            ty: DfType::Text(Collation::default())
+                            ty: DfType::DEFAULT_TEXT
                         },
                         Some(Expr::Literal {
                             val: 1.into(),
@@ -910,7 +911,7 @@ mod tests {
                             ty: DfType::UnsignedBigInt
                         })
                     )),
-                    ty: DfType::Text(Collation::default())
+                    ty: DfType::DEFAULT_TEXT
                 }
             )
         }
@@ -919,7 +920,7 @@ mod tests {
         fn substring_without_string_arg() {
             let input = parse_expr(ParserDialect::MySQL, "substring(123 from 2)").unwrap();
             let res = Expr::lower(input, Dialect::DEFAULT_MYSQL, |_| internal!()).unwrap();
-            assert_eq!(res.ty(), &DfType::Text(Collation::default()));
+            assert_eq!(res.ty(), &DfType::DEFAULT_TEXT);
         }
 
         #[test]
@@ -939,7 +940,7 @@ mod tests {
             infers_type(
                 vec![Null, Null],
                 Dialect::DEFAULT_POSTGRESQL,
-                DfType::Text(Collation::default()),
+                DfType::DEFAULT_TEXT,
             );
 
             infers_type(
@@ -951,13 +952,13 @@ mod tests {
             infers_type(
                 vec!["123".into(), "456".into()],
                 Dialect::DEFAULT_POSTGRESQL,
-                DfType::Text(Collation::default()),
+                DfType::DEFAULT_TEXT,
             );
 
             infers_type(
                 vec!["123".into(), "456".into()],
                 Dialect::DEFAULT_POSTGRESQL,
-                DfType::Text(Collation::default()),
+                DfType::DEFAULT_TEXT,
             );
 
             infers_type(
@@ -990,7 +991,7 @@ mod tests {
                     }),
                 ],
                 Dialect::DEFAULT_MYSQL,
-                DfType::Text(Collation::default()),
+                DfType::DEFAULT_TEXT,
             );
 
             // TODO(ENG-1911)
@@ -1031,7 +1032,7 @@ mod tests {
             compares_as(
                 vec![Null, Null],
                 Dialect::DEFAULT_POSTGRESQL,
-                DfType::Text(Collation::default()),
+                DfType::DEFAULT_TEXT,
             );
             compares_as(vec![Null, Null], Dialect::DEFAULT_MYSQL, DfType::Unknown);
             compares_as(
@@ -1042,7 +1043,7 @@ mod tests {
             compares_as(
                 vec![Null, "a".into(), "b".into()],
                 Dialect::DEFAULT_POSTGRESQL,
-                DfType::Text(Collation::default()),
+                DfType::DEFAULT_TEXT,
             );
             compares_as(
                 vec![12u64.into(), (-123).into()],
@@ -1055,12 +1056,12 @@ mod tests {
             compares_as(
                 vec![12u64.into(), "123".into()],
                 Dialect::DEFAULT_MYSQL,
-                DfType::Text(Collation::default()),
+                DfType::DEFAULT_TEXT,
             );
             compares_as(
                 vec!["A".into(), "b".into(), 1.into()],
                 Dialect::DEFAULT_MYSQL,
-                DfType::Text(Collation::default()),
+                DfType::DEFAULT_TEXT,
             );
         }
     }

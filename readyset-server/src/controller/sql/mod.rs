@@ -3653,7 +3653,7 @@ mod tests {
             let g = &mig.dataflow_state.ingredients;
             g.node_indices().for_each(|idx| {
                 if matches!(g[idx].as_internal(), Some(NodeOperator::TopK(_))) {
-                    let text = DfType::Text(Collation::default());
+                    let text = DfType::DEFAULT_TEXT;
                     let truth = vec![
                         &DfType::Int,    // a
                         &DfType::Float,  // b
@@ -3717,7 +3717,7 @@ mod tests {
             let g = &mig.dataflow_state.ingredients;
             g.node_indices().for_each(|idx| {
                 if matches!(g[idx].as_internal(), Some(NodeOperator::Filter(_))) {
-                    let text = DfType::Text(Collation::default());
+                    let text = DfType::DEFAULT_TEXT;
                     let truth = vec![
                         &DfType::Int,   // a
                         &DfType::Float, // b
@@ -3794,7 +3794,7 @@ mod tests {
                     let types = g[idx].columns().iter().map(|c| c.ty()).collect::<Vec<_>>();
                     assert_eq!(truth, types);
                 } else if matches!(g[idx].as_internal(), Some(NodeOperator::Concat(_))) {
-                    let text = DfType::Text(Collation::default());
+                    let text = DfType::DEFAULT_TEXT;
                     let truth = vec![
                         &DfType::BigInt, // bogokey
                         &text,           // group_concat()
@@ -3872,7 +3872,7 @@ mod tests {
             let g = &mig.dataflow_state.ingredients;
             g.node_indices().for_each(|idx| {
                 if matches!(g[idx].as_internal(), Some(NodeOperator::Join(_))) {
-                    let text = DfType::Text(Collation::default());
+                    let text = DfType::DEFAULT_TEXT;
                     let truth = vec![
                         &DfType::Int,   // t1.a
                         &DfType::Float, // t1.b

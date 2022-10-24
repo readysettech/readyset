@@ -92,7 +92,7 @@ use readyset::{ColumnSchema, ViewCreateRequest};
 use readyset_client_metrics::{
     recorded, EventType, QueryDestination, QueryExecutionEvent, SqlQueryType,
 };
-use readyset_data::{Collation, DfType, DfValue};
+use readyset_data::{DfType, DfValue};
 use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
 use readyset_errors::{internal, internal_err, unsupported, ReadySetResult};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
@@ -1581,7 +1581,7 @@ where
                 name: n.into(),
                 table: None,
             },
-            column_type: DfType::Text(Collation::default()),
+            column_type: DfType::DEFAULT_TEXT,
             base: None,
         };
 

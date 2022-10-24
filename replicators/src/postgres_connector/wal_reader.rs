@@ -360,9 +360,7 @@ impl wal::TupleData {
                             let target_type = DfType::Array(Box::new(match *member_type {
                                 PGType::BOOL => DfType::Bool,
                                 PGType::CHAR => DfType::Char(1, Collation::default(), dialect),
-                                PGType::TEXT | PGType::VARCHAR => {
-                                    DfType::Text(Collation::default())
-                                }
+                                PGType::TEXT | PGType::VARCHAR => DfType::DEFAULT_TEXT,
                                 PGType::INT2 => DfType::SmallInt,
                                 PGType::INT4 => DfType::Int,
                                 PGType::INT8 => DfType::BigInt,

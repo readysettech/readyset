@@ -22,7 +22,7 @@ use readyset::{
     ReadySetHandle, ReadySetResult, SchemaType, Table, TableOperation, View, ViewCreateRequest,
     ViewPlaceholder, ViewQuery, ViewSchema,
 };
-use readyset_data::{Collation, DfType, DfValue, Dialect};
+use readyset_data::{DfType, DfValue, Dialect};
 use readyset_errors::ReadySetError::PreparedStatementMissing;
 use readyset_errors::{
     internal, internal_err, invariant_eq, table_err, unsupported, unsupported_err,
@@ -538,7 +538,7 @@ impl NoriaConnector {
                         name: "name".into(),
                         table: None,
                     },
-                    column_type: DfType::Text(Collation::default()),
+                    column_type: DfType::DEFAULT_TEXT,
                     base: None,
                 },
                 ColumnSchema {
@@ -546,7 +546,7 @@ impl NoriaConnector {
                         name: "query".into(),
                         table: None,
                     },
-                    column_type: DfType::Text(Collation::default()),
+                    column_type: DfType::DEFAULT_TEXT,
                     base: None,
                 },
                 ColumnSchema {
@@ -554,7 +554,7 @@ impl NoriaConnector {
                         name: "always".into(),
                         table: None,
                     },
-                    column_type: DfType::Text(Collation::default()),
+                    column_type: DfType::DEFAULT_TEXT,
                     base: None,
                 },
             ]),
@@ -1835,7 +1835,6 @@ async fn do_read<'a>(
 #[cfg(test)]
 mod tests {
     use nom_sql::Dialect;
-    use readyset_data::Collation;
 
     use super::*;
 
@@ -1919,7 +1918,7 @@ mod tests {
                             name: "y".into(),
                             table: Some("t".into()),
                         },
-                        column_type: DfType::Text(Collation::default()),
+                        column_type: DfType::DEFAULT_TEXT,
                         base: Some(ColumnBase {
                             table: "t".into(),
                             column: "y".into(),
@@ -1945,7 +1944,7 @@ mod tests {
                             name: "y".into(),
                             table: Some("t".into()),
                         },
-                        column_type: DfType::Text(Collation::default()),
+                        column_type: DfType::DEFAULT_TEXT,
                         base: Some(ColumnBase {
                             table: "t".into(),
                             column: "y".into(),
@@ -2030,12 +2029,12 @@ mod tests {
                 Some(DfExpr::Op {
                     left: Box::new(DfExpr::Column {
                         index: 1,
-                        ty: DfType::Text(Collation::default())
+                        ty: DfType::DEFAULT_TEXT
                     }),
                     op: BinaryOperator::ILike,
                     right: Box::new(DfExpr::Literal {
                         val: DfValue::from("%a%"),
-                        ty: DfType::Text(Collation::default())
+                        ty: DfType::DEFAULT_TEXT
                     }),
                     ty: DfType::Bool,
                 })
@@ -2134,12 +2133,12 @@ mod tests {
                 Some(DfExpr::Op {
                     left: Box::new(DfExpr::Column {
                         index: 1,
-                        ty: DfType::Text(Collation::default())
+                        ty: DfType::DEFAULT_TEXT
                     }),
                     op: BinaryOperator::Greater,
                     right: Box::new(DfExpr::Literal {
                         val: "a".into(),
-                        ty: DfType::Text(Collation::default())
+                        ty: DfType::DEFAULT_TEXT
                     }),
                     ty: DfType::Bool
                 })

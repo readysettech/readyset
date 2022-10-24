@@ -127,7 +127,7 @@ mod tests {
 
     use readyset::ColumnSchema;
     use readyset_client::backend as cl;
-    use readyset_data::{Collation, DfType, DfValue};
+    use readyset_data::{DfType, DfValue};
 
     use super::*;
 
@@ -219,7 +219,7 @@ mod tests {
                 },
                 ColumnSchema {
                     column: "tab1.col2".into(),
-                    column_type: DfType::Text(Collation::default()),
+                    column_type: DfType::DEFAULT_TEXT,
                     base: None,
                 },
             ]),
@@ -267,7 +267,7 @@ mod tests {
                 },
                 ColumnSchema {
                     column: "tab1.col2".into(),
-                    column_type: DfType::Text(Collation::default()),
+                    column_type: DfType::DEFAULT_TEXT,
                     base: None,
                 },
             ]),

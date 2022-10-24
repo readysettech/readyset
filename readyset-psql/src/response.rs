@@ -7,7 +7,7 @@ use psql_srv::Column;
 use readyset::results::{ResultIterator, Results};
 use readyset::ColumnSchema;
 use readyset_client::backend::{self as cl, noria_connector, SinglePrepareResult, UpstreamPrepare};
-use readyset_data::{Collation, DfType};
+use readyset_data::DfType;
 use upstream::StatementMeta;
 
 use crate::resultset::Resultset;
@@ -93,7 +93,7 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                                     name: v.name.clone(),
                                     table: None,
                                 },
-                                column_type: DfType::Text(Collation::default()),
+                                column_type: DfType::DEFAULT_TEXT,
                                 base: None,
                             })
                             .collect(),
@@ -122,7 +122,7 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                                 name: "name".into(),
                                 table: None,
                             },
-                            column_type: DfType::Text(Collation::default()),
+                            column_type: DfType::DEFAULT_TEXT,
                             base: None,
                         },
                         ColumnSchema {
@@ -130,7 +130,7 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                                 name: "value".into(),
                                 table: None,
                             },
-                            column_type: DfType::Text(Collation::default()),
+                            column_type: DfType::DEFAULT_TEXT,
                             base: None,
                         },
                     ]),
@@ -161,7 +161,7 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                                 name: col1_header.clone(),
                                 table: None,
                             },
-                            column_type: DfType::Text(Collation::default()),
+                            column_type: DfType::DEFAULT_TEXT,
                             base: None,
                         },
                         ColumnSchema {
@@ -169,7 +169,7 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                                 name: col2_header.clone(),
                                 table: None,
                             },
-                            column_type: DfType::Text(Collation::default()),
+                            column_type: DfType::DEFAULT_TEXT,
                             base: None,
                         },
                     ]),

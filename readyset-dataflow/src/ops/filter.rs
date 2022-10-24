@@ -133,7 +133,7 @@ impl Ingredient for Filter {
 #[cfg(test)]
 mod tests {
     use dataflow_expression::utils::{column_with_type, make_literal};
-    use readyset_data::{Collation, DfType};
+    use readyset_data::DfType;
     use Expr::Op;
 
     use super::*;
@@ -148,7 +148,7 @@ mod tests {
             Filter::new(
                 s.as_global(),
                 filters.unwrap_or_else(|| Op {
-                    left: Box::new(column_with_type(1, DfType::Text(Collation::default()))),
+                    left: Box::new(column_with_type(1, DfType::DEFAULT_TEXT)),
                     op: BinaryOperator::Equal,
                     right: Box::new(make_literal(DfValue::from("a"))),
                     ty: DfType::Bool,
@@ -200,7 +200,7 @@ mod tests {
                 }),
                 op: BinaryOperator::And,
                 right: Box::new(Op {
-                    left: Box::new(column_with_type(1, DfType::Text(Collation::default()))),
+                    left: Box::new(column_with_type(1, DfType::DEFAULT_TEXT)),
                     op: BinaryOperator::Equal,
                     right: Box::new(make_literal(DfValue::from("a"))),
                     ty: DfType::Bool,
@@ -269,7 +269,7 @@ mod tests {
                 }),
                 op: BinaryOperator::And,
                 right: Box::new(Op {
-                    left: Box::new(column_with_type(1, DfType::Text(Collation::default()))),
+                    left: Box::new(column_with_type(1, DfType::DEFAULT_TEXT)),
                     op: BinaryOperator::NotEqual,
                     right: Box::new(make_literal(DfValue::from("a"))),
                     ty: DfType::Bool,
@@ -300,9 +300,9 @@ mod tests {
         let mut g = setup(
             false,
             Some(Op {
-                left: Box::new(column_with_type(0, DfType::Text(Collation::default()))),
+                left: Box::new(column_with_type(0, DfType::DEFAULT_TEXT)),
                 op: BinaryOperator::Equal,
-                right: Box::new(column_with_type(1, DfType::Text(Collation::default()))),
+                right: Box::new(column_with_type(1, DfType::DEFAULT_TEXT)),
                 ty: DfType::Bool,
             }),
         );

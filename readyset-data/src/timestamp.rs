@@ -501,7 +501,7 @@ mod tests {
         assert_eq!(
             &format!(
                 "{}",
-                ts.coerce_to(&DfType::Text(Collation::default()), &DfType::Unknown)
+                ts.coerce_to(&DfType::DEFAULT_TEXT, &DfType::Unknown)
                     .unwrap()
             ),
             "2022-02-09 13:14:15"
@@ -526,7 +526,7 @@ mod tests {
                     &DfType::Unknown
                 )
                 .unwrap()
-                .coerce_to(&DfType::Text(Collation::default()), &DfType::Unknown)
+                .coerce_to(&DfType::DEFAULT_TEXT, &DfType::Unknown)
                 .unwrap()
             ),
             "2022-02-09 13:14:15.169000"
@@ -542,7 +542,7 @@ mod tests {
                     &DfType::Unknown
                 )
                 .unwrap()
-                .coerce_to(&DfType::Text(Collation::default()), &DfType::Unknown)
+                .coerce_to(&DfType::DEFAULT_TEXT, &DfType::Unknown)
                 .unwrap()
             ),
             "2022-02-09 13:14:15.17"
@@ -558,7 +558,7 @@ mod tests {
                     &DfType::Unknown
                 )
                 .unwrap()
-                .coerce_to(&DfType::Text(Collation::default()), &DfType::Unknown)
+                .coerce_to(&DfType::DEFAULT_TEXT, &DfType::Unknown)
                 .unwrap()
             ),
             "2022-02-09 13:14:15.2"
@@ -569,7 +569,7 @@ mod tests {
                 "{}",
                 ts.coerce_to(&DfType::Date, &DfType::Unknown)
                     .unwrap()
-                    .coerce_to(&DfType::Text(Collation::default()), &DfType::Unknown)
+                    .coerce_to(&DfType::DEFAULT_TEXT, &DfType::Unknown)
                     .unwrap()
             ),
             "2022-02-09"

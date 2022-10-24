@@ -31,7 +31,7 @@ use readyset::consistency::Timestamp;
 use readyset::internal::LocalNodeIndex;
 use readyset::recipe::changelist::ChangeList;
 use readyset::{KeyComparison, Modification, SchemaType, ViewPlaceholder, ViewQuery};
-use readyset_data::{Collation, DfType, DfValue, Dialect};
+use readyset_data::{DfType, DfValue, Dialect};
 use readyset_errors::ReadySetError::{MigrationPlanFailed, RpcFailed, SelectQueryCreationFailed};
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
@@ -4292,10 +4292,7 @@ async fn correct_nested_view_schema() {
 
     let expected_schema = vec![
         ("swvc.id".try_into().unwrap(), DfType::Int),
-        (
-            "swvc.content".try_into().unwrap(),
-            DfType::Text(Collation::default()),
-        ),
+        ("swvc.content".try_into().unwrap(), DfType::DEFAULT_TEXT),
         ("swvc.vc".try_into().unwrap(), DfType::BigInt),
     ];
     assert_eq!(
@@ -5102,12 +5099,12 @@ async fn post_read_ilike() {
             filter: Some(DfExpr::Op {
                 left: Box::new(DfExpr::Column {
                     index: 0,
-                    ty: DfType::Text(Collation::default()),
+                    ty: DfType::DEFAULT_TEXT,
                 }),
                 op: BinaryOperator::ILike,
                 right: Box::new(DfExpr::Literal {
                     val: "%a%".into(),
-                    ty: DfType::Text(Collation::default()),
+                    ty: DfType::DEFAULT_TEXT,
                 }),
                 ty: DfType::Bool,
             }),

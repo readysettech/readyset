@@ -1203,10 +1203,10 @@ impl TryFrom<DfValue> for Literal {
             DfValue::Text(_) => Ok(Literal::String(String::try_from(value)?)),
             DfValue::TinyText(_) => Ok(Literal::String(String::try_from(value)?)),
             DfValue::TimestampTz(_) => Ok(Literal::String(String::try_from(
-                value.coerce_to(&DfType::Text(Collation::default()), &DfType::Unknown)?,
+                value.coerce_to(&DfType::DEFAULT_TEXT, &DfType::Unknown)?,
             )?)),
             DfValue::Time(_) => Ok(Literal::String(String::try_from(
-                value.coerce_to(&DfType::Text(Collation::default()), &DfType::Unknown)?,
+                value.coerce_to(&DfType::DEFAULT_TEXT, &DfType::Unknown)?,
             )?)),
             DfValue::ByteArray(ref array) => Ok(Literal::ByteArray(array.as_ref().clone())),
             DfValue::Numeric(ref d) => Ok(Literal::Numeric(d.mantissa(), d.scale())),
@@ -3337,7 +3337,7 @@ mod tests {
         fn int_to_text() {
             assert_eq!(
                 DfValue::from(20070523i64)
-                    .coerce_to(&DfType::Text(Collation::default()), &DfType::Unknown)
+                    .coerce_to(&DfType::DEFAULT_TEXT, &DfType::Unknown)
                     .unwrap(),
                 DfValue::from("20070523"),
             );
@@ -3431,7 +3431,7 @@ mod tests {
             let input = DfValue::from(r#"{"a", "b", "c"}"#);
             let res = input
                 .coerce_to(
-                    &DfType::Array(Box::new(DfType::Text(Collation::default()))),
+                    &DfType::Array(Box::new(DfType::DEFAULT_TEXT)),
                     &DfType::Unknown,
                 )
                 .unwrap();
@@ -3450,7 +3450,7 @@ mod tests {
             let input = DfValue::from(r#"{1, 2, 3}"#);
             let res = input
                 .coerce_to(
-                    &DfType::Array(Box::new(DfType::Text(Collation::default()))),
+                    &DfType::Array(Box::new(DfType::DEFAULT_TEXT)),
                     &DfType::Unknown,
                 )
                 .unwrap();
@@ -3469,7 +3469,7 @@ mod tests {
             let input = DfValue::from(r#"[0:1][0:1]={{1, 2}, {3, 4}}"#);
             let res = input
                 .coerce_to(
-                    &DfType::Array(Box::new(DfType::Text(Collation::default()))),
+                    &DfType::Array(Box::new(DfType::DEFAULT_TEXT)),
                     &DfType::Unknown,
                 )
                 .unwrap();
@@ -3506,7 +3506,7 @@ mod tests {
             for dv in [DfValue::Int(2), DfValue::UnsignedInt(2)] {
                 assert_eq!(
                     "yellow",
-                    dv.coerce_to(&DfType::Text(Collation::default()), &enum_ty)
+                    dv.coerce_to(&DfType::DEFAULT_TEXT, &enum_ty)
                         .unwrap()
                         .to_string()
                 )
@@ -3517,7 +3517,7 @@ mod tests {
                 assert_eq!(
                     "",
                     DfValue::Int(i)
-                        .coerce_to(&DfType::Text(Collation::default()), &enum_ty)
+                        .coerce_to(&DfType::DEFAULT_TEXT, &enum_ty)
                         .unwrap()
                         .to_string()
                 );
@@ -3611,7 +3611,7 @@ mod tests {
                 DfType::VarChar(10, Collation::default()),
                 // FIXME(ENG-1839)
                 // DfType::Char(None, Collation::default(), Dialect::DEFAULT_MYSQL),
-                DfType::Text(Collation::default()),
+                DfType::DEFAULT_TEXT,
             ];
 
             for to_ty in no_change_tys {

@@ -8,7 +8,7 @@ use chrono_tz::Tz;
 use launchpad::redacted::Sensitive;
 use maths::int::integer_rnd;
 use mysql_time::MySqlTime;
-use readyset_data::{Collation, DfType, DfValue};
+use readyset_data::{DfType, DfValue};
 use readyset_errors::{ReadySetError, ReadySetResult};
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 use rust_decimal::Decimal;
@@ -166,10 +166,8 @@ impl BuiltinFunction {
                     },
                     arg1.ty()
                 );
-                let param2_cast =
-                    try_cast_or_none!(param2, &DfType::Text(Collation::default()), arg2.ty());
-                let param3_cast =
-                    try_cast_or_none!(param3, &DfType::Text(Collation::default()), arg3.ty());
+                let param2_cast = try_cast_or_none!(param2, &DfType::DEFAULT_TEXT, arg2.ty());
+                let param3_cast = try_cast_or_none!(param3, &DfType::DEFAULT_TEXT, arg3.ty());
 
                 match convert_tz(
                     &(NaiveDateTime::try_from(&param1_cast))?,
@@ -358,7 +356,7 @@ impl BuiltinFunction {
                 // `DfValue` actually representing JSON.
                 let val = try_cast_or_none!(
                     non_null!(&expr.eval(record)?),
-                    &DfType::Text(Collation::default()),
+                    &DfType::DEFAULT_TEXT,
                     expr.ty()
                 );
                 let json_str = <&str>::try_from(&val)?;
@@ -454,7 +452,6 @@ mod tests {
     use chrono::{NaiveTime, Timelike};
     use launchpad::arbitrary::arbitrary_timestamp_naive_date_time;
     use nom_sql::Dialect::*;
-    use readyset_data::Collation;
     use test_strategy::proptest;
 
     use super::*;
@@ -1140,20 +1137,20 @@ mod tests {
             func: Box::new(BuiltinFunction::Concat(
                 Expr::Literal {
                     val: "My".into(),
-                    ty: DfType::Text(Collation::default()),
+                    ty: DfType::DEFAULT_TEXT,
                 },
                 vec![
                     Expr::Literal {
                         val: "S".into(),
-                        ty: DfType::Text(Collation::default()),
+                        ty: DfType::DEFAULT_TEXT,
                     },
                     Expr::Literal {
                         val: "QL".into(),
-                        ty: DfType::Text(Collation::default()),
+                        ty: DfType::DEFAULT_TEXT,
                     },
                 ],
             )),
-            ty: DfType::Text(Collation::default()),
+            ty: DfType::DEFAULT_TEXT,
         };
 
         let res = expr.eval::<DfValue>(&[]).unwrap();
@@ -1166,20 +1163,20 @@ mod tests {
             func: Box::new(BuiltinFunction::Concat(
                 Expr::Literal {
                     val: "My".into(),
-                    ty: DfType::Text(Collation::default()),
+                    ty: DfType::DEFAULT_TEXT,
                 },
                 vec![
                     Expr::Literal {
                         val: DfValue::None,
-                        ty: DfType::Text(Collation::default()),
+                        ty: DfType::DEFAULT_TEXT,
                     },
                     Expr::Literal {
                         val: "QL".into(),
-                        ty: DfType::Text(Collation::default()),
+                        ty: DfType::DEFAULT_TEXT,
                     },
                 ],
             )),
-            ty: DfType::Text(Collation::default()),
+            ty: DfType::DEFAULT_TEXT,
         };
 
         let res = expr.eval::<DfValue>(&[]).unwrap();
@@ -1192,7 +1189,7 @@ mod tests {
             func: Box::new(BuiltinFunction::Substring(
                 Expr::Literal {
                     val: "abcdef".into(),
-                    ty: DfType::Text(Collation::default()),
+                    ty: DfType::DEFAULT_TEXT,
                 },
                 Some(Expr::Column {
                     index: 0,
@@ -1203,7 +1200,7 @@ mod tests {
                     ty: DfType::Int,
                 }),
             )),
-            ty: DfType::Text(Collation::default()),
+            ty: DfType::DEFAULT_TEXT,
         };
         let call_with =
             |from: i64, len: i64| expr.eval::<DfValue>(&[from.into(), len.into()]).unwrap();
@@ -1225,7 +1222,7 @@ mod tests {
             func: Box::new(BuiltinFunction::Substring(
                 Expr::Literal {
                     val: "é".into(),
-                    ty: DfType::Text(Collation::default()),
+                    ty: DfType::DEFAULT_TEXT,
                 },
                 Some(Expr::Literal {
                     val: 1.into(),
@@ -1236,7 +1233,7 @@ mod tests {
                     ty: DfType::Int,
                 }),
             )),
-            ty: DfType::Text(Collation::default()),
+            ty: DfType::DEFAULT_TEXT,
         };
         let res = expr.eval::<DfValue>(&[]).unwrap();
         assert_eq!(res, "é".into());
@@ -1248,7 +1245,7 @@ mod tests {
             func: Box::new(BuiltinFunction::Substring(
                 Expr::Literal {
                     val: "abcdef".into(),
-                    ty: DfType::Text(Collation::default()),
+                    ty: DfType::DEFAULT_TEXT,
                 },
                 Some(Expr::Column {
                     index: 0,
@@ -1256,7 +1253,7 @@ mod tests {
                 }),
                 None,
             )),
-            ty: DfType::Text(Collation::default()),
+            ty: DfType::DEFAULT_TEXT,
         };
         let res = expr.eval::<DfValue>(&[2.into()]).unwrap();
         assert_eq!(res, "bcdef".into());
@@ -1268,7 +1265,7 @@ mod tests {
             func: Box::new(BuiltinFunction::Substring(
                 Expr::Literal {
                     val: "abcdef".into(),
-                    ty: DfType::Text(Collation::default()),
+                    ty: DfType::DEFAULT_TEXT,
                 },
                 None,
                 Some(Expr::Column {
@@ -1276,7 +1273,7 @@ mod tests {
                     ty: DfType::Int,
                 }),
             )),
-            ty: DfType::Text(Collation::default()),
+            ty: DfType::DEFAULT_TEXT,
         };
         let res = expr.eval::<DfValue>(&[3.into()]).unwrap();
         assert_eq!(res, "abc".into());

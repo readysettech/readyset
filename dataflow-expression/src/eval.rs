@@ -2,7 +2,7 @@ use std::borrow::Borrow;
 use std::convert::TryFrom;
 
 use nom_sql::BinaryOperator;
-use readyset_data::{Collation, DfType, DfValue};
+use readyset_data::{DfType, DfValue};
 use readyset_errors::{ReadySetError, ReadySetResult};
 
 use crate::like::{CaseInsensitive, CaseSensitive, LikePattern};
@@ -49,8 +49,8 @@ impl Expr {
                 macro_rules! like {
                     ($case_sensitivity: expr, $negated: expr) => {{
                         match (
-                            left.coerce_to(&DfType::Text(Collation::default()), left_ty),
-                            right.coerce_to(&DfType::Text(Collation::default()), right_ty),
+                            left.coerce_to(&DfType::DEFAULT_TEXT, left_ty),
+                            right.coerce_to(&DfType::DEFAULT_TEXT, right_ty),
                         ) {
                             (Ok(left), Ok(right)) => {
                                 // NOTE(grfn): At some point, we may want to optimize this to
