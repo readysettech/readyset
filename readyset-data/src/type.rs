@@ -287,43 +287,6 @@ impl DfType {
         Self::Enum(variants.into(), dialect)
     }
 
-    /// Returns the SQL [`Dialect`], which determines this type's expression evaluation semantics.
-    #[inline]
-    pub fn dialect(&self) -> Option<Dialect> {
-        use DfType::*;
-
-        match *self {
-            Binary(_) | VarBinary(_) | Date => Some(Dialect::DEFAULT_MYSQL),
-            Array(_) | TimestampTz { .. } | Jsonb | Inet | Uuid | MacAddr | PassThrough(_) => {
-                Some(Dialect::DEFAULT_POSTGRESQL)
-            }
-
-            Enum(.., d) | Char(.., d) | Json(d) => Some(d),
-
-            Blob
-            | Float
-            | Unknown
-            | Bool
-            | Int
-            | TinyInt
-            | SmallInt
-            | BigInt
-            | UnsignedInt
-            | UnsignedTinyInt
-            | UnsignedSmallInt
-            | UnsignedBigInt
-            | Double
-            | Numeric { .. }
-            | Text { .. }
-            | VarChar { .. }
-            | Bit(_)
-            | VarBit(_)
-            | DateTime { .. }
-            | Time { .. }
-            | Timestamp { .. } => None,
-        }
-    }
-
     /// Returns the PostgreSQL type category for this type
     pub fn pg_category(&self) -> PgTypeCategory {
         match self {
