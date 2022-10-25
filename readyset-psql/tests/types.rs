@@ -201,4 +201,76 @@ mod types {
             .get(0);
         assert_eq!(typname, "bool");
     }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[serial_test::serial]
+    async fn enums() {
+        let (config, _handle) = setup().await;
+        let client = connect(config).await;
+
+        client
+            .simple_query("CREATE TYPE abc AS ENUM ('a', 'b', 'c');")
+            .await
+            .unwrap();
+
+        #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, ToSql, FromSql)]
+        #[postgres(name = "abc")]
+        enum Abc {
+            #[postgres(name = "a")]
+            A,
+            #[postgres(name = "b")]
+            B,
+            #[postgres(name = "c")]
+            C,
+        }
+        use Abc::*;
+
+        client
+            .simple_query("CREATE TABLE t (x abc);")
+            .await
+            .unwrap();
+
+        client
+            .simple_query("INSERT INTO t (x) VALUES ('b'), ('c'), ('a'), ('a')")
+            .await
+            .unwrap();
+
+        let eq_res: i64 = client
+            .query_one(
+                "WITH a AS (SELECT COUNT(*) AS c FROM t WHERE x = 'a') SELECT c FROM a",
+                &[],
+            )
+            .await
+            .unwrap()
+            .get(0);
+        assert_eq!(eq_res, 2);
+
+        let upquery_res = client
+            .query("SELECT x FROM t WHERE x = $1", &[&B])
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|r| r.get(0))
+            .collect::<Vec<Abc>>();
+        assert_eq!(upquery_res, vec![B]);
+
+        let sort_res = client
+            .query("SELECT x FROM t ORDER BY x ASC", &[])
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|r| r.get(0))
+            .collect::<Vec<Abc>>();
+        assert_eq!(sort_res, vec![A, A, B, C]);
+
+        let mut range_res = client
+            .query("SELECT x FROM t WHERE x >= $1", &[&B])
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|r| r.get(0))
+            .collect::<Vec<Abc>>();
+        range_res.sort();
+        assert_eq!(range_res, vec![B, C]);
+    }
 }
