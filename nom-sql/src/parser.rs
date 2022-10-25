@@ -158,163 +158,43 @@ pub fn sql_query(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlQuery>
     }
 }
 
-/// Parse a SQL query from a byte slice
-pub fn parse_query_bytes<T>(dialect: Dialect, input: T) -> Result<SqlQuery, &'static str>
-where
-    T: AsRef<[u8]>,
-{
-    match sql_query(dialect)(input.as_ref()) {
-        Ok((_, o)) => Ok(o),
-        Err(_) => Err("failed to parse query"),
-    }
+macro_rules! export_parser {
+    ($parser: ident -> $ret:ty, $parse_bytes: ident, $parse: ident) => {
+        pub fn $parse_bytes<T>(dialect: Dialect, input: T) -> Result<$ret, &'static str>
+        where
+            T: AsRef<[u8]>,
+        {
+            match $parser(dialect)(input.as_ref()) {
+                Ok((_, o)) => Ok(o),
+                Err(_) => Err("failed to parse query"),
+            }
+        }
+
+        // TODO(fran): Make this function return a ReadySetResult.
+        pub fn $parse<T>(dialect: Dialect, input: T) -> Result<$ret, &'static str>
+        where
+            T: AsRef<str>,
+        {
+            $parse_bytes(dialect, input.as_ref().trim().as_bytes())
+        }
+    };
 }
 
-/// Parse a SQL query from a string
-// TODO(fran): Make this function return a ReadySetResult.
-pub fn parse_query<T>(dialect: Dialect, input: T) -> Result<SqlQuery, &'static str>
-where
-    T: AsRef<str>,
-{
-    parse_query_bytes(dialect, input.as_ref().trim().as_bytes())
-}
-
-/// Parse a select statement from a byte slice
-pub fn parse_select_statement_bytes<T>(
-    dialect: Dialect,
-    input: T,
-) -> Result<SelectStatement, &'static str>
-where
-    T: AsRef<[u8]>,
-{
-    match selection(dialect)(input.as_ref()) {
-        Ok((remaining, o)) if remaining.is_empty() => Ok(o),
-        _ => Err("failed to parse query"),
-    }
-}
-
-/// Parse a select statement from a string
-pub fn parse_select_statement<T>(
-    dialect: Dialect,
-    input: T,
-) -> Result<SelectStatement, &'static str>
-where
-    T: AsRef<str>,
-{
-    parse_select_statement_bytes(dialect, input.as_ref().trim().as_bytes())
-}
-
-/// Parse an expr from a byte slice
-pub fn parse_expr_bytes<T>(dialect: Dialect, input: T) -> Result<Expr, &'static str>
-where
-    T: AsRef<[u8]>,
-{
-    match expression(dialect)(input.as_ref()) {
-        Ok((remaining, o)) if remaining.is_empty() => Ok(o),
-        _ => Err("failed to parse expr"),
-    }
-}
-
-/// Parse an expr from a string
-pub fn parse_expr<T>(dialect: Dialect, input: T) -> Result<Expr, &'static str>
-where
-    T: AsRef<str>,
-{
-    parse_expr_bytes(dialect, input.as_ref().trim().as_bytes())
-}
-
-/// Parse a create table statement from a byte slice
-pub fn parse_create_table_bytes<T>(
-    dialect: Dialect,
-    input: T,
-) -> Result<CreateTableStatement, &'static str>
-where
-    T: AsRef<[u8]>,
-{
-    match create_table(dialect)(input.as_ref()) {
-        Ok((remaining, o)) if remaining.is_empty() => Ok(o),
-        _ => Err("failed to parse query"),
-    }
-}
-
-/// Parse a create table statement from a string
-pub fn parse_create_table<T>(
-    dialect: Dialect,
-    input: T,
-) -> Result<CreateTableStatement, &'static str>
-where
-    T: AsRef<str>,
-{
-    parse_create_table_bytes(dialect, input.as_ref().trim().as_bytes())
-}
-
-/// Parse a create view statement from a string
-pub fn parse_create_view<T>(dialect: Dialect, input: T) -> Result<CreateViewStatement, &'static str>
-where
-    T: AsRef<str>,
-{
-    parse_create_view_bytes(dialect, input.as_ref().trim().as_bytes())
-}
-
-/// Parse a create table statement from a byte slice
-pub fn parse_create_view_bytes<T>(
-    dialect: Dialect,
-    input: T,
-) -> Result<CreateViewStatement, &'static str>
-where
-    T: AsRef<[u8]>,
-{
-    match view_creation(dialect)(input.as_ref()) {
-        Ok((remaining, o)) if remaining.is_empty() => Ok(o),
-        _ => Err("failed to parse query"),
-    }
-}
-
-/// Parse an alter table statement from a byte slice
-pub fn parse_alter_table_bytes<T>(
-    dialect: Dialect,
-    input: T,
-) -> Result<AlterTableStatement, &'static str>
-where
-    T: AsRef<[u8]>,
-{
-    match alter_table_statement(dialect)(input.as_ref()) {
-        Ok((remaining, o)) if remaining.is_empty() => Ok(o),
-        _ => Err("failed to parse query"),
-    }
-}
-
-/// Parse an alter table statement from a string
-pub fn parse_alter_table<T>(dialect: Dialect, input: T) -> Result<AlterTableStatement, &'static str>
-where
-    T: AsRef<str>,
-{
-    parse_alter_table_bytes(dialect, input.as_ref().trim().as_bytes())
-}
-
-/// Parse a specification for a table key or constraint from a byte slice
-pub fn parse_key_specification_bytes<T>(
-    dialect: Dialect,
-    input: T,
-) -> Result<TableKey, &'static str>
-where
-    T: AsRef<[u8]>,
-{
-    match key_specification(dialect)(input.as_ref()) {
-        Ok((_, o)) => Ok(o),
-        Err(_) => Err("failed to parse query"),
-    }
-}
-
-/// Parse a specification for a table key or constraint from a string
-pub fn parse_key_specification_string<T>(
-    dialect: Dialect,
-    input: T,
-) -> Result<TableKey, &'static str>
-where
-    T: AsRef<str>,
-{
-    parse_key_specification_bytes(dialect, input.as_ref().trim().as_bytes())
-}
+export_parser!(sql_query -> SqlQuery, parse_query_bytes, parse_query);
+export_parser!(selection -> SelectStatement, parse_select_statement_bytes, parse_select_statement);
+export_parser!(expression -> Expr, parse_expr_bytes, parse_expr);
+export_parser!(create_table -> CreateTableStatement, parse_create_table_bytes, parse_create_table);
+export_parser!(view_creation -> CreateViewStatement, parse_create_view_bytes, parse_create_view);
+export_parser!(
+    alter_table_statement -> AlterTableStatement,
+    parse_alter_table_bytes,
+    parse_alter_table
+);
+export_parser!(
+    key_specification -> TableKey,
+    parse_key_specification_bytes,
+    parse_key_specification_string
+);
 
 #[cfg(test)]
 mod tests {
