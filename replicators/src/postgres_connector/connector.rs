@@ -490,7 +490,7 @@ impl Connector for PostgresWalConnector {
                         return Ok((
                             ReplicationAction::DdlChange {
                                 schema: ddl_event.schema().to_string(),
-                                ddl: ddl_event.to_ddl(),
+                                changes: vec![ddl_event.into_change()],
                             },
                             PostgresPosition::from(lsn).into(),
                         ));

@@ -29,53 +29,47 @@ DECLARE
 BEGIN
     SELECT
     json_build_object(
-        'operation', 'create_table',
         'schema', object.schema_name,
-        'object', replace(
-            replace(object.object_identity, object.SCHEMA_NAME || '.', ''),
-            -- un-quote identifiers if necessary
-            '"',
-            ''
-        ),
-        'statement', format(
-            'CREATE TABLE "%s" (%s %s)',
-            (SELECT relname FROM pg_class WHERE oid = object.objid),
-            (
-                SELECT string_agg(
-                    format(
-                        '%s %s%s',
-                        attr.attname,
-                        pg_catalog.format_type(attr.atttypid, attr.atttypmod),
-                        CASE WHEN attr.attnotnull THEN ' NOT NULL' ELSE '' END
+        'data', json_build_object('CreateTable', json_build_object(
+            'name', (SELECT relname FROM pg_class WHERE oid = object.objid),
+            'columns', (
+                SELECT json_agg(json_build_object(
+                    'name', attr.attname,
+                    'column_type', pg_catalog.format_type(
+                        attr.atttypid,
+                        attr.atttypmod
                     ),
-                    ', '
-                    ORDER BY attr.attnum
-                )
+                    'not_null', attr.attnotnull
+                ) ORDER BY attr.attnum)
                 FROM pg_catalog.pg_attribute attr
                 WHERE attr.attrelid = object.objid
                 AND attr.attnum > 0
                 AND NOT attr.attisdropped
             ),
-            ', ' || (
-                SELECT string_agg(
-                    DISTINCT pg_catalog.pg_get_constraintdef(con.oid, TRUE),
-                    ', '
+            'constraints', (
+                SELECT coalesce(
+                    json_agg(json_build_object('definition', def)),
+                    '[]'
                 )
-                FROM
-                    pg_catalog.pg_class cls,
-                    pg_catalog.pg_class cls_index,
-                    pg_catalog.pg_index idx
-                LEFT JOIN pg_catalog.pg_constraint con
-                    ON con.conrelid = idx.indrelid
-                    AND con.conindid = idx.indexrelid
-                    AND con.contype IN ('f', 'p', 'u')
-                WHERE cls.oid = object.objid
-                    AND cls.oid = idx.indrelid
-                    AND idx.indexrelid = cls_index.oid
-                    AND pg_catalog.pg_get_constraintdef(con.oid, TRUE)
-                        IS NOT NULL
+                FROM (
+                    SELECT DISTINCT
+                        pg_catalog.pg_get_constraintdef(con.oid, TRUE) AS def
+                    FROM
+                        pg_catalog.pg_class cls,
+                        pg_catalog.pg_class cls_index,
+                        pg_catalog.pg_index idx
+                    LEFT JOIN pg_catalog.pg_constraint con
+                        ON con.conrelid = idx.indrelid
+                        AND con.conindid = idx.indexrelid
+                        AND con.contype IN ('f', 'p', 'u')
+                    WHERE cls.oid = object.objid
+                        AND cls.oid = idx.indrelid
+                        AND idx.indexrelid = cls_index.oid
+                        AND pg_catalog.pg_get_constraintdef(con.oid, TRUE)
+                            IS NOT NULL
+                ) def
             )
-        )
+        ))
     )
     INTO create_message
     FROM pg_event_trigger_ddl_commands() object
@@ -100,15 +94,8 @@ BEGIN
     SELECT current_query() INTO query;
     SELECT
     json_build_object(
-        'operation', 'alter_table',
         'schema', object.schema_name,
-        'object', replace(
-            replace(object.object_identity, object.SCHEMA_NAME || '.', ''),
-            -- un-quote identifiers if necessary
-            '"',
-            ''
-        ),
-        'statement', query
+        'data', json_build_object('AlterTable', query)
     )
     INTO alter_message
     FROM pg_event_trigger_ddl_commands() object
@@ -132,15 +119,13 @@ DECLARE
 BEGIN
     SELECT
     json_build_object(
-        'operation', 'create_view',
         'schema', object.schema_name,
-        'object', cls.relname,
-        'statement', format(
+        'data', json_build_object('CreateView', format(
             'CREATE VIEW "%s"."%s" AS %s',
             v.schemaname,
             cls.relname,
             v.definition
-        )
+        ))
     )
     INTO create_message
     FROM pg_event_trigger_ddl_commands() object
@@ -168,12 +153,14 @@ DECLARE
 BEGIN
     SELECT
     json_build_object(
-        'operation', CASE
-                       WHEN object_type = 'table' THEN 'drop_table'
-                       WHEN object_type = 'view' THEN 'drop_view'
-                     END,
         'schema', schema_name,
-        'object', object_name
+        'data', json_build_object(
+            CASE
+            WHEN object_type = 'table' THEN 'DropTable'
+            WHEN object_type = 'view' THEN 'DropView'
+            END,
+            object_name
+        )
     )
     INTO drop_message
     FROM pg_event_trigger_dropped_objects()

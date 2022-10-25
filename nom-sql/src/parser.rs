@@ -23,6 +23,7 @@ use crate::rename::{rename_table, RenameTableStatement};
 use crate::select::{selection, SelectStatement};
 use crate::set::{set, SetStatement};
 use crate::show::{show, ShowStatement};
+use crate::sql_type::type_identifier;
 use crate::transaction::{
     commit, rollback, start_transaction, CommitStatement, RollbackStatement,
     StartTransactionStatement,
@@ -30,7 +31,7 @@ use crate::transaction::{
 use crate::update::{updating, UpdateStatement};
 use crate::use_statement::{use_statement, UseStatement};
 use crate::whitespace::whitespace0;
-use crate::{Dialect, DropAllCachesStatement, Expr, NomSqlResult, TableKey};
+use crate::{Dialect, DropAllCachesStatement, Expr, NomSqlResult, SqlType, TableKey};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)]
@@ -194,6 +195,11 @@ export_parser!(
     key_specification -> TableKey,
     parse_key_specification_bytes,
     parse_key_specification_string
+);
+export_parser!(
+    type_identifier -> SqlType,
+    parse_sql_type_bytes,
+    parse_sql_type
 );
 
 #[cfg(test)]

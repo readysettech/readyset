@@ -51,7 +51,7 @@ pub(crate) enum ReplicationAction {
     },
     DdlChange {
         schema: String,
-        ddl: String,
+        changes: Vec<Change>,
     },
     LogPosition,
 }
@@ -516,17 +516,10 @@ impl NoriaAdapter {
     async fn handle_ddl_change(
         &mut self,
         schema: String,
-        ddl: String,
+        changes: Vec<Change>,
         pos: ReplicationOffset,
     ) -> ReadySetResult<()> {
-        let mut changelist: ChangeList = match ChangeList::from_str(ddl, self.dialect) {
-            Ok(changelist) => changelist,
-            Err(e) => {
-                error!(error = %e, "Error extending recipe, DDL statement will not be used");
-                counter!(recorded::REPLICATOR_FAILURE, 1u64,);
-                return Ok(());
-            }
-        };
+        let mut changelist = ChangeList::from_changes(changes, self.dialect);
 
         // Remove DDL changes outside the filtered scope
         changelist.changes_mut().retain(|change| match change {
@@ -694,8 +687,8 @@ impl NoriaAdapter {
         }
 
         match action {
-            ReplicationAction::DdlChange { schema, ddl } => {
-                self.handle_ddl_change(schema, ddl, pos).await
+            ReplicationAction::DdlChange { schema, changes } => {
+                self.handle_ddl_change(schema, changes, pos).await
             }
             ReplicationAction::TableAction {
                 table,

@@ -2,6 +2,7 @@ use std::convert::{TryFrom, TryInto};
 
 use async_trait::async_trait;
 use binlog::consts::{BinlogChecksumAlg, EventType};
+use metrics::counter;
 use mysql::binlog::events::StatusVarVal;
 use mysql::binlog::jsonb::{self, JsonbToJsonError};
 use mysql::prelude::Queryable;
@@ -10,9 +11,12 @@ use mysql_common::binlog;
 use mysql_common::binlog::row::BinlogRow;
 use mysql_common::binlog::value::BinlogValue;
 use nom_sql::Relation;
+use readyset::metrics::recorded;
+use readyset::recipe::ChangeList;
 use readyset::replication::ReplicationOffset;
 use readyset::{ReadySetError, ReadySetResult};
-use readyset_data::DfValue;
+use readyset_data::{DfValue, Dialect};
+use tracing::error;
 
 use super::BinlogPosition;
 use crate::noria_adapter::{Connector, ReplicationAction};
@@ -283,11 +287,17 @@ impl MySqlBinlogConnector {
                         _ => continue,
                     };
 
+                    let changes = match ChangeList::from_str(&ev.query(), Dialect::DEFAULT_MYSQL) {
+                        Ok(changelist) => changelist.changes,
+                        Err(error) => {
+                            error!(%error, "Error extending recipe, DDL statement will not be used");
+                            counter!(recorded::REPLICATOR_FAILURE, 1u64);
+                            continue;
+                        }
+                    };
+
                     return Ok((
-                        ReplicationAction::DdlChange {
-                            schema,
-                            ddl: ev.query().to_string(),
-                        },
+                        ReplicationAction::DdlChange { schema, changes },
                         &self.next_position,
                     ));
                 }

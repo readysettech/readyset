@@ -38,8 +38,12 @@
 //!
 //! [dialect]: nom_sql::Dialect
 
-use nom_sql::{parse_query, Dialect, DropTableStatement, DropViewStatement, Relation, SqlQuery};
+use nom_sql::{
+    parse_query, AlterTableStatement, Column, ColumnConstraint, ColumnSpecification,
+    CreateTableStatement, CreateViewStatement, Dialect, Relation, SqlQuery, SqlType, TableKey,
+};
 use pgsql::tls::MakeTlsConnect;
+use readyset::recipe::changelist::Change;
 use readyset_errors::ReadySetResult;
 use serde::{Deserialize, Deserializer};
 use tokio_postgres as pgsql;
@@ -77,17 +81,62 @@ pub(crate) enum DdlEventOperation {
     DropView,
 }
 
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+pub(crate) struct DdlCreateTableColumn {
+    name: String,
+    #[serde(deserialize_with = "parse_sql_type")]
+    column_type: SqlType,
+    not_null: bool,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+pub(crate) struct DdlCreateTableConstraint {
+    #[serde(deserialize_with = "parse_table_key")]
+    definition: TableKey,
+}
+
+macro_rules! make_parse_deserialize_with {
+    ($name: ident -> $res: ty) => {
+        make_parse_deserialize_with!($name -> $res, $name);
+    };
+    ($name: ident -> $res: ty, $parser: ident) => {
+        fn $name<'de, D>(deserializer: D) -> Result<$res, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let ty = String::deserialize(deserializer)?;
+            nom_sql::$parser(Dialect::PostgreSQL, ty).map_err(serde::de::Error::custom)
+        }
+    };
+}
+
+make_parse_deserialize_with!(parse_sql_type -> SqlType);
+make_parse_deserialize_with!(parse_table_key -> TableKey, parse_key_specification_string);
+make_parse_deserialize_with!(parse_alter_table_statement -> AlterTableStatement, parse_alter_table);
+make_parse_deserialize_with!(parse_create_view_statement -> CreateViewStatement, parse_create_view);
+
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+pub(crate) enum DdlEventData {
+    CreateTable {
+        name: String,
+        columns: Vec<DdlCreateTableColumn>,
+        constraints: Vec<DdlCreateTableConstraint>,
+    },
+    AlterTable(#[serde(deserialize_with = "parse_alter_table_statement")] AlterTableStatement),
+    CreateView(#[serde(deserialize_with = "parse_create_view_statement")] CreateViewStatement),
+    DropTable(String),
+    DropView(String),
+}
+
 #[derive(Debug, Deserialize)]
 pub(crate) struct DdlEvent {
-    operation: DdlEventOperation,
     schema: String,
-    object: String,
-    statement: Option<ParsedStatement>,
+    data: DdlEventData,
 }
 
 /// This is just an ugly wrapper because `deserialize_with` doesn't play well with Options
 #[derive(Debug, Deserialize, Clone)]
-struct ParsedStatement(#[serde(deserialize_with = "parse_pgsql")] SqlQuery);
+pub(crate) struct ParsedStatement(#[serde(deserialize_with = "parse_pgsql")] SqlQuery);
 
 fn parse_pgsql<'de, D>(deserializer: D) -> Result<SqlQuery, D::Error>
 where
@@ -100,28 +149,50 @@ where
 impl DdlEvent {
     /// Convert this [`DdlEvent`] into a SQL DDL statement that can be sent to ReadySet directly
     /// (using the ReadySet-native SQL dialect, not the postgresql dialect!)
-    pub(crate) fn to_ddl(&self) -> String {
-        match self.operation {
-            DdlEventOperation::CreateTable
-            | DdlEventOperation::CreateView
-            | DdlEventOperation::AlterTable => self.statement.clone().unwrap().0.to_string(),
-            DdlEventOperation::DropTable => DropTableStatement {
-                tables: vec![Relation {
-                    schema: Some(self.schema.as_str().into()),
-                    name: self.object.as_str().into(),
-                }],
-                // We might be getting a drop table event for a table we don't have, eg if the table
-                // originally failed to parse
-                if_exists: true,
+    pub(crate) fn into_change(self) -> Change {
+        match self.data {
+            DdlEventData::CreateTable {
+                name,
+                columns,
+                constraints,
+            } => {
+                let table = Relation {
+                    schema: Some(self.schema.into()),
+                    name: name.into(),
+                };
+                Change::CreateTable(CreateTableStatement {
+                    table: table.clone(),
+                    fields: columns
+                        .into_iter()
+                        .map(|col| ColumnSpecification {
+                            column: Column {
+                                name: col.name.into(),
+                                table: Some(table.clone()),
+                            },
+                            sql_type: col.column_type,
+                            constraints: if col.not_null {
+                                vec![ColumnConstraint::NotNull]
+                            } else {
+                                vec![]
+                            },
+                            comment: None,
+                        })
+                        .collect(),
+                    keys: if constraints.is_empty() {
+                        None
+                    } else {
+                        Some(constraints.into_iter().map(|c| c.definition).collect())
+                    },
+                    if_not_exists: false,
+                    options: vec![],
+                })
             }
-            .to_string(),
-            DdlEventOperation::DropView => DropViewStatement {
-                views: vec![self.object.as_str().into()],
-                // We might be getting a drop view event for a view we don't have, eg if the view
-                // originally failed to parse
-                if_exists: true,
-            }
-            .to_string(),
+            DdlEventData::AlterTable(stmt) => Change::AlterTable(stmt),
+            DdlEventData::CreateView(stmt) => Change::CreateView(stmt),
+            DdlEventData::DropView(name) | DdlEventData::DropTable(name) => Change::Drop {
+                name: name.into(),
+                if_exists: false,
+            },
         }
     }
 
@@ -137,8 +208,8 @@ mod tests {
     use std::time::Duration;
 
     use nom_sql::{
-        ColumnConstraint, ColumnSpecification, CreateViewStatement, Expr, FieldDefinitionExpr,
-        SelectSpecification, SqlQuery, SqlType, TableExpr, TableKey,
+        ColumnSpecification, CreateViewStatement, Expr, FieldDefinitionExpr, Relation,
+        SelectSpecification, SqlType, TableExpr, TableKey,
     };
     use pgsql::NoTls;
     use tokio::task::JoinHandle;
@@ -286,48 +357,52 @@ mod tests {
             .unwrap();
 
         let ddl = get_last_ddl(&client, "create_table").await.unwrap();
-        assert_eq!(ddl.operation, DdlEventOperation::CreateTable);
         assert_eq!(ddl.schema, "public");
-        assert_eq!(ddl.object, "t1");
 
-        match ddl.statement.unwrap().0 {
-            SqlQuery::CreateTable(stmt) => {
-                assert_eq!(stmt.table.name, "t1");
+        match ddl.data {
+            DdlEventData::CreateTable {
+                name,
+                columns,
+                constraints,
+            } => {
+                assert_eq!(name, "t1");
                 assert_eq!(
-                    stmt.fields,
+                    columns,
                     vec![
-                        ColumnSpecification {
-                            column: "id".into(),
-                            sql_type: SqlType::Int(None),
-                            constraints: vec![ColumnConstraint::NotNull],
-                            comment: None
+                        DdlCreateTableColumn {
+                            name: "id".into(),
+                            column_type: SqlType::Int(None),
+                            not_null: true
                         },
-                        ColumnSpecification {
-                            column: "value".into(),
-                            sql_type: SqlType::Text,
-                            constraints: vec![],
-                            comment: None
+                        DdlCreateTableColumn {
+                            name: "value".into(),
+                            column_type: SqlType::Text,
+                            not_null: false
                         },
                     ]
                 );
                 assert_eq!(
-                    stmt.keys.unwrap(),
+                    constraints,
                     vec![
-                        TableKey::PrimaryKey {
-                            constraint_name: None,
-                            index_name: None,
-                            columns: vec!["id".into()]
+                        DdlCreateTableConstraint {
+                            definition: TableKey::PrimaryKey {
+                                constraint_name: None,
+                                index_name: None,
+                                columns: vec!["id".into()]
+                            },
                         },
-                        TableKey::UniqueKey {
-                            constraint_name: None,
-                            index_name: None,
-                            columns: vec!["value".into()],
-                            index_type: None
+                        DdlCreateTableConstraint {
+                            definition: TableKey::UniqueKey {
+                                constraint_name: None,
+                                index_name: None,
+                                columns: vec!["value".into()],
+                                index_type: None
+                            }
                         }
                     ]
                 );
             }
-            _ => panic!("Unexpected query type: {:?}", ddl.operation),
+            _ => panic!(),
         }
     }
 
@@ -344,11 +419,9 @@ mod tests {
             .await
             .unwrap();
 
-        match ddl.statement.unwrap().0 {
-            SqlQuery::CreateTable(stmt) => {
-                assert_eq!(stmt.table.name, "table");
-            }
-            _ => panic!("Unexpected query type: {:?}", ddl.operation),
+        match ddl.data {
+            DdlEventData::CreateTable { name, .. } => assert_eq!(name, "table"),
+            _ => panic!(),
         }
     }
 
@@ -365,12 +438,10 @@ mod tests {
             .unwrap();
 
         let ddl = get_last_ddl(&client, "alter_table").await.unwrap();
-        assert_eq!(ddl.operation, DdlEventOperation::AlterTable);
         assert_eq!(ddl.schema, "public");
-        assert_eq!(ddl.object, "t");
 
-        match ddl.statement.unwrap().0 {
-            SqlQuery::AlterTable(stmt) => {
+        match ddl.data {
+            DdlEventData::AlterTable(stmt) => {
                 assert_eq!(stmt.table.name, "t");
                 assert_eq!(
                     stmt.definitions,
@@ -379,7 +450,7 @@ mod tests {
                     ),]
                 );
             }
-            _ => panic!("Unexpected query type: {:?}", ddl.operation),
+            _ => panic!("Unexpected DDL event data: {:?}", ddl.data),
         }
     }
 
@@ -399,12 +470,10 @@ mod tests {
             .unwrap();
 
         let ddl = get_last_ddl(&client, "create_view").await.unwrap();
-        assert_eq!(ddl.operation, DdlEventOperation::CreateView);
         assert_eq!(ddl.schema, "public");
-        assert_eq!(ddl.object, "v");
 
-        match ddl.statement.unwrap().0 {
-            SqlQuery::CreateView(CreateViewStatement {
+        match ddl.data {
+            DdlEventData::CreateView(CreateViewStatement {
                 name, definition, ..
             }) => {
                 assert_eq!(
@@ -431,8 +500,25 @@ mod tests {
                     _ => panic!(),
                 }
             }
-            _ => panic!("Unexpected query type {:?}", ddl.operation),
+            _ => panic!("Unexpected query type {:?}", ddl.data),
         }
+    }
+
+    #[tokio::test]
+    async fn drop_table() {
+        let client = setup("drop_table").await;
+
+        client
+            .simple_query("create table t (x int);")
+            .await
+            .unwrap();
+
+        let _ = get_last_ddl(&client, "drop_table").await;
+
+        client.simple_query("drop table t;").await.unwrap();
+
+        let ddl = get_last_ddl(&client, "drop_table").await.unwrap();
+        assert_eq!(ddl.data, DdlEventData::DropTable("t".into()));
     }
 
     #[tokio::test]
