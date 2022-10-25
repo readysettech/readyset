@@ -8,6 +8,7 @@ use serial_test::serial;
 
 mod common;
 use common::connect;
+use postgres_types::{FromSql, ToSql};
 use tokio_postgres::SimpleQueryMessage;
 
 async fn setup() -> (tokio_postgres::Config, Handle) {
@@ -185,4 +186,45 @@ async fn proxy_unsupported_sets() {
         res[0].get::<_, NaiveDate>(0),
         NaiveDate::from_ymd(2022, 3, 5)
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn proxy_unsupported_type() {
+    let (config, _handle) = setup().await;
+    let client = connect(config).await;
+
+    #[derive(PartialEq, Eq, Debug, ToSql, FromSql)]
+    struct Comp {
+        x: i32,
+        y: i32,
+    }
+
+    client
+        .simple_query(
+            r#"CREATE TYPE "Comp" AS (x int, y int);
+               CREATE TABLE t (x "Comp");"#,
+        )
+        .await
+        .unwrap();
+
+    let exec_res = client
+        .query_one(r#"SELECT '(1,2)'::"Comp""#, &[])
+        .await
+        .unwrap()
+        .get::<_, Comp>(0);
+    assert_eq!(exec_res, Comp { x: 1, y: 2 });
+
+    let simple_res = match client
+        .simple_query(r#"SELECT '(1,2)'::"Comp""#)
+        .await
+        .unwrap()
+        .into_iter()
+        .next()
+        .unwrap()
+    {
+        SimpleQueryMessage::Row(row) => row,
+        _ => panic!(),
+    };
+    assert_eq!(simple_res.get(0).unwrap(), "(1,2)");
 }

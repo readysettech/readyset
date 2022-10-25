@@ -3257,6 +3257,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "postgres-derive"
+version = "0.4.0"
+source = "git+https://github.com/readysettech/rust-postgres.git#1e4c8fb3b16244c58c42f3f9803316d1c4c68a36"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "postgres-native-tls"
 version = "0.5.0"
 source = "git+https://github.com/readysettech/rust-postgres.git#1e4c8fb3b16244c58c42f3f9803316d1c4c68a36"
@@ -3295,6 +3305,7 @@ dependencies = [
  "chrono",
  "eui48",
  "fallible-iterator",
+ "postgres-derive",
  "postgres-protocol",
  "serde",
  "serde_json",
@@ -4222,6 +4233,7 @@ dependencies = [
  "native-tls",
  "nom-sql",
  "postgres-native-tls",
+ "postgres-types",
  "proptest",
  "psql-srv",
  "readyset",

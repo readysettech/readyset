@@ -576,30 +576,33 @@ fn make_error_response<R>(error: Error) -> BackendMessage<R> {
 }
 
 async fn load_extended_types<B: Backend>(backend: &mut B) -> Result<HashMap<Oid, i16>, Error> {
+    let err = |m| {
+        Error::InternalError(format!(
+            "failed while loading extended type information: {m}"
+        ))
+    };
+
     let response = backend
         .on_query("select oid, typlen from pg_catalog.pg_type")
         .await?;
-    let resultset = match response {
-        Select {
-            schema: _,
-            resultset,
-        } => resultset,
-        _ => todo!(),
-    };
-    let mut types = HashMap::new();
-    for row in resultset.into_iter() {
-        let cols: Result<Vec<Value>, Error> = row.into_iter().map(|x| x.try_into()).collect();
-        let cols = cols?;
-        match cols.as_slice() {
-            [Value::Oid(oid), Value::SmallInt(typlen)] => types.insert(*oid, *typlen),
-            _ => {
-                return Err(Error::InternalError(
-                    "Failed while loading extended type information".into(),
-                ))
-            }
-        };
+
+    match response {
+        SimpleQuery(r) => r
+            .into_iter()
+            .filter_map(|m| match m {
+                SimpleQueryMessage::Row(row) => Some(row),
+                _ => None,
+            })
+            .map(|row| match (row.get(0), row.get(1)) {
+                (Some(oid), Some(typlen)) => Ok((
+                    oid.parse().map_err(|_| err("could not parse oid"))?,
+                    typlen.parse().map_err(|_| err("could not parse typlen"))?,
+                )),
+                _ => Err(err("wrong number of columns returned from upstream")),
+            })
+            .collect(),
+        _ => Err(err("wrong query response type")),
     }
-    Ok(types)
 }
 
 async fn make_field_description<B: Backend>(
