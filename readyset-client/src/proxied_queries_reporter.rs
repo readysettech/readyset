@@ -1,7 +1,7 @@
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 use async_trait::async_trait;
-use readyset::query::{DeniedQuery, QueryId};
+use readyset::query::{DeniedQuery, MigrationState, QueryId};
 use readyset_sql_passes::anonymize::Anonymizer;
 use readyset_telemetry_reporter::{
     PeriodicReport, ReporterResult as Result, Telemetry, TelemetryBuilder, TelemetryEvent,
@@ -12,7 +12,7 @@ use crate::query_status_cache::QueryStatusCache;
 
 pub struct ProxiedQueriesReporter {
     query_status_cache: &'static QueryStatusCache,
-    reported_query_ids: Mutex<HashSet<QueryId>>,
+    reported_queries: Mutex<HashMap<QueryId, MigrationState>>,
     anonymizer: Mutex<Anonymizer>,
 }
 
@@ -20,7 +20,7 @@ impl ProxiedQueriesReporter {
     pub fn new(query_status_cache: &'static QueryStatusCache) -> Self {
         Self {
             query_status_cache,
-            reported_query_ids: Mutex::new(HashSet::new()),
+            reported_queries: Mutex::new(HashMap::new()),
             anonymizer: Mutex::new(Anonymizer::new()),
         }
     }
@@ -32,19 +32,32 @@ impl ProxiedQueriesReporter {
         query: &mut DeniedQuery,
     ) -> Option<(TelemetryEvent, Telemetry)> {
         tracing::debug!(?query, "reporting query");
-        let mut reported_query_ids = self.reported_query_ids.lock().await;
+        let mut reported_queries = self.reported_queries.lock().await;
         let mut anonymizer = self.anonymizer.lock().await;
-        match reported_query_ids.insert(query.id) {
-            true => None,
-            false => {
-                let anon_q = query.query.to_anonymized_string(&mut anonymizer);
-                Some((
-                    TelemetryEvent::ProxiedQuery,
-                    TelemetryBuilder::new()
-                        .proxied_query(anon_q)
-                        .migration_status(query.status.migration_state.to_string())
-                        .build(),
-                ))
+        let mut build_event = || {
+            let anon_q = query.query.to_anonymized_string(&mut anonymizer);
+            Some((
+                TelemetryEvent::ProxiedQuery,
+                TelemetryBuilder::new()
+                    .proxied_query(anon_q)
+                    .migration_status(query.status.migration_state.to_string())
+                    .build(),
+            ))
+        };
+
+        match reported_queries.insert(query.id, query.status.migration_state) {
+            Some(old_migration_state) => {
+                // Check whether we know of a new migration state for this query. Send an event if
+                // so
+                if old_migration_state != query.status.migration_state {
+                    build_event()
+                } else {
+                    None
+                }
+            }
+            None => {
+                // First time inserting this query
+                build_event()
             }
         }
     }
@@ -66,5 +79,66 @@ impl PeriodicReport for ProxiedQueriesReporter {
         .flatten()
         .inspect(|(e, t)| tracing::debug!("{e:?} {t:?}"))
         .collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use readyset::query::{Query, QueryStatus};
+
+    use super::*;
+    use crate::query_status_cache::MigrationStyle;
+
+    #[tokio::test]
+    async fn test_update_migration_state() {
+        let query_status_cache = Box::leak(Box::new(QueryStatusCache::with_style(
+            MigrationStyle::Explicit,
+        )));
+        let proxied_queries_reporter = Arc::new(ProxiedQueriesReporter::new(query_status_cache));
+
+        let query_id = QueryId::new(42);
+        let mut init_q = DeniedQuery {
+            id: query_id,
+            query: Query::ParseFailed(Arc::new(
+                "this is easier than making a view create request".to_string(),
+            )),
+            status: QueryStatus {
+                migration_state: MigrationState::Pending,
+                execution_info: None,
+                always: false,
+            },
+        };
+        proxied_queries_reporter.report_query(&mut init_q).await;
+        let status = {
+            let queries = proxied_queries_reporter.reported_queries.lock().await;
+            queries
+                .get(&query_id)
+                .expect("query should be mapped")
+                .clone()
+        };
+        assert_eq!(MigrationState::Pending, status);
+
+        let mut updated_q = DeniedQuery {
+            id: query_id,
+            query: Query::ParseFailed(Arc::new(
+                "this is easier than making a view create request".to_string(),
+            )),
+            status: QueryStatus {
+                migration_state: MigrationState::Successful,
+                execution_info: None,
+                always: false,
+            },
+        };
+        proxied_queries_reporter.report_query(&mut updated_q).await;
+        let status = {
+            let queries = proxied_queries_reporter.reported_queries.lock().await;
+            queries
+                .get(&query_id)
+                .expect("query should be mapped")
+                .clone()
+        };
+        assert_eq!(MigrationState::Successful, status);
     }
 }
