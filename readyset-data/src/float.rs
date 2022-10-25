@@ -130,7 +130,7 @@ pub(crate) fn coerce_f64(val: f64, to_ty: &DfType, from_ty: &DfType) -> ReadySet
             Ok(val.into_bytes().into())
         }
 
-        DfType::Json(_) | DfType::Jsonb => Ok(val.to_string().into()),
+        DfType::Json | DfType::Jsonb => Ok(val.to_string().into()),
 
         DfType::Time { .. } => {
             // https://dev.mysql.com/doc/refman/8.0/en/date-and-time-literals.html
@@ -238,7 +238,7 @@ pub(crate) fn coerce_decimal(
             Ok(val.into_bytes().into())
         }
 
-        DfType::Json(_) | DfType::Jsonb => Ok(val.to_string().into()),
+        DfType::Json | DfType::Jsonb => Ok(val.to_string().into()),
 
         DfType::Date
         | DfType::DateTime { .. }
@@ -422,7 +422,7 @@ mod tests {
     fn float_to_json() {
         assert_eq!(
             DfValue::Double(-5000.0)
-                .coerce_to(&DfType::Json(Dialect::DEFAULT_MYSQL), &DfType::Unknown)
+                .coerce_to(&DfType::Json, &DfType::Unknown)
                 .unwrap(),
             DfValue::from("-5000")
         );

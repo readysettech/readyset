@@ -90,7 +90,7 @@ pub(crate) fn convert_column(col: &ColumnSchema) -> ReadySetResult<mysql_srv::Co
             MYSQL_TYPE_VAR_STRING
         }
         DfType::Time { .. } => MYSQL_TYPE_TIME,
-        DfType::Json(..) => MYSQL_TYPE_JSON,
+        DfType::Json => MYSQL_TYPE_JSON,
         DfType::Numeric { .. } => MYSQL_TYPE_DECIMAL,
         DfType::MacAddr => unsupported!("MySQL does not support the MACADDR type"),
         DfType::Inet => unsupported!("MySQL does not support the INET type"),

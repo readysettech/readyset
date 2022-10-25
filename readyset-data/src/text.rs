@@ -445,7 +445,7 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
             DfType::BigInt => Self::parse_int::<i64>(str, to_ty),
             DfType::UnsignedBigInt => Self::parse_int::<u64>(str, to_ty),
 
-            DfType::Json(_) | DfType::Jsonb => {
+            DfType::Json | DfType::Jsonb => {
                 // Currently just validates the json
                 // TODO: this is very very wrong as there is no gurantee two equal json objects will
                 // be string equal, quite the opposite actually. And we can't just "normalize the

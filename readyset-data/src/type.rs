@@ -156,8 +156,7 @@ pub enum DfType {
 
     /// [MySQL `json`](https://dev.mysql.com/doc/refman/8.0/en/json.html) or
     /// [PostgreSQL `json`](https://www.postgresql.org/docs/current/datatype-json.html).
-    // TODO: Change to MySQL/PG-specific variants.
-    Json(Dialect),
+    Json,
 
     /// [PostgreSQL `jsonb`](https://www.postgresql.org/docs/current/datatype-json.html).
     Jsonb,
@@ -249,7 +248,7 @@ impl DfType {
             Bit(len) => Self::Bit(len.unwrap_or(1)),
             VarBit(len) => Self::VarBit(len),
 
-            Json => Self::Json(dialect),
+            Json => Self::Json,
             Jsonb => Self::Jsonb,
 
             Date => Self::Date,
@@ -318,7 +317,7 @@ impl DfType {
             | DfType::Timestamp { .. }
             | DfType::TimestampTz { .. } => PgTypeCategory::DateTime,
             DfType::MacAddr | DfType::Inet => PgTypeCategory::NetworkAddress,
-            DfType::Uuid | DfType::Enum(_, _) | DfType::Json(_) | DfType::Jsonb => {
+            DfType::Uuid | DfType::Enum(_, _) | DfType::Json | DfType::Jsonb => {
                 PgTypeCategory::UserDefined
             }
             DfType::PassThrough(_) => PgTypeCategory::Unknown,
@@ -537,7 +536,7 @@ impl fmt::Display for DfType {
             | Self::Inet
             | Self::MacAddr
             | Self::Uuid
-            | Self::Json(_)
+            | Self::Json
             | Self::Jsonb => write!(f, "{kind:?}"),
 
             Self::Array(ref ty) => write!(f, "{ty}[]"),

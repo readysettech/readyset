@@ -393,7 +393,7 @@ impl TimestampTz {
                 )))
             }
 
-            DfType::Json(_) => {
+            DfType::Json => {
                 let mut ts = *self;
                 ts.set_subsecond_digits(6); // Set max precision before json conversion
                 Ok(DfValue::from(format!("\"{}\"", ts).as_str()))
@@ -585,7 +585,7 @@ mod tests {
                     &DfType::Unknown
                 )
                 .unwrap()
-                .coerce_to(&DfType::Json(Dialect::DEFAULT_MYSQL), &DfType::Unknown)
+                .coerce_to(&DfType::Json, &DfType::Unknown)
                 .unwrap()
             ),
             "\"2022-02-09 13:14:15.169000\""

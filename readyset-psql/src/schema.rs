@@ -82,7 +82,7 @@ pub fn type_to_pgsql(col_type: &DfType) -> Result<pgsql::types::Type, Error> {
         DfType::Text(Collation::Citext) => Ok(Type::TEXT), // TODO: use the right CITEXT type
         DfType::Timestamp { .. } => Ok(Type::TIMESTAMP),
         DfType::TimestampTz { .. } => Ok(Type::TIMESTAMPTZ),
-        DfType::Json(..) => Ok(Type::JSON),
+        DfType::Json => Ok(Type::JSON),
         DfType::Jsonb => Ok(Type::JSONB),
         DfType::Date => Ok(Type::DATE),
         DfType::Time { .. } => Ok(Type::TIME),
@@ -125,7 +125,7 @@ pub fn type_to_pgsql(col_type: &DfType) -> Result<pgsql::types::Type, Error> {
         }
         DfType::Array(box DfType::Timestamp { .. }) => Ok(Type::TIMESTAMP_ARRAY),
         DfType::Array(box DfType::TimestampTz { .. }) => Ok(Type::TIMESTAMPTZ_ARRAY),
-        DfType::Array(box DfType::Json(..)) => Ok(Type::JSON_ARRAY),
+        DfType::Array(box DfType::Json) => Ok(Type::JSON_ARRAY),
         DfType::Array(box DfType::Jsonb) => Ok(Type::JSONB_ARRAY),
         DfType::Array(box DfType::Date) => Ok(Type::DATE_ARRAY),
         DfType::Array(box DfType::Time { .. }) => Ok(Type::TIME_ARRAY),

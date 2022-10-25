@@ -3309,16 +3309,14 @@ mod tests {
         #[test]
         fn text_to_json() {
             let input = DfValue::from("{\"name\": \"John Doe\", \"age\": 43, \"phones\": [\"+44 1234567\", \"+44 2345678\"] }");
-            let result = input
-                .coerce_to(&DfType::Json(Dialect::DEFAULT_MYSQL), &DfType::Unknown)
-                .unwrap();
+            let result = input.coerce_to(&DfType::Json, &DfType::Unknown).unwrap();
             assert_eq!(input, result);
 
             let result = input.coerce_to(&DfType::Jsonb, &DfType::Unknown).unwrap();
             assert_eq!(input, result);
 
             let input = DfValue::from("not a json");
-            let result = input.coerce_to(&DfType::Json(Dialect::DEFAULT_MYSQL), &DfType::Unknown);
+            let result = input.coerce_to(&DfType::Json, &DfType::Unknown);
             result.unwrap_err();
 
             let result = input.coerce_to(&DfType::Jsonb, &DfType::Unknown);

@@ -368,7 +368,7 @@ impl wal::TupleData {
                                 PGType::FLOAT8 => DfType::Double,
                                 PGType::TIMESTAMP => DfType::Timestamp { subsecond_digits },
                                 PGType::TIMESTAMPTZ => DfType::TimestampTz { subsecond_digits },
-                                PGType::JSON => DfType::Json(dialect),
+                                PGType::JSON => DfType::Json,
                                 PGType::JSONB => DfType::Jsonb,
                                 PGType::DATE => DfType::Date,
                                 PGType::TIME => DfType::Time { subsecond_digits },
