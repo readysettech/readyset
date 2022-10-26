@@ -351,10 +351,24 @@ pub struct Options {
 
     // TODO: This feature in general needs to be fleshed out significantly more. Off by default for
     // now.
+    #[clap(flatten)]
+    fallback_cache_options: FallbackCacheOptions,
+}
+
+/// Command-line options for running the experimental fallback_cache.
+///
+/// This option struct is intended to be embedded inside of a larger option struct using
+/// `#[clap(flatten)]`.
+#[derive(Parser, Debug)]
+pub struct FallbackCacheOptions {
     /// Used to enable the fallback cache, which can handle serving all queries that we can't parse
     /// or support from an in-memory cache that lives in the adapter.
     #[clap(long, hide = true)]
     enable_fallback_cache: bool,
+
+    /// Specifies a ttl in seconds for queries cached using the fallback cache.
+    #[clap(long, hide = true, default_value = "120")]
+    ttl_seconds: u64,
 }
 
 impl<H> NoriaAdapter<H>
@@ -622,8 +636,13 @@ where
             FallbackCache<
                 <<H as ConnectionHandler>::UpstreamDatabase as UpstreamDatabase>::CachedReadResult,
             >,
-        > = if cfg!(feature = "fallback_cache") && options.enable_fallback_cache {
-            Some(FallbackCache::new())
+        > = if cfg!(feature = "fallback_cache")
+            && options.fallback_cache_options.enable_fallback_cache
+        {
+            Some(FallbackCache::new(Duration::new(
+                options.fallback_cache_options.ttl_seconds,
+                0,
+            )))
         } else {
             None
         };
