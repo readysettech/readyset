@@ -76,8 +76,9 @@ pub enum SqlType {
     Serial,
     BigSerial,
     Array(Box<SqlType>),
-    /// Used in this context for Postgres's user defined types
-    PassThrough(SqlIdentifier),
+
+    /// Any other named type
+    Other(SqlIdentifier),
 }
 
 impl SqlType {
@@ -221,7 +222,7 @@ impl fmt::Display for SqlType {
             SqlType::Serial => write!(f, "SERIAL"),
             SqlType::BigSerial => write!(f, "BIGSERIAL"),
             SqlType::Array(ref t) => write!(f, "{}[]", t),
-            SqlType::PassThrough(ref t) => write!(f, "{t}"),
+            SqlType::Other(ref t) => write!(f, "{t}"),
         }
     }
 }
@@ -631,15 +632,15 @@ fn type_identifier_part3(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], S
                     // TODO(ENG-1910): We can remove this filter when ReadySet fully support the
                     // PostgreSQL quoted-char type
                     not(tag_no_case("\"char\"")),
-                    pass_through_type(dialect),
+                    other_type(dialect),
                 ),
-                SqlType::PassThrough,
+                SqlType::Other,
             ),
         ))(i)
     }
 }
 
-fn pass_through_type(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], crate::SqlIdentifier> {
+fn other_type(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], crate::SqlIdentifier> {
     move |i| match dialect {
         Dialect::PostgreSQL => dialect.identifier()(i),
         Dialect::MySQL => Err(nom::Err::Error(ParseError::from_error_kind(
@@ -987,9 +988,9 @@ mod tests {
         }
 
         #[test]
-        fn unsupported_passthrough() {
+        fn unsupported_other() {
             let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"unsupportedtype");
-            assert_eq!(res, SqlType::PassThrough("unsupportedtype".into()));
+            assert_eq!(res, SqlType::Other("unsupportedtype".into()));
         }
 
         #[test]

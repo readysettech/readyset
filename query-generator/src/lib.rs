@@ -165,7 +165,7 @@ fn value_of_type(typ: &SqlType) -> DfValue {
         }
         SqlType::VarBit(_) => DfValue::from(BitVec::new()),
         SqlType::Array(_) => unimplemented!(),
-        SqlType::PassThrough(_) => unimplemented!(),
+        SqlType::Other(_) => unimplemented!(),
     }
 }
 
@@ -296,7 +296,7 @@ fn random_value_of_type(typ: &SqlType) -> DfValue {
         SqlType::Serial => (rng.gen::<u32>() + 1).into(),
         SqlType::BigSerial => (rng.gen::<u64>() + 1).into(),
         SqlType::Array(_) => unimplemented!(),
-        SqlType::PassThrough(_) => unimplemented!(),
+        SqlType::Other(_) => unimplemented!(),
     }
 }
 
@@ -408,7 +408,7 @@ fn unique_value_of_type(typ: &SqlType, idx: u32) -> DfValue {
         SqlType::Serial => (idx + 1).into(),
         SqlType::BigSerial => ((idx + 1) as u64).into(),
         SqlType::Array(_) => unimplemented!(),
-        SqlType::PassThrough(_) => unimplemented!(),
+        SqlType::Other(_) => unimplemented!(),
     }
 }
 

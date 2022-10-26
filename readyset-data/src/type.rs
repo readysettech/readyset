@@ -270,7 +270,7 @@ impl DfType {
             MacAddr => Self::MacAddr,
             Inet => Self::Inet,
             Citext => Self::Text(Collation::Citext),
-            PassThrough(ref id) => Self::PassThrough(id.to_owned()),
+            Other(ref id) => Self::PassThrough(id.to_owned()),
         }
     }
 }
