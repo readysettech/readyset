@@ -184,6 +184,11 @@ pub enum BinaryOperator {
     Multiply,
     /// `/`
     Divide,
+    /// `?`
+    ///
+    /// Postgres-specific JSONB operator. Looks for the given string as an object key or an array
+    /// element and returns a boolean indicating the presence or absence of that string.
+    QuestionMark,
 }
 
 impl BinaryOperator {
@@ -228,6 +233,7 @@ impl Display for BinaryOperator {
             Self::Subtract => "-",
             Self::Multiply => "*",
             Self::Divide => "/",
+            Self::QuestionMark => "?",
         };
         f.write_str(op)
     }
@@ -480,6 +486,7 @@ fn infix_no_and_or(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], TokenTree> {
         map(char('-'), |_| BinaryOperator::Subtract),
         map(char('*'), |_| BinaryOperator::Multiply),
         map(char('/'), |_| BinaryOperator::Divide),
+        map(char('?'), |_| BinaryOperator::QuestionMark),
     ))(i)?;
 
     Ok((i, TokenTree::Infix(operator)))
@@ -637,6 +644,12 @@ where
         use UnaryOperator::*;
 
         // https://dev.mysql.com/doc/refman/8.0/en/operator-precedence.html
+        //
+        // Though, note that we currently use this same parser for Postgres, so we have to fudge
+        // the precedence rules a bit sometimes (particularly with PG-specific operators like `?`).
+        // In the future we'll probably want to switch to using a separate parser (or at least a
+        // separate precedence/associativity table) per SQL dialect that we support but for now
+        // this seems to be good enough.
         Ok(match input {
             Infix(And) => Affix::Infix(Precedence(4), Associativity::Right),
             Infix(Or) => Affix::Infix(Precedence(2), Associativity::Right),
@@ -656,6 +669,10 @@ where
             Infix(Subtract) => Affix::Infix(Precedence(11), Associativity::Right),
             Infix(Multiply) => Affix::Infix(Precedence(12), Associativity::Right),
             Infix(Divide) => Affix::Infix(Precedence(12), Associativity::Right),
+            // Not positive whether this 8 puts all other operators at the correct relative
+            // precedence here because these precedences come from MySQL rather than PG, but this
+            // seems to produce the correct behavior in all the cases I've come up with:
+            Infix(QuestionMark) => Affix::Infix(Precedence(8), Associativity::Left),
             Prefix(Not) => Affix::Prefix(Precedence(6)),
             Prefix(Neg) => Affix::Prefix(Precedence(5)),
             Primary(_) => Affix::Nilfix,
@@ -1905,6 +1922,23 @@ mod tests {
         mod conditions {
             use super::*;
             use crate::{to_nom_result, ItemPlaceholder};
+
+            #[test]
+            fn question_mark_operator() {
+                let cond = "'{\"abc\": 42}' ? 'abc'";
+                let res = to_nom_result(expression(Dialect::PostgreSQL)(LocatedSpan::new(
+                    cond.as_bytes(),
+                )));
+                let expected = Expr::BinaryOp {
+                    lhs: Box::new(Expr::Literal("{\"abc\": 42}".into())),
+                    op: BinaryOperator::QuestionMark,
+                    rhs: Box::new(Expr::Literal("abc".into())),
+                };
+
+                let (rem, res) = res.unwrap();
+                assert_eq!(std::str::from_utf8(rem).unwrap(), "");
+                assert_eq!(res, expected);
+            }
 
             #[test]
             fn complex_bracketing() {

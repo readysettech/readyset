@@ -229,6 +229,9 @@ pub enum BinaryOperator {
 
     /// `/`
     Divide,
+
+    /// `?`
+    QuestionMark,
 }
 
 impl BinaryOperator {
@@ -255,6 +258,7 @@ impl BinaryOperator {
             NotEqual => Self::NotEqual,
             Is => Self::Is,
             IsNot => Self::IsNot,
+            QuestionMark => Self::QuestionMark,
         }
     }
 }
@@ -280,6 +284,7 @@ impl fmt::Display for BinaryOperator {
             Self::Subtract => "-",
             Self::Multiply => "*",
             Self::Divide => "/",
+            Self::QuestionMark => "?",
         };
         f.write_str(op)
     }

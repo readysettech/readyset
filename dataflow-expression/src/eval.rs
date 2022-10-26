@@ -1,7 +1,7 @@
 use std::borrow::Borrow;
 
 use readyset_data::{DfType, DfValue};
-use readyset_errors::{ReadySetError, ReadySetResult};
+use readyset_errors::{unsupported, ReadySetError, ReadySetResult};
 
 use crate::like::{CaseInsensitive, CaseSensitive, LikePattern};
 use crate::{BinaryOperator, Expr};
@@ -92,6 +92,7 @@ impl Expr {
                     NotLike => Ok(like(CaseSensitive, true).into()),
                     ILike => Ok(like(CaseInsensitive, false).into()),
                     NotILike => Ok(like(CaseInsensitive, true).into()),
+                    QuestionMark => unsupported!("? operator not yet implemented"),
                 }
             }
             Cast { expr, ty, .. } => {

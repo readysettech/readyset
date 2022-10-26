@@ -40,6 +40,7 @@ fn negate_expr(expr: &mut Expr) -> bool {
                 | BinaryOperator::Subtract
                 | BinaryOperator::Multiply
                 | BinaryOperator::Divide => return false,
+                BinaryOperator::QuestionMark => return false, // TODO implement negation?
             }
         }
         Expr::UnaryOp {
