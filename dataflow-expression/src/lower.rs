@@ -374,9 +374,12 @@ impl Expr {
             AstExpr::BinaryOp { lhs, op, rhs } => {
                 let op = BinaryOperator::from_sql_op(op, dialect);
 
-                // TODO: Consider rhs and op when inferring type
                 let left = Box::new(Self::lower(*lhs, dialect, context.clone())?);
-                let ty = left.ty().clone();
+                // TODO: Add more operators to this match, and maybe consider rhs in some cases too
+                let ty = match op {
+                    BinaryOperator::QuestionMark => DfType::Bool,
+                    _ => left.ty().clone(),
+                };
                 Ok(Self::Op {
                     op,
                     left,
@@ -500,7 +503,10 @@ impl Expr {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use nom_sql::{parse_expr, Dialect as ParserDialect, Float, Literal, SqlType};
+    use nom_sql::{
+        parse_expr, BinaryOperator as AstBinaryOperator, Dialect as ParserDialect, Float, Literal,
+        SqlType,
+    };
     use readyset_data::Collation;
 
     use super::*;
@@ -925,5 +931,17 @@ pub(crate) mod tests {
             Dialect::DEFAULT_MYSQL,
             DfType::DEFAULT_TEXT,
         );
+    }
+
+    #[test]
+    fn lowered_question_mark_expr_type() {
+        let input = AstExpr::BinaryOp {
+            lhs: Box::new(AstExpr::Literal("{\"abc\": 42}".into())),
+            op: AstBinaryOperator::QuestionMark,
+            rhs: Box::new(AstExpr::Literal("abc".into())),
+        };
+        let result =
+            Expr::lower(input, Dialect::DEFAULT_POSTGRESQL, no_op_lower_context()).unwrap();
+        assert_eq!(*result.ty(), DfType::Bool);
     }
 }
