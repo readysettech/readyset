@@ -25,6 +25,7 @@ use proptest::prelude::{prop_oneof, Arbitrary};
 use readyset_errors::{internal, invalid_err, unsupported, ReadySetError, ReadySetResult};
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 use rust_decimal::Decimal;
+use serde_json::Value as JsonValue;
 use test_strategy::Arbitrary;
 use tokio_postgres::types::{to_sql_checked, FromSql, IsNull, Kind, ToSql, Type};
 use uuid::Uuid;
@@ -641,6 +642,32 @@ impl DfValue {
         } else {
             Some(self)
         }
+    }
+
+    /// Attempts to convert self to a str and parse as JSON, returning a [`serde_json::Value`]
+    /// wrapped in [`ReadySetResult`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use readyset_data::DfValue;
+    ///
+    /// assert_eq!(
+    ///     DfValue::from("[1, 2, 3]").to_json(),
+    ///     Ok(vec![1, 2, 3].into())
+    /// );
+    /// assert!(DfValue::from("🤯").to_json().is_err()); // Not a valid JSON string
+    /// ```
+    pub fn to_json(&self) -> ReadySetResult<JsonValue> {
+        let text_val = self.coerce_to(&DfType::DEFAULT_TEXT, &DfType::Unknown)?;
+        let json_str = <&str>::try_from(&text_val)?;
+        serde_json::from_str(json_str).map_err(|e| {
+            invalid_err!(
+                "Could not convert value to JSON: {}. JSON error: {}",
+                Sensitive(self),
+                Sensitive(&e)
+            )
+        })
     }
 }
 
