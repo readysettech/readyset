@@ -9,6 +9,7 @@ use nom::multi::separated_list1;
 use nom::sequence::terminated;
 use nom_locate::LocatedSpan;
 use serde::{Deserialize, Serialize};
+use test_strategy::Arbitrary;
 
 use crate::common::{as_alias, ws_sep_comma};
 use crate::{Dialect, NomSqlResult, SqlIdentifier};
@@ -17,7 +18,7 @@ use crate::{Dialect, NomSqlResult, SqlIdentifier};
 ///
 /// This type is (perhaps surprisingly) quite pervasive - it's used as not only the names for tables
 /// and views, but also all nodes in the graph (both MIR and dataflow).
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Arbitrary)]
 pub struct Relation {
     /// The optional schema for the relation.
     ///
@@ -103,9 +104,7 @@ impl From<Relation> for TableExpr {
 }
 
 // Parse a reference to a named schema.table
-pub fn table_reference(
-    dialect: Dialect,
-) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Relation> {
+pub fn relation(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Relation> {
     move |i| {
         let (i, schema) = opt(terminated(dialect.identifier(), tag(".")))(i)?;
         let (i, name) = dialect.identifier()(i)?;
@@ -117,14 +116,14 @@ pub fn table_reference(
 pub fn table_list(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<Relation>> {
-    move |i| separated_list1(ws_sep_comma, table_reference(dialect))(i)
+    move |i| separated_list1(ws_sep_comma, relation(dialect))(i)
 }
 
 pub fn table_expr(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], TableExpr> {
     move |i| {
-        let (i, table) = table_reference(dialect)(i)?;
+        let (i, table) = relation(dialect)(i)?;
         let (i, alias) = opt(as_alias(dialect))(i)?;
         Ok((i, TableExpr { table, alias }))
     }

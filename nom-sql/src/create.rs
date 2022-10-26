@@ -21,7 +21,7 @@ use crate::create_table_options::{table_options, CreateTableOption};
 use crate::expression::expression;
 use crate::order::{order_type, OrderType};
 use crate::select::{nested_selection, selection, SelectStatement};
-use crate::table::{table_reference, Relation};
+use crate::table::{relation, Relation};
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Dialect, NomSqlResult, SqlIdentifier};
 
@@ -346,7 +346,7 @@ fn foreign_key(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<
         let (i, _) = whitespace1(i)?;
         let (i, _) = tag_no_case("references")(i)?;
         let (i, _) = whitespace1(i)?;
-        let (i, target_table) = table_reference(dialect)(i)?;
+        let (i, target_table) = relation(dialect)(i)?;
 
         // (columns)
         let (i, _) = whitespace0(i)?;
@@ -530,7 +530,7 @@ pub fn create_table(
         let (i, _) = tag_no_case("table")(i)?;
         let (i, _) = whitespace1(i)?;
         let (i, if_not_exists) = if_not_exists(i)?;
-        let (i, table) = table_reference(dialect)(i)?;
+        let (i, table) = relation(dialect)(i)?;
         let (i, _) = whitespace0(i)?;
         let (i, _) = tag("(")(i)?;
         let (i, _) = whitespace0(i)?;
@@ -636,7 +636,7 @@ pub fn view_creation(
         let (i, _) = opt(create_view_params)(i)?;
         let (i, _) = tag_no_case("view")(i)?;
         let (i, _) = whitespace1(i)?;
-        let (i, name) = table_reference(dialect)(i)?;
+        let (i, name) = relation(dialect)(i)?;
         let (i, _) = whitespace1(i)?;
         let (i, _) = tag_no_case("as")(i)?;
         let (i, _) = whitespace1(i)?;
@@ -686,7 +686,7 @@ pub fn create_cached_query(
         let (i, _) = tag_no_case("cache")(i)?;
         let (i, _) = whitespace1(i)?;
         let (i, always) = opt(terminated(tag_no_case("always"), whitespace1))(i)?;
-        let (i, name) = opt(terminated(table_reference(dialect), whitespace1))(i)?;
+        let (i, name) = opt(terminated(relation(dialect), whitespace1))(i)?;
         let (i, _) = tag_no_case("from")(i)?;
         let (i, _) = whitespace1(i)?;
         let (i, inner) = cached_query_inner(dialect)(i)?;

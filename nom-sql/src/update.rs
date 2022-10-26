@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::column::Column;
 use crate::common::{assignment_expr_list, statement_terminator};
 use crate::select::where_clause;
-use crate::table::{table_reference, Relation};
+use crate::table::{relation, Relation};
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Dialect, Expr, NomSqlResult};
 
@@ -48,7 +48,7 @@ pub fn updating(
         let (remaining_input, (_, _, table, _, _, _, fields, _, where_clause, _)) = tuple((
             tag_no_case("update"),
             whitespace1,
-            table_reference(dialect),
+            relation(dialect),
             whitespace1,
             tag_no_case("set"),
             whitespace1,

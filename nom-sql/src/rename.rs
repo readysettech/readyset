@@ -7,7 +7,7 @@ use nom_locate::LocatedSpan;
 use serde::{Deserialize, Serialize};
 
 use crate::common::ws_sep_comma;
-use crate::table::{table_reference, Relation};
+use crate::table::{relation, Relation};
 use crate::whitespace::whitespace1;
 use crate::{Dialect, NomSqlResult};
 
@@ -55,11 +55,11 @@ fn rename_table_operation(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], RenameTableOperation> {
     move |i| {
-        let (i, from) = table_reference(dialect)(i)?;
+        let (i, from) = relation(dialect)(i)?;
         let (i, _) = whitespace1(i)?;
         let (i, _) = tag_no_case("to")(i)?;
         let (i, _) = whitespace1(i)?;
-        let (i, to) = table_reference(dialect)(i)?;
+        let (i, to) = relation(dialect)(i)?;
         Ok((i, RenameTableOperation { from, to }))
     }
 }

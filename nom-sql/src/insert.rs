@@ -11,7 +11,7 @@ use crate::column::Column;
 use crate::common::{
     assignment_expr_list, field_list, statement_terminator, value_list, ws_sep_comma,
 };
-use crate::table::{table_reference, Relation};
+use crate::table::{relation, Relation};
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Dialect, Expr, NomSqlResult};
 
@@ -106,7 +106,7 @@ pub fn insertion(
             whitespace1,
             tag_no_case("into"),
             whitespace1,
-            table_reference(dialect),
+            relation(dialect),
             whitespace0,
             opt(fields(dialect)),
             tag_no_case("values"),

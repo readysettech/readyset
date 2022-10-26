@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::common::statement_terminator;
 use crate::select::where_clause;
-use crate::table::{table_reference, Relation};
+use crate::table::{relation, Relation};
 use crate::whitespace::whitespace1;
 use crate::{Dialect, Expr, NomSqlResult};
 
@@ -36,7 +36,7 @@ pub fn deletion(
         let (remaining_input, (_, _, table, where_clause, _)) = tuple((
             tag_no_case("delete"),
             delimited(whitespace1, tag_no_case("from"), whitespace1),
-            table_reference(dialect),
+            relation(dialect),
             opt(where_clause(dialect)),
             statement_terminator,
         ))(i)?;

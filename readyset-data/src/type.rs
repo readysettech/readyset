@@ -2,7 +2,7 @@ use std::fmt;
 
 use enum_kinds::EnumKind;
 use itertools::Itertools;
-use nom_sql::{EnumType, Literal, SqlIdentifier, SqlType};
+use nom_sql::{EnumType, Literal, Relation, SqlType};
 use serde::{Deserialize, Serialize};
 
 use crate::{Collation, Dialect};
@@ -163,7 +163,7 @@ pub enum DfType {
 
     /// PostgreSQL fallback type, enabling the adapter to funnel arbitrary types to/from upstream.
     /// These types are uncachable and effectively blackboxes to ReadySet.
-    PassThrough(SqlIdentifier),
+    PassThrough(Relation),
 }
 
 /// Defaults.

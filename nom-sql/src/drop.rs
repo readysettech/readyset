@@ -10,7 +10,7 @@ use nom_locate::LocatedSpan;
 use serde::{Deserialize, Serialize};
 
 use crate::common::{statement_terminator, ws_sep_comma};
-use crate::table::{table_list, table_reference, Relation};
+use crate::table::{relation, table_list, Relation};
 use crate::whitespace::whitespace1;
 use crate::{Dialect, NomSqlResult};
 
@@ -91,7 +91,7 @@ pub fn drop_cached_query(
         let (i, _) = whitespace1(i)?;
         let (i, _) = tag_no_case("cache")(i)?;
         let (i, _) = whitespace1(i)?;
-        let (i, name) = table_reference(dialect)(i)?;
+        let (i, name) = relation(dialect)(i)?;
         let (i, _) = statement_terminator(i)?;
         Ok((i, DropCacheStatement { name }))
     }
@@ -122,7 +122,7 @@ pub fn drop_view(
         let (i, _) = tag_no_case("view")(i)?;
         let (i, _) = whitespace1(i)?;
         let (i, if_exists) = if_exists(i)?;
-        let (i, views) = separated_list1(ws_sep_comma, table_reference(dialect))(i)?;
+        let (i, views) = separated_list1(ws_sep_comma, relation(dialect))(i)?;
         let (i, _) = restrict_cascade(i)?;
         let (i, _) = statement_terminator(i)?;
         Ok((i, DropViewStatement { views, if_exists }))

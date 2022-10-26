@@ -18,8 +18,9 @@ use test_strategy::Arbitrary;
 use triomphe::ThinArc;
 
 use crate::common::{ws_sep_comma, Sign};
+use crate::table::relation;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{literal, Dialect, Literal, NomSqlResult, SqlIdentifier};
+use crate::{literal, Dialect, Literal, NomSqlResult, Relation};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize, Arbitrary)]
 pub enum SqlType {
@@ -78,7 +79,7 @@ pub enum SqlType {
     Array(Box<SqlType>),
 
     /// Any other named type
-    Other(SqlIdentifier),
+    Other(Relation),
 }
 
 impl SqlType {
@@ -644,11 +645,9 @@ fn type_identifier_part3(
     }
 }
 
-fn other_type(
-    dialect: Dialect,
-) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], crate::SqlIdentifier> {
+fn other_type(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Relation> {
     move |i| match dialect {
-        Dialect::PostgreSQL => dialect.identifier()(i),
+        Dialect::PostgreSQL => relation(dialect)(i),
         Dialect::MySQL => Err(nom::Err::Error(ParseError::from_error_kind(
             i,
             ErrorKind::IsNot,
@@ -1005,6 +1004,18 @@ mod tests {
         fn unsupported_other() {
             let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"unsupportedtype");
             assert_eq!(res, SqlType::Other("unsupportedtype".into()));
+        }
+
+        #[test]
+        fn custom_schema_qualified_type() {
+            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"foo.custom");
+            assert_eq!(
+                res,
+                SqlType::Other(Relation {
+                    schema: Some("foo".into()),
+                    name: "custom".into()
+                })
+            );
         }
 
         #[test]

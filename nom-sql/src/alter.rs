@@ -15,7 +15,7 @@ use crate::column::{column_specification, ColumnSpecification};
 use crate::common::{debug_print, statement_terminator, ws_sep_comma, TableKey};
 use crate::create::key_specification;
 use crate::literal::literal;
-use crate::table::{table_reference, Relation};
+use crate::table::{relation, Relation};
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Dialect, Literal, NomSqlResult, SqlIdentifier};
 
@@ -349,7 +349,7 @@ pub fn alter_table_statement(
             (i, false)
         };
 
-        let (i, table) = table_reference(dialect)(i)?;
+        let (i, table) = relation(dialect)(i)?;
         let (i, _) = whitespace1(i)?;
         let (i, definitions) = separated_list0(ws_sep_comma, alter_table_definition(dialect))(i)?;
         let (i, _) = whitespace0(i)?;

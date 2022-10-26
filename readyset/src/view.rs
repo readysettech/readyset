@@ -777,6 +777,7 @@ impl Arbitrary for KeyComparison {
 
 #[doc(hidden)]
 #[derive(Serialize, Deserialize, Debug)]
+#[allow(clippy::large_enum_variant)] // TODO: benchmark cost/benefit of boxing ViewQuery
 pub enum ReadQuery {
     /// Read from a leaf view
     Normal {

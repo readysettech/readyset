@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use bit_vec::BitVec;
 use mysql_time::MySqlTime;
-use nom_sql::SqlIdentifier;
 use postgres_types::Kind;
 use readyset::ReadySetError;
 use readyset_data::{Array, Collation, DfType, DfValue, Dialect};
@@ -379,7 +378,10 @@ impl wal::TupleData {
                                 PGType::UUID => DfType::Uuid,
                                 PGType::BIT => DfType::DEFAULT_BIT,
                                 PGType::VARBIT => DfType::VarBit(None),
-                                ref ty => DfType::PassThrough(SqlIdentifier::from(ty.name())),
+                                ref ty => DfType::PassThrough(nom_sql::Relation {
+                                    schema: Some(ty.schema().into()),
+                                    name: ty.name().into(),
+                                }),
                             }));
 
                             DfValue::from(str.parse::<Array>()?)
