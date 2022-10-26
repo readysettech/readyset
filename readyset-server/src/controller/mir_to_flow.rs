@@ -929,6 +929,11 @@ impl<'a> dataflow::LowerContext for LowerContext<'a> {
             .clone();
         Ok((index, ty))
     }
+
+    fn resolve_type(&self, _ty: Relation) -> Option<DfType> {
+        // TODO(grfn): Look up the type in the schema
+        None
+    }
 }
 
 /// Lower the given nom_sql AST expression to a `DfExpr`, resolving columns by looking their

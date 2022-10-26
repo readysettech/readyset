@@ -52,7 +52,7 @@ impl Column {
     pub fn from_spec(spec: ColumnSpecification, dialect: Dialect) -> Self {
         Self::new(
             spec.column.name,
-            DfType::from_sql_type(&spec.sql_type, dialect),
+            DfType::from_sql_type(&spec.sql_type, dialect, |_| None /* TODO(grfn) */),
             spec.column.table,
         )
     }

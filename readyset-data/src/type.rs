@@ -184,22 +184,26 @@ impl DfType {
 
 /// Conversions to/from [`SqlType`].
 impl DfType {
-    /// Converts from a possible [`SqlType`] reference within the context of a SQL [`Dialect`].
-    #[inline]
-    pub fn from_sql_type<'a>(ty: impl Into<Option<&'a SqlType>>, dialect: Dialect) -> Self {
-        // NOTE: We get a feature gate error if we don't name the lifetime in the signature.
-        match ty.into() {
-            Some(ty) => Self::from_sql_type_impl(ty, dialect),
-            None => Self::Unknown,
-        }
-    }
-
-    /// Internal implementation of `from_sql_type` to avoid monormorphizing two large functions.
-    fn from_sql_type_impl(ty: &SqlType, dialect: Dialect) -> Self {
+    /// Converts from a possible [`SqlType`] reference within the context of a SQL [`Dialect`],
+    /// given a function to resolve named custom types in the schema
+    pub fn from_sql_type<'a, T, R>(ty: T, dialect: Dialect, resolve_custom_type: R) -> Self
+    where
+        T: Into<Option<&'a SqlType>>,
+        R: Fn(Relation) -> Option<DfType>,
+    {
         use SqlType::*;
 
+        let ty = match ty.into() {
+            Some(ty) => ty,
+            None => return Self::Unknown,
+        };
+
         match *ty {
-            Array(ref ty) => Self::Array(Box::new(Self::from_sql_type_impl(ty, dialect))),
+            Array(ref ty) => Self::Array(Box::new(Self::from_sql_type(
+                Some(ty.as_ref()),
+                dialect,
+                resolve_custom_type,
+            ))),
 
             // PERF: Cloning enum types is O(1).
             Enum(ref ty) => Self::Enum(ty.clone(), dialect),
@@ -270,7 +274,9 @@ impl DfType {
             MacAddr => Self::MacAddr,
             Inet => Self::Inet,
             Citext => Self::Text(Collation::Citext),
-            Other(ref id) => Self::PassThrough(id.to_owned()),
+            Other(ref id) => {
+                resolve_custom_type(id.clone()).unwrap_or_else(|| Self::PassThrough(id.clone()))
+            }
         }
     }
 }

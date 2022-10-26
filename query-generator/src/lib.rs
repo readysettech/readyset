@@ -596,7 +596,7 @@ impl ColumnGenerationSpec {
                 ColumnGenerator::Zipfian(ZipfianGenerator::new(min.clone(), max.clone(), *alpha))
             }
             ColumnGenerationSpec::Constant(val) => {
-                let col_type = DfType::from_sql_type(&col_type, Dialect::DEFAULT_MYSQL);
+                let col_type = DfType::from_sql_type(&col_type, Dialect::DEFAULT_MYSQL, |_| None);
                 let val = val.coerce_to(&col_type, &DfType::Unknown).unwrap();
                 ColumnGenerator::Constant(val.into())
             }
@@ -947,7 +947,8 @@ impl From<CreateTableStatement> for TableSpec {
                 .iter()
                 .map(|field| {
                     let sql_type = field.sql_type.clone();
-                    let df_type = DfType::from_sql_type(&sql_type, Dialect::DEFAULT_MYSQL);
+                    let df_type =
+                        DfType::from_sql_type(&sql_type, Dialect::DEFAULT_MYSQL, |_| None);
 
                     let generator = if let Some(d) =
                         field.has_default().and_then(|l| DfValue::try_from(l).ok())

@@ -1201,7 +1201,8 @@ impl NoriaConnector {
                             )
                         })?;
 
-                    let target_type = DfType::from_sql_type(&field.sql_type, self.dialect);
+                    let target_type =
+                        DfType::from_sql_type(&field.sql_type, self.dialect, |_| None);
 
                     let value = row
                         .get(ci)

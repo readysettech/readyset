@@ -1,6 +1,6 @@
 use dataflow_expression::{Dialect, Expr as DataflowExpr, LowerContext};
 use nom_sql::analysis::visit::{self, Visitor};
-use nom_sql::{Column, Expr, Literal};
+use nom_sql::{Column, Expr, Literal, Relation};
 use readyset_data::{DfType, DfValue};
 use readyset_errors::{internal, ReadySetResult};
 
@@ -13,6 +13,11 @@ fn const_eval(expr: &Expr, dialect: Dialect) -> ReadySetResult<Literal> {
     impl LowerContext for ConstEvalLowerContext {
         fn resolve_column(&self, _col: Column) -> ReadySetResult<(usize, DfType)> {
             internal!("Can't resolve column")
+        }
+
+        fn resolve_type(&self, _ty: Relation) -> Option<DfType> {
+            // TODO(grfn): Support custom types in constant folding
+            None
         }
     }
 

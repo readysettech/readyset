@@ -177,7 +177,11 @@ impl ColumnSchema {
                 constraints: spec.constraints,
             }),
             column: spec.column,
-            column_type: DfType::from_sql_type(&spec.sql_type, dialect),
+            column_type: DfType::from_sql_type(
+                &spec.sql_type,
+                dialect,
+                |_| None, /* Custom types not allowed for inserts via the adapter */
+            ),
         }
     }
 }

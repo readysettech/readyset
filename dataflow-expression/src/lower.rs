@@ -1,7 +1,9 @@
 use std::iter;
 
 use launchpad::redacted::Sensitive;
-use nom_sql::{BinaryOperator, Column, Expr as AstExpr, FunctionExpr, InValue, UnaryOperator};
+use nom_sql::{
+    BinaryOperator, Column, Expr as AstExpr, FunctionExpr, InValue, Relation, UnaryOperator,
+};
 use readyset_data::dialect::SqlEngine;
 use readyset_data::{DfType, DfValue};
 use readyset_errors::{internal, invalid_err, unsupported, ReadySetError, ReadySetResult};
@@ -15,6 +17,9 @@ pub trait LowerContext: Clone {
     /// Look up a column in the parent node of the node containing this expression, returning its
     /// column index and type
     fn resolve_column(&self, col: Column) -> ReadySetResult<(usize, DfType)>;
+
+    /// Look up a named custom type in the schema.
+    fn resolve_type(&self, ty: Relation) -> Option<DfType>;
 }
 
 /// Unify the given list of types according to PostgreSQL's [type unification rules][pg-docs]
@@ -408,11 +413,16 @@ impl Expr {
                 }),
                 ty: DfType::Bool, // type of NE is always bool
             }),
-            AstExpr::Cast { expr, ty, .. } => Ok(Self::Cast {
-                expr: Box::new(Self::lower(*expr, dialect, context)?),
-                ty: DfType::from_sql_type(&ty, dialect),
-                to_type: ty,
-            }),
+            AstExpr::Cast {
+                expr, ty: to_type, ..
+            } => {
+                let ty = DfType::from_sql_type(&to_type, dialect, |t| context.resolve_type(t));
+                Ok(Self::Cast {
+                    expr: Box::new(Self::lower(*expr, dialect, context)?),
+                    ty,
+                    to_type,
+                })
+            }
             AstExpr::CaseWhen {
                 condition,
                 then_expr,
@@ -490,28 +500,35 @@ impl Expr {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use nom_sql::{parse_expr, Dialect as ParserDialect, Float, Literal};
+    use nom_sql::{parse_expr, Dialect as ParserDialect, Float, Literal, SqlType};
     use readyset_data::Collation;
 
     use super::*;
 
     #[derive(Clone)]
-    pub(crate) struct TestLowerContext<RC> {
+    pub(crate) struct TestLowerContext<RC, RT> {
         resolve_column: RC,
+        resolve_type: RT,
     }
 
-    impl<RC> LowerContext for TestLowerContext<RC>
+    impl<RC, RT> LowerContext for TestLowerContext<RC, RT>
     where
         RC: Fn(Column) -> ReadySetResult<(usize, DfType)> + Clone,
+        RT: Fn(Relation) -> Option<DfType> + Clone,
     {
         fn resolve_column(&self, col: Column) -> ReadySetResult<(usize, DfType)> {
             (self.resolve_column)(col)
+        }
+
+        fn resolve_type(&self, ty: Relation) -> Option<DfType> {
+            (self.resolve_type)(ty)
         }
     }
 
     pub(crate) fn no_op_lower_context() -> impl LowerContext {
         TestLowerContext {
             resolve_column: |_| internal!(),
+            resolve_type: |_| None,
         }
     }
 
@@ -519,7 +536,20 @@ pub(crate) mod tests {
     where
         F: Fn(Column) -> ReadySetResult<(usize, DfType)> + Clone,
     {
-        TestLowerContext { resolve_column }
+        TestLowerContext {
+            resolve_column,
+            resolve_type: |_| None,
+        }
+    }
+
+    pub(crate) fn resolve_types<F>(resolve_type: F) -> impl LowerContext
+    where
+        F: Fn(Relation) -> Option<DfType> + Clone,
+    {
+        TestLowerContext {
+            resolve_column: |_| internal!(),
+            resolve_type,
+        }
     }
 
     #[test]
@@ -555,6 +585,40 @@ pub(crate) mod tests {
             Expr::Column {
                 index: 0,
                 ty: DfType::Int
+            }
+        );
+    }
+
+    #[test]
+    fn cast_to_custom_type() {
+        let input =
+            parse_expr(ParserDialect::PostgreSQL, "cast('foo' as something.custom)").unwrap();
+        let enum_ty =
+            DfType::from_enum_variants(["foo".into(), "bar".into()], Dialect::DEFAULT_POSTGRESQL);
+        let result = Expr::lower(
+            input,
+            Dialect::DEFAULT_POSTGRESQL,
+            resolve_types(|ty| {
+                if ty.schema == Some("something".into()) && ty.name == "custom" {
+                    Some(enum_ty.clone())
+                } else {
+                    None
+                }
+            }),
+        )
+        .unwrap();
+        assert_eq!(
+            result,
+            Expr::Cast {
+                expr: Box::new(Expr::Literal {
+                    val: "foo".into(),
+                    ty: DfType::Unknown
+                }),
+                to_type: SqlType::Other(Relation {
+                    schema: Some("something".into()),
+                    name: "custom".into()
+                }),
+                ty: enum_ty
             }
         );
     }
