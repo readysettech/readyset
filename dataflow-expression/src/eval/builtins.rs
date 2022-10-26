@@ -264,7 +264,7 @@ impl BuiltinFunction {
                         // TODO(fran): I don't know if this is the right thing to do.
                         d.round().to_i32().ok_or_else(|| {
                             ReadySetError::BadRequest(format!(
-                                "NUMERIC value {} exceeds 32-byte integer size",
+                                "NUMERIC value {} exceeds 32-bit integer size",
                                 d
                             ))
                         })?
