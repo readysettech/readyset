@@ -316,6 +316,7 @@ impl UpstreamDatabase for MySqlUpstream {
     type CachedReadResult = CachedReadResult;
     type StatementMeta = StatementMeta;
     type Error = Error;
+    const DEFAULT_DB_VERSION: &'static str = "8.0.26-readyset\0";
 
     #[cfg(feature = "fallback_cache")]
     async fn connect(
@@ -352,6 +353,15 @@ impl UpstreamDatabase for MySqlUpstream {
 
     fn database(&self) -> Option<&str> {
         self.conn.opts().db_name()
+    }
+
+    fn version(&self) -> String {
+        // The server's version relayed back to the client as the current server version. Most
+        // clients will interpret the version numbers and use that to dictate which dialect they
+        // send us. Anything after the version can be any text we desire. Additionally, the version
+        // string must be null terminated.
+        let (major, minor, patch) = self.conn.server_version();
+        format!("{major}.{minor}.{patch}-readyset\0")
     }
 
     #[cfg(feature = "fallback_cache")]

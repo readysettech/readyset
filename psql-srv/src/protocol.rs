@@ -149,7 +149,7 @@ impl Protocol {
         channel: &mut Channel<C, B::Row>,
     ) -> Result<Response<B::Row, B::Resultset>, Error> {
         // TODO(grfn): Discard if self.state.is_error()?
-        let get_ready_message = || {
+        let get_ready_message = |version| {
             smallvec![
                 AuthenticationOk,
                 BackendMessage::ParameterStatus {
@@ -170,7 +170,7 @@ impl Protocol {
                 },
                 BackendMessage::ParameterStatus {
                     parameter_name: "server_version".to_owned(),
-                    parameter_value: B::SERVER_VERSION.to_owned(),
+                    parameter_value: version,
                 },
                 BackendMessage::ready_for_query_idle(),
             ]
@@ -190,7 +190,7 @@ impl Protocol {
                     let response = match backend.on_init(database.borrow()).await? {
                         crate::CredentialsNeeded::None => {
                             self.state = State::Ready;
-                            get_ready_message()
+                            get_ready_message(backend.version())
                         }
                         crate::CredentialsNeeded::Cleartext => {
                             self.state = State::Authenticating {
@@ -220,7 +220,7 @@ impl Protocol {
                         .await?;
                     self.state = State::Ready;
 
-                    Ok(Response::Messages(get_ready_message()))
+                    Ok(Response::Messages(get_ready_message(backend.version())))
                 }
 
                 m => Err(Error::UnsupportedMessage(m)),
@@ -806,14 +806,16 @@ mod tests {
         type Row = Vec<Self::Value>;
         type Resultset = Vec<Self::Row>;
 
-        const SERVER_VERSION: &'static str = "test";
-
         async fn on_init(&mut self, database: &str) -> Result<CredentialsNeeded, Error> {
             self.database = Some(database.to_string());
             match &self.needed_credentials {
                 Some(_) => Ok(CredentialsNeeded::Cleartext),
                 None => Ok(CredentialsNeeded::None),
             }
+        }
+
+        fn version(&self) -> String {
+            "14.5 ReadySet".to_string()
         }
 
         async fn on_auth(&mut self, provided: Credentials) -> Result<(), Error> {
@@ -993,7 +995,7 @@ mod tests {
                 },
                 BackendMessage::ParameterStatus {
                     parameter_name: "server_version".to_owned(),
-                    parameter_value: "test".to_owned(),
+                    parameter_value: "14.5 ReadySet".to_owned(),
                 },
                 BackendMessage::ready_for_query_idle()
             ])
@@ -1058,7 +1060,7 @@ mod tests {
                 },
                 BackendMessage::ParameterStatus {
                     parameter_name: "server_version".to_owned(),
-                    parameter_value: "test".to_owned(),
+                    parameter_value: "14.5 ReadySet".to_owned(),
                 },
                 BackendMessage::ready_for_query_idle()
             ])

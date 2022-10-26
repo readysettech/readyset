@@ -106,6 +106,10 @@
 //!     fn password_for_username(&self, _username: &str) -> Option<Vec<u8>> {
 //!         Some(b"password".to_vec())
 //!     }
+//!
+//!     fn version(&self) -> String {
+//!         "8.0.31-readyset\0".to_string()
+//!     }
 //! }
 //!
 //! fn main() {
@@ -184,12 +188,6 @@ mod resultset;
 mod value;
 mod writers;
 
-/// CURRENT_VERSION is relayed back to the client as the current server version. Most clients will
-/// interpret the version numbers and use that to dictate which dialect they send us. Anything
-/// after the version can be any text we desire. If you change this, feel free to change the byte
-/// array length as necessary. The length is not a crucial component.
-const CURRENT_VERSION: &[u8; 16] = b"8.0.26-readyset\0";
-
 /// Meta-information abot a single column, used either to describe a prepared statement parameter
 /// or an output column.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -247,6 +245,9 @@ pub trait MySqlShim<W: AsyncWrite + Unpin + Send> {
         info: StatementMetaWriter<'_, W>,
         schema_cache: &mut HashMap<u32, CachedSchema>,
     ) -> io::Result<()>;
+
+    /// Provides the server's version information along with ReadySet indications
+    fn version(&self) -> String;
 
     /// Called when the client executes a previously prepared statement.
     ///
@@ -377,7 +378,7 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
             1 + 16 + 4 + 8 + 1 + 2 + 1 + 2 + 2 + 1 + 6 + 4 + 12 + 1 + AUTH_PLUGIN_NAME.len() + 1,
         );
         init_packet.extend_from_slice(&[10]); // protocol 10
-        init_packet.extend_from_slice(CURRENT_VERSION);
+        init_packet.extend_from_slice(self.shim.version().as_bytes());
         init_packet.extend_from_slice(&[0x08, 0x00, 0x00, 0x00]); // TODO: connection ID
         init_packet.extend_from_slice(&auth_data[..8]);
         init_packet.push(0);

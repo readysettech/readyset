@@ -50,7 +50,9 @@ impl ps::Backend for Backend {
     type Row = Row;
     type Resultset = Resultset;
 
-    const SERVER_VERSION: &'static str = "13.4 (ReadySet)";
+    fn version(&self) -> String {
+        self.0.version()
+    }
 
     async fn on_init(&mut self, _database: &str) -> Result<ps::CredentialsNeeded, ps::Error> {
         match self.does_require_authentication() {

@@ -679,6 +679,10 @@ where
     fn require_authentication(&self) -> bool {
         self.does_require_authentication()
     }
+
+    fn version(&self) -> String {
+        self.noria.version()
+    }
 }
 
 async fn handle_column_write_err<W: AsyncWrite + Unpin>(

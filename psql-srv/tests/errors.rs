@@ -40,8 +40,6 @@ impl Backend for ErrorBackend {
     type Row = Vec<Value>;
     type Resultset = Vec<Self::Row>;
 
-    const SERVER_VERSION: &'static str = "example";
-
     async fn on_init(&mut self, _database: &str) -> Result<CredentialsNeeded, Error> {
         Ok(CredentialsNeeded::None)
     }
@@ -99,6 +97,10 @@ impl Backend for ErrorBackend {
 
     async fn on_close(&mut self, _statement_id: u32) -> Result<(), Error> {
         Ok(())
+    }
+
+    fn version(&self) -> String {
+        "13.4 ReadySet".to_string()
     }
 }
 

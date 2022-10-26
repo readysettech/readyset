@@ -122,6 +122,10 @@ where
             None
         }
     }
+
+    fn version(&self) -> String {
+        "8.0.26-readyset\0".to_string()
+    }
 }
 
 impl<Q, P, E, I> TestingShim<Q, P, E, I, OwnedWriteHalf>

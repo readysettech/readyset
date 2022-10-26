@@ -38,6 +38,9 @@ pub struct PostgreSqlUpstream {
     user: Option<String>,
     /// Upstream db configuration
     upstream_config: UpstreamConfig,
+
+    /// ReadySet-wrapped Postgresql version string, to return to clients
+    version: String,
 }
 
 #[derive(Debug)]
@@ -109,6 +112,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
     // TODO: Actually fill this in.
     type CachedReadResult = ();
     type Error = Error;
+    const DEFAULT_DB_VERSION: &'static str = "13.4 (ReadySet)";
 
     async fn connect(
         upstream_config: UpstreamConfig,
@@ -139,6 +143,10 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         );
         span.in_scope(|| info!("Establishing connection"));
         let (client, connection) = pg_config.connect(tls).instrument(span.clone()).await?;
+        let version = connection.parameter("server_version").ok_or_else(|| {
+            ReadySetError::Internal("Upstream database failed to send server version".to_string())
+        })?;
+        let version = format!("{version} ReadySet");
         let _connection_handle = tokio::spawn(connection);
         span.in_scope(|| info!("Established connection to upstream"));
 
@@ -149,6 +157,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
             statement_id_counter: 0,
             user,
             upstream_config,
+            version,
         })
     }
 
@@ -163,6 +172,11 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         );
         drop(old_self);
         Ok(())
+    }
+    // Returns the upstream server's version, with ReadySet's info appended, to indicate to clients
+    // that they're going via ReadySet
+    fn version(&self) -> String {
+        self.version.clone()
     }
 
     async fn prepare<'a, S>(&'a mut self, query: S) -> Result<UpstreamPrepare<Self>, Error>

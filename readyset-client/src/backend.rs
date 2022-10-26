@@ -719,6 +719,13 @@ where
     DB: 'static + UpstreamDatabase,
     Handler: 'static + QueryHandler,
 {
+    pub fn version(&self) -> String {
+        self.upstream
+            .as_ref()
+            .map(|upstream| upstream.version())
+            .unwrap_or_else(|| DB::DEFAULT_DB_VERSION.to_string())
+    }
+
     /// The identifier of the last prepared statement (which is always the last in the vector)
     pub fn last_prepared_id(&self) -> u32 {
         (self.state.prepared_statements.len() - 1)

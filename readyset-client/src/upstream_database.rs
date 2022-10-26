@@ -85,6 +85,10 @@ pub trait UpstreamDatabase: Sized + Send {
     /// noria_client backend.
     type Error: From<ReadySetError> + IsFatalError + Error + Send + Sync + 'static;
 
+    /// When there's no upstream DB to fetch the version from, default to this value. This features
+    /// is only used for tests
+    const DEFAULT_DB_VERSION: &'static str;
+
     /// Create a new connection to this upstream database
     async fn connect(
         upstream_config: UpstreamConfig,
@@ -103,6 +107,10 @@ pub trait UpstreamDatabase: Sized + Send {
     fn database(&self) -> Option<&str> {
         None
     }
+
+    /// Returns the servers's version string, including modifications to indicate that the
+    /// connection is running via ReadySet
+    fn version(&self) -> String;
 
     /// Send a request to the upstream database to prepare the given query, returning a unique ID
     /// for that prepared statement
