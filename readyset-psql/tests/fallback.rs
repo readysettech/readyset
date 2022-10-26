@@ -1,8 +1,8 @@
 use chrono::NaiveDate;
-use readyset_client::backend::UnsupportedSetMode;
+use readyset_client::backend::{MigrationMode, UnsupportedSetMode};
 use readyset_client::BackendBuilder;
-use readyset_client_test_helpers::psql_helpers::PostgreSQLAdapter;
-use readyset_client_test_helpers::{sleep, TestBuilder};
+use readyset_client_test_helpers::psql_helpers::{upstream_config, PostgreSQLAdapter};
+use readyset_client_test_helpers::{sleep, Adapter, TestBuilder};
 use readyset_server::Handle;
 use serial_test::serial;
 
@@ -227,4 +227,98 @@ async fn proxy_unsupported_type() {
         _ => panic!(),
     };
     assert_eq!(simple_res.get(0).unwrap(), "(1,2)");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn generated_columns() {
+    // Tests that we handle tables that have generated columns by not snapshotting them and falling
+    // back to upstream
+    readyset_tracing::init_test_logging();
+
+    let mut upstream_config = upstream_config();
+    upstream_config.dbname("noria");
+    let fallback_conn = connect(upstream_config).await;
+    let res = fallback_conn
+        .simple_query("DROP TABLE IF EXISTS calc_columns CASCADE")
+        .await
+        .expect("create failed");
+    let dropped = res.first().unwrap();
+    assert!(matches!(dropped, SimpleQueryMessage::CommandComplete(_)));
+    sleep().await;
+    let res = fallback_conn
+        .simple_query(
+            "CREATE TABLE calc_columns(
+        col1 numeric,
+        col2 numeric,
+        col3 numeric GENERATED ALWAYS AS (col1 + col2) STORED,
+        col4 bool GENERATED ALWAYS AS (col1 = col2) STORED
+    )",
+        )
+        .await
+        .expect("create failed");
+    let created = res.first().unwrap();
+    assert!(matches!(created, SimpleQueryMessage::CommandComplete(_)));
+    sleep().await;
+    let res = fallback_conn
+        .simple_query("INSERT INTO calc_columns (col1, col2) VALUES(1, 2)")
+        .await
+        .expect("populate failed");
+    let inserted = res.first().unwrap();
+    assert!(matches!(inserted, SimpleQueryMessage::CommandComplete(1)));
+    sleep().await;
+    let res = fallback_conn
+        .simple_query("SELECT * from calc_columns")
+        .await
+        .expect("select failed");
+
+    // CommandComplete and 1 row should be returned
+    assert_eq!(res.len(), 2);
+    sleep().await;
+
+    let (opts, _handle) = TestBuilder::default()
+        .recreate_database(false)
+        .fallback_url(PostgreSQLAdapter::url())
+        .migration_mode(MigrationMode::OutOfBand)
+        .build::<PostgreSQLAdapter>()
+        .await;
+    let conn = connect(opts).await;
+    // Check that we see the existing insert
+    let res = conn
+        .simple_query("SELECT * from calc_columns")
+        .await
+        .expect("select failed");
+    // CommandComplete and the 1 inserted rows
+    assert_eq!(res.len(), 2);
+
+    // This should fail, since we don't have a base table for calc_columns, as it was ignored in the
+    // initial snapshot
+    conn.simple_query("CREATE CACHE FROM SELECT * from calc_columns")
+        .await
+        .expect_err("create cache should have failed");
+
+    // There shouldnt be any caches
+    let res = conn
+        .simple_query("SHOW CACHES")
+        .await
+        .expect("show caches failed");
+    let caches = res.first().unwrap();
+    assert!(matches!(caches, SimpleQueryMessage::CommandComplete(0)));
+
+    // Inserting will go to upstream
+    let populate_gen_columns_readyset = "INSERT INTO calc_columns (col1, col2) VALUES(3, 4);";
+    let res = conn
+        .simple_query(populate_gen_columns_readyset)
+        .await
+        .expect("populate failed");
+    sleep().await;
+    let inserted = &res[0];
+    assert!(matches!(inserted, SimpleQueryMessage::CommandComplete(1)));
+
+    // We should see the inserted data
+    let res = conn
+        .simple_query("SELECT * from calc_columns")
+        .await
+        .expect("select failed");
+    let selected = &res[2];
+    assert!(matches!(*selected, SimpleQueryMessage::CommandComplete(2)));
 }

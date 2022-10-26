@@ -580,6 +580,10 @@ impl<'a> PostgresReplicator<'a> {
             TableKind::View => 'v',
         } as i8;
 
+        // We filter out tables that have any generated columns (pgcatalog.pg_attribute.attgenerated
+        // <> '') because they are currently unsupported and will cause issues
+        // with replication when the column count on an insert doesnt match the column count
+        // of the table.
         let query = r"
         SELECT n.nspname, c.oid, c.relname, c.relkind
         FROM pg_catalog.pg_class c
@@ -588,6 +592,13 @@ impl<'a> PostgresReplicator<'a> {
         WHERE c.relkind IN ($1) AND n.nspname <> 'pg_catalog'
                                 AND n.nspname <> 'information_schema'
                                 AND n.nspname !~ '^pg_toast'
+                                AND c.oid NOT IN(
+        SELECT c.oid
+            FROM pg_catalog.pg_class c
+            JOIN pg_catalog.pg_attribute a
+            ON a.attrelid = c.oid
+            WHERE attgenerated <> ''
+        )
         ";
 
         let tables = self.transaction.query(query, &[&kind_code]).await?;
