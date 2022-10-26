@@ -547,8 +547,11 @@ pub fn resolve_addr(addr: &str) -> anyhow::Result<IpAddr> {
 /// `#[clap(flatten)]`.
 #[derive(Parser, Debug)]
 pub struct WorkerOptions {
-    /// How to maintain base table state
-    #[clap(long, default_value = "persistent", parse(try_from_str))]
+    /// The durability of base tables. `persistent` and `ephemeral` store base tables
+    /// on disk, but `ephemeral` deletes the data when the ReadySet Server is stopped.
+    /// `memory` stores base tables entirely in memory. `ephemeral` and `memory` are
+    /// suitable for testing only. Use `persistent` for production deployments.
+    #[clap(long, default_value = "persistent", possible_values = &["persistent", "ephemeral", "memory"], parse(try_from_str))]
     pub durability: DurabilityMode,
 
     /// Number of background threads used by RocksDB
