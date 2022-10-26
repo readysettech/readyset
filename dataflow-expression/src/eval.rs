@@ -1,7 +1,7 @@
 use std::borrow::Borrow;
 
 use readyset_data::{DfType, DfValue};
-use readyset_errors::{unsupported, ReadySetError, ReadySetResult};
+use readyset_errors::{ReadySetError, ReadySetResult};
 
 use crate::like::{CaseInsensitive, CaseSensitive, LikePattern};
 use crate::{BinaryOperator, Expr};
@@ -92,7 +92,9 @@ impl Expr {
                     NotLike => Ok(like(CaseSensitive, true).into()),
                     ILike => Ok(like(CaseInsensitive, false).into()),
                     NotILike => Ok(like(CaseInsensitive, true).into()),
-                    QuestionMark => unsupported!("? operator not yet implemented"),
+
+                    // JSON operators:
+                    QuestionMark => Ok(false.into()), // TODO implement the ? operator logic
                 }
             }
             Cast { expr, ty, .. } => {
@@ -123,12 +125,12 @@ mod tests {
     use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
     use nom_sql::Dialect::*;
     use nom_sql::{parse_expr, SqlType};
-    use readyset_data::DfType;
+    use readyset_data::{Collation, DfType};
     use Expr::*;
 
     use super::*;
     use crate::lower::tests::no_op_lower_context;
-    use crate::utils::{make_column, make_literal};
+    use crate::utils::{column_with_type, make_column, make_literal};
 
     #[track_caller]
     pub(crate) fn eval_expr(expr: &str, dialect: nom_sql::Dialect) -> DfValue {
@@ -177,6 +179,21 @@ mod tests {
         assert_eq!(
             expr.eval(&[DfValue::from(1), DfValue::from(2)]).unwrap(),
             6.into()
+        );
+    }
+
+    #[test]
+    fn eval_question_mark() {
+        let expr = Op {
+            left: Box::new(column_with_type(0, DfType::Jsonb)),
+            right: Box::new(column_with_type(1, DfType::Text(Collation::default()))),
+            op: BinaryOperator::QuestionMark,
+            ty: DfType::Bool,
+        };
+        assert_eq!(
+            expr.eval(&[DfValue::from("{\"abc\": 42}"), DfValue::from("xyz")])
+                .unwrap(),
+            false.into()
         );
     }
 
