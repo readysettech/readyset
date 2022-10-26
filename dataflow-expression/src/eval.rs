@@ -124,10 +124,10 @@ mod tests {
     use nom_sql::Dialect::*;
     use nom_sql::{parse_expr, SqlType};
     use readyset_data::DfType;
-    use readyset_errors::internal;
     use Expr::*;
 
     use super::*;
+    use crate::lower::tests::no_op_lower_context;
     use crate::utils::{make_column, make_literal};
 
     #[track_caller]
@@ -137,7 +137,7 @@ mod tests {
             PostgreSQL => crate::Dialect::DEFAULT_POSTGRESQL,
             MySQL => crate::Dialect::DEFAULT_MYSQL,
         };
-        let expr = Expr::lower(ast, expr_dialect, |_| internal!()).unwrap();
+        let expr = Expr::lower(ast, expr_dialect, no_op_lower_context()).unwrap();
         expr.eval::<DfValue>(&[]).unwrap()
     }
 

@@ -9,6 +9,14 @@ use vec1::Vec1;
 
 use crate::{BuiltinFunction, Dialect, Expr};
 
+/// Context supplied to expression lowering to allow resolving references to objects within the
+/// schema
+pub trait LowerContext: Clone {
+    /// Look up a column in the parent node of the node containing this expression, returning its
+    /// column index and type
+    fn resolve_column(&self, col: Column) -> ReadySetResult<(usize, DfType)>;
+}
+
 /// Unify the given list of types according to PostgreSQL's [type unification rules][pg-docs]
 ///
 /// [pg-docs]: https://www.postgresql.org/docs/current/typeconv-union-case.html
@@ -295,8 +303,7 @@ impl BuiltinFunction {
 }
 
 impl Expr {
-    /// Lower the given [`nom_sql`] AST expression to a dataflow expression, given a function to
-    /// look up the index and type of a column by name.
+    /// Lower the given [`nom_sql`] AST expression to a dataflow expression
     ///
     /// Currently, this involves:
     ///
@@ -309,9 +316,9 @@ impl Expr {
     /// - Replacing unary negation with `(expr * -1)`
     /// - Replacing unary NOT with `(expr != 1)`
     /// - Inferring the type of each node in the expression AST.
-    pub fn lower<F>(expr: AstExpr, dialect: Dialect, mut resolve_column: F) -> ReadySetResult<Self>
+    pub fn lower<C>(expr: AstExpr, dialect: Dialect, context: C) -> ReadySetResult<Self>
     where
-        F: FnMut(Column) -> ReadySetResult<(usize, DfType)> + Copy,
+        C: LowerContext,
     {
         match expr {
             AstExpr::Call(FunctionExpr::Call {
@@ -320,7 +327,7 @@ impl Expr {
             }) => {
                 let args = arguments
                     .into_iter()
-                    .map(|arg| Self::lower(arg, dialect, resolve_column))
+                    .map(|arg| Self::lower(arg, dialect, context.clone()))
                     .collect::<Result<Vec<_>, _>>()?;
                 let (func, ty) = BuiltinFunction::from_name_and_args(&fname, args, dialect)?;
                 Ok(Self::Call {
@@ -332,7 +339,7 @@ impl Expr {
                 let args = iter::once(string)
                     .chain(pos)
                     .chain(len)
-                    .map(|arg| Self::lower(*arg, dialect, resolve_column))
+                    .map(|arg| Self::lower(*arg, dialect, context.clone()))
                     .collect::<Result<Vec<_>, _>>()?;
                 let (func, ty) = BuiltinFunction::from_name_and_args("substring", args, dialect)?;
 
@@ -358,17 +365,17 @@ impl Expr {
                 Ok(Self::Literal { val, ty })
             }
             AstExpr::Column(col) => {
-                let (index, ty) = resolve_column(col)?;
+                let (index, ty) = context.resolve_column(col)?;
                 Ok(Self::Column { index, ty })
             }
             AstExpr::BinaryOp { lhs, op, rhs } => {
                 // TODO: Consider rhs and op when inferring type
-                let left = Box::new(Self::lower(*lhs, dialect, resolve_column)?);
+                let left = Box::new(Self::lower(*lhs, dialect, context.clone())?);
                 let ty = left.ty().clone();
                 Ok(Self::Op {
                     op,
                     left,
-                    right: Box::new(Self::lower(*rhs, dialect, resolve_column)?),
+                    right: Box::new(Self::lower(*rhs, dialect, context)?),
                     ty,
                 })
             }
@@ -376,7 +383,7 @@ impl Expr {
                 op: UnaryOperator::Neg,
                 rhs,
             } => {
-                let left = Box::new(Self::lower(*rhs, dialect, resolve_column)?);
+                let left = Box::new(Self::lower(*rhs, dialect, context)?);
                 // TODO: Negation may change type to signed
                 let ty = left.ty().clone();
                 Ok(Self::Op {
@@ -394,7 +401,7 @@ impl Expr {
                 rhs,
             } => Ok(Self::Op {
                 op: BinaryOperator::NotEqual,
-                left: Box::new(Self::lower(*rhs, dialect, resolve_column)?),
+                left: Box::new(Self::lower(*rhs, dialect, context)?),
                 right: Box::new(Self::Literal {
                     val: DfValue::Int(1),
                     ty: DfType::Int,
@@ -402,7 +409,7 @@ impl Expr {
                 ty: DfType::Bool, // type of NE is always bool
             }),
             AstExpr::Cast { expr, ty, .. } => Ok(Self::Cast {
-                expr: Box::new(Self::lower(*expr, dialect, resolve_column)?),
+                expr: Box::new(Self::lower(*expr, dialect, context)?),
                 ty: DfType::from_sql_type(&ty, dialect),
                 to_type: ty,
             }),
@@ -411,16 +418,14 @@ impl Expr {
                 then_expr,
                 else_expr,
             } => {
-                let then_expr = Box::new(Self::lower(*then_expr, dialect, resolve_column)?);
+                let then_expr = Box::new(Self::lower(*then_expr, dialect, context.clone())?);
                 let ty = then_expr.ty().clone();
                 Ok(Self::CaseWhen {
                     // TODO: Do case arm types have to match? See if type is inferred at runtime
-                    condition: Box::new(Self::lower(*condition, dialect, resolve_column)?),
+                    condition: Box::new(Self::lower(*condition, dialect, context.clone())?),
                     then_expr,
                     else_expr: match else_expr {
-                        Some(else_expr) => {
-                            Box::new(Self::lower(*else_expr, dialect, resolve_column)?)
-                        }
+                        Some(else_expr) => Box::new(Self::lower(*else_expr, dialect, context)?),
                         None => Box::new(Self::Literal {
                             val: DfValue::None,
                             ty: DfType::Unknown,
@@ -442,12 +447,12 @@ impl Expr {
                         (BinaryOperator::Equal, BinaryOperator::Or)
                     };
 
-                    let lhs = Self::lower(*lhs, dialect, resolve_column)?;
+                    let lhs = Self::lower(*lhs, dialect, context.clone())?;
                     let make_comparison = |rhs| -> ReadySetResult<_> {
                         Ok(Self::Op {
                             left: Box::new(lhs.clone()),
                             op: comparison_op,
-                            right: Box::new(Self::lower(rhs, dialect, resolve_column)?),
+                            right: Box::new(Self::lower(rhs, dialect, context.clone())?),
                             ty: DfType::Bool, // type of =/!= is always bool
                         })
                     };
@@ -484,11 +489,38 @@ impl Expr {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use nom_sql::{parse_expr, Dialect as ParserDialect, Float, Literal};
     use readyset_data::Collation;
 
     use super::*;
+
+    #[derive(Clone)]
+    pub(crate) struct TestLowerContext<RC> {
+        resolve_column: RC,
+    }
+
+    impl<RC> LowerContext for TestLowerContext<RC>
+    where
+        RC: Fn(Column) -> ReadySetResult<(usize, DfType)> + Clone,
+    {
+        fn resolve_column(&self, col: Column) -> ReadySetResult<(usize, DfType)> {
+            (self.resolve_column)(col)
+        }
+    }
+
+    pub(crate) fn no_op_lower_context() -> impl LowerContext {
+        TestLowerContext {
+            resolve_column: |_| internal!(),
+        }
+    }
+
+    pub(crate) fn resolve_columns<F>(resolve_column: F) -> impl LowerContext
+    where
+        F: Fn(Column) -> ReadySetResult<(usize, DfType)> + Clone,
+    {
+        TestLowerContext { resolve_column }
+    }
 
     #[test]
     fn postgresql_text_literaal() {
@@ -498,20 +530,25 @@ mod tests {
         //  unknown
 
         let input = AstExpr::Literal("abc".into());
-        let result = Expr::lower(input, Dialect::DEFAULT_POSTGRESQL, |_| internal!()).unwrap();
+        let result =
+            Expr::lower(input, Dialect::DEFAULT_POSTGRESQL, no_op_lower_context()).unwrap();
         assert_eq!(result.ty(), &DfType::Unknown);
     }
 
     #[test]
     fn simple_column_reference() {
         let input = AstExpr::Column("t.x".into());
-        let result = Expr::lower(input, Dialect::DEFAULT_MYSQL, |c| {
-            if c == "t.x".into() {
-                Ok((0, DfType::Int))
-            } else {
-                internal!("what's this column!?")
-            }
-        })
+        let result = Expr::lower(
+            input,
+            Dialect::DEFAULT_MYSQL,
+            resolve_columns(|c| {
+                if c == "t.x".into() {
+                    Ok((0, DfType::Int))
+                } else {
+                    internal!("what's this column!?")
+                }
+            }),
+        )
         .unwrap();
         assert_eq!(
             result,
@@ -529,13 +566,17 @@ mod tests {
             arguments: vec![AstExpr::Column("t.x".into()), AstExpr::Literal(2.into())],
         });
 
-        let result = Expr::lower(input, Dialect::DEFAULT_MYSQL, |c| {
-            if c == "t.x".into() {
-                Ok((0, DfType::Int))
-            } else {
-                internal!("what's this column!?")
-            }
-        })
+        let result = Expr::lower(
+            input,
+            Dialect::DEFAULT_MYSQL,
+            resolve_columns(|c| {
+                if c == "t.x".into() {
+                    Ok((0, DfType::Int))
+                } else {
+                    internal!("what's this column!?")
+                }
+            }),
+        )
         .unwrap();
 
         assert_eq!(
@@ -559,7 +600,7 @@ mod tests {
     #[test]
     fn call_concat_with_texts() {
         let input = parse_expr(ParserDialect::MySQL, "concat('My', 'SQ', 'L')").unwrap();
-        let res = Expr::lower(input, Dialect::DEFAULT_MYSQL, |_| internal!()).unwrap();
+        let res = Expr::lower(input, Dialect::DEFAULT_MYSQL, no_op_lower_context()).unwrap();
         assert_eq!(
             res,
             Expr::Call {
@@ -587,13 +628,17 @@ mod tests {
     #[test]
     fn substring_from_for() {
         let input = parse_expr(ParserDialect::MySQL, "substr(col from 1 for 7)").unwrap();
-        let res = Expr::lower(input, Dialect::DEFAULT_MYSQL, |c| {
-            if c == "col".into() {
-                Ok((0, DfType::Text(Collation::Citext)))
-            } else {
-                internal!()
-            }
-        })
+        let res = Expr::lower(
+            input,
+            Dialect::DEFAULT_MYSQL,
+            resolve_columns(|c| {
+                if c == "col".into() {
+                    Ok((0, DfType::Text(Collation::Citext)))
+                } else {
+                    internal!()
+                }
+            }),
+        )
         .unwrap();
         assert_eq!(
             res,
@@ -620,7 +665,7 @@ mod tests {
     #[test]
     fn substr_regular() {
         let input = parse_expr(ParserDialect::MySQL, "substr('abcdefghi', 1, 7)").unwrap();
-        let res = Expr::lower(input, Dialect::DEFAULT_MYSQL, |_| internal!()).unwrap();
+        let res = Expr::lower(input, Dialect::DEFAULT_MYSQL, no_op_lower_context()).unwrap();
         assert_eq!(
             res,
             Expr::Call {
@@ -646,7 +691,7 @@ mod tests {
     #[test]
     fn substring_regular() {
         let input = parse_expr(ParserDialect::MySQL, "substring('abcdefghi', 1, 7)").unwrap();
-        let res = Expr::lower(input, Dialect::DEFAULT_MYSQL, |_| internal!()).unwrap();
+        let res = Expr::lower(input, Dialect::DEFAULT_MYSQL, no_op_lower_context()).unwrap();
         assert_eq!(
             res,
             Expr::Call {
@@ -672,7 +717,7 @@ mod tests {
     #[test]
     fn substring_without_string_arg() {
         let input = parse_expr(ParserDialect::MySQL, "substring(123 from 2)").unwrap();
-        let res = Expr::lower(input, Dialect::DEFAULT_MYSQL, |_| internal!()).unwrap();
+        let res = Expr::lower(input, Dialect::DEFAULT_MYSQL, no_op_lower_context()).unwrap();
         assert_eq!(res.ty(), &DfType::DEFAULT_TEXT);
     }
 
@@ -686,7 +731,7 @@ mod tests {
                 name: "greatest".into(),
                 arguments: args.into_iter().map(AstExpr::Literal).collect(),
             });
-            let result = Expr::lower(input, dialect, |_| internal!()).unwrap();
+            let result = Expr::lower(input, dialect, no_op_lower_context()).unwrap();
             assert_eq!(result.ty(), &expected_ty);
         }
 
@@ -771,7 +816,7 @@ mod tests {
                 name: "greatest".into(),
                 arguments: args.into_iter().map(AstExpr::Literal).collect(),
             });
-            let result = Expr::lower(input, dialect, |_| internal!()).unwrap();
+            let result = Expr::lower(input, dialect, no_op_lower_context()).unwrap();
             let compare_as = match result {
                 Expr::Call { func, .. } => match *func {
                     BuiltinFunction::Greatest { compare_as, .. } => compare_as,

@@ -909,25 +909,44 @@ fn make_latest_node(
     Ok(FlowNode::New(na))
 }
 
-/// Lower the given nom_sql AST expression to a `DfExpr`, resolving columns by looking their
-/// index up in the given parent node.
-fn lower_expression(
-    parent: &MirNodeRef,
-    expr: Expr,
-    parent_cols: &[DfColumn],
-    dialect: Dialect,
-) -> ReadySetResult<DfExpr> {
-    DfExpr::lower(expr, dialect, |nom_sql::Column { name, table, .. }| {
-        let index = parent
+#[derive(Clone)]
+struct LowerContext<'a> {
+    parent_node: &'a MirNodeRef,
+    parent_cols: &'a [DfColumn],
+}
+
+impl<'a> dataflow::LowerContext for LowerContext<'a> {
+    fn resolve_column(&self, col: nom_sql::Column) -> ReadySetResult<(usize, DfType)> {
+        let index = self
+            .parent_node
             .borrow()
-            .column_id_for_column(&Column::new(table, name))?;
-        let ty = parent_cols
+            .column_id_for_column(&Column::new(col.table.clone(), &col.name))?;
+        let ty = self
+            .parent_cols
             .get(index)
             .ok_or_else(|| internal_err!("Index exceeds length of parent cols, idx={}", index))?
             .ty()
             .clone();
         Ok((index, ty))
-    })
+    }
+}
+
+/// Lower the given nom_sql AST expression to a `DfExpr`, resolving columns by looking their
+/// index up in the given parent node.
+fn lower_expression(
+    parent_node: &MirNodeRef,
+    expr: Expr,
+    parent_cols: &[DfColumn],
+    dialect: Dialect,
+) -> ReadySetResult<DfExpr> {
+    DfExpr::lower(
+        expr,
+        dialect,
+        LowerContext {
+            parent_node,
+            parent_cols,
+        },
+    )
 }
 
 fn make_project_node(

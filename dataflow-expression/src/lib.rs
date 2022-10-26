@@ -16,6 +16,7 @@ use readyset_data::{DfType, DfValue};
 use serde::{Deserialize, Serialize};
 use vec1::Vec1;
 
+pub use crate::lower::LowerContext;
 pub use crate::post_lookup::{
     PostLookup, PostLookupAggregate, PostLookupAggregateFunction, PostLookupAggregates,
     PreInsertion, ReaderProcessing,

@@ -1,15 +1,22 @@
-use dataflow_expression::{Dialect, Expr as DataflowExpr};
+use dataflow_expression::{Dialect, Expr as DataflowExpr, LowerContext};
 use nom_sql::analysis::visit::{self, Visitor};
-use nom_sql::{Expr, Literal};
-use readyset_data::DfValue;
+use nom_sql::{Column, Expr, Literal};
+use readyset_data::{DfType, DfValue};
 use readyset_errors::{internal, ReadySetResult};
 
 /// Statically evaluate the given expression, returning a literal value representing the result.
 ///
 /// Returns an error if the expression evaluation failed, or if the expression is not constant
 fn const_eval(expr: &Expr, dialect: Dialect) -> ReadySetResult<Literal> {
-    let dataflow_expr =
-        DataflowExpr::lower(expr.clone(), dialect, |_| internal!("Can't resolve column"))?;
+    #[derive(Clone)]
+    struct ConstEvalLowerContext;
+    impl LowerContext for ConstEvalLowerContext {
+        fn resolve_column(&self, _col: Column) -> ReadySetResult<(usize, DfType)> {
+            internal!("Can't resolve column")
+        }
+    }
+
+    let dataflow_expr = DataflowExpr::lower(expr.clone(), dialect, ConstEvalLowerContext)?;
     let res = dataflow_expr.eval::<DfValue>(&[])?;
     res.try_into()
 }
