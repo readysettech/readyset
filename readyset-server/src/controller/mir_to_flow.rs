@@ -44,6 +44,7 @@ fn set_names(names: &[&str], columns: &mut [DfColumn]) -> ReadySetResult<()> {
 
 pub(super) fn mir_query_to_flow_parts(
     mir_query: &mut MirQuery,
+    custom_types: &HashMap<Relation, DfType>,
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<QueryFlowParts> {
     use std::collections::VecDeque;
@@ -69,13 +70,14 @@ pub(super) fn mir_query_to_flow_parts(
             let n = n.borrow_mut();
             (n.name.clone(), n.from_version)
         };
-        let flow_node = mir_node_to_flow_parts(&mut n.borrow_mut(), mig).map_err(|e| {
-            ReadySetError::MirNodeCreationFailed {
-                name: name.to_string(),
-                from_version,
-                source: Box::new(e),
-            }
-        })?;
+        let flow_node =
+            mir_node_to_flow_parts(&mut n.borrow_mut(), custom_types, mig).map_err(|e| {
+                ReadySetError::MirNodeCreationFailed {
+                    name: name.to_string(),
+                    from_version,
+                    source: Box::new(e),
+                }
+            })?;
         match flow_node {
             FlowNode::New(na) => new_nodes.push(na),
             FlowNode::Existing(na) => reused_nodes.push(na),
@@ -113,6 +115,7 @@ pub(super) fn mir_query_to_flow_parts(
 
 fn mir_node_to_flow_parts(
     mir_node: &mut MirNode,
+    custom_types: &HashMap<Relation, DfType>,
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<FlowNode> {
     let name = mir_node.name.clone();
@@ -148,6 +151,7 @@ fn mir_node_to_flow_parts(
                     None => make_base_node(
                         name,
                         column_specs.as_mut_slice(),
+                        custom_types,
                         primary_key.as_deref(),
                         unique_keys,
                         mig,
@@ -156,6 +160,7 @@ fn mir_node_to_flow_parts(
                         bna.over.clone(),
                         mig,
                         column_specs.as_mut_slice(),
+                        custom_types,
                         &bna.columns_added,
                         &bna.columns_removed,
                     )?,
@@ -388,6 +393,7 @@ fn adapt_base_node(
     over_node: MirNodeRef,
     mig: &mut Migration<'_>,
     column_specs: &mut [(ColumnSpecification, Option<usize>)],
+    custom_types: &HashMap<Relation, DfType>,
     add: &[ColumnSpecification],
     remove: &[ColumnSpecification],
 ) -> ReadySetResult<FlowNode> {
@@ -406,7 +412,7 @@ fn adapt_base_node(
         }
         let column_id = mig.add_column(
             na,
-            DfColumn::from_spec(a.clone(), mig.dialect),
+            DfColumn::from_spec(a.clone(), mig.dialect, |ty| custom_types.get(&ty).cloned()),
             default_value,
         )?;
 
@@ -449,6 +455,7 @@ fn column_names(cs: &[Column]) -> Vec<&str> {
 fn make_base_node(
     name: Relation,
     column_specs: &mut [(ColumnSpecification, Option<usize>)],
+    custom_types: &HashMap<Relation, DfType>,
     primary_key: Option<&[Column]>,
     unique_keys: &[Box<[Column]>],
     mig: &mut Migration<'_>,
@@ -460,7 +467,9 @@ fn make_base_node(
 
     let columns: Vec<DfColumn> = column_specs
         .iter()
-        .map(|&(ref cs, _)| DfColumn::from_spec(cs.clone(), mig.dialect))
+        .map(|&(ref cs, _)| {
+            DfColumn::from_spec(cs.clone(), mig.dialect, |ty| custom_types.get(&ty).cloned())
+        })
         .collect();
 
     // note that this defaults to a "None" (= NULL) default value for columns that do not have one

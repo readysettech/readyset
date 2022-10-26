@@ -564,7 +564,7 @@ impl SqlIncorporator {
         // no optimization, because standalone base nodes can't be optimized
 
         // push it into the flow graph using the migration in `mig`, and obtain `QueryFlowParts`
-        let qfp = mir_query_to_flow_parts(&mut mir, mig)?;
+        let qfp = mir_query_to_flow_parts(&mut mir, &self.custom_types, mig)?;
 
         // remember the schema in case we need it later
         // on base table schema change, we will overwrite the existing schema here.
@@ -613,7 +613,7 @@ impl SqlIncorporator {
             is_leaf,
         )?;
 
-        let qfp = mir_query_to_flow_parts(&mut combined_mir_query, mig)?;
+        let qfp = mir_query_to_flow_parts(&mut combined_mir_query, &self.custom_types, mig)?;
 
         self.register_query(query_name.clone(), None, &combined_mir_query);
 
@@ -734,7 +734,7 @@ impl SqlIncorporator {
         let mut opt_mir = mir_query.optimize().map_err(on_err)?;
         trace!(post_opt_mir = %opt_mir.to_graphviz());
 
-        let qfp = mir_query_to_flow_parts(&mut opt_mir, mig).map_err(on_err)?;
+        let qfp = mir_query_to_flow_parts(&mut opt_mir, &self.custom_types, mig).map_err(on_err)?;
         self.register_query(query_name.clone(), Some(qg), &opt_mir);
         Ok((qfp, opt_mir))
     }

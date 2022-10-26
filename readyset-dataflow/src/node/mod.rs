@@ -49,10 +49,13 @@ impl Column {
 
     /// Creates a dataflow column from the [`nom_sql`] specification.
     #[inline]
-    pub fn from_spec(spec: ColumnSpecification, dialect: Dialect) -> Self {
+    pub fn from_spec<F>(spec: ColumnSpecification, dialect: Dialect, resolve_type: F) -> Self
+    where
+        F: Fn(Relation) -> Option<DfType>,
+    {
         Self::new(
             spec.column.name,
-            DfType::from_sql_type(&spec.sql_type, dialect, |_| None /* TODO(grfn) */),
+            DfType::from_sql_type(&spec.sql_type, dialect, resolve_type),
             spec.column.table,
         )
     }
