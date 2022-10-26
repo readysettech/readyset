@@ -2,6 +2,7 @@ use std::borrow::Borrow;
 
 use readyset_data::{DfType, DfValue};
 use readyset_errors::{ReadySetError, ReadySetResult};
+use serde_json::Value as JsonValue;
 
 use crate::like::{CaseInsensitive, CaseSensitive, LikePattern};
 use crate::{BinaryOperator, Expr};
@@ -94,7 +95,15 @@ impl Expr {
                     NotILike => Ok(like(CaseInsensitive, true).into()),
 
                     // JSON operators:
-                    QuestionMark => Ok(false.into()), // TODO implement the ? operator logic
+                    QuestionMark => {
+                        let json_value = left.to_json()?;
+                        let key = <&str>::try_from(&right)?;
+
+                        // For non-object JSON values the operator always returns false:
+                        let JsonValue::Object(map) = json_value else { return Ok(false.into()) };
+
+                        Ok(map.contains_key(key).into())
+                    }
                 }
             }
             Cast { expr, ty, .. } => {
@@ -195,6 +204,27 @@ mod tests {
                 .unwrap(),
             false.into()
         );
+        assert_eq!(
+            expr.eval(&[DfValue::from("{\"abc\": 42}"), DfValue::from("abc")])
+                .unwrap(),
+            true.into()
+        );
+    }
+
+    #[test]
+    fn eval_question_mark_bad_types() {
+        let expr = Op {
+            left: Box::new(column_with_type(0, DfType::Jsonb)),
+            right: Box::new(column_with_type(1, DfType::Text(Collation::default()))),
+            op: BinaryOperator::QuestionMark,
+            ty: DfType::Bool,
+        };
+        assert!(expr
+            .eval(&[DfValue::from("bad_json"), DfValue::from("abc")])
+            .is_err());
+        assert!(expr
+            .eval(&[DfValue::from("{\"abc\": 42}"), DfValue::from(67)])
+            .is_err());
     }
 
     #[test]
