@@ -33,6 +33,7 @@ use mir::query::MirQuery;
 use mir::MirNodeRef;
 use nom_sql::{CreateTableStatement, Relation, SqlIdentifier};
 use petgraph::graph::NodeIndex;
+use readyset_data::DfType;
 use readyset_errors::{internal_err, invariant, ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize, Serializer};
 
@@ -139,6 +140,8 @@ struct SerializableSqlIncorporator {
     base_schemas: HashMap<Relation, CreateTableStatement>,
     view_schemas: HashMap<Relation, Vec<SqlIdentifier>>,
 
+    custom_types: HashMap<Relation, DfType>,
+
     pub(crate) config: Config,
 }
 
@@ -169,6 +172,7 @@ impl<'a> TryFrom<&'a SqlIncorporator> for SerializableSqlIncorporator {
             num_queries: inc.num_queries,
             base_schemas: inc.base_schemas.clone(),
             view_schemas: inc.view_schemas.clone(),
+            custom_types: inc.custom_types.clone(),
             config: inc.config.clone(),
         })
     }
@@ -305,6 +309,7 @@ where
         num_queries: serialized_inc.num_queries,
         base_schemas: serialized_inc.base_schemas,
         view_schemas: serialized_inc.view_schemas,
+        custom_types: serialized_inc.custom_types,
         config: serialized_inc.config,
     })
 }

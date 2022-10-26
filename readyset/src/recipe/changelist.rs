@@ -38,6 +38,7 @@ use nom_sql::{
     CreateViewStatement, DropTableStatement, DropViewStatement, Relation, SelectStatement,
     SqlIdentifier, SqlQuery,
 };
+use readyset_data::DfType;
 use readyset_errors::{unsupported, ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
@@ -271,6 +272,19 @@ pub enum Change {
     CreateCache(CreateCacheStatement),
     /// Expression that represents an ALTER TABLE statement.
     AlterTable(AlterTableStatement),
+    /// Add a new custom type
+    ///
+    /// Internally, custom types are just represented as aliases for a [`DfType`].
+    CreateType {
+        /// The name of the type
+        name: Relation,
+        /// The definition of the type itself.
+        ///
+        /// Structurally, this can be any type within ReadySet's internal type system, but in
+        /// practice this is currently just enum types (and in the future will be expanded to also
+        /// include composite types and range types)
+        ty: DfType,
+    },
     /// The removal of a [`RecipeExpr`].
     Drop {
         /// The name of the relation to remove.

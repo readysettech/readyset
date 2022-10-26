@@ -322,6 +322,14 @@ impl Recipe {
                     let new_table_name = new_table.table.name.clone();
                     self.drop_and_recreate_table(&ats.table, new_table, mig);
                 }
+                Change::CreateType { mut name, ty } => {
+                    if let Some(first_schema) = schema_search_path.first() {
+                        if name.schema.is_none() {
+                            name.schema = Some(first_schema.clone())
+                        }
+                    }
+                    self.inc.add_custom_type(name, ty)?;
+                }
                 Change::Drop {
                     mut name,
                     if_exists,

@@ -1,5 +1,5 @@
 use std::cmp::max;
-use std::collections::{HashMap, HashSet};
+use std::collections::{hash_map, HashMap, HashSet};
 use std::str;
 use std::vec::Vec;
 
@@ -16,7 +16,7 @@ use nom_sql::{
 };
 use petgraph::graph::NodeIndex;
 use readyset::internal::IndexType;
-use readyset_data::Dialect;
+use readyset_data::{DfType, Dialect};
 use readyset_errors::{internal_err, invalid_err, unsupported, ReadySetError, ReadySetResult};
 use readyset_sql_passes::alias_removal::TableAliasRewrite;
 use readyset_sql_passes::{contains_aggregate, AliasRemoval, Rewrite, RewriteContext};
@@ -86,6 +86,11 @@ pub(crate) struct SqlIncorporator {
 
     base_schemas: HashMap<Relation, CreateTableStatement>,
     view_schemas: HashMap<Relation, Vec<SqlIdentifier>>,
+
+    /// User-defined custom types, indexed by (schema-qualified) name.
+    ///
+    /// Internally, we just represent custom types as named aliases for a [`DfType`].
+    custom_types: HashMap<Relation, DfType>,
 
     pub(crate) config: Config,
 }
@@ -212,6 +217,20 @@ impl SqlIncorporator {
         self.leaf_addresses.insert(name.clone(), qfp.query_leaf);
 
         Ok(name)
+    }
+
+    /// Add a new user-defined custom type (represented internally as a named alias for a
+    /// [`DfType`]). Will return an error if a type already exists with the same name
+    pub(crate) fn add_custom_type(&mut self, name: Relation, ty: DfType) -> ReadySetResult<()> {
+        match self.custom_types.entry(name.clone()) {
+            hash_map::Entry::Occupied(_) => {
+                Err(invalid_err!("Custom type named {name} already exists"))
+            }
+            hash_map::Entry::Vacant(e) => {
+                e.insert(ty);
+                Ok(())
+            }
+        }
     }
 
     pub(super) fn get_base_schema(&self, table: &Relation) -> Option<CreateTableStatement> {
