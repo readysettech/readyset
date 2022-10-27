@@ -169,8 +169,12 @@ pub struct ColumnSchema {
 impl ColumnSchema {
     /// Create a new ColumnSchema from a ColumnSpecification representing a column directly in a
     /// base table with the given name.
-    pub fn from_base(spec: ColumnSpecification, table: Relation, dialect: Dialect) -> Self {
-        Self {
+    pub fn from_base(
+        spec: ColumnSpecification,
+        table: Relation,
+        dialect: Dialect,
+    ) -> ReadySetResult<Self> {
+        Ok(Self {
             base: Some(ColumnBase {
                 column: spec.column.name.clone(),
                 table,
@@ -181,8 +185,8 @@ impl ColumnSchema {
                 &spec.sql_type,
                 dialect,
                 |_| None, /* Custom types not allowed for inserts via the adapter */
-            ),
-        }
+            )?,
+        })
     }
 }
 

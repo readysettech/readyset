@@ -664,7 +664,7 @@ impl NoriaConnector {
             .fields
             .iter()
             .map(|cs| ColumnSchema::from_base(cs.clone(), q.table.clone(), self.dialect))
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, _>>()?;
 
         if q.fields.is_none() {
             q.fields = Some(
@@ -825,6 +825,7 @@ impl NoriaConnector {
                     .find(|f| f.column.name == c.name)
                     .cloned()
                     .map(|cs| ColumnSchema::from_base(cs, q.table.clone(), self.dialect))
+                    .transpose()?
                     .ok_or_else(|| internal_err!("Unknown column {}", c))
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -881,6 +882,7 @@ impl NoriaConnector {
                     .find(|f| f.column.name == c.name)
                     .cloned()
                     .map(|cs| ColumnSchema::from_base(cs, q.table.clone(), self.dialect))
+                    .transpose()?
                     .ok_or_else(|| internal_err!("Unknown column {}", c))
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -1202,7 +1204,7 @@ impl NoriaConnector {
                         })?;
 
                     let target_type =
-                        DfType::from_sql_type(&field.sql_type, self.dialect, |_| None);
+                        DfType::from_sql_type(&field.sql_type, self.dialect, |_| None)?;
 
                     let value = row
                         .get(ci)

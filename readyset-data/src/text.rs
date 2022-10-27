@@ -556,10 +556,6 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
             DfType::Unknown | DfType::Bit(_) | DfType::VarBit(_) => {
                 Err(Self::coerce_err(to_ty, "Not allowed"))
             }
-            DfType::PassThrough(ref ty) => Err(ReadySetError::PassThroughConversionError {
-                target_contained: ty.to_string(),
-                src_type: from_ty.to_string(),
-            }),
         }
     }
 }

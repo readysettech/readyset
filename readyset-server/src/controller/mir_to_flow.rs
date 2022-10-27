@@ -412,7 +412,7 @@ fn adapt_base_node(
         }
         let column_id = mig.add_column(
             na,
-            DfColumn::from_spec(a.clone(), mig.dialect, |ty| custom_types.get(&ty).cloned()),
+            DfColumn::from_spec(a.clone(), mig.dialect, |ty| custom_types.get(&ty).cloned())?,
             default_value,
         )?;
 
@@ -465,12 +465,12 @@ fn make_base_node(
         cs.1 = Some(i);
     }
 
-    let columns: Vec<DfColumn> = column_specs
+    let columns = column_specs
         .iter()
         .map(|&(ref cs, _)| {
             DfColumn::from_spec(cs.clone(), mig.dialect, |ty| custom_types.get(&ty).cloned())
         })
-        .collect();
+        .collect::<Result<Vec<_>, _>>()?;
 
     // note that this defaults to a "None" (= NULL) default value for columns that do not have one
     // specified; we don't currently handle a "NOT NULL" SQL constraint for defaults

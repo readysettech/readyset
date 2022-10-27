@@ -7,6 +7,7 @@ use mysql_time::MySqlTime;
 use postgres_types::Kind;
 use readyset::ReadySetError;
 use readyset_data::{Array, Collation, DfType, DfValue, Dialect};
+use readyset_errors::unsupported;
 use rust_decimal::prelude::FromStr;
 use rust_decimal::Decimal;
 use tokio_postgres as pgsql;
@@ -378,10 +379,7 @@ impl wal::TupleData {
                                 PGType::UUID => DfType::Uuid,
                                 PGType::BIT => DfType::DEFAULT_BIT,
                                 PGType::VARBIT => DfType::VarBit(None),
-                                ref ty => DfType::PassThrough(nom_sql::Relation {
-                                    schema: Some(ty.schema().into()),
-                                    name: ty.name().into(),
-                                }),
+                                ref ty => unsupported!("Unsupported type: {ty}"),
                             }));
 
                             DfValue::from(str.parse::<Array>()?)

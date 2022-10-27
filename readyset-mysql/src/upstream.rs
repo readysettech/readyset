@@ -637,19 +637,22 @@ mod tests {
                 ColumnSpecification::new(test_column(), SqlType::VarChar(Some(10))),
                 "table1".into(),
                 Dialect::DEFAULT_MYSQL,
-            ),
+            )
+            .unwrap(),
             ColumnSchema::from_base(
                 ColumnSpecification::new(test_column(), SqlType::Double),
                 "table1".into(),
                 Dialect::DEFAULT_MYSQL,
-            ),
+            )
+            .unwrap(),
         ];
 
         let schema_spec = vec![ColumnSchema::from_base(
             ColumnSpecification::new(test_column(), SqlType::Int(None)),
             "table1".into(),
             Dialect::DEFAULT_MYSQL,
-        )];
+        )
+        .unwrap()];
 
         assert!(s.compare(&schema_spec, &param_specs).is_ok());
     }
@@ -668,13 +671,15 @@ mod tests {
             ColumnSpecification::new(test_column(), SqlType::VarChar(Some(10))),
             "table1".into(),
             Dialect::DEFAULT_MYSQL,
-        )];
+        )
+        .unwrap()];
 
         let schema_spec = vec![ColumnSchema::from_base(
             ColumnSpecification::new(test_column(), SqlType::Int(None)),
             "table1".into(),
             Dialect::DEFAULT_MYSQL,
-        )];
+        )
+        .unwrap()];
 
         assert!(s.compare(&schema_spec, &param_specs).is_err());
     }

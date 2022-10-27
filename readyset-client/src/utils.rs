@@ -440,7 +440,7 @@ where
                     updates.push((i, Modification::Set(v)));
                 }
                 Expr::Literal(ref v) => {
-                    let target_type = DfType::from_sql_type(&field.sql_type, dialect, |_| None);
+                    let target_type = DfType::from_sql_type(&field.sql_type, dialect, |_| None)?;
 
                     updates.push((
                         i,
@@ -542,7 +542,7 @@ pub(crate) fn coerce_params(
         for (i, col) in get_parameter_columns(q).iter().enumerate() {
             for field in &schema.fields {
                 if col.name == field.column.name {
-                    let target_type = DfType::from_sql_type(&field.sql_type, dialect, |_| None);
+                    let target_type = DfType::from_sql_type(&field.sql_type, dialect, |_| None)?;
 
                     coerced_params.push(DfValue::coerce_to(
                         &prms[i],

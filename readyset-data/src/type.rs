@@ -3,6 +3,7 @@ use std::fmt;
 use enum_kinds::EnumKind;
 use itertools::Itertools;
 use nom_sql::{EnumType, Literal, Relation, SqlType};
+use readyset_errors::{unsupported_err, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
 use crate::{Collation, Dialect};
@@ -160,10 +161,6 @@ pub enum DfType {
 
     /// [PostgreSQL `jsonb`](https://www.postgresql.org/docs/current/datatype-json.html).
     Jsonb,
-
-    /// PostgreSQL fallback type, enabling the adapter to funnel arbitrary types to/from upstream.
-    /// These types are uncachable and effectively blackboxes to ReadySet.
-    PassThrough(Relation),
 }
 
 /// Defaults.
@@ -186,7 +183,11 @@ impl DfType {
 impl DfType {
     /// Converts from a possible [`SqlType`] reference within the context of a SQL [`Dialect`],
     /// given a function to resolve named custom types in the schema
-    pub fn from_sql_type<'a, T, R>(ty: T, dialect: Dialect, resolve_custom_type: R) -> Self
+    pub fn from_sql_type<'a, T, R>(
+        ty: T,
+        dialect: Dialect,
+        resolve_custom_type: R,
+    ) -> ReadySetResult<Self>
     where
         T: Into<Option<&'a SqlType>>,
         R: Fn(Relation) -> Option<DfType>,
@@ -195,15 +196,15 @@ impl DfType {
 
         let ty = match ty.into() {
             Some(ty) => ty,
-            None => return Self::Unknown,
+            None => return Ok(Self::Unknown),
         };
 
-        match *ty {
+        Ok(match *ty {
             Array(ref ty) => Self::Array(Box::new(Self::from_sql_type(
                 Some(ty.as_ref()),
                 dialect,
                 resolve_custom_type,
-            ))),
+            )?)),
 
             // PERF: Cloning enum types is O(1).
             Enum(ref ty) => Self::Enum(ty.clone(), dialect),
@@ -274,10 +275,9 @@ impl DfType {
             MacAddr => Self::MacAddr,
             Inet => Self::Inet,
             Citext => Self::Text(Collation::Citext),
-            Other(ref id) => {
-                resolve_custom_type(id.clone()).unwrap_or_else(|| Self::PassThrough(id.clone()))
-            }
-        }
+            Other(ref id) => resolve_custom_type(id.clone())
+                .ok_or_else(|| unsupported_err!("Unsupported type: {id}"))?,
+        })
     }
 }
 
@@ -326,7 +326,6 @@ impl DfType {
             DfType::Uuid | DfType::Enum(_, _) | DfType::Json | DfType::Jsonb => {
                 PgTypeCategory::UserDefined
             }
-            DfType::PassThrough(_) => PgTypeCategory::Unknown,
         }
     }
 
@@ -546,7 +545,6 @@ impl fmt::Display for DfType {
             | Self::Jsonb => write!(f, "{kind:?}"),
 
             Self::Array(ref ty) => write!(f, "{ty}[]"),
-            Self::PassThrough(ref ty) => write!(f, "PassThrough({ty})"),
 
             Self::Char(n, ..)
             | Self::VarChar(n, ..)

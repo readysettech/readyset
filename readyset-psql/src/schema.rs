@@ -146,7 +146,5 @@ pub fn type_to_pgsql(col_type: &DfType) -> Result<pgsql::types::Type, Error> {
         DfType::Array(box DfType::Bit(_)) => Ok(Type::BIT_ARRAY),
         DfType::Array(box DfType::VarBit(_)) => Ok(Type::VARBIT_ARRAY),
         DfType::Array(box DfType::Array(_)) => unsupported_type!(),
-        DfType::Array(box DfType::PassThrough(_)) => unsupported_type!(),
-        DfType::PassThrough(_) => unsupported_type!(),
     }
 }

@@ -105,7 +105,6 @@ pub(crate) fn convert_column(col: &ColumnSchema) -> ReadySetResult<mysql_srv::Co
         }
         DfType::VarBit(_) => unsupported!("MySQL does not support the bit varying type"),
         DfType::Array(_) => unsupported!("MySQL does not support arrays"),
-        DfType::PassThrough(_) => unsupported!("MySQL does not support PassThrough types"),
     };
 
     for c in col.base.iter().flat_map(|b| &b.constraints) {

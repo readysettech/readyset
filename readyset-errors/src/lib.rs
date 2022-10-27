@@ -350,15 +350,6 @@ pub enum ReadySetError {
         details: String,
     },
 
-    /// PassThrough cannot be converted to other types
-    #[error("Cannot convert {src_type} to PassThrough<{target_contained}>, PassThrough types cannot support any conversions")]
-    PassThroughConversionError {
-        /// Type contained in the PassThrough.
-        target_contained: String,
-        /// Target type.
-        src_type: String,
-    },
-
     /// Invalid index when evaluating a project expression.
     #[error("Column index out-of-bounds while evaluating project expression: index was {0}")]
     ProjectExprInvalidColumnIndex(usize),

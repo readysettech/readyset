@@ -161,10 +161,6 @@ pub(crate) fn coerce_f64(val: f64, to_ty: &DfType, from_ty: &DfType) -> ReadySet
         | DfType::Bit(_)
         | DfType::VarBit(_)
         | DfType::Array(_) => Err(err("not allowed")),
-        DfType::PassThrough(ref ty) => Err(ReadySetError::PassThroughConversionError {
-            src_type: "Double".to_string(),
-            target_contained: ty.to_string(),
-        }),
     }
 }
 
@@ -258,10 +254,6 @@ pub(crate) fn coerce_decimal(
             src_type: "Decimal".to_string(),
             target_type: to_ty.to_string(),
             details: "Not allowed".to_string(),
-        }),
-        DfType::PassThrough(_) => Err(ReadySetError::PassThroughConversionError {
-            src_type: "Decimal".to_string(),
-            target_contained: to_ty.to_string(),
         }),
     }
 }

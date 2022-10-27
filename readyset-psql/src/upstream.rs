@@ -359,19 +359,22 @@ mod tests {
                 ColumnSpecification::new(test_column(), SqlType::Bool),
                 "table1".into(),
                 Dialect::DEFAULT_POSTGRESQL,
-            ),
+            )
+            .unwrap(),
             ColumnSchema::from_base(
                 ColumnSpecification::new(test_column(), SqlType::BigInt(Some(10))),
                 "table1".into(),
                 Dialect::DEFAULT_POSTGRESQL,
-            ),
+            )
+            .unwrap(),
         ];
 
         let schema_spec = vec![ColumnSchema::from_base(
             ColumnSpecification::new(test_column(), SqlType::VarChar(Some(8))),
             "table1".into(),
             Dialect::DEFAULT_POSTGRESQL,
-        )];
+        )
+        .unwrap()];
 
         assert!(s.compare(&schema_spec, &param_specs).is_ok());
     }
@@ -390,13 +393,15 @@ mod tests {
             ColumnSpecification::new(test_column(), SqlType::Bool),
             "table1".into(),
             Dialect::DEFAULT_POSTGRESQL,
-        )];
+        )
+        .unwrap()];
 
         let schema_spec = vec![ColumnSchema::from_base(
             ColumnSpecification::new(test_column(), SqlType::VarChar(Some(8))),
             "table1".into(),
             Dialect::DEFAULT_POSTGRESQL,
-        )];
+        )
+        .unwrap()];
 
         assert!(s.compare(&schema_spec, &param_specs).is_err());
     }
@@ -416,17 +421,20 @@ mod tests {
             ColumnSchema::from_base(
                 ColumnSpecification::new(test_column(), SqlType::Bool),
                 "table1".into(),
-            ),
+            )
+            .unwrap(),
             ColumnSchema::from_base(
                 ColumnSpecification::new(test_column(), SqlType::VarChar(Some(10))),
                 "table1".into(),
-            ),
+            )
+            .unwrap(),
         ];
 
         let schema_spec = vec![ColumnSchema::from_base(
             ColumnSpecification::new(test_column(), SqlType::VarChar(Some(8))),
             "table1".into(),
-        )];
+        )
+        .unwrap()];
 
         assert!(s.compare(&schema_spec, &param_specs).is_err());
     }
