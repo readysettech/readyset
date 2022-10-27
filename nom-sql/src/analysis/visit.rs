@@ -88,8 +88,8 @@ pub trait Visitor<'ast>: Sized {
         Ok(())
     }
 
-    fn visit_sql_type(&mut self, _sql_type: &'ast mut SqlType) -> Result<(), Self::Error> {
-        Ok(())
+    fn visit_sql_type(&mut self, sql_type: &'ast mut SqlType) -> Result<(), Self::Error> {
+        walk_sql_type(self, sql_type)
     }
 
     fn visit_column(&mut self, column: &'ast mut Column) -> Result<(), Self::Error> {
@@ -607,6 +607,16 @@ pub fn walk_relation<'ast, V: Visitor<'ast>>(
         visitor.visit_sql_identifier(schema)?;
     }
     visitor.visit_sql_identifier(&mut relation.name)
+}
+
+pub fn walk_sql_type<'ast, V: Visitor<'ast>>(
+    visitor: &mut V,
+    sql_type: &'ast mut SqlType,
+) -> Result<(), V::Error> {
+    match sql_type {
+        SqlType::Array(t) => visitor.visit_sql_type(t),
+        _ => Ok(()),
+    }
 }
 
 pub fn walk_column<'ast, V: Visitor<'ast>>(
