@@ -10,9 +10,9 @@ use metrics::register_gauge;
 use nom_sql::{parse_key_specification_string, Dialect, Relation, SqlIdentifier, TableKey};
 use postgres_types::{accepts, FromSql, Kind, Type};
 use readyset::metrics::recorded;
-use readyset::recipe::changelist::ChangeList;
+use readyset::recipe::changelist::{Change, ChangeList};
 use readyset::{ReadySetError, ReadySetResult};
-use readyset_data::{DfValue, Dialect as DataDialect};
+use readyset_data::{DfType, DfValue, Dialect as DataDialect};
 use readyset_errors::{internal, internal_err, unsupported};
 use tokio_postgres as pgsql;
 use tracing::{debug, error, info, info_span, trace, Instrument};
@@ -76,6 +76,20 @@ struct ConstraintEntry {
     definition: TableKey,
     #[allow(dead_code)]
     kind: Option<ConstraintKind>,
+}
+
+#[derive(Debug)]
+struct EnumVariant {
+    #[allow(dead_code)]
+    oid: u32,
+    label: String,
+}
+
+#[derive(Debug)]
+struct CustomTypeEntry {
+    oid: u32,
+    name: String,
+    schema: String,
 }
 
 /// Newtype struct to allow converting TableKey from a SQL column in a way that lets us wrap the
@@ -190,6 +204,51 @@ impl TryFrom<pgsql::Row> for TableEntry {
             oid: row.try_get(1)?,
             name: row.try_get(2)?,
         })
+    }
+}
+
+impl TryFrom<pgsql::Row> for CustomTypeEntry {
+    type Error = pgsql::Error;
+
+    fn try_from(row: pgsql::Row) -> Result<Self, Self::Error> {
+        let oid = row.try_get(0)?;
+        let name = row.try_get(1)?;
+        let schema = row.try_get(2)?;
+        Ok(CustomTypeEntry { oid, name, schema })
+    }
+}
+
+impl TryFrom<pgsql::Row> for EnumVariant {
+    type Error = pgsql::Error;
+
+    fn try_from(row: pgsql::Row) -> Result<Self, Self::Error> {
+        let oid = row.try_get(0)?;
+        let label = row.try_get(1)?;
+        Ok(EnumVariant { oid, label })
+    }
+}
+
+impl CustomTypeEntry {
+    async fn get_variants<'a>(
+        &self,
+        transaction: &'a pgsql::Transaction<'a>,
+    ) -> Result<Vec<EnumVariant>, pgsql::Error> {
+        let query = r"
+            SELECT oid, enumlabel
+            FROM pg_enum
+            WHERE enumtypid = $1
+            ORDER BY enumsortorder ASC
+        ";
+
+        let res = transaction.query(query, &[&self.oid]).await?;
+        res.into_iter().map(TryInto::try_into).collect()
+    }
+
+    pub(crate) fn into_relation(self) -> Relation {
+        Relation {
+            schema: Some(self.schema.into()),
+            name: self.name.into(),
+        }
     }
 }
 
@@ -437,15 +496,41 @@ impl<'a> PostgresReplicator<'a> {
 
         let mut table_list = self.get_table_list(TableKind::RegularTable).await?;
         let mut view_list = self.get_table_list(TableKind::View).await?;
+        let mut custom_types = self.get_custom_types().await?;
 
         table_list.retain(|tbl| {
             self.table_filter
                 .contains(tbl.schema.as_str(), tbl.name.as_str())
         });
         view_list.retain(|view| self.table_filter.contains_schema(&view.schema));
+        custom_types.retain(|ty| self.table_filter.contains_schema(&ty.schema));
 
         trace!(?table_list, "Loaded table list");
         trace!(?view_list, "Loaded view list");
+        trace!(?custom_types, "Loaded custom types");
+
+        for ty in custom_types {
+            let variants = match ty.get_variants(&self.transaction).await {
+                Ok(v) => v,
+                Err(error) => {
+                    error!(%error, "Error looking up variants for custom type, type will not be used");
+                    continue;
+                }
+            };
+            let changelist = ChangeList::from_change(
+                Change::CreateType {
+                    name: ty.into_relation(),
+                    ty: DfType::from_enum_variants(
+                        variants.into_iter().map(|v| v.label.into()),
+                        DataDialect::DEFAULT_POSTGRESQL,
+                    ),
+                },
+                DataDialect::DEFAULT_POSTGRESQL,
+            );
+            if let Err(error) = self.noria.extend_recipe_no_leader_ready(changelist).await {
+                error!(%error, "Error creating custom type, type will not be used");
+            }
+        }
 
         // For each table, retrieve its structure
         let mut tables = Vec::with_capacity(table_list.len());
@@ -603,6 +688,16 @@ impl<'a> PostgresReplicator<'a> {
 
         let tables = self.transaction.query(query, &[&kind_code]).await?;
         tables.into_iter().map(TryInto::try_into).collect()
+    }
+
+    /// Retrieve a list of custom types
+    ///
+    /// Currently this is limited to enum types since that's all we support, but in the future this
+    /// can be extended to support composite types and ranges as well
+    async fn get_custom_types(&mut self) -> Result<Vec<CustomTypeEntry>, pgsql::Error> {
+        let query = r"SELECT oid, typname, typnamespace FROM pg_type WHERE typtype = 'e'";
+        let res = self.transaction.query(query, &[]).await?;
+        res.into_iter().map(TryInto::try_into).collect()
     }
 
     /// Assign the specific snapshot to the underlying transaction
