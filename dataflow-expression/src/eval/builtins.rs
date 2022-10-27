@@ -1,11 +1,9 @@
 use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::ops::{Add, Div, Mul, Sub};
-use std::str::FromStr;
 
 use chrono::{Datelike, LocalResult, NaiveDate, NaiveDateTime, TimeZone};
 use chrono_tz::Tz;
-use launchpad::redacted::Sensitive;
 use maths::int::integer_rnd;
 use mysql_time::MySqlTime;
 use readyset_data::{DfType, DfValue};
@@ -352,22 +350,7 @@ impl BuiltinFunction {
                 }
             }
             BuiltinFunction::JsonTypeof(expr) | BuiltinFunction::JsonbTypeof(expr) => {
-                // TODO: Change this to coerce to `SqlType::Jsonb` and have it return a
-                // `DfValue` actually representing JSON.
-                let val = try_cast_or_none!(
-                    non_null!(&expr.eval(record)?),
-                    &DfType::DEFAULT_TEXT,
-                    expr.ty()
-                );
-                let json_str = <&str>::try_from(&val)?;
-
-                let json = serde_json::Value::from_str(json_str).map_err(|e| -> ReadySetError {
-                    ReadySetError::ProjectExprBuiltInFunctionError {
-                        function: self.name().into(),
-                        message: format!("parsing JSON expression failed: {}", Sensitive(&e)),
-                    }
-                })?;
-
+                let json = expr.eval(record)?.to_json()?;
                 Ok(get_json_value_type(&json).into())
             }
             BuiltinFunction::Coalesce(arg1, rest_args) => {
