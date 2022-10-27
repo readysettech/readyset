@@ -21,6 +21,7 @@ pub enum WalError {
     UnknownTuple,
     CorruptRelation,
     CorruptUpdate,
+    CorruptType,
     CorruptInsert,
     CorruptDelete,
     CorruptTruncate,
@@ -348,6 +349,7 @@ impl TryFrom<Bytes> for WalRecord {
             b'B' => WalRecord::begin(b),
             b'C' => WalRecord::commit(b),
             b'R' => WalRecord::relation(b),
+            b'Y' => WalRecord::type_(b),
             b'U' => WalRecord::update(b),
             b'I' => WalRecord::insert(b),
             b'D' => WalRecord::delete(b),
@@ -594,6 +596,20 @@ impl WalRecord {
             n_cols,
             cols,
         }))
+    }
+
+    /// Parse as `Type`, assumes `b[0] == 'Y`
+    fn type_(mut b: Bytes) -> Result<Self, WalError> {
+        if b.len() < 10 {
+            return Err(WalError::CorruptType);
+        }
+
+        let id = i32::from_be_bytes(b[1..5].try_into()?);
+        let _ = b.split_to(5);
+        let schema = Self::consume_string(&mut b)?;
+        let name = Self::consume_string(&mut b)?;
+
+        Ok(WalRecord::Type { id, schema, name })
     }
 
     /// Parse as Insert, assumes b[0] == 'I'
@@ -844,6 +860,29 @@ mod tests {
                             TupleEntry::Text(Bytes::copy_from_slice(b"a")),
                         ]
                     }
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn wal_parse_type() {
+        let wal: WalData = Bytes::copy_from_slice(
+            b"w\0\0\0\0\x01l\xafx\0\0\0\0\x01l\xafx\0\x02g?\x9e\xc7y\xbcY\0\x01@\xf1public\0abc\0",
+        )
+        .try_into()
+        .unwrap();
+
+        assert_eq!(
+            wal,
+            WalData::XLogData {
+                start: 23900024,
+                end: 23900024,
+                time: 676472897894844,
+                data: WalRecord::Type {
+                    id: 82161,
+                    schema: "public".into(),
+                    name: "abc".into()
                 }
             }
         );
