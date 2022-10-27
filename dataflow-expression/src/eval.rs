@@ -99,10 +99,12 @@ impl Expr {
                         let json_value = left.to_json()?;
                         let key = <&str>::try_from(&right)?;
 
-                        // For non-object JSON values the operator always returns false:
-                        let JsonValue::Object(map) = json_value else { return Ok(false.into()) };
-
-                        Ok(map.contains_key(key).into())
+                        let result = match json_value {
+                            JsonValue::Object(map) => map.contains_key(key),
+                            JsonValue::Array(vec) => vec.iter().any(|v| v.as_str() == Some(key)),
+                            _ => false,
+                        };
+                        Ok(result.into())
                     }
                 }
             }
@@ -208,6 +210,16 @@ mod tests {
             expr.eval(&[DfValue::from("{\"abc\": 42}"), DfValue::from("abc")])
                 .unwrap(),
             true.into()
+        );
+        assert_eq!(
+            expr.eval(&[DfValue::from("[\"abc\"]"), DfValue::from("abc")])
+                .unwrap(),
+            true.into()
+        );
+        assert_eq!(
+            expr.eval(&[DfValue::from("[\"abc\"]"), DfValue::from("xyz")])
+                .unwrap(),
+            false.into()
         );
     }
 
