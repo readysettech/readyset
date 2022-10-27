@@ -84,7 +84,7 @@ pub(crate) fn convert_column(col: &ColumnSchema) -> ReadySetResult<mysql_srv::Co
             colflags |= mysql_srv::ColumnFlags::BINARY_FLAG;
             MYSQL_TYPE_VAR_STRING
         }
-        DfType::Enum(..) => {
+        DfType::Enum { .. } => {
             // TODO(grfn): I don't know if this is right
             colflags |= mysql_srv::ColumnFlags::ENUM_FLAG;
             MYSQL_TYPE_VAR_STRING

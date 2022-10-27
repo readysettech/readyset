@@ -96,8 +96,8 @@ pub(crate) fn coerce_f64(val: f64, to_ty: &DfType, from_ty: &DfType) -> ReadySet
             .map(DfValue::from),
 
         // The numeric cast from f64 to usize will round down, which is what we want for enums:
-        DfType::Enum(ref elements, _) => {
-            Ok(r#enum::apply_enum_limits(val as usize, elements).into())
+        DfType::Enum { ref variants, .. } => {
+            Ok(r#enum::apply_enum_limits(val as usize, variants).into())
         }
 
         DfType::Text(collation) => Ok(DfValue::from_str_and_collation(&val.to_string(), collation)),
@@ -200,8 +200,8 @@ pub(crate) fn coerce_decimal(
             .ok_or_else(err)
             .map(DfValue::Double),
 
-        DfType::Enum(ref elements, _) => {
-            Ok(r#enum::apply_enum_limits(usize::try_from(*val).unwrap_or(0), elements).into())
+        DfType::Enum { ref variants, .. } => {
+            Ok(r#enum::apply_enum_limits(usize::try_from(*val).unwrap_or(0), variants).into())
         }
 
         DfType::Text(collation) => Ok(DfValue::from_str_and_collation(&val.to_string(), collation)),

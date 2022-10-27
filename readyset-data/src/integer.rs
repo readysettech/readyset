@@ -171,11 +171,11 @@ where
 
         DfType::Numeric { .. } => Ok(DfValue::Numeric(Arc::new(val.into()))),
 
-        DfType::Enum(ref elements, _) => {
-            // Values above the number of elements are converted to 0 by MySQL, and anything that
+        DfType::Enum { ref variants, .. } => {
+            // Values above the number of variants are converted to 0 by MySQL, and anything that
             // can't be held in a usize is certainly too high, hence the .unwrap_or(0)
             let idx = usize::try_from(val).unwrap_or(0);
-            Ok(DfValue::from(r#enum::apply_enum_limits(idx, elements)))
+            Ok(DfValue::from(r#enum::apply_enum_limits(idx, variants)))
         }
 
         DfType::Unknown

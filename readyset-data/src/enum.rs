@@ -1,4 +1,4 @@
-use nom_sql::{EnumType, Literal};
+use nom_sql::{EnumVariants, Literal};
 use readyset_errors::ReadySetResult;
 
 use crate::{integer, DfType, DfValue};
@@ -51,7 +51,7 @@ pub(crate) fn coerce_enum(
 /// enum index will be converted to 0 instead. (Note, however, that MySQL coerces non-integer
 /// numbers to enum by rounding them down instead of rounding them off, but these semantics will be
 /// applied outside this function.) This helper function aids us in applying these semantics.
-pub(crate) fn apply_enum_limits(idx: usize, elements: &EnumType) -> usize {
+pub(crate) fn apply_enum_limits(idx: usize, elements: &EnumVariants) -> usize {
     if idx > elements.len() {
         0
     } else {

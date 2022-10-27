@@ -517,12 +517,14 @@ impl<'a> PostgresReplicator<'a> {
                     continue;
                 }
             };
+            let oid = ty.oid;
             let changelist = ChangeList::from_change(
                 Change::CreateType {
                     name: ty.into_relation(),
                     ty: DfType::from_enum_variants(
                         variants.into_iter().map(|v| v.label.into()),
                         DataDialect::DEFAULT_POSTGRESQL,
+                        Some(oid),
                     ),
                 },
                 DataDialect::DEFAULT_POSTGRESQL,

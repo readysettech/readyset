@@ -2,7 +2,7 @@ use std::fmt;
 
 use enum_kinds::EnumKind;
 use itertools::Itertools;
-use nom_sql::{EnumType, Literal, Relation, SqlType};
+use nom_sql::{EnumVariants, Literal, Relation, SqlType};
 use readyset_errors::{unsupported_err, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
@@ -150,10 +150,16 @@ pub enum DfType {
     /// [PostgreSQL `uuid`](https://www.postgresql.org/docs/current/datatype-uuid.html).
     Uuid,
 
-    /// MySQL enum.
-    ///
-    /// PostgreSQL enums are technically not yet supported.
-    Enum(EnumType, Dialect),
+    /// Enum types
+    Enum {
+        variants: EnumVariants,
+
+        /// For PostgreSQL enums, the OID of the enum type in the upstream database that we've
+        /// replicated from. For MySQL enums, this will always be `None`.
+        oid: Option<u32>,
+
+        dialect: Dialect,
+    },
 
     /// [MySQL `json`](https://dev.mysql.com/doc/refman/8.0/en/json.html) or
     /// [PostgreSQL `json`](https://www.postgresql.org/docs/current/datatype-json.html).
@@ -206,8 +212,12 @@ impl DfType {
                 resolve_custom_type,
             )?)),
 
-            // PERF: Cloning enum types is O(1).
-            Enum(ref ty) => Self::Enum(ty.clone(), dialect),
+            Enum(ref variants) => Self::Enum {
+                // PERF: Cloning variants is O(1).
+                variants: variants.clone(),
+                dialect,
+                oid: None,
+            },
 
             // FIXME(ENG-1650): Convert to `tinyint(1)` for MySQL.
             Bool => Self::Bool,
@@ -282,14 +292,19 @@ impl DfType {
 }
 
 impl DfType {
-    /// Creates a [`DfType::Enum`] instance from a sequence of variant names.
+    /// Creates a [`DfType::Enum`] instance from a sequence of variant names, a dialect, and an
+    /// `oid`
     #[inline]
-    pub fn from_enum_variants<I>(variants: I, dialect: Dialect) -> Self
+    pub fn from_enum_variants<I>(variants: I, dialect: Dialect, oid: Option<u32>) -> Self
     where
         I: IntoIterator<Item = Literal>,
         I::IntoIter: ExactSizeIterator, // required by `triomphe::ThinArc`
     {
-        Self::Enum(variants.into(), dialect)
+        Self::Enum {
+            variants: variants.into(),
+            dialect,
+            oid,
+        }
     }
 
     /// Returns the PostgreSQL type category for this type
@@ -323,7 +338,7 @@ impl DfType {
             | DfType::Timestamp { .. }
             | DfType::TimestampTz { .. } => PgTypeCategory::DateTime,
             DfType::MacAddr | DfType::Inet => PgTypeCategory::NetworkAddress,
-            DfType::Uuid | DfType::Enum(_, _) | DfType::Json | DfType::Jsonb => {
+            DfType::Uuid | DfType::Enum { .. } | DfType::Json | DfType::Jsonb => {
                 PgTypeCategory::UserDefined
             }
         }
@@ -565,7 +580,9 @@ impl fmt::Display for DfType {
                 subsecond_digits: n,
             } => write!(f, "{kind:?}({n})"),
 
-            Self::Enum(ref variants, _) => write!(f, "{kind:?}({})", variants.iter().join(", ")),
+            Self::Enum { ref variants, .. } => {
+                write!(f, "{kind:?}({})", variants.iter().join(", "))
+            }
             Self::Numeric { prec, scale } => write!(f, "{kind:?}({prec}, {scale})"),
         }
     }

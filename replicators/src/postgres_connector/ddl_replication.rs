@@ -206,7 +206,7 @@ impl DdlEvent {
                 if_exists: false,
             },
             DdlEventData::CreateType {
-                oid: _,
+                oid,
                 name,
                 variants,
             } => Change::CreateType {
@@ -217,6 +217,7 @@ impl DdlEvent {
                 ty: DfType::from_enum_variants(
                     variants.into_iter().map(|v| v.label.into()),
                     DataDialect::DEFAULT_POSTGRESQL,
+                    Some(oid),
                 ),
             },
         }

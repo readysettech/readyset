@@ -63,7 +63,7 @@ pub enum SqlType {
     #[weight(0)]
     VarBinary(u16),
     #[weight(0)]
-    Enum(EnumType),
+    Enum(EnumVariants),
     #[weight(0)]
     Decimal(#[strategy(1..=30u8)] u8, #[strategy(1..=# 0)] u8),
     Json,
@@ -242,11 +242,11 @@ impl FromStr for SqlType {
 ///
 /// Clones are O(1) and this is always 1 pointer wide for efficient storage in `SqlType`.
 #[derive(Clone, Eq, Hash, PartialEq)]
-pub struct EnumType {
+pub struct EnumVariants {
     variants: ThinArc<(), Literal>,
 }
 
-impl Deref for EnumType {
+impl Deref for EnumVariants {
     type Target = [Literal];
 
     #[inline]
@@ -259,7 +259,7 @@ impl Deref for EnumType {
 //
 // This impl works for `Vec` and `[T; N]`. It will never conflict with `From<EnumType>` because we
 // cannot implement an owned iterator over `triomphe::ThinArc`.
-impl<I: IntoIterator<Item = Literal>> From<I> for EnumType
+impl<I: IntoIterator<Item = Literal>> From<I> for EnumVariants
 where
     I::IntoIter: ExactSizeIterator,
 {
@@ -271,20 +271,20 @@ where
     }
 }
 
-impl fmt::Debug for EnumType {
+impl fmt::Debug for EnumVariants {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_list().entries(self.iter()).finish()
     }
 }
 
-impl PartialOrd for EnumType {
+impl PartialOrd for EnumVariants {
     #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         <[Literal]>::partial_cmp(self, other)
     }
 }
 
-impl<'de> Deserialize<'de> for EnumType {
+impl<'de> Deserialize<'de> for EnumVariants {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -297,7 +297,7 @@ impl<'de> Deserialize<'de> for EnumType {
     }
 }
 
-impl Serialize for EnumType {
+impl Serialize for EnumVariants {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,

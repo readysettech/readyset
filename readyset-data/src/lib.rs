@@ -493,11 +493,11 @@ impl DfValue {
         // necessary if we want to support both u64 and i64 for both UnsignedInt and Int.
         macro_rules! handle_enum_or_coerce_int {
             ($v:expr, $to_ty:expr, $from_ty:expr) => {
-                if let DfType::Enum(enum_elements, _) = $from_ty {
+                if let DfType::Enum { variants, .. } = $from_ty {
                     // This will either be u64 or i64, and if it's i64 then negative values will be
                     // converted to 0 anyway, so unwrap_or_default gets us what we want here:
                     let enum_val = u64::try_from(*$v).unwrap_or_default();
-                    r#enum::coerce_enum(enum_val, enum_elements, $to_ty, $from_ty)
+                    r#enum::coerce_enum(enum_val, variants, $to_ty, $from_ty)
                 } else {
                     integer::coerce_integer(*$v, $to_ty, $from_ty)
                 }
@@ -3525,6 +3525,7 @@ mod tests {
             let enum_ty = DfType::from_enum_variants(
                 variants.iter().map(|s| Literal::String(s.to_string())),
                 Dialect::DEFAULT_MYSQL,
+                None,
             );
 
             // Test conversions from enums to strings

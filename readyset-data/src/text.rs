@@ -537,7 +537,7 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
             )
             .coerce_to(to_ty, from_ty),
 
-            DfType::Enum(ref variants, _) => {
+            DfType::Enum { ref variants, .. } => {
                 if let Some(i) = variants
                     .iter()
                     .position(|e| matches!(e, Literal::String(s) if s == str))
@@ -821,11 +821,12 @@ mod tests {
             DfValue::from("feed::beef")
         );
         // TEXT to ENUM
-        let enum_type = DfType::Enum(
+        let enum_type = DfType::from_enum_variants(
             ["red", "yellow", "green"]
-                .map(|s| Literal::String(s.to_string()))
-                .into(),
+                .iter()
+                .map(|s| Literal::String(s.to_string())),
             Dialect::DEFAULT_MYSQL,
+            None,
         );
         assert_eq!(
             DfValue::from("green")

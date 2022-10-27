@@ -400,7 +400,7 @@ impl TimestampTz {
             }
 
             DfType::Unknown
-            | DfType::Enum(_, _)
+            | DfType::Enum { .. }
             | DfType::Jsonb
             | DfType::MacAddr
             | DfType::Inet

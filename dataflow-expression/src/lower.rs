@@ -599,8 +599,11 @@ pub(crate) mod tests {
     fn cast_to_custom_type() {
         let input =
             parse_expr(ParserDialect::PostgreSQL, "cast('foo' as something.custom)").unwrap();
-        let enum_ty =
-            DfType::from_enum_variants(["foo".into(), "bar".into()], Dialect::DEFAULT_POSTGRESQL);
+        let enum_ty = DfType::from_enum_variants(
+            ["foo".into(), "bar".into()],
+            Dialect::DEFAULT_POSTGRESQL,
+            Some(12345),
+        );
         let result = Expr::lower(
             input,
             Dialect::DEFAULT_POSTGRESQL,
