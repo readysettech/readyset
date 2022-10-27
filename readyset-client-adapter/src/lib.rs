@@ -30,7 +30,7 @@ use readyset::metrics::recorded;
 use readyset::{ReadySetError, ReadySetHandle, ViewCreateRequest};
 use readyset_client::backend::noria_connector::{NoriaConnector, ReadBehavior};
 use readyset_client::backend::MigrationMode;
-use readyset_client::fallback_cache::FallbackCache;
+use readyset_client::fallback_cache::{DiskModeledCache, FallbackCache, SimpleFallbackCache};
 use readyset_client::http_router::NoriaAdapterHttpRouter;
 use readyset_client::migration_handler::MigrationHandler;
 use readyset_client::proxied_queries_reporter::ProxiedQueriesReporter;
@@ -369,6 +369,10 @@ pub struct FallbackCacheOptions {
     /// Specifies a ttl in seconds for queries cached using the fallback cache.
     #[clap(long, hide = true, default_value = "120")]
     ttl_seconds: u64,
+
+    /// If enabled, will model running the fallback cache off spinning disk.
+    #[clap(long, hide = true)]
+    model_disk: bool,
 }
 
 impl<H> NoriaAdapter<H>
@@ -639,10 +643,17 @@ where
         > = if cfg!(feature = "fallback_cache")
             && options.fallback_cache_options.enable_fallback_cache
         {
-            Some(FallbackCache::new(Duration::new(
-                options.fallback_cache_options.ttl_seconds,
-                0,
-            )))
+            let cache = if options.fallback_cache_options.model_disk {
+                DiskModeledCache::new(Duration::new(options.fallback_cache_options.ttl_seconds, 0))
+                    .into()
+            } else {
+                SimpleFallbackCache::new(Duration::new(
+                    options.fallback_cache_options.ttl_seconds,
+                    0,
+                ))
+                .into()
+            };
+            Some(cache)
         } else {
             None
         };

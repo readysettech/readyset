@@ -19,6 +19,8 @@ use nom_sql::SqlIdentifier;
 use pin_project::pin_project;
 use readyset::ColumnSchema;
 use readyset_client::fallback_cache::FallbackCache;
+#[cfg(feature = "fallback_cache")]
+use readyset_client::fallback_cache::FallbackCacheApi;
 use readyset_client::upstream_database::{NoriaCompare, UpstreamDestination};
 use readyset_client::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
 use readyset_client_metrics::QueryDestination;
@@ -371,7 +373,7 @@ impl UpstreamDatabase for MySqlUpstream {
         let prepared_statements = HashMap::new();
         let upstream_config = self.upstream_config.clone();
         let fallback_cache = if let Some(ref cache) = self.fallback_cache {
-            cache.clear();
+            cache.clear().await;
             Some(cache.clone())
         } else {
             None
@@ -431,11 +433,11 @@ impl UpstreamDatabase for MySqlUpstream {
         id: u32,
         params: &[DfValue],
     ) -> Result<Self::QueryResult<'a>, Error> {
-        if let Some(ref cache) = self.fallback_cache {
+        if let Some(ref mut cache) = self.fallback_cache {
             let mut s = DefaultHasher::new();
             (id, params).hash(&mut s);
             let hash = format!("{:x}", s.finish());
-            if let Some(query_r) = cache.get(&hash) {
+            if let Some(query_r) = cache.get(&hash).await {
                 return Ok(query_r.into());
             }
             let params = dt_to_value_params(params)?;
@@ -452,7 +454,7 @@ impl UpstreamDatabase for MySqlUpstream {
             match r {
                 Ok(query_result @ QueryResult::ReadResult { .. }) => {
                     let cached_result: CachedReadResult = query_result.async_try_into().await?;
-                    cache.insert(hash, cached_result.clone());
+                    cache.insert(hash, cached_result.clone()).await;
                     Ok(cached_result.into())
                 }
                 _ => r,
@@ -496,8 +498,8 @@ impl UpstreamDatabase for MySqlUpstream {
     where
         S: AsRef<str> + Send + Sync + 'a,
     {
-        if let Some(ref cache) = self.fallback_cache {
-            if let Some(query_r) = cache.get(query.as_ref()) {
+        if let Some(ref mut cache) = self.fallback_cache {
+            if let Some(query_r) = cache.get(query.as_ref()).await {
                 return Ok(query_r.into());
             }
             let query_str = query.as_ref().to_owned();
@@ -506,7 +508,7 @@ impl UpstreamDatabase for MySqlUpstream {
             match r {
                 Ok(query_result @ QueryResult::ReadResult { .. }) => {
                     let cached_result: CachedReadResult = query_result.async_try_into().await?;
-                    cache.insert(query_str, cached_result.clone());
+                    cache.insert(query_str, cached_result.clone()).await;
                     Ok(cached_result.into())
                 }
                 _ => r,

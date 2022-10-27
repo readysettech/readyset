@@ -23,7 +23,7 @@ tracing-futures = "0.2.5"
 vec1 = "1.6.0"
 itertools = "0.10"
 derive_more = "0.99.11"
-async-trait = "0.1.49"
+async-trait = "0.1.58"
 thiserror = "1.0.26"
 launchpad = { path = "../launchpad" }
 metrics = "0.19"

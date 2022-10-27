@@ -70,7 +70,7 @@ pub trait UpstreamDatabase: Sized + Send {
         Self: 'a;
 
     /// A read result that has been cached in the underlying FallbackCache.
-    type CachedReadResult: Debug + Send + Clone;
+    type CachedReadResult: Debug + Send + Sync + Clone;
 
     /// A type representing metadata about a prepared statement.
     ///
