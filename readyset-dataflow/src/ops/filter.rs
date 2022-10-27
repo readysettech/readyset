@@ -3,7 +3,6 @@ use std::convert::TryInto;
 
 use dataflow_expression::Expr;
 use dataflow_state::PointKey;
-pub use nom_sql::BinaryOperator;
 use readyset_errors::ReadySetResult;
 use serde::{Deserialize, Serialize};
 
@@ -135,6 +134,7 @@ impl Ingredient for Filter {
 #[cfg(test)]
 mod tests {
     use dataflow_expression::utils::{column_with_type, make_literal};
+    use dataflow_expression::BinaryOperator;
     use readyset_data::DfType;
     use Expr::Op;
 

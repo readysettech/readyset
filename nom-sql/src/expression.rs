@@ -210,26 +210,26 @@ impl BinaryOperator {
 impl Display for BinaryOperator {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let op = match *self {
-            BinaryOperator::And => "AND",
-            BinaryOperator::Or => "OR",
-            BinaryOperator::Like => "LIKE",
-            BinaryOperator::NotLike => "NOT LIKE",
-            BinaryOperator::ILike => "ILIKE",
-            BinaryOperator::NotILike => "NOT ILIKE",
-            BinaryOperator::Equal => "=",
-            BinaryOperator::NotEqual => "!=",
-            BinaryOperator::Greater => ">",
-            BinaryOperator::GreaterOrEqual => ">=",
-            BinaryOperator::Less => "<",
-            BinaryOperator::LessOrEqual => "<=",
-            BinaryOperator::Is => "IS",
-            BinaryOperator::IsNot => "IS NOT",
-            BinaryOperator::Add => "+",
-            BinaryOperator::Subtract => "-",
-            BinaryOperator::Multiply => "*",
-            BinaryOperator::Divide => "/",
+            Self::And => "AND",
+            Self::Or => "OR",
+            Self::Like => "LIKE",
+            Self::NotLike => "NOT LIKE",
+            Self::ILike => "ILIKE",
+            Self::NotILike => "NOT ILIKE",
+            Self::Equal => "=",
+            Self::NotEqual => "!=",
+            Self::Greater => ">",
+            Self::GreaterOrEqual => ">=",
+            Self::Less => "<",
+            Self::LessOrEqual => "<=",
+            Self::Is => "IS",
+            Self::IsNot => "IS NOT",
+            Self::Add => "+",
+            Self::Subtract => "-",
+            Self::Multiply => "*",
+            Self::Divide => "/",
         };
-        write!(f, "{}", op)
+        f.write_str(op)
     }
 }
 

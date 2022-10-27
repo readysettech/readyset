@@ -1,15 +1,13 @@
 use std::iter;
 
 use launchpad::redacted::Sensitive;
-use nom_sql::{
-    BinaryOperator, Column, Expr as AstExpr, FunctionExpr, InValue, Relation, UnaryOperator,
-};
+use nom_sql::{Column, Expr as AstExpr, FunctionExpr, InValue, Relation, UnaryOperator};
 use readyset_data::dialect::SqlEngine;
 use readyset_data::{DfType, DfValue};
 use readyset_errors::{internal, invalid_err, unsupported, ReadySetError, ReadySetResult};
 use vec1::Vec1;
 
-use crate::{BuiltinFunction, Dialect, Expr};
+use crate::{BinaryOperator, BuiltinFunction, Dialect, Expr};
 
 /// Context supplied to expression lowering to allow resolving references to objects within the
 /// schema
@@ -374,6 +372,8 @@ impl Expr {
                 Ok(Self::Column { index, ty })
             }
             AstExpr::BinaryOp { lhs, op, rhs } => {
+                let op = BinaryOperator::from_sql_op(op, dialect);
+
                 // TODO: Consider rhs and op when inferring type
                 let left = Box::new(Self::lower(*lhs, dialect, context.clone())?);
                 let ty = left.ty().clone();

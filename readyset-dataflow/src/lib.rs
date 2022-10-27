@@ -56,7 +56,7 @@ pub type Readers = Arc<Mutex<ReaderMap>>;
 pub type DomainConfig = domain::Config;
 
 pub use dataflow_expression::{
-    BuiltinFunction, Expr, LowerContext, PostLookup, PostLookupAggregate,
+    BinaryOperator, BuiltinFunction, Expr, LowerContext, PostLookup, PostLookupAggregate,
     PostLookupAggregateFunction, PostLookupAggregates, ReaderProcessing,
 };
 pub use dataflow_state::{DurabilityMode, PersistenceParameters};

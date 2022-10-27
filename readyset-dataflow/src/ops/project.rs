@@ -249,8 +249,8 @@ impl Ingredient for Project {
 #[cfg(test)]
 mod tests {
     use dataflow_expression::utils::{make_int_column, make_literal};
+    use dataflow_expression::BinaryOperator;
     use dataflow_state::MaterializedNodeState;
-    use nom_sql::BinaryOperator;
     use readyset_data::DfType;
     use Expr::Op;
 

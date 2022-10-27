@@ -22,10 +22,12 @@ use dataflow::ops::join::{Join, JoinSource, JoinType};
 use dataflow::ops::project::Project;
 use dataflow::ops::union::{self, Union};
 use dataflow::utils::{dataflow_column, make_columns};
-use dataflow::{DurabilityMode, Expr as DfExpr, PersistenceParameters, ReaderProcessing};
+use dataflow::{
+    BinaryOperator, DurabilityMode, Expr as DfExpr, PersistenceParameters, ReaderProcessing,
+};
 use futures::StreamExt;
 use itertools::Itertools;
-use nom_sql::{parse_query, BinaryOperator, OrderType, Relation, SqlQuery};
+use nom_sql::{parse_query, OrderType, Relation, SqlQuery};
 use readyset::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use readyset::consistency::Timestamp;
 use readyset::internal::LocalNodeIndex;

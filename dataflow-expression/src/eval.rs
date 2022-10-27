@@ -1,11 +1,10 @@
 use std::borrow::Borrow;
 
-use nom_sql::BinaryOperator;
 use readyset_data::{DfType, DfValue};
 use readyset_errors::{ReadySetError, ReadySetResult};
 
 use crate::like::{CaseInsensitive, CaseSensitive, LikePattern};
-use crate::Expr;
+use crate::{BinaryOperator, Expr};
 
 macro_rules! non_null {
     ($df_value:expr) => {

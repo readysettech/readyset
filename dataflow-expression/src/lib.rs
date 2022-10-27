@@ -1,7 +1,7 @@
 #![feature(box_patterns, let_else)]
 
 mod eval;
-mod like;
+pub mod like;
 mod lower;
 mod post_lookup;
 pub mod utils;
@@ -10,7 +10,7 @@ use std::fmt;
 use std::fmt::Formatter;
 
 use itertools::Itertools;
-use nom_sql::{BinaryOperator, SqlType};
+use nom_sql::{BinaryOperator as SqlBinaryOperator, SqlType};
 pub use readyset_data::Dialect;
 use readyset_data::{DfType, DfValue};
 use serde::{Deserialize, Serialize};
@@ -165,6 +165,123 @@ impl fmt::Display for BuiltinFunction {
                 write!(f, "({})", args.iter().join(", "))
             }
         }
+    }
+}
+
+/// Binary infix operators with [`Expr`] on both the left- and right-hand sides
+///
+/// This type is used as the operator in [`Expr::BinaryOp`].
+///
+/// Note that because all binary operators have expressions on both sides, SQL `IN` is not a binary
+/// operator - since it must have either a subquery or a list of expressions on its right-hand side
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub enum BinaryOperator {
+    /// `AND`
+    And,
+
+    /// `OR`
+    Or,
+
+    /// `LIKE`
+    Like,
+
+    /// `NOT LIKE`
+    NotLike,
+
+    /// `ILIKE`
+    ILike,
+
+    /// `NOT ILIKE`
+    NotILike,
+
+    /// `=`
+    Equal,
+
+    /// `!=` or `<>`
+    NotEqual,
+
+    /// `>`
+    Greater,
+
+    /// `>=`
+    GreaterOrEqual,
+
+    /// `<`
+    Less,
+
+    /// `<=`
+    LessOrEqual,
+
+    /// `IS`
+    Is,
+
+    /// `IS NOT`
+    IsNot,
+
+    /// `+`
+    Add,
+
+    /// `-`
+    Subtract,
+
+    /// `*`
+    Multiply,
+
+    /// `/`
+    Divide,
+}
+
+impl BinaryOperator {
+    /// Converts from a [`nom_sql::BinaryOperator`] within the context of a SQL [`Dialect`].
+    pub fn from_sql_op(op: SqlBinaryOperator, _dialect: Dialect) -> Self {
+        // TODO: Use dialect for future operators, such as JSON extraction arrows.
+        use SqlBinaryOperator::*;
+        match op {
+            And => Self::And,
+            Or => Self::Or,
+            Greater => Self::Greater,
+            GreaterOrEqual => Self::GreaterOrEqual,
+            Less => Self::Less,
+            LessOrEqual => Self::LessOrEqual,
+            Add => Self::Add,
+            Subtract => Self::Subtract,
+            Multiply => Self::Multiply,
+            Divide => Self::Divide,
+            Like => Self::Like,
+            NotLike => Self::NotLike,
+            ILike => Self::ILike,
+            NotILike => Self::NotILike,
+            Equal => Self::Equal,
+            NotEqual => Self::NotEqual,
+            Is => Self::Is,
+            IsNot => Self::IsNot,
+        }
+    }
+}
+
+impl fmt::Display for BinaryOperator {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let op = match *self {
+            Self::And => "AND",
+            Self::Or => "OR",
+            Self::Like => "LIKE",
+            Self::NotLike => "NOT LIKE",
+            Self::ILike => "ILIKE",
+            Self::NotILike => "NOT ILIKE",
+            Self::Equal => "=",
+            Self::NotEqual => "!=",
+            Self::Greater => ">",
+            Self::GreaterOrEqual => ">=",
+            Self::Less => "<",
+            Self::LessOrEqual => "<=",
+            Self::Is => "IS",
+            Self::IsNot => "IS NOT",
+            Self::Add => "+",
+            Self::Subtract => "-",
+            Self::Multiply => "*",
+            Self::Divide => "/",
+        };
+        f.write_str(op)
     }
 }
 

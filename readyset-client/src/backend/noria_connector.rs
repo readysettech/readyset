@@ -5,7 +5,7 @@ use std::fmt;
 use std::ops::Bound;
 use std::sync::{atomic, Arc, RwLock};
 
-use dataflow_expression::Expr as DfExpr;
+use dataflow_expression::{BinaryOperator as DfBinaryOperator, Expr as DfExpr};
 use itertools::Itertools;
 use launchpad::redacted::Sensitive;
 use nom_sql::analysis::visit::Visitor;
@@ -1462,6 +1462,7 @@ impl NoriaConnector {
             self.read_behavior,
             self.read_request_handler.as_mut(),
             event,
+            self.dialect,
         )
         .await;
 
@@ -1524,6 +1525,7 @@ fn verify_no_placeholders(statement: &mut SelectStatement, query: &str) -> Ready
 
 /// Build a [`ViewQuery`] for performing a lookup of the given `q` with the given `raw_keys`,
 /// provided `getter_schema` and `key_map` from the [`View`] itself.
+#[allow(clippy::too_many_arguments)]
 fn build_view_query(
     getter_schema: &ViewSchema,
     key_map: &[(ViewPlaceholder, KeyColumnIdx)],
@@ -1532,6 +1534,7 @@ fn build_view_query(
     q: &nom_sql::SelectStatement,
     ticket: Option<Timestamp>,
     read_behavior: ReadBehavior,
+    dialect: Dialect,
 ) -> ReadySetResult<ViewQuery> {
     let projected_schema = getter_schema.schema(SchemaType::ProjectedSchema);
 
@@ -1580,7 +1583,7 @@ fn build_view_query(
                     index: column,
                     ty: key_type.clone(),
                 }),
-                op: *op,
+                op: DfBinaryOperator::from_sql_op(*op, dialect),
                 right: Box::new(DfExpr::Literal {
                     val: value,
                     ty: key_type.clone(),
@@ -1634,7 +1637,7 @@ fn build_view_query(
                             // also, no from_ty since the key value is a literal
                             let value = key[*idx - 1].coerce_to(key_type, &DfType::Unknown)?;
 
-                            let make_op = |op| DfExpr::Op {
+                            let make_op = |op: DfBinaryOperator| DfExpr::Op {
                                 left: Box::new(DfExpr::Column {
                                     index: *key_column_idx,
                                     ty: key_type.clone(),
@@ -1662,22 +1665,22 @@ fn build_view_query(
                                         upper_bound.push(value);
                                     }
                                     BinaryOperator::GreaterOrEqual => {
-                                        filters.push(make_op(BinaryOperator::GreaterOrEqual));
+                                        filters.push(make_op(DfBinaryOperator::GreaterOrEqual));
                                         lower_bound.push(value);
                                         upper_bound.push(DfValue::Max);
                                     }
                                     BinaryOperator::LessOrEqual => {
-                                        filters.push(make_op(BinaryOperator::LessOrEqual));
+                                        filters.push(make_op(DfBinaryOperator::LessOrEqual));
                                         lower_bound.push(DfValue::None); // NULL is the minimum DfValue
                                         upper_bound.push(value);
                                     }
                                     BinaryOperator::Greater => {
-                                        filters.push(make_op(BinaryOperator::Greater));
+                                        filters.push(make_op(DfBinaryOperator::Greater));
                                         lower_bound.push(value);
                                         upper_bound.push(DfValue::Max);
                                     }
                                     BinaryOperator::Less => {
-                                        filters.push(make_op(BinaryOperator::Less));
+                                        filters.push(make_op(DfBinaryOperator::Less));
                                         lower_bound.push(DfValue::None); // NULL is the minimum DfValue
                                         upper_bound.push(value);
                                     }
@@ -1688,7 +1691,10 @@ fn build_view_query(
                                 }
                             } else {
                                 if !k.is_empty() && binop_to_use != BinaryOperator::Equal {
-                                    filters.push(make_op(binop_to_use));
+                                    filters.push(make_op(DfBinaryOperator::from_sql_op(
+                                        binop_to_use,
+                                        dialect,
+                                    )));
                                 }
                                 k.push(value);
                             }
@@ -1748,7 +1754,7 @@ fn build_view_query(
         block: read_behavior.is_blocking(),
         filter: filters.into_iter().reduce(|expr1, expr2| DfExpr::Op {
             left: Box::new(expr1),
-            op: BinaryOperator::And,
+            op: DfBinaryOperator::And,
             right: Box::new(expr2),
             ty: DfType::Bool, // AND is a boolean operator
         }),
@@ -1771,6 +1777,7 @@ async fn do_read<'a>(
     read_behavior: ReadBehavior,
     read_request_handler: Option<&'a mut ReadRequestHandler>,
     event: &mut readyset_client_metrics::QueryExecutionEvent,
+    dialect: Dialect,
 ) -> ReadySetResult<QueryResult<'a>> {
     let (limit, _) = processed_query_params.limit_offset_params(params)?;
     if limit == Some(0) {
@@ -1787,6 +1794,7 @@ async fn do_read<'a>(
         q,
         ticket,
         read_behavior,
+        dialect,
     )?;
 
     event.num_keys = Some(vq.key_comparisons.len() as _);
@@ -1903,6 +1911,7 @@ mod tests {
     }
 
     mod build_view_query {
+        use dataflow_expression::Dialect as DfDialect;
         use lazy_static::lazy_static;
         use nom_sql::{parse_query, Column, Dialect, SelectStatement};
         use readyset::ColumnBase;
@@ -1977,7 +1986,13 @@ mod tests {
             query: &str,
             key_map: &[(ViewPlaceholder, KeyColumnIdx)],
             params: &[DfValue],
+            dialect: Dialect,
         ) -> ViewQuery {
+            let dataflow_dialect = match dialect {
+                Dialect::MySQL => DfDialect::DEFAULT_MYSQL,
+                Dialect::PostgreSQL => DfDialect::DEFAULT_POSTGRESQL,
+            };
+
             let mut q = parse_select_statement(query);
             let pp = rewrite::process_query(&mut q, true).unwrap();
             build_view_query(
@@ -1988,6 +2003,7 @@ mod tests {
                 &q,
                 None,
                 ReadBehavior::Blocking,
+                dataflow_dialect,
             )
             .unwrap()
         }
@@ -1998,6 +2014,7 @@ mod tests {
                 "SELECT t.x FROM t WHERE t.x = $1",
                 &[(ViewPlaceholder::OneToOne(1), 0)],
                 &[DfValue::from(1)],
+                Dialect::MySQL,
             );
 
             assert!(query.filter.is_none());
@@ -2013,6 +2030,7 @@ mod tests {
                 "SELECT t.x FROM t WHERE t.x BETWEEN $1 AND $2",
                 &[(ViewPlaceholder::Between(1, 2), 0)],
                 &[DfValue::from(1), DfValue::from(2)],
+                Dialect::MySQL,
             );
 
             assert!(query.filter.is_none());
@@ -2033,6 +2051,7 @@ mod tests {
                     (ViewPlaceholder::OneToOne(2), 1),
                 ],
                 &[DfValue::from(1), DfValue::from("%a%")],
+                Dialect::MySQL,
             );
 
             assert_eq!(
@@ -2042,7 +2061,7 @@ mod tests {
                         index: 1,
                         ty: DfType::DEFAULT_TEXT
                     }),
-                    op: BinaryOperator::ILike,
+                    op: DfBinaryOperator::ILike,
                     right: Box::new(DfExpr::Literal {
                         val: DfValue::from("%a%"),
                         ty: DfType::DEFAULT_TEXT
@@ -2061,6 +2080,7 @@ mod tests {
                     (ViewPlaceholder::OneToOne(1), 0),
                 ],
                 &[DfValue::from(1), DfValue::from("a")],
+                Dialect::MySQL,
             );
 
             assert_eq!(
@@ -2081,6 +2101,7 @@ mod tests {
                     (ViewPlaceholder::Between(1, 2), 0),
                 ],
                 &[DfValue::from(1), DfValue::from(2), DfValue::from("a")],
+                Dialect::MySQL,
             );
 
             assert!(query.filter.is_none());
@@ -2102,6 +2123,7 @@ mod tests {
                     (ViewPlaceholder::OneToOne(1), 0),
                 ],
                 &[DfValue::from(1), DfValue::from("a")],
+                Dialect::MySQL,
             );
 
             assert_eq!(
@@ -2111,7 +2133,7 @@ mod tests {
                         index: 0,
                         ty: DfType::Int
                     }),
-                    op: BinaryOperator::Greater,
+                    op: DfBinaryOperator::Greater,
                     right: Box::new(DfExpr::Literal {
                         val: 1.into(),
                         ty: DfType::Int
@@ -2137,6 +2159,7 @@ mod tests {
                     (ViewPlaceholder::OneToOne(2), 1),
                 ],
                 &[DfValue::from(1), DfValue::from("a")],
+                Dialect::MySQL,
             );
 
             assert_eq!(
@@ -2146,7 +2169,7 @@ mod tests {
                         index: 1,
                         ty: DfType::DEFAULT_TEXT
                     }),
-                    op: BinaryOperator::Greater,
+                    op: DfBinaryOperator::Greater,
                     right: Box::new(DfExpr::Literal {
                         val: "a".into(),
                         ty: DfType::DEFAULT_TEXT
@@ -2179,6 +2202,7 @@ mod tests {
                     ),
                 ],
                 &[DfValue::from(1), DfValue::from(3)],
+                Dialect::MySQL,
             );
 
             assert_eq!(query.filter, None);
