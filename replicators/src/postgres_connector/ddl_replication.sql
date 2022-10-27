@@ -175,6 +175,42 @@ END $$;
 
 ----
 
+CREATE OR REPLACE FUNCTION readyset.replicate_create_type()
+RETURNS event_trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    create_message text;
+BEGIN
+    SELECT
+        json_build_object(
+            'schema', schema_name,
+            'data', json_build_object('CreateType', json_build_object(
+                'oid', t.oid::int,
+                'name', t.typname,
+                'variants', json_agg(json_build_object(
+                    'oid', e.oid::int,
+                    'label', e.enumlabel
+                ) ORDER BY e.enumsortorder ASC)
+            ))
+        )
+    INTO create_message
+    FROM pg_event_trigger_ddl_commands() object
+    JOIN pg_catalog.pg_type t
+      ON t.oid = object.objid
+    JOIN pg_catalog.pg_enum e
+      ON e.enumtypid = t.oid
+    GROUP BY object.objid, object.schema_name, t.oid;
+
+    IF readyset.is_pre14() THEN
+        UPDATE readyset.ddl_replication_log SET "ddl" = create_message;
+    ELSE
+        PERFORM pg_logical_emit_message(true, 'readyset', create_message);
+    END IF;
+END $$;
+
+----
+
 DROP EVENT TRIGGER IF EXISTS readyset_replicate_create_table;
 CREATE EVENT TRIGGER readyset_replicate_create_table
     ON ddl_command_end
@@ -198,3 +234,9 @@ CREATE EVENT TRIGGER readyset_replicate_drop
     ON sql_drop
     WHEN TAG IN ('DROP TABLE', 'DROP VIEW')
     EXECUTE PROCEDURE readyset.replicate_drop();
+
+DROP EVENT TRIGGER IF EXISTS readyset_replicate_create_type;
+CREATE EVENT TRIGGER readyset_replicate_create_type
+    ON ddl_command_end
+    WHEN TAG IN ('CREATE TYPE')
+    EXECUTE PROCEDURE readyset.replicate_create_type();

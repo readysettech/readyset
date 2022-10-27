@@ -44,6 +44,7 @@ use nom_sql::{
 };
 use pgsql::tls::MakeTlsConnect;
 use readyset::recipe::changelist::Change;
+use readyset_data::{DfType, Dialect as DataDialect};
 use readyset_errors::ReadySetResult;
 use serde::{Deserialize, Deserializer};
 use tokio_postgres as pgsql;
@@ -95,6 +96,12 @@ pub(crate) struct DdlCreateTableConstraint {
     definition: TableKey,
 }
 
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+pub(crate) struct DdlEnumVariant {
+    oid: u32,
+    label: String,
+}
+
 macro_rules! make_parse_deserialize_with {
     ($name: ident -> $res: ty) => {
         make_parse_deserialize_with!($name -> $res, $name);
@@ -126,6 +133,11 @@ pub(crate) enum DdlEventData {
     CreateView(#[serde(deserialize_with = "parse_create_view_statement")] CreateViewStatement),
     DropTable(String),
     DropView(String),
+    CreateType {
+        oid: u32,
+        name: String,
+        variants: Vec<DdlEnumVariant>,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -192,6 +204,20 @@ impl DdlEvent {
             DdlEventData::DropView(name) | DdlEventData::DropTable(name) => Change::Drop {
                 name: name.into(),
                 if_exists: false,
+            },
+            DdlEventData::CreateType {
+                oid: _,
+                name,
+                variants,
+            } => Change::CreateType {
+                name: Relation {
+                    schema: Some(self.schema.into()),
+                    name: name.into(),
+                },
+                ty: DfType::from_enum_variants(
+                    variants.into_iter().map(|v| v.label.into()),
+                    DataDialect::DEFAULT_POSTGRESQL,
+                ),
             },
         }
     }
@@ -519,6 +545,27 @@ mod tests {
 
         let ddl = get_last_ddl(&client, "drop_table").await.unwrap();
         assert_eq!(ddl.data, DdlEventData::DropTable("t".into()));
+    }
+
+    #[tokio::test]
+    async fn create_type() {
+        let client = setup("create_type").await;
+        client
+            .simple_query("create type abc as enum ('a', 'b', 'c')")
+            .await
+            .unwrap();
+
+        let ddl = get_last_ddl(&client, "create_type").await.unwrap();
+        match ddl.data {
+            DdlEventData::CreateType { name, variants, .. } => {
+                assert_eq!(name, "abc");
+                assert_eq!(
+                    variants.into_iter().map(|v| v.label).collect::<Vec<_>>(),
+                    vec!["a", "b", "c"]
+                );
+            }
+            _ => panic!(),
+        }
     }
 
     #[tokio::test]
