@@ -230,6 +230,7 @@ async fn proxy_unsupported_type() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[serial]
 async fn generated_columns() {
     // Tests that we handle tables that have generated columns by not snapshotting them and falling
     // back to upstream
