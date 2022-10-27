@@ -56,6 +56,9 @@ pub struct RewriteContext<'a> {
     /// to create that table. Each key in this map should also exist in [`view_schemas`].
     pub base_schemas: &'a HashMap<Relation, CreateTableStatement>,
 
+    /// Map from schema name to the set of custom types in that schema
+    pub custom_types: &'a HashMap<&'a SqlIdentifier, HashSet<&'a SqlIdentifier>>,
+
     /// Ordered list of schema names to search in when resolving schema names of tables
     pub search_path: &'a [SqlIdentifier],
 
@@ -103,6 +106,7 @@ impl Rewrite for CreateTableStatement {
         Ok(self
             .resolve_schemas(
                 context.tables(),
+                context.custom_types,
                 context.search_path,
                 context.invalidating_tables.as_deref_mut(),
             )
@@ -118,6 +122,7 @@ impl Rewrite for SelectStatement {
             .strip_post_filters()
             .resolve_schemas(
                 context.tables(),
+                context.custom_types,
                 context.search_path,
                 context.invalidating_tables.as_deref_mut(),
             )

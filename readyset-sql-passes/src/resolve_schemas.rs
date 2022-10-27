@@ -5,11 +5,14 @@
 use std::collections::{HashMap, HashSet};
 
 use nom_sql::analysis::visit::{self, walk_select_statement, Visitor};
-use nom_sql::{CreateTableStatement, Relation, SelectStatement, SqlIdentifier, TableExpr};
+use nom_sql::{CreateTableStatement, Relation, SelectStatement, SqlIdentifier, SqlType, TableExpr};
 
 struct ResolveSchemaVisitor<'schema> {
     /// Map from schema name to the set of table names in that schema
     tables: HashMap<&'schema SqlIdentifier, HashSet<&'schema SqlIdentifier>>,
+
+    /// Map from schema name to the set of custom types in that schema
+    custom_types: &'schema HashMap<&'schema SqlIdentifier, HashSet<&'schema SqlIdentifier>>,
 
     /// List of schema names to use to resolve schemas for tables. Schemas earlier in this list
     /// will take precedence over schemas later in this list
@@ -34,6 +37,23 @@ impl<'schema> ResolveSchemaVisitor<'schema> {
 
 impl<'ast, 'schema> Visitor<'ast> for ResolveSchemaVisitor<'schema> {
     type Error = !;
+
+    fn visit_sql_type(&mut self, sql_type: &'ast mut nom_sql::SqlType) -> Result<(), Self::Error> {
+        if let SqlType::Other(ty) = sql_type {
+            if ty.schema.is_none() {
+                if let Some(schema) = self.search_path.iter().find(|schema| {
+                    self.custom_types
+                        .get(schema)
+                        .into_iter()
+                        .any(|tys| tys.contains(&ty.name))
+                }) {
+                    ty.schema = Some(schema.clone());
+                }
+            }
+        }
+
+        visit::walk_sql_type(self, sql_type)
+    }
 
     fn visit_select_statement(
         &mut self,
@@ -142,6 +162,7 @@ pub trait ResolveSchemas {
     fn resolve_schemas<'schema>(
         self,
         tables: HashMap<&'schema SqlIdentifier, HashSet<&'schema SqlIdentifier>>,
+        custom_types: &'schema HashMap<&'schema SqlIdentifier, HashSet<&'schema SqlIdentifier>>,
         search_path: &'schema [SqlIdentifier],
         invalidating_tables: Option<&'schema mut Vec<Relation>>,
     ) -> Self;
@@ -151,11 +172,13 @@ impl ResolveSchemas for SelectStatement {
     fn resolve_schemas<'schema>(
         mut self,
         tables: HashMap<&'schema SqlIdentifier, HashSet<&'schema SqlIdentifier>>,
+        custom_types: &'schema HashMap<&'schema SqlIdentifier, HashSet<&'schema SqlIdentifier>>,
         search_path: &'schema [SqlIdentifier],
         invalidating_tables: Option<&'schema mut Vec<Relation>>,
     ) -> Self {
         let Ok(()) = ResolveSchemaVisitor {
             tables,
+            custom_types,
             search_path,
             alias_stack: Default::default(),
             invalidating_tables,
@@ -170,11 +193,13 @@ impl ResolveSchemas for CreateTableStatement {
     fn resolve_schemas<'schema>(
         mut self,
         tables: HashMap<&'schema SqlIdentifier, HashSet<&'schema SqlIdentifier>>,
+        custom_types: &'schema HashMap<&'schema SqlIdentifier, HashSet<&'schema SqlIdentifier>>,
         search_path: &'schema [SqlIdentifier],
         invalidating_tables: Option<&'schema mut Vec<Relation>>,
     ) -> Self {
         let Ok(()) = ResolveSchemaVisitor {
             tables,
+            custom_types,
             search_path,
             alias_stack: Default::default(),
             invalidating_tables,
@@ -210,6 +235,7 @@ mod tests {
                 ),
                 (&"s3".into(), HashSet::from([&"t4".into()])),
             ]),
+            &HashMap::from([(&"s2".into(), HashSet::from([&"abc".into()]))]),
             &["s1".into(), "s2".into()],
             None,
         );
@@ -265,6 +291,24 @@ mod tests {
         )
     }
 
+    #[test]
+    fn select_with_cast_to_custom_type() {
+        rewrites_to(
+            "select cast(t1.x as abc) from t1",
+            "select cast(s1.t1.x as s2.abc) from s1.t1",
+            |s| nom_sql::parse_select_statement(Dialect::PostgreSQL, s).unwrap(),
+        )
+    }
+
+    #[test]
+    fn select_with_cast_to_custom_type_array() {
+        rewrites_to(
+            "select cast(t1.x as abc[][]) from t1",
+            "select cast(s1.t1.x as s2.abc[][]) from s1.t1",
+            |s| nom_sql::parse_select_statement(Dialect::PostgreSQL, s).unwrap(),
+        )
+    }
+
     #[track_caller]
     fn create_table_rewrites_to(input: &str, expected: &str) {
         rewrites_to(input, expected, |s| {
@@ -297,11 +341,30 @@ mod tests {
     }
 
     #[test]
+    fn create_table_with_custom_type() {
+        rewrites_to(
+            "create table t (x abc)",
+            "create table s1.t (x s2.abc)",
+            |s| parse_create_table(Dialect::PostgreSQL, s).unwrap(),
+        );
+    }
+
+    #[test]
+    fn create_table_with_array_of_custom_type() {
+        rewrites_to(
+            "create table t (x abc[][])",
+            "create table s1.t (x s2.abc[][])",
+            |s| parse_create_table(Dialect::PostgreSQL, s).unwrap(),
+        );
+    }
+
+    #[test]
     fn writes_to_invalidating_tables() {
         let input = parse_select_statement("select * from t");
         let mut invalidating_tables = vec![];
         let _result = input.resolve_schemas(
             HashMap::from([(&"s2".into(), HashSet::from([&"t".into()]))]),
+            &HashMap::new(),
             &["s1".into(), "s2".into()],
             Some(&mut invalidating_tables),
         );

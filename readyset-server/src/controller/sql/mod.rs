@@ -144,6 +144,14 @@ impl SqlIncorporator {
         stmt.rewrite(&mut RewriteContext {
             view_schemas: &self.view_schemas,
             base_schemas: &self.base_schemas,
+            custom_types: &self
+                .custom_types
+                .keys()
+                .filter_map(|t| Some((t.schema.as_ref()?, &t.name)))
+                .fold(HashMap::new(), |mut acc, (schema, name)| {
+                    acc.entry(schema).or_default().insert(name);
+                    acc
+                }),
             search_path,
             dialect,
             invalidating_tables,
