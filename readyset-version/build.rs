@@ -55,7 +55,7 @@ fn set_platform() {
 
 /// Set RUSTC_VERSION to one of the following, in order:
 /// - $RUSTC_VERSION
-/// - $HOST (set by cargo)
+/// - $(rustc --version)
 /// - "unknown-rustc-version"
 fn set_rustc_version() {
     let maybe_rustc_version = || {
@@ -92,7 +92,7 @@ fn env_or_unknown(env: &str, unknown: &str) {
     env_or_unknown_with_fallback(env, unknown, || None)
 }
 
-/// Sets cargo::rustc-env=$env if it is set,
+/// Sets cargo::rustc-env=$env if it is set and not empty,
 /// otherwise runs fallback and sets it to that if it returns Some,
 /// Otherwise sets it to unknown-$unknown
 fn env_or_unknown_with_fallback<F>(env: &str, unknown: &str, fallback: F)
@@ -101,8 +101,10 @@ where
 {
     println!("cargo:rerun-if-env-changed={env}");
     let rustc_env = std::env::var(env)
+        .ok()
         .map(|s| s.trim().to_owned())
-        .unwrap_or_else(|_|
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(||
             fallback().unwrap_or_else(|| {
             println!("cargo:warning=Failed to get {unknown} from either CI env or local repository. It will be absent from run-time version information.");
             format!("unknown-{unknown}")
