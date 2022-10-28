@@ -2,11 +2,23 @@ use std::fmt;
 
 use enum_kinds::EnumKind;
 use itertools::Itertools;
-use nom_sql::{EnumVariants, Literal, Relation, SqlType};
+use nom_sql::{EnumVariants, Literal, Relation, SqlIdentifier, SqlType};
 use readyset_errors::{unsupported_err, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
 use crate::{Collation, Dialect};
+
+/// Metadata about a postgresql enum type, optionally stored inside of `DfType::Enum` for enum types
+/// that originate in postgres
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+pub struct PgEnumMetadata {
+    /// The name of the enum type
+    pub name: SqlIdentifier,
+    /// The postgres schema that the enum type is in
+    pub schema: SqlIdentifier,
+    /// The postgres `oid` of the enum type
+    pub oid: u32,
+}
 
 /// Dataflow runtime representation of [`SqlType`].
 ///
@@ -154,9 +166,9 @@ pub enum DfType {
     Enum {
         variants: EnumVariants,
 
-        /// For PostgreSQL enums, the OID of the enum type in the upstream database that we've
-        /// replicated from. For MySQL enums, this will always be `None`.
-        oid: Option<u32>,
+        /// Metadata about the enum type for PostgreSQL enums. For MySQL enums, this will always be
+        /// `None`.
+        metadata: Option<PgEnumMetadata>,
 
         dialect: Dialect,
     },
@@ -216,7 +228,7 @@ impl DfType {
                 // PERF: Cloning variants is O(1).
                 variants: variants.clone(),
                 dialect,
-                oid: None,
+                metadata: None,
             },
 
             // FIXME(ENG-1650): Convert to `tinyint(1)` for MySQL.
@@ -292,10 +304,14 @@ impl DfType {
 }
 
 impl DfType {
-    /// Creates a [`DfType::Enum`] instance from a sequence of variant names, a dialect, and an
-    /// `oid`
+    /// Creates a [`DfType::Enum`] instance from a sequence of variant names, a dialect, and
+    /// optional metadata about the enum if it originated in a postgresql database
     #[inline]
-    pub fn from_enum_variants<I>(variants: I, dialect: Dialect, oid: Option<u32>) -> Self
+    pub fn from_enum_variants<I>(
+        variants: I,
+        dialect: Dialect,
+        metadata: Option<PgEnumMetadata>,
+    ) -> Self
     where
         I: IntoIterator<Item = Literal>,
         I::IntoIter: ExactSizeIterator, // required by `triomphe::ThinArc`
@@ -303,7 +319,7 @@ impl DfType {
         Self::Enum {
             variants: variants.into(),
             dialect,
-            oid,
+            metadata,
         }
     }
 

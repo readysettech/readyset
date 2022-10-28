@@ -235,6 +235,13 @@ impl From<SqlIdentifier> for String {
     }
 }
 
+impl From<&SqlIdentifier> for String {
+    #[inline]
+    fn from(ident: &SqlIdentifier) -> Self {
+        ident.as_str().to_owned()
+    }
+}
+
 impl<'a> From<Cow<'a, str>> for SqlIdentifier {
     #[inline]
     fn from(s: Cow<str>) -> Self {

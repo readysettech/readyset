@@ -44,7 +44,7 @@ mod r#type;
 pub use crate::array::Array;
 pub use crate::collation::Collation;
 pub use crate::dialect::Dialect;
-pub use crate::r#type::{DfType, PgTypeCategory};
+pub use crate::r#type::{DfType, PgEnumMetadata, PgTypeCategory};
 pub use crate::text::{Text, TinyText};
 pub use crate::timestamp::{TimestampTz, TIMESTAMP_FORMAT, TIMESTAMP_PARSE_FORMAT};
 

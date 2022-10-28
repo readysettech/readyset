@@ -507,7 +507,7 @@ pub(crate) mod tests {
         parse_expr, BinaryOperator as AstBinaryOperator, Dialect as ParserDialect, Float, Literal,
         SqlType,
     };
-    use readyset_data::Collation;
+    use readyset_data::{Collation, PgEnumMetadata};
 
     use super::*;
 
@@ -602,7 +602,11 @@ pub(crate) mod tests {
         let enum_ty = DfType::from_enum_variants(
             ["foo".into(), "bar".into()],
             Dialect::DEFAULT_POSTGRESQL,
-            Some(12345),
+            Some(PgEnumMetadata {
+                name: "custom".into(),
+                schema: "something".into(),
+                oid: 12345,
+            }),
         );
         let result = Expr::lower(
             input,

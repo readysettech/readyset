@@ -12,7 +12,7 @@ use postgres_types::{accepts, FromSql, Kind, Type};
 use readyset::metrics::recorded;
 use readyset::recipe::changelist::{Change, ChangeList};
 use readyset::{ReadySetError, ReadySetResult};
-use readyset_data::{DfType, DfValue, Dialect as DataDialect};
+use readyset_data::{DfType, DfValue, Dialect as DataDialect, PgEnumMetadata};
 use readyset_errors::{internal, internal_err, unsupported};
 use tokio_postgres as pgsql;
 use tracing::{debug, error, info, info_span, trace, Instrument};
@@ -517,15 +517,18 @@ impl<'a> PostgresReplicator<'a> {
                     continue;
                 }
             };
-            let oid = ty.oid;
             let changelist = ChangeList::from_change(
                 Change::CreateType {
-                    name: ty.into_relation(),
                     ty: DfType::from_enum_variants(
                         variants.into_iter().map(|v| v.label.into()),
                         DataDialect::DEFAULT_POSTGRESQL,
-                        Some(oid),
+                        Some(PgEnumMetadata {
+                            name: ty.name.clone().into(),
+                            schema: ty.schema.clone().into(),
+                            oid: ty.oid,
+                        }),
                     ),
+                    name: ty.into_relation(),
                 },
                 DataDialect::DEFAULT_POSTGRESQL,
             );
