@@ -47,3 +47,54 @@ pub fn make_call(func: BuiltinFunction) -> Expr {
         ty: DfType::Unknown,
     }
 }
+
+/// Indexes into a slice, using reverse indexing if negative.
+#[inline]
+pub fn index_bidirectional<T>(slice: &[T], index: isize) -> Option<&T> {
+    let index = if index.is_negative() {
+        // Addition of a negative value is subtraction of the absolute value.
+        slice.len().wrapping_add(index as usize)
+    } else {
+        index as usize
+    };
+    slice.get(index)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    mod index_bidirectional {
+        use super::*;
+
+        /// Ensures correct bounds checking.
+        #[test]
+        fn bounds() {
+            assert_eq!(index_bidirectional::<()>(&[], -1), None);
+            assert_eq!(index_bidirectional::<()>(&[], 0), None);
+            assert_eq!(index_bidirectional::<()>(&[], 1), None);
+
+            assert_eq!(index_bidirectional(&[1], -2), None);
+            assert_eq!(index_bidirectional(&[1], 1), None);
+        }
+
+        /// Ensures correct results for the simple/edge case.
+        #[test]
+        fn single() {
+            assert_eq!(index_bidirectional(&[1], 0), Some(&1));
+            assert_eq!(index_bidirectional(&[1], -1), Some(&1));
+        }
+
+        /// Ensures correct results for the common case.
+        #[test]
+        fn multi() {
+            assert_eq!(index_bidirectional(&[1, 2, 3], 0), Some(&1));
+            assert_eq!(index_bidirectional(&[1, 2, 3], 1), Some(&2));
+            assert_eq!(index_bidirectional(&[1, 2, 3], 2), Some(&3));
+
+            assert_eq!(index_bidirectional(&[1, 2, 3], -1), Some(&3));
+            assert_eq!(index_bidirectional(&[1, 2, 3], -2), Some(&2));
+            assert_eq!(index_bidirectional(&[1, 2, 3], -3), Some(&1));
+        }
+    }
+}
