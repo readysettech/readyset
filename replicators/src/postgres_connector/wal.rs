@@ -7,7 +7,6 @@
 use std::convert::{TryFrom, TryInto};
 
 use bytes::Bytes;
-use postgres_types::Type;
 
 /// An parse error
 #[derive(Debug)]
@@ -44,7 +43,7 @@ pub enum WalError {
     ToastNotSupported,
     ReadySetError(readyset::ReadySetError),
     UnsupportedTypeConversion {
-        ty: Type,
+        type_oid: u32,
         schema: Bytes,
         table: Bytes,
     },
@@ -304,8 +303,8 @@ pub struct ColumnSpec {
     pub(crate) flags: i8,
     /// Name of the column.
     pub(crate) name: Bytes,
-    /// ID of the column's data type.
-    pub(crate) data_type: postgres_types::Type,
+    /// Postgres `oid` of the column's data type.
+    pub(crate) type_oid: u32,
     /// Type modifier of the column (atttypmod)
     pub(crate) type_modifier: i32,
 }
@@ -562,23 +561,14 @@ impl WalRecord {
                 return Err(WalError::CorruptRelation);
             }
 
-            let data_type = i32::from_be_bytes(b[0..4].try_into()?);
+            let type_oid = u32::from_be_bytes(b[0..4].try_into()?);
             let type_modifier = i32::from_be_bytes(b[4..8].try_into()?);
             let _ = b.split_to(8);
-
-            let data_type = postgres_types::Type::from_oid(data_type as _).unwrap_or_else(|| {
-                postgres_types::Type::new(
-                    "Unhandled type".to_string(),
-                    data_type as _,
-                    postgres_types::Kind::Pseudo,
-                    "Unhandled schema".to_string(),
-                )
-            });
 
             cols.push(ColumnSpec {
                 flags,
                 name,
-                data_type,
+                type_oid,
                 type_modifier,
             })
         }
@@ -809,25 +799,25 @@ mod tests {
                         ColumnSpec {
                             flags: 1,
                             name: Bytes::copy_from_slice(b"emp_no"),
-                            data_type: Type::INT4,
+                            type_oid: Type::INT4.oid(),
                             type_modifier: -1
                         },
                         ColumnSpec {
                             flags: 0,
                             name: Bytes::copy_from_slice(b"first_name"),
-                            data_type: Type::VARCHAR,
+                            type_oid: Type::VARCHAR.oid(),
                             type_modifier: 18
                         },
                         ColumnSpec {
                             flags: 0,
                             name: Bytes::copy_from_slice(b"last_name"),
-                            data_type: Type::VARCHAR,
+                            type_oid: Type::VARCHAR.oid(),
                             type_modifier: 20
                         },
                         ColumnSpec {
                             flags: 0,
                             name: Bytes::copy_from_slice(b"status"),
-                            data_type: Type::VARCHAR,
+                            type_oid: Type::VARCHAR.oid(),
                             type_modifier: 5
                         }
                     ]

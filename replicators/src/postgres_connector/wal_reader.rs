@@ -352,7 +352,15 @@ impl wal::TupleData {
                     // ReadySet type
                     let str = String::from_utf8_lossy(&text);
 
-                    let val = match spec.data_type.kind() {
+                    let unsupported_type_err = || WalError::UnsupportedTypeConversion {
+                        type_oid: spec.type_oid,
+                        schema: relation.schema.clone(),
+                        table: relation.name.clone(),
+                    };
+                    let pg_type =
+                        PGType::from_oid(spec.type_oid).ok_or_else(unsupported_type_err)?;
+
+                    let val = match pg_type.kind() {
                         Kind::Array(member_type) => {
                             let dialect = Dialect::DEFAULT_POSTGRESQL;
                             let subsecond_digits = dialect.default_subsecond_digits();
@@ -385,7 +393,7 @@ impl wal::TupleData {
                             DfValue::from(str.parse::<Array>()?)
                                 .coerce_to(&target_type, &DfType::Unknown)?
                         }
-                        _ => match spec.data_type {
+                        _ => match pg_type {
                             PGType::BOOL => DfValue::UnsignedInt(match str.as_ref() {
                                 "t" => true as _,
                                 "f" => false as _,
@@ -449,13 +457,7 @@ impl wal::TupleData {
                                 }
                                 DfValue::from(bits)
                             }
-                            ref t => {
-                                return Err(WalError::UnsupportedTypeConversion {
-                                    ty: t.clone(),
-                                    schema: relation.schema.clone(),
-                                    table: relation.name.clone(),
-                                });
-                            }
+                            _ => return Err(unsupported_type_err()),
                         },
                     };
 
