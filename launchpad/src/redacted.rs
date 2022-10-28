@@ -14,7 +14,7 @@ pub struct Sensitive<'a, T: ?Sized>(pub &'a T);
 
 impl<'a, T> Display for Sensitive<'a, T>
 where
-    T: Display,
+    T: ?Sized + Display,
 {
     #[cfg(not(feature = "redact_sensitive"))]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -28,7 +28,7 @@ where
 
 impl<'a, T> Debug for Sensitive<'a, T>
 where
-    T: Debug,
+    T: ?Sized + Debug,
 {
     #[cfg(not(feature = "redact_sensitive"))]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
