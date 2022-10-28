@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
 use std::sync::Arc;
 
@@ -32,6 +32,8 @@ pub struct WalReader {
     wal: pgsql::client::Responses,
     /// Keeps track of the relation mappings that we had
     relations: HashMap<i32, Relation>,
+    /// Keeps track of the OIDs of all custom types we've seen
+    custom_types: HashSet<u32>,
 }
 
 #[derive(Debug)]
@@ -74,12 +76,17 @@ impl WalReader {
     pub(crate) fn new(wal: pgsql::client::Responses) -> Self {
         WalReader {
             relations: Default::default(),
+            custom_types: Default::default(),
             wal,
         }
     }
 
     pub(crate) async fn next_event(&mut self) -> Result<(WalEvent, i64), WalError> {
-        let WalReader { wal, relations } = self;
+        let WalReader {
+            wal,
+            relations,
+            custom_types,
+        } = self;
 
         loop {
             let data: WalData = match wal
@@ -149,7 +156,7 @@ impl WalReader {
                             WalEvent::Insert {
                                 schema: schema.clone(),
                                 table: table.clone(),
-                                tuple: new_tuple.into_noria_vec(mapping, false)?,
+                                tuple: new_tuple.into_noria_vec(mapping, custom_types, false)?,
                             },
                             end,
                         ));
@@ -186,7 +193,7 @@ impl WalReader {
                             }
                         };
 
-                        let ddl_event = match serde_json::from_slice(ddl_data) {
+                        let ddl_event: Box<DdlEvent> = match serde_json::from_slice(ddl_data) {
                             Err(err) => {
                                 error!(
                                     ?err,
@@ -196,6 +203,7 @@ impl WalReader {
                             }
                             Ok(ddl_event) => ddl_event,
                         };
+
                         return Ok((WalEvent::DdlEvent { ddl_event }, end));
                     }
                     // We only ever going to have a `key_tuple` *OR* `old_tuple` *OR* neither
@@ -206,8 +214,16 @@ impl WalReader {
                             WalEvent::UpdateRow {
                                 schema: schema.clone(),
                                 table: table.clone(),
-                                old_tuple: old_tuple.into_noria_vec(mapping, false)?,
-                                new_tuple: new_tuple.into_noria_vec(mapping, false)?,
+                                old_tuple: old_tuple.into_noria_vec(
+                                    mapping,
+                                    custom_types,
+                                    false,
+                                )?,
+                                new_tuple: new_tuple.into_noria_vec(
+                                    mapping,
+                                    custom_types,
+                                    false,
+                                )?,
                             },
                             end,
                         ));
@@ -217,9 +233,9 @@ impl WalReader {
                             WalEvent::UpdateByKey {
                                 schema: schema.clone(),
                                 table: table.clone(),
-                                key: key_tuple.into_noria_vec(mapping, true)?,
+                                key: key_tuple.into_noria_vec(mapping, custom_types, true)?,
                                 set: new_tuple
-                                    .into_noria_vec(mapping, false)?
+                                    .into_noria_vec(mapping, custom_types, false)?
                                     .into_iter()
                                     .map(readyset::Modification::Set)
                                     .collect(),
@@ -234,9 +250,13 @@ impl WalReader {
                             WalEvent::UpdateByKey {
                                 schema: schema.clone(),
                                 table: table.clone(),
-                                key: new_tuple.clone().into_noria_vec(mapping, true)?,
+                                key: new_tuple.clone().into_noria_vec(
+                                    mapping,
+                                    custom_types,
+                                    true,
+                                )?,
                                 set: new_tuple
-                                    .into_noria_vec(mapping, false)?
+                                    .into_noria_vec(mapping, custom_types, false)?
                                     .into_iter()
                                     .map(readyset::Modification::Set)
                                     .collect(),
@@ -264,7 +284,11 @@ impl WalReader {
                                 WalEvent::DeleteRow {
                                     schema: schema.clone(),
                                     table: table.clone(),
-                                    tuple: old_tuple.into_noria_vec(mapping, false)?,
+                                    tuple: old_tuple.into_noria_vec(
+                                        mapping,
+                                        custom_types,
+                                        false,
+                                    )?,
                                 },
                                 end,
                             ));
@@ -273,7 +297,7 @@ impl WalReader {
                                 WalEvent::DeleteByKey {
                                     schema: schema.clone(),
                                     table: table.clone(),
-                                    key: key_tuple.into_noria_vec(mapping, true)?,
+                                    key: key_tuple.into_noria_vec(mapping, custom_types, true)?,
                                 },
                                 end,
                             ));
@@ -302,9 +326,8 @@ impl WalReader {
                 WalRecord::Message { prefix, .. } => {
                     debug!("Message with ignored prefix {prefix:?}")
                 }
-                msg @ WalRecord::Type { .. } => {
-                    // This happens when a `NEW TYPE` is used, unsupported yet
-                    error!(?msg, "Unhandled message");
+                WalRecord::Type { id, .. } => {
+                    custom_types.insert(id as _);
                 }
                 msg @ WalRecord::Truncate { .. } => {
                     // This happens when `TRUNCATE table` is used, unsupported yet
@@ -325,6 +348,7 @@ impl wal::TupleData {
     pub(crate) fn into_noria_vec(
         self,
         relation: &RelationMapping,
+        custom_types: &HashSet<u32>,
         is_key: bool,
     ) -> Result<Vec<DfValue>, WalError> {
         use postgres_types::Type as PGType;
@@ -357,108 +381,119 @@ impl wal::TupleData {
                         schema: relation.schema.clone(),
                         table: relation.name.clone(),
                     };
-                    let pg_type =
-                        PGType::from_oid(spec.type_oid).ok_or_else(unsupported_type_err)?;
 
-                    let val = match pg_type.kind() {
-                        Kind::Array(member_type) => {
-                            let dialect = Dialect::DEFAULT_POSTGRESQL;
-                            let subsecond_digits = dialect.default_subsecond_digits();
+                    let val = if custom_types.contains(&spec.type_oid) {
+                        // For custom types, just leave the value as text - we don't have enough
+                        // information here to actually coerce to the correct type, but the table
+                        // will do that for us (albeit this is slightly less efficient)
+                        DfValue::from(&*text)
+                    } else {
+                        let pg_type =
+                            PGType::from_oid(spec.type_oid).ok_or_else(unsupported_type_err)?;
 
-                            let target_type = DfType::Array(Box::new(match *member_type {
-                                PGType::BOOL => DfType::Bool,
-                                PGType::CHAR => DfType::Char(1, Collation::default(), dialect),
-                                PGType::TEXT | PGType::VARCHAR => DfType::DEFAULT_TEXT,
-                                PGType::INT2 => DfType::SmallInt,
-                                PGType::INT4 => DfType::Int,
-                                PGType::INT8 => DfType::BigInt,
-                                PGType::FLOAT4 => DfType::Float,
-                                PGType::FLOAT8 => DfType::Double,
-                                PGType::TIMESTAMP => DfType::Timestamp { subsecond_digits },
-                                PGType::TIMESTAMPTZ => DfType::TimestampTz { subsecond_digits },
-                                PGType::JSON => DfType::Json,
-                                PGType::JSONB => DfType::Jsonb,
-                                PGType::DATE => DfType::Date,
-                                PGType::TIME => DfType::Time { subsecond_digits },
-                                PGType::NUMERIC => DfType::DEFAULT_NUMERIC,
-                                PGType::BYTEA => DfType::Blob,
-                                PGType::MACADDR => DfType::MacAddr,
-                                PGType::INET => DfType::Inet,
-                                PGType::UUID => DfType::Uuid,
-                                PGType::BIT => DfType::DEFAULT_BIT,
-                                PGType::VARBIT => DfType::VarBit(None),
-                                ref ty => unsupported!("Unsupported type: {ty}"),
-                            }));
+                        match pg_type.kind() {
+                            Kind::Array(member_type) => {
+                                let dialect = Dialect::DEFAULT_POSTGRESQL;
+                                let subsecond_digits = dialect.default_subsecond_digits();
 
-                            DfValue::from(str.parse::<Array>()?)
-                                .coerce_to(&target_type, &DfType::Unknown)?
-                        }
-                        _ => match pg_type {
-                            PGType::BOOL => DfValue::UnsignedInt(match str.as_ref() {
-                                "t" => true as _,
-                                "f" => false as _,
-                                _ => return Err(WalError::BoolParseError),
-                            }),
-                            PGType::INT2 | PGType::INT4 | PGType::INT8 => {
-                                DfValue::Int(str.parse()?)
+                                let target_type = DfType::Array(Box::new(match *member_type {
+                                    PGType::BOOL => DfType::Bool,
+                                    PGType::CHAR => DfType::Char(1, Collation::default(), dialect),
+                                    PGType::TEXT | PGType::VARCHAR => DfType::DEFAULT_TEXT,
+                                    PGType::INT2 => DfType::SmallInt,
+                                    PGType::INT4 => DfType::Int,
+                                    PGType::INT8 => DfType::BigInt,
+                                    PGType::FLOAT4 => DfType::Float,
+                                    PGType::FLOAT8 => DfType::Double,
+                                    PGType::TIMESTAMP => DfType::Timestamp { subsecond_digits },
+                                    PGType::TIMESTAMPTZ => DfType::TimestampTz { subsecond_digits },
+                                    PGType::JSON => DfType::Json,
+                                    PGType::JSONB => DfType::Jsonb,
+                                    PGType::DATE => DfType::Date,
+                                    PGType::TIME => DfType::Time { subsecond_digits },
+                                    PGType::NUMERIC => DfType::DEFAULT_NUMERIC,
+                                    PGType::BYTEA => DfType::Blob,
+                                    PGType::MACADDR => DfType::MacAddr,
+                                    PGType::INET => DfType::Inet,
+                                    PGType::UUID => DfType::Uuid,
+                                    PGType::BIT => DfType::DEFAULT_BIT,
+                                    PGType::VARBIT => DfType::VarBit(None),
+                                    ref ty => unsupported!("Unsupported type: {ty}"),
+                                }));
+
+                                DfValue::from(str.parse::<Array>()?)
+                                    .coerce_to(&target_type, &DfType::Unknown)?
                             }
-                            PGType::OID => DfValue::UnsignedInt(str.parse()?),
-                            PGType::FLOAT4 => str.parse::<f32>()?.try_into()?,
-                            PGType::FLOAT8 => str.parse::<f64>()?.try_into()?,
-                            PGType::NUMERIC => Decimal::from_str(str.as_ref())
-                                .map_err(|_| WalError::NumericParseError)
-                                .map(|d| DfValue::Numeric(Arc::new(d)))?,
-                            PGType::TEXT
-                            | PGType::JSON
-                            | PGType::VARCHAR
-                            | PGType::CHAR
-                            | PGType::BPCHAR
-                            | PGType::MACADDR
-                            | PGType::INET
-                            | PGType::UUID
-                            | PGType::NAME => DfValue::from(str.as_ref()),
-                            // JSONB might rearrange the json value (like the order of the keys in
-                            // an object for example), vs JSON that
-                            // keeps the text as-is. So, in order to get
-                            // the same values, we parse the json into a
-                            // serde_json::Value and then convert it
-                            // back to String. ♪ ┏(・o･)┛ ♪
-                            PGType::JSONB => {
-                                serde_json::from_str::<serde_json::Value>(str.as_ref())
-                                    .map_err(|e| WalError::JsonParseError(e.to_string()))
-                                    .map(|v| DfValue::from(v.to_string()))?
-                            }
-                            PGType::TIMESTAMP => DfValue::TimestampTz(
-                                str.parse().map_err(|_| WalError::TimestampParseError)?,
-                            ),
-                            PGType::TIMESTAMPTZ => DfValue::TimestampTz(
-                                str.parse().map_err(|_| WalError::TimestampTzParseError)?,
-                            ),
-                            PGType::BYTEA => hex::decode(str.strip_prefix("\\x").unwrap_or(&str))
-                                .map_err(|_| WalError::ByteArrayHexParseError)
-                                .map(|bytes| DfValue::ByteArray(Arc::new(bytes)))?,
-                            PGType::DATE => DfValue::TimestampTz(
-                                str.parse().map_err(|_| WalError::DateParseError)?,
-                            ),
-                            PGType::TIME => DfValue::Time(MySqlTime::from_str(&str)?),
-                            PGType::BIT | PGType::VARBIT => {
-                                let mut bits = BitVec::with_capacity(str.len());
-                                for c in str.chars() {
-                                    match c {
-                                        '0' => bits.push(false),
-                                        '1' => bits.push(true),
-                                        _ => {
-                                            return Err(WalError::BitVectorParseError(format!(
-                                                "\"{}\" is not a valid binary digit",
-                                                c
-                                            )))
+                            _ => match pg_type {
+                                PGType::BOOL => DfValue::UnsignedInt(match str.as_ref() {
+                                    "t" => true as _,
+                                    "f" => false as _,
+                                    _ => return Err(WalError::BoolParseError),
+                                }),
+                                PGType::INT2 | PGType::INT4 | PGType::INT8 => {
+                                    DfValue::Int(str.parse()?)
+                                }
+                                PGType::OID => DfValue::UnsignedInt(str.parse()?),
+                                PGType::FLOAT4 => str.parse::<f32>()?.try_into()?,
+                                PGType::FLOAT8 => str.parse::<f64>()?.try_into()?,
+                                PGType::NUMERIC => Decimal::from_str(str.as_ref())
+                                    .map_err(|_| WalError::NumericParseError)
+                                    .map(|d| DfValue::Numeric(Arc::new(d)))?,
+                                PGType::TEXT
+                                | PGType::JSON
+                                | PGType::VARCHAR
+                                | PGType::CHAR
+                                | PGType::BPCHAR
+                                | PGType::MACADDR
+                                | PGType::INET
+                                | PGType::UUID
+                                | PGType::NAME => DfValue::from(str.as_ref()),
+                                // JSONB might rearrange the json value (like the order of the keys
+                                // in an object for example), vs
+                                // JSON that keeps the text as-is.
+                                // So, in order to get
+                                // the same values, we parse the json into a
+                                // serde_json::Value and then convert it
+                                // back to String. ♪ ┏(・o･)┛ ♪
+                                PGType::JSONB => {
+                                    serde_json::from_str::<serde_json::Value>(str.as_ref())
+                                        .map_err(|e| WalError::JsonParseError(e.to_string()))
+                                        .map(|v| DfValue::from(v.to_string()))?
+                                }
+                                PGType::TIMESTAMP => DfValue::TimestampTz(
+                                    str.parse().map_err(|_| WalError::TimestampParseError)?,
+                                ),
+                                PGType::TIMESTAMPTZ => DfValue::TimestampTz(
+                                    str.parse().map_err(|_| WalError::TimestampTzParseError)?,
+                                ),
+                                PGType::BYTEA => {
+                                    hex::decode(str.strip_prefix("\\x").unwrap_or(&str))
+                                        .map_err(|_| WalError::ByteArrayHexParseError)
+                                        .map(|bytes| DfValue::ByteArray(Arc::new(bytes)))?
+                                }
+                                PGType::DATE => DfValue::TimestampTz(
+                                    str.parse().map_err(|_| WalError::DateParseError)?,
+                                ),
+                                PGType::TIME => DfValue::Time(MySqlTime::from_str(&str)?),
+                                PGType::BIT | PGType::VARBIT => {
+                                    let mut bits = BitVec::with_capacity(str.len());
+                                    for c in str.chars() {
+                                        match c {
+                                            '0' => bits.push(false),
+                                            '1' => bits.push(true),
+                                            _ => {
+                                                return Err(WalError::BitVectorParseError(format!(
+                                                    "\"{}\" is not a valid binary digit",
+                                                    c
+                                                )))
+                                            }
                                         }
                                     }
+                                    DfValue::from(bits)
                                 }
-                                DfValue::from(bits)
-                            }
-                            _ => return Err(unsupported_type_err()),
-                        },
+                                _ => return Err(unsupported_type_err()),
+                            },
+                        }
                     };
 
                     ret.push(val);

@@ -99,7 +99,7 @@ pub(crate) struct DdlCreateTableConstraint {
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 pub(crate) struct DdlEnumVariant {
     oid: u32,
-    label: String,
+    pub(crate) label: String,
 }
 
 macro_rules! make_parse_deserialize_with {
@@ -142,8 +142,8 @@ pub(crate) enum DdlEventData {
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct DdlEvent {
-    schema: String,
-    data: DdlEventData,
+    pub(crate) schema: String,
+    pub(crate) data: DdlEventData,
 }
 
 /// This is just an ugly wrapper because `deserialize_with` doesn't play well with Options

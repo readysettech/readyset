@@ -7,7 +7,7 @@ use postgres_native_tls::MakeTlsConnector;
 use readyset::replication::ReplicationOffset;
 use readyset::{ReadySetError, ReadySetResult, TableOperation};
 use tokio_postgres as pgsql;
-use tracing::{debug, error, trace};
+use tracing::{debug, error, trace, warn};
 
 use super::ddl_replication::setup_ddl_replication;
 use super::wal_reader::{WalEvent, WalReader};
@@ -440,7 +440,17 @@ impl Connector for PostgresWalConnector {
                 Some(event) => event,
                 None => match self.next_event().await {
                     Ok(ev) => ev,
-                    Err(WalError::UnsupportedTypeConversion { .. }) => {
+                    Err(WalError::UnsupportedTypeConversion {
+                        type_oid,
+                        schema,
+                        table,
+                    }) => {
+                        warn!(
+                            type_oid,
+                            schema = %String::from_utf8_lossy(&schema),
+                            table = %String::from_utf8_lossy(&table),
+                            "Ignoring write with value of unsupported type"
+                        );
                         // ReadySet will skip replicate tables with unsupported types (e.g.
                         // Postgres's user defined types). RS will leverage the fallback instead.
                         continue;
