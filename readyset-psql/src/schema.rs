@@ -1,8 +1,10 @@
 use std::convert::TryFrom;
 
+use nom_sql::Literal;
+use postgres_types::Kind;
 use readyset_client::backend as cl;
-use readyset_data::{Collation, DfType};
-use readyset_errors::unsupported;
+use readyset_data::{Collation, DfType, PgEnumMetadata};
+use readyset_errors::{unsupported, ReadySetResult};
 use {psql_srv as ps, tokio_postgres as pgsql};
 
 use crate::Error;
@@ -64,7 +66,7 @@ pub fn type_to_pgsql(col_type: &DfType) -> Result<pgsql::types::Type, Error> {
         };
     }
 
-    match *col_type {
+    match col_type {
         DfType::Unknown => Ok(Type::TEXT), // The default type for "unknown" in pgsql is TEXT
         DfType::Bool => Ok(Type::BOOL),
         DfType::Char(..) => Ok(Type::CHAR),
@@ -95,7 +97,25 @@ pub fn type_to_pgsql(col_type: &DfType) -> Result<pgsql::types::Type, Error> {
         DfType::DateTime { .. } => unsupported_type!(),
         DfType::Binary(_) => unsupported_type!(),
         DfType::VarBinary(_) => unsupported_type!(),
-        DfType::Enum { .. } => unsupported_type!(),
+        DfType::Enum {
+            metadata: Some(PgEnumMetadata { name, schema, oid }),
+            variants,
+            ..
+        } => Ok(Type::new(
+            name.into(),
+            *oid,
+            Kind::Enum(
+                variants
+                    .iter()
+                    .map(|v| match v {
+                        Literal::String(s) => Ok(s.clone()),
+                        _ => unsupported_type!(),
+                    })
+                    .collect::<ReadySetResult<_>>()?,
+            ),
+            schema.into(),
+        )),
+        DfType::Enum { metadata: None, .. } => unsupported_type!(),
         DfType::Numeric { .. } => Ok(Type::NUMERIC),
         DfType::MacAddr => Ok(Type::MACADDR),
         DfType::Inet => Ok(Type::INET),
