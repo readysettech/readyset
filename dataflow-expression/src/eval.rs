@@ -162,6 +162,42 @@ impl Expr {
                         Ok(json_inner.map(|inner| inner.to_string().into()).unwrap_or_default())
                     }
 
+                    JsonKeyPathExtract | JsonKeyPathExtractText => {
+                        // Both extraction operations behave the same in PostgreSQL except for the
+                        // return type, which is handled during expression lowering.
+
+                        // Type errors are handled during expression lowering.
+                        let keys = right.as_array()?;
+
+                        // This value is reassigned to inner fields while looping through keys.
+                        let mut json = &left.to_json()?;
+
+                        // PostgreSQL docs state `text[]` but in practice it allows using
+                        // multi-dimensional arrays here.
+                        for key in keys.values() {
+                            let key = <&str>::try_from(key)?;
+
+                            let inner = match json {
+                                JsonValue::Array(array) => {
+                                    // NOTE: "+" prefix parsing is handled the same way in both Rust
+                                    // and PostgreSQL.
+                                    key.parse::<isize>().ok().and_then(|index| {
+                                        crate::utils::index_bidirectional(array, index)
+                                    })
+                                }
+                                JsonValue::Object(object) => object.get(key),
+                                _ => None,
+                            };
+
+                            match inner {
+                                Some(inner) => json = inner,
+                                None => return Ok(DfValue::None),
+                            }
+                        }
+
+                        Ok(json.to_string().into())
+                    },
+
                     JsonContains => {
                         Ok(json::json_contains(&left.to_json()?, &right.to_json()?).into())
                     }
@@ -788,6 +824,37 @@ mod tests {
         let object = r#"{ "hello": "world", "abc": 123 }"#;
         test(object, "'hello'::text", "\"world\"");
         test(object, "'abc'::char(3)", "123");
+    }
+
+    /// Tests evaluation of `JsonKeyPathExtract` and `JsonKeyPathExtractText` binary ops.
+    #[test]
+    fn eval_json_key_path_extract() {
+        #[track_caller]
+        fn test(json: &str, key: &str, expected: Option<&str>) {
+            // Both ops behave the same except for their return type.
+            for op in ["#>", "#>>"] {
+                for json_type in ["json", "jsonb"] {
+                    let expr = format!("'{json}'::{json_type} {op} {key}");
+                    assert_eq!(
+                        eval_expr(&expr, PostgreSQL),
+                        expected.into(),
+                        "incorrect result for for `{expr}`"
+                    );
+                }
+            }
+        }
+
+        let array = "[[\"world\", 123]]";
+        test(array, "array['0', '0']", Some("\"world\""));
+        test(array, "array['0', '1']", Some("123"));
+        test(array, "array['1']", None);
+        test(array, "array['0', '2']", None);
+
+        let object = r#"{ "hello": ["world"], "abc": [123] }"#;
+        test(object, "array['hello', '0']", Some("\"world\""));
+        test(object, "array['abc'::char(3), '0']", Some("123"));
+        test(object, "array['world']", None);
+        test(object, "array['hello', '1']", None);
     }
 
     /// Tests evaluation of `JsonContains` and `JsonContainedIn` binary ops.

@@ -225,6 +225,16 @@ pub enum BinaryOperator {
     /// - PostgreSQL: `json[b] ->> {text,integer}` to `text`
     Arrow2,
 
+    /// PostgreSQL `#>`
+    ///
+    /// This extracts JSON values as JSON: `json[b] #> text[]` to `json[b]`.
+    HashArrow1,
+
+    /// PostgreSQL `#>>`
+    ///
+    /// This extracts JSON values as JSON: `json[b] #>> text[]` to `text`.
+    HashArrow2,
+
     /// `@>`
     ///
     /// Postgres-specific JSONB operator. Takes two JSONB values and determines whether the
@@ -286,6 +296,8 @@ impl Display for BinaryOperator {
             Self::DoublePipe => "||",
             Self::Arrow1 => "->",
             Self::Arrow2 => "->>",
+            Self::HashArrow1 => "#>",
+            Self::HashArrow2 => "#>>",
             Self::AtArrowRight => "@>",
             Self::AtArrowLeft => "<@",
         };
@@ -592,6 +604,8 @@ fn infix_no_and_or(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], TokenTree> {
             map(tag("?&"), |_| BinaryOperator::QuestionMarkAnd),
             map(char('?'), |_| BinaryOperator::QuestionMark),
             map(tag("||"), |_| BinaryOperator::DoublePipe),
+            map(tag("#>>"), |_| BinaryOperator::HashArrow2),
+            map(tag("#>"), |_| BinaryOperator::HashArrow1),
         )),
     ))(i)?;
 
@@ -792,6 +806,8 @@ where
             Infix(DoublePipe) => Affix::Infix(Precedence(8), Associativity::Left),
             Infix(Arrow1) => Affix::Infix(Precedence(8), Associativity::Left),
             Infix(Arrow2) => Affix::Infix(Precedence(8), Associativity::Left),
+            Infix(HashArrow1) => Affix::Infix(Precedence(8), Associativity::Left),
+            Infix(HashArrow2) => Affix::Infix(Precedence(8), Associativity::Left),
             Infix(AtArrowRight) => Affix::Infix(Precedence(8), Associativity::Left),
             Infix(AtArrowLeft) => Affix::Infix(Precedence(8), Associativity::Left),
         })
@@ -2373,6 +2389,34 @@ mod tests {
                         lhs: Box::new(Expr::Literal("[1, 2, 3]".into())),
                         op: BinaryOperator::Arrow2,
                         rhs: Box::new(Expr::Literal(2u64.into())),
+                    }
+                );
+            }
+
+            #[test]
+            fn hash_arrow1_operator() {
+                let expr = b"'[1, 2, 3]' #> array['2']";
+                let res = test_parse!(expression(Dialect::PostgreSQL), expr);
+                assert_eq!(
+                    res,
+                    Expr::BinaryOp {
+                        lhs: Box::new(Expr::Literal("[1, 2, 3]".into())),
+                        op: BinaryOperator::HashArrow1,
+                        rhs: Box::new(Expr::Array(vec![Expr::Literal("2".into())])),
+                    }
+                );
+            }
+
+            #[test]
+            fn hash_arrow2_operator() {
+                let expr = b"'[1, 2, 3]' #>> array['2']";
+                let res = test_parse!(expression(Dialect::PostgreSQL), expr);
+                assert_eq!(
+                    res,
+                    Expr::BinaryOp {
+                        lhs: Box::new(Expr::Literal("[1, 2, 3]".into())),
+                        op: BinaryOperator::HashArrow2,
+                        rhs: Box::new(Expr::Array(vec![Expr::Literal("2".into())])),
                     }
                 );
             }

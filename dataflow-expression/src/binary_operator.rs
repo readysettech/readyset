@@ -3,7 +3,7 @@ use std::fmt;
 use nom_sql::BinaryOperator as SqlBinaryOperator;
 use readyset_data::dialect::SqlEngine;
 use readyset_data::{DfType, Dialect};
-use readyset_errors::{invalid_err, ReadySetResult};
+use readyset_errors::{invalid_err, unsupported, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
 /// Binary infix operators with [`Expr`](crate::Expr) on both the left- and right-hand sides
@@ -99,6 +99,18 @@ pub enum BinaryOperator {
     /// `json[b] ->> {text,integer}` to `text`.
     JsonKeyExtractText,
 
+    /// PostgreSQL `#>` to extract JSON values as JSON via a key path:
+    /// `json[b] #> text[]` to `json[b]`.
+    ///
+    /// Keys in the path are treated as indices when operating over JSON arrays.
+    JsonKeyPathExtract,
+
+    /// PostgreSQL `#>>` to extract JSON values as TEXT via a key path:
+    /// `json[b] #>> text[]` to `text`.
+    ///
+    /// Keys in the path are treated as indices when operating over JSON arrays.
+    JsonKeyPathExtractText,
+
     /// `@>`
     JsonContains,
 
@@ -164,6 +176,11 @@ impl BinaryOperator {
                 SqlEngine::MySQL => Self::JsonPathExtractUnquote,
                 SqlEngine::PostgreSQL => Self::JsonKeyExtractText,
             },
+            HashArrow1 | HashArrow2 if dialect.engine() != SqlEngine::PostgreSQL => {
+                unsupported!("'{op}' not available in {}", dialect.engine())
+            }
+            HashArrow1 => Self::JsonKeyPathExtract,
+            HashArrow2 => Self::JsonKeyPathExtractText,
             AtArrowRight => Self::JsonContains,
             AtArrowLeft => Self::JsonContainedIn,
         };
@@ -222,7 +239,10 @@ impl BinaryOperator {
             }
 
             // text[], char[], varchar[], unknown, unknown[]
-            Self::JsonAnyExists | Self::JsonAllExists
+            Self::JsonAnyExists
+            | Self::JsonAllExists
+            | Self::JsonKeyPathExtract
+            | Self::JsonKeyPathExtractText
                 if right_type.innermost_array_type().is_known()
                     && !(right_type.is_array()
                         && right_type.innermost_array_type().is_any_text()) =>
@@ -273,7 +293,9 @@ impl BinaryOperator {
             | Self::JsonContains
             | Self::JsonContainedIn => Ok(DfType::Bool),
 
-            Self::JsonPathExtractUnquote | Self::JsonKeyExtractText => Ok(DfType::DEFAULT_TEXT),
+            Self::JsonPathExtractUnquote
+            | Self::JsonKeyExtractText
+            | Self::JsonKeyPathExtractText => Ok(DfType::DEFAULT_TEXT),
 
             _ => Ok(left_type.clone()),
         }
@@ -307,6 +329,8 @@ impl fmt::Display for BinaryOperator {
             Self::JsonConcat => "||",
             Self::JsonPathExtract | Self::JsonKeyExtract => "->",
             Self::JsonPathExtractUnquote | Self::JsonKeyExtractText => "->>",
+            Self::JsonKeyPathExtract => "#>",
+            Self::JsonKeyPathExtractText => "#>>",
             Self::JsonContains => "@>",
             Self::JsonContainedIn => "<@",
         };
@@ -343,6 +367,15 @@ mod tests {
             );
         }
 
+        #[track_caller]
+        fn test_json_key_path_extract(op: BinaryOperator, left_type: DfType, output_type: DfType) {
+            assert_eq!(
+                op.output_type(&left_type, &DfType::Array(Box::new(DfType::DEFAULT_TEXT)))
+                    .unwrap(),
+                output_type
+            );
+        }
+
         #[test]
         fn json_path_extract() {
             test_json_extract(BinaryOperator::JsonPathExtract, DfType::Json, DfType::Json);
@@ -372,6 +405,34 @@ mod tests {
             );
             test_json_extract(
                 BinaryOperator::JsonKeyExtractText,
+                DfType::Jsonb,
+                DfType::DEFAULT_TEXT,
+            );
+        }
+
+        #[test]
+        fn json_key_path_extract() {
+            test_json_key_path_extract(
+                BinaryOperator::JsonKeyPathExtract,
+                DfType::Json,
+                DfType::Json,
+            );
+            test_json_key_path_extract(
+                BinaryOperator::JsonKeyPathExtract,
+                DfType::Jsonb,
+                DfType::Jsonb,
+            );
+        }
+
+        #[test]
+        fn json_key_path_extract_text() {
+            test_json_key_path_extract(
+                BinaryOperator::JsonKeyPathExtractText,
+                DfType::Json,
+                DfType::DEFAULT_TEXT,
+            );
+            test_json_key_path_extract(
+                BinaryOperator::JsonKeyPathExtractText,
                 DfType::Jsonb,
                 DfType::DEFAULT_TEXT,
             );
