@@ -375,9 +375,22 @@ impl Expr {
                 let op = BinaryOperator::from_sql_op(op, dialect);
 
                 let left = Box::new(Self::lower(*lhs, dialect, context.clone())?);
-                // TODO: Add more operators to this match, and maybe consider rhs in some cases too
+                // TODO: Maybe consider rhs in some cases too
+                // TODO: What is the correct return type for And and Or?
                 let ty = match op {
-                    BinaryOperator::QuestionMark => DfType::Bool,
+                    BinaryOperator::Like
+                    | BinaryOperator::NotLike
+                    | BinaryOperator::ILike
+                    | BinaryOperator::NotILike
+                    | BinaryOperator::Equal
+                    | BinaryOperator::NotEqual
+                    | BinaryOperator::Greater
+                    | BinaryOperator::GreaterOrEqual
+                    | BinaryOperator::Less
+                    | BinaryOperator::LessOrEqual
+                    | BinaryOperator::Is
+                    | BinaryOperator::IsNot
+                    | BinaryOperator::QuestionMark => DfType::Bool,
                     _ => left.ty().clone(),
                 };
                 Ok(Self::Op {
@@ -938,6 +951,24 @@ pub(crate) mod tests {
             Dialect::DEFAULT_MYSQL,
             DfType::DEFAULT_TEXT,
         );
+    }
+
+    #[test]
+    fn eq_returns_bool() {
+        let input = parse_expr(ParserDialect::MySQL, "x = 1").unwrap();
+        let result = Expr::lower(
+            input,
+            Dialect::DEFAULT_MYSQL,
+            resolve_columns(|c| {
+                if c.name == "x" {
+                    Ok((0, DfType::DEFAULT_TEXT))
+                } else {
+                    internal!("what's this column?")
+                }
+            }),
+        )
+        .unwrap();
+        assert_eq!(*result.ty(), DfType::Bool);
     }
 
     #[test]
