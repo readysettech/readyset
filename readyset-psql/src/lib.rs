@@ -1,4 +1,9 @@
-#![feature(box_patterns, type_alias_impl_trait, generic_associated_types)]
+#![feature(
+    box_patterns,
+    type_alias_impl_trait,
+    generic_associated_types,
+    if_let_guard
+)]
 mod backend;
 mod error;
 mod query_handler;

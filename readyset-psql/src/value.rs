@@ -2,6 +2,7 @@ use std::convert::{TryFrom, TryInto};
 use std::net::IpAddr;
 
 use eui48::MacAddress;
+use postgres_types::Kind;
 use ps::util::type_is_oid;
 use psql_srv as ps;
 use readyset_data::DfValue;
@@ -106,6 +107,20 @@ impl TryFrom<Value> for ps::Value {
             (Type::VARBIT, DfValue::BitVector(ref b)) => Ok(ps::Value::VarBit(b.as_ref().clone())),
             (t, DfValue::Array(ref arr)) => Ok(ps::Value::Array((**arr).clone(), t)),
             (_, DfValue::PassThrough(ref p)) => Ok(ps::Value::PassThrough((**p).clone())),
+            (ref t, val) if let Kind::Enum(vs) = t.kind() => {
+                let idx = u64::try_from(val).map_err(|e| {
+                    ps::Error::InternalError(format!("Invalid representation for enum value: {e}"))
+                })?;
+                if idx == 0 {
+                    return Err(ps::Error::InternalError("Invalid enum value".into()))
+                }
+                let val: &String = vs.get((idx - 1) as usize).ok_or_else(|| {
+                    ps::Error::InternalError(
+                        "Enum variant index out-of-bounds".into(),
+                    )
+                })?;
+                Ok(ps::Value::Text(val.as_str().into()))
+            },
             (t, dt) => {
                 trace!(?t, ?dt);
                 error!(
