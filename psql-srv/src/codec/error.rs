@@ -58,6 +58,9 @@ pub enum DecodeError {
     #[error("invalid text bit vector value: {0}")]
     InvalidTextBitVectorValue(String),
 
+    #[error("unknown enum variant: {0}")]
+    UnknownEnumVariant(String),
+
     #[error("invalid type: {0}")]
     InvalidType(u32),
 
