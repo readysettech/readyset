@@ -41,6 +41,7 @@ pub enum WalError {
     BitVectorParseError(String),
     InvalidMapping(String),
     ToastNotSupported,
+    UnknownEnumVariant(Bytes),
     ReadySetError(readyset::ReadySetError),
     UnsupportedTypeConversion {
         type_oid: u32,

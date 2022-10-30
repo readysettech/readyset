@@ -4,11 +4,11 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::convert::{TryFrom, TryInto};
 use std::error::Error;
-use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::net::IpAddr;
 use std::ops::{Add, Div, Mul, Sub};
 use std::sync::Arc;
+use std::{fmt, str};
 
 use bit_vec::BitVec;
 use bytes::BytesMut;
@@ -1526,7 +1526,7 @@ impl<'a> From<&'a str> for DfValue {
 impl From<&[u8]> for DfValue {
     fn from(b: &[u8]) -> Self {
         // NOTE: should we *really* be converting to Text here?
-        if let Ok(s) = std::str::from_utf8(b) {
+        if let Ok(s) = str::from_utf8(b) {
             s.into()
         } else {
             DfValue::ByteArray(b.to_vec().into())
@@ -1706,6 +1706,18 @@ impl<'a> FromSql<'a> for DfValue {
         }
         match ty.kind() {
             Kind::Array(_) => mk_from_sql!(Array),
+            Kind::Enum(variants) => {
+                let variant_str = str::from_utf8(raw)?;
+                Ok(DfValue::from(
+                    variants
+                        .iter()
+                        .position(|v| v == variant_str)
+                        .ok_or("Unknown enum variant")?
+                        // To be compatible with mysql enums, we always represent enum values as
+                        // *1-indexed* (since mysql needs 0 to represent invalid values)
+                        + 1,
+                ))
+            }
             _ => match *ty {
                 Type::BOOL => mk_from_sql!(bool),
                 Type::CHAR => mk_from_sql!(i8),

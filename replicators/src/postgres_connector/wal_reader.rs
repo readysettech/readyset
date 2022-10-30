@@ -424,6 +424,16 @@ impl wal::TupleData {
                                 DfValue::from(str.parse::<Array>()?)
                                     .coerce_to(&target_type, &DfType::Unknown)?
                             }
+                            Kind::Enum(variants) => DfValue::from(
+                                variants
+                                    .iter()
+                                    .position(|v| v.as_bytes() == text)
+                                    .ok_or(WalError::UnknownEnumVariant(text))?
+                                    // To be compatible with mysql enums, we always represent enum
+                                    // values as *1-indexed* (since mysql needs 0 to represent
+                                    // invalid values)
+                                    + 1,
+                            ),
                             _ => match pg_type {
                                 PGType::BOOL => DfValue::UnsignedInt(match str.as_ref() {
                                     "t" => true as _,

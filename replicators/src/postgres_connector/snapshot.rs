@@ -119,7 +119,7 @@ impl TryFrom<pgsql::Row> for ColumnEntry {
                 'b' => Ok(Kind::Simple),
                 'c' => unsupported!("Composite types are not supported"),
                 'd' => unsupported!("Domain types are not supported"),
-                'e' => unsupported!("Enum types are not supported"),
+                'e' => Ok(Kind::Enum(row.try_get(12 /* array_agg(e.enumlabel)... */)?)),
                 'p' => Ok(Kind::Pseudo),
                 'r' => unsupported!("Range types are not supported"),
                 'm' => unsupported!("Multirange types are not supported"),
@@ -270,7 +270,10 @@ impl TableEntry {
                 member_t.typname,
                 member_t.oid,
                 member_t.typtype,
-                member_tn.nspname
+                member_tn.nspname,
+                (SELECT array_agg(e.enumlabel ORDER BY e.enumsortorder ASC)
+                 FROM pg_enum e
+                 WHERE e.enumtypid = t.oid)
             FROM pg_catalog.pg_attribute a
             JOIN pg_catalog.pg_type t ON a.atttypid = t.oid
             JOIN pg_catalog.pg_namespace tn ON t.typnamespace = tn.oid
