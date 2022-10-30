@@ -703,7 +703,12 @@ impl<'a> PostgresReplicator<'a> {
     /// Currently this is limited to enum types since that's all we support, but in the future this
     /// can be extended to support composite types and ranges as well
     async fn get_custom_types(&mut self) -> Result<Vec<CustomTypeEntry>, pgsql::Error> {
-        let query = r"SELECT oid, typname, typnamespace FROM pg_type WHERE typtype = 'e'";
+        let query = r"
+            SELECT t.oid, t.typname, tn.nspname
+            FROM pg_type t
+            JOIN pg_catalog.pg_namespace tn ON t.typnamespace = tn.oid
+            WHERE typtype = 'e'
+        ";
         let res = self.transaction.query(query, &[]).await?;
         res.into_iter().map(TryInto::try_into).collect()
     }
