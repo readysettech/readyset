@@ -7,7 +7,10 @@ use std::time::Instant;
 use futures::stream::FuturesUnordered;
 use futures::{pin_mut, StreamExt, TryFutureExt};
 use metrics::register_gauge;
-use nom_sql::{parse_key_specification_string, Dialect, Relation, SqlIdentifier, TableKey};
+use nom_sql::{
+    parse_key_specification_string, parse_sql_type, Column, ColumnConstraint, ColumnSpecification,
+    CreateTableStatement, Dialect, Relation, SqlIdentifier, TableKey,
+};
 use postgres_types::{accepts, FromSql, Kind, Type};
 use readyset::metrics::recorded;
 use readyset::recipe::changelist::{Change, ChangeList};
@@ -38,7 +41,7 @@ enum TableKind {
     View,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum ConstraintKind {
     PrimaryKey,
     UniqueKey,
@@ -53,14 +56,14 @@ struct TableEntry {
     oid: u32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct TableDescription {
     name: Relation,
     columns: Vec<ColumnEntry>,
     constraints: Vec<ConstraintEntry>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct ColumnEntry {
     name: String,
     type_name: String,
@@ -69,7 +72,7 @@ struct ColumnEntry {
     pg_type: Type,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct ConstraintEntry {
     #[allow(dead_code)]
     name: String,
@@ -364,6 +367,39 @@ impl TableDescription {
             .ok_or_else(|| internal_err!("All tables must have a schema in the replicator"))
     }
 
+    fn try_into_change(self) -> ReadySetResult<Change> {
+        Ok(Change::CreateTable(CreateTableStatement {
+            table: self.name.clone(),
+            fields: self
+                .columns
+                .into_iter()
+                .map(|c| {
+                    Ok(ColumnSpecification {
+                        column: Column {
+                            name: c.name.into(),
+                            table: Some(self.name.clone()),
+                        },
+                        sql_type: parse_sql_type(Dialect::PostgreSQL, c.type_name)
+                            .map_err(|e| internal_err!("Could not parse SQL type: {e}"))?,
+                        constraints: if c.not_null {
+                            vec![ColumnConstraint::NotNull]
+                        } else {
+                            vec![]
+                        },
+                        comment: None,
+                    })
+                })
+                .collect::<ReadySetResult<_>>()?,
+            keys: if self.constraints.is_empty() {
+                None
+            } else {
+                Some(self.constraints.into_iter().map(|c| c.definition).collect())
+            },
+            if_not_exists: false,
+            options: vec![],
+        }))
+    }
+
     /// Copy a table's contents from PostgreSQL to ReadySet
     async fn dump<'a>(
         &self,
@@ -554,10 +590,12 @@ impl<'a> PostgresReplicator<'a> {
             debug!(%create_table, "Extending recipe");
             create_schema.add_table_create(create_table.name.to_string(), create_table.to_string());
 
-            match future::ready(ChangeList::from_str(
-                create_table.to_string(),
-                DataDialect::DEFAULT_POSTGRESQL,
-            ))
+            match future::ready(
+                create_table
+                    .clone()
+                    .try_into_change()
+                    .map(|change| ChangeList::from_change(change, DataDialect::DEFAULT_POSTGRESQL)),
+            )
             .and_then(|changelist| self.noria.extend_recipe_no_leader_ready(changelist))
             .await
             {
