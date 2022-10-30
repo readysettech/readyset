@@ -81,8 +81,12 @@ impl Expr {
                     Divide => Ok((non_null!(left) / non_null!(right))?),
                     And => Ok((non_null!(left).is_truthy() && non_null!(right).is_truthy()).into()),
                     Or => Ok((non_null!(left).is_truthy() || non_null!(right).is_truthy()).into()),
-                    Equal => Ok((non_null!(left) == non_null!(right)).into()),
-                    NotEqual => Ok((non_null!(left) != non_null!(right)).into()),
+                    Equal => Ok((non_null!(left)
+                        == &non_null!(right).coerce_to(left_ty, right_ty)?)
+                        .into()),
+                    NotEqual => Ok((non_null!(left)
+                        != &non_null!(right).coerce_to(left_ty, right_ty)?)
+                        .into()),
                     Greater => Ok((non_null!(left) > non_null!(right)).into()),
                     GreaterOrEqual => Ok((non_null!(left) >= non_null!(right)).into()),
                     Less => Ok((non_null!(left) < non_null!(right)).into()),
@@ -136,7 +140,7 @@ mod tests {
     use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
     use nom_sql::Dialect::*;
     use nom_sql::{parse_expr, SqlType};
-    use readyset_data::{Collation, DfType};
+    use readyset_data::{Collation, DfType, Dialect, PgEnumMetadata};
     use Expr::*;
 
     use super::*;
@@ -251,7 +255,7 @@ mod tests {
         macro_rules! assert_op {
             ($binary_op:expr, $value:expr, $expected:expr) => {
                 let expr = Op {
-                    left: Box::new(make_column(0)),
+                    left: Box::new(column_with_type(0, DfType::DEFAULT_TEXT)),
                     right: Box::new(make_literal($value)),
                     op: $binary_op,
                     ty: DfType::Unknown,
@@ -327,10 +331,10 @@ mod tests {
     fn eval_case_when() {
         let expr = Expr::CaseWhen {
             condition: Box::new(Op {
-                left: Box::new(make_column(0)),
+                left: Box::new(column_with_type(0, DfType::Int)),
                 op: BinaryOperator::Equal,
                 right: Box::new(make_literal(1.into())),
-                ty: DfType::Unknown,
+                ty: DfType::Bool,
             }),
             then_expr: Box::new(make_literal("yes".try_into().unwrap())),
             else_expr: Box::new(make_literal("no".try_into().unwrap())),
@@ -355,5 +359,35 @@ mod tests {
         };
         let res = expr.eval::<DfValue>(&[]).unwrap();
         assert!(res.is_truthy());
+    }
+
+    #[test]
+    fn enum_eq_string_postgres() {
+        let expr = Expr::Op {
+            op: BinaryOperator::Equal,
+            left: Box::new(Expr::Column {
+                index: 0,
+                ty: DfType::from_enum_variants(
+                    ["a".into(), "b".into(), "c".into()],
+                    Dialect::DEFAULT_POSTGRESQL,
+                    Some(PgEnumMetadata {
+                        name: "abc".into(),
+                        schema: "public".into(),
+                        oid: 12345,
+                    }),
+                ),
+            }),
+            right: Box::new(Expr::Literal {
+                val: "a".into(),
+                ty: DfType::Unknown,
+            }),
+            ty: DfType::Bool,
+        };
+
+        let true_res = expr.eval(&[DfValue::from(1)]).unwrap();
+        assert_eq!(true_res, true.into());
+
+        let false_res = expr.eval(&[DfValue::from(2)]).unwrap();
+        assert_eq!(false_res, false.into());
     }
 }

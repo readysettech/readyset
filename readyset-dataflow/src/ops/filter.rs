@@ -302,16 +302,16 @@ mod tests {
         let mut g = setup(
             false,
             Some(Op {
-                left: Box::new(column_with_type(0, DfType::DEFAULT_TEXT)),
+                left: Box::new(column_with_type(0, DfType::Int)),
                 op: BinaryOperator::Equal,
-                right: Box::new(column_with_type(1, DfType::DEFAULT_TEXT)),
+                right: Box::new(column_with_type(1, DfType::Int)),
                 ty: DfType::Bool,
             }),
         );
 
         let mut left: Vec<DfValue> = vec![2.into(), 2.into()];
         assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
-        left = vec![2.into(), "b".try_into().unwrap()];
+        left = vec![2.into(), 3.into()];
         assert_eq!(g.narrow_one_row(left, false), Records::default());
     }
 }
