@@ -1,0 +1,10 @@
+statement ok
+create table t (x int);
+
+statement ok
+insert into t (x) values (1);
+
+query I nosort
+with s as (select x from t) select * from s;
+----
+1

@@ -136,14 +136,10 @@ impl ExprRegistry {
         }
         for table_reference in expression.table_references() {
             // Get the references from the expression.
-            let table_id = match self.aliases.get(&table_reference) {
-                None => {
-                    return Err(ReadySetError::RecipeInvariantViolated(format!(
-                        "Referenced table {} does not exist",
-                        table_reference
-                    )))
-                }
-                Some(tid) => tid,
+            let Some(table_id) = self.aliases.get(&table_reference) else {
+                // Queries can reference tables that don't exist in the schema, eg with CTEs or
+                // aliased subqueries
+                continue
             };
             // Add the dependency.
             self.dependencies
