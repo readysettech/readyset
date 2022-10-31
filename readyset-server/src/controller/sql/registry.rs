@@ -13,6 +13,7 @@ use readyset_tracing::debug;
 use readyset_util::hash::hash;
 use readyset_util::redacted::Sensitive;
 use serde::{Deserialize, Serialize};
+use vec1::Vec1;
 
 use super::QueryID;
 
@@ -160,7 +161,7 @@ type LiteralPair<'a, 'b> = (&'a Literal, &'b Literal);
 /// This struct maps values in a query AST to values in a corresponding dataflow migration. We
 /// cannot directly relate an AST and dataflow migration - however, we can use this mapping to adapt
 /// the mapping given by [`Reader::placeholder_map`].
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
 pub struct MatchedCache {
     /// The name of the matching cached query.
     name: Relation,
@@ -250,8 +251,7 @@ impl ExprSkeletons {
     }
 
     /// Remove a set of expressions by name. [`ExprSkeletons`] will not resolve aliases.
-    pub fn remove_expressions(&mut self, exprs: impl Iterator<Item = Relation>) {
-        let exprs: HashSet<Relation> = exprs.collect();
+    pub fn remove_expressions(&mut self, exprs: &HashSet<Relation>) {
         // For each entry, remove a set of literals if it is associated with one of the given
         // aliases
         self.inner.drain_filter(|_, v| {
@@ -361,6 +361,10 @@ pub(super) struct ExprRegistry {
     /// # Invariants
     /// - Each `QueryID` present here *must* exist as key in the `expressions` map.
     aliases: HashMap<Relation, QueryID>,
+
+    /// Queries that can reuse the view for a different [`RecipeExpr::Cache`], specified by
+    /// [`QueryID`]
+    reused_caches: HashMap<Relation, MatchedCache>,
 }
 
 impl ExprRegistry {
@@ -456,11 +460,18 @@ impl ExprRegistry {
     /// Returns the removed [`RecipeExpr`] if it was present, or `None` otherwise.
     pub(super) fn remove_expression(&mut self, name_or_alias: &Relation) -> Option<RecipeExpr> {
         let query_id = *self.aliases.get(name_or_alias)?;
-        let expr_aliases = self
+        // Remove all aliases for this query
+        let expr_aliases: HashSet<Relation> = self
             .aliases
             .drain_filter(|_, v| *v == query_id)
-            .map(|(k, _)| k);
-        self.skeletons.remove_expressions(expr_aliases);
+            .map(|(k, _)| k)
+            .collect();
+        // Remove any queries that reuse this query's cache.
+        let mut removed_reused_cache = self
+            .reused_caches
+            .drain_filter(|k, v| expr_aliases.contains(k) || expr_aliases.contains(&v.name));
+        // Remove the entry for this query's skeleton.
+        self.skeletons.remove_expressions(&expr_aliases);
         let expression = self.expressions.remove(&query_id)?;
         if !matches!(expression, RecipeExpr::Table { .. }) {
             self.dependencies.iter_mut().for_each(|(_, deps)| {
@@ -472,7 +483,13 @@ impl ExprRegistry {
                 self.expressions.remove(dependency_id);
             }
         }
-        Some(expression)
+        // If we have only removed a reused cache, there is nothing else to clean up because the
+        // expression does not exist in the graph.
+        if removed_reused_cache.any(|(n, _)| expr_aliases.contains(&n)) {
+            None
+        } else {
+            Some(expression)
+        }
     }
 
     /// Removes the custom type associated with the given name from the registry. Returns `true` if
@@ -543,6 +560,26 @@ impl ExprRegistry {
             .into_iter()
             .flatten()
             .map(|dep| self.expressions.get(dep).expect("Documented invariant"))
+    }
+
+    /// Returns a list of caches that could be used to create a View for the given query.
+    ///
+    /// This function is used to match a query to a cached query when one or the other has inlined
+    /// values where the other has placeholder variables.
+    pub(super) fn caches_for_query(
+        &self,
+        query: SelectStatement,
+    ) -> ReadySetResult<Vec<MatchedCache>> {
+        self.skeletons.caches_for_query(query)
+    }
+
+    /// Add an entry to [`reused_caches`]. Used to indicate that a Relation will borrow the view
+    /// for an existing cache.
+    pub(super) fn add_reused_caches(&mut self, name: Relation, caches: Vec1<MatchedCache>) {
+        // TODO: handle multiple caches for a single query
+        #[allow(clippy::unwrap_used)] // Vec1 is guaranteed to have one element
+        self.reused_caches
+            .insert(name, caches.into_iter().next().unwrap());
     }
 
     fn assign_alias(&mut self, alias: Relation, query_id: QueryID) -> ReadySetResult<()> {
@@ -1262,6 +1299,7 @@ mod tests {
                 custom_type_dependencies: HashMap::new(),
                 table_to_invalidated_queries: HashMap::new(),
                 aliases: HashMap::new(),
+                reused_caches: HashMap::new(),
             };
 
             registry
@@ -1321,6 +1359,7 @@ mod tests {
                 custom_type_dependencies: HashMap::new(),
                 table_to_invalidated_queries: HashMap::new(),
                 aliases: HashMap::new(),
+                reused_caches: HashMap::new(),
             };
 
             registry

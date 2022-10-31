@@ -21,7 +21,8 @@ use readyset_sql_passes::alias_removal::TableAliasRewrite;
 use readyset_sql_passes::{AliasRemoval, Rewrite, RewriteContext};
 use readyset_tracing::{debug, trace};
 use readyset_util::redacted::Sensitive;
-use tracing::{error, info};
+use tracing::{error, info, warn};
+use vec1::Vec1;
 
 use self::mir::{LeafBehavior, NodeIndex as MirNodeIndex, SqlToMirConverter};
 use self::query_graph::to_query_graph;
@@ -499,14 +500,31 @@ impl SqlIncorporator {
         let name = name.unwrap_or_else(|| format!("q_{}", self.num_queries).into());
 
         let mut invalidating_tables = vec![];
-        let mir_query = self.select_query_to_mir(
+        let mir_query = match self.select_query_to_mir(
             name.clone(),
             &mut stmt,
             schema_search_path,
             Some(&mut invalidating_tables),
             LeafBehavior::Leaf,
             mig,
-        )?;
+        ) {
+            Ok(mir_query) => Some(mir_query),
+            // If we fail to migrate the query, see if we can reuse an existing cached query.
+            Err(err) => {
+                let caches = self.registry.caches_for_query(stmt.clone())?;
+                if caches.is_empty() {
+                    return Err(err);
+                } else {
+                    #[allow(clippy::unwrap_used)]
+                    // we checked that caches is not empty
+                    self.registry
+                        .add_reused_caches(name.clone(), Vec1::try_from(caches).unwrap());
+                    warn!(%err, "Migration failed");
+                    info!("Found compatible view for {}. View may not satisfy all possible placeholder values", name);
+                }
+                None
+            }
+        };
 
         let aliased = !self.registry.add_query(RecipeExpr::Cache {
             name: name.clone(),
@@ -520,8 +538,11 @@ impl SqlIncorporator {
             return Ok(name);
         }
 
-        let leaf = self.mir_to_dataflow(name.clone(), mir_query, mig)?;
-        self.leaf_addresses.insert(name.clone(), leaf);
+        // Do not add a leaf if we are reusing a query
+        if let Some(mir_query) = mir_query {
+            let leaf = self.mir_to_dataflow(name.clone(), mir_query, mig)?;
+            self.leaf_addresses.insert(name.clone(), leaf);
+        }
 
         Ok(name)
     }
