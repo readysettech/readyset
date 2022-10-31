@@ -47,7 +47,7 @@ pub use crate::remove_numeric_field_references::RemoveNumericFieldReferences;
 pub use crate::resolve_schemas::ResolveSchemas;
 pub use crate::rewrite_between::RewriteBetween;
 pub use crate::star_expansion::StarExpansion;
-pub use crate::strip_literals::StripLiterals;
+pub use crate::strip_literals::{SelectStatementSkeleton, StripLiterals};
 pub use crate::strip_post_filters::StripPostFilters;
 pub use crate::util::{
     is_correlated, is_logical_op, is_predicate, map_aggregates, outermost_table_exprs, LogicalOp,

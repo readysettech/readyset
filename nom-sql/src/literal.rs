@@ -321,6 +321,14 @@ impl Literal {
     pub fn is_string(&self) -> bool {
         matches!(self, Self::String(..))
     }
+
+    /// Returns `true` if `self` is a [`Placeholder`] literal
+    ///
+    /// [`Placeholder`]: Literal::Placeholder
+    #[must_use]
+    pub fn is_placeholder(&self) -> bool {
+        matches!(self, Self::Placeholder(_))
+    }
 }
 
 // Integer literal value

@@ -400,7 +400,8 @@
     result_flattening,
     stmt_expr_attributes,
     try_find,
-    type_alias_impl_trait
+    type_alias_impl_trait,
+    hash_drain_filter
 )]
 #![deny(missing_docs)]
 #![deny(unused_extern_crates)]

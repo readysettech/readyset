@@ -9,6 +9,7 @@ edition = "2021"
 itertools = "0.10"
 maplit = "1.0.2"
 tracing = { version = "0.1" }
+serde = "1.0.8"
 
 # Local dependencies
 nom-sql = { path = "../nom-sql" }

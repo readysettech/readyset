@@ -4785,6 +4785,7 @@ dependencies = [
  "readyset-data",
  "readyset-errors",
  "readyset-tracing",
+ "serde",
  "tracing",
 ]
 

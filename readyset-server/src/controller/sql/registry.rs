@@ -3,10 +3,12 @@ use std::collections::{HashMap, HashSet};
 
 use nom_sql::analysis::visit::{self, Visitor};
 use nom_sql::{
-    CreateTableBody, CreateTableStatement, CreateViewStatement, Relation, SelectSpecification,
-    SelectStatement, SqlType,
+    CreateTableBody, CreateTableStatement, CreateViewStatement, ItemPlaceholder, Literal, Relation,
+    SelectSpecification, SelectStatement, SqlType,
 };
-use readyset_errors::{unsupported_err, ReadySetError, ReadySetResult};
+use readyset_client::PlaceholderIdx;
+use readyset_errors::{internal_err, unsupported_err, ReadySetError, ReadySetResult};
+use readyset_sql_passes::SelectStatementSkeleton;
 use readyset_tracing::debug;
 use readyset_util::hash::hash;
 use readyset_util::redacted::Sensitive;
@@ -149,12 +151,185 @@ impl RecipeExpr {
     }
 }
 
+/// A pair of (Cached Literal, Given Literal) used to build a MatchedCache
+type LiteralPair<'a, 'b> = (&'a Literal, &'b Literal);
+
+/// A struct to capture the relationship between a query and a cached query. This will be used when
+/// we allow making a [`ViewRequest`] by query instead of by name.
+///
+/// This struct maps values in a query AST to values in a corresponding dataflow migration. We
+/// cannot directly relate an AST and dataflow migration - however, we can use this mapping to adapt
+/// the mapping given by [`Reader::placeholder_map`].
+#[derive(PartialEq, Eq, Debug)]
+pub struct MatchedCache {
+    /// The name of the matching cached query.
+    name: Relation,
+    /// A mapping from query placeholders to inlined values in the cached query.
+    ///
+    /// The values given to these placeholders on query execution must match the corresponding
+    /// Literal.
+    required_values: HashMap<PlaceholderIdx, Literal>,
+    /// A mapping from placeholder values in the cached query to inlined values in the given query.
+    ///
+    /// The placeholder indices may map to fixed literal values or placeholders in the given query.
+    ///
+    /// # Invariants
+    /// - Every placeholder in the cached query must appear in this map.
+    key_mapping: HashMap<PlaceholderIdx, Literal>,
+}
+
+impl MatchedCache {
+    /// Builds a MatchedCache from a set of query literals and migrated query literals. The
+    /// query and cached must correspond to the same [`ExprSkeletons`] entry and must match.
+    pub fn new<'a, 'b>(
+        name: Relation,
+        mut literals: impl Iterator<Item = LiteralPair<'a, 'b>>,
+    ) -> ReadySetResult<Self> {
+        let mut required_values = HashMap::new();
+        let mut key_mapping = HashMap::new();
+        literals.try_for_each(|(l1, l2)| {
+            match (l1, l2) {
+                (Literal::Placeholder(ItemPlaceholder::DollarNumber(idx)), lit) => {
+                    key_mapping.insert(*idx as usize, lit.clone());
+                    Ok(())
+                }
+                (lit, Literal::Placeholder(ItemPlaceholder::DollarNumber(idx))) => {
+                    required_values.insert(*idx as usize, lit.clone());
+                    Ok(())
+                }
+                (Literal::Placeholder(_), _) | (_, Literal::Placeholder(_)) => {
+                    Err(internal_err!("Expected numbered placeholder"))
+                }
+                _ => {
+                    Ok(()) /* Literals exactly match - do nothing */
+                }
+            }
+        })?;
+        Ok(Self {
+            name,
+            required_values,
+            key_mapping,
+        })
+    }
+}
+
+/// A struct to maintain queries by their AST structure, without regard for literal values.
+#[derive(Clone, Default, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub(super) struct ExprSkeletons {
+    /// Map from the query with all literals removed (the "skeleton") to the name of the view and
+    /// the set of literals that belong to that view.
+    inner: HashMap<SelectStatementSkeleton, Vec<(Relation, Vec<Literal>)>>,
+}
+
+// Code will be used shortly.
+#[allow(dead_code)]
+impl ExprSkeletons {
+    /// Create an empty ExprSkeletons
+    pub fn new() -> Self {
+        Self {
+            inner: HashMap::new(),
+        }
+    }
+
+    /// Insert a new expr (by name and literal values)
+    pub fn insert(&mut self, query: SelectStatement, name: Relation) {
+        let (skeleton, literals) = SelectStatementSkeleton::decompose_select(query);
+        let entry = self.inner.entry(skeleton);
+        match entry {
+            Entry::Occupied(mut e) => {
+                let exprs = e.get_mut();
+                // No need to check literals, each relation should have a unique name
+                if !exprs.iter().any(|(r, _)| *r == name) {
+                    exprs.push((name, literals))
+                }
+            }
+            Entry::Vacant(e) => {
+                e.insert(vec![(name, literals)]);
+            }
+        }
+    }
+
+    /// Remove a set of expressions by name. [`ExprSkeletons`] will not resolve aliases.
+    pub fn remove_expressions(&mut self, exprs: impl Iterator<Item = Relation>) {
+        let exprs: HashSet<Relation> = exprs.collect();
+        // For each entry, remove a set of literals if it is associated with one of the given
+        // aliases
+        self.inner.drain_filter(|_, v| {
+            v.drain_filter(|(alias, _)| exprs.contains(alias));
+            // Remove the entire entry if we've removed all associated literals
+            v.is_empty()
+        });
+    }
+
+    /// Find caches that match the given query.
+    ///
+    /// Two queries match if all their literals match. Two literals match if one or both are
+    /// placeholder literals, or if they have equivalent literal values. If all literal values are
+    /// equal, then we have two identical queries. Identical queries are ignored here because they
+    /// are handled elsewhere.
+    pub fn caches_for_query(&self, query: SelectStatement) -> ReadySetResult<Vec<MatchedCache>> {
+        let (skeleton, literals) = SelectStatementSkeleton::decompose_select(query);
+        // Iterate over every cached query for this entry. Compare the literals in the query AST for
+        // that cached query with the literals in the given query AST. Ignore identical queries.
+        // Return each result that could be identical for some set of placeholder
+        // substitutions.
+        match self.inner.get(&skeleton) {
+            Some(exprs) => {
+                exprs
+                    .iter()
+                    .try_fold(vec![], |mut acc, (rel, cached_literals)| {
+                        // Test whether the literals are all equal, all matching or not matching
+                        match cached_literals.iter().zip(literals.iter()).try_fold(
+                            true,
+                            |acc, (l1, l2)| {
+                                // TODO: values might be equal after casting
+                                if l1 == l2 {
+                                    Some(acc) // equal
+                                } else if l1.is_placeholder() || l2.is_placeholder() {
+                                    Some(false) // matching
+                                } else {
+                                    None // not matching
+                                }
+                            },
+                        ) {
+                            // The cached query is identical to our query or the queries do not
+                            // match. Ignore identical queries as those are handled elsewhere.
+                            Some(true) | None => Ok(acc),
+                            // This query matches the cached query (i.e., can use the same
+                            // migration).
+                            Some(false) => {
+                                match MatchedCache::new(
+                                    rel.clone(),
+                                    cached_literals.iter().zip(literals.iter()),
+                                ) {
+                                    Ok(m) => {
+                                        acc.push(m);
+                                        Ok(acc)
+                                    }
+                                    Err(e) => Err(e),
+                                }
+                            }
+                        }
+                    })
+            }
+            None => Ok(vec![]),
+        }
+    }
+}
+
 /// The set of all [`RecipeExpr`]s installed in a ReadySet server cluster.
 #[derive(Clone, Default, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub(super) struct ExprRegistry {
     /// A map from [`QueryID`] to the [`RecipeExpr`] associated with it.
     #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
     expressions: HashMap<QueryID, RecipeExpr>,
+
+    /// A map from a hash of a stripped SelectStatement to all sets of stripped literals for each
+    /// cached version of the stripped SelectStatement.
+    ///
+    /// A stripped expression has all literals replaced with question mark identifiers, and is used
+    /// to match syntactically equivalent queries.
+    skeletons: ExprSkeletons,
 
     /// The set of queries that depend on other queries.
     ///
@@ -207,6 +382,18 @@ impl ExprRegistry {
         if self.expressions.contains_key(&query_id) {
             return Ok(false);
         }
+
+        // We're adding a new RecipeExpr
+        // If we're adding a select statement, then add the statement to Self::skeletons
+        if let RecipeExpr::Cache {
+            ref name,
+            ref statement,
+            ..
+        } = expression
+        {
+            self.skeletons.insert(statement.clone(), name.clone());
+        }
+
         for table_reference in expression.table_references() {
             // Get the references from the expression.
             let Some(table_id) = self.aliases.get(&table_reference) else {
@@ -269,7 +456,11 @@ impl ExprRegistry {
     /// Returns the removed [`RecipeExpr`] if it was present, or `None` otherwise.
     pub(super) fn remove_expression(&mut self, name_or_alias: &Relation) -> Option<RecipeExpr> {
         let query_id = *self.aliases.get(name_or_alias)?;
-        self.aliases.retain(|_, v| *v != query_id);
+        let expr_aliases = self
+            .aliases
+            .drain_filter(|_, v| *v == query_id)
+            .map(|(k, _)| k);
+        self.skeletons.remove_expressions(expr_aliases);
         let expression = self.expressions.remove(&query_id)?;
         if !matches!(expression, RecipeExpr::Table { .. }) {
             self.dependencies.iter_mut().for_each(|(_, deps)| {
@@ -944,6 +1135,240 @@ mod tests {
                     .collect::<Vec<_>>(),
                 vec![(&"foo".into(), &query)]
             );
+        }
+    }
+
+    mod expr_skeleton {
+        use std::collections::HashMap;
+
+        use nom_sql::{
+            parse_create_table, parse_select_statement, Dialect, ItemPlaceholder, Literal,
+        };
+
+        use super::{ExprRegistry, ExprSkeletons, MatchedCache, RecipeExpr};
+
+        #[test]
+        fn equates_literals() {
+            let mut skeleton = ExprSkeletons::new();
+            skeleton.insert(
+                parse_select_statement(Dialect::MySQL, "SELECT NULL, true, 1 FROM t").unwrap(),
+                "foo".into(),
+            );
+            // NULL is considered equivalent to itself in this context
+            assert_eq!(
+                skeleton
+                    .caches_for_query(
+                        parse_select_statement(Dialect::MySQL, "SELECT NULL, true, $1 FROM t")
+                            .unwrap(),
+                    )
+                    .unwrap(),
+                vec![MatchedCache {
+                    name: "foo".into(),
+                    required_values: HashMap::from_iter([(1, Literal::UnsignedInteger(1))]),
+                    key_mapping: HashMap::new(),
+                }]
+            );
+            // true != false
+            assert_eq!(
+                skeleton
+                    .caches_for_query(
+                        parse_select_statement(Dialect::MySQL, "SELECT NULL, false, $1 FROM t")
+                            .unwrap(),
+                    )
+                    .unwrap(),
+                vec![]
+            );
+            // Float(1) != Integer(1)
+            // TODO: We would like to consider equality after casting (e.g., "1" == 1 == 1.0)
+            assert_eq!(
+                skeleton
+                    .caches_for_query(
+                        parse_select_statement(Dialect::MySQL, "SELECT NULL, $1, 1.0 from t")
+                            .unwrap()
+                    )
+                    .unwrap(),
+                vec![]
+            );
+        }
+
+        #[test]
+        fn finds_many() {
+            let mut skeleton = ExprSkeletons::new();
+            skeleton.insert(
+                parse_select_statement(Dialect::MySQL, "SELECT $1, NULL, 1 FROM t").unwrap(),
+                "foo".into(),
+            );
+            skeleton.insert(
+                parse_select_statement(Dialect::MySQL, "SELECT $1, NULL, 2 FROM t").unwrap(),
+                "bar".into(),
+            );
+            skeleton.insert(
+                parse_select_statement(Dialect::MySQL, "SELECT $1, $2, 2 FROM t").unwrap(),
+                "baz".into(),
+            );
+
+            let res = skeleton
+                .caches_for_query(
+                    parse_select_statement(Dialect::MySQL, "SELECT \"string\", NULL, $1 FROM t")
+                        .unwrap(),
+                )
+                .unwrap();
+            let truth = vec![
+                MatchedCache {
+                    name: "foo".into(),
+                    required_values: HashMap::from_iter([(1, Literal::UnsignedInteger(1))]),
+                    key_mapping: HashMap::from_iter([(1, Literal::String("string".to_string()))]),
+                },
+                MatchedCache {
+                    name: "bar".into(),
+                    required_values: HashMap::from_iter([(1, Literal::UnsignedInteger(2))]),
+                    key_mapping: HashMap::from_iter([(1, Literal::String("string".to_string()))]),
+                },
+                MatchedCache {
+                    name: "baz".into(),
+                    required_values: HashMap::from_iter([(1, Literal::UnsignedInteger(2))]),
+                    key_mapping: HashMap::from_iter([
+                        (1, Literal::String("string".to_string())),
+                        (2, Literal::Null),
+                    ]),
+                },
+            ];
+            assert_eq!(res, truth);
+
+            let res = skeleton
+                .caches_for_query(
+                    parse_select_statement(Dialect::MySQL, "SELECT 1, 2, 2 FROM t").unwrap(),
+                )
+                .unwrap();
+            assert_eq!(
+                res,
+                vec![MatchedCache {
+                    name: "baz".into(),
+                    required_values: HashMap::new(),
+                    key_mapping: HashMap::from_iter([
+                        (1, Literal::UnsignedInteger(1)),
+                        (2, Literal::UnsignedInteger(2))
+                    ])
+                }]
+            );
+        }
+
+        #[test]
+        fn adds_query() {
+            let mut registry = ExprRegistry {
+                expressions: HashMap::new(),
+                skeletons: ExprSkeletons::new(),
+                dependencies: HashMap::new(),
+                custom_type_dependencies: HashMap::new(),
+                table_to_invalidated_queries: HashMap::new(),
+                aliases: HashMap::new(),
+            };
+
+            registry
+                .add_query(
+                    RecipeExpr::try_from(
+                        parse_create_table(Dialect::MySQL, "CREATE TABLE t (a INT);").unwrap(),
+                    )
+                    .unwrap(),
+                )
+                .unwrap();
+
+            let statement =
+                parse_select_statement(Dialect::MySQL, "SELECT a FROM t WHERE a = 1 LIMIT ?;")
+                    .unwrap();
+
+            registry
+                .add_query(RecipeExpr::Cache {
+                    name: "test_query".into(),
+                    statement: statement.clone(),
+                    always: false,
+                })
+                .unwrap();
+
+            // Assert that entry was added
+            assert_eq!(registry.skeletons.inner.len(), 1);
+
+            // Assert that stored literals match query
+            let entry = registry.skeletons.inner.iter().next().unwrap().1;
+            assert_eq!(
+                entry[0].1,
+                vec![
+                    Literal::UnsignedInteger(1),
+                    Literal::Placeholder(ItemPlaceholder::QuestionMark)
+                ]
+            );
+
+            // Assert that aliases don't affect this cache
+            registry
+                .add_query(RecipeExpr::Cache {
+                    name: "alias".into(),
+                    statement,
+                    always: false,
+                })
+                .unwrap();
+
+            assert_eq!(registry.skeletons.inner.len(), 1);
+            let entry = registry.skeletons.inner.iter().next().unwrap().1;
+            assert_eq!(entry.len(), 1);
+        }
+
+        #[test]
+        fn removes_query() {
+            let mut registry = ExprRegistry {
+                expressions: HashMap::new(),
+                skeletons: ExprSkeletons::new(),
+                dependencies: HashMap::new(),
+                custom_type_dependencies: HashMap::new(),
+                table_to_invalidated_queries: HashMap::new(),
+                aliases: HashMap::new(),
+            };
+
+            registry
+                .add_query(
+                    RecipeExpr::try_from(
+                        parse_create_table(Dialect::MySQL, "CREATE TABLE t (a INT);").unwrap(),
+                    )
+                    .unwrap(),
+                )
+                .unwrap();
+
+            let statement1 =
+                parse_select_statement(Dialect::MySQL, "SELECT a FROM t WHERE a = 1 LIMIT ?;")
+                    .unwrap();
+            let statement2 =
+                parse_select_statement(Dialect::MySQL, "SELECT a FROM t WHERE a = 2 LIMIT ?;")
+                    .unwrap();
+
+            registry
+                .add_query(RecipeExpr::Cache {
+                    name: "query1".into(),
+                    statement: statement1.clone(),
+                    always: false,
+                })
+                .unwrap();
+
+            registry
+                .add_query(RecipeExpr::Cache {
+                    name: "query1_alias".into(),
+                    statement: statement1,
+                    always: false,
+                })
+                .unwrap();
+
+            registry
+                .add_query(RecipeExpr::Cache {
+                    name: "query2".into(),
+                    statement: statement2,
+                    always: false,
+                })
+                .unwrap();
+
+            assert_eq!(registry.skeletons.inner.len(), 1);
+            assert_eq!(registry.skeletons.inner.iter().next().unwrap().1.len(), 2);
+            registry.remove_expression(&"query1_alias".into());
+            assert_eq!(registry.skeletons.inner.iter().next().unwrap().1.len(), 1);
+            registry.remove_expression(&"query2".into());
+            assert_eq!(registry.skeletons.inner.len(), 0);
         }
     }
 }
