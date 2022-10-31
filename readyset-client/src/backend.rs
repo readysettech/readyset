@@ -89,9 +89,8 @@ use readyset::consistency::Timestamp;
 use readyset::query::*;
 use readyset::results::Results;
 use readyset::{ColumnSchema, ViewCreateRequest};
-use readyset_client_metrics::{
-    recorded, EventType, QueryDestination, QueryExecutionEvent, SqlQueryType,
-};
+pub use readyset_client_metrics::QueryDestination;
+use readyset_client_metrics::{recorded, EventType, QueryExecutionEvent, SqlQueryType};
 use readyset_data::{DfType, DfValue};
 use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
 use readyset_errors::{internal, internal_err, unsupported, ReadySetResult};

@@ -25,7 +25,8 @@ mod types {
     };
     use proptest::prelude::ProptestConfig;
     use proptest::string::string_regex;
-    use readyset_client_test_helpers::psql_helpers::upstream_config;
+    use readyset_client::backend::QueryDestination;
+    use readyset_client_test_helpers::psql_helpers::{last_query_info, upstream_config};
     use readyset_client_test_helpers::sleep;
     use readyset_data::DfValue;
     use rust_decimal::Decimal;
@@ -205,6 +206,7 @@ mod types {
     #[tokio::test(flavor = "multi_thread")]
     #[serial_test::serial]
     async fn enums() {
+        readyset_tracing::init_test_logging();
         let (config, _handle) = setup().await;
         let client = connect(config).await;
 
@@ -235,7 +237,24 @@ mod types {
             .await
             .unwrap();
 
-        let eq_res: i64 = client
+        sleep().await;
+
+        let mut project_eq_res = client
+            .query("SELECT x = 'a' FROM t", &[])
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|r| r.get(0))
+            .collect::<Vec<bool>>();
+        project_eq_res.sort();
+        assert_eq!(project_eq_res, vec![false, false, true, true]);
+
+        assert_eq!(
+            last_query_info(&client).await.destination,
+            QueryDestination::Readyset
+        );
+
+        let where_eq_res: i64 = client
             .query_one(
                 "WITH a AS (SELECT COUNT(*) AS c FROM t WHERE x = 'a') SELECT c FROM a",
                 &[],
@@ -243,7 +262,17 @@ mod types {
             .await
             .unwrap()
             .get(0);
-        assert_eq!(eq_res, 2);
+        assert_eq!(where_eq_res, 2);
+
+        assert_eq!(
+            last_query_info(&client).await.destination,
+            QueryDestination::Readyset
+        );
+
+        assert_eq!(
+            last_query_info(&client).await.destination,
+            QueryDestination::Readyset
+        );
 
         let upquery_res = client
             .query("SELECT x FROM t WHERE x = $1", &[&B])
@@ -254,6 +283,11 @@ mod types {
             .collect::<Vec<Abc>>();
         assert_eq!(upquery_res, vec![B]);
 
+        assert_eq!(
+            last_query_info(&client).await.destination,
+            QueryDestination::Readyset
+        );
+
         let sort_res = client
             .query("SELECT x FROM t ORDER BY x ASC", &[])
             .await
@@ -262,6 +296,11 @@ mod types {
             .map(|r| r.get(0))
             .collect::<Vec<Abc>>();
         assert_eq!(sort_res, vec![A, A, B, C]);
+
+        assert_eq!(
+            last_query_info(&client).await.destination,
+            QueryDestination::Readyset
+        );
 
         let mut range_res = client
             .query("SELECT x FROM t WHERE x >= $1", &[&B])
@@ -272,5 +311,10 @@ mod types {
             .collect::<Vec<Abc>>();
         range_res.sort();
         assert_eq!(range_res, vec![B, C]);
+
+        assert_eq!(
+            last_query_info(&client).await.destination,
+            QueryDestination::Readyset
+        );
     }
 }

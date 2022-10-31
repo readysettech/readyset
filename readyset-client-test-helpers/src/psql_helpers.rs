@@ -1,10 +1,11 @@
 use std::env;
 
 use async_trait::async_trait;
+use readyset_client::backend::{QueryDestination, QueryInfo};
 use readyset_client::Backend;
 use readyset_psql::{PostgreSqlQueryHandler, PostgreSqlUpstream};
 use tokio::net::TcpStream;
-use tokio_postgres::NoTls;
+use tokio_postgres::{Client, NoTls, SimpleQueryMessage};
 use tracing::error;
 
 use crate::{sleep, Adapter};
@@ -70,5 +71,28 @@ impl Adapter for PostgreSQLAdapter {
 
     async fn run_backend(backend: Backend<Self::Upstream, Self::Handler>, s: TcpStream) {
         psql_srv::run_backend(readyset_psql::Backend(backend), s).await
+    }
+}
+
+/// Retrieves where the query executed by parsing the row returned by EXPLAIN LAST STATEMENT.
+pub async fn last_query_info(conn: &Client) -> QueryInfo {
+    let row = match conn
+        .simple_query("EXPLAIN LAST STATEMENT")
+        .await
+        .unwrap()
+        .into_iter()
+        .next()
+        .unwrap()
+    {
+        SimpleQueryMessage::Row(row) => row,
+        _ => panic!("Unexpected SimpleQueryMessage"),
+    };
+
+    let destination = QueryDestination::try_from(row.get("Query_destination").unwrap()).unwrap();
+    let noria_error = row.get("ReadySet_error").unwrap().to_owned();
+
+    QueryInfo {
+        destination,
+        noria_error,
     }
 }
