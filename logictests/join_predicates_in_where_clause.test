@@ -1,0 +1,47 @@
+statement ok
+create table a(id int, b_id int);
+
+statement ok
+create table b(id int, other int);
+
+statement ok
+insert into a values (1, 1), (2, 1), (3, 3), (4, 5);
+
+statement ok
+insert into b values (1, 10), (2, 20), (3, 30), (4, 40), (5, 50);
+
+query II rowsort
+select a.id, b.other from a, b where a.b_id = b.id;
+----
+1
+10
+2
+10
+3
+30
+4
+50
+
+query II rowsort
+select a.id, b.other from a join b where a.b_id = b.id;
+----
+1
+10
+2
+10
+3
+30
+4
+50
+
+query II rowsort
+select a.id, c.other from a join (select * from b) as c where a.b_id = c.id;
+----
+1
+10
+2
+10
+3
+30
+4
+50

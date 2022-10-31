@@ -52,6 +52,12 @@ pub enum JoinOperator {
     StraightJoin,
 }
 
+impl JoinOperator {
+    pub fn is_inner_join(&self) -> bool {
+        matches!(self, JoinOperator::Join | JoinOperator::InnerJoin)
+    }
+}
+
 impl fmt::Display for JoinOperator {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {

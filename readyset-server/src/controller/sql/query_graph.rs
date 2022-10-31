@@ -12,7 +12,7 @@ use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
     BinaryOperator, Column, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, InValue,
     ItemPlaceholder, JoinConstraint, JoinOperator, JoinRightSide, Literal, OrderType, Relation,
-    SelectStatement, SqlIdentifier, TableExpr, UnaryOperator,
+    SelectStatement, SqlIdentifier, UnaryOperator,
 };
 use readyset::{PlaceholderIdx, ViewPlaceholder};
 use readyset_errors::{
@@ -456,7 +456,7 @@ where
 // 4. Collect remaining predicates as global predicates
 fn classify_conditionals(
     ce: &Expr,
-    tables: &[TableExpr],
+    inner_join_rels: &HashSet<Relation>,
     local: &mut HashMap<Relation, Vec<Expr>>,
     join: &mut Vec<JoinPredicate>,
     global: &mut Vec<Expr>,
@@ -488,7 +488,7 @@ fn classify_conditionals(
 
                 classify_conditionals(
                     lhs.as_ref(),
-                    tables,
+                    inner_join_rels,
                     &mut new_local,
                     &mut new_join,
                     &mut new_global,
@@ -496,7 +496,7 @@ fn classify_conditionals(
                 )?;
                 classify_conditionals(
                     rhs.as_ref(),
-                    tables,
+                    inner_join_rels,
                     &mut new_local,
                     &mut new_join,
                     &mut new_global,
@@ -570,24 +570,20 @@ fn classify_conditionals(
             } else if is_predicate(op) {
                 // atomic selection predicate
                 match **rhs {
-                    // right-hand side is a column, so this could be a comma join
+                    // right-hand side is a column, so this could be a join predicate
                     Expr::Column(ref rf) => {
                         match **lhs {
                             // column/column comparison
                             #[allow(clippy::unwrap_used)] // we check lf/rf.table.is_some()
                             Expr::Column(ref lf)
                                 if lf.table.is_some()
-                                    && tables
-                                        .iter()
-                                        .any(|te| &te.table == lf.table.as_ref().unwrap())
+                                    && inner_join_rels.contains(lf.table.as_ref().unwrap())
                                     && rf.table.is_some()
-                                    && tables
-                                        .iter()
-                                        .any(|te| &te.table == rf.table.as_ref().unwrap())
+                                    && inner_join_rels.contains(rf.table.as_ref().unwrap())
                                     && lf.table != rf.table =>
                             {
                                 // both columns' tables appear in table list and the tables are
-                                // different --> comma join
+                                // different --> inner join predicate appearing in the WHERE clause
                                 if *op == BinaryOperator::Equal {
                                     // equi-join between two tables
                                     let mut jp = JoinPredicate {
@@ -602,11 +598,11 @@ fn classify_conditionals(
                                     join.push(jp);
                                 } else {
                                     // non-equi-join?
-                                    unsupported!("non-equi-join?");
+                                    global.push(ce.clone());
                                 }
                             }
                             _ => {
-                                // not a comma join, just an ordinary comparison with a
+                                // not a join predicate, just an ordinary comparison with a
                                 // computed column. This must be a global predicate because it
                                 // crosses "tables" (the computed column has no associated
                                 // table)
@@ -910,25 +906,35 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
         })
     };
 
+    // Used later on to determine whether to classify predicates as "join predicates" or not
+    let mut inner_join_rels = HashSet::new();
+
     // 1. Add any relations mentioned in the query to the query graph.
     // This is needed so that we don't end up with an empty query graph when there are no
     // conditionals, but rather with a one-node query graph that has no predicates.
     for table_expr in &st.tables {
         let rel: Relation = table_expr.table.clone();
         qg.relations
-            .insert(rel.clone(), new_node(rel, Vec::new(), st)?);
+            .insert(rel.clone(), new_node(rel.clone(), Vec::new(), st)?);
+        inner_join_rels.insert(rel);
     }
     for jc in &st.join {
         match &jc.right {
             JoinRightSide::Table(table_expr) => {
                 if !qg.relations.contains_key(&table_expr.table) {
                     let name = table_expr.table.clone();
+                    if jc.operator.is_inner_join() {
+                        inner_join_rels.insert(name.clone());
+                    }
                     qg.relations
                         .insert(name.clone(), new_node(name, Vec::new(), st)?);
                 }
             }
             JoinRightSide::NestedSelect(subquery, alias) => {
                 let rel: Relation = alias.clone().into();
+                if jc.operator.is_inner_join() {
+                    inner_join_rels.insert(rel.clone());
+                }
                 if let Entry::Vacant(e) = qg.relations.entry(rel.clone()) {
                     let mut node = new_node(rel, vec![], st)?;
                     node.subgraph = Some((Box::new(to_query_graph(subquery)?), *subquery.clone()));
@@ -1066,7 +1072,7 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
         // Let's classify the predicates we have in the query
         classify_conditionals(
             cond,
-            &st.tables,
+            &inner_join_rels,
             &mut local_predicates,
             &mut join_predicates,
             &mut global_predicates,
@@ -1097,7 +1103,8 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
             }
         }
 
-        // 2. Add predicates for implied (comma) joins
+        // 2. Add predicates for inner joins that had the join condition specified in the WHERE
+        //    clause (including, but not limited to, comma joins)
         for jp in join_predicates {
             if let Expr::Column(l) = &jp.left {
                 if let Expr::Column(r) = &jp.right {
