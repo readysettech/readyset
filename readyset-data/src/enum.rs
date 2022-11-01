@@ -1,4 +1,4 @@
-use nom_sql::{EnumVariants, Literal};
+use nom_sql::EnumVariants;
 use readyset_errors::ReadySetResult;
 
 use crate::{integer, DfType, DfValue};
@@ -9,7 +9,7 @@ use crate::{integer, DfType, DfValue};
 /// to the corresponding enum label. Otherwise, we fall back to integer::coerce_integer.
 pub(crate) fn coerce_enum(
     enum_value: u64,
-    enum_elements: &[Literal],
+    enum_elements: &[String],
     to_ty: &DfType,
     from_ty: &DfType,
 ) -> ReadySetResult<DfValue> {
@@ -18,7 +18,7 @@ pub(crate) fn coerce_enum(
 
         if idx == 0 {
             Ok(DfValue::from(""))
-        } else if let Some(Literal::String(s)) = enum_elements.get(idx - 1) {
+        } else if let Some(s) = enum_elements.get(idx - 1) {
             // This match is solely here to accomodate for different length specifications in
             // char/varchar types. When Nikolai's apply_str_limit function is finished and merged,
             // we should be able to replace this logic with a simple call to that function:

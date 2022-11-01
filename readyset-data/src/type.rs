@@ -2,7 +2,7 @@ use std::fmt;
 
 use enum_kinds::EnumKind;
 use itertools::Itertools;
-use nom_sql::{EnumVariants, Literal, Relation, SqlIdentifier, SqlType};
+use nom_sql::{EnumVariants, Relation, SqlIdentifier, SqlType};
 use readyset_errors::{unsupported_err, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
@@ -313,7 +313,7 @@ impl DfType {
         metadata: Option<PgEnumMetadata>,
     ) -> Self
     where
-        I: IntoIterator<Item = Literal>,
+        I: IntoIterator<Item = String>,
         I::IntoIter: ExactSizeIterator, // required by `triomphe::ThinArc`
     {
         Self::Enum {

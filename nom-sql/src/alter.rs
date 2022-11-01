@@ -711,10 +711,7 @@ mod tests {
                     table: Relation::from("discussion_user"),
                     definitions: vec![AlterTableDefinition::AddColumn(ColumnSpecification {
                         column: Column::from("subscription"),
-                        sql_type: SqlType::from_enum_variants([
-                            Literal::String("follow".into()),
-                            Literal::String("ignore".into()),
-                        ]),
+                        sql_type: SqlType::from_enum_variants(["follow".into(), "ignore".into(),]),
                         constraints: vec![ColumnConstraint::Null],
                         comment: None,
                     })],

@@ -215,7 +215,7 @@ impl DdlEvent {
                     name: name.clone().into(),
                 },
                 ty: DfType::from_enum_variants(
-                    variants.into_iter().map(|v| v.label.into()),
+                    variants.into_iter().map(|v| v.label),
                     DataDialect::DEFAULT_POSTGRESQL,
                     Some(PgEnumMetadata {
                         name: name.into(),

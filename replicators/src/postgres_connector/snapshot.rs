@@ -559,7 +559,7 @@ impl<'a> PostgresReplicator<'a> {
             let changelist = ChangeList::from_change(
                 Change::CreateType {
                     ty: DfType::from_enum_variants(
-                        variants.into_iter().map(|v| v.label.into()),
+                        variants.into_iter().map(|v| v.label),
                         DataDialect::DEFAULT_POSTGRESQL,
                         Some(PgEnumMetadata {
                             name: ty.name.clone().into(),

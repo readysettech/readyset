@@ -1,10 +1,9 @@
 use std::convert::TryFrom;
 
-use nom_sql::Literal;
 use postgres_types::Kind;
 use readyset_client::backend as cl;
 use readyset_data::{Collation, DfType, PgEnumMetadata};
-use readyset_errors::{unsupported, ReadySetResult};
+use readyset_errors::unsupported;
 use {psql_srv as ps, tokio_postgres as pgsql};
 
 use crate::Error;
@@ -104,15 +103,7 @@ pub fn type_to_pgsql(col_type: &DfType) -> Result<pgsql::types::Type, Error> {
         } => Ok(Type::new(
             name.into(),
             *oid,
-            Kind::Enum(
-                variants
-                    .iter()
-                    .map(|v| match v {
-                        Literal::String(s) => Ok(s.clone()),
-                        _ => unsupported_type!(),
-                    })
-                    .collect::<ReadySetResult<_>>()?,
-            ),
+            Kind::Enum(variants.to_vec()),
             schema.into(),
         )),
         DfType::Enum { metadata: None, .. } => unsupported_type!(),

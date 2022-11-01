@@ -2,7 +2,6 @@ use std::ops::Deref;
 use std::str::FromStr;
 use std::{fmt, str};
 
-use itertools::Itertools;
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::character::complete::digit1;
@@ -20,7 +19,7 @@ use triomphe::ThinArc;
 use crate::common::{ws_sep_comma, Sign};
 use crate::table::relation;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{literal, Dialect, Literal, NomSqlResult, Relation};
+use crate::{Dialect, NomSqlResult, Relation};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize, Arbitrary)]
 pub enum SqlType {
@@ -107,7 +106,7 @@ impl SqlType {
     #[inline]
     pub fn from_enum_variants<I>(variants: I) -> Self
     where
-        I: IntoIterator<Item = Literal>,
+        I: IntoIterator<Item = String>,
         I::IntoIter: ExactSizeIterator, // required by `triomphe::ThinArc`
     {
         Self::Enum(variants.into())
@@ -204,7 +203,16 @@ impl fmt::Display for SqlType {
             SqlType::TimestampTz => write!(f, "TIMESTAMP WITH TIME ZONE"),
             SqlType::Binary(len) => write_with_len(f, "BINARY", len),
             SqlType::VarBinary(len) => write!(f, "VARBINARY({})", len),
-            SqlType::Enum(ref variants) => write!(f, "ENUM({})", variants.iter().join(", ")),
+            SqlType::Enum(ref variants) => {
+                write!(f, "ENUM(")?;
+                for (i, variant) in variants.iter().enumerate() {
+                    if i != 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "'{}'", variant.replace('\'', "''").replace('\\', "\\\\"))?;
+                }
+                write!(f, ")")
+            }
             SqlType::Decimal(m, d) => write!(f, "DECIMAL({}, {})", m, d),
             SqlType::Json => write!(f, "JSON"),
             SqlType::Jsonb => write!(f, "JSONB"),
@@ -238,16 +246,16 @@ impl FromStr for SqlType {
     }
 }
 
-/// [`SqlType::Enum`](crate::SqlType::Enum) abstraction over an array of [`Literal`].
+/// [`SqlType::Enum`](crate::SqlType::Enum) abstraction over an array of [`String`].
 ///
 /// Clones are O(1) and this is always 1 pointer wide for efficient storage in `SqlType`.
 #[derive(Clone, Eq, Hash, PartialEq)]
 pub struct EnumVariants {
-    variants: ThinArc<(), Literal>,
+    variants: ThinArc<(), String>,
 }
 
 impl Deref for EnumVariants {
-    type Target = [Literal];
+    type Target = [String];
 
     #[inline]
     fn deref(&self) -> &Self::Target {
@@ -259,7 +267,7 @@ impl Deref for EnumVariants {
 //
 // This impl works for `Vec` and `[T; N]`. It will never conflict with `From<EnumType>` because we
 // cannot implement an owned iterator over `triomphe::ThinArc`.
-impl<I: IntoIterator<Item = Literal>> From<I> for EnumVariants
+impl<I: IntoIterator<Item = String>> From<I> for EnumVariants
 where
     I::IntoIter: ExactSizeIterator,
 {
@@ -280,7 +288,7 @@ impl fmt::Debug for EnumVariants {
 impl PartialOrd for EnumVariants {
     #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        <[Literal]>::partial_cmp(self, other)
+        <[String]>::partial_cmp(self, other)
     }
 }
 
@@ -291,7 +299,7 @@ impl<'de> Deserialize<'de> for EnumVariants {
     {
         // Deserialize into a temporary `Vec` since we cannot construct `ThinArc` from an iterator
         // here.
-        let result = Vec::<Literal>::deserialize(deserializer)?;
+        let result = Vec::<String>::deserialize(deserializer)?;
 
         Ok(result.into())
     }
@@ -302,7 +310,7 @@ impl Serialize for EnumVariants {
     where
         S: serde::Serializer,
     {
-        <[Literal]>::serialize(self, serializer)
+        <[String]>::serialize(self, serializer)
     }
 }
 
@@ -450,7 +458,7 @@ fn enum_type(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[
         let (i, _) = whitespace0(i)?;
         let (i, _) = tag("(")(i)?;
         let (i, _) = whitespace0(i)?;
-        let (i, variants) = separated_list0(ws_sep_comma, literal(dialect))(i)?;
+        let (i, variants) = separated_list0(ws_sep_comma, dialect.utf8_string_literal())(i)?;
         let (i, _) = whitespace0(i)?;
         let (i, _) = tag(")")(i)?;
         Ok((i, SqlType::from_enum_variants(variants)))

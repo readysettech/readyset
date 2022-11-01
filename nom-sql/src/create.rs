@@ -964,9 +964,9 @@ mod tests {
                     non_null_col(
                         "type",
                         SqlType::from_enum_variants([
-                            Literal::String("SHIPPING".into()),
-                            Literal::String("BILLING".into()),
-                            Literal::String("LIVING".into()),
+                            "SHIPPING".into(),
+                            "BILLING".into(),
+                            "LIVING".into(),
                         ]),
                     ),
                 ],

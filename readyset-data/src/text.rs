@@ -7,7 +7,6 @@ use std::str::FromStr;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
 
-use nom_sql::Literal;
 use readyset_errors::{ReadySetError, ReadySetResult};
 
 use crate::{Array, Collation, DfType, DfValue};
@@ -538,10 +537,7 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
             .coerce_to(to_ty, from_ty),
 
             DfType::Enum { ref variants, .. } => {
-                if let Some(i) = variants
-                    .iter()
-                    .position(|e| matches!(e, Literal::String(s) if s == str))
-                {
+                if let Some(i) = variants.iter().position(|variant| variant == str) {
                     // MySQL enums use 1-based indexing since a value of 0 is reserved for string
                     // values that do not correspond to valid enum elements. Also, no need to check
                     // for overflow here since enum values can only be 16 bits wide (or maybe 32
@@ -822,9 +818,7 @@ mod tests {
         );
         // TEXT to ENUM
         let enum_type = DfType::from_enum_variants(
-            ["red", "yellow", "green"]
-                .iter()
-                .map(|s| Literal::String(s.to_string())),
+            ["red", "yellow", "green"].into_iter().map(Into::into),
             Dialect::DEFAULT_MYSQL,
             None,
         );
