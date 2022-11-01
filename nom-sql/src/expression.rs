@@ -1,5 +1,5 @@
 use std::fmt::{self, Display};
-use std::iter;
+use std::{iter, mem};
 
 use concrete_iter::concrete_iter;
 use derive_more::From;
@@ -415,6 +415,16 @@ impl Expr {
             Expr::Variable(_) => true,
             _ => self.recursive_subexpressions().any(Self::contains_vars),
         }
+    }
+
+    /// Functions similarly to mem::take, replacing the argument with a meaningless placeholder and
+    /// returning the value from the method, thus providing a way to move ownership more easily.
+    pub fn take(&mut self) -> Self {
+        // If Expr implemented Default we could use mem::take directly for this purpose, but we
+        // decided that it felt semantically weird and arbitrary to have a Default implementation
+        // for Expr that returned a null literal, since there isn't really such a thing as a
+        // "default" expression.
+        mem::replace(self, Expr::Literal(Literal::Null))
     }
 }
 

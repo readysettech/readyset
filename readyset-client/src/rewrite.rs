@@ -265,7 +265,7 @@ fn where_in_to_placeholders(
     };
 
     *expr = Expr::BinaryOp {
-        lhs: mem::replace(lhs, Box::new(Expr::Literal(Literal::Null))),
+        lhs: Box::new(lhs.take()),
         op,
         rhs: Box::new(Expr::Literal(Literal::Placeholder(
             ItemPlaceholder::QuestionMark,

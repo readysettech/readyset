@@ -1,7 +1,5 @@
-use std::mem;
-
 use nom_sql::analysis::visit::{self, Visitor};
-use nom_sql::{BinaryOperator, Expr, Literal, UnaryOperator};
+use nom_sql::{BinaryOperator, Expr, UnaryOperator};
 
 /// Attempt to replace `expr` with the equivalent expression negated. Returns `true` if that was
 /// doable, or `false` if it was impossible. If this function returns `false`, `expr` was not
@@ -47,7 +45,7 @@ fn negate_expr(expr: &mut Expr) -> bool {
             op: UnaryOperator::Not,
             rhs,
         } => {
-            *expr = mem::replace(rhs, Expr::Literal(Literal::Null));
+            *expr = rhs.take();
         }
         Expr::Between { negated, .. } | Expr::In { negated, .. } => {
             *negated = !*negated;
@@ -86,7 +84,7 @@ impl<'ast> Visitor<'ast> for NormalizeNegationVisitor {
             if !negate_expr(rhs) {
                 return Ok(());
             }
-            *expr = mem::replace(rhs, Expr::Literal(Literal::Null))
+            *expr = rhs.take()
         }
         visit::walk_expr(self, expr)
     }
