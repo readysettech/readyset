@@ -22,6 +22,7 @@ use readyset::status::{ReadySetStatus, SnapshotStatus};
 use readyset::WorkerDescriptor;
 use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_telemetry_reporter::TelemetrySender;
+use readyset_version::RELEASE_VERSION;
 use reqwest::Url;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::Notify;
@@ -246,6 +247,9 @@ impl Leader {
                         Ok(())
                     });
                     return_serialized!(res);
+                }
+                (&Method::GET | &Method::POST, "/version") => {
+                    return_serialized!(RELEASE_VERSION);
                 }
                 _ => {}
             }

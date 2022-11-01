@@ -11,7 +11,7 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use anyhow::{anyhow, bail};
+use anyhow::{anyhow, bail, ensure};
 use async_trait::async_trait;
 use clap::{ArgGroup, Parser};
 use failpoint_macros::set_failpoint;
@@ -771,7 +771,7 @@ where
         let upstream_config = options.server_worker_options.replicator_config.clone();
 
         // Run a readyset-server instance within this adapter.
-        let _handle = if options.standalone || options.embedded_readers {
+        let internal_server_handle = if options.standalone || options.embedded_readers {
             let (handle, valve) = Valve::new();
             let authority = options.authority.clone();
             let deployment = options.deployment.clone();
@@ -817,6 +817,12 @@ where
             let mut rh = rh.clone();
             rt.block_on(async { rh.supports_pagination().await })?
         };
+
+        if internal_server_handle.is_none() {
+            // Validate compatibility with the external readyset-server instance
+            rt.block_on(async { check_server_version_compatibility(&mut rh.clone()).await })?;
+        }
+
         rs_connect.in_scope(|| info!(supported = %server_supports_pagination));
 
         let expr_dialect = self.expr_dialect;
@@ -965,7 +971,7 @@ where
         drop(rh);
 
         // Send shutdown telemetry events
-        if _handle.is_some() {
+        if internal_server_handle.is_some() {
             let _ = telemetry_sender.send_event(TelemetryEvent::ServerStop);
         }
 
@@ -991,6 +997,18 @@ where
 
         Ok(())
     }
+}
+
+async fn check_server_version_compatibility(rh: &mut ReadySetHandle) -> anyhow::Result<()> {
+    let server_version = rh.version().await?;
+    debug!(server_version);
+    ensure!(
+        RELEASE_VERSION == server_version,
+        "Adapter and server version mismatch. Expected {} found {}",
+        RELEASE_VERSION,
+        server_version
+    );
+    Ok(())
 }
 
 async fn my_ip(destination: &str, use_aws_external: bool) -> Option<IpAddr> {

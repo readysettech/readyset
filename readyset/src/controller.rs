@@ -721,6 +721,11 @@ impl ReadySetHandle {
         self.rpc("supports_pagination", (), self.request_timeout)
     }
 
+    /// Returns the server's release version
+    pub fn version(&mut self) -> impl Future<Output = ReadySetResult<String>> + '_ {
+        self.rpc("version", (), self.request_timeout)
+    }
+
     /// Returns the amount of actually allocated memory
     pub fn allocated_bytes(&mut self) -> impl Future<Output = ReadySetResult<Option<usize>>> + '_ {
         self.rpc("allocated_bytes", (), self.request_timeout)
