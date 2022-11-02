@@ -188,7 +188,14 @@ fn mir_node_to_flow_parts(
                     invariant_eq!(mir_node.ancestors.len(), 1);
                     #[allow(clippy::unwrap_used)] // checked by above invariant
                     let parent = mir_node.first_ancestor().unwrap();
-                    make_filter_node(name, parent, &mir_node.columns(), conditions.clone(), mig)?
+                    make_filter_node(
+                        name,
+                        parent,
+                        &mir_node.columns(),
+                        conditions.clone(),
+                        custom_types,
+                        mig,
+                    )?
                 }
                 MirNodeInner::Identity => {
                     invariant_eq!(mir_node.ancestors.len(), 1);
@@ -214,6 +221,7 @@ fn mir_node_to_flow_parts(
                         on,
                         project,
                         JoinType::Inner,
+                        custom_types,
                         mig,
                     )?
                 }
@@ -286,6 +294,7 @@ fn mir_node_to_flow_parts(
                         on,
                         project,
                         JoinType::Left,
+                        custom_types,
                         mig,
                     )?
                 }
@@ -304,6 +313,7 @@ fn mir_node_to_flow_parts(
                         emit,
                         expressions,
                         literals,
+                        custom_types,
                         mig,
                     )?
                 }
@@ -581,12 +591,14 @@ fn make_filter_node(
     parent: MirNodeRef,
     columns: &[Column],
     conditions: Expr,
+    custom_types: &HashMap<Relation, DfType>,
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<FlowNode> {
     let parent_na = parent.borrow().flow_node_addr()?;
     #[allow(clippy::indexing_slicing)] // just got the address
     let mut parent_cols = mig.dataflow_state.ingredients[parent_na].columns().to_vec();
-    let filter_conditions = lower_expression(&parent, conditions, &parent_cols, mig.dialect)?;
+    let filter_conditions =
+        lower_expression(&parent, conditions, &parent_cols, custom_types, mig.dialect)?;
 
     set_names(&column_names(columns), &mut parent_cols)?;
 
@@ -707,6 +719,7 @@ fn make_join_node(
     on: &[(Column, Column)],
     proj_cols: &[Column],
     kind: JoinType,
+    custom_types: &HashMap<Relation, DfType>,
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<FlowNode> {
     use dataflow::ops::join::JoinSource;
@@ -784,6 +797,7 @@ fn make_join_node(
                 &node.borrow().columns(),
                 &[],
                 &[("cross_join_bogokey".into(), DfValue::from(0))],
+                custom_types,
                 mig,
             )
         };
@@ -922,6 +936,7 @@ fn make_latest_node(
 struct LowerContext<'a> {
     parent_node: &'a MirNodeRef,
     parent_cols: &'a [DfColumn],
+    custom_types: &'a HashMap<Relation, DfType>,
 }
 
 impl<'a> dataflow::LowerContext for LowerContext<'a> {
@@ -939,9 +954,8 @@ impl<'a> dataflow::LowerContext for LowerContext<'a> {
         Ok((index, ty))
     }
 
-    fn resolve_type(&self, _ty: Relation) -> Option<DfType> {
-        // TODO(grfn): Look up the type in the schema
-        None
+    fn resolve_type(&self, ty: Relation) -> Option<DfType> {
+        self.custom_types.get(&ty).cloned()
     }
 }
 
@@ -951,6 +965,7 @@ fn lower_expression(
     parent_node: &MirNodeRef,
     expr: Expr,
     parent_cols: &[DfColumn],
+    custom_types: &HashMap<Relation, DfType>,
     dialect: Dialect,
 ) -> ReadySetResult<DfExpr> {
     DfExpr::lower(
@@ -959,6 +974,7 @@ fn lower_expression(
         LowerContext {
             parent_node,
             parent_cols,
+            custom_types,
         },
     )
 }
@@ -970,6 +986,7 @@ fn make_project_node(
     emit: &[Column],
     expressions: &[(SqlIdentifier, Expr)],
     literals: &[(SqlIdentifier, DfValue)],
+    custom_types: &HashMap<Relation, DfType>,
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<FlowNode> {
     let parent_na = parent.borrow().flow_node_addr()?;
@@ -1007,7 +1024,7 @@ fn make_project_node(
 
     let projected_expressions: Vec<DfExpr> = expressions
         .iter()
-        .map(|(_, e)| lower_expression(&parent, e.clone(), parent_cols, mig.dialect))
+        .map(|(_, e)| lower_expression(&parent, e.clone(), parent_cols, custom_types, mig.dialect))
         .collect::<Result<Vec<_>, _>>()?;
 
     let col_names = source_columns

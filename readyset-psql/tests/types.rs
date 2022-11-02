@@ -237,6 +237,16 @@ mod types {
             .await
             .unwrap();
 
+        client
+            .simple_query("CREATE TABLE t_s (x text);")
+            .await
+            .unwrap();
+
+        client
+            .simple_query("INSERT INTO t_s (x) VALUES ('b'), ('c'), ('a'), ('a')")
+            .await
+            .unwrap();
+
         sleep().await;
 
         let mut project_eq_res = client
@@ -311,6 +321,21 @@ mod types {
             .collect::<Vec<Abc>>();
         range_res.sort();
         assert_eq!(range_res, vec![B, C]);
+
+        assert_eq!(
+            last_query_info(&client).await.destination,
+            QueryDestination::Readyset
+        );
+
+        let mut cast_res = client
+            .query("select cast(x as abc) from t_s", &[])
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|r| r.get(0))
+            .collect::<Vec<Abc>>();
+        cast_res.sort();
+        assert_eq!(cast_res, vec![A, A, B, C]);
 
         assert_eq!(
             last_query_info(&client).await.destination,
