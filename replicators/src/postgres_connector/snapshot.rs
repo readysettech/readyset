@@ -88,7 +88,7 @@ struct EnumVariant {
     label: String,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct CustomTypeEntry {
     oid: u32,
     name: String,
@@ -312,8 +312,18 @@ impl TableEntry {
         self,
         transaction: &'a pgsql::Transaction<'a>,
     ) -> Result<TableDescription, ReadySetError> {
-        let columns = Self::get_columns(self.oid, transaction).await?;
-        let constraints = Self::get_constraints(self.oid, transaction).await?;
+        let columns = Self::get_columns(self.oid, transaction)
+            .await
+            .map_err(|e| ReadySetError::TableError {
+                name: self.name.clone(),
+                source: Box::new(e),
+            })?;
+        let constraints = Self::get_constraints(self.oid, transaction)
+            .await
+            .map_err(|e| ReadySetError::TableError {
+                name: self.name.clone(),
+                source: Box::new(ReadySetError::ReplicationFailed(e.to_string())),
+            })?;
 
         Ok(TableDescription {
             name: Relation {
@@ -552,7 +562,7 @@ impl<'a> PostgresReplicator<'a> {
             let variants = match ty.get_variants(&self.transaction).await {
                 Ok(v) => v,
                 Err(error) => {
-                    error!(%error, "Error looking up variants for custom type, type will not be used");
+                    error!(%error, custom_type=?ty, "Error looking up variants for custom type, type will not be used");
                     continue;
                 }
             };
@@ -567,18 +577,19 @@ impl<'a> PostgresReplicator<'a> {
                             oid: ty.oid,
                         }),
                     ),
-                    name: ty.into_relation(),
+                    name: ty.clone().into_relation(),
                 },
                 DataDialect::DEFAULT_POSTGRESQL,
             );
             if let Err(error) = self.noria.extend_recipe_no_leader_ready(changelist).await {
-                error!(%error, "Error creating custom type, type will not be used");
+                error!(%error, custom_type=?ty, "Error creating custom type, type will not be used");
             }
         }
 
         // For each table, retrieve its structure
         let mut tables = Vec::with_capacity(table_list.len());
         for table in table_list {
+            let table_name = &table.name.clone().to_string();
             let create_table = match table.get_table(&self.transaction).await {
                 Ok(ct) => ct,
                 Err(error) => {
@@ -601,7 +612,7 @@ impl<'a> PostgresReplicator<'a> {
             {
                 Ok(_) => tables.push(create_table),
                 Err(error) => {
-                    error!(%error, "Error extending CREATE TABLE, table will not be used")
+                    error!(%error, table=%table_name, "Error extending CREATE TABLE, table will not be used")
                 }
             }
         }
@@ -609,14 +620,14 @@ impl<'a> PostgresReplicator<'a> {
         for view in view_list {
             let view_name = view.name.clone();
             let create_view = view.get_create_view(&self.transaction).await?;
-            create_schema.add_view_create(view_name, create_view.clone());
+            create_schema.add_view_create(view_name.clone(), create_view.clone());
 
             // Postgres returns a postgres style CREATE statement, but ReadySet only accepts MySQL
             // style
             let view = match nom_sql::parse_query(Dialect::PostgreSQL, &create_view) {
                 Ok(v) => v.to_string(),
                 Err(err) => {
-                    error!(%err, "Error parsing CREATE VIEW, view will not be used");
+                    error!(%err, view=%view_name, "Error parsing CREATE VIEW, view will not be used");
                     continue;
                 }
             };
@@ -636,7 +647,7 @@ impl<'a> PostgresReplicator<'a> {
                 )
                 .await
             {
-                error!(%err, "Error extending CREATE VIEW, view will not be used");
+                error!(%err, view=%view_name, "Error extending CREATE VIEW, view will not be used");
             }
         }
 

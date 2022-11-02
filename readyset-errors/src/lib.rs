@@ -522,8 +522,7 @@ pub enum ReadySetError {
     )]
     ReplicationOffsetLogDifferent(String, String),
 
-    /// An error that was encountered in the mysql_async crate during snapshot/binlog replication
-    /// proccess
+    /// An error that was encountered during snapshot/binlog/wal replication proccess
     #[error("Error during replication: {0}")]
     ReplicationFailed(String),
 
