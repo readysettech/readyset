@@ -99,7 +99,7 @@ impl Expr {
                     NotILike => Ok(like(CaseInsensitive, true).into()),
 
                     // JSON operators:
-                    QuestionMark => {
+                    JsonExists => {
                         let json_value = left.to_json()?;
                         let key = <&str>::try_from(&right)?;
 
@@ -198,11 +198,11 @@ mod tests {
     }
 
     #[test]
-    fn eval_question_mark() {
+    fn eval_json_exists() {
         let expr = Op {
             left: Box::new(column_with_type(0, DfType::Jsonb)),
             right: Box::new(column_with_type(1, DfType::Text(Collation::default()))),
-            op: BinaryOperator::QuestionMark,
+            op: BinaryOperator::JsonExists,
             ty: DfType::Bool,
         };
         assert_eq!(
@@ -228,11 +228,11 @@ mod tests {
     }
 
     #[test]
-    fn eval_question_mark_bad_types() {
+    fn eval_json_exists_bad_types() {
         let expr = Op {
             left: Box::new(column_with_type(0, DfType::Jsonb)),
             right: Box::new(column_with_type(1, DfType::Text(Collation::default()))),
-            op: BinaryOperator::QuestionMark,
+            op: BinaryOperator::JsonExists,
             ty: DfType::Bool,
         };
         assert!(expr

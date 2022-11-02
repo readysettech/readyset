@@ -231,7 +231,7 @@ pub enum BinaryOperator {
     Divide,
 
     /// `?`
-    QuestionMark,
+    JsonExists,
 }
 
 impl BinaryOperator {
@@ -258,7 +258,7 @@ impl BinaryOperator {
             NotEqual => Self::NotEqual,
             Is => Self::Is,
             IsNot => Self::IsNot,
-            QuestionMark => Self::QuestionMark,
+            QuestionMark => Self::JsonExists,
         }
     }
 }
@@ -284,7 +284,7 @@ impl fmt::Display for BinaryOperator {
             Self::Subtract => "-",
             Self::Multiply => "*",
             Self::Divide => "/",
-            Self::QuestionMark => "?",
+            Self::JsonExists => "?",
         };
         f.write_str(op)
     }

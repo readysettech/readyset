@@ -390,7 +390,7 @@ impl Expr {
                     | BinaryOperator::LessOrEqual
                     | BinaryOperator::Is
                     | BinaryOperator::IsNot
-                    | BinaryOperator::QuestionMark => DfType::Bool,
+                    | BinaryOperator::JsonExists => DfType::Bool,
                     _ => left.ty().clone(),
                 };
                 Ok(Self::Op {
