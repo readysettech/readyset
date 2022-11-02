@@ -608,6 +608,18 @@ impl Node {
     pub fn set_finalized_addr(&mut self, addr: IndexPair) {
         self.index = Some(addr);
     }
+
+    /// Change the type of one of this node's columns
+    ///
+    /// Returns an error if the given column index is out-of-bounds
+    pub fn set_column_type(&mut self, column_index: usize, new_type: DfType) -> ReadySetResult<()> {
+        self.columns
+            .get_mut(column_index)
+            .ok_or_else(|| internal_err!("Column {column_index} out of bounds"))?
+            .ty = new_type;
+
+        Ok(())
+    }
 }
 
 // is this or that?

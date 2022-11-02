@@ -1360,6 +1360,19 @@ impl Domain {
                     .drop_column(column)?;
                 Ok(None)
             }
+            DomainRequest::SetColumnType {
+                node,
+                column,
+                new_type,
+            } => {
+                trace!(%node, %column, %new_type, "Setting column type");
+                self.nodes
+                    .get(node)
+                    .ok_or_else(|| ReadySetError::NoSuchNode(node.id()))?
+                    .borrow_mut()
+                    .set_column_type(column, new_type)?;
+                Ok(None)
+            }
             DomainRequest::AddEgressTx {
                 egress_node,
                 ingress_node: (ingress_node_global, ingress_node_local),

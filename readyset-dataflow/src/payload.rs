@@ -3,6 +3,7 @@ use std::fmt::{self, Display};
 
 use itertools::Itertools;
 use readyset::{self, KeyComparison, PacketData, PacketTrace};
+use readyset_data::DfType;
 use serde::{Deserialize, Serialize};
 use strum_macros::{EnumCount, EnumDiscriminants, EnumIter, IntoStaticStr};
 use vec1::Vec1;
@@ -197,6 +198,17 @@ pub enum DomainRequest {
 
     /// Drops an existing column from a `Base` node.
     DropBaseColumn { node: LocalNodeIndex, column: usize },
+
+    /// Change the type of an existing column in a node.
+    ///
+    /// Note that this will *not* make any changes to any materialized values for this column in
+    /// node state - either all existing values must also be valid for the new type, or a separate
+    /// message must be sent to update the values.
+    SetColumnType {
+        node: LocalNodeIndex,
+        column: usize,
+        new_type: DfType,
+    },
 
     /// Add a new node to this domain below the given parents.
     AddNode {
