@@ -819,7 +819,6 @@ mod tests {
         // TEXT to ENUM
         let enum_type = DfType::from_enum_variants(
             ["red", "yellow", "green"].into_iter().map(Into::into),
-            Dialect::DEFAULT_MYSQL,
             None,
         );
         assert_eq!(

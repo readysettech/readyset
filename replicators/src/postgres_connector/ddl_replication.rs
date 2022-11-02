@@ -44,7 +44,7 @@ use nom_sql::{
 };
 use pgsql::tls::MakeTlsConnect;
 use readyset::recipe::changelist::Change;
-use readyset_data::{DfType, Dialect as DataDialect, PgEnumMetadata};
+use readyset_data::{DfType, PgEnumMetadata};
 use readyset_errors::ReadySetResult;
 use serde::{Deserialize, Deserializer};
 use tokio_postgres as pgsql;
@@ -216,7 +216,6 @@ impl DdlEvent {
                 },
                 ty: DfType::from_enum_variants(
                     variants.into_iter().map(|v| v.label),
-                    DataDialect::DEFAULT_POSTGRESQL,
                     Some(PgEnumMetadata {
                         name: name.into(),
                         schema: self.schema.into(),

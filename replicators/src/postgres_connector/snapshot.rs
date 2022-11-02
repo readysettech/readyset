@@ -570,7 +570,6 @@ impl<'a> PostgresReplicator<'a> {
                 Change::CreateType {
                     ty: DfType::from_enum_variants(
                         variants.into_iter().map(|v| v.label),
-                        DataDialect::DEFAULT_POSTGRESQL,
                         Some(PgEnumMetadata {
                             name: ty.name.clone().into(),
                             schema: ty.schema.clone().into(),

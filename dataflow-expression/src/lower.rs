@@ -614,7 +614,6 @@ pub(crate) mod tests {
             parse_expr(ParserDialect::PostgreSQL, "cast('foo' as something.custom)").unwrap();
         let enum_ty = DfType::from_enum_variants(
             ["foo".into(), "bar".into()],
-            Dialect::DEFAULT_POSTGRESQL,
             Some(PgEnumMetadata {
                 name: "custom".into(),
                 schema: "something".into(),

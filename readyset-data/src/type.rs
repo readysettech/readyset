@@ -169,8 +169,6 @@ pub enum DfType {
         /// Metadata about the enum type for PostgreSQL enums. For MySQL enums, this will always be
         /// `None`.
         metadata: Option<PgEnumMetadata>,
-
-        dialect: Dialect,
     },
 
     /// [MySQL `json`](https://dev.mysql.com/doc/refman/8.0/en/json.html) or
@@ -227,7 +225,6 @@ impl DfType {
             Enum(ref variants) => Self::Enum {
                 // PERF: Cloning variants is O(1).
                 variants: variants.clone(),
-                dialect,
                 metadata: None,
             },
 
@@ -307,18 +304,13 @@ impl DfType {
     /// Creates a [`DfType::Enum`] instance from a sequence of variant names, a dialect, and
     /// optional metadata about the enum if it originated in a postgresql database
     #[inline]
-    pub fn from_enum_variants<I>(
-        variants: I,
-        dialect: Dialect,
-        metadata: Option<PgEnumMetadata>,
-    ) -> Self
+    pub fn from_enum_variants<I>(variants: I, metadata: Option<PgEnumMetadata>) -> Self
     where
         I: IntoIterator<Item = String>,
         I::IntoIter: ExactSizeIterator, // required by `triomphe::ThinArc`
     {
         Self::Enum {
             variants: variants.into(),
-            dialect,
             metadata,
         }
     }

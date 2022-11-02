@@ -369,7 +369,6 @@ mod tests {
                 index: 0,
                 ty: DfType::from_enum_variants(
                     ["a".into(), "b".into(), "c".into()],
-                    Dialect::DEFAULT_POSTGRESQL,
                     Some(PgEnumMetadata {
                         name: "abc".into(),
                         schema: "public".into(),

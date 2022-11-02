@@ -3534,11 +3534,7 @@ mod tests {
         #[test]
         fn enum_coercions() {
             let variants = ["red", "yellow", "green"];
-            let enum_ty = DfType::from_enum_variants(
-                variants.into_iter().map(Into::into),
-                Dialect::DEFAULT_MYSQL,
-                None,
-            );
+            let enum_ty = DfType::from_enum_variants(variants.into_iter().map(Into::into), None);
 
             // Test conversions from enums to strings
             for dv in [DfValue::Int(2), DfValue::UnsignedInt(2)] {
