@@ -1,7 +1,7 @@
 use std::borrow::Borrow;
 
-use readyset_data::{DfType, DfValue};
-use readyset_errors::{unsupported, ReadySetError, ReadySetResult};
+use readyset_data::{Array, DfType, DfValue};
+use readyset_errors::{ReadySetError, ReadySetResult};
 use serde_json::Value as JsonValue;
 
 use crate::like::{CaseInsensitive, CaseSensitive, LikePattern};
@@ -110,7 +110,19 @@ impl Expr {
                         };
                         Ok(result.into())
                     }
-                    JsonAnyExists => unsupported!("?| operator not implemented yet"),
+                    JsonAnyExists => {
+                        let json_value = left.to_json()?;
+                        let keys = right.as_array().and_then(Array::to_str_vec)?;
+
+                        let result = match json_value {
+                            JsonValue::Object(map) => keys.into_iter().any(|k| map.contains_key(k)),
+                            JsonValue::Array(vec) => vec
+                                .iter()
+                                .any(|v| keys.iter().any(|k| v.as_str() == Some(k))),
+                            _ => false,
+                        };
+                        Ok(result.into())
+                    }
                 }
             }
             Cast { expr, ty, .. } => {
@@ -234,6 +246,70 @@ mod tests {
             left: Box::new(column_with_type(0, DfType::Jsonb)),
             right: Box::new(column_with_type(1, DfType::Text(Collation::default()))),
             op: BinaryOperator::JsonExists,
+            ty: DfType::Bool,
+        };
+        assert!(expr
+            .eval(&[DfValue::from("bad_json"), DfValue::from("abc")])
+            .is_err());
+        assert!(expr
+            .eval(&[DfValue::from("{\"abc\": 42}"), DfValue::from(67)])
+            .is_err());
+    }
+
+    #[test]
+    fn eval_json_any_exists() {
+        let expr = Op {
+            left: Box::new(column_with_type(0, DfType::Jsonb)),
+            right: Box::new(column_with_type(
+                1,
+                DfType::Array(Box::new(DfType::Text(Collation::default()))),
+            )),
+            op: BinaryOperator::JsonAnyExists,
+            ty: DfType::Bool,
+        };
+        assert_eq!(
+            expr.eval(&[
+                DfValue::from("{\"abc\": 42}"),
+                DfValue::from(vec![DfValue::from("uvw"), DfValue::from("xyz")])
+            ])
+            .unwrap(),
+            false.into()
+        );
+        assert_eq!(
+            expr.eval(&[
+                DfValue::from("{\"abc\": 42}"),
+                DfValue::from(vec![DfValue::from("abc"), DfValue::from("def")])
+            ])
+            .unwrap(),
+            true.into()
+        );
+        assert_eq!(
+            expr.eval(&[
+                DfValue::from("[\"abc\"]"),
+                DfValue::from(vec![DfValue::from("uvw"), DfValue::from("xyz")])
+            ])
+            .unwrap(),
+            false.into()
+        );
+        assert_eq!(
+            expr.eval(&[
+                DfValue::from("[\"abc\"]"),
+                DfValue::from(vec![DfValue::from("abc"), DfValue::from("def")])
+            ])
+            .unwrap(),
+            true.into()
+        );
+    }
+
+    #[test]
+    fn eval_json_any_exists_bad_types() {
+        let expr = Op {
+            left: Box::new(column_with_type(0, DfType::Jsonb)),
+            right: Box::new(column_with_type(
+                1,
+                DfType::Array(Box::new(DfType::Text(Collation::default()))),
+            )),
+            op: BinaryOperator::JsonAnyExists,
             ty: DfType::Bool,
         };
         assert!(expr
