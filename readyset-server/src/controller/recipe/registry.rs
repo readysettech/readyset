@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet};
 use launchpad::hash::hash;
 use nom_sql::{
     CreateTableStatement, CreateViewStatement, Relation, SelectSpecification, SelectStatement,
+    SqlType,
 };
 use readyset_errors::{ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
@@ -80,6 +81,14 @@ impl RecipeExpr {
         // Sha1 digest is 20 byte long, so it is safe to consume only 16 bytes
         u128::from_le_bytes(hasher.finalize()[..16].try_into().unwrap())
     }
+
+    pub(super) fn as_table(&self) -> Option<&CreateTableStatement> {
+        if let Self::Table(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
 }
 
 /// The set of all [`RecipeExpr`]s installed in a ReadySet server cluster.
@@ -92,12 +101,23 @@ pub(super) struct ExprRegistry {
     /// The set of queries that depend on other queries.
     ///
     /// # Invariants
+    ///
     /// - The keys here *must* be valid [`QueryID`]s (aka, present in `expressions`), and their
     ///   associated expression should be of [`RecipeExpr::Table`] variant: Tables don't depend on
     ///   anything, but queries depend on tables.
     /// - The values *must* be valid [`QueryID`]s (aka, present in `expressions`), and their
     ///   associated expression should be of [`RecipeExpr::Cache`] or [`RecipeExpr::View`] variant.
     dependencies: HashMap<QueryID, HashSet<QueryID>>,
+
+    /// Map from names of custom types to the set of Query IDs for tables that have columns with
+    /// those types.
+    ///
+    /// # Invariants
+    ///
+    /// - The keys *must* be valid custom types (aka, present in `self.inc.custom_types`),
+    /// - The values *must* be valid [`QueryID`]s (aka, present in `expressions`), and their
+    ///   associated expression should be of [`RecipeExpr::Table`]
+    custom_type_dependencies: HashMap<Relation, HashSet<QueryID>>,
 
     /// Map from names of *nonexistent* tables, to a set of names for queries which should be
     /// invalidated if those tables are ever created
@@ -147,6 +167,17 @@ impl ExprRegistry {
                 .or_insert_with(|| HashSet::new())
                 .insert(query_id);
         }
+
+        if let RecipeExpr::Table(cts) = &expression {
+            for field in &cts.fields {
+                if let SqlType::Other(ty) = field.sql_type.innermost_array_type() {
+                    if let Some(deps) = self.custom_type_dependencies.get_mut(ty) {
+                        deps.insert(query_id);
+                    }
+                }
+            }
+        }
+
         self.expressions.insert(query_id, expression);
         Ok(true)
     }
@@ -255,6 +286,25 @@ impl ExprRegistry {
             .flatten()
     }
 
+    /// Returns an iterator over a list of expressions for tables that contain columns referencing
+    /// the given custom type
+    #[allow(dead_code)] // TODO(grfn)
+    pub(super) fn tables_referencing_custom_type(
+        &self,
+        custom_type_name: &Relation,
+    ) -> impl Iterator<Item = &CreateTableStatement> {
+        self.custom_type_dependencies
+            .get(custom_type_name)
+            .into_iter()
+            .flatten()
+            .flat_map(|dep| {
+                self.expressions
+                    .get(dep)
+                    .expect("Documented invariant")
+                    .as_table()
+            })
+    }
+
     fn assign_alias(&mut self, alias: Relation, query_id: QueryID) -> ReadySetResult<()> {
         match self.aliases.entry(alias.clone()) {
             Entry::Occupied(e) => {
@@ -270,6 +320,10 @@ impl ExprRegistry {
             }
         }
         Ok(())
+    }
+
+    pub(crate) fn add_custom_type(&mut self, name: Relation) {
+        self.custom_type_dependencies.entry(name).or_default();
     }
 }
 
@@ -752,6 +806,33 @@ mod tests {
             registry
                 .insert_invalidating_tables("nonexistent_query".into(), [])
                 .unwrap_err();
+        }
+
+        #[test]
+        fn insert_custom_type_and_table() {
+            let mut registry = setup();
+
+            let ty = Relation {
+                schema: Some("public".into()),
+                name: "abc".into(),
+            };
+            registry.add_custom_type(ty.clone());
+
+            let table = parse_create_table(
+                Dialect::PostgreSQL,
+                "CREATE TABLE public.t (x public.abc, y int)",
+            )
+            .unwrap();
+            assert!(registry
+                .add_query(RecipeExpr::Table(table.clone()))
+                .unwrap());
+
+            assert_eq!(
+                registry
+                    .tables_referencing_custom_type(&ty)
+                    .collect::<Vec<_>>(),
+                vec![&table]
+            )
         }
     }
 }

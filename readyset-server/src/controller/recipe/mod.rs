@@ -328,6 +328,7 @@ impl Recipe {
                             name.schema = Some(first_schema.clone())
                         }
                     }
+                    self.registry.add_custom_type(name.clone());
                     self.inc.add_custom_type(name, ty)?;
                 }
                 Change::Drop {
