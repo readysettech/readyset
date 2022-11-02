@@ -165,6 +165,15 @@ impl<'a> From<&'a str> for Literal {
     }
 }
 
+impl<T> From<Vec<T>> for Literal
+where
+    T: Into<Literal>,
+{
+    fn from(v: Vec<T>) -> Self {
+        Literal::Array(v.into_iter().map(|l| l.into()).collect())
+    }
+}
+
 impl Display for Literal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         macro_rules! write_real {
