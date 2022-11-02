@@ -189,6 +189,11 @@ pub enum BinaryOperator {
     /// Postgres-specific JSONB operator. Looks for the given string as an object key or an array
     /// element and returns a boolean indicating the presence or absence of that string.
     QuestionMark,
+    /// `?|`
+    ///
+    /// Postgres-specific JSONB operator. Takes an array of strings and checks whether any of those
+    /// strings appear as object keys or array elements in the provided JSON value.
+    QuestionMarkPipe,
 }
 
 impl BinaryOperator {
@@ -234,6 +239,7 @@ impl Display for BinaryOperator {
             Self::Multiply => "*",
             Self::Divide => "/",
             Self::QuestionMark => "?",
+            Self::QuestionMarkPipe => "?|",
         };
         f.write_str(op)
     }
@@ -496,6 +502,7 @@ fn infix_no_and_or(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], TokenTree> {
         map(char('-'), |_| BinaryOperator::Subtract),
         map(char('*'), |_| BinaryOperator::Multiply),
         map(char('/'), |_| BinaryOperator::Divide),
+        map(tag("?|"), |_| BinaryOperator::QuestionMarkPipe),
         map(char('?'), |_| BinaryOperator::QuestionMark),
     ))(i)?;
 
@@ -683,6 +690,7 @@ where
             // precedence here because these precedences come from MySQL rather than PG, but this
             // seems to produce the correct behavior in all the cases I've come up with:
             Infix(QuestionMark) => Affix::Infix(Precedence(8), Associativity::Left),
+            Infix(QuestionMarkPipe) => Affix::Infix(Precedence(8), Associativity::Left),
             Prefix(Not) => Affix::Prefix(Precedence(6)),
             Prefix(Neg) => Affix::Prefix(Precedence(5)),
             Primary(_) => Affix::Nilfix,
@@ -1943,6 +1951,24 @@ mod tests {
                     lhs: Box::new(Expr::Literal("{\"abc\": 42}".into())),
                     op: BinaryOperator::QuestionMark,
                     rhs: Box::new(Expr::Literal("abc".into())),
+                };
+
+                let (rem, res) = res.unwrap();
+                assert_eq!(std::str::from_utf8(rem).unwrap(), "");
+                assert_eq!(res, expected);
+            }
+
+            #[test]
+            fn question_mark_pipe_operator() {
+                let cond = "'{\"abc\": 42}' ?| ARRAY['abc', 'def']";
+
+                let res = to_nom_result(expression(Dialect::PostgreSQL)(LocatedSpan::new(
+                    cond.as_bytes(),
+                )));
+                let expected = Expr::BinaryOp {
+                    lhs: Box::new(Expr::Literal("{\"abc\": 42}".into())),
+                    op: BinaryOperator::QuestionMarkPipe,
+                    rhs: Box::new(Expr::Literal(vec!["abc", "def"].into())),
                 };
 
                 let (rem, res) = res.unwrap();
