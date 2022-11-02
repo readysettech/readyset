@@ -390,7 +390,8 @@ impl Expr {
                     | BinaryOperator::LessOrEqual
                     | BinaryOperator::Is
                     | BinaryOperator::IsNot
-                    | BinaryOperator::JsonExists => DfType::Bool,
+                    | BinaryOperator::JsonExists
+                    | BinaryOperator::JsonAnyExists => DfType::Bool,
                     _ => left.ty().clone(),
                 };
                 Ok(Self::Op {
@@ -971,14 +972,19 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn lowered_question_mark_expr_type() {
-        let input = AstExpr::BinaryOp {
-            lhs: Box::new(AstExpr::Literal("{\"abc\": 42}".into())),
-            op: AstBinaryOperator::QuestionMark,
-            rhs: Box::new(AstExpr::Literal("abc".into())),
-        };
-        let result =
-            Expr::lower(input, Dialect::DEFAULT_POSTGRESQL, no_op_lower_context()).unwrap();
-        assert_eq!(*result.ty(), DfType::Bool);
+    fn lowered_json_op_expr_types() {
+        for op in [
+            AstBinaryOperator::QuestionMark,
+            AstBinaryOperator::QuestionMarkPipe,
+        ] {
+            let input = AstExpr::BinaryOp {
+                lhs: Box::new(AstExpr::Literal("{\"abc\": 42}".into())),
+                op,
+                rhs: Box::new(AstExpr::Literal("abc".into())),
+            };
+            let result =
+                Expr::lower(input, Dialect::DEFAULT_POSTGRESQL, no_op_lower_context()).unwrap();
+            assert_eq!(*result.ty(), DfType::Bool);
+        }
     }
 }
