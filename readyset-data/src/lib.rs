@@ -592,6 +592,22 @@ impl DfValue {
         }
     }
 
+    /// If `self` is [`DfValue::Array`], return a reference to the underlying [`Array`], otherwise
+    /// return a [`ReadySetError::DfValueConversionError`] for all other [`DfValue`] variants.
+    pub fn as_array(&self) -> ReadySetResult<&Array> {
+        match self {
+            DfValue::Array(array) => Ok(array),
+            _ => Err(ReadySetError::DfValueConversionError {
+                src_type: match self.sql_type() {
+                    Some(ty) => ty.to_string(),
+                    None => "Null".to_string(),
+                },
+                target_type: "Array".to_string(),
+                details: "".to_string(),
+            }),
+        }
+    }
+
     /// Transform this [`DfValue`] in preparation for being serialized to disk as part of an index.
     ///
     /// This function has the property that if `d1 == d2`, then
