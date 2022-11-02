@@ -341,5 +341,59 @@ mod types {
             last_query_info(&client).await.destination,
             QueryDestination::Readyset
         );
+
+        client
+            .simple_query("ALTER TYPE abc ADD VALUE 'd'")
+            .await
+            .unwrap();
+
+        client
+            .simple_query("INSERT INTO t (x) VALUES ('d')")
+            .await
+            .unwrap();
+
+        #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+        enum Abcd {
+            A,
+            B,
+            C,
+            D,
+        }
+
+        impl<'a> FromSql<'a> for Abcd {
+            fn from_sql(
+                _ty: &postgres_types::Type,
+                raw: &'a [u8],
+            ) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
+                match raw {
+                    b"a" => Ok(Self::A),
+                    b"b" => Ok(Self::B),
+                    b"c" => Ok(Self::C),
+                    b"d" => Ok(Self::D),
+                    r => Err(format!("Unknown variant: '{}'", String::from_utf8_lossy(r)).into()),
+                }
+            }
+
+            fn accepts(ty: &postgres_types::Type) -> bool {
+                ty.name() == "abc"
+            }
+        }
+
+        sleep().await;
+
+        client
+            .simple_query("CREATE CACHE FROM SELECT x FROM t ORDER BY x ASC")
+            .await
+            .unwrap();
+        let _ = client.query("SELECT x FROM t ORDER BY x ASC", &[]).await;
+
+        let sort_res = client
+            .query("SELECT x FROM t ORDER BY x ASC", &[])
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|r| r.get(0))
+            .collect::<Vec<Abcd>>();
+        assert_eq!(sort_res, vec![Abcd::A, Abcd::A, Abcd::B, Abcd::C, Abcd::D]);
     }
 }

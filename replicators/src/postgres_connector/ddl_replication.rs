@@ -43,7 +43,7 @@ use nom_sql::{
     CreateTableStatement, CreateViewStatement, Dialect, Relation, SqlQuery, SqlType, TableKey,
 };
 use pgsql::tls::MakeTlsConnect;
-use readyset::recipe::changelist::Change;
+use readyset::recipe::changelist::{AlterTypeChange, Change};
 use readyset_data::{DfType, PgEnumMetadata};
 use readyset_errors::ReadySetResult;
 use serde::{Deserialize, Deserializer};
@@ -138,6 +138,11 @@ pub(crate) enum DdlEventData {
         name: String,
         variants: Vec<DdlEnumVariant>,
     },
+    AlterType {
+        oid: u32,
+        name: String,
+        variants: Vec<DdlEnumVariant>,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -221,6 +226,15 @@ impl DdlEvent {
                         schema: self.schema.into(),
                         oid,
                     }),
+                ),
+            },
+            DdlEventData::AlterType { name, variants, .. } => Change::AlterType {
+                name: Relation {
+                    schema: Some(self.schema.clone().into()),
+                    name: name.into(),
+                },
+                change: AlterTypeChange::SetVariants(
+                    variants.into_iter().map(|v| v.label).collect(),
                 ),
             },
         }

@@ -209,6 +209,40 @@ BEGIN
     END IF;
 END $$;
 
+CREATE OR REPLACE FUNCTION readyset.replicate_alter_type()
+RETURNS event_trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    alter_message text;
+BEGIN
+    SELECT
+        json_build_object(
+            'schema', schema_name,
+            'data', json_build_object('AlterType', json_build_object(
+                'name', t.typname,
+                'oid', t.oid::INT,
+                'variants', json_agg(json_build_object(
+                    'oid', e.oid::int,
+                    'label', e.enumlabel
+                ) ORDER BY e.enumsortorder ASC)
+            ))
+        )
+    INTO alter_message
+    FROM pg_event_trigger_ddl_commands() object
+    JOIN pg_catalog.pg_type t
+      ON t.oid = object.objid
+    JOIN pg_catalog.pg_enum e
+      ON e.enumtypid = t.oid
+    GROUP BY object.objid, object.schema_name, t.oid;
+
+    IF readyset.is_pre14() THEN
+        UPDATE readyset.ddl_replication_log SET "ddl" = alter_message;
+    ELSE
+        PERFORM pg_logical_emit_message(true, 'readyset', alter_message);
+    END IF;
+END $$;
+
 ----
 
 DROP EVENT TRIGGER IF EXISTS readyset_replicate_create_table;
@@ -240,3 +274,9 @@ CREATE EVENT TRIGGER readyset_replicate_create_type
     ON ddl_command_end
     WHEN TAG IN ('CREATE TYPE')
     EXECUTE PROCEDURE readyset.replicate_create_type();
+
+DROP EVENT TRIGGER IF EXISTS readyset_replicate_alter_type;
+CREATE EVENT TRIGGER readyset_replicate_alter_type
+    ON ddl_command_end
+    WHEN TAG IN ('ALTER TYPE')
+    EXECUTE PROCEDURE readyset.replicate_alter_type();
