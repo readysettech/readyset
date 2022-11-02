@@ -186,7 +186,7 @@ impl Node {
                         self.columns()
                             .iter()
                             .enumerate()
-                            .map(|(i, c)| format!("{}: {}", i, c.name))
+                            .map(|(i, c)| format!("[{}] {} : {}", i, c.name, c.ty()))
                             .join(", \\n"),
                         sharding
                     ));
@@ -240,7 +240,7 @@ impl Node {
                         self.columns()
                             .iter()
                             .enumerate()
-                            .map(|(i, c)| format!("{}: {}", i, c.name))
+                            .map(|(i, c)| format!("[{}] {} : {}", i, c.name, c.ty()))
                             .join(", \\n"),
                     ));
                     s.push_str(&format!(" | {}", sharding));
