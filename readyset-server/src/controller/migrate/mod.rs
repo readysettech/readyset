@@ -42,7 +42,7 @@ use metrics::{counter, histogram};
 use nom_sql::Relation;
 use readyset::metrics::recorded;
 use readyset::{KeyColumnIdx, ReadySetError, ViewPlaceholder};
-use readyset_data::Dialect;
+use readyset_data::{DfType, Dialect};
 use tracing::{debug, debug_span, error, info, info_span, instrument, trace};
 
 use crate::controller::migrate::materialization::InvalidEdge;
@@ -374,6 +374,7 @@ fn topo_order(dataflow_state: &DfState, nodes: &HashSet<NodeIndex>) -> Vec<NodeI
 pub(super) enum ColumnChange {
     Add(Column, DfValue),
     Drop(usize),
+    SetType(usize, DfType),
 }
 
 /// Add messages to the dmp to inform nodes that columns have been added or removed
@@ -416,6 +417,11 @@ fn inform_col_changes(
                 ColumnChange::Drop(column) => DomainRequest::DropBaseColumn {
                     node: n.local_addr(),
                     column,
+                },
+                ColumnChange::SetType(column, new_type) => DomainRequest::SetColumnType {
+                    node: n.local_addr(),
+                    column,
+                    new_type,
                 },
             };
 
@@ -599,6 +605,23 @@ impl<'df> Migration<'df> {
 
         // also eventually propagate to domain clone
         self.columns.push((node, ColumnChange::Drop(column)));
+        Ok(())
+    }
+
+    /// Set the column type within a base node
+    pub fn set_column_type(
+        &mut self,
+        node_index: NodeIndex,
+        column: usize,
+        new_type: DfType,
+    ) -> ReadySetResult<()> {
+        self.dataflow_state
+            .ingredients
+            .node_weight_mut(node_index)
+            .ok_or_else(|| ReadySetError::NoSuchNode(node_index.index()))?
+            .set_column_type(column, new_type.clone())?;
+        self.columns
+            .push((node_index, ColumnChange::SetType(column, new_type)));
         Ok(())
     }
 

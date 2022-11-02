@@ -1,7 +1,9 @@
 use std::str;
 use std::vec::Vec;
 
-use nom_sql::{CacheInner, CreateCacheStatement, CreateTableStatement, Relation, SqlQuery};
+use nom_sql::{
+    CacheInner, CreateCacheStatement, CreateTableStatement, Relation, SqlQuery, SqlType,
+};
 use petgraph::graph::NodeIndex;
 use petgraph::visit::Bfs;
 use readyset::recipe::changelist::{Change, ChangeList};
@@ -346,6 +348,33 @@ impl Recipe {
                         internal!("attempted to drop relation, but relation {name} does not exist",);
                     }
                 }
+                Change::AlterType { name, change } => {
+                    let ty = self.inc.alter_custom_type(&name, change)?.clone();
+
+                    let mut table_nodes = vec![];
+                    for table in self.registry.tables_referencing_custom_type(&name) {
+                        for field in table.fields.iter() {
+                            if matches!(&field.sql_type, SqlType::Other(t) if t == &name) {
+                                self.inc.set_base_column_type(
+                                    &table.table,
+                                    &field.column,
+                                    ty.clone(),
+                                    mig,
+                                )?;
+                            }
+                        }
+
+                        let ni = self
+                            .inc
+                            .get_query_address(&table.table)
+                            .expect("Already validated above");
+                        table_nodes.push(ni);
+                    }
+
+                    for ni in table_nodes {
+                        self.remove_downstream_of(ni, mig);
+                    }
+                }
             }
         }
 
@@ -443,22 +472,32 @@ impl Recipe {
         if !is_base {
             Ok(Some(self.remove_leaf(ni, mig)?))
         } else {
-            let mut nodes_to_remove: Vec<NodeIndex> = Vec::new();
-            let mut stack = vec![ni];
-            while let Some(node) = stack.pop() {
-                nodes_to_remove.push(node);
-                mig.changes.drop_node(node);
-                stack.extend(
-                    mig.dataflow_state
-                        .ingredients
-                        .neighbors_directed(node, petgraph::EdgeDirection::Outgoing)
-                        .filter(|ni| !mig.dataflow_state.ingredients[*ni].is_dropped()),
-                );
-            }
+            let mut nodes_to_remove = vec![ni];
+            mig.changes.drop_node(ni);
+            nodes_to_remove.extend(self.remove_downstream_of(ni, mig));
 
-            self.remove_leaf_aliases(&nodes_to_remove);
             Ok(Some(nodes_to_remove))
         }
+    }
+
+    fn remove_downstream_of(&mut self, ni: NodeIndex, mig: &mut Migration<'_>) -> Vec<NodeIndex> {
+        let mut removed = vec![];
+        let next_for = |ni| {
+            mig.dataflow_state
+                .ingredients
+                .neighbors_directed(ni, petgraph::EdgeDirection::Outgoing)
+                .filter(|ni| !mig.dataflow_state.ingredients[*ni].is_dropped())
+        };
+        let mut stack = next_for(ni).collect::<Vec<_>>();
+        while let Some(node) = stack.pop() {
+            removed.push(node);
+            mig.changes.drop_node(node);
+            stack.extend(next_for(node));
+        }
+
+        self.remove_leaf_aliases(&removed);
+
+        removed
     }
 
     fn remove_leaf(

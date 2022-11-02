@@ -288,7 +288,6 @@ impl ExprRegistry {
 
     /// Returns an iterator over a list of expressions for tables that contain columns referencing
     /// the given custom type
-    #[allow(dead_code)] // TODO(grfn)
     pub(super) fn tables_referencing_custom_type(
         &self,
         custom_type_name: &Relation,

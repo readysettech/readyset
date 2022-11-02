@@ -261,6 +261,16 @@ impl ChangeList {
     }
 }
 
+/// Describes a single change to make to a custom type
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum AlterTypeChange {
+    /// Set the variants of this custom type to the given list of variants.
+    ///
+    /// Currently, if the change does not involve exclusively adding variants to the end of the
+    /// existing list of variants, an error will be returned
+    SetVariants(Vec<String>),
+}
+
 /// Describes a singe change to be made to the MIR and dataflow graphs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Change {
@@ -284,6 +294,13 @@ pub enum Change {
         /// practice this is currently just enum types (and in the future will be expanded to also
         /// include composite types and range types)
         ty: DfType,
+    },
+    /// Alter an existing custom type
+    AlterType {
+        /// The name of the type to change
+        name: Relation,
+        /// A specification for the change to make to the type
+        change: AlterTypeChange,
     },
     /// The removal of a [`RecipeExpr`].
     Drop {

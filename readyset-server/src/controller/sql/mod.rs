@@ -16,6 +16,7 @@ use nom_sql::{
 };
 use petgraph::graph::NodeIndex;
 use readyset::internal::IndexType;
+use readyset::recipe::changelist::AlterTypeChange;
 use readyset_data::{DfType, Dialect};
 use readyset_errors::{internal_err, invalid_err, unsupported, ReadySetError, ReadySetResult};
 use readyset_sql_passes::alias_removal::TableAliasRewrite;
@@ -239,6 +240,64 @@ impl SqlIncorporator {
                 Ok(())
             }
         }
+    }
+
+    pub(crate) fn alter_custom_type(
+        &mut self,
+        name: &Relation,
+        change: AlterTypeChange,
+    ) -> ReadySetResult<&DfType> {
+        let Some(ty) = self.custom_types.get_mut(name) else {
+            return Err(invalid_err!("Custom type {name} not found"));
+        };
+
+        match change {
+            AlterTypeChange::SetVariants(new_variants) => {
+                let metadata = match ty {
+                    DfType::Enum { variants, metadata } => {
+                        if new_variants.len() < variants.len()
+                            || new_variants[..variants.len()] != **variants
+                        {
+                            return Err(invalid_err!(
+                                "Cannot drop variants or add new variants unless they're at the \
+                                 end (while altering custom type {name})"
+                            ));
+                        }
+                        metadata.take()
+                    }
+                    _ => return Err(invalid_err!("Custom type {name} is not an enum")),
+                };
+
+                *ty = DfType::from_enum_variants(new_variants, metadata);
+            }
+        }
+
+        Ok(ty)
+    }
+
+    pub(super) fn set_base_column_type(
+        &mut self,
+        table: &Relation,
+        column: &nom_sql::Column,
+        new_ty: DfType,
+        mig: &mut Migration<'_>,
+    ) -> ReadySetResult<()> {
+        let not_found_err = || ReadySetError::TableNotFound {
+            name: table.name.clone().into(),
+            schema: table.schema.clone().map(Into::into),
+        };
+
+        let addr = self.leaf_addresses.get(table).ok_or_else(not_found_err)?;
+        let idx = self
+            .get_base_schema(table)
+            .ok_or_else(not_found_err)?
+            .fields
+            .iter()
+            .position(|f| f.column == *column)
+            .ok_or_else(|| ReadySetError::NoSuchColumn(column.name.clone().into()))?;
+        mig.set_column_type(*addr, idx, new_ty)?;
+
+        Ok(())
     }
 
     pub(super) fn get_base_schema(&self, table: &Relation) -> Option<CreateTableStatement> {
