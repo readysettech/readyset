@@ -131,8 +131,7 @@ pub(crate) enum DdlEventData {
     },
     AlterTable(#[serde(deserialize_with = "parse_alter_table_statement")] AlterTableStatement),
     CreateView(#[serde(deserialize_with = "parse_create_view_statement")] CreateViewStatement),
-    DropTable(String),
-    DropView(String),
+    Drop(String),
     CreateType {
         oid: u32,
         name: String,
@@ -206,7 +205,7 @@ impl DdlEvent {
             }
             DdlEventData::AlterTable(stmt) => Change::AlterTable(stmt),
             DdlEventData::CreateView(stmt) => Change::CreateView(stmt),
-            DdlEventData::DropView(name) | DdlEventData::DropTable(name) => Change::Drop {
+            DdlEventData::Drop(name) => Change::Drop {
                 name: name.into(),
                 if_exists: false,
             },
@@ -562,7 +561,7 @@ mod tests {
         client.simple_query("drop table t;").await.unwrap();
 
         let ddl = get_last_ddl(&client, "drop_table").await.unwrap();
-        assert_eq!(ddl.data, DdlEventData::DropTable("t".into()));
+        assert_eq!(ddl.data, DdlEventData::Drop("t".into()));
     }
 
     #[tokio::test]
@@ -610,5 +609,25 @@ mod tests {
             .await
             .unwrap();
         get_last_ddl(&client, "rollback_no_ddl").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn drop_type() {
+        let client = setup("drop_type").await;
+
+        client
+            .simple_query("create type type_to_drop as enum ('x', 'y');")
+            .await
+            .unwrap();
+        get_last_ddl(&client, "drop_type").await.unwrap();
+
+        client
+            .simple_query("drop type type_to_drop;")
+            .await
+            .unwrap();
+        let ddl = get_last_ddl(&client, "drop_type").await.unwrap();
+
+        assert_eq!(ddl.schema(), "public");
+        assert_eq!(ddl.data, DdlEventData::Drop("type_to_drop".into()));
     }
 }

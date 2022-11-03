@@ -275,6 +275,10 @@ impl SqlIncorporator {
         Ok(ty)
     }
 
+    pub(crate) fn drop_custom_type(&mut self, name: &Relation) -> Option<DfType> {
+        self.custom_types.remove(name)
+    }
+
     pub(super) fn set_base_column_type(
         &mut self,
         table: &Relation,

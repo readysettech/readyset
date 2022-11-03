@@ -422,5 +422,45 @@ mod types {
             last_query_info(&client).await.destination,
             QueryDestination::Readyset
         );
+
+        client.simple_query("DROP TABLE t;").await.unwrap();
+        client.simple_query("DROP TYPE abc CASCADE").await.unwrap();
+
+        client
+            .simple_query("CREATE TYPE abc AS ENUM ('c', 'b', 'a');")
+            .await
+            .unwrap();
+
+        client
+            .simple_query("CREATE TABLE t (x abc);")
+            .await
+            .unwrap();
+
+        client
+            .simple_query("INSERT INTO t (x) VALUES ('b'), ('c'), ('a'), ('a')")
+            .await
+            .unwrap();
+
+        sleep().await;
+
+        client
+            .simple_query("CREATE CACHE FROM SELECT x FROM t ORDER BY x ASC")
+            .await
+            .unwrap();
+        let _ = client.query("SELECT x FROM t ORDER BY x ASC", &[]).await;
+
+        let sort_res = client
+            .query("SELECT x FROM t ORDER BY x ASC", &[])
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|r| r.get(0))
+            .collect::<Vec<Abc>>();
+        assert_eq!(sort_res, vec![C, B, A, A]);
+
+        assert_eq!(
+            last_query_info(&client).await.destination,
+            QueryDestination::Readyset
+        );
     }
 }

@@ -263,6 +263,12 @@ impl ExprRegistry {
         Some(expression)
     }
 
+    /// Removes the custom type associated with the given name from the registry. Returns `true` if
+    /// the type was present, `false` otherwise
+    pub(super) fn remove_custom_type(&mut self, name: &Relation) -> bool {
+        self.custom_type_dependencies.remove(name).is_some()
+    }
+
     /// Returns the number of [`RecipeExpr`]s being stored in the registry.
     pub(super) fn len(&self) -> usize {
         self.expressions.len()

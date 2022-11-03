@@ -154,17 +154,11 @@ BEGIN
     SELECT
     json_build_object(
         'schema', schema_name,
-        'data', json_build_object(
-            CASE
-            WHEN object_type = 'table' THEN 'DropTable'
-            WHEN object_type = 'view' THEN 'DropView'
-            END,
-            object_name
-        )
+        'data', json_build_object('Drop', object_name)
     )
     INTO drop_message
     FROM pg_event_trigger_dropped_objects()
-    WHERE object_type IN ('table', 'view');
+    WHERE object_type IN ('table', 'view', 'type');
 
     IF readyset.is_pre14() THEN
         UPDATE readyset.ddl_replication_log SET "ddl" = drop_message;
@@ -266,7 +260,7 @@ CREATE EVENT TRIGGER readyset_replicate_create_view
 DROP EVENT TRIGGER IF EXISTS readyset_replicate_drop;
 CREATE EVENT TRIGGER readyset_replicate_drop
     ON sql_drop
-    WHEN TAG IN ('DROP TABLE', 'DROP VIEW')
+    WHEN TAG IN ('DROP TABLE', 'DROP VIEW', 'DROP TYPE')
     EXECUTE PROCEDURE readyset.replicate_drop();
 
 DROP EVENT TRIGGER IF EXISTS readyset_replicate_create_type;

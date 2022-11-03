@@ -343,8 +343,33 @@ impl Recipe {
                             name.schema = Some(first_schema.clone());
                         }
                     }
-                    let removed_indices = self.remove_expression(&name, mig)?;
-                    if removed_indices.is_none() && !if_exists {
+
+                    let removed = if self.registry.remove_custom_type(&name) {
+                        for expr in self
+                            .registry
+                            .expressions_referencing_custom_type(&name)
+                            .cloned()
+                            .collect::<Vec<_>>()
+                        {
+                            match expr {
+                                // Technically postgres doesn't allow removing custom types
+                                // before removing tables and views referencing those custom types -
+                                // but we might as well be more
+                                // permissive here
+                                RecipeExpr::Table(CreateTableStatement { table: name, .. })
+                                | RecipeExpr::View(CreateViewStatement { name, .. })
+                                | RecipeExpr::Cache { name, .. } => {
+                                    self.remove_expression(&name, mig)?;
+                                }
+                            }
+                        }
+
+                        self.inc.drop_custom_type(&name).is_some()
+                    } else {
+                        self.remove_expression(&name, mig)?.is_some()
+                    };
+
+                    if !removed && !if_exists {
                         error!(%name, "attempted to drop relation, but relation does not exist");
                         internal!("attempted to drop relation, but relation {name} does not exist",);
                     }
