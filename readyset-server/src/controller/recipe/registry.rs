@@ -3,6 +3,7 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 
 use launchpad::hash::hash;
+use nom_sql::analysis::visit::{self, Visitor};
 use nom_sql::{
     CreateTableStatement, CreateViewStatement, Relation, SelectSpecification, SelectStatement,
     SqlType,
@@ -68,6 +69,45 @@ impl RecipeExpr {
         }
     }
 
+    /// Returns a list of names of custom types referenced by this [`RecipeExpr`]
+    pub(super) fn custom_type_references(&self) -> Vec<&Relation> {
+        match self {
+            RecipeExpr::Table(table) => table
+                .fields
+                .iter()
+                .filter_map(|field| match field.sql_type.innermost_array_type() {
+                    SqlType::Other(ty) => Some(ty),
+                    _ => None,
+                })
+                .collect(),
+            RecipeExpr::View(CreateViewStatement {
+                definition: box SelectSpecification::Simple(statement),
+                ..
+            })
+            | RecipeExpr::Cache { statement, .. } => {
+                #[derive(Default)]
+                struct CollectCustomTypesVisitor<'a>(Vec<&'a Relation>);
+
+                impl<'a> Visitor<'a> for CollectCustomTypesVisitor<'a> {
+                    type Error = !;
+
+                    fn visit_sql_type(&mut self, sql_type: &'a SqlType) -> Result<(), Self::Error> {
+                        if let SqlType::Other(ty) = sql_type {
+                            self.0.push(ty);
+                        }
+
+                        visit::walk_sql_type(self, sql_type)
+                    }
+                }
+
+                let mut visitor = CollectCustomTypesVisitor::default();
+                let Ok(()) = visitor.visit_select_statement(statement);
+                visitor.0
+            }
+            _ => vec![], // TODO: compound select statements,
+        }
+    }
+
     /// Calculates a SHA-1 hash of the [`RecipeExpr`], to identify it based on its contents.
     pub(super) fn calculate_hash(&self) -> QueryID {
         // NOTE: this has to be the same as `<SelectStatement as RegistryExpr>::query_id`
@@ -80,14 +120,6 @@ impl RecipeExpr {
         };
         // Sha1 digest is 20 byte long, so it is safe to consume only 16 bytes
         u128::from_le_bytes(hasher.finalize()[..16].try_into().unwrap())
-    }
-
-    pub(super) fn as_table(&self) -> Option<&CreateTableStatement> {
-        if let Self::Table(v) = self {
-            Some(v)
-        } else {
-            None
-        }
     }
 }
 
@@ -168,13 +200,9 @@ impl ExprRegistry {
                 .insert(query_id);
         }
 
-        if let RecipeExpr::Table(cts) = &expression {
-            for field in &cts.fields {
-                if let SqlType::Other(ty) = field.sql_type.innermost_array_type() {
-                    if let Some(deps) = self.custom_type_dependencies.get_mut(ty) {
-                        deps.insert(query_id);
-                    }
-                }
+        for ty in expression.custom_type_references() {
+            if let Some(deps) = self.custom_type_dependencies.get_mut(ty) {
+                deps.insert(query_id);
             }
         }
 
@@ -286,22 +314,17 @@ impl ExprRegistry {
             .flatten()
     }
 
-    /// Returns an iterator over a list of expressions for tables that contain columns referencing
-    /// the given custom type
-    pub(super) fn tables_referencing_custom_type(
+    /// Returns an iterator over a list of expressions that contain columns referencing the given
+    /// custom type
+    pub(super) fn expressions_referencing_custom_type(
         &self,
         custom_type_name: &Relation,
-    ) -> impl Iterator<Item = &CreateTableStatement> {
+    ) -> impl Iterator<Item = &RecipeExpr> {
         self.custom_type_dependencies
             .get(custom_type_name)
             .into_iter()
             .flatten()
-            .flat_map(|dep| {
-                self.expressions
-                    .get(dep)
-                    .expect("Documented invariant")
-                    .as_table()
-            })
+            .map(|dep| self.expressions.get(dep).expect("Documented invariant"))
     }
 
     fn assign_alias(&mut self, alias: Relation, query_id: QueryID) -> ReadySetResult<()> {
@@ -828,10 +851,49 @@ mod tests {
 
             assert_eq!(
                 registry
-                    .tables_referencing_custom_type(&ty)
+                    .expressions_referencing_custom_type(&ty)
+                    .map(|expr| match expr {
+                        RecipeExpr::Table(table) => table,
+                        _ => panic!(),
+                    })
                     .collect::<Vec<_>>(),
                 vec![&table]
             )
+        }
+
+        #[test]
+        fn query_referencing_custom_type() {
+            let mut registry = setup();
+
+            let ty = Relation {
+                schema: Some("public".into()),
+                name: "abc".into(),
+            };
+            registry.add_custom_type(ty.clone());
+
+            let query =
+                parse_select_statement(Dialect::PostgreSQL, "SELECT CAST(x AS public.abc) FROM t")
+                    .unwrap();
+            assert!(registry
+                .add_query(RecipeExpr::Cache {
+                    name: "foo".into(),
+                    statement: query.clone(),
+                    always: false
+                })
+                .unwrap());
+
+            assert_eq!(
+                registry
+                    .expressions_referencing_custom_type(&ty)
+                    .map(|expr| match expr {
+                        RecipeExpr::Cache {
+                            name, statement, ..
+                        } => (name, statement),
+                        _ => panic!(),
+                    })
+                    .collect::<Vec<_>>(),
+                vec![(&"foo".into(), &query)]
+            );
         }
     }
 }

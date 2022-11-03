@@ -396,6 +396,7 @@
     hash_raw_entry,
     let_else,
     never_type,
+    exhaustive_patterns,
     result_flattening,
     stmt_expr_attributes,
     try_find,

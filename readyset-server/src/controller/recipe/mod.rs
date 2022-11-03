@@ -352,7 +352,12 @@ impl Recipe {
                     let ty = self.inc.alter_custom_type(&name, change)?.clone();
 
                     let mut table_nodes = vec![];
-                    for table in self.registry.tables_referencing_custom_type(&name) {
+                    for expr in self.registry.expressions_referencing_custom_type(&name) {
+                        let RecipeExpr::Table(table) = expr else {
+                            // TODO
+                            continue
+                        };
+
                         for field in table.fields.iter() {
                             if matches!(&field.sql_type, SqlType::Other(t) if t == &name) {
                                 self.inc.set_base_column_type(

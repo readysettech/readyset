@@ -121,7 +121,6 @@ impl Leader {
                 )
                 .await
                 {
-                    Ok(_) => {}
                     // Unrecoverable errors, propagate the error the controller and kill the loop.
                     Err(err @ ReadySetError::RecipeInvariantViolated(_)) => {
                         if let Err(e) = replication_error.send(err) {
