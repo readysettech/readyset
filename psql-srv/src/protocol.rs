@@ -613,6 +613,7 @@ async fn make_field_description<B: Backend>(
 ) -> Result<FieldDescription, Error> {
     let data_type_size = match col.col_type.kind() {
         Kind::Array(_) => TYPLEN_VARLENA,
+        Kind::Enum(_) => TYPLEN_VARLENA,
         _ => match col.col_type {
             Type::BOOL => TYPLEN_1,
             Type::BYTEA => TYPLEN_VARLENA,
