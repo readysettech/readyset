@@ -70,6 +70,7 @@ async fn create_table_insert_test() {
 /// This test verifies that a prepared statement can be executed
 /// on both noria and mysql.
 #[clustertest]
+#[ignore = "ENG-2045: flaky test"]
 async fn mirror_prepare_exec_test() {
     let mut deployment = readyset_mysql("ct_mirror_prepare_exec")
         .add_server(ServerParams::default())
