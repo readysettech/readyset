@@ -30,7 +30,9 @@ use readyset::metrics::recorded;
 use readyset::{ReadySetError, ReadySetHandle, ViewCreateRequest};
 use readyset_client::backend::noria_connector::{NoriaConnector, ReadBehavior};
 use readyset_client::backend::MigrationMode;
-use readyset_client::fallback_cache::{DiskModeledCache, FallbackCache, SimpleFallbackCache};
+use readyset_client::fallback_cache::{
+    DiskModeledCache, EvictionModeledCache, FallbackCache, SimpleFallbackCache,
+};
 use readyset_client::http_router::NoriaAdapterHttpRouter;
 use readyset_client::migration_handler::MigrationHandler;
 use readyset_client::proxied_queries_reporter::ProxiedQueriesReporter;
@@ -373,6 +375,35 @@ pub struct FallbackCacheOptions {
     /// If enabled, will model running the fallback cache off spinning disk.
     #[clap(long, hide = true)]
     model_disk: bool,
+
+    #[clap(flatten)]
+    eviction_options: FallbackCacheEvictionOptions,
+}
+
+// TODO:
+// Change this to an enum that allows for a probabilistic strategy
+//
+// enum FallbackCacheEvictionStrategy {
+// /// Don't model eviction
+// None,
+// /// This Cl's strategy
+// Rate(f64),
+// /// probabilistic strategy
+// Random(f64)
+// }
+/// Command-line options for running the experimental fallback_cache with eviction modeling.
+///
+/// This option struct is intended to be embedded inside of a larger option struct using
+/// `#[clap(flatten)]`.
+#[derive(Parser, Debug)]
+pub struct FallbackCacheEvictionOptions {
+    /// If enabled, will model running the fallback cache with eviction.
+    #[clap(long, hide = true)]
+    model_eviction: bool,
+
+    /// Provides a rate at which we will randomly evict queries.
+    #[clap(long, hide = true, default_value = "0.01")]
+    eviction_rate: f64,
 }
 
 impl<H> NoriaAdapter<H>
@@ -646,6 +677,19 @@ where
             let cache = if options.fallback_cache_options.model_disk {
                 DiskModeledCache::new(Duration::new(options.fallback_cache_options.ttl_seconds, 0))
                     .into()
+            } else if options
+                .fallback_cache_options
+                .eviction_options
+                .model_eviction
+            {
+                EvictionModeledCache::new(
+                    Duration::new(options.fallback_cache_options.ttl_seconds, 0),
+                    options
+                        .fallback_cache_options
+                        .eviction_options
+                        .eviction_rate,
+                )
+                .into()
             } else {
                 SimpleFallbackCache::new(Duration::new(
                     options.fallback_cache_options.ttl_seconds,
