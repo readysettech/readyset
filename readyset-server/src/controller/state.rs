@@ -692,8 +692,8 @@ impl DfState {
     /// the replication offset for the schema stored in the controller and the replication offsets
     /// of all base tables
     ///
-    /// See [the documentation for PersistentState](::noria_dataflow::state::persistent_state) for
-    /// more information about replication offsets.
+    /// See [the documentation for PersistentState](::readyset_dataflow::state::persistent_state)
+    /// for more information about replication offsets.
     pub(super) async fn replication_offsets(&self) -> ReadySetResult<ReplicationOffsets> {
         let domains = self.domains_with_base_tables().await?;
         self.query_domains::<_, NodeMap<Option<ReplicationOffset>>>(

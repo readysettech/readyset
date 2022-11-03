@@ -117,7 +117,7 @@ impl Builder {
 
     /// Enable the creation of [`PacketFilter`]s for egresses before readers
     ///
-    /// [`PacketFilter`]: noria_dataflow::node::special::PacketFilter
+    /// [`PacketFilter`]: readyset_dataflow::node::special::PacketFilter
     pub fn enable_packet_filters(&mut self) {
         self.config.materialization_config.packet_filters_enabled = true;
     }
@@ -191,7 +191,7 @@ impl Builder {
     /// Set the value of [`DomainConfig::aggressively_update_state_sizes`][0]. See the documentation
     /// of that field for more information
     ///
-    /// [0]: noria_dataflow::Config::aggressively_update_state_sizes.
+    /// [0]: readyset_dataflow::Config::aggressively_update_state_sizes.
     pub fn set_aggressively_update_state_sizes(&mut self, value: bool) {
         self.config.domain_config.aggressively_update_state_sizes = value;
     }

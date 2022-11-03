@@ -75,7 +75,7 @@ pub struct Config {
     ///
     /// Defaults to false
     ///
-    /// [`PacketFilter`]: noria_dataflow::node::special::PacketFilter
+    /// [`PacketFilter`]: readyset_dataflow::node::special::PacketFilter
     pub packet_filters_enabled: bool,
 
     /// Whether queries that require full materialization are allowed.

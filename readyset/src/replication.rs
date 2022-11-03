@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 /// [`replication_log_name`](ReplicationOffset::replication_log_name). Within a single log, offsets
 /// are totally ordered, but outside the scope of a log ordering is not well-defined.
 ///
-/// See [the documentation for PersistentState](::noria_dataflow::state::persistent_state) for
+/// See [the documentation for PersistentState](::readyset_dataflow::state::persistent_state) for
 /// more information about how replication offsets are used and persisted
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct ReplicationOffset {

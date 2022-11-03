@@ -83,7 +83,7 @@ pub(crate) enum MissLookupKey {
 ///
 /// [`on_input`]: Ingredient::on_input
 /// [`on_input`]: Ingredient::on_input_raw
-/// [`Domain`]: noria_dataflow::Domain
+/// [`Domain`]: readyset_dataflow::Domain
 /// [`record`]: Miss::record
 #[derive(PartialEq, Eq, Debug)]
 pub(crate) struct Miss {

@@ -101,8 +101,8 @@ pub enum TableOperation {
     ///
     /// Within a group of table operations, the largest replication offset will take precedence
     ///
-    /// See [the documentation for PersistentState](::noria_dataflow::state::persistent_state) for
-    /// more information about replication offsets.
+    /// See [the documentation for PersistentState](::readyset_dataflow::state::persistent_state)
+    /// for more information about replication offsets.
     SetReplicationOffset(ReplicationOffset),
 
     /// Enter or exit snapshot mode for the underlying persistent storage. In snapshot mode
@@ -950,8 +950,8 @@ impl Table {
     /// offsets as part of an existing write batch - but there are some cases where it might be
     /// useful to set outside of a write batch, such as in tests.
     ///
-    /// See [the documentation for PersistentState](::noria_dataflow::state::persistent_state) for
-    /// more information about replication offsets.
+    /// See [the documentation for PersistentState](::readyset_dataflow::state::persistent_state)
+    /// for more information about replication offsets.
     pub async fn set_replication_offset(
         &mut self,
         offset: ReplicationOffset,

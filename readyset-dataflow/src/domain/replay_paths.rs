@@ -92,7 +92,7 @@ struct GeneratedColumns {
 ///
 /// For more information about replay paths, see the [docs page][]
 ///
-/// [generated columns]: noria_dataflow::processing::ColumnSource::GeneratedFromColumns
+/// [generated columns]: readyset_dataflow::processing::ColumnSource::GeneratedFromColumns
 /// [docs page]: http://docs/dataflow/replay_paths.html
 #[derive(Debug, Default)]
 pub(super) struct ReplayPaths {

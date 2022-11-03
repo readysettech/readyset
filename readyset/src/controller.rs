@@ -684,8 +684,8 @@ impl ReadySetHandle {
 
     /// Get a set of all replication offsets for the entire system.
     ///
-    /// See [the documentation for PersistentState](::noria_dataflow::state::persistent_state) for
-    /// more information about replication offsets.
+    /// See [the documentation for PersistentState](::readyset_dataflow::state::persistent_state)
+    /// for more information about replication offsets.
     pub fn replication_offsets(
         &mut self,
     ) -> impl Future<Output = ReadySetResult<ReplicationOffsets>> + '_ {

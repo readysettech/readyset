@@ -106,7 +106,7 @@ pub trait State: SizeOf + Send {
     ///
     /// `replication_offset`, which is ignored for all non-base-table state, can be used to specify
     /// an update to the replication offset of a base table. See [the documentation for
-    /// PersistentState](::noria_dataflow::state::persistent_state) for more information about
+    /// PersistentState](::readyset_dataflow::state::persistent_state) for more information about
     /// replication offsets.
     fn process_records(
         &mut self,
@@ -117,8 +117,8 @@ pub trait State: SizeOf + Send {
 
     /// Returns the current replication offset written to this state.
     ///
-    ///  See [the documentation for PersistentState](::noria_dataflow::state::persistent_state) for
-    /// more information about replication offsets.
+    ///  See [the documentation for PersistentState](::readyset_dataflow::state::persistent_state)
+    /// for more information about replication offsets.
     fn replication_offset(&self) -> Option<&ReplicationOffset>;
 
     /// Mark the given `key` as a *filled hole* in the given partial `tag`, causing all lookups to

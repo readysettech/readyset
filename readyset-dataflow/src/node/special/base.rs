@@ -36,8 +36,8 @@ pub struct BaseWrite {
     /// `None` in this field means that no changes to the previously-set replication offset should
     /// be made
     ///
-    /// See [the documentation for PersistentState](::noria_dataflow::state::persistent_state) for
-    /// more information about replication offsets.
+    /// See [the documentation for PersistentState](::readyset_dataflow::state::persistent_state)
+    /// for more information about replication offsets.
     pub replication_offset: Option<ReplicationOffset>,
 
     /// Optionally enter or exit the snapshot mode for this table
