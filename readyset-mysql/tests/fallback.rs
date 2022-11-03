@@ -704,6 +704,7 @@ async fn invalid_sql_parsing_failed_doesnt_show_proxied() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
+#[ignore = "ENG-2044: fix flaky test"]
 async fn switch_database_with_use() {
     let (opts, _handle) = setup().await;
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
