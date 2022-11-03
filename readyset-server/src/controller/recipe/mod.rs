@@ -2,7 +2,8 @@ use std::str;
 use std::vec::Vec;
 
 use nom_sql::{
-    CacheInner, CreateCacheStatement, CreateTableStatement, Relation, SqlQuery, SqlType,
+    CacheInner, CreateCacheStatement, CreateTableStatement, CreateViewStatement, Relation,
+    SqlQuery, SqlType,
 };
 use petgraph::graph::NodeIndex;
 use petgraph::visit::Bfs;
@@ -352,32 +353,41 @@ impl Recipe {
                     let ty = self.inc.alter_custom_type(&name, change)?.clone();
 
                     let mut table_nodes = vec![];
+                    let mut queries_to_remove = vec![];
                     for expr in self.registry.expressions_referencing_custom_type(&name) {
-                        let RecipeExpr::Table(table) = expr else {
-                            // TODO
-                            continue
-                        };
+                        match expr {
+                            RecipeExpr::Table(table) => {
+                                for field in table.fields.iter() {
+                                    if matches!(&field.sql_type, SqlType::Other(t) if t == &name) {
+                                        self.inc.set_base_column_type(
+                                            &table.table,
+                                            &field.column,
+                                            ty.clone(),
+                                            mig,
+                                        )?;
+                                    }
+                                }
 
-                        for field in table.fields.iter() {
-                            if matches!(&field.sql_type, SqlType::Other(t) if t == &name) {
-                                self.inc.set_base_column_type(
-                                    &table.table,
-                                    &field.column,
-                                    ty.clone(),
-                                    mig,
-                                )?;
+                                let ni = self
+                                    .inc
+                                    .get_query_address(&table.table)
+                                    .expect("Already validated above");
+                                table_nodes.push(ni);
+                            }
+
+                            RecipeExpr::View(CreateViewStatement { name, .. })
+                            | RecipeExpr::Cache { name, .. } => {
+                                queries_to_remove.push(name.clone());
                             }
                         }
-
-                        let ni = self
-                            .inc
-                            .get_query_address(&table.table)
-                            .expect("Already validated above");
-                        table_nodes.push(ni);
                     }
 
                     for ni in table_nodes {
                         self.remove_downstream_of(ni, mig);
+                    }
+
+                    for name in queries_to_remove {
+                        self.remove_expression(&name, mig)?;
                     }
                 }
             }

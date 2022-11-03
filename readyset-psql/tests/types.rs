@@ -352,6 +352,11 @@ mod types {
             .await
             .unwrap();
 
+        client
+            .simple_query("INSERT INTO t_s (x) VALUES ('d')")
+            .await
+            .unwrap();
+
         #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
         enum Abcd {
             A,
@@ -395,5 +400,27 @@ mod types {
             .map(|r| r.get(0))
             .collect::<Vec<Abcd>>();
         assert_eq!(sort_res, vec![Abcd::A, Abcd::A, Abcd::B, Abcd::C, Abcd::D]);
+
+        client
+            .simple_query("CREATE CACHE FROM select cast(x as abc) from t_s")
+            .await
+            .unwrap();
+
+        let _ = client.query("select cast(x as abc) from t_s", &[]).await;
+
+        let mut cast_res = client
+            .query("select cast(x as abc) from t_s", &[])
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|r| r.get(0))
+            .collect::<Vec<Abcd>>();
+        cast_res.sort();
+        assert_eq!(cast_res, vec![Abcd::A, Abcd::A, Abcd::B, Abcd::C, Abcd::D]);
+
+        assert_eq!(
+            last_query_info(&client).await.destination,
+            QueryDestination::Readyset
+        );
     }
 }
