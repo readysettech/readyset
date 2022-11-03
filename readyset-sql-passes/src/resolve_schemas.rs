@@ -4,7 +4,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use nom_sql::analysis::visit::{self, walk_select_statement, Visitor};
+use nom_sql::analysis::visit_mut::{self, walk_select_statement, VisitorMut};
 use nom_sql::{CreateTableStatement, Relation, SelectStatement, SqlIdentifier, SqlType, TableExpr};
 
 struct ResolveSchemaVisitor<'schema> {
@@ -35,7 +35,7 @@ impl<'schema> ResolveSchemaVisitor<'schema> {
     }
 }
 
-impl<'ast, 'schema> Visitor<'ast> for ResolveSchemaVisitor<'schema> {
+impl<'ast, 'schema> VisitorMut<'ast> for ResolveSchemaVisitor<'schema> {
     type Error = !;
 
     fn visit_sql_type(&mut self, sql_type: &'ast mut nom_sql::SqlType) -> Result<(), Self::Error> {
@@ -52,7 +52,7 @@ impl<'ast, 'schema> Visitor<'ast> for ResolveSchemaVisitor<'schema> {
             }
         }
 
-        visit::walk_sql_type(self, sql_type)
+        visit_mut::walk_sql_type(self, sql_type)
     }
 
     fn visit_select_statement(
@@ -84,7 +84,7 @@ impl<'ast, 'schema> Visitor<'ast> for ResolveSchemaVisitor<'schema> {
                 create_table_statement.table.schema = Some(first_schema.clone());
             }
         }
-        visit::walk_create_table_statement(self, create_table_statement)
+        visit_mut::walk_create_table_statement(self, create_table_statement)
     }
 
     fn visit_common_table_expr(
@@ -93,7 +93,7 @@ impl<'ast, 'schema> Visitor<'ast> for ResolveSchemaVisitor<'schema> {
     ) -> Result<(), Self::Error> {
         // Walk first, since the alias for the CTE is not visible inside the CTE itself (TODO:
         // except in the case of `WITH RECURSIVE`, which we don't even parse yet).
-        visit::walk_common_table_expr(self, cte)?;
+        visit_mut::walk_common_table_expr(self, cte)?;
         self.insert_alias(cte.name.clone());
         Ok(())
     }
@@ -102,7 +102,7 @@ impl<'ast, 'schema> Visitor<'ast> for ResolveSchemaVisitor<'schema> {
         if let Some(alias) = &table_expr.alias {
             self.insert_alias(alias.clone())
         }
-        visit::walk_table_expr(self, table_expr)
+        visit_mut::walk_table_expr(self, table_expr)
     }
 
     fn visit_table(&mut self, table: &'ast mut Relation) -> Result<(), Self::Error> {

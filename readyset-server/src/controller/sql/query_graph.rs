@@ -7,7 +7,7 @@ use std::vec::Vec;
 use std::{iter, mem};
 
 use common::IndexType;
-use nom_sql::analysis::visit::{walk_expr, Visitor};
+use nom_sql::analysis::visit_mut::{walk_expr, VisitorMut};
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
     BinaryOperator, Column, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, InValue,
@@ -763,7 +763,7 @@ fn extract_having_aggregates(
         result: Vec<(FunctionExpr, SqlIdentifier)>,
     }
 
-    impl<'ast> Visitor<'ast> for AggregateFinder {
+    impl<'ast> VisitorMut<'ast> for AggregateFinder {
         type Error = !;
 
         fn visit_expr(&mut self, expr: &'ast mut Expr) -> Result<(), Self::Error> {

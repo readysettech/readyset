@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::mem;
 
 use itertools::Itertools;
-use nom_sql::analysis::visit::{walk_select_statement, Visitor};
+use nom_sql::analysis::visit_mut::{walk_select_statement, VisitorMut};
 use nom_sql::{
     Column, CommonTableExpr, JoinRightSide, Relation, SelectStatement, SqlIdentifier, SqlQuery,
     TableExpr,
@@ -45,7 +45,7 @@ struct RemoveAliasesVisitor<'a> {
     out: Vec<TableAliasRewrite>,
 }
 
-impl<'ast, 'a> Visitor<'ast> for RemoveAliasesVisitor<'a> {
+impl<'ast, 'a> VisitorMut<'ast> for RemoveAliasesVisitor<'a> {
     type Error = !;
 
     fn visit_select_statement(

@@ -1,4 +1,4 @@
-use nom_sql::analysis::visit::{self, Visitor};
+use nom_sql::analysis::visit_mut::{self, VisitorMut};
 use nom_sql::{
     BinaryOperator, DeleteStatement, Expr, SelectStatement, SqlQuery, UnaryOperator,
     UpdateStatement,
@@ -45,7 +45,7 @@ fn rewrite_between_condition(operand: Expr, min: Expr, max: Expr) -> Expr {
 
 struct RewriteBetweenVisitor;
 
-impl<'ast> Visitor<'ast> for RewriteBetweenVisitor {
+impl<'ast> VisitorMut<'ast> for RewriteBetweenVisitor {
     type Error = !;
 
     fn visit_expr(&mut self, expr: &'ast mut Expr) -> Result<(), Self::Error> {
@@ -77,7 +77,7 @@ impl<'ast> Visitor<'ast> for RewriteBetweenVisitor {
             _ => {}
         }
 
-        visit::walk_expr(self, expr)
+        visit_mut::walk_expr(self, expr)
     }
 }
 

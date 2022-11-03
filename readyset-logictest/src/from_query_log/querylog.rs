@@ -6,7 +6,7 @@ use std::str::FromStr;
 use anyhow::{bail, Error};
 use chrono::{DateTime, FixedOffset, Utc};
 use enum_display_derive::Display;
-use nom_sql::analysis::visit::Visitor;
+use nom_sql::analysis::visit_mut::VisitorMut;
 use nom_sql::{Expr, ItemPlaceholder, Literal, SelectStatement, SqlQuery};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, Lines};
 
@@ -65,7 +65,7 @@ struct ReplaceLiteralsWithPlaceholdersVisitor {
     out: Vec<Literal>,
 }
 
-impl<'ast> Visitor<'ast> for ReplaceLiteralsWithPlaceholdersVisitor {
+impl<'ast> VisitorMut<'ast> for ReplaceLiteralsWithPlaceholdersVisitor {
     type Error = !;
 
     fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {

@@ -1,4 +1,4 @@
-use nom_sql::analysis::visit::{self, Visitor};
+use nom_sql::analysis::visit_mut::{self, VisitorMut};
 use nom_sql::{BinaryOperator, Expr, UnaryOperator};
 
 /// Attempt to replace `expr` with the equivalent expression negated. Returns `true` if that was
@@ -79,7 +79,7 @@ fn negate_expr(expr: &mut Expr) -> bool {
 }
 
 struct NormalizeNegationVisitor;
-impl<'ast> Visitor<'ast> for NormalizeNegationVisitor {
+impl<'ast> VisitorMut<'ast> for NormalizeNegationVisitor {
     type Error = !;
 
     fn visit_expr(&mut self, expr: &'ast mut Expr) -> Result<(), Self::Error> {
@@ -93,7 +93,7 @@ impl<'ast> Visitor<'ast> for NormalizeNegationVisitor {
             }
             *expr = rhs.take()
         }
-        visit::walk_expr(self, expr)
+        visit_mut::walk_expr(self, expr)
     }
 }
 

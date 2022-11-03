@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use nom_sql::analysis::visit::{walk_select_statement, Visitor};
+use nom_sql::analysis::visit_mut::{walk_select_statement, VisitorMut};
 use nom_sql::{
     Column, Expr, FunctionExpr, Relation, SelectStatement, SqlIdentifier, SqlQuery, TableExpr,
 };
@@ -12,7 +12,7 @@ pub struct CountStarRewriteVisitor<'schema> {
     tables: Option<Vec<TableExpr>>,
 }
 
-impl<'ast, 'schema> Visitor<'ast> for CountStarRewriteVisitor<'schema> {
+impl<'ast, 'schema> VisitorMut<'ast> for CountStarRewriteVisitor<'schema> {
     type Error = ReadySetError;
 
     fn visit_select_statement(

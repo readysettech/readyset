@@ -1,5 +1,5 @@
 use dataflow_expression::Dialect;
-use nom_sql::analysis::visit::Visitor;
+use nom_sql::analysis::visit_mut::VisitorMut;
 use nom_sql::{Expr, SelectStatement};
 
 use self::constant_fold::constant_fold_expr;
@@ -17,7 +17,7 @@ struct ScalarOptimizeExpressionsVisitor {
     dialect: Dialect,
 }
 
-impl<'ast> Visitor<'ast> for ScalarOptimizeExpressionsVisitor {
+impl<'ast> VisitorMut<'ast> for ScalarOptimizeExpressionsVisitor {
     type Error = !;
 
     fn visit_expr(&mut self, expr: &'ast mut Expr) -> Result<(), Self::Error> {

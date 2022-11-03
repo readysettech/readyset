@@ -1,5 +1,5 @@
 use dataflow_expression::{Dialect, Expr as DataflowExpr, LowerContext};
-use nom_sql::analysis::visit::{self, Visitor};
+use nom_sql::analysis::visit_mut::{self, VisitorMut};
 use nom_sql::{Column, Expr, Literal, Relation};
 use readyset_data::{DfType, DfValue};
 use readyset_errors::{internal, ReadySetResult};
@@ -30,7 +30,7 @@ struct ConstantFoldVisitor {
     dialect: Dialect,
 }
 
-impl<'ast> Visitor<'ast> for ConstantFoldVisitor {
+impl<'ast> VisitorMut<'ast> for ConstantFoldVisitor {
     type Error = !;
 
     fn visit_expr(&mut self, expr: &'ast mut Expr) -> Result<(), Self::Error> {
@@ -48,7 +48,7 @@ impl<'ast> Visitor<'ast> for ConstantFoldVisitor {
                 *expr = Expr::Literal(res);
                 Ok(())
             }
-            Err(_) => visit::walk_expr(self, expr),
+            Err(_) => visit_mut::walk_expr(self, expr),
         }
     }
 }

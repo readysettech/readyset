@@ -5,7 +5,7 @@ use std::fmt::Debug;
 use std::{iter, mem};
 
 use itertools::{Either, Itertools};
-use nom_sql::analysis::visit::{self, Visitor};
+use nom_sql::analysis::visit_mut::{self, VisitorMut};
 use nom_sql::{BinaryOperator, Expr, InValue, ItemPlaceholder, Literal, SelectStatement};
 use readyset_data::{DfType, DfValue};
 use readyset_errors::{invalid_err, unsupported, ReadySetError, ReadySetResult};
@@ -284,7 +284,7 @@ struct CollapseWhereInVisitor {
     out: Vec<RewrittenIn>,
 }
 
-impl<'ast> Visitor<'ast> for CollapseWhereInVisitor {
+impl<'ast> VisitorMut<'ast> for CollapseWhereInVisitor {
     type Error = ReadySetError;
 
     fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
@@ -314,7 +314,7 @@ impl<'ast> Visitor<'ast> for CollapseWhereInVisitor {
             }
         }
 
-        visit::walk_expr(self, expression)
+        visit_mut::walk_expr(self, expression)
     }
 }
 
@@ -410,7 +410,7 @@ struct ReorderNumberedPlaceholdersVisitor {
     out: Vec<usize>,
 }
 
-impl<'ast> Visitor<'ast> for ReorderNumberedPlaceholdersVisitor {
+impl<'ast> VisitorMut<'ast> for ReorderNumberedPlaceholdersVisitor {
     type Error = !;
 
     fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
@@ -479,7 +479,7 @@ struct NumberPlaceholdersVisitor {
     offset: u32,
 }
 
-impl<'ast> Visitor<'ast> for NumberPlaceholdersVisitor {
+impl<'ast> VisitorMut<'ast> for NumberPlaceholdersVisitor {
     type Error = ReadySetError;
     fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
         if let Literal::Placeholder(item) = literal {
@@ -536,7 +536,7 @@ impl AutoParametrizeVisitor {
     }
 }
 
-impl<'ast> Visitor<'ast> for AutoParametrizeVisitor {
+impl<'ast> VisitorMut<'ast> for AutoParametrizeVisitor {
     type Error = !;
 
     fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
@@ -551,7 +551,7 @@ impl<'ast> Visitor<'ast> for AutoParametrizeVisitor {
         select_statement: &'ast mut SelectStatement,
     ) -> Result<(), Self::Error> {
         self.query_depth = self.query_depth.saturating_add(1);
-        visit::walk_select_statement(self, select_statement)?;
+        visit_mut::walk_select_statement(self, select_statement)?;
         self.query_depth = self.query_depth.saturating_sub(1);
         Ok(())
     }
@@ -639,7 +639,7 @@ impl<'ast> Visitor<'ast> for AutoParametrizeVisitor {
             }
         }
 
-        visit::walk_expr(self, expression)?;
+        visit_mut::walk_expr(self, expression)?;
         self.in_supported_position = was_supported;
         Ok(())
     }
@@ -655,7 +655,7 @@ impl<'ast> Visitor<'ast> for AutoParametrizeVisitor {
             }
         }
 
-        visit::walk_offset_clause(self, offset)
+        visit_mut::walk_offset_clause(self, offset)
     }
 }
 

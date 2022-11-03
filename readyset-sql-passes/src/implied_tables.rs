@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet};
 use std::mem;
 
 use itertools::Itertools;
-use nom_sql::analysis::visit::{
-    walk_group_by_clause, walk_order_clause, walk_select_statement, Visitor,
+use nom_sql::analysis::visit_mut::{
+    walk_group_by_clause, walk_order_clause, walk_select_statement, VisitorMut,
 };
 use nom_sql::{Column, FieldDefinitionExpr, Relation, SelectStatement, SqlIdentifier, SqlQuery};
 use readyset_errors::{internal, invalid_err, ReadySetError, ReadySetResult};
@@ -71,7 +71,7 @@ impl<'schema> ExpandImpliedTablesVisitor<'schema> {
     }
 }
 
-impl<'ast, 'schema> Visitor<'ast> for ExpandImpliedTablesVisitor<'schema> {
+impl<'ast, 'schema> VisitorMut<'ast> for ExpandImpliedTablesVisitor<'schema> {
     type Error = ReadySetError;
 
     fn visit_select_statement(

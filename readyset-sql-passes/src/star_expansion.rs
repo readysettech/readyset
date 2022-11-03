@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::mem;
 
-use nom_sql::analysis::visit::{self, Visitor};
+use nom_sql::analysis::visit_mut::{self, VisitorMut};
 use nom_sql::{
     Column, Expr, FieldDefinitionExpr, Relation, SelectStatement, SqlIdentifier, SqlQuery,
 };
@@ -22,14 +22,14 @@ struct ExpandStarsVisitor<'schema> {
     table_columns: &'schema HashMap<Relation, Vec<SqlIdentifier>>,
 }
 
-impl<'ast, 'schema> Visitor<'ast> for ExpandStarsVisitor<'schema> {
+impl<'ast, 'schema> VisitorMut<'ast> for ExpandStarsVisitor<'schema> {
     type Error = ReadySetError;
 
     fn visit_select_statement(
         &mut self,
         select_statement: &'ast mut SelectStatement,
     ) -> Result<(), Self::Error> {
-        visit::walk_select_statement(self, select_statement)?;
+        visit_mut::walk_select_statement(self, select_statement)?;
 
         let fields = mem::take(&mut select_statement.fields);
         let subquery_schemas =

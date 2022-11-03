@@ -1,4 +1,5 @@
 pub mod visit;
+pub mod visit_mut;
 
 use std::collections::{HashSet, VecDeque};
 use std::iter;

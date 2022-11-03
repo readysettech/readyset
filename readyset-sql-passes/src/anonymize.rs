@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use nom_sql::analysis::visit::Visitor;
+use nom_sql::analysis::visit_mut::VisitorMut;
 use nom_sql::{
     CreateTableOption, CreateTableStatement, CreateViewStatement, Literal, SelectStatement,
     SqlIdentifier,
@@ -56,7 +56,7 @@ impl Anonymize for [SqlIdentifier] {
 /// This pass replaces every instance of `Literal`, except Placeholders, in the AST with
 /// `Literal::String("<anonymized>")`
 struct AnonymizeLiteralsVisitor;
-impl<'ast> Visitor<'ast> for AnonymizeLiteralsVisitor {
+impl<'ast> VisitorMut<'ast> for AnonymizeLiteralsVisitor {
     type Error = !;
     fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
         if !matches!(literal, Literal::Placeholder(_)) {
@@ -147,7 +147,7 @@ impl AnonymizeVisitor<'_> {
     }
 }
 
-impl<'ast> Visitor<'ast> for AnonymizeVisitor<'_> {
+impl<'ast> VisitorMut<'ast> for AnonymizeVisitor<'_> {
     type Error = !;
 
     fn visit_sql_identifier(

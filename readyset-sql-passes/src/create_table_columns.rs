@@ -1,4 +1,4 @@
-use nom_sql::analysis::visit::{self, Visitor};
+use nom_sql::analysis::visit_mut::{self, VisitorMut};
 use nom_sql::{Column, CreateTableStatement, Relation};
 
 #[derive(Debug, Default)]
@@ -6,7 +6,7 @@ struct CreateTableColumnsVisitor {
     table: Option<Relation>,
 }
 
-impl<'ast> Visitor<'ast> for CreateTableColumnsVisitor {
+impl<'ast> VisitorMut<'ast> for CreateTableColumnsVisitor {
     type Error = !;
 
     fn visit_create_table_statement(
@@ -14,7 +14,7 @@ impl<'ast> Visitor<'ast> for CreateTableColumnsVisitor {
         create_table_statement: &'ast mut CreateTableStatement,
     ) -> Result<(), Self::Error> {
         self.table = Some(create_table_statement.table.clone());
-        visit::walk_create_table_statement(self, create_table_statement)
+        visit_mut::walk_create_table_statement(self, create_table_statement)
     }
 
     fn visit_column(&mut self, column: &'ast mut Column) -> Result<(), Self::Error> {
@@ -24,7 +24,7 @@ impl<'ast> Visitor<'ast> for CreateTableColumnsVisitor {
                 .expect("Must have visited the CREATE TABLE statement by now")
                 .clone()
         });
-        visit::walk_column(self, column)
+        visit_mut::walk_column(self, column)
     }
 }
 

@@ -8,7 +8,7 @@ use std::sync::{atomic, Arc, RwLock};
 use dataflow_expression::{BinaryOperator as DfBinaryOperator, Expr as DfExpr};
 use itertools::Itertools;
 use launchpad::redacted::Sensitive;
-use nom_sql::analysis::visit::Visitor;
+use nom_sql::analysis::visit_mut::VisitorMut;
 use nom_sql::{
     self, BinaryOperator, ColumnConstraint, DeleteStatement, Expr, InsertStatement, Literal,
     Relation, SelectStatement, SqlIdentifier, SqlQuery, UnaryOperator, UpdateStatement,
@@ -1501,7 +1501,7 @@ impl NoriaConnector {
 fn verify_no_placeholders(statement: &mut SelectStatement, query: &str) -> ReadySetResult<()> {
     struct PlaceholderFoundVisitor;
 
-    impl<'ast> Visitor<'ast> for PlaceholderFoundVisitor {
+    impl<'ast> VisitorMut<'ast> for PlaceholderFoundVisitor {
         type Error = ();
 
         fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
