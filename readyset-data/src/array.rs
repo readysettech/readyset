@@ -137,6 +137,16 @@ impl Array {
         }
         Ok(arr)
     }
+
+    /// Create a [`Vec`] of [`str`] references, which are obtained by calling [`try_from`] on each
+    /// of the [`DfValue`] elements contained in `self`.
+    ///
+    /// Useful for dealing with arrays of string values in a more easily usable form.
+    pub fn to_str_vec(&self) -> ReadySetResult<Vec<&str>> {
+        self.values()
+            .map(<&str>::try_from)
+            .collect::<Result<_, _>>()
+    }
 }
 
 impl Ord for Array {
