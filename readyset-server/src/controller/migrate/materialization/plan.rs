@@ -209,7 +209,7 @@ impl<'a> Plan<'a> {
     /// Finds the appropriate replay paths for the given index, and inform all domains on those
     /// paths about them. It also notes if any data backfills will need to be run, which is
     /// eventually reported back by `finalize`.
-    #[allow(clippy::cognitive_complexity)]
+    #[allow(clippy::cognitive_complexity, clippy::unreachable)]
     #[instrument(level = "debug", "index", skip(self), fields(node = ?self.node))]
     pub(super) fn add(&mut self, index_on: Index) -> Result<(), ReadySetError> {
         // if we are recovering, we must build the paths again. Otherwise
