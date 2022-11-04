@@ -291,8 +291,8 @@ impl SqlIncorporator {
             AlterTypeChange::SetVariants(new_variants) => {
                 let metadata = match ty {
                     DfType::Enum { variants, metadata } => {
-                        if new_variants.len() < variants.len()
-                            || new_variants[..variants.len()] != **variants
+                        if new_variants.len() > variants.len()
+                            && new_variants[..variants.len()] != **variants
                         {
                             return Err(invalid_err!(
                                 "Cannot drop variants or add new variants unless they're at the \
