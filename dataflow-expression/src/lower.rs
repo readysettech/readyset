@@ -391,7 +391,8 @@ impl Expr {
                     | BinaryOperator::Is
                     | BinaryOperator::IsNot
                     | BinaryOperator::JsonExists
-                    | BinaryOperator::JsonAnyExists => DfType::Bool,
+                    | BinaryOperator::JsonAnyExists
+                    | BinaryOperator::JsonAllExists => DfType::Bool,
                     _ => left.ty().clone(),
                 };
                 Ok(Self::Op {
@@ -976,6 +977,7 @@ pub(crate) mod tests {
         for op in [
             AstBinaryOperator::QuestionMark,
             AstBinaryOperator::QuestionMarkPipe,
+            AstBinaryOperator::QuestionMarkAnd,
         ] {
             let input = AstExpr::BinaryOp {
                 lhs: Box::new(AstExpr::Literal("{\"abc\": 42}".into())),

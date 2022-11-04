@@ -38,7 +38,9 @@ fn negate_expr(expr: &mut Expr) -> bool {
                 | BinaryOperator::Subtract
                 | BinaryOperator::Multiply
                 | BinaryOperator::Divide => return false,
-                BinaryOperator::QuestionMark | BinaryOperator::QuestionMarkPipe => {
+                BinaryOperator::QuestionMark
+                | BinaryOperator::QuestionMarkPipe
+                | BinaryOperator::QuestionMarkAnd => {
                     // Note we return true in this case to bypass the *op = ... above
                     *expr = Expr::UnaryOp {
                         op: UnaryOperator::Not,
@@ -46,7 +48,6 @@ fn negate_expr(expr: &mut Expr) -> bool {
                     };
                     return true;
                 }
-                BinaryOperator::QuestionMarkAnd => return false, // Operator not yet implemented
             }
         }
         Expr::UnaryOp {
