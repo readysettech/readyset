@@ -588,8 +588,15 @@ impl fmt::Display for DfType {
                 subsecond_digits: n,
             } => write!(f, "{kind:?}({n})"),
 
-            Self::Enum { ref variants, .. } => {
-                write!(f, "{kind:?}({})", variants.iter().join(", "))
+            Self::Enum {
+                ref variants,
+                ref metadata,
+            } => {
+                write!(f, "Enum")?;
+                if let Some(PgEnumMetadata { name, schema, .. }) = metadata {
+                    write!(f, "[{schema}.{name}]")?;
+                }
+                write!(f, "({})", variants.iter().join(", "))
             }
             Self::Numeric { prec, scale } => write!(f, "{kind:?}({prec}, {scale})"),
         }
