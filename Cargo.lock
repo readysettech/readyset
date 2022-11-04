@@ -5339,6 +5339,8 @@ name = "test-utils"
 version = "0.0.0"
 dependencies = [
  "test-utils-proc-macros",
+ "tokio",
+ "tokio-scoped",
 ]
 
 [[package]]
@@ -5585,6 +5587,16 @@ dependencies = [
  "socket2",
  "tokio",
  "tokio-util 0.6.9",
+]
+
+[[package]]
+name = "tokio-scoped"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e4beb8ba13bc53ac53ce1d52b42f02e5d8060f0f42138862869beb769722b256"
+dependencies = [
+ "tokio",
+ "tokio-stream",
 ]
 
 [[package]]
