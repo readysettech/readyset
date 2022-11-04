@@ -255,15 +255,30 @@ mod tests {
         SelectSpecification, SqlType, TableExpr, TableKey,
     };
     use pgsql::NoTls;
+    use test_utils::{parallel_group, AsyncParallelGroup};
     use tokio::task::JoinHandle;
     use tokio::time::sleep;
     use tracing::error;
 
     use super::*;
 
+    static GROUP: AsyncParallelGroup = AsyncParallelGroup::new(8);
+
     struct Context {
         client: pgsql::Client,
+        dbname: &'static str,
         conn_handle: JoinHandle<Result<(), pgsql::Error>>,
+    }
+
+    impl Context {
+        async fn teardown(&self) {
+            self.simple_query(&format!(
+                "SELECT pg_drop_replication_slot('{}')",
+                self.dbname
+            ))
+            .await
+            .unwrap();
+        }
     }
 
     impl Drop for Context {
@@ -305,7 +320,7 @@ mod tests {
         config
     }
 
-    async fn setup(dbname: &str) -> Context {
+    async fn setup(dbname: &'static str) -> Context {
         let (client, conn) = config().dbname("postgres").connect(NoTls).await.unwrap();
         let handle = tokio::spawn(conn);
         while let Err(error) = client
@@ -342,6 +357,7 @@ mod tests {
 
         Context {
             client,
+            dbname,
             conn_handle,
         }
     }
@@ -390,6 +406,7 @@ mod tests {
         Ok(serde_json::from_slice(&ddl)?)
     }
 
+    #[parallel_group(GROUP)]
     #[tokio::test]
     async fn create_table() {
         let client = setup("create_table").await;
@@ -447,8 +464,11 @@ mod tests {
             }
             _ => panic!(),
         }
+
+        client.teardown().await;
     }
 
+    #[parallel_group(GROUP)]
     #[tokio::test]
     async fn create_table_with_reserved_keyword_as_name() {
         readyset_tracing::init_test_logging();
@@ -466,8 +486,11 @@ mod tests {
             DdlEventData::CreateTable { name, .. } => assert_eq!(name, "table"),
             _ => panic!(),
         }
+
+        client.teardown().await;
     }
 
+    #[parallel_group(GROUP)]
     #[tokio::test]
     async fn alter_table() {
         let client = setup("alter_table").await;
@@ -495,8 +518,11 @@ mod tests {
             }
             _ => panic!("Unexpected DDL event data: {:?}", ddl.data),
         }
+
+        client.teardown().await;
     }
 
+    #[parallel_group(GROUP)]
     #[tokio::test]
     async fn create_view() {
         let client = setup("create_view").await;
@@ -545,8 +571,11 @@ mod tests {
             }
             _ => panic!("Unexpected query type {:?}", ddl.data),
         }
+
+        client.teardown().await;
     }
 
+    #[parallel_group(GROUP)]
     #[tokio::test]
     async fn drop_table() {
         let client = setup("drop_table").await;
@@ -562,8 +591,11 @@ mod tests {
 
         let ddl = get_last_ddl(&client, "drop_table").await.unwrap();
         assert_eq!(ddl.data, DdlEventData::Drop("t".into()));
+
+        client.teardown().await;
     }
 
+    #[parallel_group(GROUP)]
     #[tokio::test]
     async fn create_type() {
         let client = setup("create_type").await;
@@ -583,8 +615,11 @@ mod tests {
             }
             _ => panic!(),
         }
+
+        client.teardown().await;
     }
 
+    #[parallel_group(GROUP)]
     #[tokio::test]
     async fn rollback_no_ddl() {
         readyset_tracing::init_test_logging();
@@ -609,8 +644,11 @@ mod tests {
             .await
             .unwrap();
         get_last_ddl(&client, "rollback_no_ddl").await.unwrap();
+
+        client.teardown().await;
     }
 
+    #[parallel_group(GROUP)]
     #[tokio::test]
     async fn drop_type() {
         let client = setup("drop_type").await;
@@ -629,5 +667,7 @@ mod tests {
 
         assert_eq!(ddl.schema(), "public");
         assert_eq!(ddl.data, DdlEventData::Drop("type_to_drop".into()));
+
+        client.teardown().await;
     }
 }
