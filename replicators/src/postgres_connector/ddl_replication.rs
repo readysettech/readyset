@@ -227,7 +227,12 @@ impl DdlEvent {
                     }),
                 ),
             },
-            DdlEventData::AlterType { name, variants, .. } => Change::AlterType {
+            DdlEventData::AlterType {
+                name,
+                variants,
+                oid,
+            } => Change::AlterType {
+                oid,
                 name: Relation {
                     schema: Some(self.schema.clone().into()),
                     name: name.into(),
@@ -667,6 +672,43 @@ mod tests {
 
         assert_eq!(ddl.schema(), "public");
         assert_eq!(ddl.data, DdlEventData::Drop("type_to_drop".into()));
+
+        client.teardown().await;
+    }
+
+    #[parallel_group(GROUP)]
+    #[tokio::test]
+    async fn rename_type() {
+        let client = setup("rename_type").await;
+
+        client
+            .simple_query("create type t as enum ('x', 'y')")
+            .await
+            .unwrap();
+        get_last_ddl(&client, "rename_type").await.unwrap();
+
+        let type_oid: u32 = client
+            .query_one("select oid from pg_type where typname = 't'", &[])
+            .await
+            .unwrap()
+            .get(0);
+
+        client
+            .simple_query("alter type t rename to t_new")
+            .await
+            .unwrap();
+
+        let ddl = get_last_ddl(&client, "rename_type").await.unwrap();
+
+        assert_eq!(ddl.schema(), "public");
+        assert!(matches!(
+            ddl.data,
+            DdlEventData::AlterType {
+                oid,
+                name,
+                ..
+            } if name == "t_new" && oid == type_oid
+        ));
 
         client.teardown().await;
     }

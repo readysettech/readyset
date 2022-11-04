@@ -353,6 +353,12 @@ impl ExprRegistry {
     pub(crate) fn add_custom_type(&mut self, name: Relation) {
         self.custom_type_dependencies.entry(name).or_default();
     }
+
+    pub(crate) fn rename_custom_type(&mut self, old_name: &Relation, new_name: &Relation) {
+        if let Some(prev) = self.custom_type_dependencies.remove(old_name) {
+            self.custom_type_dependencies.insert(new_name.clone(), prev);
+        }
+    }
 }
 
 impl From<CreateTableStatement> for RecipeExpr {

@@ -374,8 +374,12 @@ impl Recipe {
                         internal!("attempted to drop relation, but relation {name} does not exist",);
                     }
                 }
-                Change::AlterType { name, change } => {
-                    let ty = self.inc.alter_custom_type(&name, change)?.clone();
+                Change::AlterType { oid, name, change } => {
+                    let (ty, old_name) = self.inc.alter_custom_type(oid, &name, change)?;
+                    if let Some(old_name) = old_name {
+                        self.registry.rename_custom_type(&old_name, &name);
+                    }
+                    let ty = ty.clone();
 
                     let mut table_nodes = vec![];
                     let mut queries_to_remove = vec![];

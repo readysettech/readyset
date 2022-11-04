@@ -141,6 +141,7 @@ struct SerializableSqlIncorporator {
     view_schemas: HashMap<Relation, Vec<SqlIdentifier>>,
 
     custom_types: HashMap<Relation, DfType>,
+    custom_types_by_oid: HashMap<u32, Relation>,
 
     pub(crate) config: Config,
 }
@@ -173,6 +174,7 @@ impl<'a> TryFrom<&'a SqlIncorporator> for SerializableSqlIncorporator {
             base_schemas: inc.base_schemas.clone(),
             view_schemas: inc.view_schemas.clone(),
             custom_types: inc.custom_types.clone(),
+            custom_types_by_oid: inc.custom_types_by_oid.clone(),
             config: inc.config.clone(),
         })
     }
@@ -310,6 +312,7 @@ where
         base_schemas: serialized_inc.base_schemas,
         view_schemas: serialized_inc.view_schemas,
         custom_types: serialized_inc.custom_types,
+        custom_types_by_oid: serialized_inc.custom_types_by_oid,
         config: serialized_inc.config,
     })
 }

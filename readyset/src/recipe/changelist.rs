@@ -297,7 +297,10 @@ pub enum Change {
     },
     /// Alter an existing custom type
     AlterType {
-        /// The name of the type to change
+        /// The oid of the type to change.
+        oid: u32,
+        /// The name of the type to change. This may be different than the previous name for the
+        /// type, in which case the type will be renamed
         name: Relation,
         /// A specification for the change to make to the type
         change: AlterTypeChange,

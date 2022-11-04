@@ -17,7 +17,7 @@ use nom_sql::{
 use petgraph::graph::NodeIndex;
 use readyset::internal::IndexType;
 use readyset::recipe::changelist::AlterTypeChange;
-use readyset_data::{DfType, Dialect};
+use readyset_data::{DfType, Dialect, PgEnumMetadata};
 use readyset_errors::{internal_err, invalid_err, unsupported, ReadySetError, ReadySetResult};
 use readyset_sql_passes::alias_removal::TableAliasRewrite;
 use readyset_sql_passes::{contains_aggregate, AliasRemoval, Rewrite, RewriteContext};
@@ -92,6 +92,13 @@ pub(crate) struct SqlIncorporator {
     ///
     /// Internally, we just represent custom types as named aliases for a [`DfType`].
     custom_types: HashMap<Relation, DfType>,
+
+    /// Map from postgresql `oid` for custom types to the names of those custom types.
+    ///
+    /// # Invariants
+    ///
+    /// All values in this map will also be keys in `self.custom_types`.
+    custom_types_by_oid: HashMap<u32, Relation>,
 
     pub(crate) config: Config,
 }
@@ -236,20 +243,49 @@ impl SqlIncorporator {
                 Err(invalid_err!("Custom type named {name} already exists"))
             }
             hash_map::Entry::Vacant(e) => {
+                if let DfType::Enum {
+                    metadata: Some(PgEnumMetadata { oid, .. }),
+                    ..
+                } = ty
+                {
+                    self.custom_types_by_oid.insert(oid, name);
+                }
                 e.insert(ty);
                 Ok(())
             }
         }
     }
 
+    /// Alter the definition of the given custom type according to the given `change`, and ensuring
+    /// that the type with the given `oid` has the given `name`.
+    ///
+    /// Returns the updated type, and the old name of the type if it was renamed.
     pub(crate) fn alter_custom_type(
         &mut self,
+        oid: u32,
         name: &Relation,
         change: AlterTypeChange,
-    ) -> ReadySetResult<&DfType> {
-        let Some(ty) = self.custom_types.get_mut(name) else {
-            return Err(invalid_err!("Custom type {name} not found"));
+    ) -> ReadySetResult<(&DfType, Option<Relation>)> {
+        let old_name = if !self.custom_types.contains_key(name) {
+            let Some(old_name) = self.custom_types_by_oid.remove(&oid) else {
+                return Err(invalid_err!("Could not find custom type with oid {oid}"));
+            };
+            self.custom_types_by_oid.insert(oid, name.clone());
+            let ty = self
+                .custom_types
+                .remove(&old_name)
+                .expect("custom_types_by_oid must point at types in custom_types");
+            self.custom_types.insert(name.clone(), ty);
+            trace!(%old_name, new_name = %name, %oid, "Renaming custom type");
+            Some(old_name)
+        } else {
+            None
         };
+
+        let ty = self
+            .custom_types
+            .get_mut(name)
+            .expect("just ensured the key was present");
 
         match change {
             AlterTypeChange::SetVariants(new_variants) => {
@@ -263,6 +299,14 @@ impl SqlIncorporator {
                                  end (while altering custom type {name})"
                             ));
                         }
+                        if old_name.is_some() {
+                            if let Some(metadata) = metadata {
+                                metadata.name = name.name.clone();
+                                if let Some(schema) = &name.schema {
+                                    metadata.schema = schema.clone()
+                                }
+                            }
+                        }
                         metadata.take()
                     }
                     _ => return Err(invalid_err!("Custom type {name} is not an enum")),
@@ -272,7 +316,7 @@ impl SqlIncorporator {
             }
         }
 
-        Ok(ty)
+        Ok((ty, old_name))
     }
 
     pub(crate) fn drop_custom_type(&mut self, name: &Relation) -> Option<DfType> {

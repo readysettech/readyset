@@ -208,7 +208,7 @@ mod types {
     async fn enums() {
         readyset_tracing::init_test_logging();
         let (config, _handle) = setup().await;
-        let client = connect(config).await;
+        let client = connect(config.clone()).await;
 
         client
             .simple_query("CREATE TYPE abc AS ENUM ('a', 'b', 'c');")
@@ -457,6 +457,69 @@ mod types {
             .map(|r| r.get(0))
             .collect::<Vec<Abc>>();
         assert_eq!(sort_res, vec![C, B, A, A]);
+
+        assert_eq!(
+            last_query_info(&client).await.destination,
+            QueryDestination::Readyset
+        );
+
+        client
+            .simple_query("ALTER TYPE abc RENAME TO cba")
+            .await
+            .unwrap();
+        client
+            .simple_query("CREATE TABLE t2 (x cba)")
+            .await
+            .unwrap();
+        client
+            .simple_query("INSERT INTO t2 (x) VALUES ('c')")
+            .await
+            .unwrap();
+
+        sleep().await;
+
+        // tokio-postgres appears to maintain a cache of oid -> custom type, so we have to reconnect
+        // to force it to see any changes we're making to our type.
+        let client = connect(config).await;
+
+        #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+        enum Cba {
+            A,
+            B,
+            C,
+        }
+
+        impl<'a> FromSql<'a> for Cba {
+            fn from_sql(
+                _ty: &postgres_types::Type,
+                raw: &'a [u8],
+            ) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
+                match raw {
+                    b"a" => Ok(Self::A),
+                    b"b" => Ok(Self::B),
+                    b"c" => Ok(Self::C),
+                    r => Err(format!("Unknown variant: '{}'", String::from_utf8_lossy(r)).into()),
+                }
+            }
+
+            fn accepts(ty: &postgres_types::Type) -> bool {
+                ty.name() == "cba"
+            }
+        }
+
+        client
+            .simple_query("CREATE CACHE FROM select x from t2")
+            .await
+            .unwrap();
+
+        let post_rename_res = client
+            .query("SELECT x FROM t2", &[])
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|r| r.get(0))
+            .collect::<Vec<Cba>>();
+        assert_eq!(post_rename_res, vec![Cba::C]);
 
         assert_eq!(
             last_query_info(&client).await.destination,
