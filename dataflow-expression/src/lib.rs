@@ -235,6 +235,9 @@ pub enum BinaryOperator {
 
     /// `?|`
     JsonAnyExists,
+
+    /// `?&`
+    JsonAllExists,
 }
 
 impl BinaryOperator {
@@ -263,6 +266,7 @@ impl BinaryOperator {
             IsNot => Self::IsNot,
             QuestionMark => Self::JsonExists,
             QuestionMarkPipe => Self::JsonAnyExists,
+            QuestionMarkAnd => Self::JsonAllExists,
         }
     }
 }
@@ -290,6 +294,7 @@ impl fmt::Display for BinaryOperator {
             Self::Divide => "/",
             Self::JsonExists => "?",
             Self::JsonAnyExists => "?|",
+            Self::JsonAllExists => "?&",
         };
         f.write_str(op)
     }

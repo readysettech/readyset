@@ -46,6 +46,7 @@ fn negate_expr(expr: &mut Expr) -> bool {
                     };
                     return true;
                 }
+                BinaryOperator::QuestionMarkAnd => return false, // Operator not yet implemented
             }
         }
         Expr::UnaryOp {
