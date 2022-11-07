@@ -285,11 +285,6 @@ impl TryFrom<Literal> for Value {
             }
             Literal::ByteArray(b) => Value::ByteArray(b),
             Literal::BitVector(b) => Value::BitVector(BitVec::from_bytes(b.as_slice())),
-            Literal::Array(_) => {
-                return Err(ValueConversionError(
-                    "ARRAY literals not yet supported".to_string(),
-                ))
-            }
             Literal::Placeholder(_) => {
                 return Err(ValueConversionError(
                     "Placeholders are not valid values".to_string(),

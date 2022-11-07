@@ -119,6 +119,7 @@ pub fn map_aggregates(expr: &mut Expr) -> Vec<(FunctionExpr, SqlIdentifier)> {
                 }
             }
         }
+        Expr::Array(exprs) => ret.extend(exprs.iter_mut().flat_map(map_aggregates)),
     }
     ret
 }

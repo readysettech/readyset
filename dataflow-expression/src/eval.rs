@@ -1,7 +1,7 @@
 use std::borrow::Borrow;
 
-use readyset_data::{Array, DfType, DfValue};
-use readyset_errors::{ReadySetError, ReadySetResult};
+use readyset_data::{Array, ArrayD, DfType, DfValue, IxDyn};
+use readyset_errors::{invalid_err, ReadySetError, ReadySetResult};
 use serde_json::Value as JsonValue;
 
 use crate::like::{CaseInsensitive, CaseSensitive, LikePattern};
@@ -25,16 +25,14 @@ impl Expr {
     where
         D: Borrow<DfValue>,
     {
-        use Expr::*;
-
         // TODO: Enforce type coercion
         match self {
-            Column { index, .. } => record
+            Expr::Column { index, .. } => record
                 .get(*index)
                 .map(|dt| dt.borrow().clone())
                 .ok_or(ReadySetError::ProjectExprInvalidColumnIndex(*index)),
-            Literal { val, .. } => Ok(val.clone()),
-            Op {
+            Expr::Literal { val, .. } => Ok(val.clone()),
+            Expr::Op {
                 op, left, right, ..
             } => {
                 use BinaryOperator::*;
@@ -133,12 +131,12 @@ impl Expr {
                     }
                 }
             }
-            Cast { expr, ty, .. } => {
+            Expr::Cast { expr, ty, .. } => {
                 let res = expr.eval(record)?;
                 Ok(res.coerce_to(ty, expr.ty())?)
             }
-            Call { func, ty } => func.eval(ty, record),
-            CaseWhen {
+            Expr::Call { func, ty } => func.eval(ty, record),
+            Expr::CaseWhen {
                 condition,
                 then_expr,
                 else_expr,
@@ -149,6 +147,20 @@ impl Expr {
                 } else {
                     else_expr.eval(record)
                 }
+            }
+            Expr::Array {
+                elements, shape, ..
+            } => {
+                let elements = elements
+                    .iter()
+                    .map(|expr| expr.eval(record))
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                Ok(DfValue::from(Array::from(
+                    ArrayD::from_shape_vec(IxDyn(shape.as_slice()), elements).map_err(|e| {
+                        invalid_err!("Mismatched array lengths in array expression: {e}")
+                    })?,
+                )))
             }
         }
     }
@@ -161,7 +173,7 @@ mod tests {
     use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
     use nom_sql::Dialect::*;
     use nom_sql::{parse_expr, SqlType};
-    use readyset_data::{Collation, DfType, Dialect, PgEnumMetadata};
+    use readyset_data::{ArrayD, Collation, DfType, IxDyn, PgEnumMetadata};
     use Expr::*;
 
     use super::*;
@@ -593,5 +605,33 @@ mod tests {
 
         let false_res = expr.eval(&[DfValue::from(2)]).unwrap();
         assert_eq!(false_res, false.into());
+    }
+
+    #[test]
+    fn array_expression() {
+        let res = eval_expr(
+            "ARRAY[[1, '2'::int], array[3, 4]]",
+            nom_sql::Dialect::PostgreSQL,
+        );
+
+        assert_eq!(
+            res,
+            DfValue::from(
+                readyset_data::Array::from_lower_bounds_and_contents(
+                    [1, 1],
+                    ArrayD::from_shape_vec(
+                        IxDyn(&[2, 2]),
+                        vec![
+                            DfValue::from(1),
+                            DfValue::from(2),
+                            DfValue::from(3),
+                            DfValue::from(4),
+                        ]
+                    )
+                    .unwrap()
+                )
+                .unwrap()
+            )
+        )
     }
 }

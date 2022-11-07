@@ -19,7 +19,6 @@ use itertools::Itertools;
 use launchpad::arbitrary::{arbitrary_decimal, arbitrary_duration};
 use launchpad::redacted::Sensitive;
 use mysql_time::MySqlTime;
-use ndarray::{ArrayD, IxDyn};
 use nom_sql::{Double, Float, Literal, SqlType};
 use proptest::prelude::{prop_oneof, Arbitrary};
 use readyset_errors::{internal, invalid_err, unsupported, ReadySetError, ReadySetResult};
@@ -40,6 +39,8 @@ mod serde;
 mod text;
 mod timestamp;
 mod r#type;
+
+pub use ndarray::{ArrayD, IxDyn};
 
 pub use crate::array::Array;
 pub use crate::collation::Collation;
@@ -1175,43 +1176,6 @@ impl<'a> TryFrom<&'a Literal> for DfValue {
             Literal::Blob(b) => Ok(DfValue::from(b.as_slice())),
             Literal::ByteArray(b) => Ok(DfValue::ByteArray(Arc::new(b.clone()))),
             Literal::BitVector(b) => Ok(DfValue::from(BitVec::from_bytes(b.as_slice()))),
-            Literal::Array(_) => {
-                fn find_shape(lit: &Literal, out: &mut Vec<usize>) -> ReadySetResult<()> {
-                    if let Literal::Array(elems) = lit {
-                        out.push(elems.len());
-                        if let Some(elem) = elems.first() {
-                            find_shape(elem, out)?
-                        }
-                    }
-                    Ok(())
-                }
-
-                fn flatten(lit: &Literal, out: &mut Vec<DfValue>) -> ReadySetResult<()> {
-                    match lit {
-                        Literal::Array(elems) => {
-                            for elem in elems {
-                                flatten(elem, out)?;
-                            }
-                        }
-                        _ => out.push(lit.try_into()?),
-                    }
-                    Ok(())
-                }
-
-                let mut shape = vec![];
-                let mut elems = vec![];
-                find_shape(l, &mut shape)?;
-                flatten(l, &mut elems)?;
-
-                Ok(DfValue::from(Array::from(
-                    ArrayD::from_shape_vec(IxDyn(&shape), elems).map_err(|_| {
-                        invalid_err!(
-                            "Multidimensional arrays must have array expressions with matching \
-                             dimensions",
-                        )
-                    })?,
-                )))
-            }
             Literal::Placeholder(_) => {
                 internal!("Tried to convert a Placeholder literal to a DfValue")
             }
@@ -2036,7 +2000,6 @@ impl Arbitrary for DfValue {
 mod tests {
     use derive_more::{From, Into};
     use launchpad::{eq_laws, hash_laws, ord_laws};
-    use ndarray::{ArrayD, IxDyn};
     use proptest::prelude::*;
     use test_strategy::proptest;
 
@@ -3148,43 +3111,6 @@ mod tests {
             arr.sql_type(),
             Some(SqlType::Array(Box::new(SqlType::BigInt(None))))
         );
-    }
-
-    #[test]
-    fn array_from_literal() {
-        let literal = Literal::Array(vec![
-            Literal::Array(vec![1.into(), 2.into(), 3.into()]),
-            Literal::Array(vec![4.into(), 5.into(), 6.into()]),
-        ]);
-        let dt = DfValue::try_from(literal).unwrap();
-        assert_eq!(
-            dt,
-            DfValue::from(Array::from(
-                ArrayD::from_shape_vec(
-                    IxDyn(&[2, 3]),
-                    vec![
-                        DfValue::from(1),
-                        DfValue::from(2),
-                        DfValue::from(3),
-                        DfValue::from(4),
-                        DfValue::from(5),
-                        DfValue::from(6),
-                    ]
-                )
-                .unwrap()
-            ))
-        );
-    }
-
-    #[test]
-    fn array_from_invalid_literal() {
-        let literal = Literal::Array(vec![
-            Literal::Array(vec![1.into(), 2.into()]),
-            Literal::Array(vec![3.into()]),
-        ]);
-        let res = DfValue::try_from(literal);
-        assert!(res.is_err());
-        assert!(res.err().unwrap().is_invalid_query())
     }
 
     mod coerce_to {

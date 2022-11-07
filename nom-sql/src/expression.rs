@@ -348,6 +348,9 @@ pub enum Expr {
         postgres_style: bool,
     },
 
+    /// `ARRAY[expr1, expr2, ...]`
+    Array(Vec<Expr>),
+
     /// A variable reference
     Variable(Variable),
 }
@@ -406,6 +409,32 @@ impl Display for Expr {
                 postgres_style,
             } if *postgres_style => write!(f, "({}::{})", expr, ty),
             Expr::Cast { expr, ty, .. } => write!(f, "CAST({} as {})", expr, ty),
+            Expr::Array(exprs) => {
+                fn write_value(expr: &Expr, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    match expr {
+                        Expr::Array(elems) => {
+                            write!(f, "[")?;
+                            for (i, elem) in elems.iter().enumerate() {
+                                if i != 0 {
+                                    write!(f, ",")?;
+                                }
+                                write_value(elem, f)?;
+                            }
+                            write!(f, "]")
+                        }
+                        _ => write!(f, "{expr}"),
+                    }
+                }
+
+                write!(f, "ARRAY[")?;
+                for (i, expr) in exprs.iter().enumerate() {
+                    if i != 0 {
+                        write!(f, ",")?;
+                    }
+                    write_value(expr, f)?;
+                }
+                write!(f, "]")
+            }
             Expr::Variable(var) => write!(f, "{}", var),
         }
     }
@@ -952,6 +981,32 @@ pub(crate) fn scoped_var(
     }
 }
 
+fn bracketed_expr_list(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<Expr>> {
+    move |i| {
+        let (i, _) = tag("[")(i)?;
+        let (i, exprs) = separated_list0(
+            ws_sep_comma,
+            alt((
+                expression(dialect),
+                map(bracketed_expr_list(dialect), Expr::Array),
+            )),
+        )(i)?;
+        let (i, _) = tag("]")(i)?;
+        Ok((i, exprs))
+    }
+}
+
+fn array_expr(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Expr> {
+    move |i| {
+        let (i, _) = tag_no_case("ARRAY")(i)?;
+        let (i, _) = whitespace0(i)?;
+        let (i, exprs) = bracketed_expr_list(dialect)(i)?;
+        Ok((i, Expr::Array(exprs)))
+    }
+}
+
 // Expressions without (binary or unary) operators
 pub(crate) fn simple_expr(
     dialect: Dialect,
@@ -966,6 +1021,7 @@ pub(crate) fn simple_expr(
             map(function_expr(dialect), Expr::Call),
             map(literal(dialect), Expr::Literal),
             case_when(dialect),
+            array_expr(dialect),
             map(column_identifier_no_alias(dialect), Expr::Column),
             cast(dialect),
             map(scoped_var(dialect), Expr::Variable),
@@ -1976,7 +2032,10 @@ mod tests {
                 let expected = Expr::BinaryOp {
                     lhs: Box::new(Expr::Literal("{\"abc\": 42}".into())),
                     op: BinaryOperator::QuestionMarkPipe,
-                    rhs: Box::new(Expr::Literal(vec!["abc", "def"].into())),
+                    rhs: Box::new(Expr::Array(vec![
+                        Expr::Literal("abc".into()),
+                        Expr::Literal("def".into()),
+                    ])),
                 };
 
                 let (rem, res) = res.unwrap();
@@ -1994,7 +2053,10 @@ mod tests {
                 let expected = Expr::BinaryOp {
                     lhs: Box::new(Expr::Literal("{\"abc\": 42}".into())),
                     op: BinaryOperator::QuestionMarkAnd,
-                    rhs: Box::new(Expr::Literal(vec!["abc", "def"].into())),
+                    rhs: Box::new(Expr::Array(vec![
+                        Expr::Literal("abc".into()),
+                        Expr::Literal("def".into()),
+                    ])),
                 };
 
                 let (rem, res) = res.unwrap();
@@ -2126,6 +2188,43 @@ mod tests {
                     }
                 );
             }
+        }
+
+        #[test]
+        fn parse_array_expr() {
+            let res = test_parse!(
+                expression(Dialect::PostgreSQL),
+                b"ARRAY[[1, '2'::int], array[3]]"
+            );
+            assert_eq!(
+                res,
+                Expr::Array(vec![
+                    Expr::Array(vec![
+                        Expr::Literal(1u32.into()),
+                        Expr::Cast {
+                            expr: Box::new(Expr::Literal("2".into())),
+                            ty: SqlType::Int(None),
+                            postgres_style: true,
+                        },
+                    ]),
+                    Expr::Array(vec![Expr::Literal(3u32.into())])
+                ])
+            );
+        }
+
+        #[test]
+        fn format_array_expr() {
+            let expr = Expr::Array(vec![Expr::Array(vec![
+                Expr::Literal(1.into()),
+                Expr::Cast {
+                    expr: Box::new(Expr::Literal("2".into())),
+                    ty: SqlType::Int(None),
+                    postgres_style: true,
+                },
+            ])]);
+            let res = expr.to_string();
+
+            assert_eq!(res, "ARRAY[[1,('2'::INT)]]");
         }
     }
 }

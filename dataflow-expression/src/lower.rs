@@ -507,6 +507,55 @@ impl Expr {
                     })
                 }
             }
+            expr @ AstExpr::Array(_) => {
+                fn find_shape(expr: &AstExpr, out: &mut Vec<usize>) {
+                    if let AstExpr::Array(elems) = expr {
+                        out.push(elems.len());
+                        if let Some(elem) = elems.first() {
+                            find_shape(elem, out)
+                        }
+                    }
+                }
+
+                fn flatten<C>(
+                    expr: AstExpr,
+                    out: &mut Vec<Expr>,
+                    dialect: Dialect,
+                    context: C,
+                ) -> ReadySetResult<()>
+                where
+                    C: LowerContext,
+                {
+                    match expr {
+                        AstExpr::Array(exprs) => {
+                            for expr in exprs {
+                                flatten(expr, out, dialect, context.clone())?;
+                            }
+                        }
+                        _ => out.push(Expr::lower(expr, dialect, context)?),
+                    }
+                    Ok(())
+                }
+
+                let mut shape = vec![];
+                let mut elements = vec![];
+                find_shape(&expr, &mut shape);
+                flatten(expr, &mut elements, dialect, context)?;
+
+                let mut ty =
+                    // Array exprs are only supported for postgresql
+                    unify_postgres_types(elements.iter().map(|expr| expr.ty()).collect())?;
+
+                for _ in &shape {
+                    ty = DfType::Array(Box::new(ty));
+                }
+
+                Ok(Self::Array {
+                    elements,
+                    shape,
+                    ty,
+                })
+            }
             AstExpr::Exists(_) => unsupported!("EXISTS not currently supported"),
             AstExpr::Variable(_) => unsupported!("Variables not currently supported"),
             AstExpr::Between { .. } | AstExpr::NestedSelect(_) | AstExpr::In { .. } => {
@@ -988,5 +1037,44 @@ pub(crate) mod tests {
                 Expr::lower(input, Dialect::DEFAULT_POSTGRESQL, no_op_lower_context()).unwrap();
             assert_eq!(*result.ty(), DfType::Bool);
         }
+    }
+
+    #[test]
+    fn array_expr() {
+        let expr = parse_expr(
+            ParserDialect::PostgreSQL,
+            "ARRAY[[1, '2'::int], array[3, 4]]",
+        )
+        .unwrap();
+        let result = Expr::lower(expr, Dialect::DEFAULT_POSTGRESQL, no_op_lower_context()).unwrap();
+        assert_eq!(
+            result,
+            Expr::Array {
+                elements: vec![
+                    Expr::Literal {
+                        val: 1u32.into(),
+                        ty: DfType::UnsignedBigInt
+                    },
+                    Expr::Cast {
+                        expr: Box::new(Expr::Literal {
+                            val: "2".into(),
+                            ty: DfType::Unknown
+                        }),
+                        to_type: SqlType::Int(None),
+                        ty: DfType::Int
+                    },
+                    Expr::Literal {
+                        val: 3u32.into(),
+                        ty: DfType::UnsignedBigInt
+                    },
+                    Expr::Literal {
+                        val: 4u32.into(),
+                        ty: DfType::UnsignedBigInt
+                    }
+                ],
+                shape: vec![2, 2],
+                ty: DfType::Array(Box::new(DfType::Array(Box::new(DfType::UnsignedBigInt))))
+            }
+        )
     }
 }

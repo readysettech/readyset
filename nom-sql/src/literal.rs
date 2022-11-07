@@ -15,7 +15,7 @@ use nom::branch::alt;
 use nom::bytes::complete::{is_not, tag, tag_no_case, take};
 use nom::character::complete::digit1;
 use nom::combinator::{map, map_parser, map_res, opt, peek, recognize};
-use nom::multi::{fold_many0, separated_list0};
+use nom::multi::fold_many0;
 use nom::sequence::{delimited, pair, preceded, tuple};
 use nom_locate::LocatedSpan;
 use proptest::strategy::Strategy;
@@ -23,8 +23,6 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::common::ws_sep_comma;
-use crate::whitespace::whitespace0;
 use crate::{Dialect, NomSqlResult, SqlType};
 
 #[derive(Clone, Debug, PartialOrd, Serialize, Deserialize, Arbitrary)]
@@ -119,8 +117,6 @@ pub enum Literal {
     ByteArray(Vec<u8>),
     Placeholder(ItemPlaceholder),
     BitVector(Vec<u8>),
-    #[weight(0)]
-    Array(Vec<Literal>),
 }
 
 impl From<bool> for Literal {
@@ -162,15 +158,6 @@ impl From<String> for Literal {
 impl<'a> From<&'a str> for Literal {
     fn from(s: &'a str) -> Self {
         Literal::String(String::from(s))
-    }
-}
-
-impl<T> From<Vec<T>> for Literal
-where
-    T: Into<Literal>,
-{
-    fn from(v: Vec<T>) -> Self {
-        Literal::Array(v.into_iter().map(|l| l.into()).collect())
     }
 }
 
@@ -224,32 +211,6 @@ impl Display for Literal {
                         .map(|bit| if bit { "1" } else { "0" })
                         .join("")
                 )
-            }
-            Literal::Array(elems) => {
-                fn write_value(lit: &Literal, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                    match lit {
-                        Literal::Array(elems) => {
-                            write!(f, "[")?;
-                            for (i, elem) in elems.iter().enumerate() {
-                                if i != 0 {
-                                    write!(f, ",")?;
-                                }
-                                write_value(elem, f)?;
-                            }
-                            write!(f, "]")
-                        }
-                        _ => write!(f, "{lit}"),
-                    }
-                }
-
-                write!(f, "ARRAY[")?;
-                for (i, elem) in elems.iter().enumerate() {
-                    if i != 0 {
-                        write!(f, ",")?;
-                    }
-                    write_value(elem, f)?;
-                }
-                write!(f, "]")
             }
         }
     }
@@ -502,36 +463,8 @@ fn simple_literal(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResu
     }
 }
 
-fn literal_list(
-    dialect: Dialect,
-) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<Literal>> {
-    move |i| {
-        let (i, _) = tag("[")(i)?;
-        let (i, _) = whitespace0(i)?;
-        let (i, elems) = separated_list0(
-            ws_sep_comma,
-            alt((
-                non_nested_literal(dialect),
-                map(literal_list(dialect), Literal::Array),
-            )),
-        )(i)?;
-        let (i, _) = whitespace0(i)?;
-        let (i, _) = tag("]")(i)?;
-        Ok((i, elems))
-    }
-}
-
-fn array_literal(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Literal> {
-    move |i| {
-        let (i, _) = tag_no_case("array")(i)?;
-        let (i, _) = whitespace0(i)?;
-        map(literal_list(dialect), Literal::Array)(i)
-    }
-}
-
-fn non_nested_literal(
-    dialect: Dialect,
-) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Literal> {
+/// Parser for any literal value, including placeholders
+pub fn literal(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Literal> {
     move |i| {
         alt((
             simple_literal(dialect),
@@ -567,11 +500,6 @@ fn non_nested_literal(
             boolean_literal,
         ))(i)
     }
-}
-
-/// Parser for any literal value, including placeholders
-pub fn literal(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Literal> {
-    move |i| alt((non_nested_literal(dialect), array_literal(dialect)))(i)
 }
 
 /// Parser for a literal value which may be embedded inside of syntactic constructs within another
@@ -713,26 +641,5 @@ mod tests {
                 Literal::Boolean(false)
             );
         }
-    }
-
-    #[test]
-    fn array_literal_to_string() {
-        let lit = Literal::Array(vec![
-            Literal::Array(vec![1.into(), 2.into(), 3.into()]),
-            Literal::Array(vec![4.into(), 5.into(), 6.into()]),
-        ]);
-        assert_eq!(lit.to_string(), "ARRAY[[1,2,3],[4,5,6]]");
-    }
-
-    #[test]
-    fn parse_array_literal() {
-        let res = test_parse!(literal(Dialect::PostgreSQL), b"ARRAY[[1,2,3],[4,5,6]]");
-        assert_eq!(
-            res,
-            Literal::Array(vec![
-                Literal::Array(vec![1_u32.into(), 2_u32.into(), 3_u32.into()]),
-                Literal::Array(vec![4_u32.into(), 5_u32.into(), 6_u32.into()]),
-            ])
-        );
     }
 }

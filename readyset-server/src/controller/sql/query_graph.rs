@@ -626,8 +626,8 @@ fn classify_conditionals(
                             });
                         }
                     }
-                    // right-hand side is a non-placeholder literal, so this is a predicate
-                    Expr::Literal(_) => {
+                    // right-hand side is a non-placeholder expr, so this is a predicate
+                    Expr::Literal(_) | Expr::Array(_) => {
                         if let Expr::Column(ref lf) = **lhs {
                             // we assume that implied table names have previously been expanded
                             // and thus all non-computed columns carry table names

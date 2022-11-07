@@ -354,6 +354,12 @@ pub enum Expr {
         else_expr: Box<Expr>,
         ty: DfType,
     },
+
+    Array {
+        elements: Vec<Expr>,
+        shape: Vec<usize>,
+        ty: DfType,
+    },
 }
 
 impl fmt::Display for Expr {
@@ -378,6 +384,9 @@ impl fmt::Display for Expr {
                 "case when {} then {} else {}",
                 condition, then_expr, else_expr
             ),
+            Array { elements, .. } => {
+                write!(f, "ARRAY[{}]", elements.iter().join(","))
+            }
         }
     }
 }
@@ -390,7 +399,8 @@ impl Expr {
             | Expr::Op { ty, .. }
             | Expr::Call { ty, .. }
             | Expr::CaseWhen { ty, .. }
-            | Expr::Cast { ty, .. } => ty,
+            | Expr::Cast { ty, .. }
+            | Expr::Array { ty, .. } => ty,
         }
     }
 }

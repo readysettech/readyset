@@ -434,6 +434,12 @@ pub fn walk_expr<'ast, V: Visitor<'ast>>(
             visitor.visit_expr(expr.as_ref())?;
             visitor.visit_sql_type(ty)
         }
+        Expr::Array(exprs) => {
+            for expr in exprs {
+                visitor.visit_expr(expr)?;
+            }
+            Ok(())
+        }
         Expr::Variable(var) => visitor.visit_variable(var),
     }
 }
