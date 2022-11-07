@@ -451,6 +451,12 @@ impl DfType {
         matches!(*self, Self::Float | Self::Double)
     }
 
+    /// Returns `true` if this is any PostgreSQL array type.
+    #[inline]
+    pub fn is_array(&self) -> bool {
+        matches!(self, Self::Array { .. })
+    }
+
     /// Returns the deepest nested type in [`DfType::Array`], otherwise returns `self`.
     #[inline]
     pub fn innermost_array_type(&self) -> &Self {
