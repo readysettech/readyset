@@ -247,6 +247,16 @@ mod types {
             .await
             .unwrap();
 
+        client
+            .simple_query("CREATE TABLE t_arr (x abc[])")
+            .await
+            .unwrap();
+
+        client
+            .simple_query("INSERT INTO t_arr (x) VALUES (ARRAY['a'::abc, 'b'::abc, 'c'::abc]);")
+            .await
+            .unwrap();
+
         sleep().await;
 
         let mut project_eq_res = client
@@ -336,6 +346,18 @@ mod types {
             .collect::<Vec<Abc>>();
         cast_res.sort();
         assert_eq!(cast_res, vec![A, A, B, C]);
+
+        assert_eq!(
+            last_query_info(&client).await.destination,
+            QueryDestination::Readyset
+        );
+
+        let array_res = client
+            .query_one("SELECT x FROM t_arr", &[])
+            .await
+            .unwrap()
+            .get::<_, Vec<Abc>>(0);
+        assert_eq!(array_res, vec![A, B, C]);
 
         assert_eq!(
             last_query_info(&client).await.destination,

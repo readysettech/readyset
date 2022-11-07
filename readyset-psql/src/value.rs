@@ -26,6 +26,18 @@ impl TryFrom<Value> for ps::Value {
     type Error = ps::Error;
 
     fn try_from(v: Value) -> Result<Self, Self::Error> {
+        let convert_enum_value = |vs: &[String], val| {
+            let idx = u64::try_from(val).map_err(|e| {
+                ps::Error::InternalError(format!("Invalid representation for enum value: {e}"))
+            })?;
+            if idx == 0 {
+                return Err(ps::Error::InternalError("Invalid enum value".into()));
+            }
+            vs.get((idx - 1) as usize)
+                .ok_or_else(|| ps::Error::InternalError("Enum variant index out-of-bounds".into()))
+                .cloned()
+        };
+
         match (v.col_type, v.value) {
             (_, DfValue::None) => Ok(ps::Value::Null),
             (Type::CHAR, DfValue::Int(v)) => Ok(ps::Value::Char(v.try_into()?)),
@@ -105,30 +117,36 @@ impl TryFrom<Value> for ps::Value {
             }
             (Type::BIT, DfValue::BitVector(ref b)) => Ok(ps::Value::Bit(b.as_ref().clone())),
             (Type::VARBIT, DfValue::BitVector(ref b)) => Ok(ps::Value::VarBit(b.as_ref().clone())),
-            (t, DfValue::Array(ref arr)) => Ok(ps::Value::Array((**arr).clone(), t)),
-            (_, DfValue::PassThrough(ref p)) => Ok(ps::Value::PassThrough((**p).clone())),
-            (ref t, val) if let Kind::Enum(vs) = t.kind() => {
-                let idx = u64::try_from(val).map_err(|e| {
-                    ps::Error::InternalError(format!("Invalid representation for enum value: {e}"))
-                })?;
-                if idx == 0 {
-                    return Err(ps::Error::InternalError("Invalid enum value".into()))
+            (t, DfValue::Array(ref arr)) => {
+                if let Kind::Array(member) = t.kind() {
+                    let mut arr = (**arr).clone();
+                    if let Kind::Enum(vs) = member.kind() {
+                        for val in arr.values_mut() {
+                            *val = convert_enum_value(vs, val.clone())?.clone().into();
+                        }
+                    }
+                    Ok(ps::Value::Array(arr, t))
+                } else {
+                    Err(ps::Error::InternalError(format!(
+                        "Mismatched type for value: expected array type, but got {t}"
+                    )))
                 }
-                let val: &String = vs.get((idx - 1) as usize).ok_or_else(|| {
-                    ps::Error::InternalError(
-                        "Enum variant index out-of-bounds".into(),
-                    )
-                })?;
-                Ok(ps::Value::Text(val.as_str().into()))
-            },
-            (t, dt) => {
-                trace!(?t, ?dt);
-                error!(
-                    psql_type = %t,
-                    data_type = ?dt.sql_type(),
-                    "Tried to serialize value to postgres with unsupported type"
-                );
-                Err(ps::Error::UnsupportedType(t))
+            }
+            (_, DfValue::PassThrough(ref p)) => Ok(ps::Value::PassThrough((**p).clone())),
+            (t, val) => {
+                if let Kind::Enum(vs) = t.kind() {
+                    Ok(ps::Value::Text(
+                        convert_enum_value(vs, val)?.as_str().into(),
+                    ))
+                } else {
+                    trace!(?t, ?val);
+                    error!(
+                        psql_type = %t,
+                        data_type = ?val.sql_type(),
+                        "Tried to serialize value to postgres with unsupported type"
+                    );
+                    Err(ps::Error::UnsupportedType(t))
+                }
             }
         }
     }

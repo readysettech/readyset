@@ -151,7 +151,28 @@ pub fn type_to_pgsql(col_type: &DfType) -> Result<pgsql::types::Type, Error> {
         DfType::Array(box DfType::DateTime { .. }) => unsupported_type!(),
         DfType::Array(box DfType::Binary(_)) => unsupported_type!(),
         DfType::Array(box DfType::VarBinary(_)) => unsupported_type!(),
-        DfType::Array(box DfType::Enum { .. }) => unsupported_type!(),
+        DfType::Array(box DfType::Enum {
+            metadata:
+                Some(PgEnumMetadata {
+                    name,
+                    schema,
+                    oid,
+                    array_oid,
+                }),
+            variants,
+            ..
+        }) => Ok(Type::new(
+            format!("_{name}"),
+            *array_oid,
+            Kind::Array(Type::new(
+                name.into(),
+                *oid,
+                Kind::Enum(variants.to_vec()),
+                schema.into(),
+            )),
+            schema.into(),
+        )),
+        DfType::Array(box DfType::Enum { metadata: None, .. }) => unsupported_type!(),
         DfType::Array(box DfType::Numeric { .. }) => Ok(Type::NUMERIC_ARRAY),
         DfType::Array(box DfType::MacAddr) => Ok(Type::MACADDR_ARRAY),
         DfType::Array(box DfType::Inet) => Ok(Type::INET_ARRAY),
