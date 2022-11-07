@@ -405,6 +405,24 @@ impl DfType {
         matches!(self, DfType::Enum { .. })
     }
 
+    /// Returns `true` if this is the JSON type in MySQL or PostgreSQL.
+    #[inline]
+    pub fn is_json(&self) -> bool {
+        matches!(self, Self::Json)
+    }
+
+    /// Returns `true` if this is the PostgreSQL JSONB type.
+    #[inline]
+    pub fn is_jsonb(&self) -> bool {
+        matches!(self, Self::Jsonb)
+    }
+
+    /// Returns `true` if this is either the JSON or JSONB type.
+    #[inline]
+    pub fn is_any_json(&self) -> bool {
+        matches!(self, Self::Json | Self::Jsonb)
+    }
+
     /// Returns `true` if this is any `*int` type.
     #[inline]
     pub fn is_any_int(&self) -> bool {
