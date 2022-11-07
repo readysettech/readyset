@@ -91,6 +91,7 @@ struct EnumVariant {
 #[derive(Clone, Debug)]
 struct CustomTypeEntry {
     oid: u32,
+    array_oid: u32,
     name: String,
     schema: String,
 }
@@ -215,9 +216,15 @@ impl TryFrom<pgsql::Row> for CustomTypeEntry {
 
     fn try_from(row: pgsql::Row) -> Result<Self, Self::Error> {
         let oid = row.try_get(0)?;
-        let name = row.try_get(1)?;
-        let schema = row.try_get(2)?;
-        Ok(CustomTypeEntry { oid, name, schema })
+        let array_oid = row.try_get(1)?;
+        let name = row.try_get(2)?;
+        let schema = row.try_get(3)?;
+        Ok(CustomTypeEntry {
+            oid,
+            array_oid,
+            name,
+            schema,
+        })
     }
 }
 
@@ -574,6 +581,7 @@ impl<'a> PostgresReplicator<'a> {
                             name: ty.name.clone().into(),
                             schema: ty.schema.clone().into(),
                             oid: ty.oid,
+                            array_oid: ty.array_oid,
                         }),
                     ),
                     name: ty.clone().into_relation(),
@@ -752,7 +760,7 @@ impl<'a> PostgresReplicator<'a> {
     /// can be extended to support composite types and ranges as well
     async fn get_custom_types(&mut self) -> Result<Vec<CustomTypeEntry>, pgsql::Error> {
         let query = r"
-            SELECT t.oid, t.typname, tn.nspname
+            SELECT t.oid, t.typarray, t.typname, tn.nspname
             FROM pg_type t
             JOIN pg_catalog.pg_namespace tn ON t.typnamespace = tn.oid
             WHERE typtype = 'e'

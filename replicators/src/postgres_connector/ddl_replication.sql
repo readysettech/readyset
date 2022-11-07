@@ -181,6 +181,7 @@ BEGIN
             'schema', schema_name,
             'data', json_build_object('CreateType', json_build_object(
                 'oid', t.oid::int,
+                'array_oid', t.typarray::int,
                 'name', t.typname,
                 'variants', json_agg(json_build_object(
                     'oid', e.oid::int,

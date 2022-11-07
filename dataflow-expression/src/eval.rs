@@ -590,6 +590,7 @@ mod tests {
                         name: "abc".into(),
                         schema: "public".into(),
                         oid: 12345,
+                        array_oid: 12344,
                     }),
                 ),
             }),

@@ -134,6 +134,7 @@ pub(crate) enum DdlEventData {
     Drop(String),
     CreateType {
         oid: u32,
+        array_oid: u32,
         name: String,
         variants: Vec<DdlEnumVariant>,
     },
@@ -211,6 +212,7 @@ impl DdlEvent {
             },
             DdlEventData::CreateType {
                 oid,
+                array_oid,
                 name,
                 variants,
             } => Change::CreateType {
@@ -224,6 +226,7 @@ impl DdlEvent {
                         name: name.into(),
                         schema: self.schema.into(),
                         oid,
+                        array_oid,
                     }),
                 ),
             },
@@ -610,6 +613,7 @@ mod tests {
             .unwrap();
 
         let ddl = get_last_ddl(&client, "create_type").await.unwrap();
+
         match ddl.data {
             DdlEventData::CreateType { name, variants, .. } => {
                 assert_eq!(name, "abc");

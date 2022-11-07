@@ -669,6 +669,7 @@ pub(crate) mod tests {
                 name: "custom".into(),
                 schema: "something".into(),
                 oid: 12345,
+                array_oid: 12344,
             }),
         );
         let result = Expr::lower(

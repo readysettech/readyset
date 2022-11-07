@@ -97,7 +97,9 @@ pub fn type_to_pgsql(col_type: &DfType) -> Result<pgsql::types::Type, Error> {
         DfType::Binary(_) => unsupported_type!(),
         DfType::VarBinary(_) => unsupported_type!(),
         DfType::Enum {
-            metadata: Some(PgEnumMetadata { name, schema, oid }),
+            metadata: Some(PgEnumMetadata {
+                name, schema, oid, ..
+            }),
             variants,
             ..
         } => Ok(Type::new(

@@ -18,6 +18,8 @@ pub struct PgEnumMetadata {
     pub schema: SqlIdentifier,
     /// The postgres `oid` of the enum type
     pub oid: u32,
+    /// The postgres `oid` of the type for *arrays* of this enum type
+    pub array_oid: u32,
 }
 
 /// Dataflow runtime representation of [`SqlType`].
