@@ -212,6 +212,26 @@ impl MatchedCache {
             key_mapping,
         })
     }
+
+    /// Get the name of the cached View.
+    #[allow(dead_code)] // will be used shortly
+    pub fn name(&self) -> &Relation {
+        &self.name
+    }
+
+    /// Get a map of placeholders in the query to values required for those placeholders to borrow
+    /// this View.
+    #[allow(dead_code)] // will be used shortly
+    pub fn required_values(&self) -> &HashMap<PlaceholderIdx, Literal> {
+        &self.required_values
+    }
+
+    /// Get a map of placeholders in the cached query, to Literals in the query that is borrowing
+    /// this View.
+    #[allow(dead_code)] // will be used shortly
+    pub fn key_mapping(&self) -> &HashMap<PlaceholderIdx, Literal> {
+        &self.key_mapping
+    }
 }
 
 /// A struct to maintain queries by their AST structure, without regard for literal values.
@@ -387,8 +407,7 @@ impl ExprRegistry {
             return Ok(false);
         }
 
-        // We're adding a new RecipeExpr
-        // If we're adding a select statement, then add the statement to Self::skeletons
+        // If we're adding a cache, then add the statement to Self::skeletons
         if let RecipeExpr::Cache {
             ref name,
             ref statement,
@@ -580,6 +599,12 @@ impl ExprRegistry {
         #[allow(clippy::unwrap_used)] // Vec1 is guaranteed to have one element
         self.reused_caches
             .insert(name, caches.into_iter().next().unwrap());
+    }
+
+    /// Returns a MatchedCache for the query if one exists.
+    #[allow(dead_code)] // will be used shortly
+    pub fn reused_cache(&self, name: &Relation) -> Option<&MatchedCache> {
+        self.reused_caches.get(name)
     }
 
     fn assign_alias(&mut self, alias: Relation, query_id: QueryID) -> ReadySetResult<()> {
