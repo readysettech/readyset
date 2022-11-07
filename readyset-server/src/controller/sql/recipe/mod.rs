@@ -13,7 +13,7 @@ use readyset_errors::ReadySetResult;
 use readyset_tracing::warn;
 use serde::{Deserialize, Serialize};
 
-use super::registry::RecipeExpr;
+use super::registry::{MatchedCache, RecipeExpr};
 use crate::controller::sql::SqlIncorporator;
 use crate::controller::Migration;
 
@@ -182,5 +182,10 @@ impl Recipe {
             self.inc
                 .rewrite(query.statement, &query.schema_search_path, dialect, None)?;
         Ok(self.inc.registry.contains(&statement))
+    }
+
+    /// Returns a MatchedCache for the query if one exists.
+    pub fn reused_cache(&self, name: &Relation) -> Option<&MatchedCache> {
+        self.inc.registry.reused_cache(name)
     }
 }

@@ -345,15 +345,27 @@ impl DfState {
         &self,
         view_req: ViewRequest,
     ) -> Result<Option<ViewBuilder>, ReadySetError> {
-        // first try to resolve the node via the recipe, which handles aliasing between identical
-        // queries.
-        let node = match self.recipe.node_addr_for(&view_req.name) {
-            Ok(ni) => ni,
-            Err(_) => {
+        let get_index_or_traverse = |name: &Relation| {
+            // first try to resolve the node via the recipe, which handles aliasing between
+            // identical queries.
+            match self.recipe.node_addr_for(name) {
+                Ok(ni) => Some(ni),
                 // if the recipe doesn't know about this query, traverse the graph.
                 // we need this do deal with manually constructed graphs (e.g., in tests).
-                if let Some(res) = self.views().get(&view_req.name) {
-                    *res
+                Err(_) => self.views().get(name).copied(),
+            }
+        };
+
+        let (node, cache_mapping) = match get_index_or_traverse(&view_req.name) {
+            Some(ni) => (ni, None),
+            None => {
+                // Does this query reuse another cache?
+                if let Some((Some(ni), cache)) = self
+                    .recipe
+                    .reused_cache(&view_req.name)
+                    .map(|m| (get_index_or_traverse(m.name()), m))
+                {
+                    (ni, Some(cache))
                 } else {
                     return Ok(None);
                 }
@@ -362,7 +374,10 @@ impl DfState {
 
         let name = self
             .recipe
-            .resolve_alias(&view_req.name)
+            .resolve_alias(
+                // Use name of borrowed relation in migration_mapping if present
+                cache_mapping.map(|m| m.name()).unwrap_or(&view_req.name),
+            )
             .unwrap_or(&view_req.name);
 
         let reader_node = if let Some(r) = self.find_reader_for(node, name, &view_req.filter) {
@@ -430,6 +445,8 @@ impl DfState {
             replica_shard_addrs: Array2::from_rows(replicas),
             key_mapping,
             view_request_timeout: self.domain_config.view_request_timeout,
+            required_values: cache_mapping.map(|m| m.required_values()).cloned(),
+            key_remapping: cache_mapping.map(|m| m.key_mapping()).cloned(),
         }))
     }
 

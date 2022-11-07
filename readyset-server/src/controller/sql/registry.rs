@@ -214,21 +214,18 @@ impl MatchedCache {
     }
 
     /// Get the name of the cached View.
-    #[allow(dead_code)] // will be used shortly
     pub fn name(&self) -> &Relation {
         &self.name
     }
 
     /// Get a map of placeholders in the query to values required for those placeholders to borrow
     /// this View.
-    #[allow(dead_code)] // will be used shortly
     pub fn required_values(&self) -> &HashMap<PlaceholderIdx, Literal> {
         &self.required_values
     }
 
     /// Get a map of placeholders in the cached query, to Literals in the query that is borrowing
     /// this View.
-    #[allow(dead_code)] // will be used shortly
     pub fn key_mapping(&self) -> &HashMap<PlaceholderIdx, Literal> {
         &self.key_mapping
     }
@@ -242,10 +239,9 @@ pub(super) struct ExprSkeletons {
     inner: HashMap<SelectStatementSkeleton, Vec<(Relation, Vec<Literal>)>>,
 }
 
-// Code will be used shortly.
-#[allow(dead_code)]
 impl ExprSkeletons {
     /// Create an empty ExprSkeletons
+    #[cfg(test)]
     pub fn new() -> Self {
         Self {
             inner: HashMap::new(),
@@ -602,7 +598,6 @@ impl ExprRegistry {
     }
 
     /// Returns a MatchedCache for the query if one exists.
-    #[allow(dead_code)] // will be used shortly
     pub fn reused_cache(&self, name: &Relation) -> Option<&MatchedCache> {
         self.reused_caches.get(name)
     }

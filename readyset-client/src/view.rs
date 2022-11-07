@@ -18,8 +18,8 @@ use futures_util::stream::futures_unordered::FuturesUnordered;
 use futures_util::stream::{StreamExt, TryStreamExt};
 use futures_util::{future, ready};
 use nom_sql::{
-    BinaryOperator, Column, ColumnConstraint, ColumnSpecification, Relation, SelectStatement,
-    SqlIdentifier,
+    BinaryOperator, Column, ColumnConstraint, ColumnSpecification, Literal, Relation,
+    SelectStatement, SqlIdentifier,
 };
 use petgraph::graph::NodeIndex;
 use proptest::arbitrary::Arbitrary;
@@ -899,6 +899,17 @@ pub struct ViewBuilder {
 
     /// The amount of time before a view request RPC is terminated.
     pub view_request_timeout: Duration,
+
+    /// Remapping from [`PlaceholderIdx`]s in the executed query to inlined [`Literal`]s in the
+    /// cached query.
+    ///
+    /// This view can only be used if the values in this map match the values passed on execution
+    /// for the given placeholders.
+    pub required_values: Option<HashMap<PlaceholderIdx, Literal>>,
+
+    // Remapping from [`PlaceholderIdx`]s in the migrated query to [`Literal`]s in the executed
+    // query. This remapping is applied to [`key_mapping`] when buliding keys.
+    pub key_remapping: Option<HashMap<PlaceholderIdx, Literal>>,
 }
 
 impl ViewBuilder {
@@ -927,6 +938,8 @@ impl ViewBuilder {
         let columns = self.columns.clone();
         let schema = self.schema.clone();
         let key_mapping = self.key_mapping.clone();
+        let required_values = self.required_values.clone();
+        let key_remapping = self.key_remapping.clone();
 
         let mut addrs = Vec::with_capacity(shards.len());
         let mut conns = Vec::with_capacity(shards.len());
@@ -980,6 +993,8 @@ impl ViewBuilder {
             shard_addrs: addrs,
             shards: Vec1::try_from_vec(conns)
                 .map_err(|_| internal_err!("cannot create view '{}' without shards", self.name))?,
+            required_values,
+            key_remapping,
         })
     }
 }
@@ -997,7 +1012,15 @@ pub struct View {
     /// (view_placeholder, key_column_index) pairs according to their mapping. Contains exactly
     /// one entry for each key column at the reader.
     key_mapping: Vec<(ViewPlaceholder, KeyColumnIdx)>,
-
+    /// Remapping from [`PlaceholderIdx`]s in the executed query to inlined [`Literal`]s in the
+    /// cached query.
+    ///
+    /// This view can only be used if the values in this map match the values passed on execution
+    /// for the given placeholders.
+    required_values: Option<HashMap<PlaceholderIdx, Literal>>,
+    // Remapping from [`PlaceholderIdx`]s in the cached query to [`Literal`]s in the executed
+    // query. This remapping is applied to [`key_mapping`] when buliding keys.
+    key_remapping: Option<HashMap<PlaceholderIdx, Literal>>,
     shards: Vec1<ViewRpc>,
     shard_addrs: Vec<SocketAddr>,
 }
@@ -1312,11 +1335,22 @@ impl View {
         &self.key_mapping
     }
 
-    /// Whether this view belongs to a cached query or borrows the cache for another query
-    ///
-    /// TODO: update function when reused_cache support is added
+    /// Get the remapping of PlaceholderIdx in the cached query to Literals in a query that is
+    /// reusing this View.
+    pub fn key_remap(&self) -> Option<&HashMap<PlaceholderIdx, Literal>> {
+        self.key_remapping.as_ref()
+    }
+
+    /// Get the PlaceholderIdxs that correspond to inlined values in the cache. The values
+    /// passed to these placeholders on execution must match the Literal values in this map.
+    pub fn required_values(&self) -> Option<&HashMap<PlaceholderIdx, Literal>> {
+        self.required_values.as_ref()
+    }
+
+    /// Whether this view belongs to a cached query or reuses the cache for another query
     pub fn reuses_cache(&self) -> bool {
-        false
+        // These should both be Some or both None
+        self.key_remapping.is_some() || self.required_values.is_some()
     }
 
     /// Get the current keys of this view. For debugging only.

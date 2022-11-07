@@ -9,17 +9,18 @@ use dataflow_expression::{BinaryOperator as DfBinaryOperator, Expr as DfExpr};
 use itertools::Itertools;
 use nom_sql::analysis::visit_mut::VisitorMut;
 use nom_sql::{
-    self, BinaryOperator, ColumnConstraint, DeleteStatement, Expr, InsertStatement, Literal,
-    Relation, SelectStatement, SqlIdentifier, SqlQuery, UnaryOperator, UpdateStatement,
+    self, BinaryOperator, ColumnConstraint, DeleteStatement, Expr, InsertStatement,
+    ItemPlaceholder, Literal, Relation, SelectStatement, SqlIdentifier, SqlQuery, UnaryOperator,
+    UpdateStatement,
 };
 use readyset_client::consistency::Timestamp;
 use readyset_client::internal::LocalNodeIndex;
 use readyset_client::recipe::changelist::{Change, ChangeList, IntoChanges};
 use readyset_client::results::{ResultIterator, Results};
 use readyset_client::{
-    ColumnSchema, KeyColumnIdx, KeyComparison, ReadQuery, ReaderAddress, ReadySetError,
-    ReadySetHandle, ReadySetResult, SchemaType, Table, TableOperation, View, ViewCreateRequest,
-    ViewPlaceholder, ViewQuery, ViewSchema,
+    ColumnSchema, KeyColumnIdx, KeyComparison, PlaceholderIdx, ReadQuery, ReaderAddress,
+    ReadySetError, ReadySetHandle, ReadySetResult, SchemaType, Table, TableOperation, View,
+    ViewCreateRequest, ViewPlaceholder, ViewQuery, ViewSchema,
 };
 use readyset_data::{DfType, DfValue, Dialect};
 use readyset_errors::ReadySetError::PreparedStatementMissing;
@@ -1616,18 +1617,45 @@ fn verify_no_placeholders(statement: &mut SelectStatement, query: &str) -> Ready
 fn build_view_query(
     getter_schema: &ViewSchema,
     key_map: &[(ViewPlaceholder, KeyColumnIdx)],
+    key_remap: Option<&HashMap<PlaceholderIdx, Literal>>,
+    required_values: Option<&HashMap<PlaceholderIdx, Literal>>,
     processed_query_params: &ProcessedQueryParams,
     params: &[DfValue],
     q: &nom_sql::SelectStatement,
     ticket: Option<Timestamp>,
     read_behavior: ReadBehavior,
     dialect: Dialect,
+    view_name: &Relation,
 ) -> ReadySetResult<ViewQuery> {
+    let mut raw_keys = processed_query_params.make_keys(params)?;
+
+    // If any placeholders in our query correspond to inlined values in the migrated query, verify
+    // that we are executing our query with these values.
+    if let Some(required) = required_values {
+        for params in raw_keys.iter() {
+            // Placeholders are 1-indexed, but params are 0-indexed
+            required.iter().try_for_each(|(idx, val)| {
+                let client_val = params.get(idx - 1).ok_or_else(|| {
+                    internal_err!(
+                        "Received fewer parameters than expected. Error indexing at position {}",
+                        idx - 1
+                    )
+                })?;
+                if DfValue::try_from(val)? != *client_val {
+                    Err(ReadySetError::ViewParameterMismatch {
+                        name: view_name.to_string(),
+                        idx: *idx,
+                    })
+                } else {
+                    Ok(())
+                }
+            })?;
+        }
+    }
+
     let projected_schema = getter_schema.schema(SchemaType::ProjectedSchema);
 
     let (limit, offset) = processed_query_params.limit_offset_params(params)?;
-
-    let mut raw_keys = processed_query_params.make_keys(params)?;
 
     let mut key_types = getter_schema.col_types(
         key_map.iter().map(|(_, key_column_idx)| *key_column_idx),
@@ -1686,7 +1714,11 @@ fn build_view_query(
         binops.remove(filter_op_idx);
     }
 
-    let keys = if raw_keys.is_empty() {
+    let keys = if raw_keys.is_empty()
+        || matches!(
+            required_values.map(|rv| rv.len() == raw_keys[0].len()),
+            Some(true)
+        ) {
         bogo
     } else {
         let mut unique_binops = binops.iter().map(|(_, b)| *b).unique();
@@ -1699,6 +1731,36 @@ fn build_view_query(
             .map(|((_, key_column_idx), key_type)| (*key_column_idx, key_type))
             .collect();
 
+        // parameter numbering is 1-based, but vecs are 0-based, so subtract 1
+        // also, no from_ty since the key value is a literal
+        let remap_key = |key: &[DfValue], idx: &usize, key_type: &DfType| -> ReadySetResult<_> {
+            Ok(match key_remap {
+                Some(remap) => {
+                    match remap.get(idx).ok_or_else(|| {
+                        internal_err!("Key remapping for borrowed view is missing indices")
+                    })? {
+                        Literal::Placeholder(ItemPlaceholder::DollarNumber(idx)) => key
+                            .get(*idx as usize - 1)
+                            .ok_or_else(|| {
+                                internal_err!(
+                                    "Key remapping for borrowed view contains erroneous index"
+                                )
+                            })?
+                            .coerce_to(key_type, &DfType::Unknown)?,
+                        Literal::Placeholder(_) => {
+                            internal!(
+                                "Key remapping for borrowed view contains non-numbered placeholder"
+                            )
+                        }
+                        literal => {
+                            DfValue::try_from(literal)?.coerce_to(key_type, &DfType::Unknown)?
+                        }
+                    }
+                }
+                None => key[*idx - 1].coerce_to(key_type, &DfType::Unknown)?,
+            })
+        };
+
         raw_keys
             .into_iter()
             .map(|key| {
@@ -1708,6 +1770,7 @@ fn build_view_query(
                 } else {
                     None
                 };
+                // All ViewPlaceholder indices must be remapped using key_remap
                 for (view_placeholder, key_column_idx) in key_map {
                     match view_placeholder {
                         ViewPlaceholder::Generated => continue,
@@ -1720,9 +1783,7 @@ fn build_view_query(
                                 None => continue,
                             };
 
-                            // parameter numbering is 1-based, but vecs are 0-based, so subtract 1
-                            // also, no from_ty since the key value is a literal
-                            let value = key[*idx - 1].coerce_to(key_type, &DfType::Unknown)?;
+                            let value = remap_key(key.as_ref(), idx, key_type)?;
 
                             let make_op = |op: DfBinaryOperator| DfExpr::Op {
                                 left: Box::new(DfExpr::Column {
@@ -1810,12 +1871,8 @@ fn build_view_query(
                         ViewPlaceholder::Between(lower_idx, upper_idx) => {
                             let key_type = key_types[key_column_idx];
 
-                            // parameter numbering is 1-based, but vecs are 0-based, so subtract 1
-                            // also, no from_ty since the key value is a literal
-                            let lower_value =
-                                key[*lower_idx - 1].coerce_to(key_type, &DfType::Unknown)?;
-                            let upper_value =
-                                key[*upper_idx - 1].coerce_to(key_type, &DfType::Unknown)?;
+                            let lower_value = remap_key(key.as_ref(), lower_idx, key_type)?;
+                            let upper_value = remap_key(key.as_ref(), upper_idx, key_type)?;
                             let (lower_key, upper_key) =
                                 bounds.get_or_insert_with(Default::default);
                             lower_key.push(lower_value);
@@ -1825,12 +1882,10 @@ fn build_view_query(
                             offset_placeholder,
                             limit,
                         } => {
-                            // parameter numbering is 1-based, but vecs are 0-based, so subtract 1
                             // offset parameters should always be a BigInt
-                            // also, no from_ty since the key value is a literal
-                            let offset: u64 = key[*offset_placeholder - 1]
-                                .coerce_to(&DfType::BigInt, &DfType::Unknown)?
-                                .try_into()?;
+                            let offset: u64 =
+                                remap_key(key.as_ref(), offset_placeholder, &DfType::BigInt)?
+                                    .try_into()?;
                             if offset % *limit != 0 {
                                 unsupported!(
                                     "OFFSET must currently be an integer multiple of LIMIT"
@@ -1897,12 +1952,15 @@ async fn do_read<'a>(
             .schema()
             .ok_or_else(|| internal_err!("No schema for view"))?,
         getter.key_map(),
+        getter.key_remap(),
+        getter.required_values(),
         processed_query_params,
         params,
         q,
         ticket,
         read_behavior,
         dialect,
+        getter.name(),
     )?;
 
     event.num_keys = Some(vq.key_comparisons.len() as _);
@@ -2106,12 +2164,15 @@ mod tests {
             build_view_query(
                 &SCHEMA,
                 key_map,
+                None,
+                None,
                 &pp,
                 params,
                 &q,
                 None,
                 ReadBehavior::Blocking,
                 dataflow_dialect,
+                &"test".into(),
             )
             .unwrap()
         }

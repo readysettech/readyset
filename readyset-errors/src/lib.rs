@@ -276,6 +276,15 @@ pub enum ReadySetError {
     #[error("View '{0}' already exists")]
     ViewAlreadyExists(String),
 
+    /// A client parameter does not match the inlined value in the query for this View.
+    #[error("The parameter at idx '{idx}' does not match the inlined value in the query for View '{name}'")]
+    ViewParameterMismatch {
+        /// The name of the View
+        name: String,
+        /// The position of the parameter that does not match the inlined value.
+        idx: usize,
+    },
+
     /// A reader could not be found at the given worker.
     #[error("Reader not found")]
     ReaderNotFound,
