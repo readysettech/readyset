@@ -13,6 +13,7 @@ use itertools::Itertools;
 use nom_sql::{BinaryOperator as SqlBinaryOperator, SqlType};
 pub use readyset_data::Dialect;
 use readyset_data::{DfType, DfValue};
+use readyset_errors::{invalid_err, ReadySetResult};
 use serde::{Deserialize, Serialize};
 use vec1::Vec1;
 
@@ -267,6 +268,60 @@ impl BinaryOperator {
             QuestionMark => Self::JsonExists,
             QuestionMarkPipe => Self::JsonAnyExists,
             QuestionMarkAnd => Self::JsonAllExists,
+        }
+    }
+
+    /// Checks this operator's input types, returning
+    /// [`ReadySetError::InvalidQuery`](readyset_errors::ReadySetError::InvalidQuery) if either is
+    /// unexpected.
+    fn check_arg_types(&self, left_type: &DfType, right_type: &DfType) -> ReadySetResult<()> {
+        enum Side {
+            Left,
+            Right,
+        }
+        use Side::*;
+
+        let error = |side: Side, expected_type: &str| -> ReadySetResult<()> {
+            let (side_name, offending_type) = match side {
+                Left => ("left", left_type),
+                Right => ("right", right_type),
+            };
+
+            Err(invalid_err!(
+                "cannot invoke '{self}' on {side_name}-side operand type {offending_type}; \
+                expected {expected_type}"
+            ))
+        };
+
+        // TODO: Type-check more operators.
+        // TODO: Proper type unification instead of blindly allowing `Unknown`.
+        match self {
+            // Left type checks:
+
+            // jsonb, unknown
+            Self::JsonExists | Self::JsonAnyExists | Self::JsonAllExists
+                if !(left_type.is_jsonb() || left_type.is_unknown()) =>
+            {
+                error(Left, "JSONB")
+            }
+
+            // Right type checks:
+
+            // text, char, varchar, unknown
+            Self::JsonExists if !(right_type.is_any_text() || right_type.is_unknown()) => {
+                error(Right, "TEXT")
+            }
+
+            // text[], char[], varchar[], unknown, unknown[]
+            Self::JsonAnyExists | Self::JsonAllExists
+                if !((right_type.is_array()
+                    && right_type.innermost_array_type().is_any_text())
+                    || right_type.innermost_array_type().is_unknown()) =>
+            {
+                error(Right, "TEXT[]")
+            }
+
+            _ => Ok(()),
         }
     }
 }

@@ -375,6 +375,10 @@ impl Expr {
                 let op = BinaryOperator::from_sql_op(op, dialect);
 
                 let left = Box::new(Self::lower(*lhs, dialect, context.clone())?);
+                let right = Box::new(Self::lower(*rhs, dialect, context)?);
+
+                op.check_arg_types(left.ty(), right.ty())?;
+
                 // TODO: Maybe consider rhs in some cases too
                 // TODO: What is the correct return type for And and Or?
                 let ty = match op {
@@ -395,10 +399,11 @@ impl Expr {
                     | BinaryOperator::JsonAllExists => DfType::Bool,
                     _ => left.ty().clone(),
                 };
+
                 Ok(Self::Op {
                     op,
                     left,
-                    right: Box::new(Self::lower(*rhs, dialect, context)?),
+                    right,
                     ty,
                 })
             }
