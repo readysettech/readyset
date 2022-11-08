@@ -239,6 +239,9 @@ pub enum BinaryOperator {
 
     /// `?&`
     JsonAllExists,
+
+    /// `||`
+    JsonConcat,
 }
 
 impl BinaryOperator {
@@ -268,6 +271,7 @@ impl BinaryOperator {
             QuestionMark => Self::JsonExists,
             QuestionMarkPipe => Self::JsonAnyExists,
             QuestionMarkAnd => Self::JsonAllExists,
+            DoublePipe => Self::JsonConcat, // TODO handle other || operators
         }
     }
 
@@ -379,6 +383,7 @@ impl fmt::Display for BinaryOperator {
             Self::JsonExists => "?",
             Self::JsonAnyExists => "?|",
             Self::JsonAllExists => "?&",
+            Self::JsonConcat => "||",
         };
         f.write_str(op)
     }

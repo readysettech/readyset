@@ -1,7 +1,7 @@
 use std::borrow::Borrow;
 
 use readyset_data::{Array, ArrayD, DfType, DfValue, IxDyn};
-use readyset_errors::{invalid_err, ReadySetError, ReadySetResult};
+use readyset_errors::{invalid_err, unsupported, ReadySetError, ReadySetResult};
 use serde_json::Value as JsonValue;
 
 use crate::like::{CaseInsensitive, CaseSensitive, LikePattern};
@@ -129,6 +129,7 @@ impl Expr {
                         };
                         Ok(result.into())
                     }
+                    JsonConcat => unsupported!("|| JSON operator not implement yet"),
                 }
             }
             Expr::Cast { expr, ty, .. } => {

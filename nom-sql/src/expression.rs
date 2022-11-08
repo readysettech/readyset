@@ -199,6 +199,13 @@ pub enum BinaryOperator {
     /// Postgres-specific JSONB operator. Takes an array of strings and checks whether *all* of
     /// those strings appear as object keys or array elements in the provided JSON value.
     QuestionMarkAnd,
+    /// `||`
+    ///
+    /// This can represent a few different operators in different contexts. In MySQL it can
+    /// represent a boolean OR operation or a string concat operation depending on whether
+    /// `PIPES_AS_CONCAT` is enabled in the SQL mode. In Postgres it can either represent string
+    /// concatenation or JSON concatenation, depending on the context.
+    DoublePipe,
 }
 
 impl BinaryOperator {
@@ -246,6 +253,7 @@ impl Display for BinaryOperator {
             Self::QuestionMark => "?",
             Self::QuestionMarkPipe => "?|",
             Self::QuestionMarkAnd => "?&",
+            Self::DoublePipe => "||",
         };
         f.write_str(op)
     }
@@ -540,6 +548,7 @@ fn infix_no_and_or(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], TokenTree> {
         map(tag("?|"), |_| BinaryOperator::QuestionMarkPipe),
         map(tag("?&"), |_| BinaryOperator::QuestionMarkAnd),
         map(char('?'), |_| BinaryOperator::QuestionMark),
+        map(tag("||"), |_| BinaryOperator::DoublePipe),
     ))(i)?;
 
     Ok((i, TokenTree::Infix(operator)))
@@ -728,6 +737,7 @@ where
             Infix(QuestionMark) => Affix::Infix(Precedence(8), Associativity::Left),
             Infix(QuestionMarkPipe) => Affix::Infix(Precedence(8), Associativity::Left),
             Infix(QuestionMarkAnd) => Affix::Infix(Precedence(8), Associativity::Left),
+            Infix(DoublePipe) => Affix::Infix(Precedence(8), Associativity::Left),
             Prefix(Not) => Affix::Prefix(Precedence(6)),
             Prefix(Neg) => Affix::Prefix(Precedence(5)),
             Primary(_) => Affix::Nilfix,
@@ -2057,6 +2067,31 @@ mod tests {
                         Expr::Literal("abc".into()),
                         Expr::Literal("def".into()),
                     ])),
+                };
+
+                let (rem, res) = res.unwrap();
+                assert_eq!(std::str::from_utf8(rem).unwrap(), "");
+                assert_eq!(res, expected);
+            }
+
+            #[test]
+            fn double_pipe_operator() {
+                // Note that we currently only support the PG JSONB || operator. At some point this
+                // test may need to be entended to also handle the string concat || operator as
+                // well as the MySQL boolean || operator.
+                let cond = "'[\"a\", \"b\"]'::jsonb || '[\"c\", \"d\"]'";
+
+                let res = to_nom_result(expression(Dialect::PostgreSQL)(LocatedSpan::new(
+                    cond.as_bytes(),
+                )));
+                let expected = Expr::BinaryOp {
+                    lhs: Box::new(Expr::Cast {
+                        expr: Box::new(Expr::Literal(r#"["a", "b"]"#.into())),
+                        ty: SqlType::Jsonb,
+                        postgres_style: true,
+                    }),
+                    op: BinaryOperator::DoublePipe,
+                    rhs: Box::new(Expr::Literal(r#"["c", "d"]"#.into())),
                 };
 
                 let (rem, res) = res.unwrap();
