@@ -1,5 +1,6 @@
 use std::{fmt, str};
 
+use launchpad::redacted::Sensitive;
 use nom::branch::alt;
 use nom::combinator::map;
 use nom_locate::LocatedSpan;
@@ -88,7 +89,7 @@ impl fmt::Display for SqlQuery {
 }
 
 impl str::FromStr for SqlQuery {
-    type Err = &'static str;
+    type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         parse_query(Dialect::MySQL, s)
@@ -161,18 +162,21 @@ pub fn sql_query(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResul
 
 macro_rules! export_parser {
     ($parser: ident -> $ret:ty, $parse_bytes: ident, $parse: ident) => {
-        pub fn $parse_bytes<T>(dialect: Dialect, input: T) -> Result<$ret, &'static str>
+        pub fn $parse_bytes<T>(dialect: Dialect, input: T) -> Result<$ret, String>
         where
             T: AsRef<[u8]>,
         {
             match $parser(dialect)(LocatedSpan::new(input.as_ref())) {
                 Ok((_, o)) => Ok(o),
-                Err(_) => Err("failed to parse query"),
+                Err(e) => Err(format!(
+                    "failed to parse query: {}",
+                    Sensitive(&e.to_string())
+                )),
             }
         }
 
         // TODO(fran): Make this function return a ReadySetResult.
-        pub fn $parse<T>(dialect: Dialect, input: T) -> Result<$ret, &'static str>
+        pub fn $parse<T>(dialect: Dialect, input: T) -> Result<$ret, String>
         where
             T: AsRef<str>,
         {
