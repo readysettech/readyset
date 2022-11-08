@@ -377,28 +377,7 @@ impl Expr {
                 let left = Box::new(Self::lower(*lhs, dialect, context.clone())?);
                 let right = Box::new(Self::lower(*rhs, dialect, context)?);
 
-                op.check_arg_types(left.ty(), right.ty())?;
-
-                // TODO: Maybe consider rhs in some cases too
-                // TODO: What is the correct return type for And and Or?
-                let ty = match op {
-                    BinaryOperator::Like
-                    | BinaryOperator::NotLike
-                    | BinaryOperator::ILike
-                    | BinaryOperator::NotILike
-                    | BinaryOperator::Equal
-                    | BinaryOperator::NotEqual
-                    | BinaryOperator::Greater
-                    | BinaryOperator::GreaterOrEqual
-                    | BinaryOperator::Less
-                    | BinaryOperator::LessOrEqual
-                    | BinaryOperator::Is
-                    | BinaryOperator::IsNot
-                    | BinaryOperator::JsonExists
-                    | BinaryOperator::JsonAnyExists
-                    | BinaryOperator::JsonAllExists => DfType::Bool,
-                    _ => left.ty().clone(),
-                };
+                let ty = op.output_type(left.ty(), right.ty())?;
 
                 Ok(Self::Op {
                     op,

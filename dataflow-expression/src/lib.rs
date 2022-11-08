@@ -324,6 +324,35 @@ impl BinaryOperator {
             _ => Ok(()),
         }
     }
+
+    /// Returns this operator's output type given its input types, or
+    /// [`ReadySetError::InvalidQuery`](readyset_errors::ReadySetError::InvalidQuery) if it could
+    /// not be inferred.
+    fn output_type(&self, left_type: &DfType, right_type: &DfType) -> ReadySetResult<DfType> {
+        self.check_arg_types(left_type, right_type)?;
+
+        // TODO: Maybe consider `right_type` in some cases too.
+        // TODO: What is the correct return type for `And` and `Or`?
+        match self {
+            Self::Like
+            | Self::NotLike
+            | Self::ILike
+            | Self::NotILike
+            | Self::Equal
+            | Self::NotEqual
+            | Self::Greater
+            | Self::GreaterOrEqual
+            | Self::Less
+            | Self::LessOrEqual
+            | Self::Is
+            | Self::IsNot
+            | Self::JsonExists
+            | Self::JsonAnyExists
+            | Self::JsonAllExists => Ok(DfType::Bool),
+
+            _ => Ok(left_type.clone()),
+        }
+    }
 }
 
 impl fmt::Display for BinaryOperator {
