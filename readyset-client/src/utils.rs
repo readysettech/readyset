@@ -1,7 +1,9 @@
 use std::collections::{HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
+use std::iter;
 
 use launchpad::hash::hash;
+use nom_sql::analysis::visit::Visitor;
 use nom_sql::{
     BinaryOperator, Column, ColumnConstraint, CreateTableStatement, DeleteStatement, Expr,
     InsertStatement, Literal, SelectStatement, SqlIdentifier, SqlQuery, TableKey, UpdateStatement,
@@ -165,135 +167,165 @@ pub(crate) fn get_primary_key(schema: &CreateTableStatement) -> Vec<(usize, &Col
         .collect()
 }
 
-fn get_parameter_columns_recurse(cond: &Expr) -> Vec<(&Column, BinaryOperator)> {
-    match *cond {
-        Expr::BinaryOp {
-            lhs: box Expr::Column(ref c),
-            rhs: box Expr::Literal(Literal::Placeholder(_)),
-            op: binop,
-        } => vec![(c, binop)],
-        Expr::BinaryOp {
-            lhs: box Expr::Literal(Literal::Placeholder(_)),
-            rhs: box Expr::Column(ref c),
-            op: binop,
-        } => vec![(c, binop.flip_comparison().unwrap_or(binop))],
-        Expr::In {
-            lhs: box Expr::Column(ref c),
-            rhs: nom_sql::InValue::List(ref exprs),
-            negated: false,
-        } if exprs
-            .iter()
-            .all(|expr| matches!(expr, Expr::Literal(Literal::Placeholder(_)))) =>
-        {
-            vec![(c, BinaryOperator::Equal); exprs.len()]
-        }
-        Expr::In {
-            lhs: box Expr::Column(ref c),
-            rhs: nom_sql::InValue::List(ref exprs),
-            negated: true,
-        } if exprs
-            .iter()
-            .all(|expr| matches!(expr, Expr::Literal(Literal::Placeholder(_)))) =>
-        {
-            vec![(c, BinaryOperator::NotEqual); exprs.len()]
-        }
-        Expr::In { .. } => vec![],
-        Expr::BinaryOp {
-            op: BinaryOperator::And,
-            ref lhs,
-            ref rhs,
-        }
-        | Expr::BinaryOp {
-            op: BinaryOperator::Or,
-            ref lhs,
-            ref rhs,
-        } => {
-            let mut l = get_parameter_columns_recurse(lhs);
-            let mut r = get_parameter_columns_recurse(rhs);
-            l.append(&mut r);
-            l
-        }
-        Expr::BinaryOp { .. } => vec![],
-        Expr::UnaryOp { rhs: ref expr, .. } | Expr::Cast { ref expr, .. } => {
-            get_parameter_columns_recurse(expr)
-        }
-        Expr::Call(ref f) => f
-            .arguments()
-            .flat_map(get_parameter_columns_recurse)
-            .collect(),
-        Expr::Literal(_) => vec![],
-        Expr::CaseWhen {
-            ref condition,
-            ref then_expr,
-            ref else_expr,
-        } => get_parameter_columns_recurse(condition)
-            .into_iter()
-            .chain(get_parameter_columns_recurse(then_expr))
-            .chain(
-                else_expr
-                    .iter()
-                    .flat_map(|expr| get_parameter_columns_recurse(expr)),
-            )
-            .collect(),
-        Expr::Column(_) => vec![],
-        Expr::Exists(_) => vec![],
-        Expr::Between {
-            operand: box Expr::Column(ref col),
-            min: box Expr::Literal(Literal::Placeholder(_)),
-            max: box Expr::Literal(Literal::Placeholder(_)),
-            ..
-        } => vec![
-            (col, BinaryOperator::GreaterOrEqual),
-            (col, BinaryOperator::LessOrEqual),
-        ],
+/// Gets parameter columns and binops in positions that can be evaluated by ReadySet.
+trait BinopsParameterColumns {
+    fn get_binops_parameter_columns(&self) -> Vec<(&Column, BinaryOperator)>;
+}
 
-        Expr::Between {
-            operand: box Expr::Column(ref col),
-            min: box Expr::Literal(Literal::Placeholder(_)),
-            negated: false,
-            ..
+struct BinopsParameterColumnsVisitor<'ast> {
+    parameter_cols: Vec<(&'ast Column, BinaryOperator)>,
+}
+
+impl BinopsParameterColumnsVisitor<'_> {
+    fn new() -> Self {
+        Self {
+            parameter_cols: Vec::new(),
         }
-        | Expr::Between {
-            operand: box Expr::Column(ref col),
-            max: box Expr::Literal(Literal::Placeholder(_)),
-            negated: true,
-            ..
-        } => vec![(col, BinaryOperator::GreaterOrEqual)],
-        Expr::Between {
-            operand: box Expr::Column(ref col),
-            max: box Expr::Literal(Literal::Placeholder(_)),
-            negated: false,
-            ..
+    }
+}
+
+impl<'ast> Visitor<'ast> for BinopsParameterColumnsVisitor<'ast> {
+    type Error = !;
+
+    /// Extracts columns and binops when one side of the Expr contains [`Expr::Column`] and the
+    /// other side contains [`Expr::Literal(Literal::Placeholder)`]
+    fn visit_expr(&mut self, expr: &'ast Expr) -> Result<(), Self::Error> {
+        match expr {
+            Expr::BinaryOp {
+                lhs: box Expr::Column(ref c),
+                rhs: box Expr::Literal(Literal::Placeholder(_)),
+                op: binop,
+            } => self.parameter_cols.push((c, *binop)),
+            Expr::BinaryOp {
+                lhs: box Expr::Literal(Literal::Placeholder(_)),
+                rhs: box Expr::Column(ref c),
+                op: binop,
+            } => self
+                .parameter_cols
+                .push((c, binop.flip_comparison().unwrap_or(*binop))),
+            Expr::In {
+                lhs: box Expr::Column(ref c),
+                rhs: nom_sql::InValue::List(ref exprs),
+                negated: false,
+            } if exprs
+                .iter()
+                .all(|expr| matches!(expr, Expr::Literal(Literal::Placeholder(_)))) =>
+            {
+                self.parameter_cols
+                    .extend(iter::repeat((c, BinaryOperator::Equal)).take(exprs.len()))
+            }
+            Expr::In {
+                lhs: box Expr::Column(ref c),
+                rhs: nom_sql::InValue::List(ref exprs),
+                negated: true,
+            } if exprs
+                .iter()
+                .all(|expr| matches!(expr, Expr::Literal(Literal::Placeholder(_)))) =>
+            {
+                self.parameter_cols
+                    .extend(iter::repeat((c, BinaryOperator::NotEqual)).take(exprs.len()))
+            }
+            Expr::In { .. } => {}
+            Expr::BinaryOp {
+                op: BinaryOperator::And,
+                ref lhs,
+                ref rhs,
+            }
+            | Expr::BinaryOp {
+                op: BinaryOperator::Or,
+                ref lhs,
+                ref rhs,
+            } => {
+                let Ok(_) = self.visit_expr(lhs);
+                let Ok(_) = self.visit_expr(rhs);
+            }
+            Expr::UnaryOp { rhs: ref expr, .. } | Expr::Cast { ref expr, .. } => {
+                let Ok(_) = self.visit_expr(expr);
+            }
+            Expr::Call(ref f) => f.arguments().for_each(|e| {
+                let Ok(_) = self.visit_expr(e);
+            }),
+            Expr::CaseWhen {
+                ref condition,
+                ref then_expr,
+                ref else_expr,
+            } => {
+                let Ok(_) = self.visit_expr(condition);
+                let Ok(_) = self.visit_expr(then_expr);
+                else_expr.as_ref().map(|expr| self.visit_expr(expr));
+            }
+            Expr::Between {
+                operand: box Expr::Column(ref col),
+                min: box Expr::Literal(Literal::Placeholder(_)),
+                max: box Expr::Literal(Literal::Placeholder(_)),
+                ..
+            } => self.parameter_cols.extend_from_slice(&[
+                (col, BinaryOperator::GreaterOrEqual),
+                (col, BinaryOperator::LessOrEqual),
+            ]),
+
+            Expr::Between {
+                operand: box Expr::Column(ref col),
+                min: box Expr::Literal(Literal::Placeholder(_)),
+                negated: false,
+                ..
+            }
+            | Expr::Between {
+                operand: box Expr::Column(ref col),
+                max: box Expr::Literal(Literal::Placeholder(_)),
+                negated: true,
+                ..
+            } => self
+                .parameter_cols
+                .push((col, BinaryOperator::GreaterOrEqual)),
+            Expr::Between {
+                operand: box Expr::Column(ref col),
+                max: box Expr::Literal(Literal::Placeholder(_)),
+                negated: false,
+                ..
+            }
+            | Expr::Between {
+                operand: box Expr::Column(ref col),
+                min: box Expr::Literal(Literal::Placeholder(_)),
+                negated: true,
+                ..
+            } => self.parameter_cols.push((col, BinaryOperator::LessOrEqual)),
+            Expr::Between { .. }
+            | Expr::Literal(_)
+            | Expr::BinaryOp { .. }
+            | Expr::Column(_)
+            | Expr::Exists(_)
+            | Expr::NestedSelect(_)
+            | Expr::Array(_)
+            | Expr::Variable(_) => {}
         }
-        | Expr::Between {
-            operand: box Expr::Column(ref col),
-            min: box Expr::Literal(Literal::Placeholder(_)),
-            negated: true,
-            ..
-        } => vec![(col, BinaryOperator::LessOrEqual)],
-        Expr::Between { .. } | Expr::NestedSelect(_) | Expr::Variable(_) | Expr::Array(_) => vec![],
+        Ok(())
+    }
+}
+
+impl BinopsParameterColumns for SelectStatement {
+    fn get_binops_parameter_columns(&self) -> Vec<(&Column, BinaryOperator)> {
+        let mut visitor = BinopsParameterColumnsVisitor::new();
+        // ReadySet only supports parameter columns in the WHERE clause
+        if let Some(wc) = &self.where_clause {
+            let Ok(_) = visitor.visit_where_clause(wc);
+        }
+        visitor.parameter_cols
     }
 }
 
 pub(crate) fn get_select_statement_binops(
     query: &SelectStatement,
 ) -> Vec<(&Column, BinaryOperator)> {
-    if let Some(ref wc) = query.where_clause {
-        get_parameter_columns_recurse(wc)
-    } else {
-        vec![]
-    }
+    query.get_binops_parameter_columns()
 }
 
 pub(crate) fn select_statement_parameter_columns(query: &SelectStatement) -> Vec<&Column> {
-    if let Some(ref wc) = query.where_clause {
-        get_parameter_columns_recurse(wc)
-            .into_iter()
-            .map(|(c, _)| c)
-            .collect()
-    } else {
-        vec![]
-    }
+    query
+        .get_binops_parameter_columns()
+        .into_iter()
+        .map(|(c, _)| c)
+        .collect()
 }
 
 pub(crate) fn get_limit_parameters(query: &SelectStatement) -> Vec<Column> {
@@ -336,27 +368,22 @@ pub(crate) fn update_statement_parameter_columns(query: &UpdateStatement) -> Vec
         }
     });
 
-    let where_params = if let Some(ref wc) = query.where_clause {
-        get_parameter_columns_recurse(wc)
-            .into_iter()
-            .map(|(c, _)| c)
-            .collect()
-    } else {
-        vec![]
-    };
+    let mut visitor = BinopsParameterColumnsVisitor::new();
+    if let Some(ref wc) = query.where_clause {
+        let Ok(_) = visitor.visit_where_clause(wc);
+    }
 
-    field_params.chain(where_params.into_iter()).collect()
+    field_params
+        .chain(visitor.parameter_cols.into_iter().map(|(c, _)| c))
+        .collect()
 }
 
 pub(crate) fn delete_statement_parameter_columns(query: &DeleteStatement) -> Vec<&Column> {
+    let mut visitor = BinopsParameterColumnsVisitor::new();
     if let Some(ref wc) = query.where_clause {
-        get_parameter_columns_recurse(wc)
-            .into_iter()
-            .map(|(c, _)| c)
-            .collect()
-    } else {
-        vec![]
+        let Ok(_) = visitor.visit_where_clause(wc);
     }
+    visitor.parameter_cols.into_iter().map(|(c, _)| c).collect()
 }
 
 pub(crate) fn get_parameter_columns(query: &SqlQuery) -> Vec<&Column> {
@@ -851,5 +878,39 @@ mod tests {
         let pc = get_parameter_columns(&q);
 
         assert_eq!(pc, vec![&Column::from("votes.story_id")]);
+    }
+
+    #[test]
+    fn test_unsupported_select_parameter_positions() {
+        let having = "SELECT * FROM t GROUP BY a HAVING count(a) > ?";
+        let field = "SELECT ? FROM t";
+        let having_query = nom_sql::parse_query(Dialect::MySQL, having).unwrap();
+        let field_query = nom_sql::parse_query(Dialect::MySQL, field).unwrap();
+
+        let pc = get_parameter_columns(&having_query);
+        assert!(pc.is_empty());
+        let pc = get_parameter_columns(&field_query);
+        assert!(pc.is_empty());
+    }
+
+    #[test]
+    fn test_update_parameter_columns() {
+        let update = "UPDATE t SET a = ? WHERE b = ?";
+        let update = nom_sql::parse_query(Dialect::MySQL, update).unwrap();
+
+        let pc = get_parameter_columns(&update);
+        assert_eq!(
+            pc,
+            vec![
+                &Column {
+                    name: "a".into(),
+                    table: None,
+                },
+                &Column {
+                    name: "b".into(),
+                    table: None,
+                },
+            ]
+        );
     }
 }

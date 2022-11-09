@@ -2,6 +2,7 @@
 #![feature(drain_filter)]
 #![feature(async_closure)]
 #![feature(never_type)]
+#![feature(exhaustive_patterns)]
 #![feature(is_sorted)]
 #![feature(if_let_guard)]
 #![feature(arc_unwrap_or_clone)]
