@@ -43,7 +43,9 @@ fn negate_expr(expr: &mut Expr) -> bool {
                 | BinaryOperator::Arrow2 => return false,
                 BinaryOperator::QuestionMark
                 | BinaryOperator::QuestionMarkPipe
-                | BinaryOperator::QuestionMarkAnd => {
+                | BinaryOperator::QuestionMarkAnd
+                | BinaryOperator::AtArrowRight
+                | BinaryOperator::AtArrowLeft => {
                     // Note we return true in this case to bypass the *op = ... above
                     *expr = Expr::UnaryOp {
                         op: UnaryOperator::Not,

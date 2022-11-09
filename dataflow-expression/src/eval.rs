@@ -18,6 +18,7 @@ macro_rules! non_null {
 }
 
 mod builtins;
+mod json;
 
 impl Expr {
     /// Evaluate this expression, given a source record to pull columns from
@@ -161,6 +162,15 @@ impl Expr {
                         };
 
                         Ok(json_inner.map(|inner| inner.to_string().into()).unwrap_or_default())
+                    }
+
+                    JsonContains => {
+                        Ok(json::json_contains(&left.to_json()?, &right.to_json()?).into())
+                    }
+                    JsonContainedIn => {
+                        // Evaluate `left` first for consistency.
+                        let child = left.to_json()?;
+                        Ok(json::json_contains(&right.to_json()?, &child).into())
                     }
                 }
             }
@@ -694,5 +704,76 @@ mod tests {
         let object = r#"{ "hello": "world", "abc": 123 }"#;
         test(object, "'hello'::text", "\"world\"");
         test(object, "'abc'::char(3)", "123");
+    }
+
+    /// Tests evaluation of `JsonContains` and `JsonContainedIn` binary ops.
+    mod json_contains {
+        use super::*;
+
+        #[track_caller]
+        fn test(parent: &str, child: &str, expected: bool) {
+            for expr in [
+                format!("'{parent}'::jsonb @> '{child}'::jsonb"),
+                format!("'{child}'::jsonb <@ '{parent}'::jsonb"),
+            ] {
+                assert_eq!(
+                    eval_expr(&expr, PostgreSQL),
+                    expected.into(),
+                    "incorrect result for `{expr}`"
+                );
+            }
+        }
+
+        #[test]
+        fn postgresql_docs_examples() {
+            // Examples in https://www.postgresql.org/docs/current/datatype-json.html#JSON-CONTAINMENT
+            test("\"foo\"", "\"foo\"", true);
+
+            test("[1, 2, 3]", "[1, 3]", true);
+            test("[1, 2, 3]", "[3, 1]", true);
+            test("[1, 2, 3]", "[1, 2, 2]", true);
+
+            test(
+                r#"{"product": "PostgreSQL", "version": 9.4, "jsonb": true}"#,
+                r#"{"version": 9.4}"#,
+                true,
+            );
+
+            test("[1, 2, [1, 3]]", "[1, 3]", false);
+            test("[1, 2, [1, 3]]", "[[1, 3]]", true);
+
+            test(r#"{"foo": {"bar": "baz"}}"#, r#"{"bar": "baz"}"#, false);
+            test(r#"{"foo": {"bar": "baz"}}"#, r#"{"foo": {}}"#, true);
+
+            test(r#"["foo", "bar"]"#, "\"bar\"", true);
+            test("\"bar\"", "[\"bar\"]", false);
+        }
+
+        #[test]
+        fn edge_cases() {
+            test("[]", "[]", true);
+            test("{}", "{}", true);
+
+            test("[[]]", "[]", true);
+            test("[]", "[[]]", false);
+
+            test("[{}]", "[]", true);
+            test("[]", "[{}]", false);
+        }
+
+        #[test]
+        fn float_semantics() {
+            // `JsonNumber` does not handle -0.0 when `arbitrary_precision` is enabled.
+            test("0.0", "-0.0", true);
+            test("-0.0", "0.0", true);
+            test("[0.0]", "-0.0", true);
+            test("[-0.0]", "0.0", true);
+            test("[0.0]", "[-0.0]", true);
+            test("[-0.0]", "[0.0]", true);
+
+            // FIXME(ENG-2080): `serde_json::Number` does not compare exponents and decimals
+            // correctly when `arbitrary_precision` is enabled.
+            // test("0.1", "1.0e-1", true);
+        }
     }
 }

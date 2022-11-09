@@ -224,6 +224,18 @@ pub enum BinaryOperator {
     /// - MySQL: `json ->> jsonpath` to unquoted `text` (unimplemented)
     /// - PostgreSQL: `json[b] ->> {text,integer}` to `text`
     Arrow2,
+
+    /// `@>`
+    ///
+    /// Postgres-specific JSONB operator. Takes two JSONB values and determines whether the
+    /// left-side values immediately contain all of the right-side values.
+    AtArrowRight,
+
+    /// `<@`
+    ///
+    /// Postgres-specific JSONB operator. Behaves like [`BinaryOperator::AtArrowRight`] with
+    /// switched sides for the operands.
+    AtArrowLeft,
 }
 
 impl BinaryOperator {
@@ -274,6 +286,8 @@ impl Display for BinaryOperator {
             Self::DoublePipe => "||",
             Self::Arrow1 => "->",
             Self::Arrow2 => "->>",
+            Self::AtArrowRight => "@>",
+            Self::AtArrowLeft => "<@",
         };
         f.write_str(op)
     }
@@ -559,6 +573,8 @@ fn infix_no_and_or(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], TokenTree> {
         // NOTE: The order here matters or else some of these will be incorrectly partially parsed,
         // such as `?` after `?|`.
         alt((
+            map(tag("@>"), |_| BinaryOperator::AtArrowRight),
+            map(tag("<@"), |_| BinaryOperator::AtArrowLeft),
             map(char('='), |_| BinaryOperator::Equal),
             map(tag("!="), |_| BinaryOperator::NotEqual),
             map(tag("<>"), |_| BinaryOperator::NotEqual),
@@ -776,6 +792,8 @@ where
             Infix(DoublePipe) => Affix::Infix(Precedence(8), Associativity::Left),
             Infix(Arrow1) => Affix::Infix(Precedence(8), Associativity::Left),
             Infix(Arrow2) => Affix::Infix(Precedence(8), Associativity::Left),
+            Infix(AtArrowRight) => Affix::Infix(Precedence(8), Associativity::Left),
+            Infix(AtArrowLeft) => Affix::Infix(Precedence(8), Associativity::Left),
         })
     }
 
@@ -2172,6 +2190,34 @@ mod tests {
                 let (rem, res) = res.unwrap();
                 assert_eq!(std::str::from_utf8(rem).unwrap(), "");
                 assert_eq!(res, expected);
+            }
+
+            #[test]
+            fn at_arrow_right_operator() {
+                let cond = b"'[1, 2, 2]' @> '2'";
+                let res = test_parse!(expression(Dialect::PostgreSQL), cond);
+                assert_eq!(
+                    res,
+                    Expr::BinaryOp {
+                        lhs: Box::new(Expr::Literal("[1, 2, 2]".into())),
+                        op: BinaryOperator::AtArrowRight,
+                        rhs: Box::new(Expr::Literal("2".into())),
+                    }
+                );
+            }
+
+            #[test]
+            fn at_arrow_left_operator() {
+                let cond = b"'2' <@ '[1, 2, 2]'";
+                let res = test_parse!(expression(Dialect::PostgreSQL), cond);
+                assert_eq!(
+                    res,
+                    Expr::BinaryOp {
+                        lhs: Box::new(Expr::Literal("2".into())),
+                        op: BinaryOperator::AtArrowLeft,
+                        rhs: Box::new(Expr::Literal("[1, 2, 2]".into())),
+                    }
+                );
             }
 
             #[test]

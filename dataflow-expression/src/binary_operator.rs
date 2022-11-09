@@ -98,6 +98,12 @@ pub enum BinaryOperator {
     /// PostgreSQL `->>` operator to extract JSON values as text via a key:
     /// `json[b] ->> {text,integer}` to `text`.
     JsonKeyExtractText,
+
+    /// `@>`
+    JsonContains,
+
+    /// `<@`
+    JsonContainedIn,
 }
 
 impl BinaryOperator {
@@ -135,6 +141,8 @@ impl BinaryOperator {
                 SqlEngine::MySQL => Self::JsonPathExtractUnquote,
                 SqlEngine::PostgreSQL => Self::JsonKeyExtractText,
             },
+            AtArrowRight => Self::JsonContains,
+            AtArrowLeft => Self::JsonContainedIn,
         }
     }
 
@@ -237,7 +245,9 @@ impl BinaryOperator {
             | Self::IsNot
             | Self::JsonExists
             | Self::JsonAnyExists
-            | Self::JsonAllExists => Ok(DfType::Bool),
+            | Self::JsonAllExists
+            | Self::JsonContains
+            | Self::JsonContainedIn => Ok(DfType::Bool),
 
             Self::JsonPathExtractUnquote | Self::JsonKeyExtractText => Ok(DfType::DEFAULT_TEXT),
 
@@ -273,6 +283,8 @@ impl fmt::Display for BinaryOperator {
             Self::JsonConcat => "||",
             Self::JsonPathExtract | Self::JsonKeyExtract => "->",
             Self::JsonPathExtractUnquote | Self::JsonKeyExtractText => "->>",
+            Self::JsonContains => "@>",
+            Self::JsonContainedIn => "<@",
         };
         f.write_str(op)
     }
