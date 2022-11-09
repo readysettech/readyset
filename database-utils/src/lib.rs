@@ -23,9 +23,7 @@ use crate::error::{DatabaseError, DatabaseURLParseError};
 
 pub mod error;
 
-/// Shared configuration for replication.
-///
-/// Usable as command-line options via `#[clap(flatten)]`
+#[allow(missing_docs)] // If we add docs they get added into --help binary text which is confusing
 #[derive(Debug, Clone, Parser, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UpstreamConfig {
     /// URL for the upstream database to connect to. Should include username and password if

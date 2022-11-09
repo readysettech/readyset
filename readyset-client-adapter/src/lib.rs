@@ -362,10 +362,11 @@ pub struct Options {
     fallback_cache_options: FallbackCacheOptions,
 }
 
-/// Command-line options for running the experimental fallback_cache.
-///
-/// This option struct is intended to be embedded inside of a larger option struct using
-/// `#[clap(flatten)]`.
+// Command-line options for running the experimental fallback_cache.
+//
+// This option struct is intended to be embedded inside of a larger option struct using
+// `#[clap(flatten)]`.
+#[allow(missing_docs)] // Allows us to exclude docs (from doc comments) from --help text
 #[derive(Parser, Debug)]
 pub struct FallbackCacheOptions {
     /// Used to enable the fallback cache, which can handle serving all queries that we can't parse
@@ -396,10 +397,12 @@ pub struct FallbackCacheOptions {
 // /// probabilistic strategy
 // Random(f64)
 // }
-/// Command-line options for running the experimental fallback_cache with eviction modeling.
-///
-/// This option struct is intended to be embedded inside of a larger option struct using
-/// `#[clap(flatten)]`.
+//
+// Command-line options for running the experimental fallback_cache with eviction modeling.
+//
+// This option struct is intended to be embedded inside of a larger option struct using
+// `#[clap(flatten)]`.
+#[allow(missing_docs)] // Allows us to exclude docs (from doc comments) from --help text
 #[derive(Parser, Debug)]
 pub struct FallbackCacheEvictionOptions {
     /// If enabled, will model running the fallback cache with eviction.

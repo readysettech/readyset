@@ -3,7 +3,8 @@ use dataflow::prelude::{Graph, NodeIndex};
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
-/// Command-line options for configuring the domain replication strategy
+// Command-line options for configuring the domain replication strategy
+#[allow(missing_docs)] // Allows us to exclude docs (from doc comments) from --help text
 #[derive(Debug, Parser, Clone)]
 pub struct ReplicationOptions {
     /// Number of times to replicate domains that contain readers

@@ -542,10 +542,11 @@ pub fn resolve_addr(addr: &str) -> anyhow::Result<IpAddr> {
         .ip())
 }
 
-/// Command-line options for running a `readyset-server` worker.
-///
-/// This option struct is intended to be embedded inside of a larger option struct using
-/// `#[clap(flatten)]`.
+// Command-line options for running a `readyset-server` worker.
+//
+// This option struct is intended to be embedded inside of a larger option struct using
+// `#[clap(flatten)]`.
+#[allow(missing_docs)] // Allows us to exclude docs (from doc comments) from --help text
 #[derive(Parser, Debug)]
 pub struct WorkerOptions {
     /// The durability of base tables. `persistent` and `ephemeral` store base tables
