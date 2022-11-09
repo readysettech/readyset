@@ -59,6 +59,19 @@ impl Dialect {
         }
     }
 
+    /// Returns whether to treat the `||` operator as a concatenation operator.
+    ///
+    /// This returns true for Postgres, and also should return true for MySQL if `PIPES_AS_CONCAT`
+    /// is set in the SQL mode, but currently that is not yet implemented. (The default for MySQL
+    /// is to treat `||` as a boolean OR, so it should be okay that we just return `false` for
+    /// MySQL right now.)
+    pub fn double_pipe_is_concat(self) -> bool {
+        match self.engine {
+            SqlEngine::MySQL => false,
+            SqlEngine::PostgreSQL => true,
+        }
+    }
+
     /// Return the [`DfType`] corresponding to the SQL `FLOAT` type for this dialect
     pub(crate) fn float_type(&self) -> DfType {
         match self.engine {
