@@ -200,10 +200,15 @@ pub struct Options {
 
     /// Sets the maximum time in minutes that we will retry migrations for in the
     /// migration handler. If this time is reached, the query will be exclusively
-    /// sent to fallback.
+    /// sent to the upstream database.
     ///
     /// Defaults to 15 minutes.
-    #[clap(long, env = "MAX_PROCESSING_MINUTES", default_value = "15")]
+    #[clap(
+        long,
+        env = "MAX_PROCESSING_MINUTES",
+        default_value = "15",
+        hide = true
+    )]
     max_processing_minutes: u64,
 
     /// Sets the migration handlers's loop interval in milliseconds.
