@@ -1583,7 +1583,7 @@ fn build_view_query(
                     index: column,
                     ty: key_type.clone(),
                 }),
-                op: DfBinaryOperator::from_sql_op(*op, dialect),
+                op: DfBinaryOperator::from_sql_op(*op, dialect)?,
                 right: Box::new(DfExpr::Literal {
                     val: value,
                     ty: key_type.clone(),
@@ -1694,7 +1694,7 @@ fn build_view_query(
                                     filters.push(make_op(DfBinaryOperator::from_sql_op(
                                         binop_to_use,
                                         dialect,
-                                    )));
+                                    )?));
                                 }
                                 k.push(value);
                             }

@@ -108,9 +108,9 @@ pub enum BinaryOperator {
 
 impl BinaryOperator {
     /// Converts from a [`nom_sql::BinaryOperator`] within the context of a SQL [`Dialect`].
-    pub fn from_sql_op(op: SqlBinaryOperator, dialect: Dialect) -> Self {
+    pub fn from_sql_op(op: SqlBinaryOperator, dialect: Dialect) -> ReadySetResult<Self> {
         use SqlBinaryOperator::*;
-        match op {
+        let res = match op {
             And => Self::And,
             Or => Self::Or,
             Greater => Self::Greater,
@@ -143,7 +143,8 @@ impl BinaryOperator {
             },
             AtArrowRight => Self::JsonContains,
             AtArrowLeft => Self::JsonContainedIn,
-        }
+        };
+        Ok(res)
     }
 
     /// Checks this operator's input types, returning
