@@ -1,3 +1,5 @@
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 
 use crate::DfType;
@@ -6,6 +8,16 @@ use crate::DfType;
 pub enum SqlEngine {
     PostgreSQL,
     MySQL,
+}
+
+impl fmt::Display for SqlEngine {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // Explicit strings in case `SQL` suffix is changed to `Sql`.
+        f.write_str(match self {
+            Self::MySQL => "MySQL",
+            Self::PostgreSQL => "PostgreSQL",
+        })
+    }
 }
 
 /// Information for how the semantics of a query should be evaluated, in places where those
