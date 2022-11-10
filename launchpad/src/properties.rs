@@ -24,7 +24,7 @@
 #[macro_export]
 macro_rules! eq_laws {
     ($ty: ty) => {
-        eq_laws!(
+        $crate::eq_laws!(
             #[strategy(::proptest::arbitrary::any::<$ty>())]
             $ty
         );
@@ -32,21 +32,19 @@ macro_rules! eq_laws {
     (#[$meta: meta] $ty: ty) => {
         #[allow(clippy::eq_op)]
         mod eq {
-            use test_strategy::proptest;
-
             use super::*;
 
-            #[proptest]
+            #[::test_strategy::proptest]
             fn reflexive(#[$meta] x: $ty) {
                 assert!(x == x);
             }
 
-            #[proptest]
+            #[::test_strategy::proptest]
             fn symmetric(#[$meta] x: $ty, #[$meta] y: $ty) {
                 assert_eq!(x == y, y == x);
             }
 
-            #[proptest]
+            #[::test_strategy::proptest]
             fn transitive(#[$meta] x: $ty, #[$meta] y: $ty, #[$meta] z: $ty) {
                 if x == y && y == z {
                     assert!(x == z);
@@ -74,23 +72,21 @@ macro_rules! eq_laws {
 #[macro_export]
 macro_rules! ord_laws {
     ($ty: ty) => {
-        ord_laws!(
+        $crate::ord_laws!(
             #[strategy(::proptest::arbitrary::any::<$ty>())]
             $ty
         );
     };
     (#[$meta: meta] $ty: ty) => {
         mod ord {
-            use test_strategy::proptest;
-
             use super::*;
 
-            #[proptest]
+            #[::test_strategy::proptest]
             fn partial_cmp_matches_cmp(#[$meta] x: $ty, #[$meta] y: $ty) {
                 assert_eq!(x.partial_cmp(&y), Some(x.cmp(&y)));
             }
 
-            #[proptest]
+            #[::test_strategy::proptest]
             fn dual(#[$meta] x: $ty, #[$meta] y: $ty) {
                 if x < y {
                     assert!(y > x);
@@ -100,21 +96,21 @@ macro_rules! ord_laws {
                 }
             }
 
-            #[proptest]
+            #[::test_strategy::proptest]
             fn le_transitive(#[$meta] x: $ty, #[$meta] y: $ty, #[$meta] z: $ty) {
                 if x < y && y < z {
                     assert!(x < z)
                 }
             }
 
-            #[proptest]
+            #[::test_strategy::proptest]
             fn gt_transitive(#[$meta] x: $ty, #[$meta] y: $ty, #[$meta] z: $ty) {
                 if x > y && y > z {
                     assert!(x > z)
                 }
             }
 
-            #[proptest]
+            #[::test_strategy::proptest]
             fn trichotomy(#[$meta] x: $ty, #[$meta] y: $ty) {
                 let less = x < y;
                 let greater = x > y;
@@ -157,22 +153,19 @@ macro_rules! ord_laws {
 #[macro_export]
 macro_rules! hash_laws {
     ($ty: ty) => {
-        hash_laws!(
+        $crate::hash_laws!(
             #[strategy(::proptest::arbitrary::any::<$ty>())]
             $ty
         );
     };
     (#[$meta: meta] $ty: ty) => {
         mod hash {
-            use launchpad::hash::hash;
-            use test_strategy::proptest;
-
             use super::*;
 
-            #[proptest]
+            #[::test_strategy::proptest]
             fn matches_eq(#[$meta] x: $ty, #[$meta] y: $ty) {
                 if x == y {
-                    assert_eq!(hash(&x), hash(&y));
+                    assert_eq!($crate::hash::hash(&x), $crate::hash::hash(&y));
                 }
             }
         }
