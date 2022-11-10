@@ -3,7 +3,7 @@ use std::fmt;
 use nom_sql::BinaryOperator as SqlBinaryOperator;
 use readyset_data::dialect::SqlEngine;
 use readyset_data::{DfType, Dialect};
-use readyset_errors::{invalid_err, unsupported, ReadySetResult};
+use readyset_errors::{invalid_err, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
 /// Binary infix operators with [`Expr`](crate::Expr) on both the left- and right-hand sides
@@ -139,7 +139,7 @@ impl BinaryOperator {
                 if dialect.double_pipe_is_concat() {
                     Self::JsonConcat
                 } else {
-                    unsupported!("The || operator is only supported for JSONB on Postgres")
+                    Self::Or
                 }
             }
             Arrow1 => match dialect.engine() {
