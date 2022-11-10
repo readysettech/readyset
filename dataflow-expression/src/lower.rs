@@ -374,7 +374,7 @@ impl Expr {
             AstExpr::BinaryOp { lhs, op, rhs } => {
                 let left = Box::new(Self::lower(*lhs, dialect, context.clone())?);
                 let right = Box::new(Self::lower(*rhs, dialect, context)?);
-                let op = BinaryOperator::from_sql_op(op, dialect)?;
+                let op = BinaryOperator::from_sql_op(op, dialect, left.ty(), right.ty())?;
 
                 if matches!(
                     op,

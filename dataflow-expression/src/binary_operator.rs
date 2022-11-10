@@ -108,7 +108,12 @@ pub enum BinaryOperator {
 
 impl BinaryOperator {
     /// Converts from a [`nom_sql::BinaryOperator`] within the context of a SQL [`Dialect`].
-    pub fn from_sql_op(op: SqlBinaryOperator, dialect: Dialect) -> ReadySetResult<Self> {
+    pub fn from_sql_op(
+        op: SqlBinaryOperator,
+        dialect: Dialect,
+        _left_type: &DfType,
+        _right_type: &DfType,
+    ) -> ReadySetResult<Self> {
         use SqlBinaryOperator::*;
         let res = match op {
             And => Self::And,
