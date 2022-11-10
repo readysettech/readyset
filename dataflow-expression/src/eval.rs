@@ -130,9 +130,6 @@ impl Expr {
                         };
                         Ok(result.into())
                     }
-
-                    JsonConcat => unsupported!("|| JSON operator not implement yet"),
-
                     // TODO(ENG-1517)
                     JsonPathExtract |
                     // TODO(ENG-1518)
@@ -171,6 +168,30 @@ impl Expr {
                         // Evaluate `left` first for consistency.
                         let child = left.to_json()?;
                         Ok(json::json_contains(&right.to_json()?, &child).into())
+                    }
+                    JsonConcat => {
+                        let mut left_json = left.to_json()?;
+                        let mut right_json = right.to_json()?;
+
+                        if let (Some(left_obj), Some(right_obj)) =
+                            (left_json.as_object_mut(), right_json.as_object_mut())
+                        {
+                            // When both the left and the right side are JSON objects, merge them:
+                            left_obj.append(right_obj);
+                            Ok(serde_json::to_string(&left_obj)?.into())
+                        } else {
+                            // If both sides aren't JSON objects, concatenate arrays (after turning
+                            // non-array JSON values into single-element arrays):
+                            let mut res = match left_json {
+                                JsonValue::Array(v) => v,
+                                _ => vec![left_json],
+                            };
+                            match right_json {
+                                JsonValue::Array(mut v) => res.append(&mut v),
+                                _ => res.push(right_json)
+                            };
+                            Ok(serde_json::to_string(&res)?.into())
+                        }
                     }
                 }
             }
@@ -217,6 +238,7 @@ mod tests {
     use nom_sql::Dialect::*;
     use nom_sql::{parse_expr, SqlType};
     use readyset_data::{ArrayD, Collation, DfType, IxDyn, PgEnumMetadata};
+    use serde_json::json;
     use Expr::*;
 
     use super::*;
@@ -500,6 +522,54 @@ mod tests {
             .is_err());
         assert!(expr
             .eval(&[DfValue::from("{\"abc\": 42}"), DfValue::from(67)])
+            .is_err());
+    }
+
+    #[test]
+    fn eval_json_concat() {
+        let expr = Op {
+            left: Box::new(column_with_type(0, DfType::Jsonb)),
+            right: Box::new(column_with_type(1, DfType::Jsonb)),
+            op: BinaryOperator::JsonConcat,
+            ty: DfType::Jsonb,
+        };
+
+        let test_eval = |left, right| {
+            expr.eval(&[
+                DfValue::from(serde_json::to_string(left).unwrap()),
+                DfValue::from(serde_json::to_string(right).unwrap()),
+            ])
+            .unwrap()
+            .to_json()
+            .unwrap()
+        };
+
+        // Test various valid cases
+
+        let json_obj1 = json!({"abc": 1, "def": 2});
+        let json_obj2 = json!({"xyz": 3, "def": 4});
+        let expected = json!({"abc": 1, "def": 4, "xyz": 3});
+        assert_eq!(test_eval(&json_obj1, &json_obj2), expected);
+
+        let json_arr1 = json!([1, 2, 3]);
+        let json_arr2 = json!([4, 5, 6]);
+        let expected = json!([1, 2, 3, 4, 5, 6]);
+        assert_eq!(test_eval(&json_arr1, &json_arr2), expected);
+
+        let expected = json!([1, 2, 3, json_obj1]);
+        assert_eq!(test_eval(&json_arr1, &json_obj1), expected);
+
+        let expected = json!([99, 100]);
+        assert_eq!(test_eval(&json!(99), &json!(100)), expected);
+
+        // Test error conditions
+
+        assert!(expr
+            .eval(&[DfValue::from("bad_json"), DfValue::from("42")])
+            .is_err());
+
+        assert!(expr
+            .eval(&[DfValue::None, DfValue::from("\"valid_json\"")])
             .is_err());
     }
 
