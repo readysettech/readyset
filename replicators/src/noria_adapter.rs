@@ -403,7 +403,11 @@ impl NoriaAdapter {
             // therefore we create a new replication slot, just so we can get a consistent snapshot
             // with a WAL position attached. This is more robust than locking and allows us to reuse
             // the existing snapshotting code.
-            let _ = connector.drop_replication_slot(RESNAPSHOT_SLOT).await;
+            info!(
+                slot = RESNAPSHOT_SLOT,
+                "Recreating replication slot to resnapshot with the latest schema"
+            );
+            connector.drop_replication_slot(RESNAPSHOT_SLOT).await?;
             Some(
                 connector
                     .create_replication_slot(RESNAPSHOT_SLOT, true)
@@ -457,7 +461,7 @@ impl NoriaAdapter {
             );
 
             if replication_slot.slot_name == RESNAPSHOT_SLOT {
-                let _ = connector.drop_replication_slot(RESNAPSHOT_SLOT).await;
+                connector.drop_replication_slot(RESNAPSHOT_SLOT).await?;
             }
 
             let _ = telemetry_sender.send_event_with_payload(

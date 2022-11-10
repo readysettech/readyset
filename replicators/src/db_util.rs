@@ -3,10 +3,11 @@
 use std::collections::HashMap;
 
 use nom_sql::Dialect;
+use readyset::ReadySetError;
 use readyset_sql_passes::anonymize::{Anonymize, Anonymizer};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct DatabaseSchemas {
     schemas: HashMap<String, CreateSchema>,
 }
@@ -169,6 +170,13 @@ impl ToString for CreateSchema {
 
 fn strip_backticks(table: &mut String) {
     table.remove_matches("`");
+}
+
+/// Checks if the passed in ReadySetError is due to the slot slot_name not existing, such as from
+/// when trying to drop a replication slot which doesn't exist
+pub fn error_is_slot_not_found(err: &ReadySetError, slot_name: &str) -> bool {
+    err.to_string()
+        .ends_with(&format!("replication slot \"{slot_name}\" does not exist"))
 }
 
 #[cfg(test)]

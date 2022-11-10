@@ -15,6 +15,7 @@ use readyset::{ReadySetError, ReadySetHandle, ReadySetResult};
 use readyset_data::{Collation, DfValue, Dialect, TinyText};
 use readyset_server::Builder;
 use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer, TelemetrySender};
+use replicators::db_util::error_is_slot_not_found;
 use replicators::NoriaAdapter;
 use test_utils::slow;
 use tracing::{error, trace};
@@ -1637,4 +1638,41 @@ async fn postgresql_replicate_custom_type() {
     )
     .await
     .unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn postgresql_drop_nonexistent_replication_slot() -> ReadySetResult<()> {
+    let connector = native_tls::TlsConnector::builder()
+        .danger_accept_invalid_certs(true)
+        .build()
+        .unwrap();
+    let tls_connector = postgres_native_tls::MakeTlsConnector::new(connector);
+    let (client, conn) = tokio_postgres::Config::from_str(&pgsql_url())?
+        .set_replication_database()
+        .connect(tls_connector)
+        .await
+        .unwrap();
+
+    let _conn = tokio::spawn(async move { conn.await.unwrap() });
+
+    // This slot shouldn't exist, and should generate a corresponding "error", which we will usually
+    // want to instead consider good enough from replication's point of view
+    let slot_name = "doesnotexist";
+    let res = client
+        .simple_query(&format!("DROP_REPLICATION_SLOT {}", slot_name))
+        .await;
+    assert!(error_is_slot_not_found(&res.unwrap_err().into(), slot_name));
+
+    // Different type of error shouldn't pass the check
+    let slot_name = "invalid syntax";
+    let res = client
+        .simple_query(&format!("DROP_REPLICATION_SLOT {}", slot_name))
+        .await;
+    assert!(!error_is_slot_not_found(
+        &res.unwrap_err().into(),
+        slot_name
+    ));
+
+    Ok(())
 }

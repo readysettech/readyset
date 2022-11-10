@@ -7,11 +7,12 @@ use postgres_native_tls::MakeTlsConnector;
 use readyset::replication::ReplicationOffset;
 use readyset::{ReadySetError, ReadySetResult, TableOperation};
 use tokio_postgres as pgsql;
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use super::ddl_replication::setup_ddl_replication;
 use super::wal_reader::{WalEvent, WalReader};
 use super::{PostgresPosition, PUBLICATION_NAME, REPLICATION_SLOT};
+use crate::db_util::error_is_slot_not_found;
 use crate::noria_adapter::{Connector, ReplicationAction};
 use crate::postgres_connector::wal::WalError;
 
@@ -131,7 +132,7 @@ impl PostgresWalConnector {
         }
 
         // Drop the existing slot if any
-        let _ = self.drop_replication_slot(REPLICATION_SLOT).await;
+        self.drop_replication_slot(REPLICATION_SLOT).await?;
 
         match self.create_replication_slot(REPLICATION_SLOT, false).await {
             Ok(slot) => self.replication_slot = Some(slot), /* Created a new slot, */
@@ -226,6 +227,7 @@ impl PostgresWalConnector {
         name: &str,
         temporary: bool,
     ) -> ReadySetResult<CreatedSlot> {
+        info!(slot = name, temporary, "Creating replication slot");
         let query = format!(
             "CREATE_REPLICATION_SLOT {name} {} LOGICAL pgoutput EXPORT_SNAPSHOT",
             if temporary { "TEMPORARY" } else { "" }
@@ -237,6 +239,10 @@ impl PostgresWalConnector {
         let consistent_point = parse_wal(row.get(1).unwrap())?;
         let snapshot_name = row.get(2).map(Into::into).unwrap();
         let output_plugin = row.get(3).map(Into::into).unwrap();
+        debug!(
+            slot_name,
+            consistent_point, snapshot_name, output_plugin, "Created replication slot"
+        );
 
         Ok(CreatedSlot {
             slot_name,
@@ -342,9 +348,22 @@ impl PostgresWalConnector {
     /// the walsender is connected to, this command fails.
     /// Not really needed when `TEMPORARY` slot is Used
     pub(crate) async fn drop_replication_slot(&mut self, name: &str) -> ReadySetResult<()> {
-        self.simple_query(&format!("DROP_REPLICATION_SLOT {}", name))
-            .await
-            .map(|_| ())
+        info!(slot = name, "Dropping replication slot if exists");
+        let res = self
+            .simple_query(&format!("DROP_REPLICATION_SLOT {}", name))
+            .await;
+
+        match res {
+            Ok(_) => Ok(()),
+            Err(err) if error_is_slot_not_found(&err, name) => {
+                debug!(
+                    slot = name,
+                    "Replication slot to-drop already doesn't exist"
+                );
+                Ok(())
+            }
+            Err(err) => Err(err),
+        }
     }
 
     /// Perform a simple query that expects a singe row in response, check that the response is
