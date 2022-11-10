@@ -470,11 +470,6 @@ impl NoriaAdapter {
             create_schema.send_schemas(telemetry_sender).await;
         }
 
-        // Let waiters know that the initial snapshotting is complete.
-        if let Some(notify) = ready_notify.take() {
-            notify.notify_one();
-        }
-
         connector
             .start_replication(REPLICATION_SLOT, PUBLICATION_NAME)
             .await?;
@@ -505,6 +500,11 @@ impl NoriaAdapter {
         if min_pos != max_pos {
             info!(start = %min_pos, end = %max_pos, "Catching up");
             adapter.main_loop(&mut min_pos, Some(max_pos)).await?;
+        }
+
+        // Let waiters know that the initial snapshotting is complete.
+        if let Some(notify) = ready_notify.take() {
+            notify.notify_one();
         }
 
         adapter.main_loop(&mut min_pos, None).await?;
