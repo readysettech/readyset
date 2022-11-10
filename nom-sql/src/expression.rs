@@ -2346,6 +2346,38 @@ mod tests {
             }
         }
 
+        mod json {
+            use super::*;
+
+            #[test]
+            fn arrow1_operator() {
+                let expr = b"'[1, 2, 3]' -> 2";
+                let res = test_parse!(expression(Dialect::PostgreSQL), expr);
+                assert_eq!(
+                    res,
+                    Expr::BinaryOp {
+                        lhs: Box::new(Expr::Literal("[1, 2, 3]".into())),
+                        op: BinaryOperator::Arrow1,
+                        rhs: Box::new(Expr::Literal(2u64.into())),
+                    }
+                );
+            }
+
+            #[test]
+            fn arrow2_operator() {
+                let expr = b"'[1, 2, 3]' ->> 2";
+                let res = test_parse!(expression(Dialect::PostgreSQL), expr);
+                assert_eq!(
+                    res,
+                    Expr::BinaryOp {
+                        lhs: Box::new(Expr::Literal("[1, 2, 3]".into())),
+                        op: BinaryOperator::Arrow2,
+                        rhs: Box::new(Expr::Literal(2u64.into())),
+                    }
+                );
+            }
+        }
+
         #[test]
         fn parse_array_expr() {
             let res = test_parse!(
