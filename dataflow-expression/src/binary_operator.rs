@@ -104,6 +104,9 @@ pub enum BinaryOperator {
 
     /// `<@`
     JsonContainedIn,
+
+    /// `-` applied to the PostreSQL JSONB type
+    JsonSubtract,
 }
 
 impl BinaryOperator {
@@ -111,7 +114,7 @@ impl BinaryOperator {
     pub fn from_sql_op(
         op: SqlBinaryOperator,
         dialect: Dialect,
-        _left_type: &DfType,
+        left_type: &DfType,
         _right_type: &DfType,
     ) -> ReadySetResult<Self> {
         use SqlBinaryOperator::*;
@@ -123,7 +126,13 @@ impl BinaryOperator {
             Less => Self::Less,
             LessOrEqual => Self::LessOrEqual,
             Add => Self::Add,
-            Subtract => Self::Subtract,
+            Subtract => {
+                if left_type.is_jsonb() {
+                    Self::JsonSubtract
+                } else {
+                    Self::Subtract
+                }
+            }
             Multiply => Self::Multiply,
             Divide => Self::Divide,
             Like => Self::Like,
@@ -289,7 +298,7 @@ impl fmt::Display for BinaryOperator {
             Self::Is => "IS",
             Self::IsNot => "IS NOT",
             Self::Add => "+",
-            Self::Subtract => "-",
+            Self::Subtract | Self::JsonSubtract => "-",
             Self::Multiply => "*",
             Self::Divide => "/",
             Self::JsonExists => "?",
@@ -308,6 +317,20 @@ impl fmt::Display for BinaryOperator {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn json_subtract_lowering() {
+        assert_eq!(
+            BinaryOperator::from_sql_op(
+                SqlBinaryOperator::Subtract,
+                Dialect::DEFAULT_POSTGRESQL,
+                &DfType::Jsonb,
+                &DfType::Int
+            )
+            .unwrap(),
+            BinaryOperator::JsonSubtract
+        );
+    }
 
     mod output_type {
         use super::*;

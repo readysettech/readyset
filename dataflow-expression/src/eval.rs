@@ -193,6 +193,7 @@ impl Expr {
                             Ok(serde_json::to_string(&res)?.into())
                         }
                     }
+                    JsonSubtract => unsupported!("'-' operator applied to JSONB not yet supported")
                 }
             }
             Expr::Cast { expr, ty, .. } => {
