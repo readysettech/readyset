@@ -226,6 +226,13 @@ pub enum HandleRequest {
         /// The result of the migration gets sent down here.
         done_tx: tokio::sync::oneshot::Sender<ReadySetResult<()>>,
     },
+    /// Set a failpoint
+    #[cfg(feature = "failure_injection")]
+    Failpoint {
+        name: String,
+        action: String,
+        done_tx: tokio::sync::oneshot::Sender<()>,
+    },
 }
 
 /// A structure to hold and manage access to the [`Leader`].
@@ -392,6 +399,18 @@ impl Controller {
                     }
                 } else {
                     return Err(ReadySetError::NotLeader);
+                }
+            }
+            #[cfg(feature = "failure_injection")]
+            HandleRequest::Failpoint {
+                name,
+                action,
+                done_tx,
+            } => {
+                tracing::info!(%name, %action, "handling failpoint request");
+                fail::cfg(name, action.as_str()).expect("failed to set failpoint");
+                if done_tx.send(()).is_err() {
+                    warn!("handle-based failpoint sender hung up!");
                 }
             }
         }

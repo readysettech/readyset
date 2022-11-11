@@ -130,6 +130,25 @@ impl Handle {
             etx.closed().await;
         }
     }
+
+    #[cfg(feature = "failure_injection")]
+    /// Injects a failpoint with the provided name/action
+    pub async fn set_failpoint<S: std::fmt::Display>(&mut self, name: S, action: S) {
+        tracing::info!(%name, %action, "Handle::set_failpoint");
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.event_tx
+            .as_mut()
+            .unwrap()
+            .send(HandleRequest::Failpoint {
+                name: name.to_string(),
+                action: action.to_string(),
+                done_tx: tx,
+            })
+            .await
+            .ok()
+            .expect("Controller dropped, failed, or panicked");
+        rx.await.expect("failed to get failpoint ack");
+    }
 }
 
 impl Drop for Handle {
