@@ -44,15 +44,15 @@ impl Expr {
                 let left = left.eval(record)?;
                 let right = right.eval(record)?;
 
-                let like = |case_sensitivity, negated| -> bool {
+                let like = |case_sensitivity, negated| -> DfValue {
                     match (
                         left.coerce_to(&DfType::DEFAULT_TEXT, left_ty),
                         right.coerce_to(&DfType::DEFAULT_TEXT, right_ty),
                     ) {
                         (Ok(left), Ok(right)) => {
-                            // unwrap: we just coerced these to Text, so they're definitely strings.
-                            let left = left.as_str().unwrap();
-                            let right = right.as_str().unwrap();
+                            let (Some(left), Some(right)) = (left.as_str(), right.as_str()) else {
+                               return DfValue::None;
+                            };
 
                             // NOTE(grfn): At some point, we may want to optimize this to pre-cache
                             // the LikePattern if the value is constant, since constructing a new
@@ -71,6 +71,7 @@ impl Expr {
                         // we return true if not negated or false otherwise.
                         _ => !negated,
                     }
+                    .into()
                 };
 
                 match op {
@@ -92,10 +93,10 @@ impl Expr {
                     LessOrEqual => Ok((non_null!(left) <= non_null!(right)).into()),
                     Is => Ok((left == right).into()),
                     IsNot => Ok((left != right).into()),
-                    Like => Ok(like(CaseSensitive, false).into()),
-                    NotLike => Ok(like(CaseSensitive, true).into()),
-                    ILike => Ok(like(CaseInsensitive, false).into()),
-                    NotILike => Ok(like(CaseInsensitive, true).into()),
+                    Like => Ok(like(CaseSensitive, false)),
+                    NotLike => Ok(like(CaseSensitive, true)),
+                    ILike => Ok(like(CaseInsensitive, false)),
+                    NotILike => Ok(like(CaseInsensitive, true)),
 
                     // JSON operators:
                     JsonExists => {
@@ -690,6 +691,18 @@ mod tests {
         };
         let res = expr.eval::<DfValue>(&[]).unwrap();
         assert!(res.is_truthy());
+    }
+
+    #[test]
+    fn like_null() {
+        let expr = Expr::Op {
+            left: Box::new(column_with_type(0, DfType::DEFAULT_TEXT)),
+            op: BinaryOperator::Like,
+            right: Box::new(make_literal("abc".into())),
+            ty: DfType::Bool,
+        };
+        let res = expr.eval(&[DfValue::None]).unwrap();
+        assert_eq!(res, DfValue::None)
     }
 
     #[test]
