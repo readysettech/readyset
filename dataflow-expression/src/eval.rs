@@ -234,25 +234,33 @@ impl Expr {
 
                         if right.is_array() {
                             unsupported!("Subtracting arrays from JSONB is not yet implemented");
-                        } else if right.is_string() {
-                            unsupported!("Subtracting strings from JSONB is not yet implemented");
+                        } else if let Some(str) = right.as_str() {
+                            if let Some(vec) = json.as_array_mut() {
+                                *vec = vec.drain(..).filter(|v| v.as_str() != Some(str)).collect();
+                            } else if let Some(map) = json.as_object_mut() {
+                                map.remove(str);
+                            } else {
+                                return Err(invalid_err!(
+                                    "Can't subtract string from non-object, non-array JSON value"
+                                ));
+                            }
                         } else if let Some(index) = right.as_int() {
                             if let Some(vec) = json.as_array_mut() {
                                 if let Ok(index) = isize::try_from(index) {
                                     utils::remove_bidirectional(vec, index);
                                 }
-                                Ok(serde_json::to_string(&json)?.into())
                             } else {
-                                Err(invalid_err!(
+                                return Err(invalid_err!(
                                     "Can't subtract integer value from non-array JSON value"
-                                ))
+                                ));
                             }
                         } else {
-                            Err(invalid_err!(
+                            return Err(invalid_err!(
                                 "Invalid type {} on right-hand side of JSONB subtract operator",
                                 right.infer_dataflow_type()
-                            ))
+                            ));
                         }
+                        Ok(serde_json::to_string(&json)?.into())
                     }
                 }
             }
@@ -645,13 +653,13 @@ mod tests {
 
         assert_eq!(
             expr.eval(&[DfValue::from(r#"["a","b","c"]"#), DfValue::from(1)])
-                .unwrap(),
+                .unwrap(), // Subtracting index 1 should remove the second element of the array
             DfValue::from(r#"["a","c"]"#)
         );
 
         assert_eq!(
             expr.eval(&[DfValue::from(r#"["a","b","c"]"#), DfValue::from(-1)])
-                .unwrap(),
+                .unwrap(), // Subtracting index -1 should remove the last element
             DfValue::from(r#"["a","b"]"#)
         );
 
@@ -661,13 +669,47 @@ mod tests {
             DfValue::from(r#"["a","b","c"]"#)
         );
 
+        assert_eq!(
+            expr.eval(&[DfValue::from(r#"["a","b","c"]"#), DfValue::from("b")])
+                .unwrap(), // Subtracting a string should remove it from the array
+            DfValue::from(r#"["a","c"]"#)
+        );
+
+        assert_eq!(
+            expr.eval(&[DfValue::from(r#"["a","b","b"]"#), DfValue::from("b")])
+                .unwrap(), // Subtracting a string should remove multiple copies if present
+            DfValue::from(r#"["a"]"#)
+        );
+
+        assert_eq!(
+            expr.eval(&[DfValue::from(r#"["a","b","c"]"#), DfValue::from("d")])
+                .unwrap(), // Subtracting a string that's not present should be a no-op
+            DfValue::from(r#"["a","b","c"]"#)
+        );
+
+        assert_eq!(
+            expr.eval(&[DfValue::from(r#"{"a": 1, "b": 2}"#), DfValue::from("b")])
+                .unwrap(), // Subtracting a string should remove that key from the object
+            DfValue::from(r#"{"a":1}"#)
+        );
+
+        assert_eq!(
+            expr.eval(&[DfValue::from(r#"{"a": 1, "b": 2}"#), DfValue::from("c")])
+                .unwrap(), // Subtracting a string that's not a key should be a no-op
+            DfValue::from(r#"{"a":1,"b":2}"#)
+        );
+
         assert!(expr
             .eval(&[DfValue::from("bad_json"), DfValue::from("abc")])
-            .is_err());
+            .is_err()); // Passing in bad JSON should error out
 
         assert!(expr
             .eval(&[DfValue::from(r#"["a","b","c"]"#), DfValue::Float(123.456)])
-            .is_err());
+            .is_err()); // Passing in a RHS that's not an int, string, or array should error out
+
+        assert!(expr
+            .eval(&[DfValue::from("42"), DfValue::from("abc")])
+            .is_err()); // Subtracting a string from a non-array, non-object JSON value is an error
     }
 
     #[test]
