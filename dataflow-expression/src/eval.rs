@@ -229,7 +229,21 @@ impl Expr {
                             Ok(serde_json::to_string(&res)?.into())
                         }
                     }
-                    JsonSubtract => unsupported!("'-' operator applied to JSONB not yet supported"),
+                    JsonSubtract => {
+                        let _json = left.to_json()?;
+                        if right.is_array() {
+                            unsupported!("Subtracting arrays from JSONB is not yet implemented");
+                        } else if right.is_string() {
+                            unsupported!("Subtracting strings from JSONB is not yet implemented");
+                        } else if right.is_integer() {
+                            unsupported!("Subtracting integers from JSONB is not yet implemented");
+                        } else {
+                            Err(invalid_err!(
+                                "Invalid type {} on right-hand side of JSONB subtract operator",
+                                right.infer_dataflow_type()
+                            ))
+                        }
+                    }
                 }
             }
             Expr::Cast { expr, ty, .. } => {
@@ -607,6 +621,24 @@ mod tests {
 
         assert!(expr
             .eval(&[DfValue::None, DfValue::from("\"valid_json\"")])
+            .is_err());
+    }
+
+    #[test]
+    fn eval_json_subtract_bad_operands() {
+        let expr = Op {
+            left: Box::new(column_with_type(0, DfType::Jsonb)),
+            right: Box::new(column_with_type(1, DfType::Unknown)),
+            op: BinaryOperator::JsonSubtract,
+            ty: DfType::Jsonb,
+        };
+
+        assert!(expr
+            .eval(&[DfValue::from("bad_json"), DfValue::from("abc")])
+            .is_err());
+
+        assert!(expr
+            .eval(&[DfValue::from(r#"["a","b","c"]"#), DfValue::Float(123.456)])
             .is_err());
     }
 
