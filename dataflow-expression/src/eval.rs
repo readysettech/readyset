@@ -5,7 +5,7 @@ use readyset_errors::{invalid_err, unsupported, ReadySetError, ReadySetResult};
 use serde_json::Value as JsonValue;
 
 use crate::like::{CaseInsensitive, CaseSensitive, LikePattern};
-use crate::{BinaryOperator, Expr};
+use crate::{utils, BinaryOperator, Expr};
 
 macro_rules! non_null {
     ($df_value:expr) => {
@@ -148,7 +148,7 @@ impl Expr {
                         let json_inner: Option<&JsonValue> = match &json {
                             JsonValue::Array(array) => isize::try_from(&right)
                                 .ok()
-                                .and_then(|index| crate::utils::index_bidirectional(array, index)),
+                                .and_then(|index| utils::index_bidirectional(array, index)),
                             JsonValue::Object(object) => {
                                 right.as_str().and_then(|key| object.get(key))
                             }
@@ -230,13 +230,23 @@ impl Expr {
                         }
                     }
                     JsonSubtract => {
-                        let _json = left.to_json()?;
+                        let mut json = left.to_json()?;
+
                         if right.is_array() {
                             unsupported!("Subtracting arrays from JSONB is not yet implemented");
                         } else if right.is_string() {
                             unsupported!("Subtracting strings from JSONB is not yet implemented");
-                        } else if right.is_integer() {
-                            unsupported!("Subtracting integers from JSONB is not yet implemented");
+                        } else if let Some(index) = right.as_int() {
+                            if let Some(vec) = json.as_array_mut() {
+                                if let Ok(index) = isize::try_from(index) {
+                                    utils::remove_bidirectional(vec, index);
+                                }
+                                Ok(serde_json::to_string(&json)?.into())
+                            } else {
+                                Err(invalid_err!(
+                                    "Can't subtract integer value from non-array JSON value"
+                                ))
+                            }
                         } else {
                             Err(invalid_err!(
                                 "Invalid type {} on right-hand side of JSONB subtract operator",
@@ -625,13 +635,31 @@ mod tests {
     }
 
     #[test]
-    fn eval_json_subtract_bad_operands() {
+    fn eval_json_subtract() {
         let expr = Op {
             left: Box::new(column_with_type(0, DfType::Jsonb)),
             right: Box::new(column_with_type(1, DfType::Unknown)),
             op: BinaryOperator::JsonSubtract,
             ty: DfType::Jsonb,
         };
+
+        assert_eq!(
+            expr.eval(&[DfValue::from(r#"["a","b","c"]"#), DfValue::from(1)])
+                .unwrap(),
+            DfValue::from(r#"["a","c"]"#)
+        );
+
+        assert_eq!(
+            expr.eval(&[DfValue::from(r#"["a","b","c"]"#), DfValue::from(-1)])
+                .unwrap(),
+            DfValue::from(r#"["a","b"]"#)
+        );
+
+        assert_eq!(
+            expr.eval(&[DfValue::from(r#"["a","b","c"]"#), DfValue::from(3)])
+                .unwrap(), // Out of bounds indexes should return same JSON as-is
+            DfValue::from(r#"["a","b","c"]"#)
+        );
 
         assert!(expr
             .eval(&[DfValue::from("bad_json"), DfValue::from("abc")])
