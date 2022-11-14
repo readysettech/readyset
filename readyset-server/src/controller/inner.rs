@@ -128,9 +128,13 @@ impl Leader {
                         }
                         break;
                     }
-                    Err(err) => {
+                    Err(error) => {
                         // On each replication error we wait for 30 seconds and then try again
-                        tracing::error!(error = %err, "replication error");
+                        error!(
+                            target: "replicators",
+                            %error,
+                            "Unrecoverable error in replication, restarting after restart timeout"
+                        );
                         tokio::time::sleep(replicator_restart_timeout).await;
                     }
                 }
