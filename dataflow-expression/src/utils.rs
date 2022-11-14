@@ -48,6 +48,15 @@ pub fn make_call(func: BuiltinFunction) -> Expr {
     }
 }
 
+/// Normalizes the formatting of a JSON string.
+///
+/// Not intended for use outside of tests.
+#[cfg(test)]
+#[track_caller]
+pub fn normalize_json(json: &str) -> String {
+    json.parse::<serde_json::Value>().unwrap().to_string()
+}
+
 /// Converts a sequence of strings to array expression syntax.
 ///
 /// Not intended for use outside of tests.

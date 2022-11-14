@@ -258,6 +258,18 @@ impl Expr {
                         }
                         Ok(json.into())
                     }
+                    JsonSubtractPath => {
+                        // Type errors are handled during expression lowering, unless the type is
+                        // unknown.
+                        let keys = right.as_array()?;
+                        let mut json = left.to_json()?;
+
+                        // PostgreSQL docs state `text[]` but in practice it allows using
+                        // multi-dimensional arrays here.
+                        json::json_remove_path(&mut json, keys.values())?;
+
+                        Ok(serde_json::to_string(&json)?.into())
+                    }
                 }
             }
             Expr::Cast { expr, ty, .. } => {
@@ -310,7 +322,7 @@ mod tests {
 
     use super::*;
     use crate::lower::tests::no_op_lower_context;
-    use crate::utils::{column_with_type, make_column, make_literal};
+    use crate::utils::{column_with_type, make_column, make_literal, normalize_json};
 
     /// Returns the value from evaluating an expression, or `ReadySetError` if evaluation fails.
     ///
@@ -1064,6 +1076,51 @@ mod tests {
 
         test(object, "array['abc'::char(3), '0']", Some("123"));
         test(object, "array['abc'::char(3), null::text]", None);
+    }
+
+    /// Tests evaluation of `JsonSubtractPath` binary ops.
+    #[test]
+    fn eval_json_subtract_path() {
+        #[track_caller]
+        fn test(json: &str, key: &str, expected: &str) {
+            // Normalize formatting.
+            let expected = normalize_json(expected);
+
+            let expr = format!("'{json}'::jsonb #- {key}");
+            assert_eq!(
+                eval_expr(&expr, PostgreSQL),
+                expected.into(),
+                "incorrect result for `{expr}`"
+            );
+        }
+
+        let array = "[[\"world\", 123]]";
+        test(array, "array['0']", "[]");
+        test(array, "array['0', '0']", "[[123]]");
+        test(array, "array['0', '1']", "[[\"world\"]]");
+        test(array, "array['1']", array);
+        test(array, "array['0', '2']", array);
+
+        let object = r#"{ "hello": ["world"], "abc": [123] }"#;
+        test(object, "array['hello']", r#"{ "abc": [123] }"#);
+        test(
+            object,
+            "array['hello', '0']",
+            r#"{ "hello": [], "abc": [123] }"#,
+        );
+        test(object, "array['abc'::char(3)]", r#"{ "hello": ["world"] }"#);
+        test(
+            object,
+            "array['abc'::char(3), '0']",
+            r#"{ "hello": ["world"], "abc": [] }"#,
+        );
+        test(object, "array['world']", object);
+        test(object, "array['hello', '1']", object);
+
+        // Remove leaf nodes:
+        test("[[1]]", "array['0', '0']", "[[]]");
+        test("[{ \"abc\": 1 }]", "array['0', 'abc']", "[{}]");
+        test("{ \"abc\": [1] }", "array['abc', '0']", "{ \"abc\": [] }");
     }
 
     /// Tests evaluation of `JsonContains` and `JsonContainedIn` binary ops.

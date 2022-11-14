@@ -119,6 +119,9 @@ pub enum BinaryOperator {
 
     /// `-` applied to the PostreSQL JSONB type
     JsonSubtract,
+
+    /// PostgreSQL `#-` operator to remove from JSONB values via a key/index.
+    JsonSubtractPath,
 }
 
 impl BinaryOperator {
@@ -145,6 +148,7 @@ impl BinaryOperator {
                     Self::Subtract
                 }
             }
+            HashSubtract => Self::JsonSubtractPath,
             Multiply => Self::Multiply,
             Divide => Self::Divide,
             Like => Self::Like,
@@ -215,7 +219,10 @@ impl BinaryOperator {
             // Left type checks:
 
             // jsonb, unknown
-            Self::JsonExists | Self::JsonAnyExists | Self::JsonAllExists
+            Self::JsonExists
+            | Self::JsonAnyExists
+            | Self::JsonAllExists
+            | Self::JsonSubtractPath
                 if left_type.is_known() && !left_type.is_jsonb() =>
             {
                 error(Left, "JSONB")
@@ -243,6 +250,7 @@ impl BinaryOperator {
             | Self::JsonAllExists
             | Self::JsonKeyPathExtract
             | Self::JsonKeyPathExtractText
+            | Self::JsonSubtractPath
                 if right_type.innermost_array_type().is_known()
                     && !(right_type.is_array()
                         && right_type.innermost_array_type().is_any_text()) =>
@@ -321,6 +329,7 @@ impl fmt::Display for BinaryOperator {
             Self::IsNot => "IS NOT",
             Self::Add => "+",
             Self::Subtract | Self::JsonSubtract => "-",
+            Self::JsonSubtractPath => "#-",
             Self::Multiply => "*",
             Self::Divide => "/",
             Self::JsonExists => "?",

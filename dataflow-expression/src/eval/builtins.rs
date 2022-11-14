@@ -1758,11 +1758,7 @@ mod tests {
 
     mod json {
         use super::*;
-
-        #[track_caller]
-        fn normalize_json(json: &str) -> String {
-            json.parse::<serde_json::Value>().unwrap().to_string()
-        }
+        use crate::utils::normalize_json;
 
         #[test]
         fn json_array_length() {

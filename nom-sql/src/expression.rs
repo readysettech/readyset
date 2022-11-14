@@ -179,6 +179,13 @@ pub enum BinaryOperator {
     Add,
     /// `-`
     Subtract,
+
+    /// `#-`
+    ///
+    /// Postgres-specific JSONB operator that takes JSONB and returns JSONB with the value at a
+    /// key/index path removed.
+    HashSubtract,
+
     /// `*`
     Multiply,
     /// `/`
@@ -287,6 +294,7 @@ impl Display for BinaryOperator {
             Self::IsNot => "IS NOT",
             Self::Add => "+",
             Self::Subtract => "-",
+            Self::HashSubtract => "#-",
             Self::Multiply => "*",
             Self::Divide => "/",
             Self::QuestionMark => "?",
@@ -617,6 +625,7 @@ fn infix_no_and_or(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], TokenTree> {
             map(tag("#>>"), |_| BinaryOperator::HashArrow2),
             map(tag("#>"), |_| BinaryOperator::HashArrow1),
         )),
+        map(tag("#-"), |_| BinaryOperator::HashSubtract),
     ))(i)?;
 
     Ok((i, TokenTree::Infix(operator)))
@@ -820,6 +829,7 @@ where
             Infix(HashArrow2) => Affix::Infix(Precedence(8), Associativity::Left),
             Infix(AtArrowRight) => Affix::Infix(Precedence(8), Associativity::Left),
             Infix(AtArrowLeft) => Affix::Infix(Precedence(8), Associativity::Left),
+            Infix(HashSubtract) => Affix::Infix(Precedence(8), Associativity::Left),
         })
     }
 
@@ -2544,6 +2554,20 @@ mod tests {
                     Expr::BinaryOp {
                         lhs: Box::new(Expr::Literal("[1, 2, 3]".into())),
                         op: BinaryOperator::HashArrow2,
+                        rhs: Box::new(Expr::Array(vec![Expr::Literal("2".into())])),
+                    }
+                );
+            }
+
+            #[test]
+            fn hash_subtract_operator() {
+                let expr = b"'[1, 2, 3]' #- array['2']";
+                let res = test_parse!(expression(Dialect::PostgreSQL), expr);
+                assert_eq!(
+                    res,
+                    Expr::BinaryOp {
+                        lhs: Box::new(Expr::Literal("[1, 2, 3]".into())),
+                        op: BinaryOperator::HashSubtract,
                         rhs: Box::new(Expr::Array(vec![Expr::Literal("2".into())])),
                     }
                 );

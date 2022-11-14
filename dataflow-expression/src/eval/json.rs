@@ -10,6 +10,43 @@ use crate::utils;
 
 type JsonObject = serde_json::Map<String, JsonValue>;
 
+/// Removes a value from JSON using PostgreSQL `#-` semantics.
+pub(crate) fn json_remove_path<'k>(
+    json: &mut JsonValue,
+    keys: impl IntoIterator<Item = &'k DfValue>,
+) -> ReadySetResult<()> {
+    if json_is_scalar(json) {
+        return Err(invalid_err!("cannot delete path in scalar"));
+    }
+
+    // Nulls are not allowed as path keys. Otherwise, converting to `&str` should succeed because
+    // type errors are handled during expression lowering.
+    let keys: Vec<&str> = keys
+        .into_iter()
+        .map(<&str>::try_from)
+        .collect::<ReadySetResult<_>>()?;
+
+    let Some((&removal_key, search_keys)) = keys.split_last() else {
+        // Nothing to remove.
+        return Ok(());
+    };
+
+    match json_find_mut(json, search_keys)? {
+        Some(JsonValue::Array(array)) => {
+            let index = parse_json_index(removal_key)
+                .ok_or_else(|| parse_json_index_error(search_keys.len()))?;
+
+            utils::remove_bidirectional(array, index);
+        }
+        Some(JsonValue::Object(object)) => {
+            object.remove(removal_key);
+        }
+        _ => {}
+    }
+
+    Ok(())
+}
+
 /// Returns `true` if `parent` immediately contains all of the values in `child`.
 ///
 /// Top-level arrays can be directly checked against scalars as if the scalar were a single-element
@@ -239,6 +276,14 @@ fn parse_json_index_error(iter_count: usize) -> ReadySetError {
         "path element at position {} is not an integer",
         iter_count + 1
     )
+}
+
+fn json_is_collection(json: &JsonValue) -> bool {
+    matches!(json, JsonValue::Array { .. } | JsonValue::Object { .. })
+}
+
+fn json_is_scalar(json: &JsonValue) -> bool {
+    !json_is_collection(json)
 }
 
 // `JsonNumber` does not handle -0.0 when `arbitrary_precision` is enabled, so we special case it
