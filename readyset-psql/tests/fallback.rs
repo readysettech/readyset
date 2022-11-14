@@ -11,7 +11,9 @@ use serial_test::serial;
 mod common;
 use common::connect;
 use postgres_types::{FromSql, ToSql};
-use tokio_postgres::SimpleQueryMessage;
+use rand::distributions::Alphanumeric;
+use rand::Rng;
+use tokio_postgres::{Client, SimpleQueryMessage};
 
 async fn setup() -> (tokio_postgres::Config, Handle) {
     TestBuilder::default()
@@ -324,4 +326,116 @@ async fn generated_columns() {
         .expect("select failed");
     let selected = &res[2];
     assert!(matches!(*selected, SimpleQueryMessage::CommandComplete(2)));
+}
+
+/// Handle [TOASTed](https://www.postgresql.org/docs/current/storage-toast.html) tables by skipping
+/// them during snapshot, and falling back to upstream.
+/// ReadySet psql replication specifically doesn't support updating a row containing TOASTed values,
+/// where one or more TOASTed values is unchanged.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn toast() {
+    readyset_tracing::init_test_logging();
+
+    let mut upstream_config = upstream_config();
+    upstream_config.dbname("noria");
+    let fallback_conn = connect(upstream_config).await;
+    let res = fallback_conn
+        .simple_query("DROP TABLE IF EXISTS t CASCADE")
+        .await
+        .expect("drop failed");
+    let dropped = res.first().unwrap();
+    assert!(matches!(dropped, SimpleQueryMessage::CommandComplete(_)));
+    sleep().await;
+    let res = fallback_conn
+        .simple_query("CREATE TABLE t (col1 INT PRIMARY KEY, col2 TEXT)")
+        .await
+        .expect("create failed");
+    let created = res.first().unwrap();
+    assert!(matches!(created, SimpleQueryMessage::CommandComplete(_)));
+    sleep().await;
+    fallback_conn
+        .query(
+            "INSERT INTO t VALUES (0, $1)",
+            &[&rand::thread_rng()
+                .sample_iter(&Alphanumeric)
+                .take(9000)
+                .map(char::from)
+                .collect::<String>()],
+        )
+        .await
+        .expect("populate failed");
+    sleep().await;
+    let res = fallback_conn
+        .simple_query("SELECT * FROM t")
+        .await
+        .expect("select failed");
+
+    // CommandComplete and 1 row should be returned
+    assert_eq!(res.len(), 2);
+    sleep().await;
+
+    let (opts, _handle) = TestBuilder::default()
+        .recreate_database(false)
+        .fallback_url(PostgreSQLAdapter::url())
+        .migration_mode(MigrationMode::OutOfBand)
+        .build::<PostgreSQLAdapter>()
+        .await;
+    let conn = connect(opts).await;
+    // Check that we see the existing insert
+    let res = conn
+        .simple_query("SELECT * FROM t")
+        .await
+        .expect("select failed");
+    // CommandComplete and the 1 inserted rows
+    assert_eq!(res.len(), 2);
+
+    // This should fail, since we don't have a base table for t, as it was ignored in the
+    // initial snapshot
+    conn.simple_query("CREATE CACHE FROM SELECT * FROM t")
+        .await
+        .expect_err("create cache should have failed");
+
+    // There shouldn't be any caches
+    let res = conn
+        .simple_query("SHOW CACHES")
+        .await
+        .expect("show caches failed");
+    let caches = res.first().unwrap();
+    assert!(matches!(caches, SimpleQueryMessage::CommandComplete(0)));
+
+    // Inserting will go to upstream
+    let populate_gen_columns_readyset = "INSERT INTO t VALUES (1, 'hi');";
+    let res = conn
+        .simple_query(populate_gen_columns_readyset)
+        .await
+        .expect("populate failed");
+    sleep().await;
+    let inserted = &res[0];
+    assert!(matches!(inserted, SimpleQueryMessage::CommandComplete(1)));
+
+    // We should see the inserted data
+    let res = conn
+        .simple_query("SELECT * FROM t")
+        .await
+        .expect("select failed");
+    let selected = &res[2];
+    assert!(matches!(*selected, SimpleQueryMessage::CommandComplete(2)));
+    assert!(last_statement_matches("upstream", "ok", &conn).await);
+}
+
+#[allow(dead_code)]
+async fn last_statement_matches(dest: &str, status: &str, client: &Client) -> bool {
+    match &client
+        .simple_query("EXPLAIN LAST STATEMENT")
+        .await
+        .expect("explain query failed")[0]
+    {
+        SimpleQueryMessage::Row(row) => {
+            let dest_col = row.get(0).expect("should have 2 cols");
+            let status_col = row.get(1).expect("should have 2 cols");
+            dest_col.contains(dest) && status_col.contains(status)
+        }
+        _ => panic!("should have 1 row"),
+    }
 }

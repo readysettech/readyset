@@ -792,6 +792,7 @@ impl<'a> PostgresReplicator<'a> {
         WHERE c.relkind IN ($1) AND n.nspname <> 'pg_catalog'
                                 AND n.nspname <> 'information_schema'
                                 AND n.nspname !~ '^pg_toast'
+                                AND (c.reltoastrelid = 0 OR pg_relation_size(c.reltoastrelid) = 0)
                                 AND c.oid NOT IN(
         SELECT c.oid
             FROM pg_catalog.pg_class c

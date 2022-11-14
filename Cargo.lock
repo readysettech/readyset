@@ -4304,6 +4304,7 @@ dependencies = [
  "postgres-types",
  "proptest",
  "psql-srv",
+ "rand 0.8.5",
  "readyset",
  "readyset-client",
  "readyset-client-adapter",
