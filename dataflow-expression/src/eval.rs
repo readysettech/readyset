@@ -232,13 +232,16 @@ impl Expr {
                     JsonSubtract => {
                         let mut json = left.to_json()?;
 
+                        fn remove_str(s: &str, vec: &mut Vec<JsonValue>) {
+                            *vec = vec.drain(..).filter(|v| v.as_str() != Some(s)).collect();
+                        }
+
                         if let Ok(key_array) = right.as_array() {
                             let keys = key_array.to_str_vec()?;
                             if let Some(vec) = json.as_array_mut() {
                                 // TODO maybe optimize this to perform better with many keys:
                                 for k in keys {
-                                    *vec =
-                                        vec.drain(..).filter(|v| v.as_str() != Some(k)).collect();
+                                    remove_str(k, vec);
                                 }
                             } else if let Some(_obj) = json.as_object_mut() {
                                 unsupported!("JSON subtraction of array from object not supported");
@@ -249,7 +252,7 @@ impl Expr {
                             }
                         } else if let Some(str) = right.as_str() {
                             if let Some(vec) = json.as_array_mut() {
-                                *vec = vec.drain(..).filter(|v| v.as_str() != Some(str)).collect();
+                                remove_str(str, vec);
                             } else if let Some(map) = json.as_object_mut() {
                                 map.remove(str);
                             } else {
