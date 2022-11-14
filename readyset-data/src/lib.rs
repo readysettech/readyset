@@ -550,15 +550,19 @@ impl DfValue {
 
     /// Mutates the given DfType value to match its underlying database representation for the
     /// given column schema.
-    pub fn maybe_coerce_for_table_op(&mut self, col_ty: &DfType) {
+    pub fn maybe_coerce_for_table_op(&mut self, col_ty: &DfType) -> ReadySetResult<()> {
         if col_ty.is_enum() {
-            // There shouldn't be any cases where this coerce_to call returns an error, but if
-            // it does then a value of 0 is generally a safe bet for enum values that don't
-            // trigger the happy path:
             *self = self
                 .coerce_to(col_ty, &DfType::Unknown)
+                // There shouldn't be any cases where this coerce_to call returns an error, but if
+                // it does then a value of 0 is generally a safe bet for enum values that don't
+                // trigger the happy path:
                 .unwrap_or(DfValue::Int(0));
+        } else if col_ty.is_array() && col_ty.innermost_array_type().is_enum() {
+            *self = self.coerce_to(col_ty, &DfType::Unknown)?;
         }
+
+        Ok(())
     }
 
     /// If `self` represents any integer value, returns the integer.

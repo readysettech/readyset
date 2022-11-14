@@ -383,9 +383,10 @@ impl wal::TupleData {
                     };
 
                     let val = if custom_types.contains(&spec.type_oid) {
-                        // For custom types, just leave the value as text - we don't have enough
-                        // information here to actually coerce to the correct type, but the table
-                        // will do that for us (albeit this is slightly less efficient)
+                        // For custom types (or arrays of custom types), just leave the value as
+                        // text - we don't have enough information here to actually coerce to the
+                        // correct type, but the table will do that for us (albeit this is slightly
+                        // less efficient)
                         DfValue::from(&*text)
                     } else {
                         let pg_type =

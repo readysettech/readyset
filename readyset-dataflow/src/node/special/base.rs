@@ -214,12 +214,14 @@ fn key_of<'a>(key_cols: &'a [usize], r: &'a TableOperation) -> impl Iterator<Ite
 ///
 /// Note that the actual type-specific logic is implemented as a [`DfValue`] method, so as to keep
 /// type logic out of the base node code.
-fn apply_table_op_coercions(op: &mut TableOperation, columns: &[Column]) {
+fn apply_table_op_coercions(op: &mut TableOperation, columns: &[Column]) -> ReadySetResult<()> {
     if let TableOperation::Insert(vals) = op {
         for (val, col) in vals.iter_mut().zip(columns) {
-            val.maybe_coerce_for_table_op(col.ty());
+            val.maybe_coerce_for_table_op(col.ty())?;
         }
     }
+
+    Ok(())
 }
 
 impl Base {
@@ -280,7 +282,7 @@ impl Base {
         snapshot_mode: SnapshotMode,
     ) -> ReadySetResult<BaseWrite> {
         for op in ops.iter_mut() {
-            apply_table_op_coercions(op, columns);
+            apply_table_op_coercions(op, columns)?;
         }
 
         let key_cols = match &self.primary_key {
