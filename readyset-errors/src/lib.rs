@@ -58,6 +58,16 @@ pub enum NodeType {
 /// General error type to be used across all of the ReadySet codebase.
 #[derive(Eq, PartialEq, Serialize, Deserialize, Error, Debug, Clone)]
 pub enum ReadySetError {
+    /// Additional context provided to another [`ReadySetError`] variant
+    #[error("{error} ({context})")]
+    Context {
+        /// Additional context provided to the error.
+        context: String,
+        /// The original error
+        #[source]
+        error: Box<ReadySetError>,
+    },
+
     /// The query is invalid
     #[error("The provided query is invalid: {0}")]
     InvalidQuery(String),
@@ -588,6 +598,17 @@ pub enum ReadySetError {
 }
 
 impl ReadySetError {
+    /// Add additional context to this error
+    pub fn context<S>(self, context: S) -> Self
+    where
+        String: From<S>,
+    {
+        ReadySetError::Context {
+            context: context.into(),
+            error: Box::new(self),
+        }
+    }
+
     fn any_cause<F>(&self, f: F) -> bool
     where
         F: Fn(&Self) -> bool + Clone,
