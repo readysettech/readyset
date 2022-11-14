@@ -1594,3 +1594,38 @@ async fn postgresql_replicate_citext_array() {
     .await
     .unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn postgresql_replicate_custom_type() {
+    let url = pgsql_url();
+    let mut client = DbConnection::connect(&url).await.unwrap();
+    client
+        .query(
+            "DROP TABLE IF EXISTS enum_table CASCADE;
+             DROP TYPE IF EXISTS custom_enum;
+             CREATE TYPE custom_enum AS ENUM ('a', 'b');
+             CREATE TABLE enum_table (x custom_enum);
+             CREATE VIEW enum_table_v AS SELECT x FROM enum_table;",
+        )
+        .await
+        .unwrap();
+
+    client
+        .query("INSERT INTO enum_table (x) VALUES ('a'), ('b')")
+        .await
+        .unwrap();
+
+    let mut ctx = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
+    ctx.ready_notify.as_ref().unwrap().notified().await;
+
+    ctx.check_results(
+        "enum_table_v",
+        "Snapshot",
+        &[&[DfValue::from(1)], &[DfValue::from(2)]],
+    )
+    .await
+    .unwrap()
+}

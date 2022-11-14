@@ -66,7 +66,7 @@ struct TableDescription {
 #[derive(Debug, Clone)]
 struct ColumnEntry {
     name: String,
-    type_name: String,
+    sql_type: String,
     not_null: bool,
     /// The [`Type`] of this column
     pg_type: Type,
@@ -156,7 +156,7 @@ impl TryFrom<pgsql::Row> for ColumnEntry {
         Ok(ColumnEntry {
             name: row.try_get(0 /* pg_attribute.attname */)?,
             not_null: row.try_get(1 /* pg_attribute.attnotnull */)?,
-            type_name: row.try_get(3)?,
+            sql_type: row.try_get(3)?,
             pg_type,
         })
     }
@@ -168,7 +168,7 @@ impl Display for ColumnEntry {
             f,
             "`{}` {}{}",
             self.name,
-            self.type_name,
+            self.sql_type,
             if self.not_null { " NOT NULL" } else { "" },
         )
     }
@@ -267,12 +267,16 @@ impl TableEntry {
         oid: u32,
         transaction: &'a pgsql::Transaction<'a>,
     ) -> Result<Vec<ColumnEntry>, ReadySetError> {
-        let query = r"
+        let query = r#"
             SELECT
                 a.attname,
                 a.attnotnull,
                 t.typname,
-                pg_catalog.format_type(a.atttypid, a.atttypmod),
+                CASE
+                WHEN t.typtype = 'e'
+                THEN format('"%s"."%s"', tn.nspname, t.typname)
+                ELSE pg_catalog.format_type(a.atttypid, a.atttypmod)
+                END AS sql_type,
                 t.oid,
                 t.typtype,
                 tn.nspname,
@@ -290,7 +294,7 @@ impl TableEntry {
             LEFT JOIN pg_catalog.pg_type member_t ON t.typelem = member_t.oid
             LEFT JOIN pg_catalog.pg_namespace member_tn ON member_t.typnamespace = member_tn.oid
             WHERE a.attrelid = $1 AND a.attnum > 0 AND NOT a.attisdropped
-            ";
+            "#;
 
         let columns = transaction.query(query, &[&oid]).await?;
         columns.into_iter().map(TryInto::try_into).collect()
@@ -402,7 +406,7 @@ impl TableDescription {
                             name: c.name.into(),
                             table: Some(self.name.clone()),
                         },
-                        sql_type: parse_sql_type(Dialect::PostgreSQL, c.type_name)
+                        sql_type: parse_sql_type(Dialect::PostgreSQL, c.sql_type)
                             .map_err(|e| internal_err!("Could not parse SQL type: {e}"))?,
                         constraints: if c.not_null {
                             vec![ColumnConstraint::NotNull]
@@ -803,25 +807,25 @@ mod tests {
             columns: vec![
                 ColumnEntry {
                     name: "key".into(),
-                    type_name: "varchar".into(),
+                    sql_type: "varchar".into(),
                     not_null: true,
                     pg_type: Type::VARCHAR,
                 },
                 ColumnEntry {
                     name: "value".into(),
-                    type_name: "varchar".into(),
+                    sql_type: "varchar".into(),
                     not_null: false,
                     pg_type: Type::VARCHAR,
                 },
                 ColumnEntry {
                     name: "created_at".into(),
-                    type_name: "timestamp(6) without time zone".into(),
+                    sql_type: "timestamp(6) without time zone".into(),
                     not_null: true,
                     pg_type: Type::TIMESTAMP,
                 },
                 ColumnEntry {
                     name: "updated_at".into(),
-                    type_name: "timestamp(6) without time zone".into(),
+                    sql_type: "timestamp(6) without time zone".into(),
                     not_null: true,
                     pg_type: Type::TIMESTAMP,
                 },
