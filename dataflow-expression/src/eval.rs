@@ -232,8 +232,21 @@ impl Expr {
                     JsonSubtract => {
                         let mut json = left.to_json()?;
 
-                        if right.is_array() {
-                            unsupported!("Subtracting arrays from JSONB is not yet implemented");
+                        if let Ok(key_array) = right.as_array() {
+                            let keys = key_array.to_str_vec()?;
+                            if let Some(vec) = json.as_array_mut() {
+                                // TODO maybe optimize this to perform better with many keys:
+                                for k in keys {
+                                    *vec =
+                                        vec.drain(..).filter(|v| v.as_str() != Some(k)).collect();
+                                }
+                            } else if let Some(_obj) = json.as_object_mut() {
+                                unsupported!("JSON subtraction of array from object not supported");
+                            } else {
+                                return Err(invalid_err!(
+                                    "Can't subtract array from non-object, non-array JSON value"
+                                ));
+                            }
                         } else if let Some(str) = right.as_str() {
                             if let Some(vec) = json.as_array_mut() {
                                 *vec = vec.drain(..).filter(|v| v.as_str() != Some(str)).collect();
@@ -699,6 +712,33 @@ mod tests {
             DfValue::from(r#"{"a":1,"b":2}"#)
         );
 
+        assert_eq!(
+            expr.eval(&[
+                DfValue::from(r#"["a","b","c"]"#),
+                DfValue::from(vec![DfValue::from("a"), DfValue::from("c")])
+            ])
+            .unwrap(), // Subtracting str array from JSON array should remove all array elems
+            DfValue::from(r#"["b"]"#)
+        );
+
+        assert_eq!(
+            expr.eval(&[
+                DfValue::from(r#"["a","a","b","c","c"]"#),
+                DfValue::from(vec![DfValue::from("a"), DfValue::from("c")])
+            ])
+            .unwrap(), // Subtracting str array from JSON array should remove duplicate array elems
+            DfValue::from(r#"["b"]"#)
+        );
+
+        assert_eq!(
+            expr.eval(&[
+                DfValue::from(r#"["a","b","c"]"#),
+                DfValue::from(vec![DfValue::from("c"), DfValue::from("d")])
+            ])
+            .unwrap(), // Subtracting str array from JSON array should ignore non-present elems
+            DfValue::from(r#"["a","b"]"#)
+        );
+
         assert!(expr
             .eval(&[DfValue::from("bad_json"), DfValue::from("abc")])
             .is_err()); // Passing in bad JSON should error out
@@ -710,6 +750,13 @@ mod tests {
         assert!(expr
             .eval(&[DfValue::from("42"), DfValue::from("abc")])
             .is_err()); // Subtracting a string from a non-array, non-object JSON value is an error
+
+        assert!(expr
+            .eval(&[
+                DfValue::from("42"),
+                DfValue::from(vec![DfValue::from("c"), DfValue::from("d")])
+            ])
+            .is_err()); // Subtracting an array from a non-array, non-object JSON value is an error
     }
 
     #[test]
