@@ -132,9 +132,8 @@ impl Expr {
                         Ok(result.into())
                     }
                     // TODO(ENG-1517)
-                    JsonPathExtract |
                     // TODO(ENG-1518)
-                    JsonPathExtractUnquote => {
+                    JsonPathExtract | JsonPathExtractUnquote => {
                         // TODO: Perform `JSON_EXTRACT` conditionally followed by `JSON_UNQUOTE` for
                         // `->>`.
                         unsupported!("'{op}' operator not implemented yet for MySQL")
@@ -147,11 +146,9 @@ impl Expr {
                         let json = left.to_json()?;
 
                         let json_inner: Option<&JsonValue> = match &json {
-                            JsonValue::Array(array) => {
-                                isize::try_from(&right).ok().and_then(|index| {
-                                    crate::utils::index_bidirectional(array, index)
-                                })
-                            }
+                            JsonValue::Array(array) => isize::try_from(&right)
+                                .ok()
+                                .and_then(|index| crate::utils::index_bidirectional(array, index)),
                             JsonValue::Object(object) => {
                                 right.as_str().and_then(|key| object.get(key))
                             }
@@ -159,7 +156,9 @@ impl Expr {
                             _ => None,
                         };
 
-                        Ok(json_inner.map(|inner| inner.to_string().into()).unwrap_or_default())
+                        Ok(json_inner
+                            .map(|inner| inner.to_string().into())
+                            .unwrap_or_default())
                     }
 
                     JsonKeyPathExtract | JsonKeyPathExtractText => {
@@ -196,7 +195,7 @@ impl Expr {
                         }
 
                         Ok(json.to_string().into())
-                    },
+                    }
 
                     JsonContains => {
                         Ok(json::json_contains(&left.to_json()?, &right.to_json()?).into())
@@ -225,12 +224,12 @@ impl Expr {
                             };
                             match right_json {
                                 JsonValue::Array(mut v) => res.append(&mut v),
-                                _ => res.push(right_json)
+                                _ => res.push(right_json),
                             };
                             Ok(serde_json::to_string(&res)?.into())
                         }
                     }
-                    JsonSubtract => unsupported!("'-' operator applied to JSONB not yet supported")
+                    JsonSubtract => unsupported!("'-' operator applied to JSONB not yet supported"),
                 }
             }
             Expr::Cast { expr, ty, .. } => {
