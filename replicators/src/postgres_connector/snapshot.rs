@@ -626,6 +626,7 @@ impl<'a> PostgresReplicator<'a> {
 
         for view in view_list {
             let view_name = view.name.clone();
+            let view_schema = view.schema.clone();
             let create_view = view.get_create_view(&self.transaction).await?;
             create_schema.add_view_create(view_name.clone(), create_view.clone());
 
@@ -653,12 +654,7 @@ impl<'a> PostgresReplicator<'a> {
                         Change::CreateView(view),
                         DataDialect::DEFAULT_POSTGRESQL,
                     )
-                    .with_schema_search_path(vec![
-                        // TODO(grfn): Currently we statically only replicate from the public
-                        // schema - once we start replicating from other
-                        // schemas this should be determined dynamically
-                        "public".into(),
-                    ]),
+                    .with_schema_search_path(vec![view_schema.into()]),
                 )
                 .await
             {
