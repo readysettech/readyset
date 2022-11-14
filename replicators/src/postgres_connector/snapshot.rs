@@ -321,15 +321,21 @@ impl TableEntry {
     ) -> Result<TableDescription, ReadySetError> {
         let columns = Self::get_columns(self.oid, transaction)
             .await
-            .map_err(|e| ReadySetError::TableError {
-                name: self.name.clone(),
-                source: Box::new(e),
+            .map_err(|e| {
+                ReadySetError::TableError {
+                    name: self.name.clone(),
+                    source: Box::new(e),
+                }
+                .context("when loading columns for the table")
             })?;
         let constraints = Self::get_constraints(self.oid, transaction)
             .await
-            .map_err(|e| ReadySetError::TableError {
-                name: self.name.clone(),
-                source: Box::new(ReadySetError::ReplicationFailed(e.to_string())),
+            .map_err(|e| {
+                ReadySetError::TableError {
+                    name: self.name.clone(),
+                    source: Box::new(ReadySetError::ReplicationFailed(e.to_string())),
+                }
+                .context("when loading constraints")
             })?;
 
         Ok(TableDescription {
