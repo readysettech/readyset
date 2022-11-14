@@ -48,16 +48,36 @@ pub fn make_call(func: BuiltinFunction) -> Expr {
     }
 }
 
-/// Indexes into a slice, using reverse indexing if negative.
-#[inline]
-pub fn index_bidirectional<T>(slice: &[T], index: isize) -> Option<&T> {
-    let index = if index.is_negative() {
+/// Converts `index` to be a reverse index of `slice` if negative.
+///
+/// Note that the result must still be bounds-checked.
+fn index_to_bidirectional<T>(slice: &[T], index: isize) -> usize {
+    if index.is_negative() {
         // Addition of a negative value is subtraction of the absolute value.
         slice.len().wrapping_add(index as usize)
     } else {
         index as usize
-    };
-    slice.get(index)
+    }
+}
+
+/// Indexes into a shared slice, using reverse indexing if negative.
+pub fn index_bidirectional<T>(slice: &[T], index: isize) -> Option<&T> {
+    slice.get(index_to_bidirectional(slice, index))
+}
+
+/// Indexes into a mutable slice, using reverse indexing if negative.
+pub fn index_bidirectional_mut<T>(slice: &mut [T], index: isize) -> Option<&mut T> {
+    slice.get_mut(index_to_bidirectional(slice, index))
+}
+
+/// Removes the value in `vec` at `index`, using reverse indexing if negative.
+pub fn remove_bidirectional<T>(vec: &mut Vec<T>, index: isize) -> Option<T> {
+    let index = index_to_bidirectional(vec, index);
+    if index < vec.len() {
+        Some(vec.remove(index))
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
