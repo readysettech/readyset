@@ -243,8 +243,10 @@ impl Expr {
                                 for k in keys {
                                     remove_str(k, vec);
                                 }
-                            } else if let Some(_obj) = json.as_object_mut() {
-                                unsupported!("JSON subtraction of array from object not supported");
+                            } else if let Some(obj) = json.as_object_mut() {
+                                for k in keys {
+                                    obj.remove(k);
+                                }
                             } else {
                                 return Err(invalid_err!(
                                     "Can't subtract array from non-object, non-array JSON value"
@@ -740,6 +742,24 @@ mod tests {
             ])
             .unwrap(), // Subtracting str array from JSON array should ignore non-present elems
             DfValue::from(r#"["a","b"]"#)
+        );
+
+        assert_eq!(
+            expr.eval(&[
+                DfValue::from(r#"{"a": 1, "b": 2, "c": 3}"#),
+                DfValue::from(vec![DfValue::from("a"), DfValue::from("c")])
+            ])
+            .unwrap(), // Subtracting str array from JSON object should remove all keys
+            DfValue::from(r#"{"b":2}"#)
+        );
+
+        assert_eq!(
+            expr.eval(&[
+                DfValue::from(r#"{"a": 1, "b": 2, "c": 3}"#),
+                DfValue::from(vec![DfValue::from("c"), DfValue::from("d")])
+            ])
+            .unwrap(), // Subtracting str array from JSON obj should ignore non-present keys
+            DfValue::from(r#"{"a":1,"b":2}"#)
         );
 
         assert!(expr
