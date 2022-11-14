@@ -893,6 +893,7 @@ async fn replication_skip_unparsable_inner(url: &str) -> ReadySetResult<()> {
             DROP TABLE IF EXISTS t2 CASCADE; CREATE TABLE t2 (id int);
             DROP VIEW IF EXISTS t1_view; CREATE VIEW t1_view AS SELECT * FROM t1;
             DROP VIEW IF EXISTS t2_view; CREATE VIEW t2_view AS SELECT * FROM t2;
+            DROP VIEW IF EXISTS unparsable_view; CREATE VIEW unparsable_view AS SELECT * FROM (SELECT * FROM t2) sq;
             INSERT INTO t2 VALUES (1),(2),(3);
             ",
         )

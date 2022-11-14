@@ -9,7 +9,7 @@ use futures::{pin_mut, StreamExt, TryFutureExt};
 use metrics::register_gauge;
 use nom_sql::{
     parse_key_specification_string, parse_sql_type, Column, ColumnConstraint, ColumnSpecification,
-    CreateTableStatement, Dialect, Relation, SqlIdentifier, TableKey,
+    CreateTableStatement, Dialect, Relation, SqlIdentifier, SqlQuery, TableKey,
 };
 use postgres_types::{accepts, FromSql, Kind, Type};
 use readyset::metrics::recorded;
@@ -629,32 +629,40 @@ impl<'a> PostgresReplicator<'a> {
             let create_view = view.get_create_view(&self.transaction).await?;
             create_schema.add_view_create(view_name.clone(), create_view.clone());
 
-            // Postgres returns a postgres style CREATE statement, but ReadySet only accepts MySQL
-            // style
             let view = match nom_sql::parse_query(Dialect::PostgreSQL, &create_view) {
-                Ok(v) => v.to_string(),
-                Err(err) => {
-                    error!(%err, view=%view_name, "Error parsing CREATE VIEW, view will not be used");
+                Ok(SqlQuery::CreateView(view)) => view,
+                Ok(query) => {
+                    error!(
+                        kind = %query.query_type(),
+                        "Unexpected query type when parsing CREATE VIEW statement"
+                    );
+                    continue;
+                }
+                Err(error) => {
+                    error!(%error, view=%view_name, "Error parsing CREATE VIEW, view will not be used");
                     continue;
                 }
             };
 
             debug!(%view, "Extending recipe");
 
-            if let Err(err) = self
+            if let Err(error) = self
                 .noria
                 .extend_recipe_no_leader_ready(
-                    ChangeList::from_str(view, DataDialect::DEFAULT_POSTGRESQL)?
-                        .with_schema_search_path(vec![
-                            // TODO(grfn): Currently we statically only replicate from the public
-                            // schema - once we start replicating from other
-                            // schemas this should be determined dynamically
-                            "public".into(),
-                        ]),
+                    ChangeList::from_change(
+                        Change::CreateView(view),
+                        DataDialect::DEFAULT_POSTGRESQL,
+                    )
+                    .with_schema_search_path(vec![
+                        // TODO(grfn): Currently we statically only replicate from the public
+                        // schema - once we start replicating from other
+                        // schemas this should be determined dynamically
+                        "public".into(),
+                    ]),
                 )
                 .await
             {
-                error!(%err, view=%view_name, "Error extending CREATE VIEW, view will not be used");
+                error!(%error, view=%view_name, "Error extending CREATE VIEW, view will not be used");
             }
         }
 
