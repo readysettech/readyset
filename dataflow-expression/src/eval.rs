@@ -988,7 +988,7 @@ mod tests {
                     assert_eq!(
                         eval_expr(&expr, PostgreSQL),
                         expected.into(),
-                        "incorrect result for for `{expr}`"
+                        "incorrect result for `{expr}`"
                     );
                 }
             }
@@ -1015,7 +1015,7 @@ mod tests {
                     assert_eq!(
                         eval_expr(&expr, PostgreSQL),
                         expected.into(),
-                        "incorrect result for for `{expr}`"
+                        "incorrect result for `{expr}`"
                     );
                 }
             }
