@@ -1,0 +1,76 @@
+<!doctype html>
+<html>
+
+<head>
+    <title>System Benchmark</title>
+</head>
+
+<label for="memoryLimit">Memory limit:</label>
+<select id="memoryLimit">
+    <option value="" selected="selected">all</option>
+    $MEMORY_LIMITS$
+</select>
+
+<div style="position: relative; height: 95vh;">
+    <canvas id="myChart"></canvas>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+<script>
+    const ctx = 'myChart';
+
+    const datasets = [$DATASETS$];
+
+    const myChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: [$LABELS$],
+            datasets: datasets
+        },
+        options: {
+            maintainAspectRatio: false,
+            datasets: {
+                line: {
+                    cubicInterpolationMode: 'monotone',
+                    borderWidth: 2,
+                    backgroundColor: 'rgba(0, 0, 0, 0)',
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: '[Queries/Sec]'
+                    }
+                },
+                x: {
+                    title: {
+                        display: true,
+                        text: 'Nightly Build #'
+                    }
+                }
+            },
+            plugins: {
+                legend: {
+                    position: 'bottom',
+                    labels: {
+                        boxHeight: 0,
+                    }
+                }
+            }
+        }
+    });
+
+    function filterData(chart, pred) {
+        chart.data.datasets = datasets.filter(set => set.label.endsWith(pred));
+        chart.update();
+    }
+
+    document.getElementById('memoryLimit').addEventListener('change', function () {
+        var menu = document.getElementById("memoryLimit");
+        filterData(myChart, menu.value);
+    });
+</script>
+
+</html>

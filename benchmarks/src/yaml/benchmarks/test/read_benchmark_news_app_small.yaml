@@ -1,0 +1,15 @@
+---
+QueryBenchmark:
+  query:
+    query:
+      file: news_app/news_app_read_query.sql
+    query_spec_file: news_app/news_app_read_query.spec
+    query_spec: ~
+  target_qps: 1000
+  threads: 4
+  data_generator:
+    schema: news_app/news_app_db_tiny.sql
+    var_overrides: {}
+  run_for:
+    secs: 20
+    nanos: 0

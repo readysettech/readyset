@@ -1,0 +1,1 @@
+SELECT `active_storage_variant_records`.* FROM `active_storage_variant_records` WHERE `active_storage_variant_records`.`blob_id` = 1 AND `active_storage_variant_records`.`variation_digest` = '5NLk44nVTAbtXIbOLdnBPwFqw+M=' LIMIT 1;

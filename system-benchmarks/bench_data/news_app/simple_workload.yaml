@@ -1,0 +1,55 @@
+distributions:
+  - name: users
+    range:
+      start: 0
+      end: 100000
+    uniform:
+  - name: articles
+    range:
+      start: 0
+      end: 10000
+    uniform:
+queries:
+  - spec: 'SELECT A.id, A.title, A.keywords, A.creation_time, A.short_text, A.image_url, A.url
+           FROM articles A, recommendations R
+           WHERE A.id = R.article_id AND R.user_id IN (?, ?, ?, ?, ?) ORDER BY A.title LIMIT 10'
+    params:
+    - sql_type: bigint
+      distribution: users
+    - sql_type: bigint
+      distribution: users
+    - sql_type: bigint
+      distribution: users
+    - sql_type: bigint
+      distribution: users
+    - sql_type: bigint
+      distribution: users
+    weight: 1000
+    migrate: true
+  - spec: 'SELECT AT.name, A.title
+           FROM authors AT, articles A
+           WHERE A.author_id = AT.id AND A.id IN (?, ?, ?, ?, ?) LIMIT 10'
+    params:
+    - sql_type: bigint
+      distribution: articles
+    - sql_type: bigint
+      distribution: articles
+    - sql_type: bigint
+      distribution: articles
+    - sql_type: bigint
+      distribution: articles
+    - sql_type: bigint
+      distribution: articles
+    weight: 100
+    migrate: true
+  - spec: 'UPDATE recommendations
+           SET article_id = ?
+           WHERE user_id = ? ORDER BY RAND() LIMIT 1'
+    params:
+    - sql_type: bigint
+      distribution: articles
+    - sql_type: bigint
+      distribution: users
+    weight: 10
+    migrate: false
+

@@ -1,0 +1,96 @@
+[package]
+name = "benchmarks"
+version = "0.1.0"
+publish = false
+authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1.15", features = ["macros", "rt-multi-thread", "signal"] }
+anyhow = "1.0.38"
+nom = "7.1"
+nom_locate = "4.0.0"
+mysql_async = "0.29.0"
+rand = "0.8.3"
+rand_distr = "0.4"
+tracing = "0.1.29"
+async-trait = "0.1"
+enum_dispatch = "0.3.7"
+futures = "0.3"
+vec1 = "1.8.0"
+url = "2.2.2"
+hdrhistogram = "7.4"
+zipf = "7.0.0"
+clap = { version = "3.0", features = ["derive", "env"] }
+reqwest = { version = "0.11", features = ["stream", "native-tls"] }
+chrono = "0.4"
+atomic-counter = "1.0.1"
+serde_json = "1.0"
+serde_yaml = "0.8"
+serde = "1.0"
+serde_with = "1.12"
+metrics = "0.19"
+metrics-util = "0.13"
+metrics-exporter-prometheus = {version = "0.10", features = ["push-gateway", "tokio"]}
+itertools = "0.10"
+num-integer = "0.1.44"
+lazy_static = "1.4.0"
+thiserror = "1.0.30"
+async-stream = "0.3.2"
+parking_lot = "0.11.2"
+indicatif = "0.16"
+prometheus-parse = "0.2.2"
+walkdir = "2.3"
+tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git" }
+
+# local dependencies
+database-utils = { path = "../database-utils" }
+readyset = { path = "../readyset" }
+readyset-data = { path = "../readyset-data" }
+nom-sql = { path = "../nom-sql" }
+query-generator = { path = "../query-generator" }
+readyset-client = { path = "../readyset-client" }
+readyset-server = { path = "../readyset-server" }
+readyset-mysql = { path = "../readyset-mysql" }
+readyset-tracing = { path = "../readyset-tracing" }
+readyset-client-test-helpers = { path = "../readyset-client-test-helpers", features = ["mysql"] }
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "data_generator"
+path = "src/bin/data_generator.rs"
+
+[[bin]]
+name = "reader"
+path = "src/bin/reader.rs"
+
+[[bin]]
+name = "writer"
+path = "src/bin/writer.rs"
+
+[[bin]]
+name = "extend_recipe"
+path = "src/bin/extend_recipe.rs"
+
+[[bin]]
+name = "extend_recipe_write_prop"
+path = "src/bin/extend_recipe_write_prop.rs"
+
+[[bin]]
+name = "write_propagation"
+path = "src/bin/write_propagation.rs"
+
+[[bin]]
+name = "snapshot_time"
+path = "src/bin/snapshot_time.rs"
+
+[features]
+
+[dev-dependencies]
+indoc = "1.0.3"
+itertools = "0.10"
+proptest = "1.0.0"
+test-strategy = "0.2.0"
+url = "2.2.2"

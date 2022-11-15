@@ -1,0 +1,19 @@
+---
+ReadWriteBenchmark:
+  read_query:
+    query:
+      file: news_app/news_app_read_query.sql
+    query_spec_file: news_app/news_app_read_query.spec
+    query_spec: ~
+  target_read_qps: 10
+  target_update_qps: 10
+  threads: 4
+  update_query: news_app/news_app_update_query.sql
+  update_query_spec_file: ~
+  update_query_spec: ~
+  data_generator:
+    schema: news_app/news_app_db_tiny.sql
+    var_overrides: {}
+  run_for:
+    secs: 20
+    nanos: 0

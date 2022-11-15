@@ -1,0 +1,1 @@
+SELECT `spree_option_values`.* FROM `spree_option_values` INNER JOIN `spree_option_values_variants` ON `spree_option_values`.`id` = `spree_option_values_variants`.`option_value_id` WHERE `spree_option_values_variants`.`variant_id` = ?;

@@ -1,0 +1,12 @@
+---
+CacheHitBenchmark:
+  query:
+    query:
+      file: news_app/news_app_read_query.sql
+    query_spec_file: ~
+    query_spec: ~
+  data_generator:
+    schema: news_app/news_app_db_tiny.sql
+    var_overrides: {}
+  num_cache_hits: 5
+  num_cache_misses: 5

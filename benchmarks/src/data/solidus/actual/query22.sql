@@ -1,0 +1,1 @@
+SELECT `spree_prices`.* FROM `spree_prices` WHERE `spree_prices`.`deleted_at` IS NULL AND `spree_prices`.`variant_id` = 14 ORDER BY country_iso IS NULL, `spree_prices`.`updated_at` DESC, `spree_prices`.`id` DESC;

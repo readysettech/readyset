@@ -6,6 +6,7 @@ eui48 = { git = "https://github.com/readysettech/eui48.git", branch = "master" }
 [workspace]
 members = [
     "array2",
+    "benchmarks",
     "concrete-iter",
     "database-utils",
     "dataflow-expression",
@@ -47,6 +48,7 @@ members = [
     "readyset-tracing/proc-macros",
     "readyset-version",
     "replicators",
+    "system-benchmarks",
     "test-utils",
     "timestamp-service",
     "tournament-kway",

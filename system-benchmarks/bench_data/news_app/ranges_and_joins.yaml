@@ -1,0 +1,59 @@
+distributions:
+    - name: ids
+      pair:
+        range:
+          start: 0
+          end: 99800
+        distance:
+          start: 50
+          end: 200
+      zipf: 1.15
+    - name: au
+      range:
+        start: 0
+        end: 10000
+      zipf: 1.15
+queries:
+    - spec: 'SELECT A.id, A.title, A.keywords, A.creation_time, A.short_text, A.image_url, A.url
+             FROM articles A, recommendations R
+             WHERE A.id = R.article_id AND R.user_id BETWEEN ? AND ?
+             ORDER BY A.title, A.id LIMIT 20'
+      params:
+        - sql_type: bigint
+          distribution: ids
+          col: 0
+        - sql_type: bigint
+          distribution: ids
+          col: 1
+      weight: 2000000
+      migrate: true
+    - spec: 'SELECT A.id
+             FROM articles A, recommendations R
+             WHERE A.id = R.article_id AND R.user_id BETWEEN ? AND ?
+             ORDER BY A.title, A.id LIMIT 20'
+      params:
+        - sql_type: bigint
+          distribution: ids
+          col: 0
+        - sql_type: bigint
+          distribution: ids
+          col: 1
+      weight: 1000000
+      migrate: true
+    - spec: 'SELECT AT.name, A.title
+             FROM authors AT, articles A
+             WHERE A.author_id = AT.id AND A.id IN (?, ?, ?, ?, ?)
+             LIMIT 20'
+      params:
+        - sql_type: bigint
+          distribution: au
+        - sql_type: bigint
+          distribution: au
+        - sql_type: bigint
+          distribution: au
+        - sql_type: bigint
+          distribution: au
+        - sql_type: bigint
+          distribution: au
+      weight: 500000
+      migrate: true
