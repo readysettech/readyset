@@ -275,14 +275,6 @@ impl QueryGraph {
             .collect()
     }
 
-    pub fn exact_hash(&self) -> u64 {
-        use std::collections::hash_map::DefaultHasher;
-
-        let mut s = DefaultHasher::new();
-        self.hash(&mut s);
-        s.finish()
-    }
-
     /// Construct a representation of the lookup key of a view for this query graph, based on the
     /// parameters in this query and the page number if this query is parametrized on an offset key.
     pub(crate) fn view_key(&self, config: &mir::Config) -> ReadySetResult<ViewKey> {

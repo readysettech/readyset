@@ -1,32 +1,25 @@
-use std::cmp::max;
 use std::collections::{hash_map, HashMap, HashSet};
 use std::str;
 use std::vec::Vec;
 
-use ::mir::node::node_inner::MirNodeInner;
 use ::mir::query::{MirQuery, QueryFlowParts};
-use ::mir::reuse::merge_mir_for_queries;
 use ::mir::visualize::GraphViz;
-use ::mir::{reuse as mir_reuse, Column, MirNodeRef};
 use ::serde::{Deserialize, Serialize};
 use nom_sql::{
-    BinaryOperator, CompoundSelectOperator, CompoundSelectStatement, CreateTableStatement,
-    CreateViewStatement, FieldDefinitionExpr, Relation, SelectSpecification, SelectStatement,
-    SqlIdentifier, TableExpr,
+    CompoundSelectOperator, CompoundSelectStatement, CreateTableStatement, CreateViewStatement,
+    FieldDefinitionExpr, Relation, SelectSpecification, SelectStatement, SqlIdentifier, TableExpr,
 };
 use petgraph::graph::NodeIndex;
-use readyset::internal::IndexType;
 use readyset::recipe::changelist::AlterTypeChange;
 use readyset_data::{DfType, Dialect, PgEnumMetadata};
-use readyset_errors::{internal_err, invalid_err, unsupported, ReadySetError, ReadySetResult};
+use readyset_errors::{internal_err, invalid_err, ReadySetError, ReadySetResult};
 use readyset_sql_passes::alias_removal::TableAliasRewrite;
-use readyset_sql_passes::{contains_aggregate, AliasRemoval, Rewrite, RewriteContext};
+use readyset_sql_passes::{AliasRemoval, Rewrite, RewriteContext};
 use tracing::{debug, trace, warn};
 
 use self::mir::SqlToMirConverter;
 use self::query_graph::{to_query_graph, QueryGraph};
 use self::query_signature::Signature;
-use self::reuse::ReuseConfig;
 use super::mir_to_flow::mir_query_to_flow_parts;
 use crate::controller::Migration;
 use crate::ReuseConfigType;
@@ -34,17 +27,7 @@ use crate::ReuseConfigType;
 pub(crate) mod mir;
 mod query_graph;
 mod query_signature;
-mod reuse;
 mod serde;
-
-#[derive(Clone, Debug)]
-enum QueryGraphReuse<'a> {
-    ExactMatch(&'a MirQuery),
-    ExtendExisting(Vec<u64>),
-    /// (node, columns to re-project if necessary, parameters, index_type)
-    ReaderOntoExisting(MirNodeRef, Option<Vec<Column>>, Vec<Column>, IndexType),
-    None,
-}
 
 /// Configuration for converting SQL to dataflow
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -188,23 +171,11 @@ impl SqlIncorporator {
         let name = statement.name;
         let qfp = match *statement.definition {
             SelectSpecification::Compound(query) => {
-                self.add_compound_query(
-                    name.clone(),
-                    query,
-                    /* is_name_required = */ true,
-                    /* is_leaf = */ true,
-                    mig,
-                )?
+                self.add_compound_query(name.clone(), query, /* is_leaf = */ true, mig)?
             }
             SelectSpecification::Simple(query) => {
-                self.add_select_query(
-                    name.clone(),
-                    query,
-                    /* is_name_required = */ true,
-                    /* is_leaf = */ true,
-                    mig,
-                )?
-                .0
+                self.add_select_query(name.clone(), query, /* is_leaf = */ true, mig)?
+                    .0
             }
         };
         self.leaf_addresses.insert(name, qfp.query_leaf);
@@ -222,13 +193,7 @@ impl SqlIncorporator {
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<Relation> {
         let name = name.unwrap_or_else(|| format!("q_{}", self.num_queries).into());
-        let (qfp, _) = self.add_select_query(
-            name.clone(),
-            stmt,
-            /* is_name_required = */ false,
-            /* is_leaf = */ true,
-            mig,
-        )?;
+        let (qfp, _) = self.add_select_query(name.clone(), stmt, /* is_leaf = */ true, mig)?;
 
         self.leaf_addresses.insert(name.clone(), qfp.query_leaf);
 
@@ -383,289 +348,6 @@ impl SqlIncorporator {
             .map(|(name, _)| name)
     }
 
-    fn consider_query_graph(
-        &mut self,
-        query_name: &Relation,
-        is_name_required: bool,
-        st: &SelectStatement,
-        is_leaf: bool,
-    ) -> ReadySetResult<(QueryGraph, QueryGraphReuse)> {
-        debug!(%query_name, "Making query graph");
-        trace!(%query_name, %st);
-
-        let mut qg = to_query_graph(st)?;
-
-        trace!(%query_name, ?qg);
-
-        let reuse_config = if let Some(reuse_type) = self.config.reuse_type {
-            ReuseConfig::new(reuse_type)
-        } else {
-            // if reuse is disabled, we're done
-            return Ok((qg, QueryGraphReuse::None));
-        };
-
-        // Do we already have this exact query or a subset of it
-        // TODO(malte): make this an O(1) lookup by QG signature
-        let qg_hash = qg.signature().hash;
-        match self.mir_queries.get(&(qg_hash)) {
-            None => (),
-            Some(mir_query) => {
-                let existing_qg = self
-                    .query_graphs
-                    .get(&qg_hash)
-                    .ok_or_else(|| internal_err!("query graph should be present"))?;
-
-                // note that this also checks the *order* in which parameters are specified; a
-                // different order means that we cannot simply reuse the existing reader.
-                if existing_qg.signature() == qg.signature()
-                    && existing_qg.parameters() == qg.parameters()
-                    && existing_qg.exact_hash() == qg.exact_hash()
-                    && (!is_name_required || mir_query.name == *query_name)
-                {
-                    // we already have this exact query, down to the exact same reader key columns
-                    // in exactly the same order
-                    debug!(
-                        %query_name,
-                        "An exact match already exists, reusing it"
-                    );
-
-                    trace!(%mir_query.name, ?existing_qg);
-
-                    return Ok((qg, QueryGraphReuse::ExactMatch(mir_query)));
-                } else if existing_qg.signature() == qg.signature()
-                    && existing_qg.parameters() != qg.parameters()
-                {
-                    use self::query_graph::OutputColumn;
-
-                    // the signatures match, but this comparison has only given us an inexact
-                    // result: we know that both queries mention the same
-                    // columns, but not that they actually do the same
-                    // comparisons or have the same literals. Hence, we need
-                    // to scan the predicates here and ensure that for each predicate in the
-                    // incoming QG, we have a matching predicate in the existing one.
-                    // Since `qg.relations.predicates` only contains comparisons between columns
-                    // and literals (col/col is a join predicate and associated with the join edge,
-                    // col/param is stored in qg.params), we will not be inhibited by the fact that
-                    // the queries have different parameters.
-                    let mut predicates_match = true;
-                    for (r, n) in qg.relations.iter() {
-                        for p in n.predicates.iter() {
-                            if !existing_qg.relations.contains_key(r)
-                                || !existing_qg.relations[r].predicates.contains(p)
-                            {
-                                predicates_match = false;
-                            }
-                        }
-                    }
-
-                    // if any of our columns are grouped expressions, we can't reuse here, since
-                    // the difference in parameters means that there is a difference in the implied
-                    // GROUP BY clause
-                    let no_grouped_columns = qg.columns.iter().all(|c| match *c {
-                        OutputColumn::Literal(_) => true,
-                        OutputColumn::Expr(ref ec) => contains_aggregate(&ec.expression),
-                        OutputColumn::Data { .. } => true,
-                    });
-
-                    // TODO(grfn): When we want to bring back reuse, revisit the below comment - for
-                    // one, ParamFilter no longer exists, for another, we now have parameter
-                    // operators that *are* reusable like range queries
-                    //
-                    // But regardless, preserved (for now) for posterity:
-                    // -------
-                    // The reuse implementation below may only be performed when all parameters
-                    // are equality operators. Query Graphs constructed for other operator types
-                    // may contain nodes such as ParamFilter that contain materializations specific
-                    // to their parameters and are not suitable for reuse with alternative
-                    // parameters. (Note that simple range queries are expected to be implemented
-                    // with range key lookups over equality parameter views. These views will be
-                    // reused because of the equality parameters.)
-                    let are_all_parameters_equalities = qg
-                        .parameters()
-                        .iter()
-                        .all(|p| p.op == BinaryOperator::Equal)
-                        && existing_qg
-                            .parameters()
-                            .iter()
-                            .all(|p| p.op == BinaryOperator::Equal);
-
-                    // Leaf queries with no parameters require that a "bogokey" dummy literal column
-                    // be projected to support lookups. The ReaderOntoExisting optimization below
-                    // does not support projecting a new bogokey if the existing query graph has
-                    // parameters and therefore lacks a bogokey in its leaf projection.
-                    let is_new_bogokey_needed = is_leaf
-                        && qg.parameters().is_empty()
-                        && !existing_qg.parameters().is_empty();
-
-                    if predicates_match
-                        && no_grouped_columns
-                        && are_all_parameters_equalities
-                        && !is_new_bogokey_needed
-                    {
-                        // QGs are identical, except for parameters (or their order)
-                        debug!(
-                            %query_name,
-                            matching_query = %mir_query.name,
-                            "Query has an exact match modulo parameters, so making a new reader",
-                        );
-
-                        let mut index_type = None;
-                        let params = qg
-                            .parameters()
-                            .into_iter()
-                            .map(|param| -> ReadySetResult<_> {
-                                match IndexType::for_operator(param.op) {
-                                    Some(it) if index_type.is_none() => index_type = Some(it),
-                                    Some(it) if index_type == Some(it) => {}
-                                    Some(_) => {
-                                        unsupported!("Conflicting binary operators in query")
-                                    }
-                                    None => {
-                                        unsupported!("Unsupported binary operator `{}`", param.op)
-                                    }
-                                }
-
-                                Ok(Column::from(param.col.clone()))
-                            })
-                            .collect::<Result<Vec<_>, _>>()?;
-
-                        let mut parent = mir_query
-                            .leaf
-                            .borrow()
-                            .ancestors()
-                            .iter()
-                            .next()
-                            .unwrap()
-                            .upgrade()
-                            .unwrap();
-
-                        if matches!(parent.borrow().inner, MirNodeInner::Project { .. }) {
-                            // This might be just a reordering projection on top of a different
-                            // projection, in that case we actually want to start with the
-                            // granparent instead.
-                            let grand_parent = parent
-                                .borrow()
-                                .ancestors()
-                                .iter()
-                                .next()
-                                .unwrap()
-                                .upgrade()
-                                .unwrap();
-
-                            if matches!(grand_parent.borrow().inner, MirNodeInner::Project { .. }) {
-                                parent = grand_parent;
-                            }
-                        }
-
-                        // If the existing leaf's parent contains all required parameter columns,
-                        // reuse based on this parent.
-                        if params.iter().all(|p| parent.borrow().columns().contains(p)) {
-                            return Ok((
-                                qg,
-                                QueryGraphReuse::ReaderOntoExisting(
-                                    parent,
-                                    None,
-                                    params,
-                                    index_type.unwrap_or(IndexType::HashMap),
-                                ),
-                            ));
-                        }
-
-                        // We want to hang the new leaf off the last non-leaf node of the query that
-                        // has the parameter columns we need, so backtrack until we find this place.
-                        // Typically, this unwinds only two steps, above the final projection.
-                        // However, there might be cases in which a parameter column needed is not
-                        // present in the query graph (because a later migration added the column to
-                        // a base schema after the query was added to the graph). In this case, we
-                        // move on to other reuse options.
-
-                        // If parent does not introduce any new columns absent in its ancestors,
-                        // traverse its ancestor chain to find an ancestor with the necessary
-                        // parameter columns.
-                        fn may_rewind(node: MirNodeRef) -> bool {
-                            match node.borrow().inner {
-                                MirNodeInner::Identity => true,
-                                MirNodeInner::AliasTable { .. } => {
-                                    may_rewind(node.borrow().parent().unwrap())
-                                }
-                                MirNodeInner::Project {
-                                    expressions: ref e,
-                                    literals: ref l,
-                                    ..
-                                } => e.is_empty() && l.is_empty(),
-                                _ => false,
-                            }
-                        }
-
-                        let ancestor = if may_rewind(parent.clone()) {
-                            mir_reuse::rewind_until_columns_found(parent.clone(), &params)
-                        } else {
-                            None
-                        };
-
-                        // Reuse based on ancestor, which contains the required parameter columns.
-                        if let Some(ancestor) = ancestor {
-                            let project_columns = match ancestor.borrow().inner {
-                                MirNodeInner::Project { .. } => {
-                                    // FIXME Ensure ancestor includes all columns in qg, with the
-                                    // proper names.
-                                    None
-                                }
-
-                                _ => {
-                                    // N.B.: we can't just add an identity here, since we might
-                                    // have backtracked above a projection in order to get the
-                                    // new parameter column(s). In this case, we need to add a
-                                    // new projection that includes the same columns as the one
-                                    // for the existing query, but also additional parameter
-                                    // columns. The latter get added later; here we simply
-                                    // extract the columns that need reprojecting and pass them
-                                    // along with the reuse instruction.
-                                    // FIXME Ensure ancestor includes all columns in parent,
-                                    // with the proper
-                                    // names.
-                                    Some(parent.borrow().columns().to_vec())
-                                }
-                            };
-
-                            return Ok((
-                                qg,
-                                QueryGraphReuse::ReaderOntoExisting(
-                                    ancestor,
-                                    project_columns,
-                                    params,
-                                    index_type.unwrap_or(IndexType::HashMap),
-                                ),
-                            ));
-                        }
-                    }
-                }
-            }
-        }
-
-        // Find a promising set of query graphs
-        let reuse_candidates = reuse_config.reuse_candidates(&mut qg, &self.query_graphs)?;
-
-        if !reuse_candidates.is_empty() {
-            debug!(
-                num_candidates = reuse_candidates.len(),
-                "Identified candidate QGs for reuse",
-            );
-            trace!(?qg, ?reuse_candidates);
-
-            return Ok((
-                qg,
-                QueryGraphReuse::ExtendExisting(
-                    reuse_candidates.iter().map(|(_, (sig, _))| *sig).collect(),
-                ),
-            ));
-        } else {
-            debug!("No reuse opportunity, adding fresh query");
-        }
-
-        Ok((qg, QueryGraphReuse::None))
-    }
-
     fn add_base_via_mir(
         &mut self,
         stmt: CreateTableStatement,
@@ -697,7 +379,6 @@ impl SqlIncorporator {
         &mut self,
         query_name: Relation,
         query: CompoundSelectStatement,
-        is_name_required: bool,
         is_leaf: bool,
         mig: &mut Migration<'_>,
     ) -> Result<QueryFlowParts, ReadySetError> {
@@ -707,13 +388,7 @@ impl SqlIncorporator {
             .enumerate()
             .map(|(i, (_op, stmt))| {
                 Ok(self
-                    .add_select_query(
-                        format!("{}_csq_{}", query_name, i).into(),
-                        stmt,
-                        is_name_required,
-                        false,
-                        mig,
-                    )?
+                    .add_select_query(format!("{}_csq_{}", query_name, i).into(), stmt, false, mig)?
                     .1)
             })
             .collect::<ReadySetResult<Vec<_>>>()?;
@@ -735,61 +410,12 @@ impl SqlIncorporator {
         Ok(qfp)
     }
 
-    fn select_query_to_mir(
-        &mut self,
-        query_name: Relation,
-        is_name_required: bool,
-        sq: SelectStatement,
-        is_leaf: bool,
-    ) -> ReadySetResult<(QueryGraph, MirQuery)> {
-        let (qg, reuse) = self.consider_query_graph(&query_name, is_name_required, &sq, is_leaf)?;
-
-        let mir_query = match reuse {
-            QueryGraphReuse::ExactMatch(mir_query) => mir_query.clone(),
-            QueryGraphReuse::ExtendExisting(reuse_mirs) => {
-                let mut new_query_mir =
-                    self.mir_converter
-                        .named_query_to_mir(&query_name, sq, &qg, is_leaf)?;
-                let mut num_reused_nodes = 0;
-                for m in reuse_mirs {
-                    if !self.mir_queries.contains_key(&m) {
-                        continue;
-                    }
-                    let mq = &self.mir_queries[&m];
-                    let (merged_mir, merged_nodes) = merge_mir_for_queries(&new_query_mir, mq);
-                    new_query_mir = merged_mir;
-                    num_reused_nodes = max(merged_nodes, num_reused_nodes);
-                }
-                new_query_mir
-            }
-            QueryGraphReuse::ReaderOntoExisting(
-                final_query_node,
-                project_columns,
-                params,
-                index_type,
-            ) => self.mir_converter.add_leaf_below(
-                final_query_node,
-                &query_name,
-                &params,
-                index_type,
-                project_columns,
-            ),
-            QueryGraphReuse::None => {
-                self.mir_converter
-                    .named_query_to_mir(&query_name, sq, &qg, is_leaf)?
-            }
-        };
-
-        Ok((qg, mir_query))
-    }
-
     /// Add a new SelectStatement to the given migration, returning information about the dataflow
     /// and MIR nodes that were added
     fn add_select_query(
         &mut self,
         query_name: Relation,
         mut stmt: SelectStatement,
-        is_name_required: bool,
         is_leaf: bool,
         mig: &mut Migration<'_>,
     ) -> Result<(QueryFlowParts, MirQuery), ReadySetError> {
@@ -823,7 +449,6 @@ impl SqlIncorporator {
                             mig.dialect,
                             None,
                         )?,
-                        true,
                         false,
                         mig,
                     )?;
@@ -833,7 +458,7 @@ impl SqlIncorporator {
                     for_statement,
                     ..
                 } => {
-                    self.add_select_query(to_view, *for_statement, true, false, mig)?;
+                    self.add_select_query(to_view, *for_statement, false, mig)?;
                 }
                 TableAliasRewrite::Table { .. } => {}
             }
@@ -841,8 +466,10 @@ impl SqlIncorporator {
 
         trace!(rewritten_query = %stmt);
 
-        let (qg, mir_query) = self
-            .select_query_to_mir(query_name.clone(), is_name_required, stmt, is_leaf)
+        let qg = to_query_graph(&stmt).map_err(on_err)?;
+        let mir_query = self
+            .mir_converter
+            .named_query_to_mir(&query_name, stmt, &qg, is_leaf)
             .map_err(on_err)?;
 
         trace!(pre_opt_mir = %mir_query.to_graphviz());
@@ -1565,6 +1192,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "Ignoring until we have automatic reuse"]
     async fn it_reuses_identical_query() {
         // set up graph
         let mut g = integration_utils::start_simple_unsharded("it_reuses_identical_query").await;
@@ -1666,6 +1294,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "Ignoring until we have automatic reuse"]
     async fn it_reuses_with_different_parameter() {
         // set up graph
         let mut g =

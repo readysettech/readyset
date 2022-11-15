@@ -56,7 +56,6 @@ mod column;
 pub mod graph;
 pub mod node;
 pub mod query;
-pub mod reuse;
 mod rewrite;
 pub mod visualize;
 

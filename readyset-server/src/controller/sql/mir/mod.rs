@@ -22,7 +22,6 @@ use nom_sql::{
     SelectStatement, SqlIdentifier, TableKey, UnaryOperator,
 };
 use petgraph::graph::NodeIndex;
-use readyset::ViewPlaceholder;
 use readyset_errors::{
     internal, internal_err, invariant, invariant_eq, unsupported, ReadySetError,
 };
@@ -190,84 +189,6 @@ impl SqlToMirConverter {
         let reuse_node = MirNode::reuse(node.clone(), self.schema_version);
 
         Ok(reuse_node)
-    }
-
-    pub(super) fn add_leaf_below(
-        &mut self,
-        prior_leaf: MirNodeRef,
-        name: &Relation,
-        params: &[Column],
-        index_type: IndexType,
-        project_columns: Option<Vec<Column>>,
-    ) -> MirQuery {
-        // hang off the previous logical leaf node
-        let parent_columns: Vec<Column> = prior_leaf.borrow().columns().to_vec();
-        let parent = MirNode::reuse(prior_leaf, self.schema_version);
-
-        let (reproject, columns): (bool, Vec<Column>) = match project_columns {
-            // parent is a projection already, so no need to reproject; just reuse its columns
-            None => (false, parent_columns),
-            // parent is not a projection, so we need to reproject to the columns passed to us
-            Some(pc) => (true, pc.into_iter().chain(params.iter().cloned()).collect()),
-        };
-
-        let fields = columns.iter().map(|c| c.name.clone()).collect();
-
-        let n = if reproject {
-            // add a (re-)projection and then another leaf
-            MirNode::new(
-                format!("{}_reproject", name).into(),
-                self.schema_version,
-                MirNodeInner::Project {
-                    emit: columns,
-                    literals: vec![],
-                    expressions: vec![],
-                },
-                vec![MirNodeRef::downgrade(&parent)],
-                vec![],
-            )
-        } else {
-            // add an identity node and then another leaf
-            MirNode::new(
-                format!("{}_id", name).into(),
-                self.schema_version,
-                MirNodeInner::Identity,
-                vec![MirNodeRef::downgrade(&parent)],
-                vec![],
-            )
-        };
-
-        // TODO(DAN): placeholder to key mappings are not fully supported for reuse
-        let params: Vec<(_, ViewPlaceholder)> = params
-            .iter()
-            .enumerate()
-            .map(|(i, c)| {
-                (
-                    c.clone(),
-                    ViewPlaceholder::OneToOne(i + 1 /* placeholders are 1-based */),
-                )
-            })
-            .collect();
-        let new_leaf = MirNode::new(
-            name.clone(),
-            self.schema_version,
-            MirNodeInner::leaf(params, index_type),
-            vec![MirNodeRef::downgrade(&n)],
-            vec![],
-        );
-
-        // always register leaves
-        self.current.insert(name.clone(), self.schema_version);
-        self.nodes
-            .insert((name.clone(), self.schema_version), new_leaf.clone());
-
-        // wrap in a (very short) query to return
-        MirQuery {
-            name: name.clone(),
-            roots: vec![parent],
-            leaf: new_leaf,
-            fields,
-        }
     }
 
     pub(super) fn compound_query_to_mir(
