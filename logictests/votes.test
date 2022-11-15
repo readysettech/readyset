@@ -1,0 +1,14 @@
+statement ok
+CREATE TABLE stories (id int, author text, title text, url text);
+
+statement ok
+CREATE TABLE votes (`user` int, story_id int);
+
+statement ok
+create cache from
+SELECT id, author, title, url, vcount
+FROM stories
+JOIN (SELECT story_id, COUNT(*) AS vcount
+            FROM votes GROUP BY story_id)
+AS VoteCount
+ON VoteCount.story_id = stories.id WHERE stories.id = ?;

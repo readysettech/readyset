@@ -5,7 +5,9 @@ use itertools::Itertools;
 use nom_sql::analysis::visit_mut::{
     walk_group_by_clause, walk_order_clause, walk_select_statement, VisitorMut,
 };
-use nom_sql::{Column, FieldDefinitionExpr, Relation, SelectStatement, SqlIdentifier, SqlQuery};
+use nom_sql::{
+    Column, FieldDefinitionExpr, JoinRightSide, Relation, SelectStatement, SqlIdentifier, SqlQuery,
+};
 use readyset_errors::{internal, invalid_err, ReadySetError, ReadySetResult};
 use tracing::warn;
 
@@ -87,6 +89,10 @@ impl<'ast, 'schema> VisitorMut<'ast> for ExpandImpliedTablesVisitor<'schema> {
                         .map(Relation::from)
                         .unwrap_or_else(|| tbl.table.clone())
                 })
+                .chain(select_statement.join.iter().filter_map(|j| match &j.right {
+                    JoinRightSide::NestedSelect(_, alias) => Some(alias.into()),
+                    _ => None,
+                }))
                 .collect(),
         );
         let orig_subquery_schemas = mem::replace(
@@ -462,5 +468,48 @@ Dialect::MySQL,
         ]
         .into();
         orig.expand_implied_tables(&schema).unwrap_err();
+    }
+
+    #[test]
+    fn votes() {
+        let orig = parse_query(
+            Dialect::MySQL,
+            "SELECT id, author, title, url, vcount
+            FROM stories
+            JOIN (SELECT story_id, COUNT(*) AS vcount
+                        FROM votes GROUP BY story_id)
+            AS VoteCount
+            ON VoteCount.story_id = stories.id WHERE stories.id = ?;",
+        )
+        .unwrap();
+        let expected = parse_query(
+            Dialect::MySQL,
+            "SELECT stories.id, stories.author, stories.title, stories.url, VoteCount.vcount
+            FROM stories
+            JOIN (SELECT votes.story_id, COUNT(*) AS vcount
+                        FROM votes GROUP BY votes.story_id)
+            AS VoteCount
+            ON VoteCount.story_id = stories.id WHERE stories.id = ?;",
+        )
+        .unwrap();
+        let schema = [
+            (
+                Relation {
+                    schema: None,
+                    name: "stories".into(),
+                },
+                vec!["id".into(), "author".into(), "title".into(), "url".into()],
+            ),
+            (
+                Relation {
+                    schema: None,
+                    name: "votes".into(),
+                },
+                vec!["user".into(), "story_id".into()],
+            ),
+        ]
+        .into();
+        let res = orig.expand_implied_tables(&schema).unwrap();
+        assert_eq!(res, expected, "\n left: {res}\nright: {expected}");
     }
 }
