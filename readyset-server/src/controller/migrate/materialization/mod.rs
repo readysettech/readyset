@@ -14,7 +14,7 @@ use maplit::hashmap;
 use petgraph::graph::NodeIndex;
 use readyset_errors::{internal, internal_err, invariant, ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
-use tracing::{debug, error, info, info_span, trace};
+use tracing::{debug, error, info_span, trace};
 use vec1::Vec1;
 
 use crate::controller::keys;
@@ -1118,7 +1118,7 @@ impl Materializations {
             trace!(node = %ni.index(), "node ready");
 
             if reconstructed {
-                info!(
+                debug!(
                     ms = %start.elapsed().as_millis(),
                     node = %ni.index(),
                     "reconstruction completed"
@@ -1178,7 +1178,7 @@ impl Materializations {
         {
             let span = info_span!("reconstructing node", node = %ni.index());
             let _guard = span.enter();
-            info!(node = %ni.index(), "beginning reconstruction");
+            debug!(node = %ni.index(), "beginning reconstruction");
             self.setup(ni, index_on, graph, dmp)?;
         }
 

@@ -1251,7 +1251,7 @@ impl PersistentState {
     /// Adds a new primary index, assuming there are none present
     fn add_primary_index(&mut self, columns: &[usize], is_unique: bool) {
         if self.db.inner().indices.is_empty() {
-            info!(base = %self.name, index = ?columns, is_unique, "Base creating primary index");
+            debug!(base = %self.name, index = ?columns, is_unique, "Base creating primary index");
 
             let index_params = IndexParams::new(IndexType::HashMap, columns.len());
 

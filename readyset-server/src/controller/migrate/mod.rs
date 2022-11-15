@@ -186,7 +186,7 @@ impl<'df> MigrationPlan<'df> {
             mut dmp,
         } = self;
 
-        info!(
+        debug!(
             new_domains = dmp.place.len(),
             messages = dmp.stored.len(),
             "applying migration plan",
@@ -196,7 +196,7 @@ impl<'df> MigrationPlan<'df> {
 
         match dmp.apply(dataflow_state).await {
             Ok(_) => {
-                info!(ms = %start.elapsed().as_millis(), "migration plan applied");
+                debug!(ms = %start.elapsed().as_millis(), "migration plan applied");
                 Ok(())
             }
             Err(e) => {
@@ -736,7 +736,7 @@ impl<'df> Migration<'df> {
         }
         plan.apply().await?;
 
-        info!(
+        debug!(
             ms = ?start.elapsed().as_millis(),
             "migration planning completed"
         );
@@ -789,7 +789,7 @@ impl<'df> Migration<'df> {
             "finalizing migration"
         );
 
-        info!(
+        debug!(
             ms = ?start.elapsed().as_millis(),
             "migration planning completed"
         );

@@ -52,7 +52,7 @@ use regex::Regex;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, MutexGuard, RwLock, RwLockReadGuard};
-use tracing::{debug, error, info, instrument, trace, warn};
+use tracing::{debug, error, instrument, trace, warn};
 
 use super::migrate::DomainSettings;
 use super::replication::ReplicationStrategy;
@@ -828,12 +828,12 @@ impl DfState {
     where
         F: FnOnce(&mut Migration<'_>) -> T,
     {
-        info!("starting migration");
+        debug!("starting migration");
         gauge!(recorded::CONTROLLER_MIGRATION_IN_PROGRESS, 1.0);
         let mut m = Migration::new(self, dialect);
         let r = f(&mut m);
         m.commit(dry_run).await?;
-        info!("finished migration");
+        debug!("finished migration");
         gauge!(recorded::CONTROLLER_MIGRATION_IN_PROGRESS, 0.0);
         Ok(r)
     }
@@ -925,7 +925,7 @@ impl DfState {
                 let idx = domain.index;
 
                 // send domain to worker
-                info!("sending domain {} to worker {}", replica_address, w.uri);
+                debug!("sending domain {} to worker {}", replica_address, w.uri);
 
                 let ret = w
                     .rpc::<RunDomainResponse>(WorkerRequestKind::RunDomain(domain))
@@ -955,7 +955,7 @@ impl DfState {
                     }
                 }
 
-                info!(external_addr = %ret.external_addr, "worker booted domain");
+                debug!(external_addr = %ret.external_addr, "worker booted domain");
 
                 self.channel_coordinator
                     .insert_remote(replica_address, ret.external_addr)?;
@@ -987,7 +987,7 @@ impl DfState {
         // result of a nasty deadlock.)
         for (address, w) in self.workers.iter_mut() {
             for &dd in &domain_addresses {
-                info!(worker_uri = %w.uri, "informing worker about newly placed domain");
+                debug!(worker_uri = %w.uri, "informing worker about newly placed domain");
                 if let Err(e) = w
                     .rpc::<()>(WorkerRequestKind::GossipDomainInformation(vec![dd]))
                     .await

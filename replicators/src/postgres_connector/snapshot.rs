@@ -18,7 +18,7 @@ use readyset::{ReadySetError, ReadySetResult};
 use readyset_data::{DfType, DfValue, Dialect as DataDialect, PgEnumMetadata};
 use readyset_errors::{internal, internal_err, unsupported};
 use tokio_postgres as pgsql;
-use tracing::{debug, error, info, info_span, trace, Instrument};
+use tracing::{debug, error, info, info_span, trace, warn, Instrument};
 
 use super::connector::CreatedSlot;
 use super::PostgresPosition;
@@ -581,7 +581,7 @@ impl<'a> PostgresReplicator<'a> {
             let variants = match ty.get_variants(&self.transaction).await {
                 Ok(v) => v,
                 Err(error) => {
-                    error!(%error, custom_type=?ty, "Error looking up variants for custom type, type will not be used");
+                    warn!(%error, custom_type=?ty, "Error looking up variants for custom type, type will not be used");
                     continue;
                 }
             };
@@ -601,7 +601,7 @@ impl<'a> PostgresReplicator<'a> {
                 DataDialect::DEFAULT_POSTGRESQL,
             );
             if let Err(error) = self.noria.extend_recipe_no_leader_ready(changelist).await {
-                error!(%error, custom_type=?ty, "Error creating custom type, type will not be used");
+                warn!(%error, custom_type=?ty, "Error creating custom type, type will not be used");
             }
         }
 
@@ -612,7 +612,7 @@ impl<'a> PostgresReplicator<'a> {
             let create_table = match table.get_table(&self.transaction).await {
                 Ok(ct) => ct,
                 Err(error) => {
-                    error!(%error, "Error looking up table, table will not be used");
+                    warn!(%error, "Error looking up table, table will not be used");
                     continue;
                 }
             };
@@ -631,7 +631,7 @@ impl<'a> PostgresReplicator<'a> {
             {
                 Ok(_) => tables.push(create_table),
                 Err(error) => {
-                    error!(%error, table=%table_name, "Error extending CREATE TABLE, table will not be used")
+                    warn!(%error, table=%table_name, "Error extending CREATE TABLE, table will not be used")
                 }
             }
         }
@@ -652,7 +652,7 @@ impl<'a> PostgresReplicator<'a> {
                     continue;
                 }
                 Err(error) => {
-                    error!(%error, view=%view_name, "Error parsing CREATE VIEW, view will not be used");
+                    warn!(%error, view=%view_name, "Error parsing CREATE VIEW, view will not be used");
                     continue;
                 }
             };
@@ -670,7 +670,7 @@ impl<'a> PostgresReplicator<'a> {
                 )
                 .await
             {
-                error!(%error, view=%view_name, "Error extending CREATE VIEW, view will not be used");
+                warn!(%error, view=%view_name, "Error extending CREATE VIEW, view will not be used");
             }
         }
 

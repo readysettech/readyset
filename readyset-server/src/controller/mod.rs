@@ -31,7 +31,7 @@ use serde::{Deserialize, Serialize};
 use stream_cancel::Valve;
 use tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{Notify, RwLock, RwLockReadGuard, RwLockWriteGuard};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use tracing_futures::Instrument;
 use url::Url;
 
@@ -997,12 +997,12 @@ async fn controller_req_processing_runner(
                         leader_ready
                     ).await?;
                 } else {
-                    info!("Controller shutting down after write processing handle dropped");
+                    debug!("Controller shutting down after write processing handle dropped");
                     break;
                 }
             },
             _ = shutdown_stream.next() => {
-                info!("Write processing task shutting down after valve shut");
+                debug!("Write processing task shutting down after valve shut");
                 break;
             }
         }

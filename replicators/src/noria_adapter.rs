@@ -555,7 +555,7 @@ impl NoriaAdapter {
             // ReadySet likely entered an invalid state, fail the replicator.
             Err(e @ ReadySetError::RecipeInvariantViolated(_)) => return Err(e),
             Err(e) => {
-                error!(error = %e, "Error extending recipe, DDL statement will not be used");
+                warn!(error = %e, "Error extending recipe, DDL statement will not be used");
                 counter!(recorded::REPLICATOR_FAILURE, 1u64,);
             }
             Ok(_) => {}

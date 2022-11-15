@@ -195,7 +195,7 @@ impl MySqlReplicator {
                     })
                     .await
             {
-                error!(%err, "Error extending CREATE TABLE, table will not be used");
+                warn!(%err, "Error extending CREATE TABLE, table will not be used");
                 // Prevent the table from being snapshotted as well
                 bad_tables.push((db.clone(), table.clone()));
             }
@@ -226,7 +226,7 @@ impl MySqlReplicator {
                         })
                         .await
                 {
-                    error!(%view, %err, "Error extending CREATE VIEW, view will not be used");
+                    warn!(%view, %err, "Error extending CREATE VIEW, view will not be used");
                 }
             }
         }

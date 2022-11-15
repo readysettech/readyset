@@ -16,7 +16,7 @@ use readyset::recipe::ChangeList;
 use readyset::replication::ReplicationOffset;
 use readyset::{ReadySetError, ReadySetResult};
 use readyset_data::{DfValue, Dialect};
-use tracing::error;
+use tracing::warn;
 
 use super::BinlogPosition;
 use crate::noria_adapter::{Connector, ReplicationAction};
@@ -290,7 +290,7 @@ impl MySqlBinlogConnector {
                     let changes = match ChangeList::from_str(&ev.query(), Dialect::DEFAULT_MYSQL) {
                         Ok(changelist) => changelist.changes,
                         Err(error) => {
-                            error!(%error, "Error extending recipe, DDL statement will not be used");
+                            warn!(%error, "Error extending recipe, DDL statement will not be used");
                             counter!(recorded::REPLICATOR_FAILURE, 1u64);
                             continue;
                         }

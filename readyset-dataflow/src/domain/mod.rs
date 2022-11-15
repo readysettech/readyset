@@ -29,7 +29,7 @@ use readyset_errors::{internal, internal_err, ReadySetResult};
 use serde::{Deserialize, Serialize};
 use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, trace, warn};
 use vec1::Vec1;
 
 pub(crate) use self::replay_paths::ReplayPath;
@@ -1771,7 +1771,7 @@ impl Domain {
 
                 let start = time::Instant::now();
                 self.total_replay_time.start();
-                info!(%from, "starting replay");
+                debug!(%from, "starting replay");
 
                 // we know that the node is materialized, as the migration coordinator
                 // picks path that originate with materialized nodes. if this weren't the
@@ -3533,7 +3533,7 @@ impl Domain {
             // tag came from an internal data structure that guarantees it exists
             if self.replay_paths[tag].notify_done {
                 // NOTE: this will only be Some for non-partial replays
-                info!(node = node.id(), "noting replay completed");
+                debug!(node = node.id(), "noting replay completed");
                 self.replay_completed = true;
                 Ok(())
             } else {

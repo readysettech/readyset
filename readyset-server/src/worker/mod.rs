@@ -333,7 +333,7 @@ impl Worker {
 
                 self.domain_wait_queue.push(jh);
 
-                span.in_scope(|| info!(%bind_actual, %bind_external, "domain booted",));
+                span.in_scope(|| debug!(%bind_actual, %bind_external, "domain booted",));
                 let resp = RunDomainResponse {
                     external_addr: bind_external,
                 };
@@ -403,12 +403,12 @@ impl Worker {
                         self.process_worker_request(req).await;
                     }
                     else {
-                        info!("worker shutting down after request handle dropped");
+                        debug!("worker shutting down after request handle dropped");
                         return;
                     }
                 }
                 _ = shutdown_stream.next() => {
-                    info!("worker shutting down after valve shut");
+                    debug!("worker shutting down after valve shut");
                     return;
                 }
                 _ = eviction => {
