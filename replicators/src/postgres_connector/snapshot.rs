@@ -275,6 +275,8 @@ impl TableEntry {
                 CASE
                 WHEN t.typtype = 'e'
                 THEN format('"%s"."%s"', tn.nspname, t.typname)
+                WHEN member_t.oid IS NOT NULL AND member_t.typtype = 'e'
+                THEN format('"%s"."%s"[]', member_tn.nspname, member_t.typname)
                 ELSE pg_catalog.format_type(a.atttypid, a.atttypmod)
                 END AS sql_type,
                 t.oid,
@@ -287,7 +289,7 @@ impl TableEntry {
                 member_tn.nspname,
                 (SELECT array_agg(e.enumlabel ORDER BY e.enumsortorder ASC)
                  FROM pg_enum e
-                 WHERE e.enumtypid = t.oid)
+                 WHERE (member_t.oid IS NULL AND (e.enumtypid = t.oid)) OR e.enumtypid = member_t.oid)
             FROM pg_catalog.pg_attribute a
             JOIN pg_catalog.pg_type t ON a.atttypid = t.oid
             JOIN pg_catalog.pg_namespace tn ON t.typnamespace = tn.oid

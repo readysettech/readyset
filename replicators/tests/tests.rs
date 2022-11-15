@@ -1605,14 +1605,14 @@ async fn postgresql_replicate_custom_type() {
             "DROP TABLE IF EXISTS enum_table CASCADE;
              DROP TYPE IF EXISTS custom_enum;
              CREATE TYPE custom_enum AS ENUM ('a', 'b');
-             CREATE TABLE enum_table (x custom_enum);
-             CREATE VIEW enum_table_v AS SELECT x FROM enum_table;",
+             CREATE TABLE enum_table (x custom_enum, xs custom_enum[]);
+             CREATE VIEW enum_table_v AS SELECT x, xs FROM enum_table;",
         )
         .await
         .unwrap();
 
     client
-        .query("INSERT INTO enum_table (x) VALUES ('a'), ('b')")
+        .query("INSERT INTO enum_table (x, xs) VALUES ('a', '{a, b}'), ('b', '{b, a}')")
         .await
         .unwrap();
 
@@ -1624,7 +1624,16 @@ async fn postgresql_replicate_custom_type() {
     ctx.check_results(
         "enum_table_v",
         "Snapshot",
-        &[&[DfValue::from(1)], &[DfValue::from(2)]],
+        &[
+            &[
+                DfValue::from(1),
+                DfValue::from(vec![DfValue::from(1), DfValue::from(2)]),
+            ],
+            &[
+                DfValue::from(2),
+                DfValue::from(vec![DfValue::from(2), DfValue::from(1)]),
+            ],
+        ],
     )
     .await
     .unwrap()
