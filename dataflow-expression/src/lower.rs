@@ -146,6 +146,7 @@ impl BuiltinFunction {
 
         let arity_error = || ReadySetError::ArityError(name.to_owned());
 
+        // TODO: Type-check arguments.
         let mut args = args.into_iter();
         let mut next_arg = || args.next().ok_or_else(arity_error);
 
@@ -220,6 +221,27 @@ impl BuiltinFunction {
             }
             "json_strip_nulls" => (Self::JsonStripNulls(next_arg()?), DfType::Json),
             "jsonb_strip_nulls" => (Self::JsonStripNulls(next_arg()?), DfType::Jsonb),
+            "json_extract_path" => (
+                Self::JsonExtractPath {
+                    json: next_arg()?,
+                    keys: Vec1::try_from_vec(args.by_ref().collect()).map_err(|_| arity_error())?,
+                },
+                DfType::Json,
+            ),
+            "jsonb_extract_path" => (
+                Self::JsonExtractPath {
+                    json: next_arg()?,
+                    keys: Vec1::try_from_vec(args.by_ref().collect()).map_err(|_| arity_error())?,
+                },
+                DfType::Jsonb,
+            ),
+            "json_extract_path_text" | "jsonb_extract_path_text" => (
+                Self::JsonExtractPath {
+                    json: next_arg()?,
+                    keys: Vec1::try_from_vec(args.by_ref().collect()).map_err(|_| arity_error())?,
+                },
+                DfType::DEFAULT_TEXT,
+            ),
             "coalesce" => {
                 let arg1 = next_arg()?;
                 let ty = arg1.ty().clone();

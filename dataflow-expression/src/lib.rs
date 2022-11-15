@@ -53,6 +53,8 @@ pub enum BuiltinFunction {
     JsonArrayLength(Expr),
     /// [`json[b]_strip_nulls`](https://www.postgresql.org/docs/current/functions-json.html)
     JsonStripNulls(Expr),
+    /// [`json[b]_extract_path[_text]`](https://www.postgresql.org/docs/current/functions-json.html)
+    JsonExtractPath { json: Expr, keys: Vec1<Expr> },
     /// [`coalesce`](https://www.postgresql.org/docs/current/functions-conditional.html#FUNCTIONS-COALESCE-NVL-IFNULL)
     Coalesce(Expr, Vec<Expr>),
     /// [`concat`](https://dev.mysql.com/doc/refman/8.0/en/string-functions.html#function_concat)
@@ -105,6 +107,7 @@ impl BuiltinFunction {
             JsonTypeof { .. } => "json_typeof",
             JsonArrayLength { .. } => "json_array_length",
             JsonStripNulls { .. } => "json_strip_nulls",
+            JsonExtractPath { .. } => "json_extract_path",
             Coalesce { .. } => "coalesce",
             Concat { .. } => "concat",
             Substring { .. } => "substring",
@@ -151,6 +154,9 @@ impl fmt::Display for BuiltinFunction {
             }
             JsonTypeof(arg) | JsonArrayLength(arg) | JsonStripNulls(arg) => {
                 write!(f, "({})", arg)
+            }
+            JsonExtractPath { json, keys } => {
+                write!(f, "({}, {})", json, keys.iter().join(", "))
             }
             Coalesce(arg1, args) => {
                 write!(f, "({}, {})", arg1, args.iter().join(", "))

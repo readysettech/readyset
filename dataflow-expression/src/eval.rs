@@ -164,43 +164,14 @@ impl Expr {
                     JsonKeyPathExtract | JsonKeyPathExtractText => {
                         // Both extraction operations behave the same in PostgreSQL except for the
                         // return type, which is handled during expression lowering.
-
-                        // Type errors are handled during expression lowering.
-                        let keys = right.as_array()?;
-
-                        // This value is reassigned to inner fields while looping through keys.
-                        let mut json = &left.to_json()?;
-
-                        // PostgreSQL docs state `text[]` but in practice it allows using
-                        // multi-dimensional arrays here.
-                        for key in keys.values() {
-                            // Null keys are allowed but always fail lookup.
-                            if key.is_none() {
-                                return Ok(DfValue::None);
-                            }
-
-                            // Type errors are handled during expression lowering.
-                            let key = <&str>::try_from(key)?;
-
-                            let inner = match json {
-                                JsonValue::Array(array) => {
-                                    // NOTE: PostgreSQL ignores leading whitespace, and "+" prefix
-                                    // parsing is handled the same way in both Rust and PostgreSQL.
-                                    key.trim_start().parse::<isize>().ok().and_then(|index| {
-                                        crate::utils::index_bidirectional(array, index)
-                                    })
-                                }
-                                JsonValue::Object(object) => object.get(key),
-                                _ => None,
-                            };
-
-                            match inner {
-                                Some(inner) => json = inner,
-                                None => return Ok(DfValue::None),
-                            }
-                        }
-
-                        Ok(json.to_string().into())
+                        //
+                        // Type errors are also handled during expression lowering.
+                        json::json_extract_key_path(
+                            &left.to_json()?,
+                            // PostgreSQL docs state `text[]` but in practice it allows using
+                            // multi-dimensional arrays here.
+                            right.as_array()?.values(),
+                        )
                     }
 
                     JsonContains => {

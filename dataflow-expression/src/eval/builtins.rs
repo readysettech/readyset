@@ -590,6 +590,16 @@ impl BuiltinFunction {
                 .as_array()
                 .map(|array| DfValue::from(array.len()))
                 .ok_or_else(|| invalid_err!("cannot get array length of a non-array")),
+            BuiltinFunction::JsonExtractPath { json, keys } => {
+                let json = json.eval(record)?.to_json()?;
+
+                let keys = keys
+                    .iter()
+                    .map(|key| key.eval(record))
+                    .collect::<ReadySetResult<Vec<_>>>()?;
+
+                crate::eval::json::json_extract_key_path(&json, &keys)
+            }
             BuiltinFunction::Coalesce(arg1, rest_args) => {
                 let val1 = arg1.eval(record)?;
                 let rest_vals = rest_args
@@ -1806,6 +1816,47 @@ mod tests {
             test_identity("false");
             test_identity("null");
             test_identity("[null]");
+        }
+
+        fn json_extract_path() {
+            #[track_caller]
+            fn test(object: &str, keys: &str, expected: Option<&str>) {
+                for f in [
+                    "json_extract_path",
+                    "jsonb_extract_path",
+                    "json_extract_path_text",
+                    "jsonb_extract_path_text",
+                ] {
+                    let expr = format!("{f}('{object}', {keys})");
+                    assert_eq!(
+                        eval_expr(&expr, PostgreSQL),
+                        expected.into(),
+                        "incorrect result for for `{expr}`"
+                    );
+                }
+            }
+
+            let array = "[[\"world\", 123]]";
+
+            test(array, "'1'", None);
+            test(array, "null::text", None);
+
+            test(array, "'0', '0'", Some("\"world\""));
+            test(array, "'0', '1'", Some("123"));
+            test(array, "'0', '2'", None);
+            test(array, "'0', null::text", None);
+
+            let object = r#"{ "hello": ["world"], "abc": [123] }"#;
+
+            test(object, "null::text", None);
+            test(object, "'world'", None);
+
+            test(object, "'hello', '0'", Some("\"world\""));
+            test(object, "'hello', '1'", None);
+            test(object, "'hello', null::text", None);
+
+            test(object, "'abc'::char(3), '0'", Some("123"));
+            test(object, "'abc'::char(3), null::text", None);
         }
     }
 }

@@ -2,6 +2,8 @@ use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 use std::mem;
 
+use readyset_data::DfValue;
+use readyset_errors::ReadySetResult;
 use serde_json::{Number as JsonNumber, Value as JsonValue};
 
 type JsonObject = serde_json::Map<String, JsonValue>;
@@ -112,6 +114,51 @@ pub(crate) fn json_strip_nulls(json: &mut JsonValue) {
         }
         _ => {}
     }
+}
+
+/// Extracts the JSON value from a path of key/index strings and returns a textual [`DfValue`] on
+/// success.
+///
+/// Returns [`DfValue::None`] if the lookup fails or
+/// [`ReadySetError`](readyset_errors::ReadySetError) for non-string keys.
+///
+/// All key/index path extraction operations behave the same in PostgreSQL except for the return
+/// type, which is handled during expression lowering.
+pub(crate) fn json_extract_key_path<'k>(
+    mut json: &JsonValue,
+    keys: impl IntoIterator<Item = &'k DfValue>,
+) -> ReadySetResult<DfValue> {
+    // `json` is reassigned to inner fields while looping through keys.
+
+    for key in keys {
+        // Null keys are allowed but always fail lookup.
+        if key.is_none() {
+            return Ok(DfValue::None);
+        }
+
+        // Type errors are handled during expression lowering.
+        let key = <&str>::try_from(key)?;
+
+        let inner = match json {
+            JsonValue::Array(array) => {
+                // NOTE: PostgreSQL ignores leading whitespace, and "+" prefix parsing is handled
+                // the same way in both Rust and PostgreSQL.
+                key.trim_start()
+                    .parse::<isize>()
+                    .ok()
+                    .and_then(|index| crate::utils::index_bidirectional(array, index))
+            }
+            JsonValue::Object(object) => object.get(key),
+            _ => None,
+        };
+
+        match inner {
+            Some(inner) => json = inner,
+            None => return Ok(DfValue::None),
+        }
+    }
+
+    Ok(json.to_string().into())
 }
 
 // `JsonNumber` does not handle -0.0 when `arbitrary_precision` is enabled, so we special case it
