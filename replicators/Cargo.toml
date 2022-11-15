@@ -44,6 +44,7 @@ test-utils = { path = "../test-utils" }
 failpoint-macros = { path = "../failpoint-macros" }
 readyset-sql-passes = { path = "../readyset-sql-passes" }
 readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter" }
+deadpool-postgres = "0.10.3"
 
 [dev-dependencies]
 readyset-server = { path = "../readyset-server" }

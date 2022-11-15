@@ -292,7 +292,7 @@ impl DatabaseURL {
         }
     }
 
-    /// Returns the underlying database nname.
+    /// Returns the underlying database name.
     pub fn db_name(&self) -> Option<&str> {
         match self {
             DatabaseURL::MySQL(opts) => opts.db_name(),
