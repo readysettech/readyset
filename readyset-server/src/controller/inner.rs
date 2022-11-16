@@ -14,6 +14,7 @@ use std::time::Duration;
 use database_utils::UpstreamConfig;
 use failpoint_macros::failpoint;
 use hyper::Method;
+use launchpad::futures::abort_on_panic;
 use readyset::consensus::Authority;
 use readyset::internal::ReplicaAddress;
 use readyset::recipe::ExtendRecipeSpec;
@@ -108,7 +109,12 @@ impl Leader {
         let authority = Arc::clone(&self.authority);
         let replicator_restart_timeout = self.replicator_config.replicator_restart_timeout;
         let config = self.replicator_config.clone();
-        self.replicator_task = Some(tokio::spawn(async move {
+
+        // The replication task ideally won't panic, but if it does and we arent replicating, that
+        // will mean the data we return, will be more and more stale, and the transaction logs on
+        // the upstream will be filling up disk
+        // So, we abort on any panic of the replicator task.
+        self.replicator_task = Some(tokio::spawn(abort_on_panic(async move {
             loop {
                 let noria: readyset::ReadySetHandle =
                     readyset::ReadySetHandle::new(Arc::clone(&authority)).await;
@@ -139,7 +145,7 @@ impl Leader {
                     }
                 }
             }
-        }));
+        })));
     }
 
     #[failpoint("controller-request")]
