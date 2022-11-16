@@ -174,6 +174,12 @@ impl Expr {
                         // PostgreSQL docs state `text[]` but in practice it allows using
                         // multi-dimensional arrays here.
                         for key in keys.values() {
+                            // Null keys are allowed but always fail lookup.
+                            if key.is_none() {
+                                return Ok(DfValue::None);
+                            }
+
+                            // Type errors are handled during expression lowering.
                             let key = <&str>::try_from(key)?;
 
                             let inner = match json {
@@ -1016,16 +1022,26 @@ mod tests {
         }
 
         let array = "[[\"world\", 123]]";
+
+        test(array, "array['1']", None);
+        test(array, "array[null::text]", None);
+
         test(array, "array['0', '0']", Some("\"world\""));
         test(array, "array['0', '1']", Some("123"));
-        test(array, "array['1']", None);
         test(array, "array['0', '2']", None);
+        test(array, "array['0', null::text]", None);
 
         let object = r#"{ "hello": ["world"], "abc": [123] }"#;
-        test(object, "array['hello', '0']", Some("\"world\""));
-        test(object, "array['abc'::char(3), '0']", Some("123"));
+
+        test(object, "array[null::text]", None);
         test(object, "array['world']", None);
+
+        test(object, "array['hello', '0']", Some("\"world\""));
         test(object, "array['hello', '1']", None);
+        test(object, "array['hello', null::text]", None);
+
+        test(object, "array['abc'::char(3), '0']", Some("123"));
+        test(object, "array['abc'::char(3), null::text]", None);
     }
 
     /// Tests evaluation of `JsonContains` and `JsonContainedIn` binary ops.
