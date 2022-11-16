@@ -49,6 +49,8 @@ pub enum BuiltinFunction {
     Round(Expr, Expr),
     /// [`json[b]_typeof`](https://www.postgresql.org/docs/current/functions-json.html)
     JsonTypeof(Expr),
+    /// [`json[b]_array_length`](https://www.postgresql.org/docs/current/functions-json.html)
+    JsonArrayLength(Expr),
     /// [`coalesce`](https://www.postgresql.org/docs/current/functions-conditional.html#FUNCTIONS-COALESCE-NVL-IFNULL)
     Coalesce(Expr, Vec<Expr>),
     /// [`concat`](https://dev.mysql.com/doc/refman/8.0/en/string-functions.html#function_concat)
@@ -99,6 +101,7 @@ impl BuiltinFunction {
             DateFormat { .. } => "date_format",
             Round { .. } => "round",
             JsonTypeof { .. } => "json_typeof",
+            JsonArrayLength { .. } => "json_array_length",
             Coalesce { .. } => "coalesce",
             Concat { .. } => "concat",
             Substring { .. } => "substring",
@@ -143,7 +146,7 @@ impl fmt::Display for BuiltinFunction {
             Round(arg1, precision) => {
                 write!(f, "({}, {})", arg1, precision)
             }
-            JsonTypeof(arg) => {
+            JsonTypeof(arg) | JsonArrayLength(arg) => {
                 write!(f, "({})", arg)
             }
             Coalesce(arg1, args) => {

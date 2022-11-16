@@ -580,6 +580,18 @@ impl BuiltinFunction {
                 let json = non_null!(expr.eval(record)?).to_json()?;
                 Ok(get_json_value_type(&json).into())
             }
+            BuiltinFunction::JsonArrayLength(expr) => {
+                let value = expr.eval(record)?;
+                if value.is_none() {
+                    return Ok(DfValue::None);
+                }
+
+                value
+                    .to_json()?
+                    .as_array()
+                    .map(|array| DfValue::from(array.len()))
+                    .ok_or_else(|| invalid_err!("cannot get array length of a non-array"))
+            }
             BuiltinFunction::Coalesce(arg1, rest_args) => {
                 let val1 = arg1.eval(record)?;
                 let rest_vals = rest_args
@@ -1723,5 +1735,31 @@ mod tests {
             date_format("2002-01-01 12:15:45.123456", "%D %H %I %k %l %r %S %T %X"),
             "1st 12 12 12 12 12:15:45 PM 45 12:15:45 2001".into()
         );
+    }
+
+    mod json {
+        use super::*;
+
+        #[test]
+        fn json_array_length() {
+            #[track_caller]
+            fn test(json_expr: &str, expected: Option<usize>) {
+                for expr in [
+                    format!("json_array_length({json_expr})"),
+                    format!("jsonb_array_length({json_expr})"),
+                ] {
+                    assert_eq!(
+                        eval_expr(&expr, PostgreSQL),
+                        expected.into(),
+                        "incorrect result for for `{expr}`"
+                    );
+                }
+            }
+
+            test("null", None);
+            test("'[]'", Some(0));
+            test("'[1]'", Some(1));
+            test("'[1, 2, 3]'", Some(3));
+        }
     }
 }

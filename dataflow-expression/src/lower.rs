@@ -215,6 +215,9 @@ impl BuiltinFunction {
                 // Always returns text containing the JSON type.
                 DfType::DEFAULT_TEXT,
             ),
+            "json_array_length" | "jsonb_array_length" => {
+                (Self::JsonArrayLength(next_arg()?), DfType::Int)
+            }
             "coalesce" => {
                 let arg1 = next_arg()?;
                 let ty = arg1.ty().clone();
