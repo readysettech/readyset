@@ -48,14 +48,7 @@ impl<'schema> ExpandImpliedTablesVisitor<'schema> {
                     .iter()
                     .map(|(n, fs)| (Relation::from(n.clone()), fs)),
             )
-            .filter_map(|(t, ws)| {
-                if self.tables.is_empty() {
-                    Some(t)
-                } else {
-                    self.tables.get(&t).cloned()
-                }
-                .map(|t| (t, ws))
-            })
+            .filter_map(|(t, ws)| self.tables.get(&t).cloned().map(|t| (t, ws)))
             .filter_map(|(t, ws)| {
                 let num_matching = ws.iter().filter(|c| **c == column_name).count();
                 assert!(num_matching <= 1);
