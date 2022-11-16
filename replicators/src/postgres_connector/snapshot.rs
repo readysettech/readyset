@@ -296,6 +296,7 @@ impl TableEntry {
             LEFT JOIN pg_catalog.pg_type member_t ON t.typelem = member_t.oid
             LEFT JOIN pg_catalog.pg_namespace member_tn ON member_t.typnamespace = member_tn.oid
             WHERE a.attrelid = $1 AND a.attnum > 0 AND NOT a.attisdropped
+            ORDER BY a.attnum
             "#;
 
         let columns = transaction.query(query, &[&oid]).await?;
