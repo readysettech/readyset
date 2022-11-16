@@ -218,6 +218,8 @@ impl BuiltinFunction {
             "json_array_length" | "jsonb_array_length" => {
                 (Self::JsonArrayLength(next_arg()?), DfType::Int)
             }
+            "json_strip_nulls" => (Self::JsonStripNulls(next_arg()?), DfType::Json),
+            "jsonb_strip_nulls" => (Self::JsonStripNulls(next_arg()?), DfType::Jsonb),
             "coalesce" => {
                 let arg1 = next_arg()?;
                 let ty = arg1.ty().clone();

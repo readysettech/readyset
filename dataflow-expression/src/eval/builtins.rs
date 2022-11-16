@@ -580,18 +580,16 @@ impl BuiltinFunction {
                 let json = non_null!(expr.eval(record)?).to_json()?;
                 Ok(get_json_value_type(&json).into())
             }
-            BuiltinFunction::JsonArrayLength(expr) => {
-                let value = expr.eval(record)?;
-                if value.is_none() {
-                    return Ok(DfValue::None);
-                }
-
-                value
-                    .to_json()?
-                    .as_array()
-                    .map(|array| DfValue::from(array.len()))
-                    .ok_or_else(|| invalid_err!("cannot get array length of a non-array"))
+            BuiltinFunction::JsonStripNulls(expr) => {
+                let mut json = non_null!(expr.eval(record)?).to_json()?;
+                crate::eval::json::json_strip_nulls(&mut json);
+                Ok(serde_json::to_string(&json)?.into())
             }
+            BuiltinFunction::JsonArrayLength(expr) => non_null!(expr.eval(record)?)
+                .to_json()?
+                .as_array()
+                .map(|array| DfValue::from(array.len()))
+                .ok_or_else(|| invalid_err!("cannot get array length of a non-array")),
             BuiltinFunction::Coalesce(arg1, rest_args) => {
                 let val1 = arg1.eval(record)?;
                 let rest_vals = rest_args
@@ -1760,6 +1758,54 @@ mod tests {
             test("'[]'", Some(0));
             test("'[1]'", Some(1));
             test("'[1, 2, 3]'", Some(3));
+        }
+
+        #[test]
+        fn json_strip_nulls() {
+            #[track_caller]
+            fn test(json_expr: &str, expected: Option<&str>) {
+                // Normalize formatting and convert.
+                let expected = expected
+                    .map(|s| s.parse::<serde_json::Value>().unwrap().to_string())
+                    .map(DfValue::from)
+                    .unwrap_or_default();
+
+                for expr in [
+                    format!("json_strip_nulls({json_expr})"),
+                    format!("jsonb_strip_nulls({json_expr})"),
+                ] {
+                    assert_eq!(
+                        eval_expr(&expr, PostgreSQL),
+                        expected,
+                        "incorrect result for for `{expr}`"
+                    );
+                }
+            }
+
+            test(r#"'{ "abc" : 1, "xyz": null }'"#, Some(r#"{ "abc": 1 }"#));
+            test(
+                r#"'[{ "abc" : 1, "xyz": null }]'"#,
+                Some(r#"[{ "abc": 1 }]"#),
+            );
+            test(
+                r#"'[{ "abc" : 1, "xyz": [{ "123": null }] }]'"#,
+                Some(r#"[{ "abc" : 1, "xyz": [{}] }]"#),
+            );
+            test("null", None);
+
+            #[track_caller]
+            fn test_identity(json: &str) {
+                test(&format!("'{json}'"), Some(json));
+            }
+
+            test_identity("{}");
+            test_identity("[]");
+            test_identity("1");
+            test_identity("2.0");
+            test_identity("true");
+            test_identity("false");
+            test_identity("null");
+            test_identity("[null]");
         }
     }
 }

@@ -101,6 +101,19 @@ pub(crate) fn json_contains(parent: &JsonValue, child: &JsonValue) -> bool {
     }
 }
 
+/// Deletes all object fields that have null values from the given JSON value, recursively. Null
+/// values that are not object fields are untouched.
+pub(crate) fn json_strip_nulls(json: &mut JsonValue) {
+    match json {
+        JsonValue::Array(array) => array.iter_mut().for_each(json_strip_nulls),
+        JsonValue::Object(object) => {
+            object.retain(|_, v| !v.is_null());
+            object.values_mut().for_each(json_strip_nulls);
+        }
+        _ => {}
+    }
+}
+
 // `JsonNumber` does not handle -0.0 when `arbitrary_precision` is enabled, so we special case it
 // via our own equality and hashing implementations.
 //
