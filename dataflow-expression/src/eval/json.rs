@@ -13,7 +13,7 @@ type JsonObject = serde_json::Map<String, JsonValue>;
 ///
 /// Arrays are treated like sets. `parent` may store more values than `child`, and duplicate values
 /// are allowed. See the [PostgreSQL docs for containment rules](https://www.postgresql.org/docs/current/datatype-json.html#JSON-CONTAINMENT).
-pub fn json_contains(parent: &JsonValue, child: &JsonValue) -> bool {
+pub(crate) fn json_contains(parent: &JsonValue, child: &JsonValue) -> bool {
     // FIXME(ENG-2080): `serde_json::Number` does not compare exponents and decimals correctly when
     // `arbitrary_precision` is enabled.
     return json_contains_impl(parent, child, true);
