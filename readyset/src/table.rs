@@ -629,11 +629,11 @@ impl Service<TableRequest> for Table {
 
     fn call(&mut self, req: TableRequest) -> Self::Future {
         // TODO(eta): error handling impl adds overhead
-        let tn = self.table_name.to_owned();
+        let (schema, name) = (self.table_name.schema.clone(), self.table_name.name.clone());
         match req {
             TableRequest::TableOperations(ops) => match self.prep_records(ops) {
                 Ok(i) => future::Either::Left(future::Either::Left(
-                    self.input(i).map_err(|e| table_err(tn, e)),
+                    self.input(i).map_err(|e| table_err(schema, name, e)),
                 )),
                 Err(e) => future::Either::Left(future::Either::Right(async move { Err(e) })),
             },
@@ -643,7 +643,7 @@ impl Service<TableRequest> for Table {
                     data: PacketPayload::Timestamp(t),
                     trace: None,
                 };
-                future::Either::Right(self.timestamp(p).map_err(|e| table_err(tn, e)))
+                future::Either::Right(self.timestamp(p).map_err(|e| table_err(schema, name, e)))
             }
         }
     }
@@ -886,10 +886,12 @@ impl Table {
             match update.get_mut(coli) {
                 Some(elem) => *elem = m,
                 None => {
+                    let table = self.table_name();
                     return Err(table_err(
-                        self.table_name(),
+                        table.schema.clone(),
+                        table.name.clone(),
                         ReadySetError::WrongColumnCount(self.columns.len(), coli + 1),
-                    ))
+                    ));
                 }
             }
         }
@@ -921,10 +923,12 @@ impl Table {
             match set.get_mut(coli) {
                 Some(elem) => *elem = m,
                 None => {
+                    let table = self.table_name();
                     return Err(table_err(
-                        self.table_name(),
+                        table.schema.clone(),
+                        table.name.clone(),
                         ReadySetError::WrongColumnCount(self.columns.len(), coli + 1),
-                    ))
+                    ));
                 }
             }
         }

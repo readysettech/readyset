@@ -333,6 +333,7 @@ impl TableEntry {
             .await
             .map_err(|e| {
                 ReadySetError::TableError {
+                    schema: self.schema.clone(),
                     name: self.name.clone(),
                     source: Box::new(e),
                 }
@@ -342,6 +343,7 @@ impl TableEntry {
             .await
             .map_err(|e| {
                 ReadySetError::TableError {
+                    schema: self.schema.clone(),
                     name: self.name.clone(),
                     source: Box::new(ReadySetError::ReplicationFailed(e.to_string())),
                 }

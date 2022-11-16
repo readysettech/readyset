@@ -315,8 +315,10 @@ pub enum ReadySetError {
     },
 
     /// Manipulating a base table failed.
-    #[error("Failed to manipulate table {name}: {source}")]
+    #[error("Failed to manipulate table {schema}.{name}: {source}")]
     TableError {
+        /// The schema of the base table being manipulated.
+        schema: String,
         /// The name of the base table being manipulated.
         name: String,
         /// The underlying error that occurred while manipulating the table.
@@ -972,8 +974,17 @@ pub fn view_err<A: Into<NodeIndex>, B: Into<ReadySetError>>(idx: A, err: B) -> R
 }
 
 /// Make a new `ReadySetError::TableError` with the provided `name` and `err` values.
-pub fn table_err<A: ToString, B: Into<ReadySetError>>(name: A, err: B) -> ReadySetError {
+pub fn table_err<A: ToString, B: ToString, C: Into<ReadySetError>>(
+    schema: Option<A>,
+    name: B,
+    err: C,
+) -> ReadySetError {
+    let schema = match schema {
+        Some(schema) => schema.to_string(),
+        None => "default".to_string(),
+    };
     ReadySetError::TableError {
+        schema,
         name: name.to_string(),
         source: Box::new(err.into()),
     }
