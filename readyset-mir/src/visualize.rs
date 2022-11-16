@@ -57,6 +57,12 @@ impl<'a> GraphViz for MirQuery<'a> {
         //  but it's not very configurable and the resulting graph is harder
         //  to read than ours. So, for now, we'll stick to our current implementation.
 
+        let mut edge_count = 0usize;
+        let mut get_edge_name = || {
+            let name = format!("edge_{}", edge_count);
+            edge_count += 1;
+            name
+        };
         f.write_str("digraph {\n")?;
         f.write_str("node [shape=record, fontsize=10]\n")?;
 
@@ -90,7 +96,15 @@ impl<'a> GraphViz for MirQuery<'a> {
                 if !self.graph[child].is_owned_by(self.name()) {
                     continue;
                 }
-                writeln!(f, "{} -> {}", n.index(), child.index(),)?;
+                let edge_name = get_edge_name();
+                writeln!(
+                    f,
+                    "{} [label = \"{}\", shape = diamond]",
+                    edge_name,
+                    edge.weight()
+                )?;
+                writeln!(f, "{} -> {} [ arrowhead=none ]", n.index(), edge_name,)?;
+                writeln!(f, "{} -> {}", edge_name, child.index(),)?;
             }
         }
         f.write_str("}\n")
