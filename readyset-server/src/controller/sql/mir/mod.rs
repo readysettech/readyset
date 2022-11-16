@@ -522,7 +522,6 @@ impl SqlToMirConverter {
                     .collect(),
                 primary_key,
                 unique_keys,
-                adapted_over: None,
             },
         );
         let ni = self.mir_graph.add_node(node);

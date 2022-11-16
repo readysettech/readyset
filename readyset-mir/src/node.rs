@@ -2,13 +2,13 @@ use std::collections::HashSet;
 use std::fmt::{Debug, Display, Error, Formatter};
 
 use dataflow::ops;
-use nom_sql::{ColumnSpecification, Relation};
+use nom_sql::Relation;
 use petgraph::stable_graph::NodeIndex;
 use readyset_errors::{internal_err, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
 pub use self::node_inner::MirNodeInner;
-use crate::{FlowNode, MirNodeRef};
+use crate::FlowNode;
 
 pub mod node_inner;
 
@@ -98,16 +98,6 @@ impl MirNode {
     }
 }
 
-/// Specifies the adapatation of an existing base node by column addition/removal.
-/// `over` is a `MirNode` of type `Base`.
-// TODO(fran): Remove.
-#[derive(Clone, Serialize, Deserialize)]
-pub struct BaseNodeAdaptation {
-    pub over: MirNodeRef,
-    pub columns_added: Vec<ColumnSpecification>,
-    pub columns_removed: Vec<ColumnSpecification>,
-}
-
 impl Display for MirNode {
     fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
         write!(
@@ -129,7 +119,7 @@ mod tests {
         use dataflow::ops::grouped::aggregate::Aggregation;
         use dataflow::ops::grouped::extremum::Extremum;
         use dataflow::ops::union::DuplicateMode;
-        use nom_sql::{BinaryOperator, Expr, OrderType, SqlType};
+        use nom_sql::{BinaryOperator, ColumnSpecification, Expr, OrderType, SqlType};
         use readyset::ViewPlaceholder;
 
         use super::*;
@@ -162,7 +152,6 @@ mod tests {
                     ],
                     primary_key: None,
                     unique_keys: vec![].into(),
-                    adapted_over: None,
                 },
             ))
         }
@@ -193,7 +182,6 @@ mod tests {
                     ],
                     primary_key: None,
                     unique_keys: vec![].into(),
-                    adapted_over: None,
                 },
             ))
         }
@@ -580,7 +568,6 @@ mod tests {
                     column_specs: vec![cspec("c1"), cspec("c2"), cspec("c3")],
                     primary_key: Some([Column::from("c1")].into()),
                     unique_keys: Default::default(),
-                    adapted_over: None,
                 },
                 flow_node: None,
             });
@@ -628,7 +615,6 @@ mod tests {
                     column_specs: vec![cspec("c1"), cspec("c2"), cspec("c3")],
                     primary_key: Some([Column::from("c1")].into()),
                     unique_keys: Default::default(),
-                    adapted_over: None,
                 },
                 flow_node: None,
             });
@@ -670,7 +656,6 @@ mod tests {
                     column_specs: vec![cspec("c1")],
                     primary_key: Some([Column::from("c1")].into()),
                     unique_keys: Default::default(),
-                    adapted_over: None,
                 },
                 flow_node: None,
             });

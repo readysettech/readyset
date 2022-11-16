@@ -11,7 +11,6 @@ use readyset::ViewPlaceholder;
 use readyset_errors::{internal, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
-use crate::node::BaseNodeAdaptation;
 use crate::Column;
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -43,7 +42,6 @@ pub enum MirNodeInner {
         column_specs: Vec<(ColumnSpecification, Option<usize>)>,
         primary_key: Option<Box<[Column]>>,
         unique_keys: Box<[Box<[Column]>]>,
-        adapted_over: Option<BaseNodeAdaptation>,
     },
     /// Node that computes the extreme value (minimum or maximum) of a column grouped by another
     /// set of columns, outputting its result as an additional column.

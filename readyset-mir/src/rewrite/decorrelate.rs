@@ -349,7 +349,6 @@ mod tests {
                 )],
                 primary_key: Some([Column::new(Some("t2"), "a")].into()),
                 unique_keys: Default::default(),
-                adapted_over: None,
             },
         ));
         graph[t2].add_owner(query_name.clone());
@@ -439,7 +438,6 @@ mod tests {
                 )],
                 primary_key: Some([Column::from("a")].into()),
                 unique_keys: Default::default(),
-                adapted_over: None,
             },
         ));
         graph[t1].add_owner(query_name.clone());
@@ -565,7 +563,6 @@ mod tests {
                 ],
                 primary_key: Some([Column::new(Some("t2"), "a")].into()),
                 unique_keys: Default::default(),
-                adapted_over: None,
             },
         ));
         graph[t2].add_owner(query_name.clone());
@@ -690,7 +687,6 @@ mod tests {
                 )],
                 primary_key: Some([Column::from("a")].into()),
                 unique_keys: Default::default(),
-                adapted_over: None,
             },
         ));
         graph[t1].add_owner(query_name.clone());
