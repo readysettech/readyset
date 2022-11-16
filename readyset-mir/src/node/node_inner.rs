@@ -1,4 +1,4 @@
-use std::fmt::{self, Debug, Formatter};
+use std::fmt::Debug;
 
 use common::{DfValue, IndexType};
 use dataflow::ops::grouped::aggregate::Aggregation;
@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::Column;
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum MirNodeInner {
     /// Node that computes an aggregate function on a column grouped by another set of columns,
     /// outputting its result as an additional column.
@@ -257,10 +257,6 @@ impl MirNodeInner {
         }
     }
 
-    pub(crate) fn description(&self) -> String {
-        format!("{:?}", self)
-    }
-
     /// Attempt to add the given column to the set of columns projected by this node.
     ///
     /// If this node is not a node that has control over the columns it projects (such as a filter
@@ -321,10 +317,8 @@ impl MirNodeInner {
     pub fn is_dependent_join(&self) -> bool {
         matches!(self, Self::DependentJoin { .. })
     }
-}
 
-impl Debug for MirNodeInner {
-    fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
+    pub(crate) fn description(&self) -> String {
         match self {
             MirNodeInner::Aggregation {
                 ref on,
@@ -345,14 +339,13 @@ impl Debug for MirNodeInner {
                     .map(|c| c.name.as_str())
                     .collect::<Vec<_>>()
                     .join(", ");
-                write!(f, "{} γ[{}]", op_string, group_cols)
+                format!("{} γ[{}]", op_string, group_cols)
             }
             MirNodeInner::Base {
                 column_specs,
                 unique_keys,
                 ..
-            } => write!(
-                f,
+            } => format!(
                 "B [{}; ⚷: {}]",
                 column_specs
                     .iter()
@@ -383,12 +376,12 @@ impl Debug for MirNodeInner {
                     .map(|c| c.name.as_str())
                     .collect::<Vec<_>>()
                     .join(", ");
-                write!(f, "{} γ[{}]", op_string, group_cols)
+                format!("{} γ[{}]", op_string, group_cols)
             }
             MirNodeInner::Filter { ref conditions, .. } => {
-                write!(f, "σ[{}]", conditions)
+                format!("σ[{}]", conditions)
             }
-            MirNodeInner::Identity => write!(f, "≡"),
+            MirNodeInner::Identity => "≡".to_string(),
             MirNodeInner::Join {
                 ref on,
                 ref project,
@@ -399,8 +392,7 @@ impl Debug for MirNodeInner {
                     .map(|(l, r)| format!("{}:{}", l.name, r.name))
                     .collect::<Vec<_>>()
                     .join(", ");
-                write!(
-                    f,
+                format!(
                     "⋈ [{} on {}]",
                     project
                         .iter()
@@ -410,16 +402,14 @@ impl Debug for MirNodeInner {
                     jc
                 )
             }
-            MirNodeInner::JoinAggregates => {
-                write!(f, "AGG ⋈")
-            }
+            MirNodeInner::JoinAggregates => "AGG ⋈".to_string(),
             MirNodeInner::Leaf { ref keys, .. } => {
                 let key_cols = keys
                     .iter()
                     .map(|(column, _)| column.name.clone())
                     .collect::<Vec<_>>()
                     .join(", ");
-                write!(f, "Leaf [⚷: {}]", key_cols)
+                format!("Leaf [⚷: {}]", key_cols)
             }
             MirNodeInner::LeftJoin {
                 ref on,
@@ -431,8 +421,7 @@ impl Debug for MirNodeInner {
                     .map(|(l, r)| format!("{}:{}", l.name, r.name))
                     .collect::<Vec<_>>()
                     .join(", ");
-                write!(
-                    f,
+                format!(
                     "⋉ [{} on {}]",
                     project
                         .iter()
@@ -447,8 +436,7 @@ impl Debug for MirNodeInner {
                 ref project,
                 ..
             } => {
-                write!(
-                    f,
+                format!(
                     "⧑ | {} on: {}",
                     project.iter().map(|c| &c.name).join(", "),
                     on.iter()
@@ -462,14 +450,13 @@ impl Debug for MirNodeInner {
                     .map(|k| k.name.clone())
                     .collect::<Vec<_>>()
                     .join(", ");
-                write!(f, "⧖ γ[{}]", key_cols)
+                format!("⧖ γ[{}]", key_cols)
             }
             MirNodeInner::Project {
                 ref emit,
                 ref literals,
                 ref expressions,
-            } => write!(
-                f,
+            } => format!(
                 "π [{}]",
                 emit.iter()
                     .map(|c| c.name.clone())
@@ -492,21 +479,21 @@ impl Debug for MirNodeInner {
                     .map(|k| k.name.clone())
                     .collect::<Vec<_>>()
                     .join(", ");
-                write!(f, "Distinct [γ: {}]", key_cols)
+                format!("Distinct [γ: {}]", key_cols)
             }
             MirNodeInner::Paginate {
                 ref order,
                 ref limit,
                 ..
             } => {
-                write!(f, "Paginate [limit: {}, {:?}]", limit, order)
+                format!("Paginate [limit: {}, {:?}]", limit, order)
             }
             MirNodeInner::TopK {
                 ref order,
                 ref limit,
                 ..
             } => {
-                write!(f, "TopK [k: {}, {:?}]", limit, order)
+                format!("TopK [k: {}, {:?}]", limit, order)
             }
             MirNodeInner::Union {
                 ref emit,
@@ -516,20 +503,17 @@ impl Debug for MirNodeInner {
                     union::DuplicateMode::BagUnion => '⊎',
                     union::DuplicateMode::UnionAll => '⋃',
                 };
-                let cols = emit
-                    .iter()
+                emit.iter()
                     .map(|c| {
                         c.iter()
                             .map(|e| e.name.clone())
                             .collect::<Vec<_>>()
                             .join(", ")
                     })
-                    .join(&format!(" {} ", symbol));
-
-                write!(f, "{}", cols)
+                    .join(&format!(" {} ", symbol))
             }
             MirNodeInner::AliasTable { ref table } => {
-                write!(f, "AliasTable [{}]", table)
+                format!("AliasTable [{}]", table)
             }
         }
     }
