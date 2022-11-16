@@ -1,0 +1,24 @@
+statement ok
+CREATE TABLE IF NOT EXISTS `sb_banlog` (
+  `sid` int(6) NOT NULL,
+  `time` int(11) NOT NULL,
+  `name` varchar(128) NOT NULL,
+  `bid` int(6) NOT NULL,
+  PRIMARY KEY  (`sid`,`time`,`bid`)
+);
+
+statement ok
+CREATE TABLE IF NOT EXISTS `sb_servers` (
+  `sid` int(6) NOT NULL auto_increment,
+  `ip` varchar(64) NOT NULL,
+  `port` int(5) NOT NULL,
+  `rcon` varchar(64) NOT NULL,
+  `modid` int(10) NOT NULL,
+  `enabled` TINYINT NOT NULL DEFAULT '1',
+  PRIMARY KEY  (`sid`),
+  UNIQUE KEY `ip` (`ip`,`port`)
+);
+
+statement ok
+create cache from
+SELECT bl.time, bl.name, s.ip, s.port FROM sb_banlog AS bl LEFT JOIN sb_servers AS s ON (s.sid = bl.sid) WHERE (bid = $1)

@@ -22,9 +22,15 @@ pub trait ImpliedTableExpansion: Sized {
 
 #[derive(Debug)]
 struct ExpandImpliedTablesVisitor<'schema> {
+    /// Map from table name to list of fields for all tables in the db
     schema: &'schema HashMap<Relation, Vec<SqlIdentifier>>,
+    /// Map from aliases for subqueries that are in scope, to a list of that subquery's projected
+    /// fields
     subquery_schemas: HashMap<SqlIdentifier, Vec<SqlIdentifier>>,
-    tables: HashSet<Relation>,
+    /// All the tables which are currently in scope for the query, represented as a map from the
+    /// name of the table to its alias (or name, if unaliased)
+    tables: HashMap<Relation, Relation>,
+    /// The set of aliases for projected fields that are currently in-scope
     aliases: HashSet<SqlIdentifier>,
     // Are we currently in a position in the query that can reference aliases in the projected
     // field list?
@@ -42,7 +48,14 @@ impl<'schema> ExpandImpliedTablesVisitor<'schema> {
                     .iter()
                     .map(|(n, fs)| (Relation::from(n.clone()), fs)),
             )
-            .filter(|(t, _)| self.tables.is_empty() || self.tables.contains(t))
+            .filter_map(|(t, ws)| {
+                if self.tables.is_empty() {
+                    Some(t)
+                } else {
+                    self.tables.get(&t).cloned()
+                }
+                .map(|t| (t, ws))
+            })
             .filter_map(|(t, ws)| {
                 let num_matching = ws.iter().filter(|c| **c == column_name).count();
                 assert!(num_matching <= 1);
@@ -84,13 +97,16 @@ impl<'ast, 'schema> VisitorMut<'ast> for ExpandImpliedTablesVisitor<'schema> {
             &mut self.tables,
             outermost_table_exprs(select_statement)
                 .map(|tbl| {
-                    tbl.alias
-                        .clone()
-                        .map(Relation::from)
-                        .unwrap_or_else(|| tbl.table.clone())
+                    (
+                        tbl.table.clone(),
+                        tbl.alias
+                            .clone()
+                            .map(Relation::from)
+                            .unwrap_or_else(|| tbl.table.clone()),
+                    )
                 })
                 .chain(select_statement.join.iter().filter_map(|j| match &j.right {
-                    JoinRightSide::NestedSelect(_, alias) => Some(alias.into()),
+                    JoinRightSide::NestedSelect(_, alias) => Some((alias.into(), alias.into())),
                     _ => None,
                 }))
                 .collect(),
@@ -157,7 +173,8 @@ impl<'ast, 'schema> VisitorMut<'ast> for ExpandImpliedTablesVisitor<'schema> {
             let matches = self
                 .tables
                 .iter()
-                .filter(|t| t.name == table.name)
+                .filter(|(t, _alias)| t.name == table.name)
+                .map(|(_t, alias)| alias)
                 .collect::<Vec<_>>();
 
             if matches.len() > 1 {
@@ -509,6 +526,50 @@ Dialect::MySQL,
             ),
         ]
         .into();
+        let res = orig.expand_implied_tables(&schema).unwrap();
+        assert_eq!(res, expected, "\n left: {res}\nright: {expected}");
+    }
+
+    #[test]
+    fn column_referencing_aliased_table() {
+        let orig = parse_query(
+            Dialect::MySQL,
+            "SELECT bl.time, bl.name, s.ip, s.port
+             FROM sb_banlog AS bl
+             LEFT JOIN sb_servers AS s
+             ON (s.sid = bl.sid)
+             WHERE (bid = $1)",
+        )
+        .unwrap();
+        let expected = parse_query(
+            Dialect::MySQL,
+            "SELECT bl.time, bl.name, s.ip, s.port
+             FROM sb_banlog AS bl
+             LEFT JOIN sb_servers AS s
+             ON (s.sid = bl.sid)
+             WHERE (bl.bid = $1)",
+        )
+        .unwrap();
+
+        let schema = [
+            (
+                Relation::from("sb_banlog"),
+                vec!["sid".into(), "time".into(), "name".into(), "bid".into()],
+            ),
+            (
+                Relation::from("sb_servers"),
+                vec![
+                    "sid".into(),
+                    "ip".into(),
+                    "port".into(),
+                    "rcon".into(),
+                    "modid".into(),
+                    "enabled".into(),
+                ],
+            ),
+        ]
+        .into();
+
         let res = orig.expand_implied_tables(&schema).unwrap();
         assert_eq!(res, expected, "\n left: {res}\nright: {expected}");
     }
