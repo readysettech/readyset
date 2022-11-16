@@ -131,24 +131,18 @@ mod tests {
                 "base".into(),
                 MirNodeInner::Base {
                     column_specs: vec![
-                        (
-                            ColumnSpecification {
-                                column: "base.a".into(),
-                                sql_type: SqlType::Int(None),
-                                constraints: vec![],
-                                comment: None,
-                            },
-                            None,
-                        ),
-                        (
-                            ColumnSpecification {
-                                column: "base.b".into(),
-                                sql_type: SqlType::Int(None),
-                                constraints: vec![],
-                                comment: None,
-                            },
-                            None,
-                        ),
+                        ColumnSpecification {
+                            column: "base.a".into(),
+                            sql_type: SqlType::Int(None),
+                            constraints: vec![],
+                            comment: None,
+                        },
+                        ColumnSpecification {
+                            column: "base.b".into(),
+                            sql_type: SqlType::Int(None),
+                            constraints: vec![],
+                            comment: None,
+                        },
                     ],
                     primary_key: None,
                     unique_keys: vec![].into(),
@@ -161,24 +155,18 @@ mod tests {
                 "base2".into(),
                 MirNodeInner::Base {
                     column_specs: vec![
-                        (
-                            ColumnSpecification {
-                                column: "base2.a".into(),
-                                sql_type: SqlType::Int(None),
-                                constraints: vec![],
-                                comment: None,
-                            },
-                            None,
-                        ),
-                        (
-                            ColumnSpecification {
-                                column: "base2.b".into(),
-                                sql_type: SqlType::Int(None),
-                                constraints: vec![],
-                                comment: None,
-                            },
-                            None,
-                        ),
+                        ColumnSpecification {
+                            column: "base2.a".into(),
+                            sql_type: SqlType::Int(None),
+                            constraints: vec![],
+                            comment: None,
+                        },
+                        ColumnSpecification {
+                            column: "base2.b".into(),
+                            sql_type: SqlType::Int(None),
+                            constraints: vec![],
+                            comment: None,
+                        },
                     ],
                     primary_key: None,
                     unique_keys: vec![].into(),
@@ -553,11 +541,8 @@ mod tests {
         // parent column with the same name
         #[test]
         fn with_no_alias() {
-            let cspec = |n: &str| -> (ColumnSpecification, Option<usize>) {
-                (
-                    ColumnSpecification::new(nom_sql::Column::from(n), SqlType::Text),
-                    None,
-                )
+            let cspec = |n: &str| -> ColumnSpecification {
+                ColumnSpecification::new(nom_sql::Column::from(n), SqlType::Text)
             };
 
             let mut graph = MirGraph::new();
@@ -594,16 +579,13 @@ mod tests {
                 }],
             };
 
-            let cspec = |n: &str| -> (ColumnSpecification, Option<usize>) {
-                (
-                    ColumnSpecification::new(
-                        nom_sql::Column {
-                            name: n.into(),
-                            table: Some("table".into()),
-                        },
-                        SqlType::Text,
-                    ),
-                    None,
+            let cspec = |n: &str| -> ColumnSpecification {
+                ColumnSpecification::new(
+                    nom_sql::Column {
+                        name: n.into(),
+                        table: Some("table".into()),
+                    },
+                    SqlType::Text,
                 )
             };
 
@@ -641,11 +623,8 @@ mod tests {
                 }],
             };
 
-            let cspec = |n: &str| -> (ColumnSpecification, Option<usize>) {
-                (
-                    ColumnSpecification::new(nom_sql::Column::from(n), SqlType::Text),
-                    None,
-                )
+            let cspec = |n: &str| -> ColumnSpecification {
+                ColumnSpecification::new(nom_sql::Column::from(n), SqlType::Text)
             };
 
             let mut graph = MirGraph::new();

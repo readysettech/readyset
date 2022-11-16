@@ -83,21 +83,6 @@ pub(super) fn mir_node_to_flow_parts(
 
     let name = graph[mir_node].name().clone();
 
-    // TODO(fran): This was moved here because we take a mutable reference to the graph,
-    //  so we can't then pass it on to the different methods.
-    //  Honestly, this seems like a weird thing to be doing to begin with, so we should
-    //  remove/replace this in the future.
-    // remember the absolute base column ID for potential later removal
-    if let MirNodeInner::Base {
-        ref mut column_specs,
-        ..
-    } = graph[mir_node].inner
-    {
-        for (i, cs) in column_specs.iter_mut().enumerate() {
-            cs.1 = Some(i);
-        }
-    }
-
     let ancestors = graph
         .edges_directed(mir_node, Direction::Incoming)
         .sorted_by(|e1, e2| e1.weight().cmp(e2.weight()))
@@ -396,7 +381,7 @@ fn column_names(cs: &[Column]) -> Vec<&str> {
 
 fn make_base_node(
     name: Relation,
-    column_specs: &[(ColumnSpecification, Option<usize>)],
+    column_specs: &[ColumnSpecification],
     custom_types: &HashMap<Relation, DfType>,
     primary_key: Option<&[Column]>,
     unique_keys: &[Box<[Column]>],
@@ -404,16 +389,14 @@ fn make_base_node(
 ) -> ReadySetResult<FlowNode> {
     let columns = column_specs
         .iter()
-        .map(|&(ref cs, _)| {
-            DfColumn::from_spec(cs.clone(), mig.dialect, |ty| custom_types.get(&ty).cloned())
-        })
+        .map(|cs| DfColumn::from_spec(cs.clone(), mig.dialect, |ty| custom_types.get(&ty).cloned()))
         .collect::<Result<Vec<_>, _>>()?;
 
     // note that this defaults to a "None" (= NULL) default value for columns that do not have one
     // specified; we don't currently handle a "NOT NULL" SQL constraint for defaults
     let default_values = column_specs
         .iter()
-        .map(|&(ref cs, _)| {
+        .map(|cs| {
             for c in &cs.constraints {
                 if let ColumnConstraint::DefaultValue(Expr::Literal(ref dv)) = *c {
                     return dv.try_into();
@@ -428,7 +411,7 @@ fn make_base_node(
             .map(|col| {
                 column_specs
                     .iter()
-                    .position(|(ColumnSpecification { column, .. }, _)| {
+                    .position(|ColumnSpecification { column, .. }| {
                         column.name == col.name && column.table == col.table
                     })
                     .ok_or_else(|| internal_err!("could not find pkey column id for {:?}", col))

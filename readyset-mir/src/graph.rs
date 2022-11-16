@@ -182,7 +182,7 @@ impl MirGraph {
         match &self.graph[node].inner {
             MirNodeInner::Base { column_specs, .. } => column_specs
                 .iter()
-                .map(|(spec, _)| spec.column.clone().into())
+                .map(|spec| spec.column.clone().into())
                 .collect(),
             MirNodeInner::Filter { .. }
             | MirNodeInner::Leaf { .. }
@@ -299,12 +299,10 @@ impl MirGraph {
                 ref column_specs, ..
             } => match column_specs
                 .iter()
-                .rposition(|cs| MirColumn::from(&cs.0.column) == *c)
+                .rposition(|cs| MirColumn::from(&cs.column) == *c)
             {
                 None => err,
-                Some(id) => Ok(column_specs[id]
-                    .1
-                    .expect("must have an absolute column ID on base")),
+                Some(idx) => Ok(idx),
             },
             // otherwise, just look up in the column set
             // Compare by name if there is no table

@@ -444,13 +444,7 @@ impl SqlToMirConverter {
         if let Some(ni) = self.get_relation(table_name) {
             match &self.mir_graph[ni].inner {
                 MirNodeInner::Base { column_specs, .. } => {
-                    if &column_specs
-                        .iter()
-                        .map(|(cs, _)| cs)
-                        .cloned()
-                        .collect::<Vec<_>>()[..]
-                        == cols
-                    {
+                    if column_specs.as_slice() == cols {
                         debug!(
                             %table_name,
                             "base table already exists with identical schema; reusing it.",
@@ -515,11 +509,7 @@ impl SqlToMirConverter {
         let node = MirNode::new(
             table_name.clone(),
             MirNodeInner::Base {
-                column_specs: cols
-                    .iter()
-                    .enumerate()
-                    .map(|(i, cs)| (cs.clone(), Some(i)))
-                    .collect(),
+                column_specs: cols.to_vec(),
                 primary_key,
                 unique_keys,
             },

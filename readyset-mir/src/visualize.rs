@@ -169,7 +169,7 @@ impl GraphViz for MirNodeInner {
                     "B | {} | ⚷: {}",
                     column_specs
                         .iter()
-                        .map(|&(ref cs, _)| cs.column.name.as_str())
+                        .map(|cs| cs.column.name.as_str())
                         .join(", "),
                     unique_keys
                         .iter()

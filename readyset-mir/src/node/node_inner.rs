@@ -39,7 +39,7 @@ pub enum MirNodeInner {
     ///
     /// [`Aggregator`]: dataflow::node::special::Base
     Base {
-        column_specs: Vec<(ColumnSpecification, Option<usize>)>,
+        column_specs: Vec<ColumnSpecification>,
         primary_key: Option<Box<[Column]>>,
         unique_keys: Box<[Box<[Column]>]>,
     },
@@ -272,7 +272,7 @@ impl MirNodeInner {
                 Ok(true)
             }
             MirNodeInner::Base { column_specs, .. } => {
-                if !column_specs.iter().any(|(cs, _)| c == cs.column) {
+                if !column_specs.iter().any(|cs| c == cs.column) {
                     internal!("can't add columns to base nodes!")
                 }
                 Ok(true)
@@ -356,7 +356,7 @@ impl Debug for MirNodeInner {
                 "B [{}; ⚷: {}]",
                 column_specs
                     .iter()
-                    .map(|&(ref cs, _)| cs.column.name.as_str())
+                    .map(|cs| cs.column.name.as_str())
                     .collect::<Vec<_>>()
                     .join(", "),
                 unique_keys

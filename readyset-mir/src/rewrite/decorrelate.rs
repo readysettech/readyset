@@ -338,15 +338,12 @@ mod tests {
         let t2 = graph.add_node(MirNode::new(
             "t2".into(),
             MirNodeInner::Base {
-                column_specs: vec![(
-                    ColumnSpecification {
-                        column: nom_sql::Column::from("t2.a"),
-                        sql_type: SqlType::Int(None),
-                        constraints: vec![],
-                        comment: None,
-                    },
-                    None,
-                )],
+                column_specs: vec![ColumnSpecification {
+                    column: nom_sql::Column::from("t2.a"),
+                    sql_type: SqlType::Int(None),
+                    constraints: vec![],
+                    comment: None,
+                }],
                 primary_key: Some([Column::new(Some("t2"), "a")].into()),
                 unique_keys: Default::default(),
             },
@@ -427,15 +424,12 @@ mod tests {
         let t1 = graph.add_node(MirNode::new(
             "t1".into(),
             MirNodeInner::Base {
-                column_specs: vec![(
-                    ColumnSpecification {
-                        column: nom_sql::Column::from("t1.a"),
-                        sql_type: SqlType::Int(None),
-                        constraints: vec![],
-                        comment: None,
-                    },
-                    None,
-                )],
+                column_specs: vec![ColumnSpecification {
+                    column: nom_sql::Column::from("t1.a"),
+                    sql_type: SqlType::Int(None),
+                    constraints: vec![],
+                    comment: None,
+                }],
                 primary_key: Some([Column::from("a")].into()),
                 unique_keys: Default::default(),
             },
@@ -542,24 +536,18 @@ mod tests {
             "t2".into(),
             MirNodeInner::Base {
                 column_specs: vec![
-                    (
-                        ColumnSpecification {
-                            column: nom_sql::Column::from("t2.a"),
-                            sql_type: SqlType::Int(None),
-                            constraints: vec![],
-                            comment: None,
-                        },
-                        None,
-                    ),
-                    (
-                        ColumnSpecification {
-                            column: nom_sql::Column::from("t2.b"),
-                            sql_type: SqlType::Int(None),
-                            constraints: vec![],
-                            comment: None,
-                        },
-                        None,
-                    ),
+                    ColumnSpecification {
+                        column: nom_sql::Column::from("t2.a"),
+                        sql_type: SqlType::Int(None),
+                        constraints: vec![],
+                        comment: None,
+                    },
+                    ColumnSpecification {
+                        column: nom_sql::Column::from("t2.b"),
+                        sql_type: SqlType::Int(None),
+                        constraints: vec![],
+                        comment: None,
+                    },
                 ],
                 primary_key: Some([Column::new(Some("t2"), "a")].into()),
                 unique_keys: Default::default(),
@@ -676,15 +664,12 @@ mod tests {
         let t1 = graph.add_node(MirNode::new(
             "t1".into(),
             MirNodeInner::Base {
-                column_specs: vec![(
-                    ColumnSpecification {
-                        column: nom_sql::Column::from("t1.a"),
-                        sql_type: SqlType::Int(None),
-                        constraints: vec![],
-                        comment: None,
-                    },
-                    None,
-                )],
+                column_specs: vec![ColumnSpecification {
+                    column: nom_sql::Column::from("t1.a"),
+                    sql_type: SqlType::Int(None),
+                    constraints: vec![],
+                    comment: None,
+                }],
                 primary_key: Some([Column::from("a")].into()),
                 unique_keys: Default::default(),
             },
