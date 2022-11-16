@@ -86,9 +86,10 @@ impl serde::ser::Serialize for DfValue {
                 serialize_variant(serializer, Variant::TimestampTz, &(ts, extra))
             }
             DfValue::Array(vs) => serialize_variant(serializer, Variant::Array, &vs),
-            DfValue::PassThrough(_) => Err(serde::ser::Error::custom(
-                "PassThrough not supported in dataflow graph",
-            )),
+            DfValue::PassThrough(v) => Err(serde::ser::Error::custom(format_args!(
+                "PassThrough value of type {} not supported in dataflow graph",
+                v.ty
+            ))),
             DfValue::Max => serializer.serialize_unit_variant(
                 "DfValue",
                 Variant::Max as _,
