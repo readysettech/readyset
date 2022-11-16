@@ -359,6 +359,9 @@ fn put_binary_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
         Value::Name(v) => {
             v.as_bytes().to_sql(&Type::NAME, dst)?;
         }
+        Value::BpChar(v) => {
+            v.as_bytes().to_sql(&Type::BPCHAR, dst)?;
+        }
         Value::Char(v) => {
             v.to_sql(&Type::CHAR, dst)?;
         }
@@ -461,7 +464,7 @@ fn put_text_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
             };
             write!(dst, "{}", text)?;
         }
-        Value::VarChar(v) | Value::Name(v) | Value::Text(v) => {
+        Value::BpChar(v) | Value::VarChar(v) | Value::Name(v) | Value::Text(v) => {
             dst.extend_from_slice(v.as_bytes());
         }
         Value::Char(v) => {
@@ -1117,6 +1120,16 @@ mod tests {
     fn test_encode_binary_varchar() {
         let mut buf = BytesMut::new();
         put_binary_value(DataValue::VarChar("some stuff".into()), &mut buf).unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_i32(10); // length
+        exp.extend_from_slice(b"some stuff"); // value
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
+    fn test_encode_binary_bpchar() {
+        let mut buf = BytesMut::new();
+        put_binary_value(DataValue::BpChar("some stuff".into()), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(10); // length
         exp.extend_from_slice(b"some stuff"); // value

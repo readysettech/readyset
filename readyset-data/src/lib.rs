@@ -1792,7 +1792,7 @@ impl<'a> FromSql<'a> for DfValue {
                 | Type::REGPROCEDURE
                 | Type::REGROLE
                 | Type::REGTYPE => mk_from_sql!(u32),
-                Type::TEXT | Type::VARCHAR | Type::NAME => mk_from_sql!(&str),
+                Type::BPCHAR | Type::TEXT | Type::VARCHAR | Type::NAME => mk_from_sql!(&str),
                 Type::FLOAT4 => mk_from_sql!(f32),
                 Type::FLOAT8 => mk_from_sql!(f64),
                 Type::DATE => mk_from_sql!(NaiveDate),

@@ -47,6 +47,8 @@ impl TryFrom<Value> for ps::Value {
             (Type::VARCHAR, DfValue::TinyText(t)) => Ok(ps::Value::VarChar(t.as_str().into())),
             (Type::NAME, DfValue::Text(t)) => Ok(ps::Value::Name(t)),
             (Type::NAME, DfValue::TinyText(t)) => Ok(ps::Value::Name(t.as_str().into())),
+            (Type::BPCHAR, DfValue::Text(v)) => Ok(ps::Value::BpChar(v)),
+            (Type::BPCHAR, DfValue::TinyText(t)) => Ok(ps::Value::BpChar(t.as_str().into())),
 
             (Type::INT2, DfValue::Int(v)) => Ok(ps::Value::SmallInt(v as _)),
             (Type::INT4, DfValue::Int(v)) => Ok(ps::Value::Int(v as _)),

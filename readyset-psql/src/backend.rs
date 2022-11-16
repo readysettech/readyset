@@ -109,9 +109,10 @@ impl TryFrom<ParamRef<'_>> for DfValue {
         match v.0 {
             ps::Value::Null => Ok(DfValue::None),
             ps::Value::Bool(b) => Ok(DfValue::from(*b)),
-            ps::Value::VarChar(v) | ps::Value::Name(v) | ps::Value::Text(v) => {
-                Ok(v.as_str().into())
-            }
+            ps::Value::BpChar(v)
+            | ps::Value::VarChar(v)
+            | ps::Value::Name(v)
+            | ps::Value::Text(v) => Ok(v.as_str().into()),
             ps::Value::Char(v) => Ok((*v).into()),
             ps::Value::Int(v) => Ok((*v).into()),
             ps::Value::BigInt(v) => Ok((*v).into()),

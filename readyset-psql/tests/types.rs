@@ -128,6 +128,7 @@ mod types {
         double_f64("double precision", f64);
         char_i8("\"char\"", #[strategy(proptest::prelude::prop_oneof![1..=i8::MAX, i8::MIN..=-1])] i8);
         text_string("text", String);
+        bpchar_string("bpchar", String);
         bytea_bytes("bytea", Vec<u8>);
         name_string("name", #[strategy(string_regex("[a-zA-Z0-9]{1,63}").unwrap())] String);
         // TODO(fran): Add numeric with precision and scale when we start correctly

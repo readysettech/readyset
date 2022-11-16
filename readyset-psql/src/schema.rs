@@ -68,7 +68,7 @@ pub fn type_to_pgsql(col_type: &DfType) -> Result<pgsql::types::Type, Error> {
     match col_type {
         DfType::Unknown => Ok(Type::TEXT), // The default type for "unknown" in pgsql is TEXT
         DfType::Bool => Ok(Type::BOOL),
-        DfType::Char(..) => Ok(Type::CHAR),
+        DfType::Char(..) => Ok(Type::BPCHAR),
         DfType::VarChar(_, Collation::Utf8) => Ok(Type::VARCHAR),
         DfType::VarChar(_, Collation::Citext) => {
             // TODO: use the right CITEXT type
@@ -120,7 +120,7 @@ pub fn type_to_pgsql(col_type: &DfType) -> Result<pgsql::types::Type, Error> {
             Ok(Type::TEXT)
         }
         DfType::Array(box DfType::Bool) => Ok(Type::BOOL_ARRAY),
-        DfType::Array(box DfType::Char(..)) => Ok(Type::CHAR_ARRAY),
+        DfType::Array(box DfType::Char(..)) => Ok(Type::BPCHAR_ARRAY),
         DfType::Array(box DfType::VarChar(_, Collation::Utf8)) => Ok(Type::VARCHAR_ARRAY),
         DfType::Array(box DfType::VarChar(_, Collation::Citext)) => {
             // TODO: use the right CITEXT type
@@ -144,7 +144,7 @@ pub fn type_to_pgsql(col_type: &DfType) -> Result<pgsql::types::Type, Error> {
         DfType::Array(box DfType::Time { .. }) => Ok(Type::TIME_ARRAY),
         DfType::Array(box DfType::UnsignedInt) => unsupported_type!(),
         DfType::Array(box DfType::UnsignedBigInt) => unsupported_type!(),
-        DfType::Array(box DfType::TinyInt) => Ok(Type::CHAR),
+        DfType::Array(box DfType::TinyInt) => Ok(Type::CHAR_ARRAY),
         DfType::Array(box DfType::UnsignedTinyInt) => unsupported_type!(),
         DfType::Array(box DfType::UnsignedSmallInt) => unsupported_type!(),
         DfType::Array(box DfType::Blob) => unsupported_type!(),

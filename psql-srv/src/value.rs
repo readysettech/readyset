@@ -14,6 +14,7 @@ pub enum Value {
     Bool(bool),
     VarChar(Text),
     Name(Text),
+    BpChar(Text),
     Char(i8),
     Int(i32),
     BigInt(i64),
