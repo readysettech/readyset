@@ -577,7 +577,7 @@ impl BuiltinFunction {
                 }
             }
             BuiltinFunction::JsonTypeof(expr) => {
-                let json = expr.eval(record)?.to_json()?;
+                let json = non_null!(expr.eval(record)?).to_json()?;
                 Ok(get_json_value_type(&json).into())
             }
             BuiltinFunction::Coalesce(arg1, rest_args) => {
@@ -1281,6 +1281,8 @@ mod tests {
             let json_type = expr.eval::<DfValue>(&[json.into()]).unwrap();
             assert_eq!(json_type, DfValue::from(expected_type));
         }
+
+        assert_eq!(expr.eval(&[DfValue::None]), Ok(DfValue::None));
     }
 
     #[test]
