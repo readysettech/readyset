@@ -598,15 +598,19 @@ impl<'a> PostgresReplicator<'a> {
         self.set_snapshot(&replication_slot.snapshot_name).await?;
 
         let mut table_list = self.get_table_list(TableKind::RegularTable).await?;
-        let mut view_list = self.get_table_list(TableKind::View).await?;
-        let mut custom_types = self.get_custom_types().await?;
+        let view_list = self.get_table_list(TableKind::View).await?;
+        let custom_types = self.get_custom_types().await?;
 
         table_list.retain(|tbl| {
             self.table_filter
-                .contains(tbl.schema.as_str(), tbl.name.as_str())
+                .should_be_processed(tbl.schema.as_str(), tbl.name.as_str())
         });
-        view_list.retain(|view| self.table_filter.contains_schema(&view.schema));
-        custom_types.retain(|ty| self.table_filter.contains_schema(&ty.schema));
+
+        // We don't filter the view list by schemas since a view could be in schema 1 (that may not
+        // be replicated), but refer to only tables in schema 2 that are all replicated. If we try
+        // to process a view that points to unreplicated schemas, we will just fail and ignore that
+        // view.
+        // Similary, custom types may have cross-schema references and aren't filtered initally
 
         trace!(?table_list, "Loaded table list");
         trace!(?view_list, "Loaded view list");

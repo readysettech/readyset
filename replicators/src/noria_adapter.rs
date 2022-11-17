@@ -556,10 +556,10 @@ impl NoriaAdapter {
         changelist.changes_mut().retain(|change| match change {
             Change::CreateTable(stmt) => self
                 .table_filter
-                .contains(schema.as_str(), stmt.table.name.as_str()),
+                .should_be_processed(schema.as_str(), stmt.table.name.as_str()),
             Change::AlterTable(stmt) => self
                 .table_filter
-                .contains(schema.as_str(), stmt.table.name.as_str()),
+                .should_be_processed(schema.as_str(), stmt.table.name.as_str()),
             _ => true,
         });
 
@@ -706,7 +706,7 @@ impl NoriaAdapter {
                     _ => {}
                 }
 
-                if !self.table_filter.contains(
+                if !self.table_filter.should_be_processed(
                     table.schema.as_deref().ok_or_else(|| {
                         internal_err!("All tables should have a schema in the replicator")
                     })?,

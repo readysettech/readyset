@@ -40,6 +40,7 @@ fn log_err<E: Error>(err: E) -> E {
     err
 }
 
+#[derive(Copy, Clone, Debug)]
 pub enum TableKind {
     BaseTable,
     View,
@@ -61,6 +62,29 @@ pub async fn load_table_list<Q: Queryable>(
     let query = format!("show full tables in `{db}` where Table_Type={kind}");
     let tables_entries: Vec<(String, String)> = q.query_map(query, std::convert::identity).await?;
     Ok(tables_entries.into_iter().map(|(name, _)| name).collect())
+}
+
+/// Get the list of tables defined in the database for all (non-internal) schemas
+async fn get_table_list<Q: Queryable>(
+    q: &mut Q,
+    kind: TableKind,
+) -> mysql::Result<Vec<(String, String)>> {
+    let mut all_tables = Vec::new();
+    let schemas = q
+        .query_iter("SHOW SCHEMAS")
+        .await?
+        .collect::<String>()
+        .await?;
+    for schema in schemas
+        .into_iter()
+        .filter(|s| !MYSQL_INTERNAL_DBS.contains(&s.as_str()))
+    {
+        let tables = load_table_list(q, kind, &schema).await?;
+        for table in tables {
+            all_tables.push((schema.clone(), table));
+        }
+    }
+    Ok(all_tables)
 }
 
 /// Get the `CREATE TABLE` or `CREATE VIEW` statement for the named table
@@ -96,55 +120,24 @@ fn tx_opts() -> TxOpts {
 }
 
 impl MySqlReplicator {
-    /// Convert the inner `self.table_filter`, into an explict list of schemas and their tables, by
-    /// querying the database
-    async fn update_table_list<Q: Queryable>(&mut self, tx: &mut Q) -> ReadySetResult<()> {
-        if self.table_filter.for_all_schemas() {
-            // If the filter is set to replicate all schemas, we have to first get the list of all
-            // schemas from the database
-            let schemas = tx
-                .query_iter("SHOW SCHEMAS")
-                .await?
-                .collect::<String>()
-                .await?;
-
-            for db in schemas
-                .into_iter()
-                .filter(|s| !MYSQL_INTERNAL_DBS.contains(&s.as_str()))
-            {
-                self.table_filter.add_for_all_schema(db.into());
-            }
-        }
-
-        for (db, table_list) in self.table_filter.schemas_mut() {
-            if table_list.is_for_all_tables() {
-                // If the filter for this schema subscribes to all tables, we need to load actual
-                // table names
-                table_list.set(load_table_list(tx, TableKind::BaseTable, db).await?);
-            }
-        }
-
-        Ok(())
-    }
-
     /// Load all the `CREATE TABLE` statements for the tables in the MySQL database. Returns the the
     /// transaction that holds the DDL locks for the tables.
     ///
     /// If `install` is set to `true`, will also install the tables in ReadySet one-by-one, skipping
     /// over any tables that fail to install
+    ///
+    /// Returns a list of tables that should be dumped to readyset
     async fn load_recipe_with_meta_lock(
         &mut self,
         noria: &mut readyset::ReadySetHandle,
         db_schemas: &mut DatabaseSchemas,
-    ) -> ReadySetResult<Transaction<'static>> {
+    ) -> ReadySetResult<(Transaction<'static>, Vec<Relation>)> {
         let mut tx = self.pool.start_transaction(tx_opts()).await?;
 
         let _ = tx
             .query_drop("SET SESSION MAX_EXECUTION_TIME=0")
             .await
             .map_err(log_err);
-
-        self.update_table_list(&mut tx).await?;
 
         // After we loaded the list of currently existing tables, we will acquire a metadata
         // lock on all of them to prevent DDL changes.
@@ -160,13 +153,21 @@ impl MySqlReplicator {
         // >> transaction within one session cannot be used in DDL statements by other sessions
         // >> until the transaction ends. This principle applies not only to transactional tables,
         // >> but also to nontransactional tables.
-        let all_tables = self
-            .table_filter
-            .tables()
+        let all_tables = get_table_list(&mut tx, TableKind::BaseTable).await?;
+        let all_tables = all_tables
+            .into_iter()
+            .filter(|(schema, table)| {
+                self.table_filter
+                    .should_be_processed(schema.as_str(), table.as_str())
+            })
+            .collect::<Vec<_>>();
+
+        let all_tables_formatted = all_tables
+            .iter()
             .map(|(db, tbl)| format!("`{db}`.`{tbl}`"))
             .collect::<Vec<_>>();
 
-        for tables in all_tables.chunks(20) {
+        for tables in all_tables_formatted.chunks(20) {
             // There is a default limit of 61 tables per join, so we chunk into smaller joins just
             // in case
             let metalock = format!("SELECT 1 FROM {} LIMIT 0", tables.iter().join(","));
@@ -175,7 +176,7 @@ impl MySqlReplicator {
 
         let mut bad_tables = Vec::new();
         // Process `CREATE TABLE` statements
-        for (db, table) in self.table_filter.tables() {
+        for (db, table) in all_tables.iter() {
             let create_table = create_for_table(&mut tx, db, table, TableKind::BaseTable).await?;
             debug!(%create_table, "Extending recipe");
             db_schemas.extend_create_schema_for_table(
@@ -189,7 +190,7 @@ impl MySqlReplicator {
                     .and_then(|changelist| async {
                         noria
                             .extend_recipe_no_leader_ready(
-                                changelist.with_schema_search_path(vec![db.clone()]),
+                                changelist.with_schema_search_path(vec![db.clone().into()]),
                             )
                             .await
                     })
@@ -203,31 +204,33 @@ impl MySqlReplicator {
 
         bad_tables
             .into_iter()
-            .for_each(|(db, table)| self.table_filter.remove(&db, &table));
+            .for_each(|(db, table)| self.table_filter.deny_replication(&db, &table));
+
+        // We process all views, regardless of their schemas and the table filter, since a view can
+        // exist that only selects from tables in other schemas.
+        let all_views = get_table_list(&mut tx, TableKind::View).await?;
 
         // Process `CREATE VIEW` statements
-        for (db, _) in self.table_filter.schemas_mut() {
-            for view in load_table_list(&mut tx, TableKind::View, db).await? {
-                let create_view = create_for_table(&mut tx, db, &view, TableKind::View).await?;
-                db_schemas.extend_create_schema_for_view(
-                    db.to_string(),
-                    view.to_string(),
-                    create_view.clone(),
-                    nom_sql::Dialect::MySQL,
-                );
-                if let Err(err) =
-                    future::ready(ChangeList::from_str(create_view, Dialect::DEFAULT_MYSQL))
-                        .and_then(|changelist| async {
-                            noria
-                                .extend_recipe_no_leader_ready(
-                                    changelist.with_schema_search_path(vec![db.clone()]),
-                                )
-                                .await
-                        })
-                        .await
-                {
-                    warn!(%view, %err, "Error extending CREATE VIEW, view will not be used");
-                }
+        for (db, view) in all_views.iter() {
+            let create_view = create_for_table(&mut tx, db, view, TableKind::View).await?;
+            db_schemas.extend_create_schema_for_view(
+                db.to_string(),
+                view.to_string(),
+                create_view.clone(),
+                nom_sql::Dialect::MySQL,
+            );
+            if let Err(err) =
+                future::ready(ChangeList::from_str(create_view, Dialect::DEFAULT_MYSQL))
+                    .and_then(|changelist| async {
+                        noria
+                            .extend_recipe_no_leader_ready(
+                                changelist.with_schema_search_path(vec![db.clone().into()]),
+                            )
+                            .await
+                    })
+                    .await
+            {
+                warn!(%view, %err, "Error extending CREATE VIEW, view will not be used");
             }
         }
         // Get the current binlog position, since at this point the tables are not locked, binlog
@@ -240,7 +243,19 @@ impl MySqlReplicator {
             .set_schema_replication_offset(Some(&binlog_position.try_into()?))
             .await?;
 
-        Ok(tx)
+        let table_list = all_tables
+            .into_iter()
+            // refilter to remove any bad tables that failed to extend recipe
+            .filter(|(schema, table)| {
+                self.table_filter
+                    .should_be_processed(schema.as_str(), table.as_str())
+            })
+            .map(|(schema, name)| Relation {
+                schema: Some(schema.into()),
+                name: name.into(),
+            })
+            .collect::<Vec<_>>();
+        Ok((tx, table_list))
     }
 
     /// Call `SELECT * FROM table` and convert all rows into a ReadySet row
@@ -440,7 +455,7 @@ impl MySqlReplicator {
             }
         };
 
-        let _meta_lock = self
+        let (_meta_lock, table_list) = self
             .load_recipe_with_meta_lock(noria, db_schemas)
             .await
             .map_err(log_err)?;
@@ -448,8 +463,13 @@ impl MySqlReplicator {
         // Replication offsets could change following a schema update, so get a new list
         let replication_offsets = noria.replication_offsets().await?;
 
-        self.dump_tables(noria, &replication_offsets, snapshot_report_interval_secs)
-            .await
+        self.dump_tables(
+            noria,
+            table_list,
+            &replication_offsets,
+            snapshot_report_interval_secs,
+        )
+        .await
     }
 
     /// Spawns a new tokio task that replicates a given table to noria, returning
@@ -492,22 +512,16 @@ impl MySqlReplicator {
     async fn dump_tables(
         &mut self,
         noria: &mut readyset::ReadySetHandle,
+        mut table_list: Vec<Relation>,
         replication_offsets: &ReplicationOffsets,
         snapshot_report_interval_secs: u16,
     ) -> ReadySetResult<()> {
         let mut replication_tasks = FuturesUnordered::new();
         let mut compacting_tasks = FuturesUnordered::new();
 
-        let mut table_list = self
-            .table_filter
-            .tables()
-            .map(|(db, table)| Relation {
-                schema: Some(db.clone()),
-                name: table.clone(),
-            })
-            .collect::<Vec<_>>();
-
         // For each table we spawn a new task to parallelize the replication process, with a limit
+        // We pop front because we add the tables before the views, and the views depend on the
+        // tables. TODO: do we need to fully finish tables before views?
         while let Some(table) = table_list.pop() {
             if replication_offsets.has_table(&table) {
                 info!(%table, "Replication offset already exists for table, skipping snapshot");

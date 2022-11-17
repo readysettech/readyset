@@ -6,83 +6,134 @@ use nom_locate::LocatedSpan;
 use nom_sql::{replicator_table_list, Dialect, SqlIdentifier};
 use readyset::{ReadySetError, ReadySetResult};
 
-/// A [`TableFilter`] keep a list of all the tables readyset-server is interested in as a mapping
-/// from schema to a list of tables for that schema. When a replication event happens, the event
-/// is filtered based on its schema/table before being sent to readyset-server.
+/// A [`TableFilter`] keeps lists of all the tables readyset-server is interested in, as well as a
+/// list of tables that we explicitly want to filter out of replication.
+/// Tables may be filtered from replication in 2 ways:
+/// 1. All tables will be filtered other than the ones provided to the option --replication_tables,
+///    if it is used
+/// 2. If we encounter a unrecoverable failure in replication for a table, we can filter out the
+///    table to keep the process running without that table, which is better than being stuck until
+///    we fix why that table isn't replicating.
+///
+/// NOTE: 2. takes precedence over 1. above. So if a table is explicitly replicated with
+/// --replication_tables, but then experiences an error in replication, we will stop replicating
+/// that table.
+///
+/// When a replication event happens, the event is filtered based on its
+/// schema/table before being sent to readyset-server.
+///
+/// `BTreeMap`s are used here, because the assumption is that the number of schemas in a
+/// database is usually small, and their names are short, so a small `BTreeMap` with inlined
+/// `SqlIdentifiers` would perform better than a `HashMap` where a hash is performed on every
+/// lookup.
 #[derive(Debug, Clone)]
 pub(crate) struct TableFilter {
     /// A mapping between schema to the list of tables to replicate from that schema.
-    /// A `BTreeMap` is used here, because the assumption is that the number of schemas in a
-    /// database is usually small, and their names are short, so a small `BTreeMap` with inlined
-    /// `SqlIdentifiers` would perform better than a `HashMap` where a hash is performed on every
-    /// lookup.
-    /// If [`Option::None`], all tables in all schemas will be replicated.
-    tables: Option<BTreeMap<SqlIdentifier, ReplicateTableSpec>>,
+    /// Only the tables included in the map will be replicated.
+    /// This is only populated by the --rplication-tables option
+    explicitly_replicated: BTreeMap<SqlIdentifier, ReplicateTableSpec>,
+    /// A mapping between schema to the list of tables to *NOT* replicate from that schema.
+    /// Any other valid tables will be replicated, where a valid table is either one of the tables
+    /// in `explicitly_replicated`, or all tables if that is empty.
+    replication_denied: BTreeMap<SqlIdentifier, ReplicateTableSpec>,
 }
 
 #[derive(Debug, Clone)]
+/// Within a particular schema, [`ReplicateTablesSpec`] tells us which tables to replicate or filter
+/// out
+///
+/// If we start replicating all tables, adding tables to AllTablesExcept allows us to ignore them
+/// If we start with a specific set of tables to replicate, removing them from Tables also alows us
+/// to no longer replicate them.
+///
+/// Similarly to [`TableFilter`] a `BTreeSet` is used here, because the assumption is that
+/// table names are usually short and not that numerous that a `HashMap` would be slower.
 pub(crate) enum ReplicateTableSpec {
-    AllTablesInSchema,
-    /// Similarly to [`TableFilter`] a `BTreeMap` is used here, because the assumption is that
-    /// table names are usually short and not that numerous that a `HashMap` would be slower.
+    AllTablesExcept(BTreeSet<SqlIdentifier>),
     Tables(BTreeSet<SqlIdentifier>),
 }
 
 impl ReplicateTableSpec {
-    /// Check if spec is for all tables (i.e. created with *)
-    pub(crate) fn is_for_all_tables(&self) -> bool {
-        matches!(self, ReplicateTableSpec::AllTablesInSchema)
+    pub(crate) fn empty() -> Self {
+        Self::Tables(BTreeSet::new())
     }
 
-    /// Replace the current spec with named tables
-    pub(crate) fn set(&mut self, actual_tables: Vec<String>) {
-        *self =
-            ReplicateTableSpec::Tables(actual_tables.into_iter().map(SqlIdentifier::from).collect())
+    pub(crate) fn empty_all_tables() -> Self {
+        Self::AllTablesExcept(BTreeSet::new())
+    }
+
+    pub(crate) fn insert<S: Into<SqlIdentifier>>(&mut self, t: S) {
+        match self {
+            Self::AllTablesExcept(tables) => tables.remove(&t.into()),
+            Self::Tables(tables) => tables.insert(t.into()),
+        };
+    }
+
+    pub(crate) fn remove<S: Into<SqlIdentifier>>(&mut self, t: S) {
+        match self {
+            Self::AllTablesExcept(tables) => tables.insert(t.into()),
+            Self::Tables(tables) => tables.remove(&t.into()),
+        };
+    }
+
+    pub(crate) fn contains<S>(&self, t: &S) -> bool
+    where
+        S: Ord + ?Sized,
+        SqlIdentifier: Borrow<S>,
+    {
+        match self {
+            Self::AllTablesExcept(tables) => !tables.contains(t),
+            Self::Tables(tables) => tables.contains(t),
+        }
     }
 }
 
 impl TableFilter {
     pub(crate) fn try_new(
         dialect: Dialect,
-        table_list: Option<RedactedString>,
+        filter_table_list: Option<RedactedString>,
         default_schema: Option<&str>,
     ) -> ReadySetResult<TableFilter> {
         let default_schema = default_schema.map(SqlIdentifier::from);
 
-        let mut tables = BTreeMap::new();
+        let mut schemas = BTreeMap::new();
 
-        let replicated = match table_list {
+        let filtered = match filter_table_list {
             None => {
                 match default_schema {
                     Some(default) => {
                         // Will load all tables for the default schema
-                        tables.insert(default, ReplicateTableSpec::AllTablesInSchema);
+                        schemas.insert(default, ReplicateTableSpec::empty_all_tables());
                         return Ok(TableFilter {
-                            tables: Some(tables),
+                            explicitly_replicated: schemas,
+                            replication_denied: BTreeMap::new(),
                         });
                     }
-                    None => return Ok(TableFilter { tables: None }),
+                    None => {
+                        // We will learn what the tables are by `update_table_list` at snapshot
+                        // time since `for_all_schemas` is true.
+                        return Ok(Self::for_all_tables());
+                    }
                 };
             }
             Some(t) => t,
         };
 
-        if replicated.as_str() == "*.*" {
+        if filtered.as_str() == "*.*" {
             return Ok(Self::for_all_tables());
         }
 
-        // TODO(alex) Propagate nom-sql error position info?
-        let replicate_list =
-            match replicator_table_list(dialect)(LocatedSpan::new(replicated.as_bytes())) {
+        let filter_list =
+            match replicator_table_list(dialect)(LocatedSpan::new(filtered.as_bytes())) {
                 Ok((rem, tables)) if rem.is_empty() => tables,
                 _ => {
                     return Err(ReadySetError::ReplicationFailed(
-                        "Unable to parse replicated tables list".to_string(),
+                        "Unable to parse filtered tables list".to_string(),
                     ))
                 }
             };
 
-        for table in replicate_list {
+        for table in filter_list {
             let table_name = table.name;
             let table_schema =
                 table
@@ -95,108 +146,91 @@ impl TableFilter {
                     })?;
 
             if table_name == "*" {
-                tables.insert(table_schema, ReplicateTableSpec::AllTablesInSchema);
+                schemas.insert(table_schema, ReplicateTableSpec::empty_all_tables());
             } else {
-                match tables
+                let tables = schemas
                     .entry(table_schema)
-                    .or_insert_with(|| ReplicateTableSpec::Tables(BTreeSet::new()))
-                {
-                    // Replicating all tables for schema, nothing to do */
-                    ReplicateTableSpec::AllTablesInSchema => true,
-                    ReplicateTableSpec::Tables(tables) => tables.insert(table_name),
-                };
+                    .or_insert_with(ReplicateTableSpec::empty);
+                tables.insert(table_name);
             }
         }
 
         Ok(TableFilter {
-            tables: Some(tables),
+            explicitly_replicated: schemas,
+            replication_denied: BTreeMap::new(),
         })
     }
 
     /// Create a new filter that will pass all tables
     fn for_all_tables() -> Self {
-        TableFilter { tables: None }
-    }
-
-    /// Iterator over all schemas in this filter
-    pub(crate) fn schemas_mut(
-        &mut self,
-    ) -> impl Iterator<Item = (&SqlIdentifier, &mut ReplicateTableSpec)> {
-        self.tables
-            .as_mut()
-            .map(|t| t.iter_mut())
-            .into_iter()
-            .flatten()
-    }
-
-    /// Iterator over all of the (schema, table) tuples in the filter
-    pub(crate) fn tables(&self) -> impl Iterator<Item = (&SqlIdentifier, &SqlIdentifier)> {
-        self.tables
-            .as_ref()
-            .map(|t| {
-                t.iter()
-                    .filter_map(|(db, spec)| match spec {
-                        ReplicateTableSpec::AllTablesInSchema => None,
-                        ReplicateTableSpec::Tables(tables) => {
-                            Some(tables.iter().map(move |t| (db, t)))
-                        }
-                    })
-                    .flatten()
-            })
-            .into_iter()
-            .flatten()
-    }
-
-    /// Remove the given table from the list of tables
-    pub(crate) fn remove(&mut self, schema: &str, table: &str) {
-        if let Some(tables) = self.tables.as_mut() {
-            if let Some(ReplicateTableSpec::Tables(tables)) = tables.get_mut(schema) {
-                tables.remove(table);
-            }
+        Self {
+            explicitly_replicated: BTreeMap::new(),
+            replication_denied: BTreeMap::new(),
         }
     }
 
+    /// Stop replicating the provided table
+    pub(crate) fn deny_replication(&mut self, schema: &str, table: &str) {
+        if let Some(tables) = self.explicitly_replicated.get_mut(schema) {
+            tables.remove(table);
+        }
+
+        let tables = self
+            .replication_denied
+            .entry(schema.into())
+            .or_insert_with(ReplicateTableSpec::empty);
+        tables.insert(table);
+    }
+
     /// Check if a given table should be processed
-    pub(crate) fn contains<Q1, Q2>(&self, schema: &Q1, table: &Q2) -> bool
+    pub(crate) fn should_be_processed<Q1, Q2>(&self, schema: &Q1, table: &Q2) -> bool
     where
         Q1: Ord + ?Sized,
         Q2: Ord + ?Sized,
         SqlIdentifier: Borrow<Q1> + Borrow<Q2>,
     {
-        let tables = match self.tables.as_ref() {
-            Some(tables) => tables,
-            None => return true, // Empty filter processes all tables
+        self.explicitly_replicated.is_empty() && !self.is_denied(schema, table)
+            || self.is_explicitly_replicated(schema, table)
+    }
+
+    pub(crate) fn is_explicitly_replicated<Q1, Q2>(&self, schema: &Q1, table: &Q2) -> bool
+    where
+        Q1: Ord + ?Sized,
+        Q2: Ord + ?Sized,
+        SqlIdentifier: Borrow<Q1> + Borrow<Q2>,
+    {
+        let res = match self.explicitly_replicated.get(schema) {
+            Some(tables) => tables.contains(table),
+            None => false,
         };
 
-        if let Some(ns) = tables.get(schema) {
-            match ns {
-                ReplicateTableSpec::AllTablesInSchema => true,
-                ReplicateTableSpec::Tables(tables) => tables.contains(table),
-            }
-        } else {
-            false
+        if res {
+            debug_assert!(
+                !self.is_denied(schema, table),
+                "If a table is explicitly replicated, it should not also be denied"
+            );
         }
+        res
     }
 
-    /// Check if the given schema is mentioned at all in the filter, or if the filter is for all
-    /// schemas
-    pub(crate) fn contains_schema(&self, schema: &str) -> bool {
-        self.tables
-            .as_ref()
-            .map(|t| t.contains_key(schema))
-            .unwrap_or(true)
-    }
+    pub(crate) fn is_denied<Q1, Q2>(&self, schema: &Q1, table: &Q2) -> bool
+    where
+        Q1: Ord + ?Sized,
+        Q2: Ord + ?Sized,
+        SqlIdentifier: Borrow<Q1> + Borrow<Q2>,
+    {
+        let res = match self.replication_denied.get(schema) {
+            Some(tables) => tables.contains(table),
+            None => false,
+        };
 
-    /// Check if the filter is for all schemas and tables
-    pub(crate) fn for_all_schemas(&self) -> bool {
-        self.tables.is_none()
-    }
-
-    /// Insert a new schema into the filter that replicates all tables
-    pub(crate) fn add_for_all_schema(&mut self, schema: SqlIdentifier) {
-        self.tables
-            .get_or_insert_with(BTreeMap::new)
-            .insert(schema, ReplicateTableSpec::AllTablesInSchema);
+        if res {
+            debug_assert!(
+                !self.is_explicitly_replicated(schema, table),
+                "If a table is denied, it should not also be explicitly_replicated"
+            );
+        }
+        res
     }
 }
 
@@ -208,8 +242,8 @@ mod tests {
     fn empty_list() {
         let filter = TableFilter::try_new(nom_sql::Dialect::MySQL, None, Some("noria")).unwrap();
         // By default should only allow all tables from the default schema
-        assert!(filter.contains("noria", "table"));
-        assert!(!filter.contains("readyset", "table"));
+        assert!(filter.should_be_processed("noria", "table"));
+        assert!(!filter.should_be_processed("readyset", "table"));
     }
 
     #[test]
@@ -220,15 +254,15 @@ mod tests {
             Some("noria"),
         )
         .unwrap();
-        assert!(filter.contains("noria", "table"));
-        assert!(filter.contains("readyset", "table"));
+        assert!(filter.should_be_processed("noria", "table"));
+        assert!(filter.should_be_processed("readyset", "table"));
     }
 
     #[test]
     fn all_schemas_implicit() {
         let filter = TableFilter::try_new(nom_sql::Dialect::MySQL, None, None).unwrap();
-        assert!(filter.contains("noria", "table"));
-        assert!(filter.contains("readyset", "table"));
+        assert!(filter.should_be_processed("noria", "table"));
+        assert!(filter.should_be_processed("readyset", "table"));
     }
 
     #[test]
@@ -240,11 +274,11 @@ mod tests {
         )
         .unwrap();
         // Tables with no schema belong to the default schema
-        assert!(filter.contains("noria", "t1"));
-        assert!(filter.contains("noria", "t2"));
-        assert!(filter.contains("noria", "t3"));
-        assert!(!filter.contains("noria", "t4"));
-        assert!(!filter.contains("readyset", "table"));
+        assert!(filter.should_be_processed("noria", "t1"));
+        assert!(filter.should_be_processed("noria", "t2"));
+        assert!(filter.should_be_processed("noria", "t3"));
+        assert!(!filter.should_be_processed("noria", "t4"));
+        assert!(!filter.should_be_processed("readyset", "table"));
     }
 
     #[test]
@@ -255,12 +289,12 @@ mod tests {
             Some("noria"),
         )
         .unwrap();
-        assert!(filter.contains("noria", "t1"));
-        assert!(filter.contains("noria", "t2"));
-        assert!(filter.contains("noria", "t3"));
-        assert!(!filter.contains("noria", "t4"));
-        assert!(filter.contains("readyset", "t4"));
-        assert!(!filter.contains("readyset", "table"));
+        assert!(filter.should_be_processed("noria", "t1"));
+        assert!(filter.should_be_processed("noria", "t2"));
+        assert!(filter.should_be_processed("noria", "t3"));
+        assert!(!filter.should_be_processed("noria", "t4"));
+        assert!(filter.should_be_processed("readyset", "t4"));
+        assert!(!filter.should_be_processed("readyset", "table"));
     }
 
     #[test]
@@ -272,11 +306,33 @@ mod tests {
         )
         .unwrap();
         // Namespace with a wildcard contains all tables
-        assert!(filter.contains("noria", "t1"));
-        assert!(filter.contains("noria", "t2"));
-        assert!(filter.contains("noria", "t3"));
-        assert!(filter.contains("noria", "t4"));
-        assert!(filter.contains("readyset", "t4"));
-        assert!(!filter.contains("readyset", "table"));
+        assert!(filter.should_be_processed("noria", "t1"));
+        assert!(filter.should_be_processed("noria", "t2"));
+        assert!(filter.should_be_processed("noria", "t3"));
+        assert!(filter.should_be_processed("noria", "t4"));
+        assert!(filter.should_be_processed("readyset", "t4"));
+        assert!(!filter.should_be_processed("readyset", "table"));
+    }
+
+    #[test]
+    fn allowed_then_denied() {
+        let mut filter = TableFilter::try_new(
+            nom_sql::Dialect::MySQL,
+            Some("noria.*, readyset.t4, t3".to_string().into()),
+            Some("noria"),
+        )
+        .unwrap();
+        assert!(filter.should_be_processed("readyset", "t4"));
+        filter.deny_replication("readyset", "t4");
+        assert!(!filter.should_be_processed("readyset", "t4"));
+    }
+
+    #[test]
+    fn all_allowed_then_one_denied() {
+        let mut filter = TableFilter::for_all_tables();
+
+        assert!(filter.should_be_processed("readyset", "t4"));
+        filter.deny_replication("readyset", "t4");
+        assert!(!filter.should_be_processed("readyset", "t4"));
     }
 }

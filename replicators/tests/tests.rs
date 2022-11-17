@@ -331,7 +331,9 @@ impl TestHandle {
                     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                 }
                 Ok(res) => {
-                    assert_eq!(res, *test_results, "{} incorrect", test_name);
+                    if res != *test_results {
+                        return Err(ReadySetError::Internal(format!("{} incorrect", test_name)));
+                    }
                     break Ok(());
                 }
                 Err(err) => break Err(err),
@@ -898,9 +900,11 @@ async fn replication_skip_unparsable_inner(url: &str) -> ReadySetResult<()> {
             INSERT INTO t2 VALUES (1),(2),(3);
             ",
         )
-        .await?;
+        .await.expect("failed to setup");
 
-    let mut ctx = TestHandle::start_noria(url.to_string(), None).await?;
+    let mut ctx = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .expect("failed to start noria");
     ctx.ready_notify.as_ref().unwrap().notified().await;
 
     ctx.check_results(
@@ -908,7 +912,8 @@ async fn replication_skip_unparsable_inner(url: &str) -> ReadySetResult<()> {
         "skip_unparsable",
         &[&[DfValue::Int(1)], &[DfValue::Int(2)], &[DfValue::Int(3)]],
     )
-    .await?;
+    .await
+    .expect("t2_view initial state incorrect");
 
     ctx.noria
         .table("t1")
@@ -928,7 +933,8 @@ async fn replication_skip_unparsable_inner(url: &str) -> ReadySetResult<()> {
             INSERT INTO t2 VALUES (4),(5),(6);
             ",
         )
-        .await?;
+        .await
+        .expect("query failed");
 
     ctx.check_results(
         "t2_view",
@@ -942,7 +948,8 @@ async fn replication_skip_unparsable_inner(url: &str) -> ReadySetResult<()> {
             &[DfValue::Int(6)],
         ],
     )
-    .await?;
+    .await
+    .expect("t2 view state incorrect after adding 4, 5, 6");
 
     ctx.stop().await;
     client.stop().await;
@@ -1248,6 +1255,7 @@ async fn resnapshot_inner(url: &str) -> ReadySetResult<()> {
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
 async fn mysql_enum_replication() -> ReadySetResult<()> {
+    readyset_tracing::init_test_logging();
     let url = &mysql_url();
     let mut client = DbConnection::connect(url).await?;
     client
