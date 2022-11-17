@@ -239,7 +239,7 @@ impl Expr {
                         let mut json = left.to_json()?;
 
                         fn remove_str(s: &str, vec: &mut Vec<JsonValue>) {
-                            *vec = vec.drain(..).filter(|v| v.as_str() != Some(s)).collect();
+                            vec.retain(|v| v.as_str() != Some(s));
                         }
 
                         if let Ok(key_array) = right.as_array() {
