@@ -33,7 +33,7 @@ itertools = "0.10"
 thiserror = "1.0.26"
 tracing = { version = "0.1", features = ["release_max_level_debug"] }
 tracing-futures = "0.2.5"
-rust_decimal = { version = "1.16" }
+rust_decimal = { version = "1.26" }
 eui48 = { version = "1.1", default-features = false }
 uuid = "0.8"
 serde_json = { version = "1", features = ["arbitrary_precision"] }

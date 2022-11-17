@@ -58,7 +58,7 @@ metrics = "0.19"
 metrics-util = "0.13"
 itertools = "0.10"
 bytes = "1.0.1"
-rust_decimal = { version = "1.16", features = ["db-tokio-postgres", "serde-str"] }
+rust_decimal = { version = "1.26", features = ["db-tokio-postgres", "serde-str"] }
 eui48 = { version = "1.1", default-features = false }
 uuid = { version = "0.8", features = ["v4"] }
 bit-vec = { version = "0.6", features = ["serde"] }

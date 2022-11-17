@@ -25,7 +25,7 @@ thiserror = "1.0.26"
 launchpad = { path = "../launchpad" }
 proptest = "1.0.0"
 test-strategy = "0.2.0"
-rust_decimal = { version = "1.16" }
+rust_decimal = { version = "1.26" }
 eui48 = { version = "1.1", default-features = false }
 uuid = "0.8"
 bit-vec = { version = "0.6", features = ["serde"] }

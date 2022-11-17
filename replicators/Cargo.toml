@@ -21,7 +21,7 @@ tracing = { version = "0.1", features = ["release_max_level_debug"] }
 tracing-futures = "0.2.5"
 serde_json = { version = "1", features = ["arbitrary_precision"] }
 hex = "0.4.3"
-rust_decimal = { version = "1.16" }
+rust_decimal = { version = "1.26" }
 bit-vec = { version = "0.6", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
 nom_locate = "4.0.0"
