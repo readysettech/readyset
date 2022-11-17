@@ -184,9 +184,9 @@ impl Expr {
 
                             let inner = match json {
                                 JsonValue::Array(array) => {
-                                    // NOTE: "+" prefix parsing is handled the same way in both Rust
-                                    // and PostgreSQL.
-                                    key.parse::<isize>().ok().and_then(|index| {
+                                    // NOTE: PostgreSQL ignores leading whitespace, and "+" prefix
+                                    // parsing is handled the same way in both Rust and PostgreSQL.
+                                    key.trim_start().parse::<isize>().ok().and_then(|index| {
                                         crate::utils::index_bidirectional(array, index)
                                     })
                                 }
@@ -1028,6 +1028,7 @@ mod tests {
 
         test(array, "array['0', '0']", Some("\"world\""));
         test(array, "array['0', '1']", Some("123"));
+        test(array, "array['0', '   1']", Some("123"));
         test(array, "array['0', '2']", None);
         test(array, "array['0', null::text]", None);
 
