@@ -210,20 +210,11 @@ impl BuiltinFunction {
                 let ty = type_for_round(&expr, &prec);
                 (Self::Round(expr, prec), ty)
             }
-            "json_typeof" => {
-                (
-                    Self::JsonTypeof(next_arg()?),
-                    // Always returns text containing the JSON type.
-                    DfType::DEFAULT_TEXT,
-                )
-            }
-            "jsonb_typeof" => {
-                (
-                    Self::JsonbTypeof(next_arg()?),
-                    // Always returns text containing the JSON type.
-                    DfType::DEFAULT_TEXT,
-                )
-            }
+            "json_typeof" | "jsonb_typeof" => (
+                Self::JsonTypeof(next_arg()?),
+                // Always returns text containing the JSON type.
+                DfType::DEFAULT_TEXT,
+            ),
             "coalesce" => {
                 let arg1 = next_arg()?;
                 let ty = arg1.ty().clone();

@@ -576,7 +576,7 @@ impl BuiltinFunction {
                     }
                 }
             }
-            BuiltinFunction::JsonTypeof(expr) | BuiltinFunction::JsonbTypeof(expr) => {
+            BuiltinFunction::JsonTypeof(expr) => {
                 let json = expr.eval(record)?.to_json()?;
                 Ok(get_json_value_type(&json).into())
             }
