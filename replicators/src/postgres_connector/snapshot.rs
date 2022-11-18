@@ -333,8 +333,10 @@ impl TableEntry {
             .await
             .map_err(|e| {
                 ReadySetError::TableError {
-                    schema: self.schema.clone(),
-                    name: self.name.clone(),
+                    table: Relation {
+                        schema: Some(self.schema.clone().into()),
+                        name: self.name.clone().into(),
+                    },
                     source: Box::new(e),
                 }
                 .context("when loading columns for the table")
@@ -343,8 +345,10 @@ impl TableEntry {
             .await
             .map_err(|e| {
                 ReadySetError::TableError {
-                    schema: self.schema.clone(),
-                    name: self.name.clone(),
+                    table: Relation {
+                        schema: Some(self.schema.clone().into()),
+                        name: self.name.clone().into(),
+                    },
                     source: Box::new(ReadySetError::ReplicationFailed(e.to_string())),
                 }
                 .context("when loading constraints")

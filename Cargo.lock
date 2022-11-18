@@ -4512,6 +4512,7 @@ dependencies = [
  "derive_more",
  "launchpad",
  "mysql_async",
+ "nom-sql",
  "petgraph",
  "serde",
  "serde_json",

@@ -5,6 +5,7 @@ use std::io;
 
 use derive_more::Display;
 use launchpad::redacted::Sensitive;
+use nom_sql::Relation;
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -313,12 +314,10 @@ pub enum ReadySetError {
     },
 
     /// Manipulating a base table failed.
-    #[error("Failed to manipulate table {schema}.{name}: {source}")]
+    #[error("Failed to manipulate table {table}: {source}")]
     TableError {
-        /// The schema of the base table being manipulated.
-        schema: String,
-        /// The name of the base table being manipulated.
-        name: String,
+        /// The base table being manipulated.
+        table: Relation,
         /// The underlying error that occurred while manipulating the table.
         source: Box<ReadySetError>,
     },
@@ -976,18 +975,9 @@ pub fn view_err<A: Into<NodeIndex>, B: Into<ReadySetError>>(idx: A, err: B) -> R
 }
 
 /// Make a new `ReadySetError::TableError` with the provided `name` and `err` values.
-pub fn table_err<A: ToString, B: ToString, C: Into<ReadySetError>>(
-    schema: Option<A>,
-    name: B,
-    err: C,
-) -> ReadySetError {
-    let schema = match schema {
-        Some(schema) => schema.to_string(),
-        None => "default".to_string(),
-    };
+pub fn table_err<E: Into<ReadySetError>>(table: Relation, err: E) -> ReadySetError {
     ReadySetError::TableError {
-        schema,
-        name: name.to_string(),
+        table,
         source: Box::new(err.into()),
     }
 }

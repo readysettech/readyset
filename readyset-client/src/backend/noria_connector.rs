@@ -1119,8 +1119,7 @@ impl NoriaConnector {
         if auto_increment_columns.len() > 1 {
             // can only have zero or one AUTO_INCREMENT columns
             return Err(table_err(
-                table.schema.clone(),
-                table.name.clone(),
+                table.clone(),
                 ReadySetError::MultipleAutoIncrement,
             ));
         }
@@ -1170,8 +1169,7 @@ impl NoriaConnector {
                         .position(|f| f == *col)
                         .ok_or_else(|| {
                             table_err(
-                                table.schema.clone(),
-                                table.name.clone(),
+                                table.clone(),
                                 ReadySetError::NoSuchColumn(col.column.name.to_string()),
                             )
                         })?;
@@ -1192,8 +1190,7 @@ impl NoriaConnector {
                         .position(|f| f.column == c)
                         .ok_or_else(|| {
                             table_err(
-                                table.schema.clone(),
-                                table.name.clone(),
+                                table.clone(),
                                 ReadySetError::NoSuchColumn(c.name.to_string()),
                             )
                         })?;
@@ -1210,8 +1207,7 @@ impl NoriaConnector {
                         .find_position(|f| f.column == *c)
                         .ok_or_else(|| {
                             table_err(
-                                schema.table.schema.clone(),
-                                schema.table.name.clone(),
+                                schema.table.clone(),
                                 ReadySetError::NoSuchColumn(c.name.to_string()),
                             )
                         })?;
