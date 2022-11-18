@@ -364,6 +364,16 @@ mod types {
             QueryDestination::Readyset
         );
 
+        let proxied_parameter_res = client
+            .query_one(
+                "SELECT COUNT(*) FROM (SELECT * FROM t WHERE x = $1) sq",
+                &[&A],
+            )
+            .await
+            .unwrap()
+            .get::<_, i64>(0);
+        assert_eq!(proxied_parameter_res, 2);
+
         client
             .simple_query("ALTER TYPE abc ADD VALUE 'd'")
             .await
