@@ -12,6 +12,7 @@ use metrics::{counter, histogram};
 use mysql::prelude::Queryable;
 use mysql::{OptsBuilder, PoolConstraints, PoolOpts, SslOpts};
 use nom_sql::Relation;
+use postgres_native_tls::MakeTlsConnector;
 use readyset::consensus::Authority;
 use readyset::consistency::Timestamp;
 #[cfg(feature = "failure_injection")]
@@ -142,7 +143,24 @@ impl NoriaAdapter {
             DatabaseURL::PostgreSQL(options) => {
                 let noria = noria.clone();
                 let config = config.clone();
-                let pool = pg_pool(options.clone(), config.replication_pool_size).await?;
+                let connector = {
+                    let mut builder = native_tls::TlsConnector::builder();
+                    if config.disable_upstream_ssl_verification {
+                        builder.danger_accept_invalid_certs(true);
+                    }
+                    if let Some(root_cert) = config.get_root_cert().await {
+                        builder.add_root_certificate(root_cert?);
+                    }
+                    builder.build().unwrap() // Never returns an error
+                };
+                let tls_connector = postgres_native_tls::MakeTlsConnector::new(connector);
+                let pool = pg_pool(
+                    options.clone(),
+                    config.replication_pool_size,
+                    tls_connector.clone(),
+                )
+                .await?;
+
                 NoriaAdapter::start_inner_postgres(
                     options,
                     noria,
@@ -150,6 +168,7 @@ impl NoriaAdapter {
                     &mut notify,
                     resnapshot,
                     &telemetry_sender,
+                    tls_connector,
                     pool,
                 )
                 .await
@@ -363,6 +382,7 @@ impl NoriaAdapter {
         unreachable!("`main_loop` will never stop with an Ok status if `until = None`");
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn start_inner_postgres(
         pgsql_opts: pgsql::Config,
         mut noria: ReadySetHandle,
@@ -370,6 +390,7 @@ impl NoriaAdapter {
         ready_notify: &mut Option<Arc<Notify>>,
         resnapshot: bool,
         telemetry_sender: &TelemetrySender,
+        tls_connector: MakeTlsConnector,
         pool: deadpool_postgres::Pool,
     ) -> ReadySetResult<!> {
         let dbname = pgsql_opts.get_dbname().ok_or_else(|| {
@@ -387,18 +408,6 @@ impl NoriaAdapter {
             config.replication_tables.take(),
             None,
         )?;
-
-        let connector = {
-            let mut builder = native_tls::TlsConnector::builder();
-            if config.disable_upstream_ssl_verification {
-                builder.danger_accept_invalid_certs(true);
-            }
-            if let Some(root_cert) = config.get_root_cert().await {
-                builder.add_root_certificate(root_cert?);
-            }
-            builder.build().unwrap() // Never returns an error
-        };
-        let tls_connector = postgres_native_tls::MakeTlsConnector::new(connector);
 
         let mut connector = Box::new(
             PostgresWalConnector::connect(
@@ -781,12 +790,11 @@ impl NoriaAdapter {
 pub async fn pg_pool(
     config: pgsql::Config,
     pool_size: usize,
+    tls: MakeTlsConnector,
 ) -> Result<deadpool_postgres::Pool, deadpool_postgres::BuildError> {
     let mgr_config = ManagerConfig {
         recycling_method: RecyclingMethod::Verified,
     };
-    let connector = native_tls::TlsConnector::builder().build().unwrap(); // Never returns an error
-    let tls = postgres_native_tls::MakeTlsConnector::new(connector);
     let mgr = Manager::from_config(config, tls, mgr_config);
     Pool::builder(mgr).max_size(pool_size).build()
 }
