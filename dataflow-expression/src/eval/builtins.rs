@@ -1818,6 +1818,7 @@ mod tests {
             test_identity("[null]");
         }
 
+        #[test]
         fn json_extract_path() {
             #[track_caller]
             fn test(object: &str, keys: &str, expected: Option<&str>) {
