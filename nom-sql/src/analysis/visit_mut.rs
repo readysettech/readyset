@@ -863,8 +863,10 @@ pub fn walk_alter_table_statement<'a, V: VisitorMut<'a>>(
     alter_table_statement: &'a mut AlterTableStatement,
 ) -> Result<(), V::Error> {
     visitor.visit_table(&mut alter_table_statement.table)?;
-    for definition in &mut alter_table_statement.definitions {
-        visitor.visit_alter_table_definition(definition)?;
+    if let Ok(ref mut definitions) = alter_table_statement.definitions {
+        for definition in definitions {
+            visitor.visit_alter_table_definition(definition)?;
+        }
     }
     Ok(())
 }

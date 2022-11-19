@@ -3,9 +3,11 @@
 /// See https://dev.mysql.com/doc/refman/8.0/en/alter-table.html
 use std::{fmt, str};
 
+use itertools::Itertools;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
-use nom::combinator::{map, opt};
+use nom::character::complete::not_line_ending;
+use nom::combinator::{map, map_res, opt};
 use nom::multi::separated_list0;
 use nom::sequence::{preceded, terminated};
 use nom_locate::LocatedSpan;
@@ -121,22 +123,30 @@ impl fmt::Display for AlterTableDefinition {
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct AlterTableStatement {
     pub table: Relation,
-    pub definitions: Vec<AlterTableDefinition>,
+    /// The result of parsing the alter table definitions.
+    /// If the parsing succeeded, then this will be an `Ok` result
+    /// with the list of [`AlterTableDefinition`]s.
+    /// If it failed to parse, this will be an `Err` with the remainder
+    /// [`String`] that could not be parsed.
+    pub definitions: Result<Vec<AlterTableDefinition>, String>,
     pub only: bool,
 }
 
 impl fmt::Display for AlterTableStatement {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "ALTER TABLE `{}` ", self.table.name)?;
-        write!(
-            f,
-            "{}",
-            self.definitions
-                .iter()
-                .map(|def| def.to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )?;
+        match &self.definitions {
+            Ok(definitions) => {
+                write!(
+                    f,
+                    "{}",
+                    definitions.iter().map(|def| def.to_string()).join(", ")
+                )?;
+            }
+            Err(unparsed) => {
+                write!(f, "{}", unparsed)?;
+            }
+        }
         Ok(())
     }
 }
@@ -339,7 +349,6 @@ pub fn alter_table_statement(
         let (i, _) = whitespace1(i)?;
         let (i, _) = tag_no_case("table")(i)?;
         let (i, _) = whitespace1(i)?;
-
         // The ONLY keyword is not used in MySQL ALTER. It *is* reserved, but we match anyways.
         let (i, only) = if matches!(dialect, Dialect::PostgreSQL) {
             let (i, only) = opt(tag_no_case("only"))(i)?;
@@ -351,18 +360,49 @@ pub fn alter_table_statement(
 
         let (i, table) = relation(dialect)(i)?;
         let (i, _) = whitespace1(i)?;
-        let (i, definitions) = separated_list0(ws_sep_comma, alter_table_definition(dialect))(i)?;
-        let (i, _) = whitespace0(i)?;
-        let (i, _) = statement_terminator(i)?;
 
-        Ok((
-            i,
-            AlterTableStatement {
-                table,
-                definitions,
-                only,
-            },
-        ))
+        fn parse_remaining(
+            dialect: Dialect,
+        ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<AlterTableDefinition>> {
+            move |i: LocatedSpan<&[u8]>| {
+                let (i, definitions) =
+                    separated_list0(ws_sep_comma, alter_table_definition(dialect))(i)?;
+                let (i, _) = whitespace0(i)?;
+                let (i, _) = statement_terminator(i)?;
+
+                Ok((i, definitions))
+            }
+        }
+
+        let result = parse_remaining(dialect)(i);
+
+        if let Ok((i, definitions)) = result {
+            Ok((
+                i,
+                AlterTableStatement {
+                    table,
+                    definitions: Ok(definitions),
+                    only,
+                },
+            ))
+        } else {
+            let (i, unsupported) = map_res(
+                terminated(not_line_ending, statement_terminator),
+                |i: LocatedSpan<&[u8]>| {
+                    #[allow(clippy::explicit_auto_deref)]
+                    // for some reason, clippy was complaining
+                    str::from_utf8(*i)
+                },
+            )(i)?;
+            Ok((
+                i,
+                AlterTableStatement {
+                    table,
+                    definitions: Err(unsupported.to_string()),
+                    only,
+                },
+            ))
+        }
     }
 }
 
@@ -375,7 +415,7 @@ mod tests {
     fn display_add_column() {
         let stmt = AlterTableStatement {
             table: "t".into(),
-            definitions: vec![AlterTableDefinition::AddColumn(ColumnSpecification {
+            definitions: Ok(vec![AlterTableDefinition::AddColumn(ColumnSpecification {
                 column: Column {
                     name: "c".into(),
                     table: None,
@@ -383,12 +423,24 @@ mod tests {
                 sql_type: SqlType::Int(Some(32)),
                 comment: None,
                 constraints: vec![],
-            })],
+            })]),
             only: false,
         };
 
         let result = stmt.to_string();
         assert_eq!(result, "ALTER TABLE `t` ADD COLUMN `c` INT(32)");
+    }
+
+    #[test]
+    fn display_unsupported() {
+        let stmt = AlterTableStatement {
+            table: "t".into(),
+            definitions: Err("unsupported rest of the query".to_string()),
+            only: false,
+        };
+
+        let result = stmt.to_string();
+        assert_eq!(result, "ALTER TABLE `t` unsupported rest of the query");
     }
 
     #[test]
@@ -399,7 +451,7 @@ mod tests {
                 name: "employees".into(),
                 schema: None,
             },
-            definitions: vec![
+            definitions: Ok(vec![
                 AlterTableDefinition::AddColumn(ColumnSpecification {
                     column: Column {
                         name: "Email".into(),
@@ -418,7 +470,7 @@ mod tests {
                     constraints: vec![],
                     comment: None,
                 }),
-            ],
+            ]),
             only: false,
         };
         let result = alter_table_statement(Dialect::MySQL)(LocatedSpan::new(qstring));
@@ -431,6 +483,37 @@ mod tests {
         use crate::{Column, ColumnConstraint, SqlType};
 
         #[test]
+        fn parse_unsupported() {
+            // Ending with semicolon
+            let qstring = "ALTER TABLE `t` unsupported rest of the query;";
+            let expected = AlterTableStatement {
+                table: Relation {
+                    name: "t".into(),
+                    schema: None,
+                },
+                definitions: Err("unsupported rest of the query;".to_string()),
+                only: false,
+            };
+            let result =
+                alter_table_statement(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
+            assert_eq!(result.unwrap().1, expected);
+
+            // Ending with EOF
+            let qstring = "ALTER TABLE `t` unsupported rest of the query";
+            let expected = AlterTableStatement {
+                table: Relation {
+                    name: "t".into(),
+                    schema: None,
+                },
+                definitions: Err("unsupported rest of the query".to_string()),
+                only: false,
+            };
+            let result =
+                alter_table_statement(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
+            assert_eq!(result.unwrap().1, expected);
+        }
+
+        #[test]
         fn parse_add_column() {
             let qstring = "ALTER TABLE `t` ADD COLUMN `c` INT";
             let expected = AlterTableStatement {
@@ -438,7 +521,7 @@ mod tests {
                     name: "t".into(),
                     schema: None,
                 },
-                definitions: vec![AlterTableDefinition::AddColumn(ColumnSpecification {
+                definitions: Ok(vec![AlterTableDefinition::AddColumn(ColumnSpecification {
                     column: Column {
                         name: "c".into(),
                         table: None,
@@ -446,7 +529,7 @@ mod tests {
                     sql_type: SqlType::Int(None),
                     constraints: vec![],
                     comment: None,
-                })],
+                })]),
                 only: false,
             };
             let result =
@@ -462,7 +545,7 @@ mod tests {
                     name: "t".into(),
                     schema: None,
                 },
-                definitions: vec![
+                definitions: Ok(vec![
                     AlterTableDefinition::AddColumn(ColumnSpecification {
                         column: Column {
                             name: "c".into(),
@@ -481,7 +564,7 @@ mod tests {
                         constraints: vec![],
                         comment: None,
                     }),
-                ],
+                ]),
                 only: false,
             };
             let result =
@@ -497,10 +580,10 @@ mod tests {
                     name: "t".into(),
                     schema: None,
                 },
-                definitions: vec![AlterTableDefinition::DropColumn {
+                definitions: Ok(vec![AlterTableDefinition::DropColumn {
                     name: "c".into(),
                     behavior: None,
-                }],
+                }]),
                 only: false,
             };
             let result =
@@ -516,10 +599,10 @@ mod tests {
                     name: "t".into(),
                     schema: None,
                 },
-                definitions: vec![AlterTableDefinition::DropColumn {
+                definitions: Ok(vec![AlterTableDefinition::DropColumn {
                     name: "c".into(),
                     behavior: Some(DropBehavior::Cascade),
-                }],
+                }]),
                 only: false,
             };
             let result =
@@ -535,12 +618,12 @@ mod tests {
                     name: "t".into(),
                     schema: None,
                 },
-                definitions: vec![AlterTableDefinition::AlterColumn {
+                definitions: Ok(vec![AlterTableDefinition::AlterColumn {
                     name: "c".into(),
                     operation: AlterColumnOperation::SetColumnDefault(Literal::String(
                         "foo".into(),
                     )),
-                }],
+                }]),
                 only: false,
             };
             let result =
@@ -556,10 +639,10 @@ mod tests {
                     name: "t".into(),
                     schema: None,
                 },
-                definitions: vec![AlterTableDefinition::AlterColumn {
+                definitions: Ok(vec![AlterTableDefinition::AlterColumn {
                     name: "c".into(),
                     operation: AlterColumnOperation::DropColumnDefault,
-                }],
+                }]),
                 only: false,
             };
             let result =
@@ -575,7 +658,7 @@ mod tests {
                 res,
                 AlterTableStatement {
                     table: Relation::from("flags"),
-                    definitions: vec![AlterTableDefinition::ChangeColumn {
+                    definitions: Ok(vec![AlterTableDefinition::ChangeColumn {
                         name: "time".into(),
                         spec: ColumnSpecification {
                             column: Column::from("created_at"),
@@ -583,7 +666,7 @@ mod tests {
                             constraints: vec![ColumnConstraint::NotNull],
                             comment: None,
                         }
-                    }],
+                    }]),
                     only: false,
                 }
             );
@@ -597,7 +680,7 @@ mod tests {
                 res,
                 AlterTableStatement {
                     table: Relation::from("t"),
-                    definitions: vec![AlterTableDefinition::ChangeColumn {
+                    definitions: Ok(vec![AlterTableDefinition::ChangeColumn {
                         name: "f".into(),
                         spec: ColumnSpecification {
                             column: Column::from("f"),
@@ -608,7 +691,7 @@ mod tests {
                             ],
                             comment: None,
                         }
-                    }],
+                    }]),
                     only: false,
                 }
             );
@@ -622,7 +705,7 @@ mod tests {
                 res,
                 AlterTableStatement {
                     table: Relation::from("t"),
-                    definitions: vec![AlterTableDefinition::ChangeColumn {
+                    definitions: Ok(vec![AlterTableDefinition::ChangeColumn {
                         name: "f".into(),
                         spec: ColumnSpecification {
                             column: Column::from("modify"),
@@ -630,7 +713,7 @@ mod tests {
                             constraints: vec![],
                             comment: None,
                         }
-                    }],
+                    }]),
                     only: false,
                 }
             );
@@ -649,11 +732,11 @@ mod tests {
                 res,
                 AlterTableStatement {
                     table: Relation::from("posts_likes"),
-                    definitions: vec![AlterTableDefinition::AddKey(TableKey::PrimaryKey {
+                    definitions: Ok(vec![AlterTableDefinition::AddKey(TableKey::PrimaryKey {
                         constraint_name: None,
                         index_name: Some("posts_likes_post_id_user_id_primary".into()),
                         columns: vec![Column::from("post_id"), Column::from("user_id"),],
-                    })],
+                    })]),
                     only: false,
                 }
             );
@@ -667,12 +750,12 @@ mod tests {
                 res,
                 AlterTableStatement {
                     table: Relation::from("flags"),
-                    definitions: vec![AlterTableDefinition::AddKey(TableKey::Key {
+                    definitions: Ok(vec![AlterTableDefinition::AddKey(TableKey::Key {
                         constraint_name: None,
                         index_name: Some("flags_created_at_index".into()),
                         columns: vec![Column::from("created_at")],
                         index_type: None,
-                    })],
+                    })]),
                     only: false,
                 }
             );
@@ -686,7 +769,7 @@ mod tests {
                 res,
                 AlterTableStatement {
                     table: Relation::from("flags"),
-                    definitions: vec![AlterTableDefinition::AddKey(TableKey::ForeignKey {
+                    definitions: Ok(vec![AlterTableDefinition::AddKey(TableKey::ForeignKey {
                         constraint_name: Some("flags_post_id_foreign".into()),
                         index_name: None,
                         columns: vec![Column::from("post_id")],
@@ -694,7 +777,7 @@ mod tests {
                         target_columns: vec![Column::from("id")],
                         on_delete: Some(ReferentialAction::Cascade),
                         on_update: None
-                    })],
+                    })]),
                     only: false,
                 }
             );
@@ -709,12 +792,12 @@ mod tests {
                 res,
                 AlterTableStatement {
                     table: Relation::from("discussion_user"),
-                    definitions: vec![AlterTableDefinition::AddColumn(ColumnSpecification {
+                    definitions: Ok(vec![AlterTableDefinition::AddColumn(ColumnSpecification {
                         column: Column::from("subscription"),
                         sql_type: SqlType::from_enum_variants(["follow".into(), "ignore".into(),]),
                         constraints: vec![ColumnConstraint::Null],
                         comment: None,
-                    })],
+                    })]),
                     only: false,
                 }
             );
@@ -723,18 +806,42 @@ mod tests {
                 "ALTER TABLE `discussion_user` ADD COLUMN `subscription` ENUM('follow', 'ignore') NULL"
             );
         }
-
-        #[test]
-        fn error_on_only() {
-            let qstring = "ALTER TABLE ONLY \"t\" DROP COLUMN c";
-            let res = alter_table_statement(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
-            assert!(res.is_err());
-        }
     }
 
     mod postgres {
         use super::*;
         use crate::{Column, IndexType, SqlType};
+
+        #[test]
+        fn parse_unsupported() {
+            // Ending with semicolon
+            let qstring = "ALTER TABLE \"t\" unsupported rest of the query;";
+            let expected = AlterTableStatement {
+                table: Relation {
+                    name: "t".into(),
+                    schema: None,
+                },
+                definitions: Err("unsupported rest of the query;".to_string()),
+                only: false,
+            };
+            let result =
+                alter_table_statement(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
+            assert_eq!(result.unwrap().1, expected);
+
+            // Ending with EOF
+            let qstring = "ALTER TABLE \"t\" unsupported rest of the query";
+            let expected = AlterTableStatement {
+                table: Relation {
+                    name: "t".into(),
+                    schema: None,
+                },
+                definitions: Err("unsupported rest of the query".to_string()),
+                only: false,
+            };
+            let result =
+                alter_table_statement(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
+            assert_eq!(result.unwrap().1, expected);
+        }
 
         #[test]
         fn parse_add_column() {
@@ -744,7 +851,7 @@ mod tests {
                     name: "t".into(),
                     schema: None,
                 },
-                definitions: vec![AlterTableDefinition::AddColumn(ColumnSpecification {
+                definitions: Ok(vec![AlterTableDefinition::AddColumn(ColumnSpecification {
                     column: Column {
                         name: "c".into(),
                         table: None,
@@ -752,7 +859,7 @@ mod tests {
                     sql_type: SqlType::Int(None),
                     constraints: vec![],
                     comment: None,
-                })],
+                })]),
                 only: false,
             };
             let result =
@@ -768,7 +875,7 @@ mod tests {
                     name: "t".into(),
                     schema: None,
                 },
-                definitions: vec![
+                definitions: Ok(vec![
                     AlterTableDefinition::AddColumn(ColumnSpecification {
                         column: Column {
                             name: "c".into(),
@@ -787,7 +894,7 @@ mod tests {
                         constraints: vec![],
                         comment: None,
                     }),
-                ],
+                ]),
                 only: false,
             };
             let result =
@@ -803,10 +910,10 @@ mod tests {
                     name: "t".into(),
                     schema: None,
                 },
-                definitions: vec![AlterTableDefinition::DropColumn {
+                definitions: Ok(vec![AlterTableDefinition::DropColumn {
                     name: "c".into(),
                     behavior: None,
-                }],
+                }]),
                 only: false,
             };
             let result =
@@ -822,10 +929,10 @@ mod tests {
                     name: "t".into(),
                     schema: None,
                 },
-                definitions: vec![AlterTableDefinition::DropColumn {
+                definitions: Ok(vec![AlterTableDefinition::DropColumn {
                     name: "c".into(),
                     behavior: Some(DropBehavior::Cascade),
-                }],
+                }]),
                 only: false,
             };
             let result =
@@ -841,12 +948,12 @@ mod tests {
                     name: "t".into(),
                     schema: None,
                 },
-                definitions: vec![AlterTableDefinition::AlterColumn {
+                definitions: Ok(vec![AlterTableDefinition::AlterColumn {
                     name: "c".into(),
                     operation: AlterColumnOperation::SetColumnDefault(Literal::String(
                         "foo".into(),
                     )),
-                }],
+                }]),
                 only: false,
             };
             let result =
@@ -862,10 +969,10 @@ mod tests {
                     name: "t".into(),
                     schema: None,
                 },
-                definitions: vec![AlterTableDefinition::AlterColumn {
+                definitions: Ok(vec![AlterTableDefinition::AlterColumn {
                     name: "c".into(),
                     operation: AlterColumnOperation::DropColumnDefault,
-                }],
+                }]),
                 only: false,
             };
             let result =
@@ -881,10 +988,10 @@ mod tests {
                     name: "t".into(),
                     schema: None,
                 },
-                definitions: vec![AlterTableDefinition::DropColumn {
+                definitions: Ok(vec![AlterTableDefinition::DropColumn {
                     name: "c".into(),
                     behavior: None,
-                }],
+                }]),
                 only: true,
             };
             let res =
@@ -902,10 +1009,10 @@ mod tests {
                     name: "t".into(),
                     schema: None,
                 },
-                definitions: vec![AlterTableDefinition::DropConstraint {
+                definitions: Ok(vec![AlterTableDefinition::DropConstraint {
                     name: "c".into(),
                     drop_behavior: Some(DropBehavior::Cascade),
-                }],
+                }]),
                 only: false,
             };
             let res1 =
@@ -915,12 +1022,12 @@ mod tests {
             let res3 =
                 alter_table_statement(Dialect::PostgreSQL)(LocatedSpan::new(qstring3.as_bytes()));
             assert_eq!(res1.unwrap().1, expected);
-            expected.definitions[0] = AlterTableDefinition::DropConstraint {
+            expected.definitions.as_mut().unwrap()[0] = AlterTableDefinition::DropConstraint {
                 name: "c".into(),
                 drop_behavior: Some(DropBehavior::Restrict),
             };
             assert_eq!(res2.unwrap().1, expected);
-            expected.definitions[0] = AlterTableDefinition::DropConstraint {
+            expected.definitions.as_mut().unwrap()[0] = AlterTableDefinition::DropConstraint {
                 name: "c".into(),
                 drop_behavior: None,
             };
@@ -940,7 +1047,7 @@ mod tests {
                     name: "t".into(),
                     schema: None,
                 },
-                definitions: vec![AlterTableDefinition::AddKey(table_key)],
+                definitions: Ok(vec![AlterTableDefinition::AddKey(table_key)]),
                 only: false,
             };
             let res1 =

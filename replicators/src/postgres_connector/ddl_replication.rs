@@ -518,7 +518,7 @@ mod tests {
             DdlEventData::AlterTable(stmt) => {
                 assert_eq!(stmt.table.name, "t");
                 assert_eq!(
-                    stmt.definitions,
+                    stmt.definitions.unwrap(),
                     vec![nom_sql::AlterTableDefinition::AddColumn(
                         ColumnSpecification::new("y".into(), SqlType::Int(None),)
                     ),]

@@ -851,8 +851,10 @@ pub fn walk_alter_table_statement<'a, V: Visitor<'a>>(
     alter_table_statement: &'a AlterTableStatement,
 ) -> Result<(), V::Error> {
     visitor.visit_table(&alter_table_statement.table)?;
-    for definition in &alter_table_statement.definitions {
-        visitor.visit_alter_table_definition(definition)?;
+    if let Ok(ref definitions) = alter_table_statement.definitions {
+        for definition in definitions {
+            visitor.visit_alter_table_definition(definition)?;
+        }
     }
     Ok(())
 }

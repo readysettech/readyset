@@ -1,8 +1,9 @@
+use launchpad::redacted::Sensitive;
 use nom_sql::{
     AlterColumnOperation, AlterTableDefinition, AlterTableStatement, ColumnConstraint,
     CreateTableStatement, Expr, TableKey,
 };
-use readyset_errors::{unsupported, ReadySetError, ReadySetResult};
+use readyset_errors::{internal, unsupported, ReadySetError, ReadySetResult};
 
 /// Creates a new [`CreateTableStatement`] from the one given, and applies all the
 /// alterations specified in the [`AlterTableStatement`].
@@ -10,7 +11,15 @@ pub(super) fn rewrite_table_definition(
     alter_table_definition: &AlterTableStatement,
     mut new_table: CreateTableStatement,
 ) -> ReadySetResult<CreateTableStatement> {
-    for definition in alter_table_definition.definitions.iter() {
+    let definitions = if let Ok(definitions) = alter_table_definition.definitions.as_ref() {
+        definitions
+    } else {
+        internal!(
+            "can't rewrite unsupported alter table: {}",
+            Sensitive(alter_table_definition)
+        );
+    };
+    for definition in definitions.iter() {
         match definition {
             AlterTableDefinition::AddColumn(c) => {
                 let mut c = c.clone();

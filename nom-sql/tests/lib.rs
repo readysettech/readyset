@@ -246,6 +246,6 @@ fn parse_select() {
 #[test]
 fn parse_alter_table() {
     let (ok, fail) = parse_file(Dialect::MySQL, "tests/alter-table.txt");
-    assert_eq!(fail, 3);
-    assert_eq!(ok, 8);
+    assert_eq!(fail, 2);
+    assert_eq!(ok, 9);
 }

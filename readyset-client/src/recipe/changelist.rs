@@ -336,18 +336,24 @@ impl Change {
             _ => return false,
         };
 
-        // NOTE: This exhaustive list is here so that we remember to think about the behavior of
-        // any additional alter table additions we add support for. We may not need to resnapshot
-        // for them. As such, this list should not be removed.
-        alter_table.definitions.iter().any(|def| match def {
-            nom_sql::AlterTableDefinition::AddColumn(_)
-            | nom_sql::AlterTableDefinition::AlterColumn { .. }
-            | nom_sql::AlterTableDefinition::DropColumn { .. }
-            | nom_sql::AlterTableDefinition::ChangeColumn { .. }
-            | nom_sql::AlterTableDefinition::RenameColumn { .. }
-            | nom_sql::AlterTableDefinition::AddKey(_)
-            | nom_sql::AlterTableDefinition::DropConstraint { .. } => true,
-        })
+        if let Ok(ref definitions) = alter_table.definitions {
+            // NOTE: This exhaustive list is here so that we remember to think about the behavior of
+            // any additional alter table additions we add support for. We may not need to
+            // resnapshot for them. As such, this list should not be removed.
+            definitions.iter().any(|def| match def {
+                nom_sql::AlterTableDefinition::AddColumn(_)
+                | nom_sql::AlterTableDefinition::AlterColumn { .. }
+                | nom_sql::AlterTableDefinition::DropColumn { .. }
+                | nom_sql::AlterTableDefinition::ChangeColumn { .. }
+                | nom_sql::AlterTableDefinition::RenameColumn { .. }
+                | nom_sql::AlterTableDefinition::AddKey(_)
+                | nom_sql::AlterTableDefinition::DropConstraint { .. } => true,
+            })
+        } else {
+            // We know it's an alter table, but we couldn't fully parse it.
+            // Trigger a resnapshot.
+            true
+        }
     }
 }
 

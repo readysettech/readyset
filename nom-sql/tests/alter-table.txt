@@ -7,8 +7,8 @@ alter table t1 drop column foo;
 alter table t1 alter column foo default 1;
 alter table t1 alter column foo set default 1;
 alter table t1 alter column foo drop default;
+alter table t1 drop column foo int;
 
 # failures
 alter table;
 alter t1 add foo;
-alter table t1 drop column foo int;
