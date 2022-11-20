@@ -97,6 +97,11 @@ pub enum TableOperation {
         /// The key used to identify the row to update.
         key: Vec<DfValue>,
     },
+    /// Delete all rows in the table
+    ///
+    /// Note that truncate operations are *not* currently performed in order within a single batch
+    /// of table operations
+    Truncate,
     /// Set the replication offset for data written to this base table.
     ///
     /// Within a group of table operations, the largest replication offset will take precedence
@@ -134,14 +139,15 @@ impl TableOperation {
             TableOperation::DeleteRow { row } => Some(&row[key_col]),
             TableOperation::Update { key, .. } => Some(&key[0]),
             TableOperation::InsertOrUpdate { row, .. } => Some(&row[key_col]),
-            TableOperation::SetReplicationOffset(_) => None,
-            TableOperation::SetSnapshotMode(_) => None,
+            TableOperation::Truncate
+            | TableOperation::SetReplicationOffset(_)
+            | TableOperation::SetSnapshotMode(_) => None,
         };
 
         if let Some(key) = key {
             Either::Left(iter::once(crate::shard_by(key, num_shards)))
         } else {
-            // updates to replication offsets should hit all shards
+            // unkeyed updates should hit all shards
             Either::Right(0..num_shards)
         }
     }
@@ -448,8 +454,9 @@ impl Table {
                             ));
                         }
                     }
-                    TableOperation::SetReplicationOffset(_) => {}
-                    TableOperation::SetSnapshotMode(_) => {}
+                    TableOperation::SetReplicationOffset(_)
+                    | TableOperation::SetSnapshotMode(_)
+                    | TableOperation::Truncate => {}
                 }
             }
             Ok(())
@@ -934,6 +941,14 @@ impl Table {
                 row: insert,
                 update: set,
             },
+        ]))
+        .await
+    }
+
+    /// Delete all rows from this base table
+    pub async fn truncate(&mut self) -> ReadySetResult<()> {
+        self.quick_n_dirty_with_timeout(TableRequest::TableOperations(vec![
+            TableOperation::Truncate,
         ]))
         .await
     }

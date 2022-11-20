@@ -82,7 +82,7 @@ use readyset::replication::ReplicationOffset;
 use readyset::{KeyComparison, KeyCount, SqlIdentifier};
 use readyset_data::DfValue;
 use readyset_errors::{ReadySetError, ReadySetResult};
-use rocksdb::{self, PlainTableFactoryOptions, SliceTransform, WriteBatch, DB};
+use rocksdb::{self, IteratorMode, PlainTableFactoryOptions, SliceTransform, WriteBatch, DB};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tempfile::{tempdir, TempDir};
@@ -917,7 +917,7 @@ impl State for PersistentStateHandle {
         let inner = self.inner();
         let db = &inner.db;
         let cf = db.cf_handle(&inner.indices[0].column_family).unwrap();
-        db.full_iterator_cf(cf, rocksdb::IteratorMode::Start)
+        db.full_iterator_cf(cf, IteratorMode::Start)
             .map(|res| deserialize_row(res.unwrap().1))
             .collect()
     }
@@ -2408,27 +2408,6 @@ mod tests {
         // rows() is estimated, but we want to make sure we at least don't return
         // self.indices.len() * rows.len() here.
         assert!(count > 0 && count < rows.len() * 2);
-    }
-
-    #[test]
-    fn persistent_state_all_rows() {
-        let mut state = setup_persistent("persistent_state_all_rows", None);
-        let mut rows = vec![];
-        for i in 0..10 {
-            let row = vec![DfValue::from(i); 10];
-            rows.push(row);
-            // Add a bunch of indices to make sure the sorting in all_rows()
-            // correctly filters out non-primary indices:
-            state.add_key(Index::new(IndexType::HashMap, vec![i]), None);
-        }
-
-        for row in rows.iter().cloned() {
-            insert(&mut state, row);
-        }
-
-        let actual_rows: Vec<Vec<DfValue>> = state.cloned_records();
-
-        assert_eq!(actual_rows, rows);
     }
 
     #[test]

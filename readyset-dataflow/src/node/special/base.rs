@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 
@@ -12,7 +13,7 @@ use readyset::{Modification, Operation, TableOperation};
 use readyset_data::{DfValue, DfValueKind};
 use readyset_errors::ReadySetResult;
 use serde::{Deserialize, Serialize};
-use tracing::warn;
+use tracing::{debug, trace, warn};
 use vec_map::VecMap;
 
 use crate::node::Column;
@@ -193,8 +194,9 @@ fn key_val(i: usize, col: usize, r: &TableOperation) -> Option<&DfValue> {
         TableOperation::DeleteRow { ref row } => Some(&row[col]),
         TableOperation::Update { ref key, .. } => Some(&key[i]),
         TableOperation::InsertOrUpdate { ref row, .. } => Some(&row[col]),
-        TableOperation::SetReplicationOffset(_) => None,
-        TableOperation::SetSnapshotMode(_) => None,
+        TableOperation::SetReplicationOffset(_)
+        | TableOperation::SetSnapshotMode(_)
+        | TableOperation::Truncate => None,
     }
 }
 
@@ -281,6 +283,7 @@ impl Base {
         state: &StateMap,
         snapshot_mode: SnapshotMode,
     ) -> ReadySetResult<BaseWrite> {
+        trace!(node = %our_index, base_ops = ?ops);
         for op in ops.iter_mut() {
             apply_table_op_coercions(op, columns)?;
         }
@@ -296,7 +299,18 @@ impl Base {
         // Sort all of the operations lexicographically by key types, all unkeyed operations will
         // move to the front of the vector (which can only be `SetReplicationOffset`), for
         // the rest of the operations it will group them by their key value.
-        ops.sort_by(|a, b| key_of(key_cols, a).cmp(key_of(key_cols, b)));
+        ops.sort_by(|a, b| {
+            key_of(key_cols, a).cmp(key_of(key_cols, b)).then_with(|| {
+                // Put all the Truncate ops last so we can process them separately
+                if *a == TableOperation::Truncate {
+                    Ordering::Greater
+                } else if *b == TableOperation::Truncate {
+                    Ordering::Less
+                } else {
+                    Ordering::Equal
+                }
+            })
+        });
         let mut ops = ops.into_iter().peekable();
 
         // First compute the replication offset
@@ -331,9 +345,23 @@ impl Base {
             None => internal!("base with primary key must be materialized"),
         };
 
+        let mut results = vec![];
+
+        let mut truncated = false;
+        while let Some(TableOperation::Truncate) = ops.peek() {
+            n_ops -= 1;
+            ops.next();
+            if !truncated {
+                debug!("Truncating base");
+                truncated = true;
+                results.extend(db.cloned_records().into_iter().map(|r| Record::Negative(r)));
+            }
+        }
+
         // Group the operations by their key, so we can process each group independently
         let ops = ops.group_by(|op| key_of(key_cols, op).cloned().collect::<Vec<_>>());
-        let mut results = Vec::with_capacity(n_ops);
+        results.reserve(n_ops);
+
         /// [`TouchedKey`] indicates if the given key was previously deleted or inserted as part of
         /// the current batch that was not yet persisted to the base node.
         enum TouchedKey<'a> {
@@ -419,7 +447,8 @@ impl Base {
                     }
                     TableOperation::SetSnapshotMode(_)
                     | TableOperation::SetReplicationOffset(_)
-                    | TableOperation::InsertOrUpdate { .. } => {
+                    | TableOperation::InsertOrUpdate { .. }
+                    | TableOperation::Truncate => {
                         // This is unreachable, because all of those cases are handled above
                     }
                 }
@@ -862,6 +891,55 @@ mod tests {
                     set_snapshot_mode: None,
                 }
             )
+        }
+
+        #[test]
+        fn truncate() {
+            let mut b = Base::new().with_primary_key([0]);
+            let ni = LocalNodeIndex::make(0u32);
+            let mut state = MaterializedNodeState::Persistent(PersistentState::new(
+                "truncate".into(),
+                Vec::<Box<[usize]>>::new(),
+                &PersistenceParameters::default(),
+            ));
+
+            state.add_key(Index::hash_map(vec![0]), None);
+
+            let mut recs = vec![
+                Record::Positive(vec![1.into(), "a".into()]),
+                Record::Positive(vec![1.into(), "b".into()]),
+                Record::Positive(vec![2.into(), "b".into()]),
+                Record::Positive(vec![3.into(), "c".into()]),
+            ]
+            .into();
+            state.process_records(&mut recs, None, None);
+
+            let mut state_map = NodeMap::new();
+            state_map.insert(ni, state);
+
+            let res = b
+                .process(
+                    ni,
+                    &[],
+                    vec![TableOperation::Truncate],
+                    &state_map,
+                    SnapshotMode::SnapshotModeDisabled,
+                )
+                .unwrap();
+            assert_eq!(
+                res,
+                BaseWrite {
+                    records: vec![
+                        Record::Negative(vec![1.into(), "a".into()]),
+                        Record::Negative(vec![1.into(), "b".into()]),
+                        Record::Negative(vec![2.into(), "b".into()]),
+                        Record::Negative(vec![3.into(), "c".into()]),
+                    ]
+                    .into(),
+                    replication_offset: None,
+                    set_snapshot_mode: None
+                }
+            );
         }
     }
 }

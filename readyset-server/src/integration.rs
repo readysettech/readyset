@@ -515,6 +515,14 @@ async fn base_mutation() {
         read.lookup(&[1.into()], true).await.unwrap().into_vec(),
         vec![vec![1.into(), 2.into()]]
     );
+
+    // truncate deletes everything
+    write.truncate().await.unwrap();
+    sleep().await;
+    assert_eq!(
+        read.lookup(&[1.into()], true).await.unwrap().into_vec(),
+        Vec::<Vec<DfValue>>::new()
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
