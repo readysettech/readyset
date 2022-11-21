@@ -1650,6 +1650,62 @@ async fn postgresql_replicate_custom_type() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
+async fn postgresql_replicate_truncate() {
+    let url = pgsql_url();
+    let mut client = DbConnection::connect(&url).await.unwrap();
+    client
+        .query(
+            "DROP TABLE IF EXISTS t CASCADE;
+             CREATE TABLE t (x int PRIMARY KEY);
+             CREATE VIEW v AS SELECT x FROM t;
+             INSERT INTO t (x) values (1), (2), (3);
+
+             DROP TABLE IF EXISTS t2 CASCADE;
+             CREATE TABLE t2 (y int PRIMARY KEY);
+             CREATE VIEW v2 AS SELECT y FROM t2;
+             INSERT INTO t2 (y) values (1), (2), (3);
+            ",
+        )
+        .await
+        .unwrap();
+
+    let mut ctx = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
+    ctx.ready_notify.as_ref().unwrap().notified().await;
+
+    ctx.check_results(
+        "v",
+        "pre-truncate",
+        &[
+            &[DfValue::from(1)],
+            &[DfValue::from(2)],
+            &[DfValue::from(3)],
+        ],
+    )
+    .await
+    .unwrap();
+
+    ctx.check_results(
+        "v2",
+        "pre-truncate",
+        &[
+            &[DfValue::from(1)],
+            &[DfValue::from(2)],
+            &[DfValue::from(3)],
+        ],
+    )
+    .await
+    .unwrap();
+
+    client.query("TRUNCATE t, t2").await.unwrap();
+
+    ctx.check_results("v", "post-truncate", &[]).await.unwrap();
+    ctx.check_results("v2", "post-truncate", &[]).await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
 async fn postgresql_drop_nonexistent_replication_slot() -> ReadySetResult<()> {
     let connector = native_tls::TlsConnector::builder()
         .danger_accept_invalid_certs(true)

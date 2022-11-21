@@ -67,6 +67,9 @@ pub(crate) enum WalEvent {
         key: Vec<DfValue>,
         set: Vec<readyset::Modification>,
     },
+    Truncate {
+        tables: Vec<(String, String)>,
+    },
     DdlEvent {
         ddl_event: Box<DdlEvent>,
     },
@@ -329,9 +332,21 @@ impl WalReader {
                 WalRecord::Type { id, .. } => {
                     custom_types.insert(id as _);
                 }
-                msg @ WalRecord::Truncate { .. } => {
-                    // This happens when `TRUNCATE table` is used, unsupported yet
-                    error!(?msg, "Unhandled message");
+                WalRecord::Truncate {
+                    n_relations,
+                    relation_ids,
+                    ..
+                } => {
+                    let mut tables = Vec::with_capacity(n_relations as _);
+                    for relation_id in relation_ids {
+                        if let Some(Relation { schema, table, .. }) = relations.get(&relation_id) {
+                            tables.push((schema.clone(), table.clone()))
+                        } else {
+                            debug!(%relation_id, "Ignoring WAL event for unknown relation");
+                        }
+                    }
+
+                    return Ok((WalEvent::Truncate { tables }, end));
                 }
                 WalRecord::Origin { .. } => {
                     // Just tells where the transaction originated

@@ -6,6 +6,7 @@ use nom_sql::Relation;
 use postgres_native_tls::MakeTlsConnector;
 use readyset::replication::ReplicationOffset;
 use readyset::{ReadySetError, ReadySetResult, TableOperation};
+use readyset_errors::invariant;
 use tokio_postgres as pgsql;
 use tracing::{debug, error, info, trace, warn};
 
@@ -443,6 +444,11 @@ impl Connector for PostgresWalConnector {
         let mut actions = Vec::with_capacity(MAX_QUEUED_ACTIONS);
 
         loop {
+            debug_assert!(
+                cur_table.schema.is_some() || cur_table.name.is_empty(),
+                "We should either have no current table, or the current table should have a schema"
+            );
+
             // Don't accumulate too many actions between calls
             if actions.len() > MAX_QUEUED_ACTIONS {
                 return Ok((
@@ -455,7 +461,7 @@ impl Connector for PostgresWalConnector {
                 ));
             }
 
-            let (event, lsn) = match self.peek.take() {
+            let (mut event, lsn) = match self.peek.take() {
                 Some(event) => event,
                 None => match self.next_event().await {
                     Ok(ev) => ev,
@@ -482,7 +488,66 @@ impl Connector for PostgresWalConnector {
 
             // Check if next event is for another table, in which case we have to flush the events
             // accumulated for this table and store the next event in `peek`.
-            match &event {
+            match &mut event {
+                WalEvent::Truncate { tables } => {
+                    let (matching, mut other_tables) =
+                        tables.drain(..).partition::<Vec<_>, _>(|(schema, table)| {
+                            cur_table.schema.as_deref() == Some(schema.as_str())
+                                && cur_table.name == table.as_str()
+                        });
+
+                    if actions.is_empty() {
+                        invariant!(matching.is_empty());
+                        if let Some((schema, name)) = other_tables.pop() {
+                            if !other_tables.is_empty() {
+                                self.peek = Some((
+                                    WalEvent::Truncate {
+                                        tables: other_tables,
+                                    },
+                                    lsn,
+                                ));
+                            }
+
+                            actions.push(TableOperation::Truncate);
+                            return Ok((
+                                ReplicationAction::TableAction {
+                                    table: Relation {
+                                        schema: Some(schema.into()),
+                                        name: name.into(),
+                                    },
+                                    actions,
+                                    txid: None,
+                                },
+                                PostgresPosition::from(lsn).into(),
+                            ));
+                        } else {
+                            // Empty truncate op
+                            continue;
+                        }
+                    } else {
+                        if !other_tables.is_empty() {
+                            self.peek = Some((
+                                WalEvent::Truncate {
+                                    tables: other_tables,
+                                },
+                                lsn,
+                            ));
+                        }
+
+                        if !matching.is_empty() {
+                            actions.push(TableOperation::Truncate);
+                        }
+
+                        return Ok((
+                            ReplicationAction::TableAction {
+                                table: cur_table,
+                                actions,
+                                txid: None,
+                            },
+                            cur_lsn.into(),
+                        ));
+                    }
+                }
                 WalEvent::Insert { schema, table, .. }
                 | WalEvent::DeleteRow { schema, table, .. }
                 | WalEvent::DeleteByKey { schema, table, .. }
@@ -503,8 +568,8 @@ impl Connector for PostgresWalConnector {
                         ));
                     } else {
                         cur_table = Relation {
-                            schema: Some(schema.into()),
-                            name: table.into(),
+                            schema: Some((&*schema).into()),
+                            name: (&*table).into(),
                         };
                     }
                 }
@@ -570,6 +635,7 @@ impl Connector for PostgresWalConnector {
                 WalEvent::UpdateByKey { key, set, .. } => {
                     actions.push(TableOperation::Update { key, update: set })
                 }
+                WalEvent::Truncate { .. } => actions.push(TableOperation::Truncate),
             }
         }
     }
