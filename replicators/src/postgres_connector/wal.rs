@@ -40,7 +40,10 @@ pub enum WalError {
     NumericParseError,
     BitVectorParseError(String),
     InvalidMapping(String),
-    ToastNotSupported,
+    ToastNotSupported {
+        schema: Bytes,
+        table: Bytes,
+    },
     UnknownEnumVariant(Bytes),
     ReadySetError(readyset::ReadySetError),
     UnsupportedTypeConversion {

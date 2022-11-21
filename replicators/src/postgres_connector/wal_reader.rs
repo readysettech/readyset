@@ -370,7 +370,12 @@ impl wal::TupleData {
 
             match data {
                 wal::TupleEntry::Null => ret.push(DfValue::None),
-                wal::TupleEntry::Unchanged => return Err(WalError::ToastNotSupported),
+                wal::TupleEntry::Unchanged => {
+                    return Err(WalError::ToastNotSupported {
+                        schema: relation.schema.clone(),
+                        table: relation.name.clone(),
+                    })
+                }
                 wal::TupleEntry::Text(text) => {
                     // WAL delivers all entries as text, and it is up to us to parse to the proper
                     // ReadySet type
