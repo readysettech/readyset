@@ -10,7 +10,7 @@ instances:
 1. Create an EKS Cluster
 https://docs.aws.amazon.com/eks/latest/userguide/create-cluster.html
 
-* EKS cluster should contain a node group with at least r5.xlarge in
+* EKS cluster should contain a node group with at least r6a.xlarge in
   CPU/memory. ReadySet is a memory intensive application.
 
 ### Create an upstream MySQL or PostgreSQL database
