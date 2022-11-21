@@ -375,7 +375,10 @@ impl Recipe {
                     }
                 }
                 Change::AlterType { oid, name, change } => {
-                    let (ty, old_name) = self.inc.alter_custom_type(oid, &name, change)?;
+                    let (ty, old_name) = self
+                        .inc
+                        .alter_custom_type(oid, &name, change)
+                        .map_err(|e| e.context(format!("while altering custom type {name}")))?;
                     if let Some(old_name) = old_name {
                         self.registry.rename_custom_type(&old_name, &name);
                     }

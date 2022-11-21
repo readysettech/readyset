@@ -256,7 +256,7 @@ impl SqlIncorporator {
                         {
                             return Err(invalid_err!(
                                 "Cannot drop variants or add new variants unless they're at the \
-                                 end (while altering custom type {name})"
+                                 end"
                             ));
                         }
                         if old_name.is_some() {
