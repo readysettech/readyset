@@ -12,7 +12,9 @@ use mysql_srv::{
     CachedSchema, Column, ColumnFlags, ColumnType, InitWriter, MsqlSrvError, MySqlShim,
     QueryResultWriter, RowWriter, StatementMetaWriter,
 };
-use readyset_adapter::backend::noria_connector::MetaVariable;
+use readyset_adapter::backend::noria_connector::{
+    MetaVariable, SelectPrepareResult, SelectPrepareResultInner,
+};
 use readyset_adapter::backend::{
     noria_connector, QueryResult, SinglePrepareResult, UpstreamPrepare,
 };
@@ -478,11 +480,11 @@ where
         let prepare_result = self.prepare(query).await.map(|p| p.upstream_biased());
         let res = match prepare_result {
             Ok(SinglePrepareResult::Noria(
-                Select {
+                Select(SelectPrepareResult::Schema(SelectPrepareResultInner {
                     statement_id,
                     params,
                     schema,
-                }
+                }))
                 | Insert {
                     statement_id,
                     params,
@@ -494,6 +496,13 @@ where
                 let schema = convert_columns!(schema, info);
                 schema_cache.remove(&statement_id);
                 info.reply(statement_id, &params, &schema).await
+            }
+            Ok(SinglePrepareResult::Noria(Select(SelectPrepareResult::NoSchema(_)))) => {
+                info.error(
+                    mysql_srv::ErrorKind::ER_UNKNOWN_ERROR,
+                    "Unreachable".as_bytes(),
+                )
+                .await
             }
             Ok(SinglePrepareResult::Noria(Update { params, .. } | Delete { params, .. })) => {
                 let params = convert_columns!(params, info);

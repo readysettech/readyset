@@ -23,13 +23,21 @@ pub struct PrepareResponse<'a>(pub &'a cl::PrepareResult<PostgreSqlUpstream>);
 impl<'a> PrepareResponse<'a> {
     pub fn try_into_ps(self, prepared_statement_id: u32) -> Result<ps::PrepareResponse, ps::Error> {
         use readyset_adapter::backend::noria_connector::PrepareResult::*;
+        use readyset_adapter::backend::noria_connector::{
+            SelectPrepareResult, SelectPrepareResultInner,
+        };
 
         match self.0.upstream_biased() {
-            SinglePrepareResult::Noria(Select { params, schema, .. }) => Ok(ps::PrepareResponse {
+            SinglePrepareResult::Noria(Select(SelectPrepareResult::Schema(
+                SelectPrepareResultInner { params, schema, .. },
+            ))) => Ok(ps::PrepareResponse {
                 prepared_statement_id,
                 param_schema: NoriaSchema(params).try_into()?,
                 row_schema: NoriaSchema(schema).try_into()?,
             }),
+            SinglePrepareResult::Noria(Select(SelectPrepareResult::NoSchema(_))) => {
+                Err(ps::Error::InternalError("Unreachable".into()))
+            }
             SinglePrepareResult::Noria(Insert { params, schema, .. }) => Ok(ps::PrepareResponse {
                 prepared_statement_id,
                 param_schema: NoriaSchema(params).try_into()?,

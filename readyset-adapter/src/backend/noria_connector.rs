@@ -139,32 +139,56 @@ impl NoriaBackendInner {
 }
 
 #[derive(Debug, Clone)]
+pub struct SelectPrepareResultInner {
+    pub statement_id: StatementID,
+    pub params: Vec<ColumnSchema>,
+    pub schema: Vec<ColumnSchema>,
+}
+
+/// Result of preparing a statement against ReadySet
+#[derive(Debug, Clone)]
+pub enum SelectPrepareResult {
+    /// Statement can be executed against ReadySet but we do not know the schema because it does
+    /// not exist in dataflow. This variant is not useful without an upstream connection.
+    ///
+    /// This variant will be returned when the statement we are preparing reuses the cache of
+    /// another query. We cannot return a prepared statement response to the client using this
+    /// variant by itself, because we cannot determine the correct parameter and returned column
+    /// metadata (since the query itself is not cached in dataflow). Instead, we must form the
+    /// prepared statement response by retrieving the correct metadata from the upstream
+    /// prepared statement response.
+    NoSchema(StatementID),
+    /// The statement is cached in dataflow and we have the schema.
+    Schema(SelectPrepareResultInner),
+}
+
+#[derive(Debug, Clone)]
 pub enum PrepareResult {
-    Select {
-        statement_id: u32,
-        params: Vec<ColumnSchema>,
-        schema: Vec<ColumnSchema>,
-    },
+    Select(SelectPrepareResult),
     Insert {
-        statement_id: u32,
+        statement_id: StatementID,
         params: Vec<ColumnSchema>,
         schema: Vec<ColumnSchema>,
     },
     Update {
-        statement_id: u32,
+        statement_id: StatementID,
         params: Vec<ColumnSchema>,
     },
     Delete {
-        statement_id: u32,
+        statement_id: StatementID,
         params: Vec<ColumnSchema>,
     },
 }
 
 impl PrepareResult {
     /// Get the noria statement id for this statement
-    pub fn statement_id(&self) -> u32 {
+    pub fn statement_id(&self) -> StatementID {
         match self {
-            PrepareResult::Select { statement_id, .. }
+            PrepareResult::Select(SelectPrepareResult::Schema(SelectPrepareResultInner {
+                statement_id,
+                ..
+            }))
+            | PrepareResult::Select(SelectPrepareResult::NoSchema(statement_id))
             | PrepareResult::Insert { statement_id, .. }
             | PrepareResult::Delete { statement_id, .. }
             | PrepareResult::Update { statement_id, .. } => *statement_id,
@@ -1413,8 +1437,6 @@ impl NoriaConnector {
         trace!("select::access view");
         let qname = self.get_view(&statement, true, create_if_not_exist).await?;
 
-        // extract result schema
-        trace!(qname = %qname, "select::extract schema");
         let view_failed = self.failed_views.take(&qname).is_some();
         let getter = self
             .inner
@@ -1422,35 +1444,50 @@ impl NoriaConnector {
             .get_noria_view(&qname, view_failed)
             .await?;
 
-        let getter_schema = getter
-            .schema()
-            .ok_or_else(|| internal_err!("no schema for view '{}'", qname))?;
-
-        let mut params: Vec<_> = getter_schema
-            .to_cols(&client_param_columns, SchemaType::ProjectedSchema)?
-            .into_iter()
-            .map(|cs| {
-                let mut cs = cs.clone();
-                cs.column.table = Some(qname.clone());
-                cs
-            })
-            .collect();
+        // extract result schema
+        let getter_schema = if getter.reuses_cache() {
+            None
+        } else {
+            let schema = getter.schema();
+            if schema.is_none() {
+                warn!(view = %qname, "no schema for view");
+            }
+            schema
+        };
 
         trace!(id = statement_id, "select::registered");
         let ps = PreparedSelectStatement {
-            name: qname,
+            name: qname.clone(),
             statement: Box::new(statement),
             processed_query_params,
         };
         self.prepared_statement_cache
             .insert(statement_id, PreparedStatement::Select(ps));
 
-        params.extend(limit_columns);
-        Ok(PrepareResult::Select {
-            statement_id,
-            params,
-            schema: getter_schema.schema(SchemaType::ReturnedSchema).to_vec(),
-        })
+        if let Some(getter_schema) = getter_schema {
+            let mut params: Vec<_> = getter_schema
+                .to_cols(&client_param_columns, SchemaType::ProjectedSchema)?
+                .into_iter()
+                .map(|cs| {
+                    let mut cs = cs.clone();
+                    cs.column.table = Some(qname.clone());
+                    cs
+                })
+                .collect();
+
+            params.extend(limit_columns);
+            Ok(PrepareResult::Select(SelectPrepareResult::Schema(
+                SelectPrepareResultInner {
+                    statement_id,
+                    params,
+                    schema: getter_schema.schema(SchemaType::ReturnedSchema).to_vec(),
+                },
+            )))
+        } else {
+            Ok(PrepareResult::Select(SelectPrepareResult::NoSchema(
+                statement_id,
+            )))
+        }
     }
 
     #[instrument(level = "debug", skip(self, event))]

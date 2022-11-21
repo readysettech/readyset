@@ -110,8 +110,8 @@ use crate::{rewrite, QueryHandler, UpstreamDatabase, UpstreamDestination};
 
 pub mod noria_connector;
 
-use self::noria_connector::MetaVariable;
 pub use self::noria_connector::NoriaConnector;
+use self::noria_connector::{MetaVariable, SelectPrepareResult, SelectPrepareResultInner};
 
 /// Query metadata used to plan query prepare
 #[allow(clippy::large_enum_variant)]
@@ -833,21 +833,37 @@ where
 
         // Update noria migration state for query
         match &noria_res {
-            Some(Ok(noria_connector::PrepareResult::Select { schema, params, .. })) => {
+            Some(Ok(noria_connector::PrepareResult::Select(res))) => {
                 let mut state = MigrationState::Successful;
+
+                let (schema, params) = match res {
+                    SelectPrepareResult::Schema(SelectPrepareResultInner {
+                        schema,
+                        params,
+                        ..
+                    }) => (Some(schema), Some(params)),
+                    _ => (None, None),
+                };
 
                 if let Some(Ok(upstream_res)) = &upstream_res {
                     // If we are using `validate_queries`, a query that was successfully
                     // migrated may actually be unsupported if the schema or columns do not
                     // match up.
                     if self.settings.validate_queries {
-                        if let Err(e) = upstream_res.meta.compare(schema, params) {
-                            if self.settings.fail_invalidated_queries {
-                                internal!("Query comparison failed to validate: {}", e);
+                        if let (Some(schema), Some(params)) = (schema, params) {
+                            if let Err(e) = upstream_res.meta.compare(schema, params) {
+                                if self.settings.fail_invalidated_queries {
+                                    internal!("Query comparison failed to validate: {}", e);
+                                }
+                                warn!(error = %e,
+                                    query = %Sensitive(&select_meta.stmt),
+                                    "Query compare failed");
+                                state = MigrationState::Unsupported;
                             }
-                            warn!(error = %e,
-                                  query = %Sensitive(&select_meta.stmt),
-                                  "Query compare failed");
+                        } else if self.settings.fail_invalidated_queries {
+                            internal!("Cannot compare schema for borrowed query");
+                        } else {
+                            warn!("Cannot compare schema for borrowed query");
                             state = MigrationState::Unsupported;
                         }
                     }
@@ -895,7 +911,18 @@ where
             (Some(upstream_res), Some(Ok(noria_res))) => {
                 PrepareResult::Both(noria_res, upstream_res?)
             }
-            (None, Some(Ok(noria_res))) => PrepareResult::Noria(noria_res),
+            (None, Some(Ok(noria_res))) => {
+                if let noria_connector::PrepareResult::Select(SelectPrepareResult::NoSchema(_)) =
+                    noria_res
+                {
+                    // We fail when attempting to borrow a cache without an upstream here in case
+                    // the connection to the upstream is temporarily down.
+                    internal!(
+                        "Cannot create PrepareResult for borrowed cache without an upstream result"
+                    );
+                }
+                PrepareResult::Noria(noria_res)
+            }
             (None, Some(Err(noria_err))) => return Err(noria_err.into()),
             (Some(upstream_res), _) => PrepareResult::Upstream(upstream_res?),
             (None, None) => return Err(ReadySetError::Unsupported(query.to_string()).into()),
@@ -1139,10 +1166,11 @@ where
         let start = Instant::now();
 
         let res = match prep {
-            Select {
-                statement_id: id, ..
-            } => {
-                let ctx = ExecuteSelectContext::Prepared { q_id: *id, params };
+            Select(_) => {
+                let ctx = ExecuteSelectContext::Prepared {
+                    q_id: prep.statement_id(),
+                    params,
+                };
                 noria.execute_select(ctx, ticket, event).await
             }
             Insert {

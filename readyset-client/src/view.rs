@@ -1312,6 +1312,13 @@ impl View {
         &self.key_mapping
     }
 
+    /// Whether this view belongs to a cached query or borrows the cache for another query
+    ///
+    /// TODO: update function when reused_cache support is added
+    pub fn reuses_cache(&self) -> bool {
+        false
+    }
+
     /// Get the current keys of this view. For debugging only.
     #[instrument(level = "info", skip(self))]
     pub async fn keys(&mut self) -> ReadySetResult<Vec<Vec<DfValue>>> {

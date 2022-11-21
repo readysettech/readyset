@@ -19,6 +19,7 @@ use readyset_util::redacted::Sensitive;
 use tokio::select;
 use tracing::instrument;
 
+use crate::backend::noria_connector::{SelectPrepareResult, SelectPrepareResultInner};
 use crate::backend::{noria_connector, NoriaConnector};
 use crate::query_status_cache::QueryStatusCache;
 use crate::upstream_database::{IsFatalError, NoriaCompare};
@@ -194,33 +195,42 @@ where
         {
             Ok(n) => {
                 if self.validate_queries {
-                    if let noria_connector::PrepareResult::Select {
-                        ref schema,
-                        ref params,
-                        ..
-                    } = n
-                    {
-                        // Upstream is an Ok value as we check for the error above.
-                        if let Err(e) = upstream_result
-                            .unwrap()
-                            .unwrap()
-                            .meta
-                            .compare(schema, params)
-                        {
-                            warn!(
-                                error = %e,
-                                query = %Sensitive(&view_request.statement),
-                                "Query compare failed"
-                            );
-                            // TODO(justin): Fix setting migration state to unsupported with
-                            // validate_queries.
-                            /*self.query_status_cache
-                            .update_query_migration_state(stmt, MigrationState::Unsupported)
-                            .await;*/
+                    match n {
+                        noria_connector::PrepareResult::Select(SelectPrepareResult::Schema(
+                            SelectPrepareResultInner {
+                                ref schema,
+                                ref params,
+                                ..
+                            },
+                        )) => {
+                            // Upstream is an Ok value as we check for the error above.
+                            if let Err(e) = upstream_result
+                                .unwrap()
+                                .unwrap()
+                                .meta
+                                .compare(schema, params)
+                            {
+                                warn!(
+                                    error = %e,
+                                    query = %Sensitive(&view_request.statement),
+                                    "Query compare failed"
+                                );
+                                // TODO(justin): Fix setting migration state to unsupported with
+                                // validate_queries.
+                                /*self.query_status_cache
+                                .update_query_migration_state(stmt, MigrationState::Unsupported)
+                                .await;*/
+                                return;
+                            }
+                        }
+                        noria_connector::PrepareResult::Select(SelectPrepareResult::NoSchema(
+                            _,
+                        )) => {
+                            warn!("Cannot compare schema for borrowed query");
+                        }
+                        _ => {
                             return;
                         }
-                    } else {
-                        return;
                     }
                 }
                 counter!(recorded::MIGRATION_HANDLER_ALLOWED, 1);
