@@ -818,7 +818,7 @@ impl DfState {
     // ** Modify operations **
 
     /// Perform a new query schema migration.
-    #[instrument(level = "info", name = "migrate", skip(self, f))]
+    #[instrument(level = "info", name = "migrate", skip(self, f, dialect))]
     pub(crate) async fn migrate<F, T>(
         &mut self,
         dry_run: bool,
