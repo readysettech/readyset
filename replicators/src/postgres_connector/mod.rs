@@ -58,6 +58,6 @@ impl From<i64> for PostgresPosition {
 
 impl Display for PostgresPosition {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:x}/{:x}", self.lsn >> 32, self.lsn & 0xffffffff)
+        write!(f, "{:X}/{:X}", self.lsn >> 32, self.lsn & 0xffffffff)
     }
 }
