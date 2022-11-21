@@ -36,7 +36,7 @@ pub(crate) use self::replay_paths::ReplayPath;
 use self::replay_paths::{Destination, ReplayPathSpec, ReplayPaths, Target};
 use crate::node::special::EgressTx;
 use crate::node::{NodeProcessingResult, ProcessEnv};
-use crate::payload::{PrettyReplayPath, ReplayPieceContext, SourceSelection};
+use crate::payload::{PrepareStateKind, PrettyReplayPath, ReplayPieceContext, SourceSelection};
 use crate::prelude::*;
 use crate::processing::ColumnMiss;
 use crate::{backlog, DomainRequest, Readers};
@@ -1464,9 +1464,11 @@ impl Domain {
                 Ok(Some(bincode::serialize(&ret)?))
             }
             DomainRequest::PrepareState { node, state } => {
-                use crate::payload::InitialState;
                 match state {
-                    InitialState::PartialLocal { strict, weak } => {
+                    PrepareStateKind::Partial {
+                        strict_indices,
+                        weak_indices,
+                    } => {
                         if !self.state.contains_key(node) {
                             self.state.insert(
                                 node,
@@ -1474,22 +1476,25 @@ impl Domain {
                             );
                         }
                         let state = self.state.get_mut(node).unwrap();
-                        for (index, tags) in strict {
+                        for (index, tags) in strict_indices {
                             debug!(
                                 index = ?index,
                                 tags = ?tags,
-                                weak = ?weak,
+                                weak = ?weak_indices,
                                 local = %node,
                                 "told to prepare partial state"
                             );
                             state.add_key(index, Some(tags));
                         }
 
-                        for index in weak {
+                        for index in weak_indices {
                             state.add_weak_key(index);
                         }
                     }
-                    InitialState::IndexedLocal { strict, weak } => {
+                    PrepareStateKind::Full {
+                        strict_indices,
+                        weak_indices,
+                    } => {
                         if !self.state.contains_key(node) {
                             self.state.insert(
                                 node,
@@ -1497,7 +1502,7 @@ impl Domain {
                             );
                         }
                         let state = self.state.get_mut(node).unwrap();
-                        for index in strict {
+                        for index in strict_indices {
                             debug!(
                                 key = ?index,
                                 "told to prepare full state"
@@ -1505,13 +1510,13 @@ impl Domain {
                             state.add_key(index, None);
                         }
 
-                        for index in weak {
+                        for index in weak_indices {
                             state.add_weak_key(index);
                         }
                     }
-                    InitialState::PartialGlobal {
-                        gid,
-                        cols,
+                    PrepareStateKind::PartialReader {
+                        node_index,
+                        num_columns,
                         index,
                         trigger_domain,
                         num_shards,
@@ -1572,7 +1577,7 @@ impl Domain {
                         let r = n.as_mut_reader().unwrap();
 
                         let (r_part, w_part) = backlog::new_partial(
-                            cols,
+                            num_columns,
                             index,
                             move |misses: &mut dyn Iterator<Item = KeyComparison>| {
                                 if num_shards == 1 {
@@ -1617,7 +1622,7 @@ impl Domain {
                             .unwrap()
                             .insert(
                                 ReaderAddress {
-                                    node: gid,
+                                    node: node_index,
                                     name: name.clone(),
                                     shard,
                                 },
@@ -1625,12 +1630,16 @@ impl Domain {
                             )
                             .is_some()
                         {
-                            warn!(?gid, %name, %shard, "Overwrote existing reader at worker");
+                            warn!(?node_index, %name, %shard, "Overwrote existing reader at worker");
                         }
 
                         self.reader_write_handles.insert(node, w_part);
                     }
-                    InitialState::Global { gid, cols, index } => {
+                    PrepareStateKind::FullReader {
+                        node_index,
+                        num_columns,
+                        index,
+                    } => {
                         let mut n = self
                             .nodes
                             .get(node)
@@ -1646,7 +1655,7 @@ impl Domain {
                                 })?;
 
                         let (r_part, w_part) =
-                            backlog::new(cols, index, r.reader_processing().clone());
+                            backlog::new(num_columns, index, r.reader_processing().clone());
 
                         let shard = *self.shard.as_ref().unwrap_or(&0);
                         // TODO(ENG-838): Don't recreate every single node on leader failure.
@@ -1658,7 +1667,7 @@ impl Domain {
                             .unwrap()
                             .insert(
                                 ReaderAddress {
-                                    node: gid,
+                                    node: node_index,
                                     name,
                                     shard,
                                 },
@@ -1666,7 +1675,7 @@ impl Domain {
                             )
                             .is_some()
                         {
-                            warn!(?gid, ?shard, "Overwrote existing reader at worker");
+                            warn!(?node_index, ?shard, "Overwrote existing reader at worker");
                         }
 
                         // make sure Reader is actually prepared to receive state

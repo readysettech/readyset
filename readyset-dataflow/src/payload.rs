@@ -109,26 +109,44 @@ pub enum TriggerEndpoint {
     Local(Index),
 }
 
+/// Description for the kind of state to create for a particular node, along with the indices to
+/// create within that state
 #[derive(Clone, Serialize, Deserialize, Debug)]
-pub enum InitialState {
-    PartialLocal {
-        strict: Vec<(Index, Vec<Tag>)>,
-        weak: HashSet<Index>,
+pub enum PrepareStateKind {
+    /// Setup state for a partially materialized internal node
+    Partial {
+        /// List of strict partial incides to create within the new state, alongsidee the list of
+        /// tags for replay paths that will query those indices
+        strict_indices: Vec<(Index, Vec<Tag>)>,
+        /// Set of weak partial incides to create within the new state
+        weak_indices: HashSet<Index>,
     },
-    IndexedLocal {
-        strict: HashSet<Index>,
-        weak: HashSet<Index>,
+    /// Setup state for a fully materialized internal node
+    Full {
+        /// Set of strict partial incides to create within the new state
+        strict_indices: HashSet<Index>,
+        /// Set of weak partial incides to create within the new state
+        weak_indices: HashSet<Index>,
     },
-    PartialGlobal {
-        gid: petgraph::graph::NodeIndex,
-        cols: usize,
-        index: Index,
-        trigger_domain: DomainIndex,
+    /// Setup state for a partially materialized
+    PartialReader {
+        /// The global node index of the reader node
+        node_index: petgraph::graph::NodeIndex,
+        /// The number of columns within the reader node
+        num_columns: usize,
+        /// The number of ways this reader node is sharded
         num_shards: usize,
+        /// The index that the reader is keyed on
+        index: Index,
+        /// The domain index of the domain this reader should ask to trigger replays to this reader
+        trigger_domain: DomainIndex,
     },
-    Global {
-        gid: petgraph::graph::NodeIndex,
-        cols: usize,
+    FullReader {
+        /// The global node index of the reader node
+        node_index: petgraph::graph::NodeIndex,
+        /// The number of columns within the reader node
+        num_columns: usize,
+        /// The index that the reader is keyed on
         index: Index,
     },
 }
@@ -270,8 +288,10 @@ pub enum DomainRequest {
     ///
     /// This is done in preparation of a subsequent state replay.
     PrepareState {
+        /// The node to set up state for
         node: LocalNodeIndex,
-        state: InitialState,
+        /// What kind of state should we set up?
+        state: PrepareStateKind,
     },
 
     /// Probe for the number of records in the given node's state

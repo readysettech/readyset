@@ -859,7 +859,7 @@ impl<'a> Plan<'a> {
     pub(super) fn finalize(
         mut self,
     ) -> ReadySetResult<(Vec<PendingReplay>, HashMap<Tag, Vec<NodeIndex>>)> {
-        use dataflow::payload::InitialState;
+        use dataflow::payload::PrepareStateKind;
 
         #[allow(clippy::indexing_slicing)] // the node index we were created with is in graph...
         let our_node = &self.graph[self.node];
@@ -884,9 +884,9 @@ impl<'a> Plan<'a> {
                 // we need to give it a way to trigger replays.
                 #[allow(clippy::indexing_slicing)]
                 // the node index we were created with is in graph...
-                InitialState::PartialGlobal {
-                    gid: self.node,
-                    cols: self.graph[self.node].columns().len(),
+                PrepareStateKind::PartialReader {
+                    node_index: self.node,
+                    num_columns: self.graph[self.node].columns().len(),
                     index,
                     trigger_domain: last_domain,
                     num_shards,
@@ -894,23 +894,29 @@ impl<'a> Plan<'a> {
             } else {
                 #[allow(clippy::indexing_slicing)]
                 // the node index we were created with is in graph...
-                InitialState::Global {
-                    cols: self.graph[self.node].columns().len(),
+                PrepareStateKind::FullReader {
+                    num_columns: self.graph[self.node].columns().len(),
                     index,
-                    gid: self.node,
+                    node_index: self.node,
                 }
             }
         } else {
             // not a reader
 
-            let weak = self.m.added_weak.remove(&self.node).unwrap_or_default();
+            let weak_indices = self.m.added_weak.remove(&self.node).unwrap_or_default();
 
             if self.partial {
-                let strict = self.indexes.drain().collect();
-                InitialState::PartialLocal { strict, weak }
+                let strict_indices = self.indexes.drain().collect();
+                PrepareStateKind::Partial {
+                    strict_indices,
+                    weak_indices,
+                }
             } else {
-                let strict = self.indexes.drain().map(|(k, _)| k).collect();
-                InitialState::IndexedLocal { strict, weak }
+                let strict_indices = self.indexes.drain().map(|(k, _)| k).collect();
+                PrepareStateKind::Full {
+                    strict_indices,
+                    weak_indices,
+                }
             }
         };
 
