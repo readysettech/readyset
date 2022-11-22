@@ -616,6 +616,10 @@ impl<'a> PostgresReplicator<'a> {
             }
         }
 
+        self.drop_leftover_tables(&table_list, &view_list)
+            .await
+            .map_err(|e| e.context("Error while cleaning up leftover cache tables"))?;
+
         // For each table, retrieve its structure
         let mut tables = Vec::with_capacity(table_list.len());
         for table in table_list {
@@ -801,6 +805,66 @@ impl<'a> PostgresReplicator<'a> {
     async fn set_snapshot(&mut self, name: &str) -> Result<(), pgsql::Error> {
         let query = format!("SET TRANSACTION SNAPSHOT '{}'", name);
         self.transaction.query(query.as_str(), &[]).await?;
+        Ok(())
+    }
+
+    /// Get a list of ReadySet cache tables and compare against the list of upstream tables and
+    /// views, dropping any cache tables that are missing upstream.
+    ///
+    /// This function is called during snapshotting to detect and handle cases where we somehow
+    /// have a leftover cache that doesn't correspond to any upstream table or view. Without
+    /// removing such tables, we can run potentially run into problems later on where we panic due
+    /// to failure to get a replication offset.
+    async fn drop_leftover_tables(
+        &mut self,
+        table_list: &[TableEntry],
+        view_list: &[TableEntry],
+    ) -> ReadySetResult<()> {
+        let mut leftover_tables = self.noria.tables().await?;
+        leftover_tables.retain(|rel, _| {
+            if let Some(schema) = &rel.schema {
+                let schema = schema.as_str();
+                let name = rel.name.as_str();
+
+                !table_list
+                    .iter()
+                    .any(|t| t.schema == schema && t.name == name)
+                    && !view_list
+                        .iter()
+                        .any(|t| t.schema == schema && t.name == name)
+            } else {
+                // All base tables under Postgres should have a schema, so if this happens then
+                // something truly weird is going on. Don't mark this as an leftover table since we
+                // don't know what it actually is, but do warn the user via a log message:
+                warn!("Existing ReadySet cache table {} has no schema", rel.name);
+                false
+            }
+        });
+        if !leftover_tables.is_empty() {
+            warn!(
+                "Removing existing ReadySet cache tables with no upstream table/view: {}",
+                leftover_tables
+                    .keys()
+                    .map(Relation::to_string)
+                    .intersperse(", ".to_string())
+                    .collect::<String>()
+            );
+            for rel in leftover_tables.keys() {
+                if let Err(error) = self
+                    .noria
+                    .extend_recipe_no_leader_ready(ChangeList::from_change(
+                        Change::Drop {
+                            name: rel.clone(),
+                            if_exists: false,
+                        },
+                        DataDialect::DEFAULT_POSTGRESQL,
+                    ))
+                    .await
+                {
+                    warn!(%error, "Error removing leftover cache table {rel}");
+                }
+            }
+        }
         Ok(())
     }
 }
