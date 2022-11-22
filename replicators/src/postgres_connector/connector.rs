@@ -6,7 +6,7 @@ use nom_sql::Relation;
 use postgres_native_tls::MakeTlsConnector;
 use readyset_client::replication::ReplicationOffset;
 use readyset_client::{ReadySetError, ReadySetResult, TableOperation};
-use readyset_errors::invariant;
+use readyset_errors::{internal, invariant};
 use tokio_postgres as pgsql;
 use tracing::{debug, error, info, trace, warn};
 
@@ -576,7 +576,15 @@ impl Connector for PostgresWalConnector {
                 _ => {}
             }
 
-            cur_lsn = lsn.into();
+            let next_lsn: PostgresPosition = lsn.into();
+            if cur_lsn > next_lsn {
+                internal!(
+                    "Out-of-order lsn. current({}) > next({}). lsns must not decrease.",
+                    cur_lsn,
+                    next_lsn
+                );
+            }
+            cur_lsn = next_lsn;
 
             match event {
                 WalEvent::DdlEvent { ddl_event } => {
