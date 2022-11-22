@@ -30,7 +30,7 @@ launchpad = { path = "../launchpad" }
 serial_test = "0.5.1"
 criterion = { version = "0.3", features=['real_blackbox', 'async_tokio']}
 itertools = "0.10.4"
-readyset-client = { path = "../readyset-client" }
+readyset-adapter = { path = "../readyset-adapter" }
 readyset-client-metrics = { path = "../readyset-client-metrics" }
 test-utils = { path = "../test-utils" }
 readyset-clustertest-macros = { path = "./macros" }

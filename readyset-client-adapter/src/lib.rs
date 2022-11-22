@@ -28,17 +28,17 @@ use readyset::consensus::{AuthorityControl, AuthorityType, ConsulAuthority};
 use readyset::failpoints;
 use readyset::metrics::recorded;
 use readyset::{ReadySetError, ReadySetHandle, ViewCreateRequest};
-use readyset_client::backend::noria_connector::{NoriaConnector, ReadBehavior};
-use readyset_client::backend::MigrationMode;
-use readyset_client::fallback_cache::{
+use readyset_adapter::backend::noria_connector::{NoriaConnector, ReadBehavior};
+use readyset_adapter::backend::MigrationMode;
+use readyset_adapter::fallback_cache::{
     DiskModeledCache, EvictionModeledCache, FallbackCache, SimpleFallbackCache,
 };
-use readyset_client::http_router::NoriaAdapterHttpRouter;
-use readyset_client::migration_handler::MigrationHandler;
-use readyset_client::proxied_queries_reporter::ProxiedQueriesReporter;
-use readyset_client::query_status_cache::{MigrationStyle, QueryStatusCache};
-use readyset_client::views_synchronizer::ViewsSynchronizer;
-use readyset_client::{Backend, BackendBuilder, QueryHandler, UpstreamDatabase};
+use readyset_adapter::http_router::NoriaAdapterHttpRouter;
+use readyset_adapter::migration_handler::MigrationHandler;
+use readyset_adapter::proxied_queries_reporter::ProxiedQueriesReporter;
+use readyset_adapter::query_status_cache::{MigrationStyle, QueryStatusCache};
+use readyset_adapter::views_synchronizer::ViewsSynchronizer;
+use readyset_adapter::{Backend, BackendBuilder, QueryHandler, UpstreamDatabase};
 use readyset_dataflow::Readers;
 use readyset_server::metrics::{CompositeMetricsRecorder, MetricsRecorder};
 use readyset_server::worker::readers::{retry_misses, Ack, BlockingRead, ReadRequestHandler};
@@ -121,7 +121,7 @@ impl FromStr for UnsupportedSetMode {
     }
 }
 
-impl From<UnsupportedSetMode> for readyset_client::backend::UnsupportedSetMode {
+impl From<UnsupportedSetMode> for readyset_adapter::backend::UnsupportedSetMode {
     fn from(mode: UnsupportedSetMode) -> Self {
         match mode {
             UnsupportedSetMode::Error => Self::Error,
@@ -905,7 +905,7 @@ where
                 .query_log(qlog_sender.clone(), options.query_log_ad_hoc)
                 .validate_queries(options.validate_queries, options.fail_invalidated_queries)
                 .unsupported_set_mode(if options.allow_unsupported_set {
-                    readyset_client::backend::UnsupportedSetMode::Allow
+                    readyset_adapter::backend::UnsupportedSetMode::Allow
                 } else {
                     options.unsupported_set_mode.into()
                 })

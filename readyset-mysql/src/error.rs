@@ -2,7 +2,7 @@ use std::io;
 
 use mysql_srv::MsqlSrvError;
 use readyset::ReadySetError;
-use readyset_client::upstream_database::IsFatalError;
+use readyset_adapter::upstream_database::IsFatalError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]

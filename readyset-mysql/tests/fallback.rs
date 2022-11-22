@@ -1,8 +1,8 @@
 use launchpad::hash::hash;
 use mysql_async::prelude::*;
 use readyset::query::QueryId;
-use readyset_client::backend::UnsupportedSetMode;
-use readyset_client::BackendBuilder;
+use readyset_adapter::backend::UnsupportedSetMode;
+use readyset_adapter::BackendBuilder;
 use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::mysql_helpers::{last_query_info, MySQLAdapter};
 use readyset_client_test_helpers::{self, sleep, TestBuilder};

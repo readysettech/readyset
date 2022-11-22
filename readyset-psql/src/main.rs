@@ -3,7 +3,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use async_trait::async_trait;
 use clap::Parser;
 use psql_srv::run_backend;
-use readyset_client::backend as cl;
+use readyset_adapter::backend as cl;
 use readyset_client_adapter::{ConnectionHandler, DatabaseType, NoriaAdapter};
 use readyset_psql::{Backend, PostgreSqlQueryHandler, PostgreSqlUpstream};
 use readyset_version::VERSION_STR_PRETTY;

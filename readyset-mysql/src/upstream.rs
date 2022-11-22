@@ -18,11 +18,11 @@ use mysql_async::{
 use nom_sql::SqlIdentifier;
 use pin_project::pin_project;
 use readyset::ColumnSchema;
-use readyset_client::fallback_cache::FallbackCache;
+use readyset_adapter::fallback_cache::FallbackCache;
 #[cfg(feature = "fallback_cache")]
-use readyset_client::fallback_cache::FallbackCacheApi;
-use readyset_client::upstream_database::{NoriaCompare, UpstreamDestination};
-use readyset_client::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
+use readyset_adapter::fallback_cache::FallbackCacheApi;
+use readyset_adapter::upstream_database::{NoriaCompare, UpstreamDestination};
+use readyset_adapter::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
 use readyset_client_metrics::QueryDestination;
 use readyset_data::DfValue;
 use readyset_errors::{internal_err, ReadySetError};

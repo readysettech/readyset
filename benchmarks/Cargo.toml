@@ -49,7 +49,7 @@ readyset = { path = "../readyset" }
 readyset-data = { path = "../readyset-data" }
 nom-sql = { path = "../nom-sql" }
 query-generator = { path = "../query-generator" }
-readyset-client = { path = "../readyset-client" }
+readyset-adapter = { path = "../readyset-adapter" }
 readyset-server = { path = "../readyset-server" }
 readyset-mysql = { path = "../readyset-mysql" }
 readyset-tracing = { path = "../readyset-tracing" }

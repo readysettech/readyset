@@ -30,7 +30,7 @@ impl ConnectionHandler for MySqlHandler {
     async fn process_connection(
         &mut self,
         stream: net::TcpStream,
-        backend: readyset_client::Backend<MySqlUpstream, MySqlQueryHandler>,
+        backend: readyset_adapter::Backend<MySqlUpstream, MySqlQueryHandler>,
     ) {
         if let Err(e) = MySqlIntermediary::run_on_tcp(Backend::new(backend), stream).await {
             error!(err = %e, "connection lost");

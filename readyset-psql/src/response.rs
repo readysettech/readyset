@@ -6,7 +6,9 @@ use psql_srv as ps;
 use psql_srv::Column;
 use readyset::results::{ResultIterator, Results};
 use readyset::ColumnSchema;
-use readyset_client::backend::{self as cl, noria_connector, SinglePrepareResult, UpstreamPrepare};
+use readyset_adapter::backend::{
+    self as cl, noria_connector, SinglePrepareResult, UpstreamPrepare,
+};
 use readyset_data::DfType;
 use upstream::StatementMeta;
 
@@ -20,7 +22,7 @@ pub struct PrepareResponse<'a>(pub &'a cl::PrepareResult<PostgreSqlUpstream>);
 
 impl<'a> PrepareResponse<'a> {
     pub fn try_into_ps(self, prepared_statement_id: u32) -> Result<ps::PrepareResponse, ps::Error> {
-        use readyset_client::backend::noria_connector::PrepareResult::*;
+        use readyset_adapter::backend::noria_connector::PrepareResult::*;
 
         match self.0.upstream_biased() {
             SinglePrepareResult::Noria(Select { params, schema, .. }) => Ok(ps::PrepareResponse {
@@ -84,7 +86,7 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
             Noria(NoriaResult::Meta(vars)) => {
                 let columns = vars.iter().map(|v| v.name.clone()).collect::<Vec<_>>();
 
-                let select_schema = SelectSchema(readyset_client::backend::SelectSchema {
+                let select_schema = SelectSchema(readyset_adapter::backend::SelectSchema {
                     use_bogo: false,
                     schema: Cow::Owned(
                         vars.iter()
@@ -114,7 +116,7 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                 })
             }
             Noria(NoriaResult::MetaVariables(vars)) => {
-                let select_schema = SelectSchema(readyset_client::backend::SelectSchema {
+                let select_schema = SelectSchema(readyset_adapter::backend::SelectSchema {
                     use_bogo: false,
                     schema: Cow::Owned(vec![
                         ColumnSchema {
@@ -153,7 +155,7 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
             Noria(NoriaResult::MetaWithHeader(vars)) => {
                 let (col1_header, col2_header): (SqlIdentifier, SqlIdentifier) =
                     (vars[0].name.clone(), vars[0].value.clone().into());
-                let select_schema = SelectSchema(readyset_client::backend::SelectSchema {
+                let select_schema = SelectSchema(readyset_adapter::backend::SelectSchema {
                     use_bogo: false,
                     schema: Cow::Owned(vec![
                         ColumnSchema {

@@ -28,7 +28,7 @@ chrono = "0.4"
 launchpad = { path = "../launchpad" }
 nom-sql = { path = "../nom-sql" }
 readyset = { path = "../readyset/" }
-readyset-client = { path = "../readyset-client" }
+readyset-adapter = { path = "../readyset-adapter" }
 readyset-client-metrics = { path = "../readyset-client-metrics" }
 readyset-tracing = { path = "../readyset-tracing" }
 readyset-dataflow = { path = "../readyset-dataflow" }
@@ -41,4 +41,4 @@ health-reporter = { path = "../health-reporter" }
 
 [features]
 failure_injection = ["fail/failpoints"]
-fallback_cache = ["readyset-client/fallback_cache", "readyset-client-metrics/fallback_cache"]
+fallback_cache = ["readyset-adapter/fallback_cache", "readyset-client-metrics/fallback_cache"]

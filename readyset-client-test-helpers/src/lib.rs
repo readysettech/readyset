@@ -10,10 +10,10 @@ use async_trait::async_trait;
 use nom_sql::Relation;
 use readyset::consensus::{Authority, LocalAuthorityStore};
 use readyset::ViewCreateRequest;
-use readyset_client::backend::noria_connector::{NoriaConnector, ReadBehavior};
-use readyset_client::backend::{BackendBuilder, MigrationMode};
-use readyset_client::query_status_cache::QueryStatusCache;
-use readyset_client::{Backend, QueryHandler, UpstreamConfig, UpstreamDatabase};
+use readyset_adapter::backend::noria_connector::{NoriaConnector, ReadBehavior};
+use readyset_adapter::backend::{BackendBuilder, MigrationMode};
+use readyset_adapter::query_status_cache::QueryStatusCache;
+use readyset_adapter::{Backend, QueryHandler, UpstreamConfig, UpstreamDatabase};
 use readyset_server::{Builder, Handle, LocalAuthority, ReadySetHandle};
 use tokio::net::{TcpListener, TcpStream};
 

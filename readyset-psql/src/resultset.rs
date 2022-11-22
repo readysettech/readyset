@@ -126,7 +126,7 @@ mod tests {
     use std::convert::TryFrom;
 
     use readyset::ColumnSchema;
-    use readyset_client::backend as cl;
+    use readyset_adapter::backend as cl;
     use readyset_data::{DfType, DfValue};
 
     use super::*;

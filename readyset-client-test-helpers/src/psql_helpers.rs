@@ -1,8 +1,8 @@
 use std::env;
 
 use async_trait::async_trait;
-use readyset_client::backend::{QueryDestination, QueryInfo};
-use readyset_client::Backend;
+use readyset_adapter::backend::{QueryDestination, QueryInfo};
+use readyset_adapter::Backend;
 use readyset_psql::{PostgreSqlQueryHandler, PostgreSqlUpstream};
 use tokio::net::TcpStream;
 use tokio_postgres::{Client, NoTls, SimpleQueryMessage};

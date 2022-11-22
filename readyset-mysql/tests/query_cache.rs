@@ -1,8 +1,8 @@
 use mysql_async::prelude::*;
 use mysql_async::{Conn, Result, Row, Statement};
-use readyset_client::backend::{MigrationMode, QueryInfo, UnsupportedSetMode};
-use readyset_client::query_status_cache::QueryStatusCache;
-use readyset_client::BackendBuilder;
+use readyset_adapter::backend::{MigrationMode, QueryInfo, UnsupportedSetMode};
+use readyset_adapter::query_status_cache::QueryStatusCache;
+use readyset_adapter::BackendBuilder;
 use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::mysql_helpers::{last_query_info, MySQLAdapter};
 use readyset_client_test_helpers::{sleep, TestBuilder};

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use eui48::MacAddressFormat;
 use psql_srv as ps;
-use readyset_client::backend as cl;
+use readyset_adapter::backend as cl;
 use readyset_data::DfValue;
 
 use crate::error::Error;

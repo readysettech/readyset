@@ -25,7 +25,7 @@ members = [
     "query-generator",
     "reader-map",
     "readyset",
-    "readyset-client",
+    "readyset-adapter",
     "readyset-client-adapter",
     "readyset-client-metrics",
     "readyset-client-test-helpers",

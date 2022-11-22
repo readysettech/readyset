@@ -13,8 +13,8 @@ use mysql_srv::{
     CachedSchema, Column, ColumnFlags, ColumnType, InitWriter, MsqlSrvError, MySqlShim,
     QueryResultWriter, RowWriter, StatementMetaWriter,
 };
-use readyset_client::backend::noria_connector::MetaVariable;
-use readyset_client::backend::{
+use readyset_adapter::backend::noria_connector::MetaVariable;
+use readyset_adapter::backend::{
     noria_connector, QueryResult, SinglePrepareResult, UpstreamPrepare,
 };
 use readyset_data::{DfType, DfValue, DfValueKind};
@@ -243,18 +243,18 @@ async fn write_meta_with_header<W: AsyncWrite + Unpin>(
 
 pub struct Backend {
     /// Handle to the backing noria client
-    noria: readyset_client::Backend<MySqlUpstream, MySqlQueryHandler>,
+    noria: readyset_adapter::Backend<MySqlUpstream, MySqlQueryHandler>,
 }
 
 impl Backend {
     #[allow(dead_code)]
-    pub fn new(noria: readyset_client::Backend<MySqlUpstream, MySqlQueryHandler>) -> Self {
+    pub fn new(noria: readyset_adapter::Backend<MySqlUpstream, MySqlQueryHandler>) -> Self {
         Backend { noria }
     }
 }
 
 impl Deref for Backend {
-    type Target = readyset_client::Backend<MySqlUpstream, MySqlQueryHandler>;
+    type Target = readyset_adapter::Backend<MySqlUpstream, MySqlQueryHandler>;
 
     fn deref(&self) -> &Self::Target {
         &self.noria

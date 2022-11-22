@@ -1,7 +1,7 @@
 use std::convert::TryFrom;
 
 use postgres_types::Kind;
-use readyset_client::backend as cl;
+use readyset_adapter::backend as cl;
 use readyset_data::{Collation, DfType, PgEnumMetadata};
 use readyset_errors::unsupported;
 use {psql_srv as ps, tokio_postgres as pgsql};

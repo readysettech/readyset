@@ -277,7 +277,7 @@ dependencies = [
  "rand 0.8.5",
  "rand_distr",
  "readyset",
- "readyset-client",
+ "readyset-adapter",
  "readyset-client-test-helpers",
  "readyset-data",
  "readyset-mysql",
@@ -4224,7 +4224,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "readyset-client"
+name = "readyset-adapter"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -4299,7 +4299,7 @@ dependencies = [
  "metrics-exporter-prometheus",
  "nom-sql",
  "readyset",
- "readyset-client",
+ "readyset-adapter",
  "readyset-client-metrics",
  "readyset-data",
  "readyset-dataflow",
@@ -4339,7 +4339,7 @@ dependencies = [
  "nom-sql",
  "psql-srv",
  "readyset",
- "readyset-client",
+ "readyset-adapter",
  "readyset-data",
  "readyset-mysql",
  "readyset-psql",
@@ -4368,7 +4368,7 @@ dependencies = [
  "port_scanner",
  "rand 0.8.5",
  "readyset",
- "readyset-client",
+ "readyset-adapter",
  "readyset-client-metrics",
  "readyset-clustertest-macros",
  "readyset-data",
@@ -4559,7 +4559,7 @@ dependencies = [
  "psql-srv",
  "query-generator",
  "readyset",
- "readyset-client",
+ "readyset-adapter",
  "readyset-data",
  "readyset-mysql",
  "readyset-psql",
@@ -4620,7 +4620,7 @@ dependencies = [
  "pin-project",
  "proptest",
  "readyset",
- "readyset-client",
+ "readyset-adapter",
  "readyset-client-adapter",
  "readyset-client-metrics",
  "readyset-client-test-helpers",
@@ -4664,7 +4664,7 @@ dependencies = [
  "psql-srv",
  "rand 0.8.5",
  "readyset",
- "readyset-client",
+ "readyset-adapter",
  "readyset-client-adapter",
  "readyset-client-test-helpers",
  "readyset-data",

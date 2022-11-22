@@ -6,7 +6,7 @@ use ::readyset::{get_metric, ViewCreateRequest};
 use launchpad::eventually;
 use launchpad::hash::hash;
 use mysql_async::prelude::Queryable;
-use readyset_client::backend::QueryInfo;
+use readyset_adapter::backend::QueryInfo;
 use readyset_client_metrics::QueryDestination;
 use serial_test::serial;
 use test_utils::slow;

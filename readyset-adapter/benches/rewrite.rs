@@ -1,6 +1,6 @@
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, Bencher, Criterion};
 use nom_sql::{parse_select_statement, Dialect, SelectStatement};
-use readyset_client::rewrite;
+use readyset_adapter::rewrite;
 
 fn auto_parametrize_query(c: &mut Criterion) {
     let run_benchmark = |b: &mut Bencher, src: &str| {

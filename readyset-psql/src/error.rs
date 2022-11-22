@@ -2,7 +2,7 @@ use std::io;
 
 use psql_srv as ps;
 use readyset::ReadySetError;
-use readyset_client::upstream_database::IsFatalError;
+use readyset_adapter::upstream_database::IsFatalError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]

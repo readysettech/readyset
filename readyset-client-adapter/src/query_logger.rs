@@ -103,7 +103,7 @@ impl QueryLogger {
         SharedString::from(match query {
             SqlQuery::Select(stmt) => {
                 let mut stmt = stmt.clone();
-                if readyset_client::rewrite::process_query(&mut stmt, true).is_ok() {
+                if readyset_adapter::rewrite::process_query(&mut stmt, true).is_ok() {
                     anonymize_literals(&mut stmt);
                     stmt.to_string()
                 } else {

@@ -20,7 +20,7 @@ use nom_sql::parser::{sql_query, SqlQuery};
 use nom_sql::whitespace::whitespace0;
 use nom_sql::{Dialect, Expr, NomSqlResult};
 use query_generator::{ColumnName, TableName, TableSpec};
-use readyset_client::backend::Backend;
+use readyset_adapter::backend::Backend;
 use readyset_mysql::{MySqlQueryHandler, MySqlUpstream};
 use serde::{Deserialize, Serialize};
 use serde_json::json;

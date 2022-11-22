@@ -1,4 +1,4 @@
-use readyset_client::backend::BackendBuilder;
+use readyset_adapter::backend::BackendBuilder;
 use readyset_client_test_helpers::psql_helpers::PostgreSQLAdapter;
 use readyset_client_test_helpers::TestBuilder;
 use readyset_server::Handle;
@@ -25,7 +25,7 @@ mod types {
     };
     use proptest::prelude::ProptestConfig;
     use proptest::string::string_regex;
-    use readyset_client::backend::QueryDestination;
+    use readyset_adapter::backend::QueryDestination;
     use readyset_client_test_helpers::psql_helpers::{last_query_info, upstream_config};
     use readyset_client_test_helpers::sleep;
     use readyset_data::DfValue;

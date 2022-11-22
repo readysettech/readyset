@@ -7,9 +7,9 @@ use nom_sql::{
     SetPostgresParameterValue, SetStatement, SqlQuery,
 };
 use readyset::ReadySetResult;
-use readyset_client::backend::noria_connector::QueryResult;
-use readyset_client::backend::{noria_connector, SelectSchema};
-use readyset_client::{QueryHandler, SetBehavior};
+use readyset_adapter::backend::noria_connector::QueryResult;
+use readyset_adapter::backend::{noria_connector, SelectSchema};
+use readyset_adapter::{QueryHandler, SetBehavior};
 
 enum AllowedParameterValue {
     Literal(PostgresParameterValue),

@@ -39,7 +39,7 @@ bit-vec = { version = "0.6", features = ["serde"] }
 thiserror = "1.0.30"
 
 readyset-server = { path = "../readyset-server/" }
-readyset-client = { path = "../readyset-client/" }
+readyset-adapter = { path = "../readyset-adapter/" }
 readyset = { path = "../readyset/" }
 database-utils = { path = "../database-utils" }
 nom-sql = { path = "../nom-sql" }
