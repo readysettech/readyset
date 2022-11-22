@@ -4,64 +4,15 @@ pub mod visit_mut;
 use std::collections::{HashSet, VecDeque};
 use std::iter;
 
-use maplit::hashset;
-
 use crate::{
-    CacheInner, Column, CreateCacheStatement, Expr, FieldDefinitionExpr, FieldReference,
-    FunctionExpr, InValue, JoinConstraint, Relation, SelectStatement, SqlQuery,
+    Column, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, InValue, JoinConstraint,
+    Relation, SelectStatement,
 };
 
 /// Extension trait providing the `referred_tables` method to various parts of the AST
 pub trait ReferredTables {
     /// Return a set of all tables referred to in `self`
     fn referred_tables(&self) -> HashSet<Relation>;
-}
-
-impl ReferredTables for SqlQuery {
-    fn referred_tables(&self) -> HashSet<Relation> {
-        match *self {
-            SqlQuery::CreateTable(ref ctq) => hashset![ctq.table.clone()],
-            SqlQuery::AlterTable(ref atq) => hashset![atq.table.clone()],
-            SqlQuery::Insert(ref iq) => hashset![iq.table.clone()],
-            SqlQuery::Select(ref sq) => sq.tables.iter().map(|te| &te.table).cloned().collect(),
-            SqlQuery::CreateCache(CreateCacheStatement { inner: ref i, .. }) => match i {
-                CacheInner::Statement(sq) => {
-                    sq.tables.iter().map(|te| &te.table).cloned().collect()
-                }
-                CacheInner::Id(_) => HashSet::new(),
-            },
-            SqlQuery::CompoundSelect(ref csq) => csq
-                .selects
-                .iter()
-                .flat_map(|(_, sq)| &sq.tables)
-                .map(|te| &te.table)
-                .cloned()
-                .collect(),
-            SqlQuery::RenameTable(ref rt) => rt
-                .ops
-                .iter()
-                // Only including op.from because referred_tables() callers expect to get a list of
-                // _existing_ tables that are utilized in the query.
-                .map(|op| op.from.clone())
-                .collect(),
-            // If the type does not have any referred tables, we return an
-            // empty hashset.
-            SqlQuery::CreateView(_)
-            | SqlQuery::Delete(_)
-            | SqlQuery::DropTable(_)
-            | SqlQuery::DropView(_)
-            | SqlQuery::Update(_)
-            | SqlQuery::Set(_)
-            | SqlQuery::StartTransaction(_)
-            | SqlQuery::Commit(_)
-            | SqlQuery::Rollback(_)
-            | SqlQuery::Use(_)
-            | SqlQuery::Show(_)
-            | SqlQuery::Explain(_)
-            | SqlQuery::DropCache(_)
-            | SqlQuery::DropAllCaches(_) => HashSet::new(),
-        }
-    }
 }
 
 impl ReferredTables for Expr {
