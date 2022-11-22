@@ -4,10 +4,12 @@ use launchpad::redacted::Sensitive;
 use nom_sql::{Column, Expr as AstExpr, FunctionExpr, InValue, Relation, UnaryOperator};
 use readyset_data::dialect::SqlEngine;
 use readyset_data::{DfType, DfValue};
-use readyset_errors::{internal, invalid_err, unsupported, ReadySetError, ReadySetResult};
+use readyset_errors::{
+    internal, internal_err, invalid_err, unsupported, ReadySetError, ReadySetResult,
+};
 use vec1::Vec1;
 
-use crate::{BinaryOperator, BuiltinFunction, Dialect, Expr};
+use crate::{BinaryOperator, BuiltinFunction, CaseWhenBranch, Dialect, Expr};
 
 /// Context supplied to expression lowering to allow resolving references to objects within the
 /// schema
@@ -458,16 +460,26 @@ impl Expr {
                 })
             }
             AstExpr::CaseWhen {
-                condition,
-                then_expr,
+                branches,
                 else_expr,
             } => {
-                let then_expr = Box::new(Self::lower(*then_expr, dialect, context.clone())?);
-                let ty = then_expr.ty().clone();
+                let branches = branches
+                    .into_iter()
+                    .map(|branch| {
+                        let condition = Self::lower(branch.condition, dialect, context.clone())?;
+                        let body = Self::lower(branch.body, dialect, context.clone())?;
+                        Ok(CaseWhenBranch { condition, body })
+                    })
+                    .collect::<ReadySetResult<Vec<_>>>()?;
+                // TODO: Do case arm types have to match? See if type is inferred at runtime
+                let ty = branches
+                    .first()
+                    .ok_or_else(|| internal_err!("CASE expression cannot have zero branches"))?
+                    .body
+                    .ty()
+                    .clone();
                 Ok(Self::CaseWhen {
-                    // TODO: Do case arm types have to match? See if type is inferred at runtime
-                    condition: Box::new(Self::lower(*condition, dialect, context.clone())?),
-                    then_expr,
+                    branches,
                     else_expr: match else_expr {
                         Some(else_expr) => Box::new(Self::lower(*else_expr, dialect, context)?),
                         None => Box::new(Self::Literal {

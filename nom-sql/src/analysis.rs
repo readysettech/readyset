@@ -36,12 +36,11 @@ impl<'a> ReferredColumnsIter<'a> {
             Expr::Literal(_) => None,
             Expr::Column(col) => Some(col),
             Expr::CaseWhen {
-                condition,
-                then_expr,
+                branches,
                 else_expr,
             } => {
-                self.exprs_to_visit.push(condition);
-                self.exprs_to_visit.push(then_expr);
+                self.exprs_to_visit
+                    .extend(branches.iter().flat_map(|b| vec![&b.condition, &b.body]));
                 if let Some(else_expr) = else_expr {
                     self.visit_expr(else_expr)
                 } else {
@@ -144,12 +143,14 @@ impl<'a> ReferredColumnsMut<'a> {
             Expr::Literal(_) => None,
             Expr::Column(col) => Some(col),
             Expr::CaseWhen {
-                condition,
-                then_expr,
+                branches,
                 else_expr,
             } => {
-                self.exprs_to_visit.push(condition);
-                self.exprs_to_visit.push(then_expr);
+                self.exprs_to_visit.extend(
+                    branches
+                        .iter_mut()
+                        .flat_map(|b| vec![&mut b.condition, &mut b.body]),
+                );
                 if let Some(else_expr) = else_expr {
                     self.visit_expr(else_expr)
                 } else {
@@ -346,12 +347,12 @@ pub fn contains_aggregate(expr: &Expr) -> bool {
         Expr::Literal(_) => false,
         Expr::Column { .. } => false,
         Expr::CaseWhen {
-            condition,
-            then_expr,
+            branches,
             else_expr,
         } => {
-            contains_aggregate(condition)
-                || contains_aggregate(then_expr)
+            branches
+                .iter()
+                .any(|b| contains_aggregate(&b.condition) || contains_aggregate(&b.body))
                 || else_expr
                     .iter()
                     .any(|expr| contains_aggregate(expr.as_ref()))
@@ -432,14 +433,13 @@ impl Expr {
                 Box::new(iter::once(expr.as_ref())) as _
             }
             Expr::CaseWhen {
-                condition,
-                then_expr,
+                branches,
                 else_expr,
             } => Box::new(
-                vec![condition, then_expr]
-                    .into_iter()
-                    .chain(else_expr)
-                    .map(AsRef::as_ref),
+                branches
+                    .iter()
+                    .flat_map(|b| vec![&b.condition, &b.body])
+                    .chain(else_expr.as_deref()),
             ) as _,
             Expr::Between {
                 operand, min, max, ..

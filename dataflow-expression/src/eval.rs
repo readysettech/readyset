@@ -5,7 +5,7 @@ use readyset_errors::{invalid_err, unsupported, ReadySetError, ReadySetResult};
 use serde_json::Value as JsonValue;
 
 use crate::like::{CaseInsensitive, CaseSensitive, LikePattern};
-use crate::{utils, BinaryOperator, Expr};
+use crate::{utils, BinaryOperator, CaseWhenBranch, Expr};
 
 macro_rules! non_null {
     ($df_value:expr) => {
@@ -266,16 +266,18 @@ impl Expr {
             }
             Expr::Call { func, ty } => func.eval(ty, record),
             Expr::CaseWhen {
-                condition,
-                then_expr,
+                branches,
                 else_expr,
                 ..
             } => {
-                if condition.eval(record)?.is_truthy() {
-                    then_expr.eval(record)
-                } else {
-                    else_expr.eval(record)
+                let mut res = None;
+                for CaseWhenBranch { condition, body } in branches {
+                    if condition.eval(record)?.is_truthy() {
+                        res = Some(body.eval(record)?);
+                        break;
+                    }
                 }
+                res.map(Ok).unwrap_or_else(|| else_expr.eval(record))
             }
             Expr::Array {
                 elements, shape, ..
@@ -845,15 +847,17 @@ mod tests {
     }
 
     #[test]
-    fn eval_case_when() {
+    fn eval_case_when_single_branch() {
         let expr = Expr::CaseWhen {
-            condition: Box::new(Op {
-                left: Box::new(column_with_type(0, DfType::Int)),
-                op: BinaryOperator::Equal,
-                right: Box::new(make_literal(1.into())),
-                ty: DfType::Bool,
-            }),
-            then_expr: Box::new(make_literal("yes".try_into().unwrap())),
+            branches: vec![CaseWhenBranch {
+                condition: Op {
+                    left: Box::new(column_with_type(0, DfType::Int)),
+                    op: BinaryOperator::Equal,
+                    right: Box::new(make_literal(1.into())),
+                    ty: DfType::Bool,
+                },
+                body: make_literal("yes".try_into().unwrap()),
+            }],
             else_expr: Box::new(make_literal("no".try_into().unwrap())),
             ty: DfType::Unknown,
         };
@@ -863,6 +867,42 @@ mod tests {
         assert_eq!(
             expr.eval::<DfValue>(&[DfValue::from(8)]),
             Ok(DfValue::from("no"))
+        );
+    }
+
+    #[test]
+    fn eval_case_when_mutliple_branches() {
+        let expr = Expr::CaseWhen {
+            branches: vec![
+                CaseWhenBranch {
+                    condition: Op {
+                        left: Box::new(column_with_type(0, DfType::Int)),
+                        op: BinaryOperator::Equal,
+                        right: Box::new(make_literal(1.into())),
+                        ty: DfType::Bool,
+                    },
+                    body: make_literal("one".try_into().unwrap()),
+                },
+                CaseWhenBranch {
+                    condition: Op {
+                        left: Box::new(column_with_type(0, DfType::Int)),
+                        op: BinaryOperator::Equal,
+                        right: Box::new(make_literal(2.into())),
+                        ty: DfType::Bool,
+                    },
+                    body: make_literal("two".try_into().unwrap()),
+                },
+            ],
+            else_expr: Box::new(make_literal("other".try_into().unwrap())),
+            ty: DfType::Unknown,
+        };
+
+        assert_eq!(expr.eval::<DfValue>(&[1.into()]), Ok(DfValue::from("one")));
+        assert_eq!(expr.eval::<DfValue>(&[2.into()]), Ok(DfValue::from("two")));
+
+        assert_eq!(
+            expr.eval::<DfValue>(&[DfValue::from(8)]),
+            Ok(DfValue::from("other"))
         );
     }
 

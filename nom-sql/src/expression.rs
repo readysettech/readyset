@@ -8,7 +8,7 @@ use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::character::complete::char;
 use nom::combinator::{complete, map, opt};
-use nom::multi::{many0, separated_list0};
+use nom::multi::{many0, many1, separated_list0};
 use nom::sequence::{delimited, pair, preceded, terminated, tuple};
 use nom::Parser;
 use nom_locate::LocatedSpan;
@@ -16,7 +16,6 @@ use pratt::{Affix, Associativity, PrattParser, Precedence};
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::case::case_when;
 use crate::common::{column_identifier_no_alias, function_expr, ws_sep_comma};
 use crate::literal::literal;
 use crate::select::nested_selection;
@@ -336,6 +335,19 @@ impl Display for InValue {
     }
 }
 
+/// A single branch of a `CASE WHEN` statement
+#[derive(Debug, PartialEq, Eq, PartialOrd, Hash, Clone, Serialize, Deserialize, From)]
+pub struct CaseWhenBranch {
+    pub condition: Expr,
+    pub body: Expr,
+}
+
+impl Display for CaseWhenBranch {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "WHEN {} THEN {}", self.condition, self.body)
+    }
+}
+
 /// SQL Expression AST
 #[derive(Debug, PartialEq, Eq, PartialOrd, Hash, Clone, Serialize, Deserialize, From)]
 pub enum Expr {
@@ -357,10 +369,9 @@ pub enum Expr {
     /// Unary operator
     UnaryOp { op: UnaryOperator, rhs: Box<Expr> },
 
-    /// CASE WHEN condition THEN then_expr ELSE else_expr
+    /// CASE (WHEN condition THEN then_expr)... ELSE else_expr
     CaseWhen {
-        condition: Box<Expr>,
-        then_expr: Box<Expr>,
+        branches: Vec<CaseWhenBranch>,
         else_expr: Option<Box<Expr>>,
     },
 
@@ -413,15 +424,17 @@ impl Display for Expr {
             Expr::Literal(l) => write!(f, "{}", l),
             Expr::Column(col) => col.fmt(f),
             Expr::CaseWhen {
-                condition,
-                then_expr,
+                branches,
                 else_expr,
             } => {
-                write!(f, "CASE WHEN {} THEN {}", condition, then_expr)?;
-                if let Some(else_expr) = else_expr {
-                    write!(f, " ELSE {}", else_expr)?;
+                write!(f, "CASE ")?;
+                for branch in branches {
+                    write!(f, "{branch} ")?;
                 }
-                write!(f, " END")
+                if let Some(else_expr) = else_expr {
+                    write!(f, "ELSE {} ", else_expr)?;
+                }
+                write!(f, "END")
             }
             Expr::BinaryOp { lhs, op, rhs } => write!(f, "({} {} {})", lhs, op, rhs),
             Expr::UnaryOp {
@@ -872,7 +885,7 @@ fn in_lhs(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8]
         alt((
             map(function_expr(dialect), Expr::Call),
             map(literal(dialect), Expr::Literal),
-            case_when(dialect),
+            case_when_expr(dialect),
             map(column_identifier_no_alias(dialect), Expr::Column),
         ))(i)
     }
@@ -923,7 +936,7 @@ fn between_operand(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlRes
             parenthesized_expr(dialect),
             map(function_expr(dialect), Expr::Call),
             map(literal(dialect), Expr::Literal),
-            case_when(dialect),
+            case_when_expr(dialect),
             map(column_identifier_no_alias(dialect), Expr::Column),
         ))(i)
     }
@@ -977,6 +990,55 @@ fn exists_expr(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<
         let (i, _) = char(')')(i)?;
 
         Ok((i, Expr::Exists(Box::new(statement))))
+    }
+}
+
+fn case_when_branch(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CaseWhenBranch> {
+    move |i| {
+        let (i, _) = tag_no_case("when")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, condition) = expression(dialect)(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("then")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, then) = expression(dialect)(i)?;
+
+        Ok((
+            i,
+            CaseWhenBranch {
+                condition,
+                body: then,
+            },
+        ))
+    }
+}
+
+fn case_when_else(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Expr> {
+    move |i| {
+        let (i, _) = tag_no_case("else")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, else_expr) = expression(dialect)(i)?;
+        let (i, _) = whitespace1(i)?;
+        Ok((i, else_expr))
+    }
+}
+
+fn case_when_expr(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Expr> {
+    move |i| {
+        let (i, _) = tag_no_case("case")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, branches) = many1(terminated(case_when_branch(dialect), whitespace1))(i)?;
+        let (i, else_expr) = opt(map(case_when_else(dialect), Box::new))(i)?;
+        let (i, _) = tag_no_case("end")(i)?;
+        Ok((
+            i,
+            Expr::CaseWhen {
+                branches,
+                else_expr,
+            },
+        ))
     }
 }
 
@@ -1094,7 +1156,7 @@ pub(crate) fn simple_expr(
             in_expr(dialect),
             map(function_expr(dialect), Expr::Call),
             map(literal(dialect), Expr::Literal),
-            case_when(dialect),
+            case_when_expr(dialect),
             array_expr(dialect),
             map(column_identifier_no_alias(dialect), Expr::Column),
             cast(dialect),
@@ -1900,6 +1962,75 @@ mod tests {
             assert_eq!(std::str::from_utf8(remaining).unwrap(), "");
             assert_eq!(result, expected);
         }
+    }
+
+    #[test]
+    fn case_display() {
+        let c1 = Column {
+            name: "foo".into(),
+            table: None,
+        };
+
+        let exp = Expr::CaseWhen {
+            branches: vec![CaseWhenBranch {
+                condition: Expr::BinaryOp {
+                    op: BinaryOperator::Equal,
+                    lhs: Box::new(Expr::Column(c1.clone())),
+                    rhs: Box::new(Expr::Literal(Literal::Integer(0))),
+                },
+                body: Expr::Column(c1.clone()),
+            }],
+            else_expr: Some(Box::new(Expr::Literal(Literal::Integer(1)))),
+        };
+
+        assert_eq!(
+            exp.to_string(),
+            "CASE WHEN (`foo` = 0) THEN `foo` ELSE 1 END"
+        );
+
+        let exp_no_else = Expr::CaseWhen {
+            branches: vec![CaseWhenBranch {
+                condition: Expr::BinaryOp {
+                    op: BinaryOperator::Equal,
+                    lhs: Box::new(Expr::Column(c1.clone())),
+                    rhs: Box::new(Expr::Literal(Literal::Integer(0))),
+                },
+                body: Expr::Column(c1.clone()),
+            }],
+            else_expr: None,
+        };
+
+        assert_eq!(
+            exp_no_else.to_string(),
+            "CASE WHEN (`foo` = 0) THEN `foo` END"
+        );
+
+        let exp_multiple_branches = Expr::CaseWhen {
+            branches: vec![
+                CaseWhenBranch {
+                    condition: Expr::BinaryOp {
+                        op: BinaryOperator::Equal,
+                        lhs: Box::new(Expr::Column(c1.clone())),
+                        rhs: Box::new(Expr::Literal(Literal::Integer(0))),
+                    },
+                    body: Expr::Column(c1.clone()),
+                },
+                CaseWhenBranch {
+                    condition: Expr::BinaryOp {
+                        op: BinaryOperator::Equal,
+                        lhs: Box::new(Expr::Column(c1.clone())),
+                        rhs: Box::new(Expr::Literal(Literal::Integer(7))),
+                    },
+                    body: Expr::Column(c1),
+                },
+            ],
+            else_expr: None,
+        };
+
+        assert_eq!(
+            exp_multiple_branches.to_string(),
+            "CASE WHEN (`foo` = 0) THEN `foo` WHEN (`foo` = 7) THEN `foo` END"
+        );
     }
 
     mod mysql {

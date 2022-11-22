@@ -561,6 +561,7 @@ mod tests {
     use super::*;
     use crate::column::Column;
     use crate::common::FieldDefinitionExpr;
+    use crate::expression::CaseWhenBranch;
     use crate::table::Relation;
     use crate::{
         to_nom_result, BinaryOperator, Expr, FunctionExpr, InValue, ItemPlaceholder, SqlType,
@@ -1059,9 +1060,11 @@ mod tests {
         };
         let agg_expr = FunctionExpr::Count {
             expr: Box::new(Expr::CaseWhen {
-                then_expr: Box::new(Expr::Column(Column::from("vote_id"))),
+                branches: vec![CaseWhenBranch {
+                    condition: filter_cond,
+                    body: Expr::Column(Column::from("vote_id")),
+                }],
                 else_expr: None,
-                condition: Box::new(filter_cond),
             }),
             distinct: false,
         };
@@ -1089,9 +1092,11 @@ mod tests {
         };
         let agg_expr = FunctionExpr::Sum {
             expr: Box::new(Expr::CaseWhen {
-                then_expr: Box::new(Expr::Column(Column::from("vote_id"))),
+                branches: vec![CaseWhenBranch {
+                    condition: filter_cond,
+                    body: Expr::Column(Column::from("vote_id")),
+                }],
                 else_expr: None,
-                condition: Box::new(filter_cond),
             }),
             distinct: false,
         };
@@ -1120,9 +1125,11 @@ mod tests {
         };
         let agg_expr = FunctionExpr::Sum {
             expr: Box::new(Expr::CaseWhen {
-                then_expr: Box::new(Expr::Column(Column::from("vote_id"))),
+                branches: vec![CaseWhenBranch {
+                    condition: filter_cond,
+                    body: Expr::Column(Column::from("vote_id")),
+                }],
                 else_expr: Some(Box::new(Expr::Literal(Literal::UnsignedInteger(6)))),
-                condition: Box::new(filter_cond),
             }),
             distinct: false,
         };
@@ -1161,9 +1168,11 @@ mod tests {
         };
         let agg_expr = FunctionExpr::Count {
             expr: Box::new(Expr::CaseWhen {
-                then_expr: Box::new(Expr::Column(Column::from("votes.vote"))),
+                branches: vec![CaseWhenBranch {
+                    condition: filter_cond,
+                    body: Expr::Column(Column::from("votes.vote")),
+                }],
                 else_expr: None,
-                condition: Box::new(filter_cond),
             }),
             distinct: false,
         };

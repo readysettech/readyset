@@ -66,19 +66,6 @@ fn negate_expr(expr: &mut Expr) -> bool {
         Expr::Between { negated, .. } | Expr::In { negated, .. } => {
             *negated = !*negated;
         }
-        Expr::CaseWhen {
-            then_expr,
-            else_expr,
-            ..
-        } => {
-            if negate_expr(then_expr) {
-                if let Some(else_expr) = else_expr {
-                    negate_expr(else_expr);
-                }
-            } else {
-                return false;
-            }
-        }
         _ => {
             return false;
         }

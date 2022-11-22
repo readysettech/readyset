@@ -15,8 +15,8 @@ use crate::rename::{RenameTableOperation, RenameTableStatement};
 use crate::set::Variable;
 use crate::transaction::{CommitStatement, RollbackStatement, StartTransactionStatement};
 use crate::{
-    AlterColumnOperation, AlterTableDefinition, AlterTableStatement, CacheInner, Column,
-    ColumnConstraint, ColumnSpecification, CommonTableExpr, CompoundSelectStatement,
+    AlterColumnOperation, AlterTableDefinition, AlterTableStatement, CacheInner, CaseWhenBranch,
+    Column, ColumnConstraint, ColumnSpecification, CommonTableExpr, CompoundSelectStatement,
     CreateCacheStatement, CreateTableStatement, CreateViewStatement, DeleteStatement,
     DropAllCachesStatement, DropCacheStatement, DropTableStatement, DropViewStatement,
     ExplainStatement, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, GroupByClause,
@@ -121,6 +121,10 @@ pub trait Visitor<'ast>: Sized {
 
     fn visit_expr(&mut self, expr: &'ast Expr) -> Result<(), Self::Error> {
         walk_expr(self, expr)
+    }
+
+    fn visit_case_when_branch(&mut self, branch: &'ast CaseWhenBranch) -> Result<(), Self::Error> {
+        walk_case_when_branch(self, branch)
     }
 
     fn visit_common_table_expr(&mut self, cte: &'ast CommonTableExpr) -> Result<(), Self::Error> {
@@ -405,12 +409,12 @@ pub fn walk_expr<'ast, V: Visitor<'ast>>(
         }
         Expr::UnaryOp { rhs, .. } => visitor.visit_expr(rhs.as_ref()),
         Expr::CaseWhen {
-            condition,
-            then_expr,
+            branches,
             else_expr,
         } => {
-            visitor.visit_expr(condition.as_ref())?;
-            visitor.visit_expr(then_expr.as_ref())?;
+            for branch in branches {
+                visitor.visit_case_when_branch(branch)?;
+            }
             if let Some(else_expr) = else_expr {
                 visitor.visit_expr(else_expr)?;
             }
@@ -442,6 +446,14 @@ pub fn walk_expr<'ast, V: Visitor<'ast>>(
         }
         Expr::Variable(var) => visitor.visit_variable(var),
     }
+}
+
+pub fn walk_case_when_branch<'ast, V: Visitor<'ast>>(
+    visitor: &mut V,
+    branch: &'ast CaseWhenBranch,
+) -> Result<(), V::Error> {
+    visitor.visit_expr(&branch.condition)?;
+    visitor.visit_expr(&branch.body)
 }
 
 pub fn walk_function_expr<'ast, V: Visitor<'ast>>(
@@ -1086,7 +1098,7 @@ pub fn walk_sql_query<'a, V: Visitor<'a>>(
 mod tests {
     use super::*;
     use crate::select::selection;
-    use crate::Dialect;
+    use crate::{CaseWhenBranch, Dialect};
 
     #[derive(Default, Debug, PartialEq, Eq)]
     struct NodeCounter(usize);
@@ -1120,6 +1132,14 @@ mod tests {
         fn visit_expr(&mut self, expr: &'ast Expr) -> Result<(), Self::Error> {
             self.0 += 1;
             walk_expr(self, expr)
+        }
+
+        fn visit_case_when_branch(
+            &mut self,
+            branch: &'ast CaseWhenBranch,
+        ) -> Result<(), Self::Error> {
+            self.0 += 1;
+            walk_case_when_branch(self, branch)
         }
 
         fn visit_common_table_expr(

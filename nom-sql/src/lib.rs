@@ -27,7 +27,9 @@ pub use self::drop::{
     DropAllCachesStatement, DropCacheStatement, DropTableStatement, DropViewStatement,
 };
 pub use self::explain::ExplainStatement;
-pub use self::expression::{BinaryOperator, Expr, FunctionExpr, InValue, UnaryOperator};
+pub use self::expression::{
+    BinaryOperator, CaseWhenBranch, Expr, FunctionExpr, InValue, UnaryOperator,
+};
 pub use self::insert::InsertStatement;
 pub use self::join::{JoinConstraint, JoinOperator, JoinRightSide};
 pub use self::literal::{
@@ -57,7 +59,6 @@ mod macros;
 
 mod alter;
 pub mod analysis;
-mod case;
 mod column;
 mod common;
 mod compound_select;

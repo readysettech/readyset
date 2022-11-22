@@ -81,12 +81,14 @@ pub fn map_aggregates(expr: &mut Expr) -> Vec<(FunctionExpr, SqlIdentifier)> {
             *expr = Expr::Column(Column { name, table: None });
         }
         Expr::CaseWhen {
-            condition,
-            then_expr,
+            branches,
             else_expr,
         } => {
-            ret.append(&mut map_aggregates(condition));
-            ret.append(&mut map_aggregates(then_expr));
+            ret.extend(branches.iter_mut().flat_map(|b| {
+                map_aggregates(&mut b.condition)
+                    .into_iter()
+                    .chain(map_aggregates(&mut b.body))
+            }));
             if let Some(else_expr) = else_expr {
                 ret.append(&mut map_aggregates(else_expr));
             }

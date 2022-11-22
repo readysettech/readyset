@@ -15,8 +15,8 @@ use crate::rename::{RenameTableOperation, RenameTableStatement};
 use crate::set::Variable;
 use crate::transaction::{CommitStatement, RollbackStatement, StartTransactionStatement};
 use crate::{
-    AlterColumnOperation, AlterTableDefinition, AlterTableStatement, CacheInner, Column,
-    ColumnConstraint, ColumnSpecification, CommonTableExpr, CompoundSelectStatement,
+    AlterColumnOperation, AlterTableDefinition, AlterTableStatement, CacheInner, CaseWhenBranch,
+    Column, ColumnConstraint, ColumnSpecification, CommonTableExpr, CompoundSelectStatement,
     CreateCacheStatement, CreateTableStatement, CreateViewStatement, DeleteStatement,
     DropAllCachesStatement, DropCacheStatement, DropTableStatement, DropViewStatement,
     ExplainStatement, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, GroupByClause,
@@ -124,6 +124,13 @@ pub trait VisitorMut<'ast>: Sized {
 
     fn visit_expr(&mut self, expr: &'ast mut Expr) -> Result<(), Self::Error> {
         walk_expr(self, expr)
+    }
+
+    fn visit_case_when_branch(
+        &mut self,
+        branch: &'ast mut CaseWhenBranch,
+    ) -> Result<(), Self::Error> {
+        walk_case_when_branch(self, branch)
     }
 
     fn visit_common_table_expr(
@@ -417,12 +424,12 @@ pub fn walk_expr<'ast, V: VisitorMut<'ast>>(
         }
         Expr::UnaryOp { rhs, .. } => visitor.visit_expr(rhs.as_mut()),
         Expr::CaseWhen {
-            condition,
-            then_expr,
+            branches,
             else_expr,
         } => {
-            visitor.visit_expr(condition.as_mut())?;
-            visitor.visit_expr(then_expr.as_mut())?;
+            for branch in branches {
+                visitor.visit_case_when_branch(branch)?;
+            }
             if let Some(else_expr) = else_expr {
                 visitor.visit_expr(else_expr)?;
             }
@@ -454,6 +461,14 @@ pub fn walk_expr<'ast, V: VisitorMut<'ast>>(
         }
         Expr::Variable(var) => visitor.visit_variable(var),
     }
+}
+
+pub fn walk_case_when_branch<'ast, V: VisitorMut<'ast>>(
+    visitor: &mut V,
+    branch: &'ast mut CaseWhenBranch,
+) -> Result<(), V::Error> {
+    visitor.visit_expr(&mut branch.condition)?;
+    visitor.visit_expr(&mut branch.body)
 }
 
 pub fn walk_function_expr<'ast, V: VisitorMut<'ast>>(

@@ -7,8 +7,7 @@ mod lower;
 mod post_lookup;
 pub mod utils;
 
-use std::fmt;
-use std::fmt::Formatter;
+use std::fmt::{self, Display, Formatter};
 
 use itertools::Itertools;
 use nom_sql::SqlType;
@@ -121,7 +120,7 @@ impl BuiltinFunction {
     }
 }
 
-impl fmt::Display for BuiltinFunction {
+impl Display for BuiltinFunction {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         use BuiltinFunction::*;
 
@@ -192,6 +191,19 @@ impl fmt::Display for BuiltinFunction {
     }
 }
 
+/// A single `WHEN expr THEN expr` branch of a `CASE WHEN` expr
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CaseWhenBranch {
+    condition: Expr,
+    body: Expr,
+}
+
+impl Display for CaseWhenBranch {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "WHEN {} THEN {} ", self.condition, self.body)
+    }
+}
+
 /// Expressions that can be evaluated during execution of a query
 ///
 /// This type, which is the final lowered version of the original Expression AST, essentially
@@ -241,8 +253,7 @@ pub enum Expr {
     },
 
     CaseWhen {
-        condition: Box<Expr>,
-        then_expr: Box<Expr>,
+        branches: Vec<CaseWhenBranch>,
         else_expr: Box<Expr>,
         ty: DfType,
     },
@@ -254,7 +265,7 @@ pub enum Expr {
     },
 }
 
-impl fmt::Display for Expr {
+impl Display for Expr {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use Expr::*;
 
@@ -267,15 +278,16 @@ impl fmt::Display for Expr {
             Cast { expr, to_type, .. } => write!(f, "cast({} as {})", expr, to_type),
             Call { func, .. } => write!(f, "{}", func),
             CaseWhen {
-                condition,
-                then_expr,
+                branches,
                 else_expr,
                 ..
-            } => write!(
-                f,
-                "case when {} then {} else {}",
-                condition, then_expr, else_expr
-            ),
+            } => {
+                write!(f, "CASE ")?;
+                for branch in branches {
+                    write!(f, "{branch} ")?;
+                }
+                write!(f, "ELSE {else_expr} END")
+            }
             Array { elements, .. } => {
                 write!(f, "ARRAY[{}]", elements.iter().join(","))
             }
