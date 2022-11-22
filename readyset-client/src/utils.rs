@@ -3,7 +3,7 @@ use std::convert::{TryFrom, TryInto};
 use std::iter;
 
 use launchpad::hash::hash;
-use nom_sql::analysis::visit::Visitor;
+use nom_sql::analysis::visit::{self, Visitor};
 use nom_sql::{
     BinaryOperator, Column, ColumnConstraint, CreateTableStatement, DeleteStatement, Expr,
     InsertStatement, Literal, SelectStatement, SqlIdentifier, SqlQuery, TableKey, UpdateStatement,
@@ -225,35 +225,6 @@ impl<'ast> Visitor<'ast> for BinopsParameterColumnsVisitor<'ast> {
                 self.parameter_cols
                     .extend(iter::repeat((c, BinaryOperator::NotEqual)).take(exprs.len()))
             }
-            Expr::In { .. } => {}
-            Expr::BinaryOp {
-                op: BinaryOperator::And,
-                ref lhs,
-                ref rhs,
-            }
-            | Expr::BinaryOp {
-                op: BinaryOperator::Or,
-                ref lhs,
-                ref rhs,
-            } => {
-                let Ok(_) = self.visit_expr(lhs);
-                let Ok(_) = self.visit_expr(rhs);
-            }
-            Expr::UnaryOp { rhs: ref expr, .. } | Expr::Cast { ref expr, .. } => {
-                let Ok(_) = self.visit_expr(expr);
-            }
-            Expr::Call(ref f) => f.arguments().for_each(|e| {
-                let Ok(_) = self.visit_expr(e);
-            }),
-            Expr::CaseWhen {
-                ref condition,
-                ref then_expr,
-                ref else_expr,
-            } => {
-                let Ok(_) = self.visit_expr(condition);
-                let Ok(_) = self.visit_expr(then_expr);
-                else_expr.as_ref().map(|expr| self.visit_expr(expr));
-            }
             Expr::Between {
                 operand: box Expr::Column(ref col),
                 min: box Expr::Literal(Literal::Placeholder(_)),
@@ -290,14 +261,7 @@ impl<'ast> Visitor<'ast> for BinopsParameterColumnsVisitor<'ast> {
                 negated: true,
                 ..
             } => self.parameter_cols.push((col, BinaryOperator::LessOrEqual)),
-            Expr::Between { .. }
-            | Expr::Literal(_)
-            | Expr::BinaryOp { .. }
-            | Expr::Column(_)
-            | Expr::Exists(_)
-            | Expr::NestedSelect(_)
-            | Expr::Array(_)
-            | Expr::Variable(_) => {}
+            _ => visit::walk_expr(self, expr)?,
         }
         Ok(())
     }
