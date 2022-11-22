@@ -365,9 +365,6 @@ pub enum Expr {
     },
 
     /// A reference to a column
-    ///
-    /// TODO(grfn): Inline Column here once we get a chance to get rid of the `alias` attribute on
-    /// Column. Until then, an invariant is that `function = None` for all columns in this enum
     Column(Column),
 
     /// EXISTS (select)
