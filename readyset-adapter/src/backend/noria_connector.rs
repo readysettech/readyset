@@ -13,11 +13,11 @@ use nom_sql::{
     self, BinaryOperator, ColumnConstraint, DeleteStatement, Expr, InsertStatement, Literal,
     Relation, SelectStatement, SqlIdentifier, SqlQuery, UnaryOperator, UpdateStatement,
 };
-use readyset::consistency::Timestamp;
-use readyset::internal::LocalNodeIndex;
-use readyset::recipe::changelist::{Change, ChangeList, IntoChanges};
-use readyset::results::{ResultIterator, Results};
-use readyset::{
+use readyset_client::consistency::Timestamp;
+use readyset_client::internal::LocalNodeIndex;
+use readyset_client::recipe::changelist::{Change, ChangeList, IntoChanges};
+use readyset_client::results::{ResultIterator, Results};
+use readyset_client::{
     ColumnSchema, KeyColumnIdx, KeyComparison, ReadQuery, ReaderAddress, ReadySetError,
     ReadySetHandle, ReadySetResult, SchemaType, Table, TableOperation, View, ViewCreateRequest,
     ViewPlaceholder, ViewQuery, ViewSchema,
@@ -1811,7 +1811,7 @@ async fn do_read<'a>(
     event.num_keys = Some(vq.key_comparisons.len() as _);
 
     let data = if let Some(rh) = read_request_handler {
-        let request = readyset::Tagged::from(ReadQuery::Normal {
+        let request = readyset_client::Tagged::from(ReadQuery::Normal {
             target: ReaderAddress {
                 node: *getter.node(),
                 name: getter.name().clone(),
@@ -1925,7 +1925,7 @@ mod tests {
         use dataflow_expression::Dialect as DfDialect;
         use lazy_static::lazy_static;
         use nom_sql::{parse_query, Column, Dialect, SelectStatement};
-        use readyset::ColumnBase;
+        use readyset_client::ColumnBase;
 
         use super::*;
 

@@ -8,12 +8,12 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use nom_sql::Relation;
-use readyset::consensus::{Authority, LocalAuthorityStore};
-use readyset::ViewCreateRequest;
 use readyset_adapter::backend::noria_connector::{NoriaConnector, ReadBehavior};
 use readyset_adapter::backend::{BackendBuilder, MigrationMode};
 use readyset_adapter::query_status_cache::QueryStatusCache;
 use readyset_adapter::{Backend, QueryHandler, UpstreamConfig, UpstreamDatabase};
+use readyset_client::consensus::{Authority, LocalAuthorityStore};
+use readyset_client::ViewCreateRequest;
 use readyset_server::{Builder, Handle, LocalAuthority, ReadySetHandle};
 use tokio::net::{TcpListener, TcpStream};
 

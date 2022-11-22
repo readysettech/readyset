@@ -19,7 +19,7 @@ streaming-iterator = "0.1"
 futures-util = "0.3"
 pin-project = "1.0"
 
-readyset = { path = "../readyset" }
+readyset-client = { path = "../readyset-client" }
 readyset-errors = { path = "../readyset-errors" }
 readyset-data = { path = "../readyset-data" }
 readyset-adapter = { path = "../readyset-adapter" }

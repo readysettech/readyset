@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use readyset::metrics::recorded;
+use readyset_client::metrics::recorded;
 use readyset_errors::{internal_err, invariant, ReadySetResult};
 use serde::{Deserialize, Serialize};
 

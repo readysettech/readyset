@@ -45,7 +45,7 @@ pub enum WalError {
         table: Bytes,
     },
     UnknownEnumVariant(Bytes),
-    ReadySetError(readyset::ReadySetError),
+    ReadySetError(readyset_client::ReadySetError),
     UnsupportedTypeConversion {
         type_oid: u32,
         schema: Bytes,
@@ -89,14 +89,14 @@ impl From<chrono::ParseError> for WalError {
     }
 }
 
-impl From<WalError> for readyset::ReadySetError {
+impl From<WalError> for readyset_client::ReadySetError {
     fn from(err: WalError) -> Self {
-        readyset::ReadySetError::ReplicationFailed(format!("WAL error: {:?}", err))
+        readyset_client::ReadySetError::ReplicationFailed(format!("WAL error: {:?}", err))
     }
 }
 
-impl From<readyset::ReadySetError> for WalError {
-    fn from(err: readyset::ReadySetError) -> Self {
+impl From<readyset_client::ReadySetError> for WalError {
+    fn from(err: readyset_client::ReadySetError) -> Self {
         WalError::ReadySetError(err)
     }
 }

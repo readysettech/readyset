@@ -1,4 +1,4 @@
-use readyset::KeyComparison;
+use readyset_client::KeyComparison;
 use serde::{Deserialize, Serialize};
 use vec_map::VecMap;
 

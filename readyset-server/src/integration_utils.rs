@@ -5,9 +5,9 @@ use std::time::Duration;
 
 use dataflow::{DurabilityMode, PersistenceParameters};
 use nom_sql::Relation;
-use readyset::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
-use readyset::metrics::client::MetricsClient;
-use readyset::metrics::{DumpedMetric, DumpedMetricValue, MetricsDump};
+use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
+use readyset_client::metrics::client::MetricsClient;
+use readyset_client::metrics::{DumpedMetric, DumpedMetricValue, MetricsDump};
 use readyset_errors::{ReadySetError, ReadySetResult};
 
 use crate::metrics::{

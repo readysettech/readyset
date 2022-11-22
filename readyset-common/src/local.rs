@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 use petgraph::graph::NodeIndex;
-use readyset::internal::LocalNodeIndex;
+use readyset_client::internal::LocalNodeIndex;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use test_strategy::Arbitrary;
 

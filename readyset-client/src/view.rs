@@ -461,7 +461,7 @@ impl KeyComparison {
     /// # Examples
     ///
     /// ```
-    /// use readyset::KeyComparison;
+    /// use readyset_client::KeyComparison;
     /// use readyset_data::DfValue;
     /// use vec1::vec1;
     ///
@@ -542,7 +542,7 @@ impl KeyComparison {
     /// Equal keys contain themselves and only themselves:
     ///
     /// ```rust
-    /// use readyset::KeyComparison;
+    /// use readyset_client::KeyComparison;
     /// use readyset_data::DfValue;
     /// use vec1::vec1;
     ///
@@ -556,7 +556,7 @@ impl KeyComparison {
     /// ```rust
     /// use std::ops::Bound::*;
     ///
-    /// use readyset::KeyComparison;
+    /// use readyset_client::KeyComparison;
     /// use readyset_data::DfValue;
     /// use vec1::vec1;
     ///

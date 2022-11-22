@@ -23,11 +23,6 @@ use launchpad::redacted::RedactedString;
 use maplit::hashmap;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use nom_sql::Relation;
-use readyset::consensus::{AuthorityControl, AuthorityType, ConsulAuthority};
-#[cfg(feature = "failure_injection")]
-use readyset::failpoints;
-use readyset::metrics::recorded;
-use readyset::{ReadySetError, ReadySetHandle, ViewCreateRequest};
 use readyset_adapter::backend::noria_connector::{NoriaConnector, ReadBehavior};
 use readyset_adapter::backend::MigrationMode;
 use readyset_adapter::fallback_cache::{
@@ -39,6 +34,11 @@ use readyset_adapter::proxied_queries_reporter::ProxiedQueriesReporter;
 use readyset_adapter::query_status_cache::{MigrationStyle, QueryStatusCache};
 use readyset_adapter::views_synchronizer::ViewsSynchronizer;
 use readyset_adapter::{Backend, BackendBuilder, QueryHandler, UpstreamDatabase};
+use readyset_client::consensus::{AuthorityControl, AuthorityType, ConsulAuthority};
+#[cfg(feature = "failure_injection")]
+use readyset_client::failpoints;
+use readyset_client::metrics::recorded;
+use readyset_client::{ReadySetError, ReadySetHandle, ViewCreateRequest};
 use readyset_dataflow::Readers;
 use readyset_server::metrics::{CompositeMetricsRecorder, MetricsRecorder};
 use readyset_server::worker::readers::{retry_misses, Ack, BlockingRead, ReadRequestHandler};

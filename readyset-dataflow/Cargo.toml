@@ -50,7 +50,7 @@ timekeeper = { version = "0.3.2", default-features = false }
 
 # local deps
 common = { path = "../readyset-common", package = "readyset-common" }
-readyset = { path = "../readyset" }
+readyset-client = { path = "../readyset-client" }
 merging-interval-tree = { path = "../merging-interval-tree" }
 launchpad = { path = "../launchpad" }
 readyset-errors = { path = "../readyset-errors" }
@@ -63,4 +63,4 @@ dataflow-expression = { path = "../dataflow-expression" }
 
 [features]
 bench = ["criterion"]
-failure_injection = ["fail/failpoints", "readyset/failure_injection"]
+failure_injection = ["fail/failpoints", "readyset-client/failure_injection"]

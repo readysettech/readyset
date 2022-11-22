@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use metrics::{register_counter, register_histogram, Counter, Histogram, SharedString};
 use nom_sql::SqlQuery;
-use readyset::query::QueryId;
+use readyset_client::query::QueryId;
 use readyset_client_metrics::{
     recorded, DatabaseType, EventType, QueryExecutionEvent, SqlQueryType,
 };

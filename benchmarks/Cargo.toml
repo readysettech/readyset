@@ -45,7 +45,7 @@ tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git" }
 
 # local dependencies
 database-utils = { path = "../database-utils" }
-readyset = { path = "../readyset" }
+readyset-client = { path = "../readyset-client" }
 readyset-data = { path = "../readyset-data" }
 nom-sql = { path = "../nom-sql" }
 query-generator = { path = "../query-generator" }

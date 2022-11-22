@@ -6,7 +6,7 @@ use std::ops::{Bound, RangeBounds};
 
 use itertools::Either;
 use partial_map::PartialMap;
-use readyset::internal::IndexType;
+use readyset_client::internal::IndexType;
 
 use crate::eviction::{EvictionMeta, EvictionStrategy};
 use crate::values::Values;

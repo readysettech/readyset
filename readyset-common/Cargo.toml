@@ -18,6 +18,6 @@ proptest = "1.0"
 test-strategy = "0.2.0"
 
 # Local deps
-readyset = { path = "../readyset" }
+readyset-client = { path = "../readyset-client" }
 readyset-data = { path = "../readyset-data" }
 launchpad = { path = "../launchpad" }

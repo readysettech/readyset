@@ -216,9 +216,9 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::{Duration, Instant};
 
-use ::readyset::consensus::AuthorityType;
-use ::readyset::metrics::client::MetricsClient;
-use ::readyset::{ReadySetHandle, ReadySetResult};
+use ::readyset_client::consensus::AuthorityType;
+use ::readyset_client::metrics::client::MetricsClient;
+use ::readyset_client::{ReadySetHandle, ReadySetResult};
 use anyhow::{anyhow, Result};
 use futures::executor;
 use hyper::Client;

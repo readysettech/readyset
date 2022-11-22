@@ -7,7 +7,7 @@ use std::{iter, mem};
 use dataflow_state::PointKey;
 use derive_more::From;
 use launchpad::Indices;
-use readyset::KeyComparison;
+use readyset_client::KeyComparison;
 use readyset_errors::ReadySetResult;
 use serde::{Deserialize, Serialize};
 use vec1::Vec1;

@@ -1,8 +1,8 @@
 use std::time::Duration;
 
-use ::readyset::metrics::{recorded, DumpedMetricValue};
-use ::readyset::query::QueryId;
-use ::readyset::{get_metric, ViewCreateRequest};
+use ::readyset_client::metrics::{recorded, DumpedMetricValue};
+use ::readyset_client::query::QueryId;
+use ::readyset_client::{get_metric, ViewCreateRequest};
 use launchpad::eventually;
 use launchpad::hash::hash;
 use mysql_async::prelude::Queryable;

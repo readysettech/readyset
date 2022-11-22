@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Error};
-use readyset::consistency::Timestamp;
-use readyset::internal::LocalNodeIndex;
+use readyset_client::consistency::Timestamp;
+use readyset_client::internal::LocalNodeIndex;
 
 /// Unique identifier for a client write discernable at both the
 /// debezium connector and the noria client.

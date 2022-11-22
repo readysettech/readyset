@@ -16,7 +16,7 @@ default = []
 generate_mysql_tests = ["default"]
 profiling = ["timekeeper/default"]
 bench = ["dataflow/bench"]
-failure_injection = ["fail/failpoints", "readyset/failure_injection", "dataflow/failure_injection", "replicators/failure_injection"]
+failure_injection = ["fail/failpoints", "readyset-client/failure_injection", "dataflow/failure_injection", "replicators/failure_injection"]
 # Redact the display of strings marked sensitive from logs and error messages
 redact_sensitive = ["launchpad/redact_sensitive"]
 
@@ -81,7 +81,7 @@ strawpoll = "0.2.2"
 dataflow = { path = "../readyset-dataflow", package = "readyset-dataflow" }
 mir = { path = "../readyset-mir", package = "readyset-mir" }
 common = { path = "../readyset-common", package = "readyset-common" }
-readyset = { path = "../readyset" }
+readyset-client = { path = "../readyset-client" }
 failpoint-macros = { path = "../failpoint-macros" }
 readyset-errors = { path = "../readyset-errors" }
 readyset-data = { path = "../readyset-data" }

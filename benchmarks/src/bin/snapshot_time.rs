@@ -2,8 +2,8 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use clap::{Parser, ValueHint};
-use readyset::metrics::{recorded, MetricsDump};
-use readyset::recipe::changelist::ChangeList;
+use readyset_client::metrics::{recorded, MetricsDump};
+use readyset_client::recipe::changelist::ChangeList;
 use readyset_data::Dialect;
 use readyset_server::metrics::{
     get_global_recorder, install_global_recorder, CompositeMetricsRecorder, MetricsRecorder,

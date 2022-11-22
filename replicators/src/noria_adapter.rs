@@ -12,14 +12,14 @@ use metrics::{counter, histogram};
 use mysql::prelude::Queryable;
 use mysql::{OptsBuilder, SslOpts};
 use nom_sql::Relation;
-use readyset::consensus::Authority;
-use readyset::consistency::Timestamp;
+use readyset_client::consensus::Authority;
+use readyset_client::consistency::Timestamp;
 #[cfg(feature = "failure_injection")]
-use readyset::failpoints;
-use readyset::metrics::recorded::{self, SnapshotStatusTag};
-use readyset::recipe::changelist::{Change, ChangeList};
-use readyset::replication::{ReplicationOffset, ReplicationOffsets};
-use readyset::{ReadySetError, ReadySetHandle, ReadySetResult, Table, TableOperation};
+use readyset_client::failpoints;
+use readyset_client::metrics::recorded::{self, SnapshotStatusTag};
+use readyset_client::recipe::changelist::{Change, ChangeList};
+use readyset_client::replication::{ReplicationOffset, ReplicationOffsets};
+use readyset_client::{ReadySetError, ReadySetHandle, ReadySetResult, Table, TableOperation};
 use readyset_data::Dialect;
 use readyset_errors::{internal_err, invalid_err};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
@@ -107,7 +107,7 @@ impl NoriaAdapter {
         telemetry_sender: TelemetrySender,
         config: UpstreamConfig,
     ) -> ReadySetResult<!> {
-        let noria = readyset::ReadySetHandle::new(authority).await;
+        let noria = readyset_client::ReadySetHandle::new(authority).await;
         NoriaAdapter::start(noria, config, None, telemetry_sender).await
     }
 

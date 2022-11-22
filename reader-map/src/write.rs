@@ -5,7 +5,7 @@ use std::ops::{Bound, RangeBounds};
 
 use left_right::Absorb;
 use partial_map::InsertionOrder;
-use readyset::internal::IndexType;
+use readyset_client::internal::IndexType;
 
 use crate::eviction::EvictionMeta;
 use crate::inner::Inner;

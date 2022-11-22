@@ -4,12 +4,12 @@ use std::time::Duration;
 
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use mysql_async::prelude::Queryable;
-use readyset::status::ReadySetStatus;
 use readyset_adapter::backend::noria_connector::ReadBehavior;
 use readyset_adapter::backend::{MigrationMode, QueryInfo};
 use readyset_adapter::proxied_queries_reporter::ProxiedQueriesReporter;
 use readyset_adapter::query_status_cache::{MigrationStyle, QueryStatusCache};
 use readyset_adapter::BackendBuilder;
+use readyset_client::status::ReadySetStatus;
 use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::mysql_helpers::{last_query_info, MySQLAdapter};
 use readyset_client_test_helpers::{sleep, TestBuilder};

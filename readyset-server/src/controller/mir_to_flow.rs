@@ -25,8 +25,8 @@ use mir::{Column, FlowNode};
 use nom_sql::{ColumnConstraint, ColumnSpecification, Expr, OrderType, Relation, SqlIdentifier};
 use petgraph::graph::NodeIndex;
 use petgraph::Direction;
-use readyset::internal::{Index, IndexType};
-use readyset::ViewPlaceholder;
+use readyset_client::internal::{Index, IndexType};
+use readyset_client::ViewPlaceholder;
 use readyset_data::{Collation, DfType, Dialect};
 use readyset_errors::{
     internal, internal_err, invariant, invariant_eq, unsupported, ReadySetError, ReadySetResult,

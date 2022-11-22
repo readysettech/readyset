@@ -34,16 +34,16 @@ use nom_sql::{
     CacheInner, CreateCacheStatement, Relation, SelectStatement, SqlIdentifier, SqlQuery,
 };
 use petgraph::visit::Bfs;
-use readyset::builders::{TableBuilder, ViewBuilder};
-use readyset::consensus::{Authority, AuthorityControl};
-use readyset::debug::info::GraphInfo;
-use readyset::debug::stats::{DomainStats, GraphStats, NodeStats};
-use readyset::internal::{MaterializationStatus, ReplicaAddress};
-use readyset::metrics::recorded;
-use readyset::recipe::changelist::{Change, ChangeList};
-use readyset::recipe::ExtendRecipeSpec;
-use readyset::replication::{ReplicationOffset, ReplicationOffsets};
-use readyset::{
+use readyset_client::builders::{TableBuilder, ViewBuilder};
+use readyset_client::consensus::{Authority, AuthorityControl};
+use readyset_client::debug::info::GraphInfo;
+use readyset_client::debug::stats::{DomainStats, GraphStats, NodeStats};
+use readyset_client::internal::{MaterializationStatus, ReplicaAddress};
+use readyset_client::metrics::recorded;
+use readyset_client::recipe::changelist::{Change, ChangeList};
+use readyset_client::recipe::ExtendRecipeSpec;
+use readyset_client::replication::{ReplicationOffset, ReplicationOffsets};
+use readyset_client::{
     NodeSize, ReadySetError, ReadySetResult, ViewCreateRequest, ViewFilter, ViewRequest, ViewSchema,
 };
 use readyset_data::Dialect;
@@ -1395,7 +1395,7 @@ impl DfStateHandle {
         let state_copy = read_guard.state.clone();
         let elapsed = start.elapsed();
         histogram!(
-            readyset::metrics::recorded::DATAFLOW_STATE_CLONE_TIME,
+            readyset_client::metrics::recorded::DATAFLOW_STATE_CLONE_TIME,
             elapsed.as_micros() as f64,
         );
         DfStateWriter {

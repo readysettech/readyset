@@ -12,7 +12,7 @@ rand = { version = "0.7", default-features = false, features = ["alloc"] }
 left-right = "0.11"
 itertools = "0.10"
 
-readyset = { path = "../readyset" }
+readyset-client = { path = "../readyset-client" }
 partial-map = { path = "../partial-map" }
 thiserror = "1.0.31"
 

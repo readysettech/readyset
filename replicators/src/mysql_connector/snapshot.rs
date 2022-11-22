@@ -13,10 +13,10 @@ use mysql::prelude::Queryable;
 use mysql::{Transaction, TxOpts};
 use mysql_async as mysql;
 use nom_sql::Relation;
-use readyset::metrics::recorded;
-use readyset::recipe::changelist::ChangeList;
-use readyset::replication::{ReplicationOffset, ReplicationOffsets};
-use readyset::ReadySetResult;
+use readyset_client::metrics::recorded;
+use readyset_client::recipe::changelist::ChangeList;
+use readyset_client::replication::{ReplicationOffset, ReplicationOffsets};
+use readyset_client::ReadySetResult;
 use readyset_data::Dialect;
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, info_span, warn};
@@ -129,7 +129,7 @@ impl MySqlReplicator {
     /// Returns a list of tables that should be dumped to readyset
     async fn load_recipe_with_meta_lock(
         &mut self,
-        noria: &mut readyset::ReadySetHandle,
+        noria: &mut readyset_client::ReadySetHandle,
         db_schemas: &mut DatabaseSchemas,
     ) -> ReadySetResult<(Transaction<'static>, Vec<Relation>)> {
         let mut tx = self.pool.start_transaction(tx_opts()).await?;
@@ -314,7 +314,7 @@ impl MySqlReplicator {
     /// converting every MySQL row into ReadySet row and calling `insert_many` in batches
     async fn replicate_table(
         mut dumper: TableDumper,
-        mut table_mutator: readyset::Table,
+        mut table_mutator: readyset_client::Table,
         snapshot_report_interval_secs: u16,
     ) -> ReadySetResult<()> {
         let mut cnt = 0;
@@ -406,7 +406,7 @@ impl MySqlReplicator {
     ///   in addition to the rows
     pub(crate) async fn snapshot_to_noria(
         mut self,
-        noria: &mut readyset::ReadySetHandle,
+        noria: &mut readyset_client::ReadySetHandle,
         db_schemas: &mut DatabaseSchemas,
         snapshot_report_interval_secs: u16,
     ) -> ReadySetResult<()> {
@@ -426,7 +426,7 @@ impl MySqlReplicator {
     /// offset.
     async fn replicate_to_noria_with_table_locks(
         &mut self,
-        noria: &mut readyset::ReadySetHandle,
+        noria: &mut readyset_client::ReadySetHandle,
         db_schemas: &mut DatabaseSchemas,
         snapshot_report_interval_secs: u16,
     ) -> ReadySetResult<()> {
@@ -476,7 +476,7 @@ impl MySqlReplicator {
     /// the join handle
     async fn dumper_task_for_table(
         &mut self,
-        noria: &mut readyset::ReadySetHandle,
+        noria: &mut readyset_client::ReadySetHandle,
         table: Relation,
         snapshot_report_interval_secs: u16,
     ) -> ReadySetResult<JoinHandle<(Relation, ReplicationOffset, ReadySetResult<()>)>> {
@@ -511,7 +511,7 @@ impl MySqlReplicator {
     /// Copy all base tables into noria
     async fn dump_tables(
         &mut self,
-        noria: &mut readyset::ReadySetHandle,
+        noria: &mut readyset_client::ReadySetHandle,
         mut table_list: Vec<Relation>,
         replication_offsets: &ReplicationOffsets,
         snapshot_report_interval_secs: u16,

@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use clap::Parser;
 use futures_util::future::{self, Either};
 use metrics_exporter_prometheus::PrometheusBuilder;
-use readyset::metrics::recorded;
+use readyset_client::metrics::recorded;
 use readyset_server::consensus::AuthorityType;
 use readyset_server::metrics::{
     install_global_recorder, CompositeMetricsRecorder, MetricsRecorder,

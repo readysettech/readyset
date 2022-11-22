@@ -2,9 +2,9 @@ use std::time::{Duration, Instant};
 
 use mysql_async::prelude::{FromRow, Queryable, StatementLike};
 use mysql_async::{Conn, Params};
-use readyset::get_metric;
-use readyset::metrics::client::MetricsClient;
-use readyset::metrics::{recorded, DumpedMetricValue};
+use readyset_client::get_metric;
+use readyset_client::metrics::client::MetricsClient;
+use readyset_client::metrics::{recorded, DumpedMetricValue};
 use tokio::time::sleep;
 
 fn equal_rows<T>(a: &[T], b: &[T]) -> bool

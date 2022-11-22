@@ -4,8 +4,8 @@ use std::hash::Hash;
 use std::{iter, ops};
 
 use itertools::Either;
-use readyset::internal::LocalNodeIndex;
-use readyset::KeyComparison;
+use readyset_client::internal::LocalNodeIndex;
+use readyset_client::KeyComparison;
 use vec1::Vec1;
 
 use super::{RemappedKeys, TriggerEndpoint};

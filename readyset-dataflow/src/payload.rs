@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::fmt::{self, Display};
 
 use itertools::Itertools;
-use readyset::{self, KeyComparison, PacketData, PacketTrace};
+use readyset_client::{self, KeyComparison, PacketData, PacketTrace};
 use readyset_data::DfType;
 use serde::{Deserialize, Serialize};
 use strum_macros::{EnumCount, EnumDiscriminants, EnumIter, IntoStaticStr};

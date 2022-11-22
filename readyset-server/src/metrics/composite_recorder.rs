@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use metrics::{Counter, Gauge, Histogram, KeyName, Recorder, Unit};
 use metrics_exporter_prometheus::PrometheusRecorder;
-use readyset::metrics::Key;
+use readyset_client::metrics::Key;
 
 use crate::metrics::recorders::MetricsRecorder;
 use crate::metrics::{Clear, Render};

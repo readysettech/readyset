@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use dataflow_state::PointKey;
 use derive_more::From;
-use readyset::KeyComparison;
+use readyset_client::KeyComparison;
 use readyset_errors::ReadySetResult;
 use serde::{Deserialize, Serialize};
 

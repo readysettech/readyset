@@ -7,7 +7,7 @@ use itertools::Itertools;
 use launchpad::hash::hash;
 use launchpad::intervals::{cmp_endbound, cmp_startbound};
 use launchpad::Indices;
-use readyset::KeyComparison;
+use readyset_client::KeyComparison;
 use readyset_errors::{invariant, ReadySetResult};
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;

@@ -4,7 +4,7 @@ use std::fmt::Debug;
 use async_trait::async_trait;
 pub use database_utils::UpstreamConfig;
 use nom_sql::SqlIdentifier;
-use readyset::ColumnSchema;
+use readyset_client::ColumnSchema;
 use readyset_client_metrics::QueryDestination;
 use readyset_data::DfValue;
 use readyset_errors::ReadySetError;
@@ -81,7 +81,7 @@ pub trait UpstreamDatabase: Sized + Send {
     /// Errors that can be returned from operations on this database
     ///
     /// This type, which must have at least one enum variant that includes a
-    /// [`readyset::ReadySetError`], is used as the error type for all return values in the
+    /// [`readyset_client::ReadySetError`], is used as the error type for all return values in the
     /// noria_client backend.
     type Error: From<ReadySetError> + IsFatalError + Error + Send + Sync + 'static;
 
@@ -127,8 +127,8 @@ pub trait UpstreamDatabase: Sized + Send {
     ///
     /// If 'on_execute' is called with a 'statement_id' that was not previously passed to
     /// 'on_prepare', this method should return
-    /// ['Err(Error::ReadySet(ReadySetError::PreparedStatementMissing))'](readyset::ReadySetError::
-    /// PreparedStatementMissing)
+    /// ['Err(Error::ReadySet(ReadySetError::PreparedStatementMissing))'
+    /// ](readyset_client::ReadySetError:: PreparedStatementMissing)
     async fn execute<'a>(
         &'a mut self,
         statement_id: u32,

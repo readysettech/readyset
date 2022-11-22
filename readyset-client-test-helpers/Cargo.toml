@@ -16,7 +16,7 @@ tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", fe
 tracing = "0.1.35"
 
 nom-sql = { path = "../nom-sql" }
-readyset = { path = "../readyset/" }
+readyset-client = { path = "../readyset-client/" }
 readyset-adapter = { path = "../readyset-adapter" }
 readyset-server = { path = "../readyset-server/" }
 readyset-data = { path = "../readyset-data" }

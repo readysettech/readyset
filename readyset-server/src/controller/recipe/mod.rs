@@ -7,8 +7,8 @@ use nom_sql::{
 };
 use petgraph::graph::NodeIndex;
 use petgraph::visit::Bfs;
-use readyset::recipe::changelist::{Change, ChangeList};
-use readyset::ViewCreateRequest;
+use readyset_client::recipe::changelist::{Change, ChangeList};
+use readyset_client::ViewCreateRequest;
 use readyset_data::Dialect;
 use readyset_errors::{
     internal, internal_err, invariant, invariant_eq, ReadySetError, ReadySetResult,

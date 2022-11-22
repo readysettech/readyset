@@ -15,12 +15,12 @@ use database_utils::UpstreamConfig;
 use failpoint_macros::failpoint;
 use hyper::Method;
 use launchpad::futures::abort_on_panic;
-use readyset::consensus::Authority;
-use readyset::internal::ReplicaAddress;
-use readyset::recipe::ExtendRecipeSpec;
-use readyset::replication::ReplicationOffset;
-use readyset::status::{ReadySetStatus, SnapshotStatus};
-use readyset::WorkerDescriptor;
+use readyset_client::consensus::Authority;
+use readyset_client::internal::ReplicaAddress;
+use readyset_client::recipe::ExtendRecipeSpec;
+use readyset_client::replication::ReplicationOffset;
+use readyset_client::status::{ReadySetStatus, SnapshotStatus};
+use readyset_client::WorkerDescriptor;
 use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_telemetry_reporter::TelemetrySender;
 use readyset_version::RELEASE_VERSION;
@@ -116,8 +116,8 @@ impl Leader {
         // So, we abort on any panic of the replicator task.
         self.replicator_task = Some(tokio::spawn(abort_on_panic(async move {
             loop {
-                let noria: readyset::ReadySetHandle =
-                    readyset::ReadySetHandle::new(Arc::clone(&authority)).await;
+                let noria: readyset_client::ReadySetHandle =
+                    readyset_client::ReadySetHandle::new(Arc::clone(&authority)).await;
 
                 match replicators::NoriaAdapter::start(
                     noria,

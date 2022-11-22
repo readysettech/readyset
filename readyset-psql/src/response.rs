@@ -4,11 +4,11 @@ use std::convert::{TryFrom, TryInto};
 use nom_sql::SqlIdentifier;
 use psql_srv as ps;
 use psql_srv::Column;
-use readyset::results::{ResultIterator, Results};
-use readyset::ColumnSchema;
 use readyset_adapter::backend::{
     self as cl, noria_connector, SinglePrepareResult, UpstreamPrepare,
 };
+use readyset_client::results::{ResultIterator, Results};
+use readyset_client::ColumnSchema;
 use readyset_data::DfType;
 use upstream::StatementMeta;
 

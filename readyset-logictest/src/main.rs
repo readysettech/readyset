@@ -20,7 +20,7 @@ use proptest::arbitrary::any;
 use proptest::strategy::Strategy;
 use proptest::test_runner::{self, TestCaseError, TestError, TestRng, TestRunner};
 use query_generator::QuerySeed;
-use readyset::consensus::AuthorityType;
+use readyset_client::consensus::AuthorityType;
 use tempfile::NamedTempFile;
 use tokio::sync::Mutex;
 use walkdir::WalkDir;

@@ -3,7 +3,7 @@ use std::fmt;
 
 use itertools::Itertools;
 use lazy_static::lazy_static;
-use readyset::NodeSize;
+use readyset_client::NodeSize;
 use regex::Regex;
 
 use crate::node::{Node, NodeType};

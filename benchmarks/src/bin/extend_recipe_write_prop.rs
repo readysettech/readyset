@@ -1,7 +1,7 @@
 use clap::Parser;
-use readyset::consensus::AuthorityType;
-use readyset::recipe::changelist::ChangeList;
-use readyset::ReadySetHandle;
+use readyset_client::consensus::AuthorityType;
+use readyset_client::recipe::changelist::ChangeList;
+use readyset_client::ReadySetHandle;
 use readyset_data::Dialect;
 
 #[derive(Parser)]

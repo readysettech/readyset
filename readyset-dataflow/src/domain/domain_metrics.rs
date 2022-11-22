@@ -11,8 +11,8 @@ use metrics::{
     register_counter, register_gauge, register_histogram, Counter, Gauge, Histogram, Label,
     SharedString,
 };
-use readyset::internal::ReplicaAddress;
-use readyset::metrics::recorded;
+use readyset_client::internal::ReplicaAddress;
+use readyset_client::metrics::recorded;
 use strum::{EnumCount, IntoEnumIterator};
 
 use crate::domain::{LocalNodeIndex, Tag};

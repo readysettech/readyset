@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use anyhow::anyhow;
 use dashmap::DashMap;
 use launchpad::hash::hash;
-use readyset::query::*;
+use readyset_client::query::*;
 use tracing::error;
 
 /// A metadata cache for all queries that have been processed by this
@@ -402,7 +402,7 @@ impl FromStr for MigrationStyle {
 #[cfg(test)]
 mod tests {
     use nom_sql::{SelectStatement, SqlQuery};
-    use readyset::ViewCreateRequest;
+    use readyset_client::ViewCreateRequest;
 
     use super::*;
 

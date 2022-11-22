@@ -17,7 +17,7 @@ use crate::{Misses, PointKey, RangeKey, Row, Rows};
 /// KeyedStates are associative (key-value) maps from lists of [`DfValue`]s of length of at least 1
 /// to [lists of reference-counted pointers to rows](Rows), and can be backed by either a
 /// [`BTreeMap`](std::collections::BTreeMap) or an [`IndexMap`], according to an
-/// [`IndexType`](readyset::IndexType).
+/// [`IndexType`](readyset_client::IndexType).
 ///
 /// Any operations on a KeyedState that are unsupported by the index type, such as inserting or
 /// looking up ranges in a HashMap, will panic.

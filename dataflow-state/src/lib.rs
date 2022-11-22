@@ -19,9 +19,9 @@ use common::{Records, SizeOf, Tag};
 use derive_more::From;
 use hashbag::HashBag;
 pub use partial_map::PartialMap;
-use readyset::internal::Index;
-use readyset::replication::ReplicationOffset;
-use readyset::{KeyComparison, KeyCount};
+use readyset_client::internal::Index;
+use readyset_client::replication::ReplicationOffset;
+use readyset_client::{KeyComparison, KeyCount};
 use readyset_data::DfValue;
 use readyset_errors::ReadySetResult;
 

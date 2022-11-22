@@ -1,7 +1,7 @@
 #![warn(clippy::panic)]
 use clap::Parser;
-use readyset::consensus::AuthorityType;
-use readyset::ReadySetHandle;
+use readyset_client::consensus::AuthorityType;
+use readyset_client::ReadySetHandle;
 
 #[derive(Parser)]
 #[clap(name = "view_checker")]

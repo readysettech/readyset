@@ -10,7 +10,7 @@ use itertools::Itertools;
 use launchpad::Indices;
 use maplit::hashmap;
 use nom_sql::OrderType;
-use readyset::internal;
+use readyset_client::internal;
 use readyset_errors::{internal, internal_err, invariant, ReadySetResult};
 use serde::{Deserialize, Serialize};
 use tracing::trace;
@@ -676,11 +676,11 @@ mod tests {
         assert_eq!(idx.len(), 2);
         assert_eq!(
             &idx[&me],
-            &LookupIndex::Strict(readyset::internal::Index::hash_map(vec![1]))
+            &LookupIndex::Strict(readyset_client::internal::Index::hash_map(vec![1]))
         );
         assert_eq!(
             &idx[&parent],
-            &LookupIndex::Strict(readyset::internal::Index::hash_map(vec![1]))
+            &LookupIndex::Strict(readyset_client::internal::Index::hash_map(vec![1]))
         );
     }
 

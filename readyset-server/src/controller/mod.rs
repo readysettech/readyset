@@ -15,14 +15,14 @@ use hyper::http::{Method, StatusCode};
 use launchpad::select;
 use metrics::{counter, gauge, histogram};
 use nom_sql::Relation;
-use readyset::consensus::{
+use readyset_client::consensus::{
     Authority, AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult,
     WorkerDescriptor, WorkerId, WorkerSchedulingConfig,
 };
 #[cfg(feature = "failure_injection")]
-use readyset::failpoints;
-use readyset::metrics::recorded;
-use readyset::ControllerDescriptor;
+use readyset_client::failpoints;
+use readyset_client::metrics::recorded;
+use readyset_client::ControllerDescriptor;
 use readyset_data::Dialect;
 use readyset_errors::{internal, internal_err, ReadySetError};
 use readyset_telemetry_reporter::TelemetrySender;
@@ -1098,9 +1098,9 @@ mod tests {
 
     use launchpad::eventually;
     use nom_sql::{parse_select_statement, Dialect};
-    use readyset::recipe::changelist::ChangeList;
-    use readyset::replication::ReplicationOffset;
-    use readyset::{KeyCount, ViewCreateRequest};
+    use readyset_client::recipe::changelist::ChangeList;
+    use readyset_client::replication::ReplicationOffset;
+    use readyset_client::{KeyCount, ViewCreateRequest};
     use readyset_data::Dialect as DataDialect;
 
     use crate::integration_utils::start_simple;

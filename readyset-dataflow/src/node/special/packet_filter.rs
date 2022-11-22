@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::ops::Bound;
 
 use common::DfValue;
-use readyset::KeyComparison;
+use readyset_client::KeyComparison;
 use readyset_errors::{internal, ReadySetResult};
 use serde::{Deserialize, Serialize};
 use vec1::Vec1;

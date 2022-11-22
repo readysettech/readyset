@@ -7,8 +7,8 @@ use std::time::Duration;
 use anyhow::Result;
 use mysql_async::prelude::Queryable;
 use mysql_async::ServerError;
-use readyset::status::{ReadySetStatus, SnapshotStatus};
-use readyset::ReadySetResult;
+use readyset_client::status::{ReadySetStatus, SnapshotStatus};
+use readyset_client::ReadySetResult;
 use tracing::info;
 
 pub mod generate;

@@ -11,10 +11,10 @@ use mysql_common::binlog;
 use mysql_common::binlog::row::BinlogRow;
 use mysql_common::binlog::value::BinlogValue;
 use nom_sql::Relation;
-use readyset::metrics::recorded;
-use readyset::recipe::ChangeList;
-use readyset::replication::ReplicationOffset;
-use readyset::{ReadySetError, ReadySetResult};
+use readyset_client::metrics::recorded;
+use readyset_client::recipe::ChangeList;
+use readyset_client::replication::ReplicationOffset;
+use readyset_client::{ReadySetError, ReadySetResult};
 use readyset_data::{DfValue, Dialect};
 use tracing::warn;
 
@@ -330,7 +330,7 @@ impl MySqlBinlogConnector {
                     for row in ev.rows(tme) {
                         // For each row in the event we produce a vector of ReadySet types that
                         // represent that row
-                        inserted_rows.push(readyset::TableOperation::Insert(
+                        inserted_rows.push(readyset_client::TableOperation::Insert(
                             binlog_row_to_noria_row(
                                 &row?.1.ok_or("Missing data in WRITE_ROWS_EVENT")?,
                                 tme,
@@ -367,7 +367,7 @@ impl MySqlBinlogConnector {
                         // to delete the previous entry and insert the new
                         // one
                         let row = &row?;
-                        updated_rows.push(readyset::TableOperation::DeleteRow {
+                        updated_rows.push(readyset_client::TableOperation::DeleteRow {
                             row: binlog_row_to_noria_row(
                                 row.0.as_ref().ok_or(format!(
                                     "Missing before rows in UPDATE_ROWS_EVENT {:?}",
@@ -377,7 +377,7 @@ impl MySqlBinlogConnector {
                             )?,
                         });
 
-                        updated_rows.push(readyset::TableOperation::Insert(
+                        updated_rows.push(readyset_client::TableOperation::Insert(
                             binlog_row_to_noria_row(
                                 row.1.as_ref().ok_or(format!(
                                     "Missing after rows in UPDATE_ROWS_EVENT {:?}",
@@ -415,7 +415,7 @@ impl MySqlBinlogConnector {
                     for row in ev.rows(tme) {
                         // For each row in the event we produce a vector of ReadySet types that
                         // represent that row
-                        deleted_rows.push(readyset::TableOperation::DeleteRow {
+                        deleted_rows.push(readyset_client::TableOperation::DeleteRow {
                             row: binlog_row_to_noria_row(
                                 &row?.0.ok_or("Missing data in DELETE_ROWS_EVENT")?,
                                 tme,

@@ -25,10 +25,10 @@
 //! requires a nightly release of Rust to run for the time being.
 //!
 //! ```no_run
-//! # use readyset::*;
-//! # use readyset::consensus::Authority;
+//! # use readyset_client::*;
+//! # use readyset_client::consensus::Authority;
 //! # use readyset_data::{DfValue, Dialect};
-//! # use readyset::recipe::ChangeList;
+//! # use readyset_client::recipe::ChangeList;
 //!
 //! #[tokio::main]
 //! async fn main() {

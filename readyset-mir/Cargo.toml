@@ -19,7 +19,7 @@ proptest = "1.0.0"
 common = { path = "../readyset-common", package = "readyset-common" }
 dataflow = { path = "../readyset-dataflow", package = "readyset-dataflow" }
 nom-sql = { path = "../nom-sql" }
-readyset = { path = "../readyset" }
+readyset-client = { path = "../readyset-client" }
 readyset-errors = { path = "../readyset-errors" }
 readyset-data = { path = "../readyset-data" }
 fixedbitset = { version = "0.2.0", default-features = false }

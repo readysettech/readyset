@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use launchpad::redacted::RedactedString;
 use nom_locate::LocatedSpan;
 use nom_sql::{replicator_table_list, Dialect, SqlIdentifier};
-use readyset::{ReadySetError, ReadySetResult};
+use readyset_client::{ReadySetError, ReadySetResult};
 
 /// A [`TableFilter`] keeps lists of all the tables readyset-server is interested in, as well as a
 /// list of tables that we explicitly want to filter out of replication.

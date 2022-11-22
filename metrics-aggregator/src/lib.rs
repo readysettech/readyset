@@ -8,7 +8,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use clap::Parser;
 use prometheus_http_query::{Client, Scheme};
-use readyset::consensus::ConsulAuthority;
+use readyset_client::consensus::ConsulAuthority;
 use readyset_version::*;
 use stream_cancel::Valve;
 use tokio::sync::Mutex;

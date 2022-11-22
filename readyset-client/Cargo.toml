@@ -1,5 +1,5 @@
 [package]
-name = "readyset"
+name = "readyset-client"
 version = "0.7.0"
 publish = false
 authors = ["ReadySet Technology, Inc. <info@readyset.io>"]

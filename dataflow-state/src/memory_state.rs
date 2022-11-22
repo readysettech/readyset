@@ -3,9 +3,9 @@ use std::rc::Rc;
 
 use common::{IndexType, Record, Records, SizeOf, Tag};
 use rand::{self, Rng};
-use readyset::internal::Index;
-use readyset::replication::ReplicationOffset;
-use readyset::{KeyComparison, KeyCount};
+use readyset_client::internal::Index;
+use readyset_client::replication::ReplicationOffset;
+use readyset_client::{KeyComparison, KeyCount};
 use readyset_data::DfValue;
 use readyset_errors::ReadySetResult;
 use tracing::trace;

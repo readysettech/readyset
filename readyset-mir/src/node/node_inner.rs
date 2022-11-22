@@ -7,7 +7,7 @@ use dataflow::ops::union;
 use dataflow::PostLookupAggregates;
 use itertools::Itertools;
 use nom_sql::{ColumnSpecification, Expr, OrderType, Relation, SqlIdentifier};
-use readyset::ViewPlaceholder;
+use readyset_client::ViewPlaceholder;
 use readyset_errors::{internal, ReadySetResult};
 use serde::{Deserialize, Serialize};
 

@@ -22,7 +22,7 @@ use metrics::Unit;
 use mysql_async::prelude::Queryable;
 use mysql_async::Row;
 use prometheus_parse::Scrape;
-use readyset::metrics::recorded;
+use readyset_client::metrics::recorded;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::{debug, error, info};

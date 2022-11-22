@@ -4,8 +4,8 @@ use std::rc::Rc;
 use common::{IndexType, SizeOf};
 use itertools::Either;
 use rand::prelude::*;
-use readyset::internal::Index;
-use readyset::KeyComparison;
+use readyset_client::internal::Index;
+use readyset_client::KeyComparison;
 use readyset_data::DfValue;
 use vec1::Vec1;
 
@@ -22,8 +22,8 @@ use crate::{LookupResult, PointKey, RangeKey, RangeLookupResult, RecordResult, R
 /// [`IndexMap`](indexmap::IndexMap) (which is similar to a [`HashMap`](std::collections::HashMap)).
 ///
 /// Any operations on a SingleState that are unsupported by the index type, such as inserting or
-/// looking up ranges in a [`HashMap`](readyset::IndexType::HashMap) index, will panic, as mixing up
-/// index types is an unrecoverable violation of a broad system invariant.
+/// looking up ranges in a [`HashMap`](readyset_client::IndexType::HashMap) index, will panic, as
+/// mixing up index types is an unrecoverable violation of a broad system invariant.
 pub(super) struct SingleState {
     /// The column indices and index type that this index is keyed on
     index: Index,

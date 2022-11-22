@@ -231,7 +231,7 @@ use std::hash::{BuildHasher, Hash};
 
 pub use eviction::EvictionStrategy;
 use partial_map::InsertionOrder;
-use readyset::internal::IndexType;
+use readyset_client::internal::IndexType;
 
 use crate::inner::Inner;
 use crate::read::ReadHandle;

@@ -120,7 +120,7 @@ mod tests {
         use dataflow::ops::grouped::extremum::Extremum;
         use dataflow::ops::union::DuplicateMode;
         use nom_sql::{BinaryOperator, ColumnSpecification, Expr, OrderType, SqlType};
-        use readyset::ViewPlaceholder;
+        use readyset_client::ViewPlaceholder;
 
         use super::*;
         use crate::graph::MirGraph;

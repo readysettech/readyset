@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use dataflow_expression::Dialect;
-use readyset::query::MigrationState;
-use readyset::ReadySetHandle;
+use readyset_client::query::MigrationState;
+use readyset_client::ReadySetHandle;
 use tokio::select;
 use tracing::{debug, info, instrument, trace, warn};
 

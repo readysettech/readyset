@@ -1,7 +1,7 @@
 #![warn(clippy::panic)]
 
 use nom_sql::{self, ColumnConstraint, Relation};
-use readyset::ColumnSchema;
+use readyset_client::ColumnSchema;
 use readyset_data::DfType;
 use readyset_errors::{unsupported, ReadySetResult};
 

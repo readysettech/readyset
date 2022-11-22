@@ -3,7 +3,7 @@ use std::iter;
 use std::sync::Arc;
 
 use psql_srv as ps;
-use readyset::results::{ResultIterator, Results};
+use readyset_client::results::{ResultIterator, Results};
 use readyset_data::DfValue;
 use tokio_postgres::types::Type;
 
@@ -125,8 +125,8 @@ mod tests {
     use std::borrow::Cow;
     use std::convert::TryFrom;
 
-    use readyset::ColumnSchema;
     use readyset_adapter::backend as cl;
+    use readyset_client::ColumnSchema;
     use readyset_data::{DfType, DfValue};
 
     use super::*;

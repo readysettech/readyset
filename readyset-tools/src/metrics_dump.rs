@@ -3,9 +3,9 @@
 //! deployment.
 
 use clap::Parser;
-use readyset::consensus::AuthorityType;
-use readyset::metrics::client::MetricsClient;
-use readyset::ReadySetHandle;
+use readyset_client::consensus::AuthorityType;
+use readyset_client::metrics::client::MetricsClient;
+use readyset_client::ReadySetHandle;
 
 #[derive(Parser)]
 #[clap(name = "metrics_dump")]

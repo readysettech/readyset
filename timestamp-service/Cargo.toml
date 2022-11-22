@@ -8,4 +8,4 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0"
 # local deps
-readyset = { path = "../readyset" }
+readyset-client = { path = "../readyset-client" }

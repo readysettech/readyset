@@ -13,9 +13,9 @@ use dataflow::{Domain, DomainRequest, Packet};
 use futures_util::sink::{Sink, SinkExt};
 use futures_util::stream::StreamExt;
 use futures_util::FutureExt;
-use readyset::channel::{self, CONNECTION_FROM_BASE};
-use readyset::internal::ReplicaAddress;
-use readyset::{KeyComparison, PacketData, PacketPayload, Tagged};
+use readyset_client::channel::{self, CONNECTION_FROM_BASE};
+use readyset_client::internal::ReplicaAddress;
+use readyset_client::{KeyComparison, PacketData, PacketPayload, Tagged};
 use strawpoll::Strawpoll;
 use time::Duration;
 use tokio::io::{AsyncReadExt, BufReader, BufStream, BufWriter};
@@ -110,7 +110,7 @@ impl Executor for Outboxes {
 
 /// Merge multiple [`RequestReaderReplay`] packets into a single packet
 fn flatten_request_reader_replay(
-    n: readyset::internal::LocalNodeIndex,
+    n: readyset_client::internal::LocalNodeIndex,
     c: &[usize],
     unique_keys: &mut HashSet<KeyComparison>,
     packets: &mut VecDeque<Box<Packet>>,

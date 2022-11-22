@@ -17,12 +17,12 @@ use failpoint_macros::set_failpoint;
 use futures_util::future::TryFutureExt;
 use futures_util::stream::{StreamExt, TryStreamExt};
 use pin_project::pin_project;
-use readyset::consistency::Timestamp;
+use readyset_client::consistency::Timestamp;
 #[cfg(feature = "failure_injection")]
-use readyset::failpoints;
-use readyset::metrics::recorded;
-use readyset::results::ResultIterator;
-use readyset::{
+use readyset_client::failpoints;
+use readyset_client::metrics::recorded;
+use readyset_client::results::ResultIterator;
+use readyset_client::{
     KeyComparison, LookupResult, ReadQuery, ReadReply, ReadReplyStats, ReaderAddress, Tagged,
     ViewQuery,
 };
@@ -566,8 +566,8 @@ fn get_reader_from_cache<'a>(
 
 #[cfg(test)]
 mod readreply {
-    use readyset::results::SharedResults;
-    use readyset::{LookupResult, ReadReply, ReadReplyStats, ReadySetError, Tagged};
+    use readyset_client::results::SharedResults;
+    use readyset_client::{LookupResult, ReadReply, ReadReplyStats, ReadySetError, Tagged};
     use readyset_data::DfValue;
 
     use super::*;

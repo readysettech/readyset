@@ -12,9 +12,9 @@ use nom_sql::{
     CreateTableStatement, Dialect, Relation, SqlIdentifier, SqlQuery, TableKey,
 };
 use postgres_types::{accepts, FromSql, Kind, Type};
-use readyset::metrics::recorded;
-use readyset::recipe::changelist::{Change, ChangeList};
-use readyset::{ReadySetError, ReadySetResult};
+use readyset_client::metrics::recorded;
+use readyset_client::recipe::changelist::{Change, ChangeList};
+use readyset_client::{ReadySetError, ReadySetResult};
 use readyset_data::{DfType, DfValue, Dialect as DataDialect, PgEnumMetadata};
 use readyset_errors::{internal, internal_err, unsupported};
 use tokio_postgres as pgsql;
@@ -30,7 +30,7 @@ const BATCH_SIZE: usize = 1024; // How many queries to buffer before pushing to 
 pub struct PostgresReplicator<'a> {
     /// This is the underlying (regular) PostgreSQL transaction
     pub(crate) transaction: pgsql::Transaction<'a>,
-    pub(crate) noria: &'a mut readyset::ReadySetHandle,
+    pub(crate) noria: &'a mut readyset_client::ReadySetHandle,
     /// Filters out tables we are not interested in
     pub(crate) table_filter: TableFilter,
 }
@@ -440,7 +440,7 @@ impl TableDescription {
     async fn dump<'a>(
         &self,
         transaction: &'a pgsql::Transaction<'a>,
-        mut noria_table: readyset::Table,
+        mut noria_table: readyset_client::Table,
         snapshot_report_interval_secs: u16,
     ) -> ReadySetResult<()> {
         let mut cnt = 0;
@@ -540,7 +540,7 @@ impl TableDescription {
 impl<'a> PostgresReplicator<'a> {
     pub(crate) async fn new(
         client: &'a mut pgsql::Client,
-        noria: &'a mut readyset::ReadySetHandle,
+        noria: &'a mut readyset_client::ReadySetHandle,
         table_filter: TableFilter,
     ) -> ReadySetResult<PostgresReplicator<'a>> {
         let transaction = client

@@ -9,7 +9,7 @@ use nom_sql::{
     FieldDefinitionExpr, Relation, SelectSpecification, SelectStatement, SqlIdentifier, TableExpr,
 };
 use petgraph::graph::NodeIndex;
-use readyset::recipe::changelist::AlterTypeChange;
+use readyset_client::recipe::changelist::AlterTypeChange;
 use readyset_data::{DfType, Dialect, PgEnumMetadata};
 use readyset_errors::{invalid_err, ReadySetError, ReadySetResult};
 use readyset_sql_passes::alias_removal::TableAliasRewrite;

@@ -3,9 +3,9 @@ use std::convert::TryInto;
 use std::mem;
 
 use dataflow_state::{MaterializedNodeState, SnapshotMode};
-use readyset::consistency::Timestamp;
-use readyset::replication::ReplicationOffset;
-use readyset::{KeyComparison, PacketData, ReadySetError};
+use readyset_client::consistency::Timestamp;
+use readyset_client::replication::ReplicationOffset;
+use readyset_client::{KeyComparison, PacketData, ReadySetError};
 use readyset_errors::ReadySetResult;
 use tracing::{debug_span, trace};
 

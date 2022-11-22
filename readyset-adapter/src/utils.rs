@@ -8,7 +8,7 @@ use nom_sql::{
     BinaryOperator, Column, ColumnConstraint, CreateTableStatement, DeleteStatement, Expr,
     InsertStatement, Literal, SelectStatement, SqlIdentifier, SqlQuery, TableKey, UpdateStatement,
 };
-use readyset::{Modification, Operation};
+use readyset_client::{Modification, Operation};
 use readyset_data::{DfType, DfValue, Dialect};
 use readyset_errors::{
     bad_request_err, invariant, invariant_eq, unsupported, unsupported_err, ReadySetResult,

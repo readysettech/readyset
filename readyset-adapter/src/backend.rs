@@ -85,10 +85,10 @@ use nom_sql::{
     InsertStatement, Relation, SelectStatement, SetStatement, ShowStatement, SqlIdentifier,
     SqlQuery, UpdateStatement, UseStatement,
 };
-use readyset::consistency::Timestamp;
-use readyset::query::*;
-use readyset::results::Results;
-use readyset::{ColumnSchema, ViewCreateRequest};
+use readyset_client::consistency::Timestamp;
+use readyset_client::query::*;
+use readyset_client::results::Results;
+use readyset_client::{ColumnSchema, ViewCreateRequest};
 pub use readyset_client_metrics::QueryDestination;
 use readyset_client_metrics::{recorded, EventType, QueryExecutionEvent, SqlQueryType};
 use readyset_data::{DfType, DfValue};

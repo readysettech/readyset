@@ -23,8 +23,8 @@ use mysql_async::prelude::Queryable;
 use mysql_async::Conn;
 use nperf_core::args::{FlamegraphArgs, RecordArgs};
 use parking_lot::Mutex;
-use readyset::get_metric;
-use readyset::metrics::{recorded, MetricsDump};
+use readyset_client::get_metric;
+use readyset_client::metrics::{recorded, MetricsDump};
 use readyset_client_adapter::{DatabaseType, NoriaAdapter, Options};
 use readyset_mysql::MySqlHandler;
 use regex::Regex;
@@ -362,12 +362,12 @@ fn get_cache_hit_ratio() -> anyhow::Result<f64> {
     let metrics = get_metrics()?;
 
     let hit = match get_metric!(metrics, recorded::SERVER_VIEW_QUERY_HIT).unwrap() {
-        readyset::metrics::DumpedMetricValue::Counter(hit) => hit,
+        readyset_client::metrics::DumpedMetricValue::Counter(hit) => hit,
         _ => unreachable!(),
     };
 
     let miss = match get_metric!(metrics, recorded::SERVER_VIEW_QUERY_MISS).unwrap() {
-        readyset::metrics::DumpedMetricValue::Counter(miss) => miss,
+        readyset_client::metrics::DumpedMetricValue::Counter(miss) => miss,
         _ => unreachable!(),
     };
 

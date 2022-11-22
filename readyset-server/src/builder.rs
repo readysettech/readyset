@@ -5,7 +5,7 @@ use std::time::{self, Duration};
 
 use database_utils::UpstreamConfig;
 use dataflow::PersistenceParameters;
-use readyset::consensus::{
+use readyset_client::consensus::{
     Authority, LocalAuthority, LocalAuthorityStore, NodeTypeSchedulingRestriction,
     WorkerSchedulingConfig,
 };

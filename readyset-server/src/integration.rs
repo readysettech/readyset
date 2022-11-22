@@ -28,11 +28,11 @@ use dataflow::{
 use futures::StreamExt;
 use itertools::Itertools;
 use nom_sql::{parse_query, OrderType, Relation, SqlQuery};
-use readyset::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
-use readyset::consistency::Timestamp;
-use readyset::internal::LocalNodeIndex;
-use readyset::recipe::changelist::ChangeList;
-use readyset::{KeyComparison, Modification, SchemaType, ViewPlaceholder, ViewQuery};
+use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
+use readyset_client::consistency::Timestamp;
+use readyset_client::internal::LocalNodeIndex;
+use readyset_client::recipe::changelist::ChangeList;
+use readyset_client::{KeyComparison, Modification, SchemaType, ViewPlaceholder, ViewQuery};
 use readyset_data::{DfType, DfValue, Dialect};
 use readyset_errors::ReadySetError::{MigrationPlanFailed, RpcFailed, SelectQueryCreationFailed};
 use rust_decimal::prelude::ToPrimitive;
@@ -427,7 +427,7 @@ async fn broad_recursing_upquery() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn base_mutation() {
-    use readyset::{Modification, Operation};
+    use readyset_client::{Modification, Operation};
 
     let mut g = start_simple_unsharded("base_mutation").await;
     let a = g

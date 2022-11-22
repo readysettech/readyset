@@ -14,7 +14,7 @@ use nom_sql::{
     ItemPlaceholder, JoinConstraint, JoinOperator, JoinRightSide, Literal, OrderType, Relation,
     SelectStatement, SqlIdentifier, UnaryOperator,
 };
-use readyset::{PlaceholderIdx, ViewPlaceholder};
+use readyset_client::{PlaceholderIdx, ViewPlaceholder};
 use readyset_errors::{
     internal, invalid_err, invariant, invariant_eq, no_table_for_col, unsupported, unsupported_err,
     ReadySetResult,

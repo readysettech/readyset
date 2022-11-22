@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use metrics::{Counter, Gauge, Histogram, KeyName, Recorder, Unit};
 use parking_lot::Mutex;
-use readyset::metrics::{Key, MetricsDump};
+use readyset_client::metrics::{Key, MetricsDump};
 
 use crate::metrics::{Clear, Render};
 

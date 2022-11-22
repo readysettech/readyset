@@ -22,7 +22,7 @@ tracing = { version = "0.1", features = ["release_max_level_debug"] }
 
 # local deps
 nom-sql = { path = "../nom-sql" }
-readyset = { path = "../readyset", features = ["failure_injection"] }
+readyset-client = { path = "../readyset-client", features = ["failure_injection"] }
 readyset-data = { path = "../readyset-data" }
 launchpad = { path = "../launchpad" }
 
@@ -43,4 +43,4 @@ harness = false
 
 [features]
 slow_bench = []
-failure_injection = ["readyset/failure_injection"]
+failure_injection = ["readyset-client/failure_injection"]

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use async_trait::async_trait;
-use readyset::query::{DeniedQuery, MigrationState, QueryId};
+use readyset_client::query::{DeniedQuery, MigrationState, QueryId};
 use readyset_sql_passes::anonymize::Anonymizer;
 use readyset_telemetry_reporter::{
     PeriodicReport, ReporterResult as Result, Telemetry, TelemetryBuilder, TelemetryEvent,
@@ -86,7 +86,7 @@ impl PeriodicReport for ProxiedQueriesReporter {
 mod tests {
     use std::sync::Arc;
 
-    use readyset::query::{Query, QueryStatus};
+    use readyset_client::query::{Query, QueryStatus};
 
     use super::*;
     use crate::query_status_cache::MigrationStyle;

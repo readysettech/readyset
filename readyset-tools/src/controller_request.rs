@@ -4,8 +4,8 @@ use std::str::FromStr;
 
 use anyhow::anyhow;
 use clap::Parser;
-use readyset::consensus::AuthorityType;
-use readyset::ReadySetHandle;
+use readyset_client::consensus::AuthorityType;
+use readyset_client::ReadySetHandle;
 
 #[derive(Parser)]
 #[clap(name = "controller_request")]

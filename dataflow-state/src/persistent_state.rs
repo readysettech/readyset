@@ -77,9 +77,9 @@ use launchpad::intervals::BoundPair;
 use parking_lot::{
     MappedRwLockReadGuard, MappedRwLockWriteGuard, RwLock, RwLockReadGuard, RwLockWriteGuard,
 };
-use readyset::internal::Index;
-use readyset::replication::ReplicationOffset;
-use readyset::{KeyComparison, KeyCount, SqlIdentifier};
+use readyset_client::internal::Index;
+use readyset_client::replication::ReplicationOffset;
+use readyset_client::{KeyComparison, KeyCount, SqlIdentifier};
 use readyset_data::DfValue;
 use readyset_errors::{ReadySetError, ReadySetResult};
 use rocksdb::{self, IteratorMode, PlainTableFactoryOptions, SliceTransform, WriteBatch, DB};

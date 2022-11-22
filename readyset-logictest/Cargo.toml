@@ -40,7 +40,7 @@ thiserror = "1.0.30"
 
 readyset-server = { path = "../readyset-server/" }
 readyset-adapter = { path = "../readyset-adapter/" }
-readyset = { path = "../readyset/" }
+readyset-client = { path = "../readyset-client/" }
 database-utils = { path = "../database-utils" }
 nom-sql = { path = "../nom-sql" }
 mysql-srv = { path = "../mysql-srv" }

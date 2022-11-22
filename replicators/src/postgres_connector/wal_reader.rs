@@ -5,7 +5,7 @@ use std::sync::Arc;
 use bit_vec::BitVec;
 use mysql_time::MySqlTime;
 use postgres_types::Kind;
-use readyset::ReadySetError;
+use readyset_client::ReadySetError;
 use readyset_data::{Array, Collation, DfType, DfValue, Dialect};
 use readyset_errors::unsupported;
 use rust_decimal::prelude::FromStr;
@@ -65,7 +65,7 @@ pub(crate) enum WalEvent {
         schema: String,
         table: String,
         key: Vec<DfValue>,
-        set: Vec<readyset::Modification>,
+        set: Vec<readyset_client::Modification>,
     },
     Truncate {
         tables: Vec<(String, String)>,
@@ -240,7 +240,7 @@ impl WalReader {
                                 set: new_tuple
                                     .into_noria_vec(mapping, custom_types, false)?
                                     .into_iter()
-                                    .map(readyset::Modification::Set)
+                                    .map(readyset_client::Modification::Set)
                                     .collect(),
                             },
                             end,
@@ -261,7 +261,7 @@ impl WalReader {
                                 set: new_tuple
                                     .into_noria_vec(mapping, custom_types, false)?
                                     .into_iter()
-                                    .map(readyset::Modification::Set)
+                                    .map(readyset_client::Modification::Set)
                                     .collect(),
                             },
                             end,

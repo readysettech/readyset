@@ -41,7 +41,7 @@ use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Mutex};
 
-use readyset::ReaderAddress;
+use readyset_client::ReaderAddress;
 use serde::{Deserialize, Serialize};
 
 pub use crate::backlog::{LookupError, ReaderUpdatedNotifier, SingleReadHandle};
@@ -100,7 +100,7 @@ impl Default for EvictionKind {
     }
 }
 
-pub use readyset::shard_by;
+pub use readyset_client::shard_by;
 
 impl Deref for ReaderMap {
     type Target = HashMap<ReaderAddress, SingleReadHandle>;

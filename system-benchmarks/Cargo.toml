@@ -18,7 +18,7 @@ benchmarks = { path = "../benchmarks" }
 database-utils = { path = "../database-utils" }
 nom-sql = { path = "../nom-sql" }
 
-readyset = { path = "../readyset" }
+readyset-client = { path = "../readyset-client" }
 readyset-data = { path = "../readyset-data" }
 readyset-mysql = { path = "../readyset-mysql" }
 readyset-client-adapter = { path = "../readyset-client-adapter" }

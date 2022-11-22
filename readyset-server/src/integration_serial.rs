@@ -11,10 +11,10 @@ use common::Index;
 use dataflow::node::special::Base;
 use dataflow::ops::union::{self, Union};
 use dataflow::utils::make_columns;
-use readyset::consensus::StandaloneAuthority;
-use readyset::get_metric;
-use readyset::metrics::{recorded, DumpedMetricValue, MetricsDump};
-use readyset::recipe::changelist::ChangeList;
+use readyset_client::consensus::StandaloneAuthority;
+use readyset_client::get_metric;
+use readyset_client::metrics::{recorded, DumpedMetricValue, MetricsDump};
+use readyset_client::recipe::changelist::ChangeList;
 use readyset_data::{DfValue, Dialect};
 use rusty_fork::rusty_fork_test;
 
@@ -224,9 +224,11 @@ async fn it_works_basic_standalone_impl() {
             dir_path,
         ));
         builder.enable_packet_filters();
-        builder.start_local_custom(std::sync::Arc::new(readyset::consensus::Authority::from(
-            StandaloneAuthority::new(dir_path, "it_works_basic_standalone").unwrap(),
-        )))
+        builder.start_local_custom(std::sync::Arc::new(
+            readyset_client::consensus::Authority::from(
+                StandaloneAuthority::new(dir_path, "it_works_basic_standalone").unwrap(),
+            ),
+        ))
     };
 
     let mut g = start_standalone().await.unwrap();

@@ -27,7 +27,7 @@ chrono = "0.4"
 # Local dependencies
 launchpad = { path = "../launchpad" }
 nom-sql = { path = "../nom-sql" }
-readyset = { path = "../readyset/" }
+readyset-client = { path = "../readyset-client/" }
 readyset-adapter = { path = "../readyset-adapter" }
 readyset-client-metrics = { path = "../readyset-client-metrics" }
 readyset-tracing = { path = "../readyset-tracing" }

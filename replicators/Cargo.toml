@@ -33,7 +33,7 @@ mysql_async = "0.29"
 
 mysql_common = "0.28.0"
 nom-sql = { path = "../nom-sql" }
-readyset = { path = "../readyset" }
+readyset-client = { path = "../readyset-client" }
 readyset-errors = { path = "../readyset-errors" }
 launchpad = { path = "../launchpad" }
 readyset-tracing = { path = "../readyset-tracing" }

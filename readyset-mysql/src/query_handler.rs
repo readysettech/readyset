@@ -4,11 +4,11 @@ use std::str::FromStr;
 
 use lazy_static::lazy_static;
 use nom_sql::{Column, Expr, FieldDefinitionExpr, Literal, SqlIdentifier, SqlQuery, VariableScope};
-use readyset::results::Results;
-use readyset::{ColumnSchema, ReadySetError};
 use readyset_adapter::backend::noria_connector::QueryResult;
 use readyset_adapter::backend::SelectSchema;
 use readyset_adapter::{QueryHandler, SetBehavior};
+use readyset_client::results::Results;
+use readyset_client::{ColumnSchema, ReadySetError};
 use readyset_data::{DfType, DfValue};
 use readyset_errors::ReadySetResult;
 use tracing::warn;

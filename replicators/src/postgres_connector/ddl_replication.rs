@@ -43,7 +43,7 @@ use nom_sql::{
     CreateTableStatement, CreateViewStatement, Dialect, Relation, SqlQuery, SqlType, TableKey,
 };
 use pgsql::tls::MakeTlsConnect;
-use readyset::recipe::changelist::{AlterTypeChange, Change};
+use readyset_client::recipe::changelist::{AlterTypeChange, Change};
 use readyset_data::{DfType, PgEnumMetadata};
 use readyset_errors::ReadySetResult;
 use serde::{Deserialize, Deserializer};

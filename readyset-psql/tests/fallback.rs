@@ -1,8 +1,8 @@
 use chrono::NaiveDate;
-#[cfg(feature = "failure_injection")]
-use readyset::failpoints;
 use readyset_adapter::backend::{MigrationMode, UnsupportedSetMode};
 use readyset_adapter::BackendBuilder;
+#[cfg(feature = "failure_injection")]
+use readyset_client::failpoints;
 use readyset_client_test_helpers::psql_helpers::{upstream_config, PostgreSQLAdapter};
 use readyset_client_test_helpers::{sleep, Adapter, TestBuilder};
 use readyset_server::Handle;

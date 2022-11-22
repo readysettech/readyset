@@ -7,7 +7,7 @@ mod wal_reader;
 use std::fmt::{self, Display};
 
 pub use connector::PostgresWalConnector;
-use readyset::replication::ReplicationOffset;
+use readyset_client::replication::ReplicationOffset;
 pub use snapshot::PostgresReplicator;
 
 pub(crate) const REPLICATION_SLOT: &str = "readyset";

@@ -1,5 +1,5 @@
 use nom_sql::{SqlIdentifier, SqlQuery};
-use readyset::ReadySetResult;
+use readyset_client::ReadySetResult;
 
 use crate::backend::noria_connector;
 

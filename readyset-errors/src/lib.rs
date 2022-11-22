@@ -523,8 +523,8 @@ pub enum ReadySetError {
 
     /// An attempt was made to compare replication offsets from different logs.
     ///
-    /// See the documentation for [`ReplicationOffset`](readyset::ReplicationOffset) for why this
-    /// might happen
+    /// See the documentation for [`ReplicationOffset`](readyset_client::ReplicationOffset) for why
+    /// this might happen
     #[error(
         "Cannot compare replication offsets from different logs: expected {0}, but got {1} \
              (did the replication log name change?)"

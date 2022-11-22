@@ -7,7 +7,7 @@ use reader_map::handles::{ReadHandle, WriteHandle};
 use reader_map::refs::Miss;
 use reader_map::Error::*;
 use reader_map::{DefaultInsertionOrder, Options};
-use readyset::internal::IndexType;
+use readyset_client::internal::IndexType;
 
 macro_rules! assert_match {
     ($x:expr, $p:pat) => {

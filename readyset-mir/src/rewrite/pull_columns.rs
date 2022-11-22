@@ -48,7 +48,7 @@ pub(crate) fn pull_all_required_columns(query: &mut MirQuery<'_>) -> ReadySetRes
 //     use common::IndexType;
 //     use dataflow::ops::grouped::aggregate::Aggregation;
 //     use nom_sql::{BinaryOperator, ColumnSpecification, Expr, FunctionExpr, Literal, SqlType};
-//     use readyset::ViewPlaceholder;
+//     use readyset_client::ViewPlaceholder;
 //     use crate::graph::MirSupergraph;
 //
 //     use super::*;

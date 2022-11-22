@@ -2,8 +2,8 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 use dataflow::prelude::*;
-use readyset::consensus::Authority;
-use readyset::prelude::*;
+use readyset_client::consensus::Authority;
+use readyset_client::prelude::*;
 use readyset_data::Dialect;
 use reqwest::Url;
 use stream_cancel::Trigger;

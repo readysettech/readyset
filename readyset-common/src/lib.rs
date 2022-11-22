@@ -5,7 +5,7 @@ mod local;
 mod records;
 
 use petgraph::prelude::*;
-pub use readyset::internal::{Index, IndexType};
+pub use readyset_client::internal::{Index, IndexType};
 pub use readyset_data::DfValue;
 use serde::{Deserialize, Serialize};
 

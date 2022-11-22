@@ -14,7 +14,7 @@ use std::convert::TryFrom;
 use dataflow::payload::{ReplayPathSegment, SourceSelection, TriggerEndpoint};
 use dataflow::prelude::*;
 use dataflow::DomainRequest;
-use readyset::ReadySetError;
+use readyset_client::ReadySetError;
 use tracing::{debug, instrument, trace};
 use vec1::Vec1;
 

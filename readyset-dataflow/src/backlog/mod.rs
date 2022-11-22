@@ -7,9 +7,9 @@ use ahash::RandomState;
 use common::SizeOf;
 use dataflow_expression::{PostLookup, ReaderProcessing};
 use reader_map::EvictionStrategy;
-use readyset::consistency::Timestamp;
-use readyset::results::SharedResults;
-use readyset::KeyComparison;
+use readyset_client::consistency::Timestamp;
+use readyset_client::results::SharedResults;
+use readyset_client::KeyComparison;
 use vec1::Vec1;
 
 pub use self::multir::LookupError;
@@ -554,7 +554,7 @@ impl SingleReadHandle {
 mod tests {
     use std::ops::Bound;
 
-    use readyset::results::SharedRows;
+    use readyset_client::results::SharedRows;
 
     use super::*;
 

@@ -12,7 +12,7 @@ use hyper::header::CONTENT_TYPE;
 use hyper::service::make_service_fn;
 use hyper::{self, Body, Method, Request, Response};
 use metrics_exporter_prometheus::PrometheusHandle;
-use readyset::query::DeniedQuery;
+use readyset_client::query::DeniedQuery;
 use readyset_client_metrics::recorded;
 use readyset_sql_passes::anonymize::Anonymizer;
 use stream_cancel::Valve;
