@@ -85,6 +85,10 @@ brew install lz4
 brew install openssl@1.1
 ```
 
+> **Note**
+> If you are on an Apple Silicon device, Homebrew will install libraries in `/opt/homebrew/bin`.
+> Add `'-L /opt/homebrew/bin'` to the `RUSTFLAGS` environment variable to include this as a library path during compilation. 
+
 **Ubuntu:**
 ```
 sudo apt update && sudo apt install -y build-essential libssl-dev pkg-config llvm clang liblz4-dev cmake
@@ -119,8 +123,8 @@ cargo run --bin readyset-server --release -- --upstream-db-url <upstream-url>  -
 
 If using the databases supplied by the docker-compose environment in this repository, replace <upstream-url> with the URL of the database corresponding to your database engine:
 
-* MySQL: `mysql://root:readyset@127.1/readyset`
-* PostgreSQL: `postgresql://root:readyset@127.1/readyset`
+* MySQL: `mysql://root:noria@127.1/readyset`
+* PostgreSQL: `postgresql://postgres:noria@127.1/readyset`
 
 If running with an existing external database, replace <upstream-url> with the connection string for that database.
 
@@ -130,13 +134,13 @@ Then, run the adapter binary corresponding to your upstream database (MySQL or P
 
 **MySQL**
 ```
-cargo run --bin readyset-mysql --release -- --upstream-db-url mysql://root:readyset@127.1/readyset  --allow-unauthenticated-connections
+cargo run --bin readyset-mysql --release -- --upstream-db-url mysql://root:noria@127.1/readyset  --allow-unauthenticated-connections
   --address 0.0.0.0:3307 --deployment <deployment name>  --prometheus-metrics --query-log --query-log-ad-hoc
  ```
 
 **Postgres**
 ```
-cargo run --bin readyset-psql --release -- --upstream-db-url postgresql://postgres:readyset@127.1/readyset  --allow-unauthenticated-connections
+cargo run --bin readyset-psql --release -- --upstream-db-url postgresql://postgres:noria@127.1/readyset  --allow-unauthenticated-connections
   --address 0.0.0.0:5433 --deployment <deployment name> --prometheus-metrics --query-log --query-log-ad-hoc
 ```
 
