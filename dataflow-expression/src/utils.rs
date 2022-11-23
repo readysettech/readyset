@@ -70,6 +70,32 @@ pub fn index_bidirectional_mut<T>(slice: &mut [T], index: isize) -> Option<&mut 
     slice.get_mut(index_to_bidirectional(slice, index))
 }
 
+/// Inserts `element` into `vec` at `index`, using reverse indexing if negative.
+///
+/// If `index` is out of bounds, `element` is inserted at the end (positive `index`) or beginning
+/// (negative `index`).
+pub fn insert_bidirectional<T>(vec: &mut Vec<T>, index: isize, element: T, insert_after: bool) {
+    let negative_index = index.is_negative();
+    let mut index = index_to_bidirectional(vec, index);
+
+    if insert_after {
+        // Use wrapping arithmetic because `index_to_bidirectional` can produce `usize::MAX` (-1)
+        // for cases like `len = 1` and `index = -2`.
+        index = index.wrapping_add(1);
+    }
+
+    // Clamp index to bounds.
+    if index > vec.len() {
+        if negative_index {
+            index = 0;
+        } else {
+            index = vec.len();
+        }
+    }
+
+    vec.insert(index, element);
+}
+
 /// Removes the value in `vec` at `index`, using reverse indexing if negative.
 pub fn remove_bidirectional<T>(vec: &mut Vec<T>, index: isize) -> Option<T> {
     let index = index_to_bidirectional(vec, index);
@@ -82,6 +108,8 @@ pub fn remove_bidirectional<T>(vec: &mut Vec<T>, index: isize) -> Option<T> {
 
 #[cfg(test)]
 mod tests {
+    use test_strategy::proptest;
+
     use super::*;
 
     mod index_bidirectional {
@@ -115,6 +143,85 @@ mod tests {
             assert_eq!(index_bidirectional(&[1, 2, 3], -1), Some(&3));
             assert_eq!(index_bidirectional(&[1, 2, 3], -2), Some(&2));
             assert_eq!(index_bidirectional(&[1, 2, 3], -3), Some(&1));
+        }
+    }
+
+    mod insert_bidirectional {
+        use super::*;
+
+        #[proptest]
+        fn inputs(mut vec: Vec<u32>, index: isize, element: u32, insert_after: bool) {
+            let prev_len = vec.len();
+            insert_bidirectional(&mut vec, index, element, insert_after);
+            assert_eq!(vec.len(), prev_len + 1);
+        }
+
+        #[track_caller]
+        fn test(input: &[u32], index: isize, element: u32, insert_after: bool, expected: &[u32]) {
+            let mut vec = input.to_vec();
+            insert_bidirectional(&mut vec, index, element, insert_after);
+            assert_eq!(vec, expected);
+        }
+
+        #[test]
+        fn empty() {
+            test(&[], 0, 42, false, &[42]);
+            test(&[], 0, 42, true, &[42]);
+
+            test(&[], 1, 42, false, &[42]);
+            test(&[], 1, 42, true, &[42]);
+
+            test(&[], -1, 42, false, &[42]);
+            test(&[], -1, 42, true, &[42]);
+        }
+
+        #[test]
+        fn positive_index() {
+            let input = &[0, 1, 2];
+
+            // Positive start:
+            test(input, 0, 42, false, &[42, 0, 1, 2]);
+
+            // Positive second:
+            test(input, 1, 42, false, &[0, 42, 1, 2]);
+            test(input, 0, 42, true, &[0, 42, 1, 2]);
+
+            // Positive third:
+            test(input, 2, 42, false, &[0, 1, 42, 2]);
+            test(input, 1, 42, true, &[0, 1, 42, 2]);
+
+            // Positive end:
+            test(input, 3, 42, false, &[0, 1, 2, 42]);
+            test(input, 2, 42, true, &[0, 1, 2, 42]);
+
+            // Positive end, out-of-bounds:
+            test(input, 3, 42, true, &[0, 1, 2, 42]);
+            test(input, 4, 42, false, &[0, 1, 2, 42]);
+            test(input, 4, 42, true, &[0, 1, 2, 42]);
+        }
+
+        #[test]
+        fn negative_index() {
+            let input = &[0, 1, 2];
+
+            // Negative start:
+            test(input, -3, 42, false, &[42, 0, 1, 2]);
+            test(input, -4, 42, true, &[42, 0, 1, 2]);
+
+            // Negative start, out-of-bounds:
+            test(input, -4, 42, false, &[42, 0, 1, 2]);
+            test(input, -5, 42, true, &[42, 0, 1, 2]);
+
+            // Negative second:
+            test(input, -2, 42, false, &[0, 42, 1, 2]);
+            test(input, -3, 42, true, &[0, 42, 1, 2]);
+
+            // Negative third:
+            test(input, -1, 42, false, &[0, 1, 42, 2]);
+            test(input, -2, 42, true, &[0, 1, 42, 2]);
+
+            // Negative end:
+            test(input, -1, 42, true, &[0, 1, 2, 42]);
         }
     }
 }

@@ -600,6 +600,28 @@ impl BuiltinFunction {
 
                 crate::eval::json::json_extract_key_path(&json, &keys)
             }
+            BuiltinFunction::JsonbInsert(target_json, key_path, inserted_json, insert_after) => {
+                let mut target_json = non_null!(target_json.eval(record)?).to_json()?;
+
+                let key_path = non_null_owned!(key_path.eval(record)?);
+                let key_path = key_path.as_array()?.values();
+
+                let inserted_json = non_null!(inserted_json.eval(record)?).to_json()?;
+
+                let insert_after = match insert_after {
+                    Some(insert_after) => bool::try_from(non_null!(insert_after.eval(record)?))?,
+                    None => false,
+                };
+
+                crate::eval::json::json_insert(
+                    &mut target_json,
+                    key_path,
+                    inserted_json,
+                    insert_after,
+                )?;
+
+                Ok(target_json.into())
+            }
             BuiltinFunction::Coalesce(arg1, rest_args) => {
                 let val1 = arg1.eval(record)?;
                 let rest_vals = rest_args
@@ -1748,6 +1770,11 @@ mod tests {
     mod json {
         use super::*;
 
+        #[track_caller]
+        fn normalize_json(json: &str) -> String {
+            json.parse::<serde_json::Value>().unwrap().to_string()
+        }
+
         #[test]
         fn json_array_length() {
             #[track_caller]
@@ -1776,7 +1803,7 @@ mod tests {
             fn test(json_expr: &str, expected: Option<&str>) {
                 // Normalize formatting and convert.
                 let expected = expected
-                    .map(|s| s.parse::<serde_json::Value>().unwrap().to_string())
+                    .map(normalize_json)
                     .map(DfValue::from)
                     .unwrap_or_default();
 
@@ -1858,6 +1885,132 @@ mod tests {
 
             test(object, "'abc'::char(3), '0'", Some("123"));
             test(object, "'abc'::char(3), null::text", None);
+        }
+
+        mod jsonb_insert {
+            use super::*;
+
+            #[track_caller]
+            fn test_nullable(
+                json: &str,
+                keys: &str,
+                inserted_json: &str,
+                insert_after: Option<bool>,
+                expected_json: Option<&str>,
+            ) {
+                // Normalize formatting and convert.
+                let expected_json = expected_json
+                    .map(normalize_json)
+                    .map(DfValue::from)
+                    .unwrap_or_default();
+
+                let insert_after_args: &[&str] = match insert_after {
+                    // Test calling with explicit and implicit false `insert_after` argument.
+                    Some(false) => &[", false", ""],
+                    Some(true) => &[", true"],
+
+                    // Test null result.
+                    None => &[", null"],
+                };
+
+                for insert_after_arg in insert_after_args {
+                    let expr =
+                        format!("jsonb_insert({json}, {keys}, {inserted_json}{insert_after_arg})");
+                    assert_eq!(
+                        eval_expr(&expr, PostgreSQL),
+                        expected_json,
+                        "incorrect result for for `{expr}`"
+                    );
+                }
+            }
+
+            #[track_caller]
+            fn test_non_null(
+                json: &str,
+                keys: &[&str],
+                inserted_json: &str,
+                insert_after: bool,
+                expected_json: &str,
+            ) {
+                use itertools::Itertools;
+
+                // Convert keys to array syntax.
+                let keys = format!(
+                    "array[{}]",
+                    keys.iter().map(|k| format!("'{k}'")).join(", "),
+                );
+
+                test_nullable(
+                    &format!("'{json}'"),
+                    &keys,
+                    &format!("'{inserted_json}'"),
+                    Some(insert_after),
+                    Some(expected_json),
+                )
+            }
+
+            #[test]
+            fn null_propagation() {
+                test_nullable("null", "array[]", "'42'", Some(false), None);
+                test_nullable("'{}'", "null", "'42'", Some(false), None);
+                test_nullable("'{}'", "array[]", "null", Some(false), None);
+                test_nullable("'{}'", "array[]", "'42'", None, None);
+            }
+
+            #[test]
+            fn scalar() {
+                test_non_null("1", &["0"], "42", false, "1");
+                test_non_null("1", &["0"], "42", true, "1");
+
+                test_non_null("1.5", &["0"], "42", false, "1.5");
+                test_non_null("1.5", &["0"], "42", true, "1.5");
+
+                test_non_null("true", &["0"], "42", false, "true");
+                test_non_null("true", &["0"], "42", true, "true");
+
+                test_non_null("\"hi\"", &["0"], "42", false, "\"hi\"");
+                test_non_null("\"hi\"", &["0"], "42", true, "\"hi\"");
+
+                test_non_null("null", &["0"], "42", false, "null");
+                test_non_null("null", &["0"], "42", true, "null");
+            }
+
+            // NOTE: Tests for one-dimension array cases are done directly on the
+            // `insert_bidirectional` utility function.
+
+            #[test]
+            fn object() {
+                // Insertable:
+                test_non_null("{}", &["a"], "42", false, r#"{"a": 42}"#);
+                test_non_null("{}", &["a"], "42", true, r#"{"a": 42}"#);
+
+                // Not insertable:
+                test_non_null("{\"a\": 0}", &["a"], "42", false, "{\"a\": 0}");
+                test_non_null("{\"a\": 0}", &["a"], "42", true, "{\"a\": 0}");
+
+                // Not found:
+                test_non_null("{}", &["a", "b"], "42", false, "{}");
+                test_non_null("{}", &["a", "b"], "42", true, "{}");
+            }
+
+            #[test]
+            fn array_nested() {
+                let array = "[[[0, 1, 2]]]";
+                let keys = ["0", "0", "0"];
+
+                test_non_null(array, &keys, "42", false, "[[[42, 0, 1, 2]]]");
+                test_non_null(array, &keys, "42", true, "[[[0, 42, 1, 2]]]");
+            }
+
+            #[test]
+            fn object_nested() {
+                let object = r#"{ "a": { "b": {} } }"#;
+                let expected = r#"{ "a": { "b": { "c": 42 } } }"#;
+                let keys = ["a", "b", "c"];
+
+                test_non_null(object, &keys, "42", false, expected);
+                test_non_null(object, &keys, "42", true, expected);
+            }
         }
     }
 }

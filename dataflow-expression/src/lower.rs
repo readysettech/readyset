@@ -242,6 +242,10 @@ impl BuiltinFunction {
                 },
                 DfType::DEFAULT_TEXT,
             ),
+            "jsonb_insert" => (
+                Self::JsonbInsert(next_arg()?, next_arg()?, next_arg()?, args.next()),
+                DfType::Jsonb,
+            ),
             "coalesce" => {
                 let arg1 = next_arg()?;
                 let ty = arg1.ty().clone();

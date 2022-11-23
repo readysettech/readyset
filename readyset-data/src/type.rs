@@ -425,6 +425,12 @@ impl DfType {
         matches!(self, Self::Json | Self::Jsonb)
     }
 
+    /// Returns `true` if this is the boolean type.
+    #[inline]
+    pub fn is_bool(&self) -> bool {
+        matches!(self, Self::Bool)
+    }
+
     /// Returns `true` if this is any `*int` type.
     #[inline]
     pub fn is_any_int(&self) -> bool {

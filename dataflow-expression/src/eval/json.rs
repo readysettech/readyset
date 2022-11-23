@@ -3,8 +3,10 @@ use std::hash::{Hash, Hasher};
 use std::mem;
 
 use readyset_data::DfValue;
-use readyset_errors::ReadySetResult;
+use readyset_errors::{invalid_err, ReadySetError, ReadySetResult};
 use serde_json::{Number as JsonNumber, Value as JsonValue};
+
+use crate::utils;
 
 type JsonObject = serde_json::Map<String, JsonValue>;
 
@@ -140,15 +142,11 @@ pub(crate) fn json_extract_key_path<'k>(
         let key = <&str>::try_from(key)?;
 
         let inner = match json {
-            JsonValue::Array(array) => {
-                // NOTE: PostgreSQL ignores leading whitespace, and "+" prefix parsing is handled
-                // the same way in both Rust and PostgreSQL.
-                key.trim_start()
-                    .parse::<isize>()
-                    .ok()
-                    .and_then(|index| crate::utils::index_bidirectional(array, index))
-            }
+            JsonValue::Array(array) => parse_json_index(key)
+                .and_then(|index| crate::utils::index_bidirectional(array, index)),
+
             JsonValue::Object(object) => object.get(key),
+
             _ => None,
         };
 
@@ -159,6 +157,88 @@ pub(crate) fn json_extract_key_path<'k>(
     }
 
     Ok(json.to_string().into())
+}
+
+pub(crate) fn json_insert<'k>(
+    target_json: &mut JsonValue,
+    key_path: impl IntoIterator<Item = &'k DfValue>,
+    inserted_json: JsonValue,
+    insert_after: bool,
+) -> ReadySetResult<()> {
+    let key_path: Vec<&str> = key_path
+        .into_iter()
+        .map(TryInto::try_into)
+        .collect::<ReadySetResult<_>>()?;
+
+    let Some((&inner_key, search_keys)) = key_path.split_last() else {
+        return Ok(());
+    };
+
+    match json_find_mut(target_json, search_keys)? {
+        Some(JsonValue::Array(array)) => {
+            let index = parse_json_index(inner_key)
+                .ok_or_else(|| parse_json_index_error(search_keys.len()))?;
+
+            utils::insert_bidirectional(array, index, inserted_json, insert_after);
+        }
+        Some(JsonValue::Object(object)) => {
+            if let serde_json::map::Entry::Vacant(entry) = object.entry(inner_key) {
+                entry.insert(inserted_json);
+            }
+        }
+        _ => {}
+    }
+
+    Ok(())
+}
+
+/// Returns a mutable reference to an inner JSON value located at the end of a key path.
+fn json_find_mut<K>(mut json: &mut JsonValue, key_path: K) -> ReadySetResult<Option<&mut JsonValue>>
+where
+    K: IntoIterator,
+    K::Item: AsRef<str>,
+{
+    for (iter_count, key) in key_path.into_iter().enumerate() {
+        let key = key.as_ref();
+
+        let inner = match json {
+            JsonValue::Array(array) => {
+                // NOTE: PostgreSQL seems to only report parse failures in mutating JSON operations.
+                // So an immutable equivalent of this function should not emit errors. However, this
+                // assumption should be validated for each operation when implementing.
+                let index =
+                    parse_json_index(key).ok_or_else(|| parse_json_index_error(iter_count))?;
+
+                utils::index_bidirectional_mut(array, index)
+            }
+            JsonValue::Object(object) => object.get_mut(key),
+            _ => None,
+        };
+
+        match inner {
+            Some(inner) => json = inner,
+            None => return Ok(None),
+        }
+    }
+
+    Ok(Some(json))
+}
+
+/// Parses an array index using PostgreSQL's rules.
+fn parse_json_index(index: &str) -> Option<isize> {
+    // NOTE: PostgreSQL ignores leading whitespace, and "+" prefix parsing is handled the same way
+    // in both Rust and PostgreSQL.
+    index.trim_start().parse::<isize>().ok()
+}
+
+/// Returns the appropriate error for reporting [`parse_json_index`] failure.
+///
+/// `iter_count` is the zero-based iteration offset, such as from [`Iterator::enumerate`].
+fn parse_json_index_error(iter_count: usize) -> ReadySetError {
+    invalid_err!(
+        "path element at position {} is not an integer",
+        iter_count + 1
+    )
 }
 
 // `JsonNumber` does not handle -0.0 when `arbitrary_precision` is enabled, so we special case it
