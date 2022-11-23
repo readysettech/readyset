@@ -1,4 +1,5 @@
 use std::collections::{hash_map, HashMap, HashSet};
+use std::convert::TryInto;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -10,7 +11,7 @@ use futures::FutureExt;
 use launchpad::select;
 use metrics::{counter, histogram};
 use mysql::prelude::Queryable;
-use mysql::{OptsBuilder, PoolConstraints, PoolOpts, SslOpts};
+use mysql::{OptsBuilder, SslOpts};
 use nom_sql::Relation;
 use readyset::consensus::Authority;
 use readyset::consistency::Timestamp;
@@ -37,6 +38,13 @@ use crate::table_filter::TableFilter;
 const WAIT_BEFORE_RESNAPSHOT: Duration = Duration::from_secs(3);
 
 const RESNAPSHOT_SLOT: &str = "readyset_resnapshot";
+
+// TODO: Change this to be configurable with a flag.
+/// Sets the maximum connection count for the postgres connection pool. This was choosen
+/// arbitrarily because the default max connections to postgres for normal user is 100, so this is
+/// a sizable pool size while leaving some buffer room for other direct connections that may be
+/// required to the underlying database.
+const PG_POOL_MAX_SIZE: usize = 50;
 
 #[derive(Debug)]
 pub(crate) enum ReplicationAction {
@@ -142,7 +150,7 @@ impl NoriaAdapter {
             DatabaseURL::PostgreSQL(options) => {
                 let noria = noria.clone();
                 let config = config.clone();
-                let pool = pg_pool(options.clone(), config.replication_pool_size).await?;
+                let pool = pg_pool(options.clone()).await?;
                 NoriaAdapter::start_inner_postgres(
                     options,
                     noria,
@@ -207,22 +215,8 @@ impl NoriaAdapter {
         let pos = match (replication_offsets.max_offset()?, resnapshot) {
             (None, _) | (_, true) => {
                 let span = info_span!("taking database snapshot");
-                // The default min is already 10, so we keep that the same to reduce complexity
-                // overhead of too many flags.
-                // The only way PoolConstraints::new() can panic on unwrap is if min is not less
-                // than or equal to max, so we naively reset min if max is below 10.
-                let constraints = if config.replication_pool_size <= 10 {
-                    PoolConstraints::new(config.replication_pool_size, config.replication_pool_size)
-                        .unwrap()
-                } else {
-                    PoolConstraints::new(10, config.replication_pool_size).unwrap()
-                };
-                let pool_opts = PoolOpts::default().with_constraints(constraints);
-                let replicator_opts: mysql_async::Opts =
-                    OptsBuilder::from_opts(mysql_options.clone())
-                        .pool_opts(pool_opts)
-                        .into();
-                let pool = mysql::Pool::new(replicator_opts);
+                let replicator_options = mysql_options.clone();
+                let pool = mysql::Pool::new(replicator_options);
 
                 // Query mysql server version
                 let db_version = pool
@@ -780,7 +774,6 @@ impl NoriaAdapter {
 
 pub async fn pg_pool(
     config: pgsql::Config,
-    pool_size: usize,
 ) -> Result<deadpool_postgres::Pool, deadpool_postgres::BuildError> {
     let mgr_config = ManagerConfig {
         recycling_method: RecyclingMethod::Verified,
@@ -788,5 +781,5 @@ pub async fn pg_pool(
     let connector = native_tls::TlsConnector::builder().build().unwrap(); // Never returns an error
     let tls = postgres_native_tls::MakeTlsConnector::new(connector);
     let mgr = Manager::from_config(config, tls, mgr_config);
-    Pool::builder(mgr).max_size(pool_size).build()
+    Pool::builder(mgr).max_size(PG_POOL_MAX_SIZE).build()
 }

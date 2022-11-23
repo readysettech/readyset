@@ -76,11 +76,6 @@ pub struct UpstreamConfig {
     #[clap(long, default_value = "30")]
     #[serde(default = "default_snapshot_report_interval_secs")]
     pub snapshot_report_interval_secs: u16,
-
-    /// Sets the connection count for the pool that is used for replication and snapshotting.
-    #[clap(long, default_value = "50")]
-    #[serde(default)]
-    pub replication_pool_size: usize,
 }
 
 impl UpstreamConfig {
@@ -133,7 +128,6 @@ impl Default for UpstreamConfig {
             replication_tables: Default::default(),
             snapshot_report_interval_secs: 30,
             ssl_root_cert: None,
-            replication_pool_size: 50,
         }
     }
 }
