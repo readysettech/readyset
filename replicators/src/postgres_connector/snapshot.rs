@@ -4,7 +4,6 @@ use std::fmt::{self, Display};
 use std::future;
 use std::time::Instant;
 
-use futures::future::join_all;
 use futures::stream::FuturesUnordered;
 use futures::{pin_mut, StreamExt, TryFutureExt};
 use metrics::register_gauge;
@@ -29,10 +28,8 @@ use crate::table_filter::TableFilter;
 const BATCH_SIZE: usize = 1024; // How many queries to buffer before pushing to ReadySet
 
 pub struct PostgresReplicator<'a> {
-    /// This is the underlying (regular) PostgreSQL transaction used for most queries.
+    /// This is the underlying (regular) PostgreSQL transaction
     pub(crate) transaction: pgsql::Transaction<'a>,
-    /// A pool to be used for parallelizing snapshot tasks.
-    pub(crate) pool: deadpool_postgres::Pool,
     pub(crate) noria: &'a mut readyset::ReadySetHandle,
     /// Filters out tables we are not interested in
     pub(crate) table_filter: TableFilter,
@@ -442,7 +439,7 @@ impl TableDescription {
     /// Copy a table's contents from PostgreSQL to ReadySet
     async fn dump<'a>(
         &self,
-        transaction: &'a deadpool_postgres::Transaction<'a>,
+        transaction: &'a pgsql::Transaction<'a>,
         mut noria_table: readyset::Table,
         snapshot_report_interval_secs: u16,
     ) -> ReadySetResult<()> {
@@ -543,7 +540,6 @@ impl TableDescription {
 impl<'a> PostgresReplicator<'a> {
     pub(crate) async fn new(
         client: &'a mut pgsql::Client,
-        pool: deadpool_postgres::Pool,
         noria: &'a mut readyset::ReadySetHandle,
         table_filter: TableFilter,
     ) -> ReadySetResult<PostgresReplicator<'a>> {
@@ -557,33 +553,9 @@ impl<'a> PostgresReplicator<'a> {
 
         Ok(PostgresReplicator {
             transaction,
-            pool,
             noria,
             table_filter,
         })
-    }
-
-    async fn snapshot_table(
-        pool: deadpool_postgres::Pool,
-        span: tracing::Span,
-        table: &TableDescription,
-        noria_table: readyset::Table,
-        snapshot_report_interval_secs: u16,
-    ) -> ReadySetResult<()> {
-        let mut client = pool.get().await?;
-
-        let transaction = client
-            .build_transaction()
-            .deferrable(true)
-            .isolation_level(pgsql::IsolationLevel::RepeatableRead)
-            .read_only(true)
-            .start()
-            .await?;
-
-        table
-            .dump(&transaction, noria_table, snapshot_report_interval_secs)
-            .instrument(span.clone())
-            .await
     }
 
     /// Begin the replication process, starting with the recipe for the database, followed
@@ -725,8 +697,8 @@ impl<'a> PostgresReplicator<'a> {
         );
 
         // Finally copy each table into noria
-        let mut futs = Vec::with_capacity(tables.len());
         for table in &tables {
+            // TODO: parallelize with a connection pool if performance here matters
             let span = info_span!("Replicating table", table = %table.name);
             span.in_scope(|| info!("Replicating table"));
             let mut noria_table = self
@@ -734,22 +706,18 @@ impl<'a> PostgresReplicator<'a> {
                 .table(table.name.clone())
                 .instrument(span.clone())
                 .await?;
+
             noria_table.set_snapshot_mode(true).await?;
 
-            let pool = self.pool.clone();
-            futs.push(Self::snapshot_table(
-                pool,
-                span,
-                table,
-                noria_table,
-                snapshot_report_interval_secs,
-            ))
+            table
+                .dump(
+                    &self.transaction,
+                    noria_table,
+                    snapshot_report_interval_secs,
+                )
+                .instrument(span.clone())
+                .await?;
         }
-
-        join_all(futs)
-            .await
-            .into_iter()
-            .collect::<Result<Vec<_>, ReadySetError>>()?;
 
         let mut compacting = FuturesUnordered::new();
         for table in tables {

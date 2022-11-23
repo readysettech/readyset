@@ -1044,30 +1044,6 @@ impl From<tokio_postgres::Error> for ReadySetError {
 
 /// HACK(eta): this From impl just stringifies the error, so that `ReadySetError` can be serialized
 /// and deserialized.
-impl From<deadpool_postgres::PoolError> for ReadySetError {
-    fn from(e: deadpool_postgres::PoolError) -> ReadySetError {
-        ReadySetError::ReplicationFailed(format!("PostgreSQL deadpool PoolError: {}", e))
-    }
-}
-
-/// HACK(eta): this From impl just stringifies the error, so that `ReadySetError` can be serialized
-/// and deserialized.
-impl From<deadpool_postgres::CreatePoolError> for ReadySetError {
-    fn from(e: deadpool_postgres::CreatePoolError) -> ReadySetError {
-        ReadySetError::ReplicationFailed(format!("PostgreSQL deadpool CreatePoolError: {}", e))
-    }
-}
-
-/// HACK(eta): this From impl just stringifies the error, so that `ReadySetError` can be serialized
-/// and deserialized.
-impl From<deadpool_postgres::BuildError> for ReadySetError {
-    fn from(e: deadpool_postgres::BuildError) -> ReadySetError {
-        ReadySetError::ReplicationFailed(format!("PostgreSQL deadpool BuildError: {}", e))
-    }
-}
-
-/// HACK(eta): this From impl just stringifies the error, so that `ReadySetError` can be serialized
-/// and deserialized.
 impl From<io::Error> for ReadySetError {
     fn from(e: io::Error) -> ReadySetError {
         ReadySetError::IOError(e.to_string())

@@ -5,7 +5,6 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use database_utils::{DatabaseURL, UpstreamConfig};
-use deadpool_postgres::{Manager, ManagerConfig, Pool, RecyclingMethod};
 use failpoint_macros::set_failpoint;
 use futures::FutureExt;
 use launchpad::select;
@@ -38,13 +37,6 @@ use crate::table_filter::TableFilter;
 const WAIT_BEFORE_RESNAPSHOT: Duration = Duration::from_secs(3);
 
 const RESNAPSHOT_SLOT: &str = "readyset_resnapshot";
-
-// TODO: Change this to be configurable with a flag.
-/// Sets the maximum connection count for the postgres connection pool. This was choosen
-/// arbitrarily because the default max connections to postgres for normal user is 100, so this is
-/// a sizable pool size while leaving some buffer room for other direct connections that may be
-/// required to the underlying database.
-const PG_POOL_MAX_SIZE: usize = 50;
 
 #[derive(Debug)]
 pub(crate) enum ReplicationAction {
@@ -150,7 +142,6 @@ impl NoriaAdapter {
             DatabaseURL::PostgreSQL(options) => {
                 let noria = noria.clone();
                 let config = config.clone();
-                let pool = pg_pool(options.clone()).await?;
                 NoriaAdapter::start_inner_postgres(
                     options,
                     noria,
@@ -158,7 +149,6 @@ impl NoriaAdapter {
                     &mut notify,
                     resnapshot,
                     &telemetry_sender,
-                    pool,
                 )
                 .await
             }
@@ -364,7 +354,6 @@ impl NoriaAdapter {
         ready_notify: &mut Option<Arc<Notify>>,
         resnapshot: bool,
         telemetry_sender: &TelemetrySender,
-        pool: deadpool_postgres::Pool,
     ) -> ReadySetResult<!> {
         let dbname = pgsql_opts.get_dbname().ok_or_else(|| {
             ReadySetError::ReplicationFailed("No database specified for replication".to_string())
@@ -444,8 +433,7 @@ impl NoriaAdapter {
                 .unwrap_or_else(|_| "unknown".to_owned());
 
             let mut replicator =
-                PostgresReplicator::new(&mut client, pool, &mut noria, table_filter.clone())
-                    .await?;
+                PostgresReplicator::new(&mut client, &mut noria, table_filter.clone()).await?;
 
             select! {
                 snapshot_result = replicator.snapshot_to_noria(&replication_slot, &mut create_schema, snapshot_report_interval_secs).fuse() =>  {
@@ -770,16 +758,4 @@ impl NoriaAdapter {
             },
         }
     }
-}
-
-pub async fn pg_pool(
-    config: pgsql::Config,
-) -> Result<deadpool_postgres::Pool, deadpool_postgres::BuildError> {
-    let mgr_config = ManagerConfig {
-        recycling_method: RecyclingMethod::Verified,
-    };
-    let connector = native_tls::TlsConnector::builder().build().unwrap(); // Never returns an error
-    let tls = postgres_native_tls::MakeTlsConnector::new(connector);
-    let mgr = Manager::from_config(config, tls, mgr_config);
-    Pool::builder(mgr).max_size(PG_POOL_MAX_SIZE).build()
 }
