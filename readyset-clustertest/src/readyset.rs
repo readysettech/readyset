@@ -710,7 +710,7 @@ impl ClusterComponent {
                 deployment
                     .start_mysql_adapter(false)
                     .await
-                    .expect("readyset-mysql-adapter failed to startup");
+                    .expect("readyset failed to startup");
 
                 let adapter_handle = deployment.first_adapter_handle().unwrap();
                 wait_for_adapter_router(

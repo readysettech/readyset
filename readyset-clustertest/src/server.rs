@@ -190,12 +190,12 @@ impl ReadysetServerBuilder {
     }
 }
 
-/// Manages running a readyset-mysql binary with the correct arguments.
+/// Manages running a readyset binary with the correct arguments.
 pub struct AdapterBuilder {
-    /// Path to the readyset-mysql binary.
+    /// Path to the readyset binary.
     binary: PathBuf,
 
-    /// The arguments to pass to the readyset-mysql process on startup.
+    /// The arguments to pass to the readyset process on startup.
     args: Vec<String>,
 
     /// Whether or not to automatically restart the adapter if it panics
@@ -207,6 +207,8 @@ impl AdapterBuilder {
         Self {
             binary: binary.to_owned(),
             args: vec![
+                "--database-type".to_string(),
+                "mysql".to_string(),
                 "--allow-unauthenticated-connections".to_string(),
                 "--migration-request-timeout-ms".to_string(),
                 "1000".to_string(),

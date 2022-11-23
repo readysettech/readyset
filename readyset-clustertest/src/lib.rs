@@ -11,14 +11,14 @@
 //!     queried for metrics separately via [`MetricsClient`] which can be checked in clustertests.
 //!
 //! # Preparing to run clustertests Clustertests require external resources in order to run: a MySQL
-//! server, an authority (consul) and binaries for readyset-server and readyset-mysql. Clustertest
+//! server, an authority (consul) and binaries for readyset-server and readyset. Clustertest
 //! defaults are set to match the developer docker-compose in `//readyset` and the default flags for
-//! readyset-server and readyset-mysql.
+//! readyset-server and readyset.
 //!
 //! ```bash
 //! # Build the binaries with the failure injection feature for most clustertests. Binaries built
 //! to //target/debug are used by default.
-//! cargo build --bin readyset-server --bin readyset-mysql --features failure_injection
+//! cargo build --bin readyset-server --bin readyset --features failure_injection
 //!
 //! # Spin up the developer docker stack to start MySQL and a consul authority.
 //! cd //readyset/public
@@ -44,19 +44,17 @@
 //! ```
 //!
 //! Clustertests can be configured via environment variables. Any environment variables are also
-//! passed to the child readyset-server and readyset-mysql processes, as a result, these processes
-//! can be futher configured through environment variables. This is helpful for configuring logging
-//! environment variables, such as `LOG_LEVEL`. See
-//! [Configuring Logging](http://docs/running-readyset.html#configuring-logging) for more
-//! information.
+//! passed to the child readyset-server and readyset processes, as a result, these processes can be
+//! futher configured through environment variables. This is helpful for configuring logging
+//! environment variables, such as `LOG_LEVEL`. See [Configuring
+//! Logging](http://docs/running-readyset.html#configuring-logging) for more information.
 //!
 //! * `AUTHORITY_ADDRESS`: The address of an authority, defaults to `127.0.0.1:8500`
 //!
 //! * `AUTHORITY`: The type of authority, defaults to `consul`.
 //!
-//! * `BINARY_PATH`: The path to a directory with the readyset-server and
-//! readyset-mysql binaries, defaults to `$CARGO_MANIFEST_DIR/../../target/debug`,
-//! `readyset/target/debug`.
+//! * `BINARY_PATH`: The path to a directory with the readyset-server and readyset binaries,
+//!   defaults to `$CARGO_MANIFEST_DIR/../../target/debug`, `readyset/target/debug`.
 //!
 //! * `MYSQL_PORT`: The host of the MySQL database to use as upstream, defaults to
 //! `127.0.0.1`.
@@ -282,8 +280,7 @@ fn default_root_password() -> String {
 pub(crate) struct ReadySetBinarySource {
     /// Path to a built readyset-server on the local machine.
     pub readyset_server: PathBuf,
-    /// Optional path to readyset-mysql on the local machine. readyset-mysql
-    /// may not be included in the build.
+    /// Optional path to readyset on the local machine. readyset may not be included in the build.
     pub readyset_mysql: Option<PathBuf>,
 }
 
@@ -361,7 +358,7 @@ pub struct DeploymentBuilder {
     quorum: usize,
     /// Parameters for the set of readyset-server instances in the deployment.
     servers: Vec<ServerParams>,
-    /// How many readyset-mysql adapter instances to deploy
+    /// How many MySQL ReadySet adapter instances to deploy
     mysql_adapters: usize,
     /// Deploy mysql and use binlog replication.
     mysql: bool,
@@ -421,8 +418,8 @@ impl DeploymentBuilder {
         let mut readyset_server_path = env.binary_path.clone();
         readyset_server_path.push("readyset-server");
 
-        let mut readyset_mysql_path = env.binary_path;
-        readyset_mysql_path.push("readyset-mysql");
+        let mut readyset_path = env.binary_path;
+        readyset_path.push("readyset");
 
         // Append the deployment name with a random number to prevent state collisions
         // on test repeats with failed teardowns.
@@ -433,7 +430,7 @@ impl DeploymentBuilder {
             name,
             readyset_binaries: ReadySetBinarySource {
                 readyset_server: readyset_server_path,
-                readyset_mysql: Some(readyset_mysql_path),
+                readyset_mysql: Some(readyset_path),
             },
             shards: None,
             quorum: 1,
@@ -596,7 +593,7 @@ impl DeploymentBuilder {
         );
         AdapterStartParams {
             deployment_name: self.name.clone(),
-            readyset_mysql_path: self.readyset_binaries.readyset_mysql.clone().unwrap(),
+            readyset_path: self.readyset_binaries.readyset_mysql.clone().unwrap(),
             authority_address: self.authority_address.clone(),
             authority_type: self.authority.to_string(),
             async_migration_interval: self.async_migration_interval,
@@ -1121,7 +1118,7 @@ impl DeploymentHandle {
         Ok(server_addr)
     }
 
-    /// Start a new readyset-mysql adapter instance in the deployment
+    /// Start a new readyset adapter instance in the deployment
     pub async fn start_mysql_adapter(&mut self, wait_for_startup: bool) -> anyhow::Result<()> {
         let port = get_next_good_port(Some(self.port));
         let metrics_port = get_next_good_port(Some(port));
@@ -1292,8 +1289,8 @@ impl Drop for DeploymentHandle {
 }
 
 pub struct AdapterStartParams {
-    /// Absolute path to the readyset-mysql binary.
-    readyset_mysql_path: PathBuf,
+    /// Absolute path to the readyset binary.
+    readyset_path: PathBuf,
     /// Name of the deployment.
     deployment_name: String,
     /// The authority connect string the adapter is configured to use.
@@ -1379,7 +1376,7 @@ async fn start_mysql_adapter(
     metrics_port: u16,
     params: &AdapterStartParams,
 ) -> Result<ProcessHandle> {
-    let mut builder = AdapterBuilder::new(params.readyset_mysql_path.as_ref())
+    let mut builder = AdapterBuilder::new(params.readyset_path.as_ref())
         .deployment(&params.deployment_name)
         .port(port)
         .metrics_port(metrics_port)

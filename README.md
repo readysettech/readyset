@@ -124,19 +124,19 @@ If using the databases supplied by the docker-compose environment in this reposi
 
 If running with an existing external database, replace <upstream-url> with the connection string for that database.
 
-#### ReadySet MySQL or Postgres Adapter
+#### ReadySet Adapter
 
-Then, run the adapter binary corresponding to your upstream database (MySQL or Postgres) The adapter will communicate with servers that have the same deployment name.
+Then, run the adapter binary. The adapter will communicate with servers that have the same deployment name.
 
 **MySQL**
 ```
-cargo run --bin readyset-mysql --release -- --upstream-db-url mysql://root:readyset@127.1/readyset  --allow-unauthenticated-connections
+cargo run --bin readyset --release -- --database-type mysql --upstream-db-url mysql://root:readyset@127.1/readyset  --allow-unauthenticated-connections
   --address 0.0.0.0:3307 --deployment <deployment name>  --prometheus-metrics --query-log --query-log-ad-hoc
  ```
 
 **Postgres**
 ```
-cargo run --bin readyset-psql --release -- --upstream-db-url postgresql://postgres:readyset@127.1/readyset  --allow-unauthenticated-connections
+cargo run --bin readyset --release -- --database-type postgresql --upstream-db-url postgresql://postgres:readyset@127.1/readyset  --allow-unauthenticated-connections
   --address 0.0.0.0:5433 --deployment <deployment name> --prometheus-metrics --query-log --query-log-ad-hoc
 ```
 

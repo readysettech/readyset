@@ -1,9 +1,12 @@
 [package]
-name = "readyset-client-adapter"
-publish = false
+name = "readyset"
 version = "0.1.0"
+publish = false
 authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
+
+[target.'cfg(not(target_env="msvc"))'.dependencies]
+tikv-jemallocator = "0.4"
 
 [dependencies]
 anyhow = "1.0"
@@ -25,20 +28,25 @@ reqwest = { version = "0.11", features = ["json"] }
 chrono = "0.4"
 
 # Local dependencies
+health-reporter = { path = "../health-reporter" }
 launchpad = { path = "../launchpad" }
 nom-sql = { path = "../nom-sql" }
-readyset-client = { path = "../readyset-client/" }
+mysql-srv = { path = "../mysql-srv" }
+psql-srv = { path = "../psql-srv" }
+database-utils = { path = "../database-utils" }
 readyset-adapter = { path = "../readyset-adapter" }
+readyset-client = { path = "../readyset-client/" }
 readyset-client-metrics = { path = "../readyset-client-metrics" }
-readyset-tracing = { path = "../readyset-tracing" }
-readyset-dataflow = { path = "../readyset-dataflow" }
 readyset-data = { path = "../readyset-data" }
+readyset-dataflow = { path = "../readyset-dataflow" }
+readyset-mysql = { path = "../readyset-mysql" }
+readyset-psql = { path = "../readyset-psql" }
 readyset-server = { path = "../readyset-server/" }
-readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter" }
 readyset-sql-passes = { path = "../readyset-sql-passes" }
+readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter" }
+readyset-tracing = { path = "../readyset-tracing" }
 readyset-version = { path = "../readyset-version" }
-health-reporter = { path = "../health-reporter" }
 
 [features]
-failure_injection = ["fail/failpoints"]
+failure_injection = ["fail/failpoints", "readyset-client/failure_injection", "readyset-server/failure_injection"]
 fallback_cache = ["readyset-adapter/fallback_cache", "readyset-client-metrics/fallback_cache"]

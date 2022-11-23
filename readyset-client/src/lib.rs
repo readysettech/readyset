@@ -130,9 +130,10 @@
 //!
 //! # Alternatives
 //!
-//! ReadySet provides a [MySQL adapter](https://github.com/readysettech/readyset/tree/main/readyset-mysql)
-//! that implements the binary MySQL protocol, which provides a compatibility layer for
-//! applications that wish to continue to issue ad-hoc MySQL queries through existing MySQL client
+//! ReadySet provides an
+//! [adapter](https://github.com/readysettech/readyset/tree/main/readyset) that implements the
+//! binary MySQL and PostgreSQL protocols, which provides a compatibility layer for applications
+//! that wish to continue to issue ad-hoc MySQL or PostgreSQL queries through existing SQL client
 //! libraries.
 #![feature(
     type_alias_impl_trait,

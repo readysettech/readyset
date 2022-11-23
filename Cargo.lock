@@ -4143,6 +4143,48 @@ dependencies = [
 ]
 
 [[package]]
+name = "readyset"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "clap 3.0.4",
+ "database-utils",
+ "fail",
+ "failpoint-macros",
+ "futures-util",
+ "health-reporter",
+ "launchpad",
+ "maplit",
+ "metrics",
+ "metrics-exporter-prometheus",
+ "mysql-srv",
+ "nom-sql",
+ "psql-srv",
+ "readyset-adapter",
+ "readyset-client",
+ "readyset-client-metrics",
+ "readyset-data",
+ "readyset-dataflow",
+ "readyset-mysql",
+ "readyset-psql",
+ "readyset-server",
+ "readyset-sql-passes",
+ "readyset-telemetry-reporter",
+ "readyset-tracing",
+ "readyset-version",
+ "reqwest",
+ "stream-cancel",
+ "tikv-jemallocator",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+ "tracing-futures",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "readyset-adapter"
 version = "0.1.0"
 dependencies = [
@@ -4279,42 +4321,6 @@ dependencies = [
  "vec1",
  "vec_map",
  "zookeeper-async",
-]
-
-[[package]]
-name = "readyset-client-adapter"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "chrono",
- "clap 3.0.4",
- "fail",
- "failpoint-macros",
- "futures-util",
- "health-reporter",
- "launchpad",
- "maplit",
- "metrics",
- "metrics-exporter-prometheus",
- "nom-sql",
- "readyset-adapter",
- "readyset-client",
- "readyset-client-metrics",
- "readyset-data",
- "readyset-dataflow",
- "readyset-server",
- "readyset-sql-passes",
- "readyset-telemetry-reporter",
- "readyset-tracing",
- "readyset-version",
- "reqwest",
- "stream-cancel",
- "tokio",
- "tokio-stream",
- "tracing",
- "tracing-futures",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -4621,7 +4627,6 @@ dependencies = [
  "proptest",
  "readyset-adapter",
  "readyset-client",
- "readyset-client-adapter",
  "readyset-client-metrics",
  "readyset-client-test-helpers",
  "readyset-data",
@@ -4665,7 +4670,6 @@ dependencies = [
  "rand 0.8.5",
  "readyset-adapter",
  "readyset-client",
- "readyset-client-adapter",
  "readyset-client-test-helpers",
  "readyset-data",
  "readyset-errors",
@@ -5804,8 +5808,8 @@ dependencies = [
  "nperf-core",
  "num_cpus",
  "parking_lot 0.12.0",
+ "readyset",
  "readyset-client",
- "readyset-client-adapter",
  "readyset-data",
  "readyset-mysql",
  "regex",

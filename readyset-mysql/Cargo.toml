@@ -23,7 +23,6 @@ readyset-client = { path = "../readyset-client" }
 readyset-errors = { path = "../readyset-errors" }
 readyset-data = { path = "../readyset-data" }
 readyset-adapter = { path = "../readyset-adapter" }
-readyset-client-adapter = { path = "../readyset-client-adapter" }
 readyset-client-metrics = { path = "../readyset-client-metrics" }
 readyset-version = { path = "../readyset-version" }
 failpoint-macros = { path = "../failpoint-macros" }
@@ -55,5 +54,5 @@ readyset-tracing = { path = "../readyset-tracing" }
 vertical_tests = []
 # Redact the display of strings marked sensitive from logs and error messages
 redact_sensitive = ["launchpad/redact_sensitive"]
-failure_injection = ["readyset-client-adapter/failure_injection", "fail/failpoints"]
-fallback_cache = ["readyset-client-adapter/fallback_cache", "readyset-adapter/fallback_cache", "readyset-client-metrics/fallback_cache"]
+failure_injection = ["fail/failpoints"]
+fallback_cache = ["readyset-adapter/fallback_cache", "readyset-client-metrics/fallback_cache"]

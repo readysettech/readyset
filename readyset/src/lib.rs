@@ -1,5 +1,7 @@
 #![deny(macro_use_extern_crate)]
 
+pub mod mysql;
+pub mod psql;
 mod query_logger;
 
 use std::collections::HashMap;
@@ -14,6 +16,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::{anyhow, bail, ensure};
 use async_trait::async_trait;
 use clap::{ArgGroup, Parser};
+use database_utils::DatabaseType;
 use failpoint_macros::set_failpoint;
 use futures_util::future::FutureExt;
 use futures_util::stream::StreamExt;
@@ -65,6 +68,10 @@ const AWS_METADATA_TOKEN_ENDPOINT: &str = "http://169.254.169.254/latest/api/tok
 /// Timeout to use when connecting to the upstream database
 const UPSTREAM_CONNECTION_TIMEOUT: Duration = Duration::from_secs(5);
 
+#[cfg(not(target_env = "msvc"))]
+#[global_allocator]
+static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
 #[async_trait]
 pub trait ConnectionHandler {
     type UpstreamDatabase: UpstreamDatabase;
@@ -78,15 +85,6 @@ pub trait ConnectionHandler {
 
     /// Return an immediate error to a newly-established connection, then immediately disconnect
     async fn immediate_error(self, stream: net::TcpStream, error_message: String);
-}
-
-/// Represents which database interface is being adapted to communicate with ReadySet.
-#[derive(Copy, Clone, Debug)]
-pub enum DatabaseType {
-    /// MySQL database.
-    MySql,
-    /// PostgreSQL database.
-    Psql,
 }
 
 /// How to behave when receiving unsupported `SET` statements.
@@ -158,6 +156,10 @@ pub struct Options {
     /// ReadySet deployment ID to attach to
     #[clap(long, env = "DEPLOYMENT", forbid_empty_values = true)]
     deployment: String,
+
+    /// Database engine protocol to emulate
+    #[clap(long, possible_values=&["mysql", "postgresql"])]
+    pub database_type: DatabaseType,
 
     /// The authority to use. Possible values: zookeeper, consul, standalone.
     #[clap(
@@ -331,8 +333,7 @@ pub struct Options {
     #[clap(long, env = "NON_BLOCKING_READS")]
     non_blocking_reads: bool,
 
-    /// Run ReadySet in standalone mode, running a readyset-server and readyset-mysql instance
-    /// within this adapter.
+    /// Run ReadySet in standalone mode, running a readyset-server instance within this adapter.
     #[clap(long, env = "STANDALONE", conflicts_with = "embedded-readers")]
     standalone: bool,
 
@@ -532,7 +533,10 @@ where
         let mut recorders = Vec::new();
         let prometheus_handle = if options.prometheus_metrics {
             let _guard = rt.enter();
-            let database_label: readyset_client_metrics::DatabaseType = self.database_type.into();
+            let database_label = match self.database_type {
+                DatabaseType::MySQL => readyset_client_metrics::DatabaseType::MySql,
+                DatabaseType::PostgreSQL => readyset_client_metrics::DatabaseType::Psql,
+            };
 
             let recorder = PrometheusBuilder::new()
                 .add_global_label("upstream_db_type", database_label)
@@ -1182,15 +1186,6 @@ async fn reconcile_endpoint_registration(
     }
 }
 
-impl From<DatabaseType> for readyset_client_metrics::DatabaseType {
-    fn from(database_type: DatabaseType) -> Self {
-        match database_type {
-            DatabaseType::MySql => readyset_client_metrics::DatabaseType::MySql,
-            DatabaseType::Psql => readyset_client_metrics::DatabaseType::Psql,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1200,7 +1195,9 @@ mod tests {
     #[test]
     fn arg_parsing_noria_standalone() {
         let opts = Options::parse_from(vec![
-            "noria-mysql",
+            "readyset",
+            "--database-type",
+            "mysql",
             "--deployment",
             "test",
             "--address",
@@ -1216,7 +1213,9 @@ mod tests {
     #[test]
     fn arg_parsing_with_upstream() {
         let opts = Options::parse_from(vec![
-            "noria-mysql",
+            "readyset",
+            "--database-type",
+            "mysql",
             "--deployment",
             "test",
             "--address",
@@ -1234,7 +1233,9 @@ mod tests {
     #[test]
     fn async_migrations_param_defaults() {
         let opts = Options::parse_from(vec![
-            "noria-mysql",
+            "readyset",
+            "--database-type",
+            "mysql",
             "--deployment",
             "test",
             "--address",

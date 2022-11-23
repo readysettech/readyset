@@ -1,0 +1,31 @@
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
+use clap::Parser;
+use database_utils::DatabaseType;
+use readyset::mysql::MySqlHandler;
+use readyset::psql::PsqlHandler;
+use readyset::{NoriaAdapter, Options};
+
+fn main() -> anyhow::Result<()> {
+    let options = Options::parse();
+    match options.database_type {
+        DatabaseType::MySQL => NoriaAdapter {
+            description: "MySQL adapter for ReadySet.",
+            default_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 3306),
+            connection_handler: MySqlHandler,
+            database_type: DatabaseType::MySQL,
+            parse_dialect: nom_sql::Dialect::MySQL,
+            expr_dialect: readyset_data::Dialect::DEFAULT_MYSQL,
+        }
+        .run(options),
+        DatabaseType::PostgreSQL => NoriaAdapter {
+            description: "PostgreSQL adapter for ReadySet.",
+            default_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 3306),
+            connection_handler: PsqlHandler,
+            database_type: DatabaseType::PostgreSQL,
+            parse_dialect: nom_sql::Dialect::PostgreSQL,
+            expr_dialect: readyset_data::Dialect::DEFAULT_POSTGRESQL,
+        }
+        .run(options),
+    }
+}

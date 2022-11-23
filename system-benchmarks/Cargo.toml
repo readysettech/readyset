@@ -21,7 +21,7 @@ nom-sql = { path = "../nom-sql" }
 readyset-client = { path = "../readyset-client" }
 readyset-data = { path = "../readyset-data" }
 readyset-mysql = { path = "../readyset-mysql" }
-readyset-client-adapter = { path = "../readyset-client-adapter" }
+readyset = { path = "../readyset" }
 
 clap = { version = "3.0", features = ["derive"] }
 core_affinity = "0.5"
@@ -52,5 +52,5 @@ name = "workload"
 harness = false
 
 [features]
-fallback_cache = ["readyset-client-adapter/fallback_cache", "readyset-mysql/fallback_cache"]
-disk_modeled = ["fallback_cache", "readyset-client-adapter/fallback_cache", "readyset-mysql/fallback_cache"]
+fallback_cache = ["readyset/fallback_cache", "readyset-mysql/fallback_cache"]
+disk_modeled = ["fallback_cache", "readyset/fallback_cache", "readyset-mysql/fallback_cache"]
