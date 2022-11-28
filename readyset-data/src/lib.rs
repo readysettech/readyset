@@ -49,6 +49,8 @@ pub use crate::r#type::{DfType, PgEnumMetadata, PgTypeCategory};
 pub use crate::text::{Text, TinyText};
 pub use crate::timestamp::{TimestampTz, TIMESTAMP_FORMAT, TIMESTAMP_PARSE_FORMAT};
 
+type JsonObject = serde_json::Map<String, JsonValue>;
+
 /// DateTime offsets must be bigger than -86_000 seconds and smaller than 86_000 (not inclusive in
 /// either case), and we don't care about seconds, so our maximum offset is gonna be
 /// 86_000 - 60 = 85_940.
@@ -1549,6 +1551,48 @@ impl From<Array> for DfValue {
 impl From<Vec<DfValue>> for DfValue {
     fn from(vs: Vec<DfValue>) -> Self {
         Self::from(Array::from(vs))
+    }
+}
+
+impl From<JsonValue> for DfValue {
+    fn from(value: JsonValue) -> Self {
+        (&value).into()
+    }
+}
+
+impl From<&JsonValue> for DfValue {
+    fn from(value: &JsonValue) -> Self {
+        value.to_string().into()
+    }
+}
+
+impl From<JsonObject> for DfValue {
+    fn from(value: JsonObject) -> Self {
+        (&value).into()
+    }
+}
+
+impl From<&JsonObject> for DfValue {
+    fn from(value: &JsonObject) -> Self {
+        // This should not fail because `JsonValue` (of which `JsonObject` is a variant) should also
+        // not fail conversion to `String`.
+        #[allow(clippy::unwrap_used)]
+        serde_json::to_string(value).unwrap().into()
+    }
+}
+
+impl From<Vec<JsonValue>> for DfValue {
+    fn from(value: Vec<JsonValue>) -> Self {
+        value.as_slice().into()
+    }
+}
+
+impl From<&[JsonValue]> for DfValue {
+    fn from(value: &[JsonValue]) -> Self {
+        // This should not fail because `JsonValue` (of which `Vec<JsonValue>` is a variant) should
+        // also not fail conversion to `String`.
+        #[allow(clippy::unwrap_used)]
+        serde_json::to_string(value).unwrap().into()
     }
 }
 

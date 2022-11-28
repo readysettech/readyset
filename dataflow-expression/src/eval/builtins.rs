@@ -583,7 +583,7 @@ impl BuiltinFunction {
             BuiltinFunction::JsonStripNulls(expr) => {
                 let mut json = non_null!(expr.eval(record)?).to_json()?;
                 crate::eval::json::json_strip_nulls(&mut json);
-                Ok(serde_json::to_string(&json)?.into())
+                Ok(json.into())
             }
             BuiltinFunction::JsonArrayLength(expr) => non_null!(expr.eval(record)?)
                 .to_json()?

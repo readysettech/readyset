@@ -191,7 +191,8 @@ impl Expr {
                         {
                             // When both the left and the right side are JSON objects, merge them:
                             left_obj.append(right_obj);
-                            Ok(serde_json::to_string(&left_obj)?.into())
+
+                            Ok((&*left_obj).into())
                         } else {
                             // If both sides aren't JSON objects, concatenate arrays (after turning
                             // non-array JSON values into single-element arrays):
@@ -203,7 +204,8 @@ impl Expr {
                                 JsonValue::Array(mut v) => res.append(&mut v),
                                 _ => res.push(right_json),
                             };
-                            Ok(serde_json::to_string(&res)?.into())
+
+                            Ok(res.into())
                         }
                     }
                     JsonSubtract => {
@@ -255,7 +257,7 @@ impl Expr {
                                 right.infer_dataflow_type()
                             ));
                         }
-                        Ok(serde_json::to_string(&json)?.into())
+                        Ok(json.into())
                     }
                 }
             }
@@ -600,8 +602,8 @@ mod tests {
 
         let test_eval = |left, right| {
             expr.eval(&[
-                DfValue::from(serde_json::to_string(left).unwrap()),
-                DfValue::from(serde_json::to_string(right).unwrap()),
+                DfValue::try_from(left).unwrap(),
+                DfValue::try_from(right).unwrap(),
             ])
             .unwrap()
             .to_json()
