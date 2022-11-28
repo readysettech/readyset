@@ -1,4 +1,4 @@
-use std::fmt::{self, Display};
+use std::fmt::{self, Display, Formatter};
 
 use dataflow::ops::grouped::aggregate::Aggregation as AggregationKind;
 use dataflow::ops::grouped::extremum::Extremum as ExtremumKind;
@@ -51,62 +51,69 @@ pub trait GraphViz {
     }
 }
 
+fn print_graph<P>(f: &mut Formatter, graph: &MirGraph, condition: P) -> fmt::Result
+where
+    P: Fn(&MirGraph, NodeIndex) -> bool,
+{
+    let mut edge_count = 0usize;
+    let mut get_edge_name = || {
+        let name = format!("edge_{}", edge_count);
+        edge_count += 1;
+        name
+    };
+    for n in graph.node_indices() {
+        if !condition(graph, n) {
+            continue;
+        }
+        let name = graph[n].name().clone();
+        writeln!(
+            f,
+            "{} [label=\"{{ {}: {} | {} }}\"]",
+            n.index(),
+            n.index(),
+            name,
+            Sanitized(MirNodeRef { node: n, graph }.to_graphviz()),
+        )?;
+
+        for edge in graph
+            .edges_directed(n, Direction::Outgoing)
+            .sorted_by_key(|e| e.weight())
+        {
+            let child = edge.target();
+            if !condition(graph, child) {
+                continue;
+            }
+            let edge_name = get_edge_name();
+            writeln!(
+                f,
+                "{} [label = \"{}\", shape = diamond]",
+                edge_name,
+                edge.weight()
+            )?;
+            writeln!(f, "{} -> {} [ arrowhead=none ]", n.index(), edge_name,)?;
+            writeln!(f, "{} -> {}", edge_name, child.index(),)?;
+        }
+    }
+    Ok(())
+}
+
+impl GraphViz for MirGraph {
+    fn graphviz_fmt(&self, f: &mut Formatter) -> fmt::Result {
+        f.write_str("digraph {\n")?;
+        f.write_str("node [shape=record, fontsize=10]\n")?;
+        print_graph(f, self, |_, _| true)?;
+        f.write_str("}\n")
+    }
+}
+
 impl<'a> GraphViz for MirQuery<'a> {
     fn graphviz_fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         // NOTE(fran): It's true that petgraph has a Graphviz implementation,
         //  but it's not very configurable and the resulting graph is harder
         //  to read than ours. So, for now, we'll stick to our current implementation.
-
-        let mut edge_count = 0usize;
-        let mut get_edge_name = || {
-            let name = format!("edge_{}", edge_count);
-            edge_count += 1;
-            name
-        };
         f.write_str("digraph {\n")?;
         f.write_str("node [shape=record, fontsize=10]\n")?;
-
-        for n in self.topo_nodes() {
-            if !self.graph[n].is_owned_by(self.name()) {
-                continue;
-            }
-
-            let name = self.graph[n].name().clone();
-            writeln!(
-                f,
-                "{} [label=\"{{ {}: {} | {} }}\"]",
-                n.index(),
-                n.index(),
-                name,
-                Sanitized(
-                    MirNodeRef {
-                        node: n,
-                        graph: self.graph
-                    }
-                    .to_graphviz()
-                ),
-            )?;
-
-            for edge in self
-                .graph
-                .edges_directed(n, Direction::Outgoing)
-                .sorted_by_key(|e| e.weight())
-            {
-                let child = edge.target();
-                if !self.graph[child].is_owned_by(self.name()) {
-                    continue;
-                }
-                let edge_name = get_edge_name();
-                writeln!(
-                    f,
-                    "{} [label = \"{}\", shape = diamond]",
-                    edge_name,
-                    edge.weight()
-                )?;
-                writeln!(f, "{} -> {} [ arrowhead=none ]", n.index(), edge_name,)?;
-                writeln!(f, "{} -> {}", edge_name, child.index(),)?;
-            }
-        }
+        print_graph(f, self.graph, |g, n| g[n].is_owned_by(self.name()))?;
         f.write_str("}\n")
     }
 }
