@@ -1102,14 +1102,14 @@ impl<'a> TryFrom<&'a DfValue> for Decimal {
             DfValue::Int(i) => Ok(Decimal::from(*i)),
             DfValue::UnsignedInt(i) => Ok(Decimal::from(*i)),
             DfValue::Float(value) => {
-                Decimal::from_f32(*value).ok_or(Self::Error::DfValueConversionError {
+                Decimal::from_f32(*value).ok_or_else(|| Self::Error::DfValueConversionError {
                     src_type: "DfValue".to_string(),
                     target_type: "Decimal".to_string(),
                     details: "".to_string(),
                 })
             }
             DfValue::Double(value) => {
-                Decimal::from_f64(*value).ok_or(Self::Error::DfValueConversionError {
+                Decimal::from_f64(*value).ok_or_else(|| Self::Error::DfValueConversionError {
                     src_type: "DfValue".to_string(),
                     target_type: "Decimal".to_string(),
                     details: "".to_string(),
@@ -1455,11 +1455,14 @@ impl TryFrom<&'_ DfValue> for f32 {
         match *data {
             DfValue::Float(f) => Ok(f),
             DfValue::Double(f) => Ok(f as f32),
-            DfValue::Numeric(ref d) => d.to_f32().ok_or(Self::Error::DfValueConversionError {
-                src_type: "DfValue".to_string(),
-                target_type: "f32".to_string(),
-                details: "".to_string(),
-            }),
+            DfValue::Numeric(ref d) => {
+                d.to_f32()
+                    .ok_or_else(|| Self::Error::DfValueConversionError {
+                        src_type: "DfValue".to_string(),
+                        target_type: "f32".to_string(),
+                        details: "".to_string(),
+                    })
+            }
             DfValue::UnsignedInt(i) => Ok(i as f32),
             DfValue::Int(i) => Ok(i as f32),
             _ => Err(Self::Error::DfValueConversionError {
@@ -1486,11 +1489,14 @@ impl TryFrom<&'_ DfValue> for f64 {
         match *data {
             DfValue::Float(f) => Ok(f as f64),
             DfValue::Double(f) => Ok(f),
-            DfValue::Numeric(ref d) => d.to_f64().ok_or(Self::Error::DfValueConversionError {
-                src_type: "DfValue".to_string(),
-                target_type: "f32".to_string(),
-                details: "".to_string(),
-            }),
+            DfValue::Numeric(ref d) => {
+                d.to_f64()
+                    .ok_or_else(|| Self::Error::DfValueConversionError {
+                        src_type: "DfValue".to_string(),
+                        target_type: "f32".to_string(),
+                        details: "".to_string(),
+                    })
+            }
             DfValue::UnsignedInt(i) => Ok(i as f64),
             DfValue::Int(i) => Ok(i as f64),
             _ => Err(Self::Error::DfValueConversionError {
@@ -1934,7 +1940,7 @@ macro_rules! arithmetic_operation (
                         details: e.to_string(),
                     })?;
                 let b: Decimal = f32::try_from(second).and_then(|f| Decimal::from_f32(f)
-                    .ok_or(ReadySetError::DfValueConversionError {
+                    .ok_or_else(|| ReadySetError::DfValueConversionError {
                         src_type: "DfValue".to_string(),
                         target_type: "Decimal".to_string(),
                         details: "".to_string(),
@@ -1949,7 +1955,7 @@ macro_rules! arithmetic_operation (
                         details: e.to_string(),
                     })?;
                 let b: Decimal = f64::try_from(second).and_then(|f| Decimal::from_f64(f)
-                    .ok_or(ReadySetError::DfValueConversionError {
+                    .ok_or_else(|| ReadySetError::DfValueConversionError {
                         src_type: "DfValue".to_string(),
                         target_type: "Decimal".to_string(),
                         details: "".to_string(),

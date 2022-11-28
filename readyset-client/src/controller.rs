@@ -469,7 +469,7 @@ impl ReadySetHandle {
                 self.request_timeout,
             )?)
             .await?
-            .ok_or(ReadySetError::TableNotFound {
+            .ok_or_else(|| ReadySetError::TableNotFound {
                 name: name.name.clone().into(),
                 schema: name.schema.clone().map(Into::into),
             })

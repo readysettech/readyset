@@ -358,7 +358,7 @@ impl MySqlBinlogConnector {
                     let tme = self
                         .reader
                         .get_tme(ev.table_id())
-                        .ok_or(format!("TME not found for UPDATE_ROWS_EVENT {:?}", ev))?;
+                        .ok_or_else(|| format!("TME not found for UPDATE_ROWS_EVENT {:?}", ev))?;
 
                     let mut updated_rows = Vec::new();
 
@@ -369,20 +369,18 @@ impl MySqlBinlogConnector {
                         let row = &row?;
                         updated_rows.push(readyset_client::TableOperation::DeleteRow {
                             row: binlog_row_to_noria_row(
-                                row.0.as_ref().ok_or(format!(
-                                    "Missing before rows in UPDATE_ROWS_EVENT {:?}",
-                                    row
-                                ))?,
+                                row.0.as_ref().ok_or_else(|| {
+                                    format!("Missing before rows in UPDATE_ROWS_EVENT {:?}", row)
+                                })?,
                                 tme,
                             )?,
                         });
 
                         updated_rows.push(readyset_client::TableOperation::Insert(
                             binlog_row_to_noria_row(
-                                row.1.as_ref().ok_or(format!(
-                                    "Missing after rows in UPDATE_ROWS_EVENT {:?}",
-                                    row
-                                ))?,
+                                row.1.as_ref().ok_or_else(|| {
+                                    format!("Missing after rows in UPDATE_ROWS_EVENT {:?}", row)
+                                })?,
                                 tme,
                             )?,
                         ));
@@ -408,7 +406,7 @@ impl MySqlBinlogConnector {
                     let tme = self
                         .reader
                         .get_tme(ev.table_id())
-                        .ok_or(format!("TME not found for UPDATE_ROWS_EVENT {:?}", ev))?;
+                        .ok_or_else(|| format!("TME not found for UPDATE_ROWS_EVENT {:?}", ev))?;
 
                     let mut deleted_rows = Vec::new();
 
