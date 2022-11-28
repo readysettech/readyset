@@ -1416,6 +1416,28 @@ macro_rules! integer_try_from {
 
 integer_try_from!(usize, isize, u128, i128, u64, i64, u32, i32, u16, i16, u8, i8);
 
+impl TryFrom<DfValue> for bool {
+    type Error = ReadySetError;
+
+    fn try_from(data: DfValue) -> Result<Self, Self::Error> {
+        (&data).try_into()
+    }
+}
+
+impl TryFrom<&DfValue> for bool {
+    type Error = ReadySetError;
+
+    fn try_from(data: &DfValue) -> Result<Self, Self::Error> {
+        data.as_int()
+            .map(|i| i != 0)
+            .ok_or_else(|| ReadySetError::DfValueConversionError {
+                src_type: "DfValue".to_owned(),
+                target_type: "bool".to_owned(),
+                details: "".to_owned(),
+            })
+    }
+}
+
 impl TryFrom<DfValue> for f32 {
     type Error = ReadySetError;
 
