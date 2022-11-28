@@ -21,7 +21,7 @@
 //! cargo build --bin readyset-server --bin readyset-mysql --features failure_injection
 //!
 //! # Spin up the developer docker stack to start MySQL and a consul authority.
-//! cd //readyset
+//! cd //readyset/public
 //! cp docker-compose.override.yml.example docker-compose.override.yml
 //! docker-compose up -d
 //! ```
@@ -34,13 +34,13 @@
 //! Clustertests are run through `cargo test`.
 //! ```bash
 //! # Running clustertests with the default arguments.
-//! cargo test -p clustertest
+//! cargo test -p readyset-clustertest
 //!
 //! # Modifying clustertests via environment arguments.
-//! MYSQL_PORT=3310 cargo test -p clustertest
+//! MYSQL_PORT=3310 cargo test -p readyset-clustertest
 //!
 //! # Configuring readyset-server logging via logging environment variables.
-//! LOG_LEVEL=debug cargo test -p clustertest
+//! LOG_LEVEL=debug cargo test -p readyset-clustertest
 //! ```
 //!
 //! Clustertests can be configured via environment variables. Any environment variables are also
