@@ -11,6 +11,7 @@ use readyset_data::{DfType, DfValue};
 use readyset_errors::{invalid_err, ReadySetError, ReadySetResult};
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 use rust_decimal::Decimal;
+use serde_json::Value as JsonValue;
 use vec1::Vec1;
 
 use crate::{BuiltinFunction, Expr};
@@ -634,19 +635,62 @@ impl BuiltinFunction {
 
                 Ok(target_json.into())
             }
-            BuiltinFunction::JsonbSet(target_json, key_path, new_json, create_if_missing) => {
+            BuiltinFunction::JsonbSet(
+                target_json,
+                key_path,
+                new_json,
+                create_if_missing,
+                null_value_treatment,
+            ) => {
+                use crate::eval::json::NullValueTreatment;
+                use crate::NullValueTreatmentArg;
+
                 let mut target_json = non_null!(target_json.eval(record)?).to_json()?;
 
                 let key_path = non_null!(key_path.eval(record)?);
                 let key_path = key_path.as_array()?.values();
 
-                let new_json = non_null!(new_json.eval(record)?).to_json()?;
+                let new_json = new_json.eval(record)?;
 
                 let create_if_missing = match create_if_missing {
                     Some(create_if_missing) => {
                         bool::try_from(non_null!(create_if_missing.eval(record)?))?
                     }
                     None => true,
+                };
+
+                // PostgreSQL's behavior is to always evaluate `null_value_treatment` regardless if
+                // `new_json` is null, so we replicate the behavior.
+                let null_value_treatment = match null_value_treatment {
+                    NullValueTreatmentArg::ReturnNull => None,
+                    NullValueTreatmentArg::Expr(arg) => {
+                        let nvt = arg
+                            .as_ref()
+                            .map(|expr| {
+                                <&str>::try_from(&expr.eval(record)?)?.parse::<NullValueTreatment>()
+                            })
+                            .transpose()?
+                            .unwrap_or_default();
+
+                        Some(nvt)
+                    }
+                };
+
+                let new_json = if new_json.is_none() {
+                    match null_value_treatment {
+                        None => return Ok(DfValue::None),
+                        Some(NullValueTreatment::UseJsonNull) => JsonValue::Null,
+                        Some(NullValueTreatment::DeleteKey) => {
+                            crate::eval::json::json_remove_path(&mut target_json, key_path)?;
+                            return Ok(target_json.into());
+                        }
+                        Some(NullValueTreatment::ReturnTarget) => return Ok(target_json.into()),
+                        Some(NullValueTreatment::RaiseException) => {
+                            return Err(invalid_err!("JSON value must not be null"))
+                        }
+                    }
+                } else {
+                    new_json.to_json()?
                 };
 
                 crate::eval::json::json_set(
@@ -2365,6 +2409,281 @@ mod tests {
 
                 test_non_null(object, &keys, "42", false, expected);
                 test_non_null(object, &keys, "42", true, expected);
+            }
+        }
+
+        mod jsonb_set_lax {
+            use super::*;
+            use crate::eval::json::NullValueTreatment;
+
+            #[track_caller]
+            fn test_nullable(
+                json: &str,
+                keys: &str,
+                new_json: &str,
+                create_if_missing: Option<bool>,
+                null_value_treatment: Option<&str>,
+                expected_json: Option<&str>,
+            ) {
+                // Normalize formatting and convert.
+                let expected_json = expected_json
+                    .map(normalize_json)
+                    .map(DfValue::from)
+                    .unwrap_or_default();
+
+                let create_if_missing_args: &[&str] = match create_if_missing {
+                    // Test calling with explicit and implicit default argument.
+                    Some(true) => &[", true", ""],
+                    Some(false) => &[", false"],
+
+                    // Test null result.
+                    None => &[", null"],
+                };
+
+                for create_if_missing_arg in create_if_missing_args {
+                    let null_value_treatment_args: Vec<String> = match null_value_treatment {
+                        // Test calling with explicit and implicit default argument.
+                        Some(arg @ "use_json_null") => {
+                            vec![format!(", '{arg}'"), "".to_owned()]
+                        }
+                        Some(arg) => vec![format!(", '{arg}'")],
+
+                        // Test null result.
+                        None => vec![", null".to_owned()],
+                    };
+
+                    for null_value_treatment_arg in null_value_treatment_args {
+                        // Skip explicit last arg if previous is implicit.
+                        if create_if_missing_arg.is_empty() && !null_value_treatment_arg.is_empty()
+                        {
+                            continue;
+                        }
+
+                        let expr = format!("jsonb_set_lax({json}, {keys}, {new_json}{create_if_missing_arg}{null_value_treatment_arg})");
+                        assert_eq!(
+                            eval_expr(&expr, PostgreSQL),
+                            expected_json,
+                            "incorrect result for for `{expr}`"
+                        );
+                    }
+                }
+            }
+
+            #[track_caller]
+            fn test_non_null(
+                json: &str,
+                keys: &[&str],
+                new_json: Option<&str>,
+                create_if_missing: bool,
+                null_value_treatment: &str,
+                expected_json: &str,
+            ) {
+                let new_json = new_json
+                    .map(|j| format!("'{j}'"))
+                    .unwrap_or_else(|| "null".to_owned());
+
+                test_nullable(
+                    &format!("'{json}'"),
+                    &strings_to_array_expr(keys),
+                    &new_json,
+                    Some(create_if_missing),
+                    Some(null_value_treatment),
+                    Some(expected_json),
+                );
+            }
+
+            #[track_caller]
+            fn test_error(
+                json: &str,
+                keys: &[&str],
+                new_json: Option<&str>,
+                create_if_missing: bool,
+                null_value_treatment: &str,
+            ) {
+                let keys = strings_to_array_expr(keys);
+
+                let new_json = new_json
+                    .map(|j| format!("'{j}'"))
+                    .unwrap_or_else(|| "null".to_owned());
+
+                let expr =
+                    format!("jsonb_set_lax('{json}', {keys}, {new_json}, {create_if_missing}, '{null_value_treatment}')");
+
+                if let Ok(value) = try_eval_expr(&expr, PostgreSQL) {
+                    panic!("Expected error for `{expr}`, got {value:?}");
+                }
+            }
+
+            #[test]
+            fn null_propagation() {
+                for null_value_treatment in NullValueTreatment::all() {
+                    let null_value_treatment = null_value_treatment.to_string();
+                    test_nullable(
+                        "null",
+                        "array[]",
+                        "'42'",
+                        Some(false),
+                        Some(&null_value_treatment),
+                        None,
+                    );
+                    test_nullable(
+                        "'{}'",
+                        "null",
+                        "'42'",
+                        Some(false),
+                        Some(&null_value_treatment),
+                        None,
+                    );
+                    test_nullable(
+                        "'{}'",
+                        "array[]",
+                        "'42'",
+                        None,
+                        Some(&null_value_treatment),
+                        None,
+                    );
+                }
+                test_nullable("'{}'", "null", "'42'", Some(false), None, None);
+            }
+
+            // NOTE: All subsequent tests are for behavior specific to how `jsonb_set_lax` uses
+            // `null_value_treatment`. Because `jsonb_set_lax` reuses the same logic as `jsonb_set`,
+            // much of the behavior is already covered by `jsonb_set` tests.
+
+            #[test]
+            fn unknown_null_value_treatment() {
+                test_error("[42]", &["0"], None, false, "unknown");
+                test_error("[42]", &["0"], None, true, "unknown");
+            }
+
+            #[test]
+            fn array_delete_key() {
+                let array = "[[42]]";
+
+                // Empty:
+                test_non_null("[]", &["0"], None, false, "delete_key", "[]");
+                test_non_null("[]", &["0"], None, true, "delete_key", "[]");
+
+                // Positive found:
+                test_non_null(array, &["0"], None, false, "delete_key", "[]");
+                test_non_null(array, &["0"], None, true, "delete_key", "[]");
+                test_non_null(array, &["0", "0"], None, false, "delete_key", "[[]]");
+                test_non_null(array, &["0", "0"], None, true, "delete_key", "[[]]");
+
+                // Negative found:
+                test_non_null(array, &["-1"], None, false, "delete_key", "[]");
+                test_non_null(array, &["-1"], None, true, "delete_key", "[]");
+                test_non_null(array, &["0", "-1"], None, false, "delete_key", "[[]]");
+                test_non_null(array, &["0", "-1"], None, true, "delete_key", "[[]]");
+                test_non_null(array, &["-1", "-1"], None, false, "delete_key", "[[]]");
+                test_non_null(array, &["-1", "-1"], None, true, "delete_key", "[[]]");
+
+                // Positive out-of-bounds:
+                test_non_null(array, &["0", "1"], None, false, "delete_key", array);
+                test_non_null(array, &["0", "1"], None, true, "delete_key", array);
+                test_non_null(array, &["1"], None, false, "delete_key", array);
+                test_non_null(array, &["1"], None, true, "delete_key", array);
+                test_non_null(array, &["1", "0"], None, false, "delete_key", array);
+                test_non_null(array, &["1", "0"], None, true, "delete_key", array);
+
+                // Negative out-of-bounds:
+                test_non_null(array, &["0", "-2"], None, false, "delete_key", array);
+                test_non_null(array, &["0", "-2"], None, true, "delete_key", array);
+                test_non_null(array, &["-2"], None, false, "delete_key", array);
+                test_non_null(array, &["-2"], None, true, "delete_key", array);
+                test_non_null(array, &["-2", "0"], None, false, "delete_key", array);
+                test_non_null(array, &["-2", "0"], None, true, "delete_key", array);
+            }
+
+            #[test]
+            fn object_delete_key() {
+                let object = r#"{ "a": { "b": 42 } }"#;
+                let del_object = r#"{ "a": {} }"#;
+
+                // Empty:
+                test_non_null("{}", &["x"], None, false, "delete_key", "{}");
+                test_non_null("{}", &["x"], None, true, "delete_key", "{}");
+
+                // Found:
+                test_non_null(object, &["a"], None, false, "delete_key", "{}");
+                test_non_null(object, &["a"], None, true, "delete_key", "{}");
+                test_non_null(object, &["a", "b"], None, false, "delete_key", del_object);
+                test_non_null(object, &["a", "b"], None, true, "delete_key", del_object);
+
+                // Missing:
+                test_non_null(object, &["x"], None, false, "delete_key", object);
+                test_non_null(object, &["x"], None, true, "delete_key", object);
+                test_non_null(object, &["a", "x"], None, false, "delete_key", object);
+                test_non_null(object, &["a", "x"], None, true, "delete_key", object);
+            }
+
+            #[test]
+            fn array_return_target() {
+                test_non_null("[]", &["0"], None, false, "return_target", "[]");
+                test_non_null("[]", &["0"], None, true, "return_target", "[]");
+
+                test_non_null("[42]", &["0"], None, false, "return_target", "[42]");
+                test_non_null("[42]", &["0"], None, true, "return_target", "[42]");
+            }
+
+            #[test]
+            fn object_return_target() {
+                let object = r#"{ "a": { "b": 42 } }"#;
+
+                test_non_null("{}", &["a"], None, false, "return_target", "{}");
+                test_non_null("{}", &["a"], None, true, "return_target", "{}");
+
+                test_non_null(object, &["a"], None, false, "return_target", object);
+                test_non_null(object, &["a"], None, true, "return_target", object);
+            }
+
+            #[test]
+            fn array_use_json_null() {
+                test_non_null("[]", &["0"], None, false, "use_json_null", "[]");
+                test_non_null("[]", &["0"], None, true, "use_json_null", "[null]");
+
+                test_non_null("[42]", &["0"], None, false, "use_json_null", "[null]");
+                test_non_null("[42]", &["0"], None, true, "use_json_null", "[null]");
+            }
+
+            #[test]
+            fn object_use_json_null() {
+                let object = r#"{ "a": 42 }"#;
+                let object_with_null = r#"{ "a": null }"#;
+
+                test_non_null("{}", &["a"], None, false, "use_json_null", "{}");
+                test_non_null("{}", &["a"], None, true, "use_json_null", object_with_null);
+
+                test_non_null(
+                    object,
+                    &["a"],
+                    None,
+                    false,
+                    "use_json_null",
+                    object_with_null,
+                );
+                test_non_null(
+                    object,
+                    &["a"],
+                    None,
+                    true,
+                    "use_json_null",
+                    object_with_null,
+                );
+            }
+
+            #[test]
+            fn array_raise_exception() {
+                test_error("[42]", &["0"], None, false, "raise_exception");
+                test_error("[42]", &["0"], None, true, "raise_exception");
+            }
+
+            #[test]
+            fn object_raise_exception() {
+                let object = r#"{ "a": 42 }"#;
+
+                test_error(object, &["a"], None, false, "raise_exception");
+                test_error(object, &["a"], None, true, "raise_exception");
             }
         }
     }

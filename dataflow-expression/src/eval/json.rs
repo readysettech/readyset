@@ -1,7 +1,8 @@
 use std::collections::HashSet;
 use std::fmt::Write;
 use std::hash::{Hash, Hasher};
-use std::mem;
+use std::str::FromStr;
+use std::{fmt, mem};
 
 use readyset_data::DfValue;
 use readyset_errors::{invalid_err, ReadySetError, ReadySetResult};
@@ -12,6 +13,57 @@ use serde_json::{Number as JsonNumber, Value as JsonValue};
 use crate::utils;
 
 type JsonObject = serde_json::Map<String, JsonValue>;
+
+/// Determines how `jsonb_set_lax` should treat inserting SQL-null JSON strings.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum NullValueTreatment {
+    #[default]
+    UseJsonNull,
+    DeleteKey,
+    ReturnTarget,
+    RaiseException,
+}
+
+impl FromStr for NullValueTreatment {
+    type Err = ReadySetError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "delete_key" => Ok(Self::DeleteKey),
+            "return_target" => Ok(Self::ReturnTarget),
+            "use_json_null" => Ok(Self::UseJsonNull),
+            "raise_exception" => Ok(Self::RaiseException),
+            _ => Err(invalid_err!(
+                "null_value_treatment must be \"delete_key\", \"return_target\", \
+                \"use_json_null\", or \"raise_exception\""
+            )),
+        }
+    }
+}
+
+impl fmt::Display for NullValueTreatment {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(match self {
+            Self::DeleteKey => "delete_key",
+            Self::ReturnTarget => "return_target",
+            Self::UseJsonNull => "use_json_null",
+            Self::RaiseException => "raise_exception",
+        })
+    }
+}
+
+impl NullValueTreatment {
+    #[cfg(test)]
+    pub fn all() -> impl Iterator<Item = Self> {
+        [
+            Self::UseJsonNull,
+            Self::DeleteKey,
+            Self::ReturnTarget,
+            Self::RaiseException,
+        ]
+        .into_iter()
+    }
+}
 
 /// Serializes `json` to a pretty-printed [`String`] with 4-space indentation.
 ///

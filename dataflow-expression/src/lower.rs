@@ -9,7 +9,9 @@ use readyset_errors::{
 };
 use vec1::Vec1;
 
-use crate::{BinaryOperator, BuiltinFunction, CaseWhenBranch, Dialect, Expr};
+use crate::{
+    BinaryOperator, BuiltinFunction, CaseWhenBranch, Dialect, Expr, NullValueTreatmentArg,
+};
 
 /// Context supplied to expression lowering to allow resolving references to objects within the
 /// schema
@@ -251,7 +253,23 @@ impl BuiltinFunction {
                 DfType::Jsonb,
             ),
             "jsonb_set" => (
-                Self::JsonbSet(next_arg()?, next_arg()?, next_arg()?, args.next()),
+                Self::JsonbSet(
+                    next_arg()?,
+                    next_arg()?,
+                    next_arg()?,
+                    args.next(),
+                    NullValueTreatmentArg::ReturnNull,
+                ),
+                DfType::Jsonb,
+            ),
+            "jsonb_set_lax" => (
+                Self::JsonbSet(
+                    next_arg()?,
+                    next_arg()?,
+                    next_arg()?,
+                    args.next(),
+                    NullValueTreatmentArg::Expr(args.next()),
+                ),
                 DfType::Jsonb,
             ),
             "jsonb_pretty" => (Self::JsonbPretty(next_arg()?), DfType::DEFAULT_TEXT),

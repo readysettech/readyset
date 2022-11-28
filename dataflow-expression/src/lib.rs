@@ -62,8 +62,8 @@ pub enum BuiltinFunction {
     JsonExtractPath { json: Expr, keys: Vec1<Expr> },
     /// [`jsonb_insert`](https://www.postgresql.org/docs/current/functions-json.html)
     JsonbInsert(Expr, Expr, Expr, Option<Expr>),
-    /// [`jsonb_set`](https://www.postgresql.org/docs/current/functions-json.html)
-    JsonbSet(Expr, Expr, Expr, Option<Expr>),
+    /// [`jsonb_set[_lax]`](https://www.postgresql.org/docs/current/functions-json.html)
+    JsonbSet(Expr, Expr, Expr, Option<Expr>, NullValueTreatmentArg),
     /// [`jsonb_pretty`](https://www.postgresql.org/docs/current/functions-json.html)
     JsonbPretty(Expr),
     /// [`coalesce`](https://www.postgresql.org/docs/current/functions-conditional.html#FUNCTIONS-COALESCE-NVL-IFNULL)
@@ -176,11 +176,20 @@ impl Display for BuiltinFunction {
             JsonExtractPath { json, keys } => {
                 write!(f, "({}, {})", json, keys.iter().join(", "))
             }
-            JsonbInsert(arg1, arg2, arg3, arg4) | JsonbSet(arg1, arg2, arg3, arg4) => {
+            JsonbInsert(arg1, arg2, arg3, arg4) => {
                 write!(f, "({arg1}, {arg2}, {arg3}")?;
                 if let Some(arg4) = arg4 {
                     write!(f, ", {arg4}")?;
                 }
+                write!(f, ")")
+            }
+            JsonbSet(arg1, arg2, arg3, arg4, arg5) => {
+                write!(f, "({arg1}, {arg2}, {arg3}")?;
+
+                for arg in [arg4.as_ref(), arg5.expr()].into_iter().flatten() {
+                    write!(f, ", {arg}")?;
+                }
+
                 write!(f, ")")
             }
             Coalesce(arg1, args) => {
@@ -203,6 +212,25 @@ impl Display for BuiltinFunction {
             Greatest { args, .. } | Least { args, .. } => {
                 write!(f, "({})", args.iter().join(", "))
             }
+        }
+    }
+}
+
+/// Argument for [`BuiltinFunction::JsonbSet`] that differentiates between `jsonb_set` and
+/// `jsonb_set_lax` behavior.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NullValueTreatmentArg {
+    /// `jsonb_set` behavior.
+    ReturnNull,
+    /// `jsonb_set_lax` behavior.
+    Expr(Option<Expr>),
+}
+
+impl NullValueTreatmentArg {
+    pub fn expr(&self) -> Option<&Expr> {
+        match self {
+            Self::ReturnNull => None,
+            Self::Expr(expr) => expr.as_ref(),
         }
     }
 }
