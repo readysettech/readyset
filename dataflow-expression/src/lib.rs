@@ -56,6 +56,8 @@ pub enum BuiltinFunction {
     JsonExtractPath { json: Expr, keys: Vec1<Expr> },
     /// [`jsonb_insert`](https://www.postgresql.org/docs/current/functions-json.html)
     JsonbInsert(Expr, Expr, Expr, Option<Expr>),
+    /// [`jsonb_set`](https://www.postgresql.org/docs/current/functions-json.html)
+    JsonbSet(Expr, Expr, Expr, Option<Expr>),
     /// [`coalesce`](https://www.postgresql.org/docs/current/functions-conditional.html#FUNCTIONS-COALESCE-NVL-IFNULL)
     Coalesce(Expr, Vec<Expr>),
     /// [`concat`](https://dev.mysql.com/doc/refman/8.0/en/string-functions.html#function_concat)
@@ -110,6 +112,7 @@ impl BuiltinFunction {
             JsonStripNulls { .. } => "json_strip_nulls",
             JsonExtractPath { .. } => "json_extract_path",
             JsonbInsert { .. } => "jsonb_insert",
+            JsonbSet { .. } => "jsonb_set",
             Coalesce { .. } => "coalesce",
             Concat { .. } => "concat",
             Substring { .. } => "substring",
@@ -160,7 +163,7 @@ impl Display for BuiltinFunction {
             JsonExtractPath { json, keys } => {
                 write!(f, "({}, {})", json, keys.iter().join(", "))
             }
-            JsonbInsert(arg1, arg2, arg3, arg4) => {
+            JsonbInsert(arg1, arg2, arg3, arg4) | JsonbSet(arg1, arg2, arg3, arg4) => {
                 write!(f, "({arg1}, {arg2}, {arg3}")?;
                 if let Some(arg4) = arg4 {
                     write!(f, ", {arg4}")?;

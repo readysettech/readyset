@@ -4,6 +4,7 @@ use std::mem;
 
 use readyset_data::DfValue;
 use readyset_errors::{invalid_err, ReadySetError, ReadySetResult};
+use serde_json::map::Entry as JsonEntry;
 use serde_json::{Number as JsonNumber, Value as JsonValue};
 
 use crate::utils;
@@ -231,6 +232,53 @@ pub(crate) fn json_insert<'k>(
                 entry.insert(inserted_json);
             }
         }
+        _ => {}
+    }
+
+    Ok(())
+}
+
+pub(crate) fn json_set<'k>(
+    target_json: &mut JsonValue,
+    key_path: impl IntoIterator<Item = &'k DfValue>,
+    new_json: JsonValue,
+    create_if_missing: bool,
+) -> ReadySetResult<()> {
+    if json_is_scalar(target_json) {
+        return Err(invalid_err!("cannot set path in scalar"));
+    }
+
+    let key_path: Vec<&str> = key_path
+        .into_iter()
+        .map(TryInto::try_into)
+        .collect::<ReadySetResult<_>>()?;
+
+    let Some((&inner_key, search_keys)) = key_path.split_last() else {
+        return Ok(());
+    };
+
+    match json_find_mut(target_json, search_keys)? {
+        Some(JsonValue::Array(array)) => {
+            let index = parse_json_index(inner_key)
+                .ok_or_else(|| parse_json_index_error(search_keys.len()))?;
+
+            if let Some(entry) = utils::index_bidirectional_mut(array, index) {
+                *entry = new_json;
+            } else if create_if_missing {
+                let index = if index.is_negative() { 0 } else { array.len() };
+                array.insert(index, new_json);
+            }
+        }
+        Some(JsonValue::Object(object)) => match object.entry(inner_key) {
+            JsonEntry::Occupied(mut entry) => {
+                entry.insert(new_json);
+            }
+            JsonEntry::Vacant(entry) => {
+                if create_if_missing {
+                    entry.insert(new_json);
+                }
+            }
+        },
         _ => {}
     }
 

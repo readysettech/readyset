@@ -611,6 +611,30 @@ impl BuiltinFunction {
 
                 Ok(target_json.into())
             }
+            BuiltinFunction::JsonbSet(target_json, key_path, new_json, create_if_missing) => {
+                let mut target_json = non_null!(target_json.eval(record)?).to_json()?;
+
+                let key_path = non_null!(key_path.eval(record)?);
+                let key_path = key_path.as_array()?.values();
+
+                let new_json = non_null!(new_json.eval(record)?).to_json()?;
+
+                let create_if_missing = match create_if_missing {
+                    Some(create_if_missing) => {
+                        bool::try_from(non_null!(create_if_missing.eval(record)?))?
+                    }
+                    None => true,
+                };
+
+                crate::eval::json::json_set(
+                    &mut target_json,
+                    key_path,
+                    new_json,
+                    create_if_missing,
+                )?;
+
+                Ok(target_json.into())
+            }
             BuiltinFunction::Coalesce(arg1, rest_args) => {
                 let val1 = arg1.eval(record)?;
                 let rest_vals = rest_args
@@ -1995,6 +2019,190 @@ mod tests {
             #[test]
             fn object_nested() {
                 let object = r#"{ "a": { "b": {} } }"#;
+                let expected = r#"{ "a": { "b": { "c": 42 } } }"#;
+                let keys = ["a", "b", "c"];
+
+                test_non_null(object, &keys, "42", false, expected);
+                test_non_null(object, &keys, "42", true, expected);
+            }
+        }
+
+        mod jsonb_set {
+            use super::*;
+
+            #[track_caller]
+            fn test_nullable(
+                json: &str,
+                keys: &str,
+                new_json: &str,
+                create_if_missing: Option<bool>,
+                expected_json: Option<&str>,
+            ) {
+                // Normalize formatting and convert.
+                let expected_json = expected_json
+                    .map(normalize_json)
+                    .map(DfValue::from)
+                    .unwrap_or_default();
+
+                let create_if_missing_args: &[&str] = match create_if_missing {
+                    // Test calling with explicit and implicit true `create_if_missing` argument.
+                    Some(true) => &[", true", ""],
+                    Some(false) => &[", false"],
+
+                    // Test null result.
+                    None => &[", null"],
+                };
+
+                for create_if_missing_arg in create_if_missing_args {
+                    let expr =
+                        format!("jsonb_set({json}, {keys}, {new_json}{create_if_missing_arg})");
+                    assert_eq!(
+                        eval_expr(&expr, PostgreSQL),
+                        expected_json,
+                        "incorrect result for for `{expr}`"
+                    );
+                }
+            }
+
+            #[track_caller]
+            fn test_non_null(
+                json: &str,
+                keys: &[&str],
+                new_json: &str,
+                create_if_missing: bool,
+                expected_json: &str,
+            ) {
+                test_nullable(
+                    &format!("'{json}'"),
+                    &strings_to_array_expr(keys),
+                    &format!("'{new_json}'"),
+                    Some(create_if_missing),
+                    Some(expected_json),
+                )
+            }
+
+            #[track_caller]
+            fn test_error(json: &str, keys: &[&str], new_json: &str, create_if_missing: bool) {
+                let keys = strings_to_array_expr(keys);
+                let expr =
+                    format!("jsonb_set('{json}', {keys}, '{new_json}', {create_if_missing})");
+
+                if let Ok(value) = try_eval_expr(&expr, PostgreSQL) {
+                    panic!("Expected error for `{expr}`, got {value:?}");
+                }
+            }
+
+            #[test]
+            fn null_propagation() {
+                test_nullable("null", "array[]", "'42'", Some(false), None);
+                test_nullable("'{}'", "null", "'42'", Some(false), None);
+                test_nullable("'{}'", "array[]", "null", Some(false), None);
+                test_nullable("'{}'", "array[]", "'42'", None, None);
+            }
+
+            #[test]
+            fn scalar() {
+                test_error("1", &["0"], "42", false);
+                test_error("1", &["0"], "42", true);
+
+                test_error("1.5", &["0"], "42", false);
+                test_error("1.5", &["0"], "42", true);
+
+                test_error("true", &["0"], "42", false);
+                test_error("true", &["0"], "42", true);
+
+                test_error("\"hi\"", &["0"], "42", false);
+                test_error("\"hi\"", &["0"], "42", true);
+
+                test_error("null", &["0"], "42", false);
+                test_error("null", &["0"], "42", true);
+            }
+
+            #[test]
+            fn array_empty() {
+                test_non_null("[]", &["0"], "42", false, "[]");
+                test_non_null("[]", &["0"], "42", true, "[42]");
+
+                test_non_null("[]", &["1"], "42", false, "[]");
+                test_non_null("[]", &["1"], "42", true, "[42]");
+
+                test_non_null("[]", &["-1"], "42", false, "[]");
+                test_non_null("[]", &["-1"], "42", true, "[42]");
+            }
+
+            #[test]
+            fn array_positive() {
+                let array = "[0, 1, 2]";
+
+                // Positive start:
+                test_non_null(array, &["0"], "42", false, "[42, 1, 2]");
+                test_non_null(array, &["0"], "42", true, "[42, 1, 2]");
+
+                // Positive middle:
+                test_non_null(array, &["1"], "42", false, "[0, 42, 2]");
+                test_non_null(array, &["1"], "42", true, "[0, 42, 2]");
+
+                // Positive end:
+                test_non_null(array, &["2"], "42", false, "[0, 1, 42]");
+                test_non_null(array, &["2"], "42", true, "[0, 1, 42]");
+
+                // Positive end, out-of-bounds:
+                test_non_null(array, &["3"], "42", false, "[0, 1, 2]");
+                test_non_null(array, &["3"], "42", true, "[0, 1, 2, 42]");
+                test_non_null(array, &["4"], "42", false, "[0, 1, 2]");
+                test_non_null(array, &["4"], "42", true, "[0, 1, 2, 42]");
+            }
+
+            #[test]
+            fn array_negative() {
+                let array = "[0, 1, 2]";
+
+                // Negative start, out-of-bounds:
+                test_non_null(array, &["-4"], "42", false, "[0, 1, 2]");
+                test_non_null(array, &["-4"], "42", true, "[42, 0, 1, 2]");
+                test_non_null(array, &["-5"], "42", false, "[0, 1, 2]");
+                test_non_null(array, &["-5"], "42", true, "[42, 0, 1, 2]");
+
+                // Negative start:
+                test_non_null(array, &["-3"], "42", false, "[42, 1, 2]");
+                test_non_null(array, &["-3"], "42", true, "[42, 1, 2]");
+
+                // Negative middle:
+                test_non_null(array, &["-2"], "42", false, "[0, 42, 2]");
+                test_non_null(array, &["-2"], "42", true, "[0, 42, 2]");
+
+                // Negative end:
+                test_non_null(array, &["-1"], "42", false, "[0, 1, 42]");
+                test_non_null(array, &["-1"], "42", true, "[0, 1, 42]");
+            }
+
+            #[test]
+            fn object() {
+                // Empty:
+                test_non_null("{}", &["a"], "42", false, "{}");
+                test_non_null("{}", &["a"], "42", true, r#"{"a": 42}"#);
+
+                // Override:
+                test_non_null("{\"a\": 0}", &["a"], "42", false, "{\"a\": 42}");
+                test_non_null("{\"a\": 0}", &["a"], "42", true, "{\"a\": 42}");
+
+                // Not found:
+                test_non_null("{}", &["a", "b"], "42", false, "{}");
+                test_non_null("{}", &["a", "b"], "42", true, "{}");
+            }
+
+            #[test]
+            fn array_nested() {
+                let array = "[[[0, 1, 2]]]";
+                let keys = ["0", "0", "0"];
+
+                test_non_null(array, &keys, "42", false, "[[[42, 1, 2]]]");
+                test_non_null(array, &keys, "42", true, "[[[42, 1, 2]]]");
+            }
+
+            #[test]
+            fn object_nested() {
+                let object = r#"{ "a": { "b": { "c": 0 } } }"#;
                 let expected = r#"{ "a": { "b": { "c": 42 } } }"#;
                 let keys = ["a", "b", "c"];
 
