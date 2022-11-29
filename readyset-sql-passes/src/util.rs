@@ -60,17 +60,19 @@ fn field_names(statement: &SelectStatement) -> impl Iterator<Item = &SqlIdentifi
 ///
 /// Takes only the CTEs and join clause so that it doesn't have to borrow the entire statement.
 pub(crate) fn subquery_schemas<'a>(
+    tables: &'a [TableExpr],
     ctes: &'a [CommonTableExpr],
     join: &'a [JoinClause],
 ) -> HashMap<&'a SqlIdentifier, Vec<&'a SqlIdentifier>> {
     ctes.iter()
         .map(|cte| (&cte.name, &cte.statement))
         .chain(
-            join.iter()
-                .flat_map(|join| match &join.right {
+            tables
+                .iter()
+                .chain(join.iter().flat_map(|join| match &join.right {
                     JoinRightSide::Table(t) => Either::Left(iter::once(t)),
                     JoinRightSide::Tables(ts) => Either::Right(ts.iter()),
-                })
+                }))
                 .filter_map(|te| match &te.inner {
                     TableExprInner::Subquery(sq) => {
                         te.alias.as_ref().map(|alias| (alias, sq.as_ref()))

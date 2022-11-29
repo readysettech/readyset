@@ -32,8 +32,11 @@ impl<'ast, 'schema> VisitorMut<'ast> for ExpandStarsVisitor<'schema> {
         visit_mut::walk_select_statement(self, select_statement)?;
 
         let fields = mem::take(&mut select_statement.fields);
-        let subquery_schemas =
-            util::subquery_schemas(&select_statement.ctes, &select_statement.join);
+        let subquery_schemas = util::subquery_schemas(
+            &select_statement.tables,
+            &select_statement.ctes,
+            &select_statement.join,
+        );
 
         let expand_table = |table: Relation| -> ReadySetResult<_> {
             Ok(if table.schema.is_none() {

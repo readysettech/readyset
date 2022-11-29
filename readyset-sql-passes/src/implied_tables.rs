@@ -105,10 +105,14 @@ impl<'ast, 'schema> VisitorMut<'ast> for ExpandImpliedTablesVisitor<'schema> {
         );
         let orig_subquery_schemas = mem::replace(
             &mut self.subquery_schemas,
-            util::subquery_schemas(&select_statement.ctes, &select_statement.join)
-                .into_iter()
-                .map(|(k, v)| (k.into(), v.into_iter().map(|s| s.into()).collect()))
-                .collect(),
+            util::subquery_schemas(
+                &select_statement.tables,
+                &select_statement.ctes,
+                &select_statement.join,
+            )
+            .into_iter()
+            .map(|(k, v)| (k.into(), v.into_iter().map(|s| s.into()).collect()))
+            .collect(),
         );
         let orig_aliases = mem::replace(
             &mut self.aliases,
@@ -561,6 +565,17 @@ Dialect::MySQL,
             ),
         ]
         .into();
+
+        let res = orig.expand_implied_tables(&schema).unwrap();
+        assert_eq!(res, expected, "\n left: {res}\nright: {expected}");
+    }
+
+    #[test]
+    fn select_from_subquery() {
+        let orig = parse_query(Dialect::MySQL, "SELECT x FROM (SELECT x FROM t1) sq").unwrap();
+        let expected =
+            parse_query(Dialect::MySQL, "SELECT sq.x FROM (SELECT t1.x FROM t1) sq").unwrap();
+        let schema = [(Relation::from("t1"), vec!["x".into()])].into();
 
         let res = orig.expand_implied_tables(&schema).unwrap();
         assert_eq!(res, expected, "\n left: {res}\nright: {expected}");
