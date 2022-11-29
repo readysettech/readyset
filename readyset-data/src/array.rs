@@ -3,7 +3,7 @@ use std::fmt::{self, Display};
 use std::str::FromStr;
 
 use fallible_iterator::FallibleIterator;
-use ndarray::{ArrayBase, ArrayD, Data, IxDyn, RawData};
+use ndarray::{ArrayBase, ArrayD, ArrayViewD, Data, IxDyn, RawData};
 use nom_locate::LocatedSpan;
 use nom_sql::NomSqlError;
 use postgres_protocol::types::ArrayDimension;
@@ -109,6 +109,13 @@ impl Array {
     /// innermost dimension first
     pub fn values_mut(&mut self) -> impl Iterator<Item = &mut DfValue> + '_ {
         self.contents.iter_mut()
+    }
+
+    /// Returns an iterator over subviews of the array's outermost dimension.
+    pub fn outer_dimension(&self) -> impl Iterator<Item = ArrayView> {
+        self.contents
+            .outer_iter()
+            .map(|contents| ArrayView { contents })
     }
 
     /// Returns `true` if the array does not contain a mix of inferred types.
@@ -381,6 +388,19 @@ impl ToSql for Array {
     }
 
     to_sql_checked!();
+}
+
+/// A shared view into an [`Array`] dimension.
+pub struct ArrayView<'v> {
+    contents: ArrayViewD<'v, DfValue>,
+}
+
+impl<'v> ArrayView<'v> {
+    /// Returns an iterator over shared references to all the values in the array view, iterating
+    /// the innermost dimension first.
+    pub fn values(&self) -> impl Iterator<Item = &DfValue> {
+        self.contents.iter()
+    }
 }
 
 mod parse {
@@ -794,6 +814,32 @@ mod tests {
         assert_eq!(
             Array::from_str("{2a, 3b}").unwrap(),
             Array::from(vec![DfValue::from("2a"), DfValue::from("3b"),])
+        );
+    }
+
+    #[test]
+    fn outer_dimension_3d_array() {
+        let arr = Array::from(
+            ArrayD::from_shape_vec(
+                IxDyn(&[2, 2, 1]),
+                vec![
+                    DfValue::from(1),
+                    DfValue::from(2),
+                    DfValue::from(3),
+                    DfValue::from(4),
+                ],
+            )
+            .unwrap(),
+        );
+
+        assert_eq!(
+            arr.outer_dimension()
+                .map(|r| r.values().cloned().collect::<Vec<_>>())
+                .collect::<Vec<_>>(),
+            vec![
+                vec![DfValue::from(1), DfValue::from(2)],
+                vec![DfValue::from(3), DfValue::from(4)]
+            ]
         );
     }
 }
