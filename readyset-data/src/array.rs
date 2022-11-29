@@ -72,6 +72,16 @@ impl Array {
         self.contents.ndim()
     }
 
+    /// Returns `true` if the array contains no elements.
+    pub fn is_empty(&self) -> bool {
+        self.contents.is_empty()
+    }
+
+    /// Returns the total number of elements in the array.
+    pub fn total_len(&self) -> usize {
+        self.contents.len()
+    }
+
     /// Look up a value at the given index in the array, with indices supplied starting at the lower
     /// bounds provided when constructing the array.
     ///
