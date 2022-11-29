@@ -9,10 +9,9 @@ use crate::{utils, BinaryOperator, Expr};
 
 macro_rules! non_null {
     ($df_value:expr) => {
-        if let Some(val) = $df_value.non_null() {
-            val
-        } else {
-            return Ok(DfValue::None);
+        match $df_value {
+            DfValue::None => return Ok(DfValue::None),
+            df_value => df_value,
         }
     };
 }
@@ -75,18 +74,18 @@ impl Expr {
                 };
 
                 match op {
-                    Add => Ok((non_null!(left) + non_null!(right))?),
-                    Subtract => Ok((non_null!(left) - non_null!(right))?),
-                    Multiply => Ok((non_null!(left) * non_null!(right))?),
-                    Divide => Ok((non_null!(left) / non_null!(right))?),
+                    Add => Ok((non_null!(&left) + non_null!(&right))?),
+                    Subtract => Ok((non_null!(&left) - non_null!(&right))?),
+                    Multiply => Ok((non_null!(&left) * non_null!(&right))?),
+                    Divide => Ok((non_null!(&left) / non_null!(&right))?),
                     And => Ok((non_null!(left).is_truthy() && non_null!(right).is_truthy()).into()),
                     Or => Ok((non_null!(left).is_truthy() || non_null!(right).is_truthy()).into()),
                     Equal => Ok((non_null!(left)
-                        == &non_null!(right).coerce_to(left_ty, right_ty)?)
-                        .into()),
+                        == non_null!(right).coerce_to(left_ty, right_ty)?)
+                    .into()),
                     NotEqual => Ok((non_null!(left)
-                        != &non_null!(right).coerce_to(left_ty, right_ty)?)
-                        .into()),
+                        != non_null!(right).coerce_to(left_ty, right_ty)?)
+                    .into()),
                     Greater => Ok((non_null!(left) > non_null!(right)).into()),
                     GreaterOrEqual => Ok((non_null!(left) >= non_null!(right)).into()),
                     Less => Ok((non_null!(left) < non_null!(right)).into()),

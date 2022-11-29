@@ -24,17 +24,6 @@ macro_rules! try_cast_or_none {
     }};
 }
 
-macro_rules! non_null_owned {
-    ($df_value:expr) => {{
-        let val = $df_value;
-        if val.is_none() {
-            return Ok(DfValue::None);
-        } else {
-            val
-        }
-    }};
-}
-
 /// Returns the type of data stored in a JSON value as a string.
 fn get_json_value_type(json: &serde_json::Value) -> &'static str {
     match json {
@@ -344,11 +333,11 @@ where
     D: Borrow<DfValue>,
 {
     let arg1 = args.first();
-    let mut res = non_null_owned!(arg1.eval(record)?);
+    let mut res = non_null!(arg1.eval(record)?);
     let mut res_ty = arg1.ty();
     let mut res_compare = try_cast_or_none!(res, compare_as, arg1.ty());
     for arg in args.iter().skip(1) {
-        let val = non_null_owned!(arg.eval(record)?);
+        let val = non_null!(arg.eval(record)?);
         let val_compare = try_cast_or_none!(val, compare_as, arg.ty());
         if compare(&val_compare, &res_compare) {
             res = val;
@@ -412,7 +401,7 @@ impl BuiltinFunction {
                 let param = arg.eval(record)?;
                 let param_cast = try_cast_or_none!(param, &DfType::Date, arg.ty());
                 Ok(DfValue::UnsignedInt(
-                    month(&(NaiveDate::try_from(non_null!(param_cast))?)) as u64,
+                    month(&(NaiveDate::try_from(non_null!(&param_cast))?)) as u64,
                 ))
             }
             BuiltinFunction::Timediff(arg1, arg2) => {
@@ -481,11 +470,11 @@ impl BuiltinFunction {
                 let expr = arg1.eval(record)?;
                 let param2 = arg2.eval(record)?;
                 let rnd_prec = match non_null!(param2) {
-                    DfValue::Int(inner) => *inner as i32,
-                    DfValue::UnsignedInt(inner) => *inner as i32,
+                    DfValue::Int(inner) => inner as i32,
+                    DfValue::UnsignedInt(inner) => inner as i32,
                     DfValue::Float(f) => f.round() as i32,
                     DfValue::Double(f) => f.round() as i32,
-                    DfValue::Numeric(ref d) => {
+                    DfValue::Numeric(d) => {
                         // TODO(fran): I don't know if this is the right thing to do.
                         d.round().to_i32().ok_or_else(|| {
                             ReadySetError::BadRequest(format!(
@@ -525,11 +514,11 @@ impl BuiltinFunction {
                     DfValue::Float(float) => round!(float, f32),
                     DfValue::Double(double) => round!(double, f64),
                     DfValue::Int(val) => {
-                        let rounded = integer_rnd(*val as i128, rnd_prec);
+                        let rounded = integer_rnd(val as i128, rnd_prec);
                         Ok(DfValue::Int(rounded as _))
                     }
                     DfValue::UnsignedInt(val) => {
-                        let rounded = integer_rnd(*val as i128, rnd_prec);
+                        let rounded = integer_rnd(val as i128, rnd_prec);
                         Ok(DfValue::Int(rounded as _))
                     }
                     DfValue::Numeric(d) => {
@@ -603,7 +592,7 @@ impl BuiltinFunction {
             BuiltinFunction::JsonbInsert(target_json, key_path, inserted_json, insert_after) => {
                 let mut target_json = non_null!(target_json.eval(record)?).to_json()?;
 
-                let key_path = non_null_owned!(key_path.eval(record)?);
+                let key_path = non_null!(key_path.eval(record)?);
                 let key_path = key_path.as_array()?.values();
 
                 let inserted_json = non_null!(inserted_json.eval(record)?).to_json()?;
