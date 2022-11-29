@@ -47,7 +47,7 @@ pub use self::set::{
 pub use self::show::ShowStatement;
 pub use self::sql_identifier::SqlIdentifier;
 pub use self::sql_type::{EnumVariants, SqlType};
-pub use self::table::{replicator_table_list, Relation, TableExpr};
+pub use self::table::{replicator_table_list, Relation, TableExpr, TableExprInner};
 pub use self::update::UpdateStatement;
 pub use self::use_statement::UseStatement;
 

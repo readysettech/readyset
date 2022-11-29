@@ -7,7 +7,7 @@ use nom_sql::{
 };
 use readyset_errors::{ReadySetError, ReadySetResult};
 
-use crate::util::{self, join_clause_tables};
+use crate::util::{self, outermost_named_tables};
 
 pub trait StarExpansion: Sized {
     /// Expand all `*` column references in the query given a map from tables to the lists of
@@ -60,13 +60,8 @@ impl<'ast, 'schema> VisitorMut<'ast> for ExpandStarsVisitor<'schema> {
         for field in fields {
             match field {
                 FieldDefinitionExpr::All => {
-                    for table_expr in &select_statement.tables {
-                        for field in expand_table(table_expr.table.clone())? {
-                            select_statement.fields.push(field);
-                        }
-                    }
-                    for table_expr in select_statement.join.iter().flat_map(join_clause_tables) {
-                        for field in expand_table(table_expr.table.clone())? {
+                    for name in outermost_named_tables(select_statement).collect::<Vec<_>>() {
+                        for field in expand_table(name)? {
                             select_statement.fields.push(field);
                         }
                     }

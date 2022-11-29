@@ -5,14 +5,13 @@ use itertools::Either;
 use nom_sql::analysis::is_aggregate;
 use nom_sql::{
     BinaryOperator, Column, CommonTableExpr, Expr, FieldDefinitionExpr, FunctionExpr, InValue,
-    JoinClause, JoinRightSide, Relation, SelectStatement, SqlIdentifier, TableExpr,
+    JoinClause, JoinRightSide, Relation, SelectStatement, SqlIdentifier, TableExpr, TableExprInner,
 };
 
 pub(crate) fn join_clause_tables(join: &JoinClause) -> impl Iterator<Item = &TableExpr> {
     match &join.right {
         JoinRightSide::Table(table) => Either::Left(iter::once(table)),
-        JoinRightSide::Tables(tables) => Either::Right(Either::Left(tables.iter())),
-        JoinRightSide::NestedSelect(..) => Either::Right(Either::Right(iter::empty())),
+        JoinRightSide::Tables(tables) => Either::Right(tables.iter()),
     }
 }
 
@@ -24,18 +23,21 @@ pub fn outermost_table_exprs(stmt: &SelectStatement) -> impl Iterator<Item = &Ta
         .chain(stmt.join.iter().flat_map(join_clause_tables))
 }
 
+pub(crate) fn outermost_named_tables(
+    stmt: &SelectStatement,
+) -> impl Iterator<Item = Relation> + '_ {
+    outermost_table_exprs(stmt).filter_map(|tbl| {
+        tbl.alias
+            .clone()
+            .map(Relation::from)
+            .or_else(|| tbl.inner.as_table().cloned())
+    })
+}
+
 /// Returns true if the given select statement is *correlated* if used as a subquery, eg if it
 /// refers to tables not explicitly mentioned in the query
 pub fn is_correlated(statement: &SelectStatement) -> bool {
-    let tables: HashSet<_> = outermost_table_exprs(statement)
-        .map(|tbl| {
-            tbl.alias
-                .clone()
-                .map(Relation::from)
-                .unwrap_or_else(|| tbl.table.clone())
-        })
-        .collect();
-
+    let tables: HashSet<_> = outermost_named_tables(statement).collect();
     statement
         .outermost_referred_columns()
         .any(|col| col.table.iter().any(|tbl| !tables.contains(tbl)))
@@ -63,10 +65,19 @@ pub(crate) fn subquery_schemas<'a>(
 ) -> HashMap<&'a SqlIdentifier, Vec<&'a SqlIdentifier>> {
     ctes.iter()
         .map(|cte| (&cte.name, &cte.statement))
-        .chain(join.iter().filter_map(|join| match &join.right {
-            JoinRightSide::NestedSelect(stmt, name) => Some((name, stmt.as_ref())),
-            _ => None,
-        }))
+        .chain(
+            join.iter()
+                .flat_map(|join| match &join.right {
+                    JoinRightSide::Table(t) => Either::Left(iter::once(t)),
+                    JoinRightSide::Tables(ts) => Either::Right(ts.iter()),
+                })
+                .filter_map(|te| match &te.inner {
+                    TableExprInner::Subquery(sq) => {
+                        te.alias.as_ref().map(|alias| (alias, sq.as_ref()))
+                    }
+                    TableExprInner::Table(_) => None,
+                }),
+        )
         .map(|(name, stmt)| (name, field_names(stmt).collect()))
         .collect()
 }

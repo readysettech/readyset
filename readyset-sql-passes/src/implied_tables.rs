@@ -6,7 +6,7 @@ use nom_sql::analysis::visit_mut::{
     walk_group_by_clause, walk_order_clause, walk_select_statement, VisitorMut,
 };
 use nom_sql::{
-    Column, FieldDefinitionExpr, JoinRightSide, Relation, SelectStatement, SqlIdentifier, SqlQuery,
+    Column, FieldDefinitionExpr, Relation, SelectStatement, SqlIdentifier, SqlQuery, TableExprInner,
 };
 use readyset_errors::{internal, invalid_err, ReadySetError, ReadySetResult};
 use tracing::warn;
@@ -89,19 +89,18 @@ impl<'ast, 'schema> VisitorMut<'ast> for ExpandImpliedTablesVisitor<'schema> {
         let orig_tables = mem::replace(
             &mut self.tables,
             outermost_table_exprs(select_statement)
-                .map(|tbl| {
-                    (
-                        tbl.table.clone(),
+                .filter_map(|tbl| {
+                    Some((
+                        match &tbl.inner {
+                            TableExprInner::Table(t) => t.clone(),
+                            TableExprInner::Subquery(_) => tbl.alias.clone()?.into(),
+                        },
                         tbl.alias
                             .clone()
                             .map(Relation::from)
-                            .unwrap_or_else(|| tbl.table.clone()),
-                    )
+                            .or_else(|| tbl.inner.as_table().cloned())?,
+                    ))
                 })
-                .chain(select_statement.join.iter().filter_map(|j| match &j.right {
-                    JoinRightSide::NestedSelect(_, alias) => Some((alias.into(), alias.into())),
-                    _ => None,
-                }))
                 .collect(),
         );
         let orig_subquery_schemas = mem::replace(

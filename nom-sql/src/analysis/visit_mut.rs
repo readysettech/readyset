@@ -22,8 +22,8 @@ use crate::{
     ExplainStatement, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, GroupByClause,
     InValue, InsertStatement, JoinClause, JoinConstraint, JoinRightSide, Literal, OrderClause,
     Relation, SelectSpecification, SelectStatement, SetNames, SetPostgresParameter, SetStatement,
-    SetVariables, ShowStatement, SqlIdentifier, SqlQuery, SqlType, TableExpr, TableKey,
-    UpdateStatement, UseStatement,
+    SetVariables, ShowStatement, SqlIdentifier, SqlQuery, SqlType, TableExpr, TableExprInner,
+    TableKey, UpdateStatement, UseStatement,
 };
 
 /// Each method of the `VisitorMut` trait is a hook to be potentially overridden when recursively
@@ -553,9 +553,6 @@ pub fn walk_join_clause<'ast, V: VisitorMut<'ast>>(
                 visitor.visit_table_expr(table_expr)?;
             }
         }
-        JoinRightSide::NestedSelect(statement, _) => {
-            visitor.visit_select_statement(statement.as_mut())?
-        }
     }
 
     visitor.visit_join_constraint(&mut join.constraint)
@@ -662,7 +659,10 @@ pub fn walk_table_expr<'ast, V: VisitorMut<'ast>>(
     visitor: &mut V,
     table_expr: &'ast mut TableExpr,
 ) -> Result<(), V::Error> {
-    visitor.visit_table(&mut table_expr.table)?;
+    match &mut table_expr.inner {
+        TableExprInner::Table(table) => visitor.visit_table(table)?,
+        TableExprInner::Subquery(sq) => visitor.visit_select_statement(sq)?,
+    }
     if let Some(ref mut alias) = table_expr.alias {
         visitor.visit_sql_identifier(alias)?;
     }

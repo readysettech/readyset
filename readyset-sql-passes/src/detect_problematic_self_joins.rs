@@ -4,7 +4,7 @@ use std::iter;
 use itertools::{Either, Itertools};
 use nom_sql::{
     BinaryOperator, Column, Expr, FieldDefinitionExpr, JoinConstraint, JoinRightSide, Relation,
-    SelectStatement, SqlIdentifier, SqlQuery, TableExpr,
+    SelectStatement, SqlIdentifier, SqlQuery, TableExpr, TableExprInner,
 };
 use readyset_errors::{internal_err, invalid_err, unsupported, unsupported_err, ReadySetResult};
 
@@ -37,7 +37,7 @@ fn check_select_statement<'a>(
 
         let table_matches = |tbl: &TableExpr| {
             (table.schema.is_none() && tbl.alias.as_ref() == Some(&table.name))
-                || tbl.table == *table
+                || matches!(&tbl.inner, TableExprInner::Table(t) if t == table)
         };
 
         macro_rules! once_ok {
@@ -49,8 +49,12 @@ fn check_select_statement<'a>(
             };
         }
 
-        if let Some(tbl) = stmt.tables.iter().find(|t| table_matches(t)) {
-            Ok(once_ok!(tbl.table.clone(), col.name.as_str()))
+        if let Some(TableExpr {
+            inner: TableExprInner::Table(tbl),
+            ..
+        }) = stmt.tables.iter().find(|t| table_matches(t))
+        {
+            Ok(once_ok!(tbl.clone(), col.name.as_str()))
         } else {
             let ctes = cte_ctx
                 .iter()
@@ -103,26 +107,36 @@ fn check_select_statement<'a>(
             let mut res = None;
             for j in &stmt.join {
                 match &j.right {
-                    JoinRightSide::Table(t) if table_matches(t) => {
-                        res = Some(once_ok!(t.table.clone(), col.name.as_str()));
+                    JoinRightSide::Table(
+                        te @ TableExpr {
+                            inner: TableExprInner::Table(t),
+                            ..
+                        },
+                    ) if table_matches(te) => {
+                        res = Some(once_ok!(t.clone(), col.name.as_str()));
                         break;
                     }
-                    JoinRightSide::Tables(ts) => {
-                        if let Some(tbl) = ts.iter().find(|t| table_matches(t)) {
-                            res = Some(once_ok!(tbl.table.clone(), col.name.as_str()));
-                            break;
-                        }
-                    }
-                    JoinRightSide::NestedSelect(stmt, alias)
-                        if table.schema.is_none() && *alias == table.name =>
-                    {
+                    JoinRightSide::Table(TableExpr {
+                        inner: TableExprInner::Subquery(sq),
+                        alias: Some(alias),
+                    }) if table.schema.is_none() && *alias == table.name => {
                         res = Some(Either::Right(trace_subquery(
-                            stmt,
+                            sq,
                             table.clone(),
                             &col.name,
                             &ctes,
                         )?));
                         break;
+                    }
+                    JoinRightSide::Tables(ts) => {
+                        if let Some(TableExpr {
+                            inner: TableExprInner::Table(tbl),
+                            ..
+                        }) = ts.iter().find(|t| table_matches(t))
+                        {
+                            res = Some(once_ok!(tbl.clone(), col.name.as_str()));
+                            break;
+                        }
                     }
                     _ => {}
                 }

@@ -12,7 +12,7 @@ use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
     BinaryOperator, Column, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, InValue,
     ItemPlaceholder, JoinConstraint, JoinOperator, JoinRightSide, Literal, OrderType, Relation,
-    SelectStatement, SqlIdentifier, UnaryOperator,
+    SelectStatement, SqlIdentifier, TableExpr, TableExprInner, UnaryOperator,
 };
 use readyset_client::{PlaceholderIdx, ViewPlaceholder};
 use readyset_errors::{
@@ -827,13 +827,21 @@ pub(crate) fn extract_limit_offset(
     Ok(Some((limit as _, offset)))
 }
 
+fn table_expr_name(table_expr: &TableExpr) -> ReadySetResult<Relation> {
+    match &table_expr.inner {
+        TableExprInner::Table(t) => Ok(t.clone()),
+        TableExprInner::Subquery(_) => Ok(table_expr
+            .alias
+            .as_ref()
+            .ok_or_else(|| invalid_err!("All subqueries must have an alias"))?
+            .clone()
+            .into()),
+    }
+}
+
 #[allow(clippy::cognitive_complexity)]
 pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
     let mut qg = QueryGraph::new();
-
-    if st.tables.is_empty() {
-        unsupported!("SELECT statements with no tables are unsupported")
-    }
 
     // a handy closure for making new relation nodes
     let new_node = |rel: Relation,
@@ -893,37 +901,48 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
     // 1. Add any relations mentioned in the query to the query graph.
     // This is needed so that we don't end up with an empty query graph when there are no
     // conditionals, but rather with a one-node query graph that has no predicates.
-    for table_expr in &st.tables {
-        let rel: Relation = table_expr.table.clone();
-        qg.relations
-            .insert(rel.clone(), new_node(rel.clone(), Vec::new(), st)?);
+
+    let mut add_table_expr = |table_expr: &TableExpr| -> ReadySetResult<Relation> {
+        match &table_expr.inner {
+            TableExprInner::Table(t) => {
+                qg.relations
+                    .insert(t.clone(), new_node(t.clone(), vec![], st)?);
+                Ok(t.clone())
+            }
+            TableExprInner::Subquery(sq) => {
+                let rel = Relation::from(
+                    table_expr
+                        .alias
+                        .as_ref()
+                        .ok_or_else(|| invalid_err!("All subqueries must have an alias"))?
+                        .clone(),
+                );
+                if let Entry::Vacant(e) = qg.relations.entry(rel.clone()) {
+                    let mut node = new_node(rel.clone(), vec![], st)?;
+                    node.subgraph = Some((Box::new(to_query_graph(sq)?), sq.as_ref().clone()));
+                    e.insert(node);
+                }
+
+                Ok(rel)
+            }
+        }
+    };
+
+    for table_expr in st.tables.iter() {
+        let rel = add_table_expr(table_expr)?;
         inner_join_rels.insert(rel);
     }
+
     for jc in &st.join {
         match &jc.right {
             JoinRightSide::Table(table_expr) => {
-                if !qg.relations.contains_key(&table_expr.table) {
-                    let name = table_expr.table.clone();
-                    if jc.operator.is_inner_join() {
-                        inner_join_rels.insert(name.clone());
-                    }
-                    qg.relations
-                        .insert(name.clone(), new_node(name, Vec::new(), st)?);
-                }
-            }
-            JoinRightSide::NestedSelect(subquery, alias) => {
-                let rel: Relation = alias.clone().into();
+                let rel = add_table_expr(table_expr)?;
                 if jc.operator.is_inner_join() {
-                    inner_join_rels.insert(rel.clone());
-                }
-                if let Entry::Vacant(e) = qg.relations.entry(rel.clone()) {
-                    let mut node = new_node(rel, vec![], st)?;
-                    node.subgraph = Some((Box::new(to_query_graph(subquery)?), *subquery.clone()));
-                    e.insert(node);
+                    inner_join_rels.insert(rel);
                 }
             }
             JoinRightSide::Tables(_) => unsupported!("JoinRightSide::Tables not yet implemented"),
-        }
+        };
     }
 
     // 2. Add edges for each pair of joined relations. Note that we must keep track of the join
@@ -938,13 +957,15 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
 
     // 2a. Explicit joins
     // The table specified in the query is available for USING joins.
-    // TODO(DAN): why is prev_table tables.last()?
-    let prev_table = st.tables.last().cloned();
+    let prev_table =
+        table_expr_name(st.tables.last().ok_or_else(|| {
+            unsupported_err!("SELECT statements with no tables are unsupported")
+        })?)?;
+
     for jc in &st.join {
         let rhs_relation = match &jc.right {
-            JoinRightSide::Table(table) => table.table.clone(),
-            JoinRightSide::NestedSelect(_, alias) => alias.into(),
-            _ => internal!(),
+            JoinRightSide::Table(te) => table_expr_name(te)?,
+            JoinRightSide::Tables(_) => unsupported!("JoinRightSide::Tables not yet implemented"),
         };
         // will be defined by join constraint
         let left_table;
@@ -1009,9 +1030,7 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                 #[allow(clippy::unwrap_used)] // cols.len() == 1
                 let col = cols.iter().next().unwrap();
 
-                // prev_table must exist because we error on st.tables.is_empty()
-                #[allow(clippy::unwrap_used)]
-                left_table = prev_table.as_ref().unwrap().table.clone();
+                left_table = prev_table.clone();
                 right_table = rhs_relation.clone();
 
                 vec![JoinPredicate {
@@ -1020,9 +1039,7 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                 }]
             }
             JoinConstraint::Empty => {
-                // prev_table must exist because we error on st.tables.is_empty()
-                #[allow(clippy::unwrap_used)]
-                left_table = prev_table.as_ref().unwrap().table.clone();
+                left_table = prev_table.clone();
                 right_table = rhs_relation.clone();
                 // An empty predicate indicates a cartesian product is expected
                 vec![]

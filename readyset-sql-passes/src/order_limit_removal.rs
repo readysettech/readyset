@@ -43,7 +43,7 @@ fn is_unique_or_primary(
                 .find_map(|table_expr| {
                     if let Some(alias) = table_expr.alias.as_ref() {
                         if table.schema.is_none() && table.name == alias {
-                            Some(&table_expr.table)
+                            table_expr.inner.as_table()
                         } else {
                             None
                         }

@@ -1,15 +1,16 @@
 use std::collections::HashMap;
+use std::mem;
 
 use nom_sql::analysis::visit_mut::{walk_select_statement, VisitorMut};
-use nom_sql::{
-    Column, Expr, FunctionExpr, Relation, SelectStatement, SqlIdentifier, SqlQuery, TableExpr,
-};
+use nom_sql::{Column, Expr, FunctionExpr, Relation, SelectStatement, SqlIdentifier, SqlQuery};
 use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
+
+use crate::util::outermost_named_tables;
 
 #[derive(Debug)]
 pub struct CountStarRewriteVisitor<'schema> {
     schemas: &'schema HashMap<Relation, Vec<SqlIdentifier>>,
-    tables: Option<Vec<TableExpr>>,
+    tables: Option<Vec<Relation>>,
 }
 
 impl<'ast, 'schema> VisitorMut<'ast> for CountStarRewriteVisitor<'schema> {
@@ -19,8 +20,12 @@ impl<'ast, 'schema> VisitorMut<'ast> for CountStarRewriteVisitor<'schema> {
         &mut self,
         select_statement: &'ast mut SelectStatement,
     ) -> Result<(), Self::Error> {
-        self.tables = Some(select_statement.tables.clone());
+        let orig_tables = mem::replace(
+            &mut self.tables,
+            Some(outermost_named_tables(select_statement).collect()),
+        );
         walk_select_statement(self, select_statement)?;
+        self.tables = orig_tables;
         Ok(())
     }
 
@@ -38,10 +43,10 @@ impl<'ast, 'schema> VisitorMut<'ast> for CountStarRewriteVisitor<'schema> {
 
             let mut schema_iter = self
                 .schemas
-                .get(&bogo_table.table)
+                .get(&bogo_table)
                 .ok_or_else(|| ReadySetError::TableNotFound {
-                    name: bogo_table.table.name.clone().into(),
-                    schema: bogo_table.table.schema.clone().map(Into::into),
+                    name: bogo_table.name.clone().into(),
+                    schema: bogo_table.schema.clone().map(Into::into),
                 })?
                 .iter();
             // The columns in the table_columns map are actually columns as seen from the
@@ -58,7 +63,7 @@ impl<'ast, 'schema> VisitorMut<'ast> for CountStarRewriteVisitor<'schema> {
                     arguments: vec![
                         Expr::Column(Column {
                             name: bogo_column.clone(),
-                            table: Some(bogo_table.table.clone()),
+                            table: Some(bogo_table.clone()),
                         }),
                         Expr::Literal(0.into()),
                     ],

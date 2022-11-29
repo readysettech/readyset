@@ -43,7 +43,7 @@ mod types {
         for<'a> V: FromSql<'a>,
     {
         let (config, _handle) = setup().await;
-        let client = connect(config).await;
+        let mut client = connect(config).await;
 
         sleep().await;
 
@@ -80,8 +80,12 @@ mod types {
         // Can't compare JSON for equality in postgres
         if type_name.to_string() != "json" {
             // check parameter passing and value returning when going through fallback
+
             let fallback_result = client
-                .query_one("SELECT x FROM (SELECT x FROM t WHERE x = $1) sq", &[&val])
+                .transaction()
+                .await
+                .unwrap()
+                .query_one("SELECT x FROM t WHERE x = $1", &[&val])
                 .await
                 .unwrap()
                 .get::<_, V>(0);

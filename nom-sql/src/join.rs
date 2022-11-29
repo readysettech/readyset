@@ -1,6 +1,6 @@
-use std::{fmt, str};
+use std::{fmt, iter, str};
 
-use itertools::Itertools;
+use itertools::{Either, Itertools};
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::map;
@@ -9,27 +9,30 @@ use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
 use crate::column::Column;
-use crate::select::SelectStatement;
-use crate::{Expr, NomSqlResult, SqlIdentifier, TableExpr};
+use crate::{Expr, NomSqlResult, TableExpr};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum JoinRightSide {
-    /// A single table.
+    /// A single table expression.
     Table(TableExpr),
     /// A comma-separated (and implicitly joined) sequence of tables.
     Tables(Vec<TableExpr>),
-    /// A nested selection, represented as (query, alias).
-    NestedSelect(Box<SelectStatement>, SqlIdentifier),
+}
+
+impl JoinRightSide {
+    /// Returns an iterator over the [`TableExpr`]s mentioned in this JoinRightSide
+    pub fn table_exprs(&self) -> impl Iterator<Item = &TableExpr> + '_ {
+        match self {
+            JoinRightSide::Table(t) => Either::Left(iter::once(t)),
+            JoinRightSide::Tables(ts) => Either::Right(ts.iter()),
+        }
+    }
 }
 
 impl fmt::Display for JoinRightSide {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             JoinRightSide::Table(t) => write!(f, "{}", t),
-            JoinRightSide::NestedSelect(subquery, alias) => {
-                write!(f, "({}) AS {}", subquery, alias)?;
-                Ok(())
-            }
             JoinRightSide::Tables(ts) => write!(f, "({})", ts.iter().join(", ")),
         }
     }

@@ -52,18 +52,33 @@ impl RecipeExpr {
                 match select {
                     SelectSpecification::Compound(compound_select) => {
                         references.extend(compound_select.selects.iter().flat_map(
-                            |(_, select)| select.tables.iter().map(|table| table.table.clone()),
+                            |(_, select)| {
+                                select
+                                    .tables
+                                    .iter()
+                                    .filter_map(|te| te.inner.as_table().cloned())
+                            },
                         ));
                     }
                     SelectSpecification::Simple(select) => {
-                        references.extend(select.tables.iter().map(|table| table.table.clone()));
+                        references.extend(
+                            select
+                                .tables
+                                .iter()
+                                .filter_map(|te| te.inner.as_table().cloned()),
+                        );
                     }
                 }
                 references
             }
             RecipeExpr::Cache { statement, .. } => {
                 let mut references = HashSet::with_capacity(statement.tables.len());
-                references.extend(statement.tables.iter().map(|t| t.table.clone()));
+                references.extend(
+                    statement
+                        .tables
+                        .iter()
+                        .filter_map(|te| te.inner.as_table().cloned()),
+                );
                 references
             }
         }

@@ -2,10 +2,10 @@ use std::collections::HashMap;
 use std::mem;
 
 use itertools::Itertools;
-use nom_sql::analysis::visit_mut::{walk_select_statement, VisitorMut};
+use nom_sql::analysis::visit_mut::{self, walk_select_statement, VisitorMut};
 use nom_sql::{
     Column, CommonTableExpr, JoinRightSide, Relation, SelectStatement, SqlIdentifier, SqlQuery,
-    TableExpr,
+    TableExpr, TableExprInner,
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -62,9 +62,8 @@ impl<'ast, 'a> VisitorMut<'ast> for RemoveAliasesVisitor<'a> {
             .chain(select_statement.join.iter().flat_map(|j| match j.right {
                 JoinRightSide::Table(ref table) => vec![table.clone()],
                 JoinRightSide::Tables(ref ts) => ts.clone(),
-                _ => vec![],
             }))
-            .map(|t| (t.table, t.alias))
+            .filter_map(|t| Some((t.inner.try_into_table().ok()?, t.alias)))
             .unique()
             .into_group_map();
 
@@ -156,16 +155,22 @@ impl<'ast, 'a> VisitorMut<'ast> for RemoveAliasesVisitor<'a> {
             .and_then(|t| self.table_remap.get(t))
             .cloned()
         {
-            table_expr.table = table
-        } else if table_expr.table.schema.is_none()
-            && let Some(table) = self.col_table_remap.get(&table_expr.table.name) {
+            table_expr.inner = TableExprInner::Table(table);
+        } else if let TableExprInner::Table(orig_table @ Relation {
+            schema: None,
+            ..
+        }) = &table_expr.inner
+            && let Some(table) = self.col_table_remap.get(&orig_table.name) {
             // No schema, but table name in `col_table_remap`, means we're referencing an aliased
             // subquery or CTE
-            table_expr.table = table.clone();
+            table_expr.inner = TableExprInner::Table(table.clone());
         }
-        table_expr.alias = None;
 
-        Ok(())
+        if !matches!(&table_expr.inner, TableExprInner::Subquery(_)) {
+            table_expr.alias = None;
+        }
+
+        visit_mut::walk_table_expr(self, table_expr)
     }
 
     fn visit_column(&mut self, column: &'ast mut Column) -> Result<(), Self::Error> {
@@ -218,7 +223,7 @@ mod tests {
     use nom_sql::{
         parse_query, parser, BinaryOperator, Column, Dialect, Expr, FieldDefinitionExpr,
         ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, Literal,
-        Relation, SelectStatement, SqlQuery, TableExpr,
+        Relation, SelectStatement, SqlQuery, TableExpr, TableExprInner,
     };
 
     use super::{AliasRemoval, TableAliasRewrite};
@@ -242,10 +247,10 @@ mod tests {
     fn it_removes_aliases() {
         let q = SelectStatement {
             tables: vec![TableExpr {
-                table: Relation {
+                inner: TableExprInner::Table(Relation {
                     name: "PaperTag".into(),
                     schema: None,
-                },
+                }),
                 alias: Some("t".into()),
             }],
             fields: vec![FieldDefinitionExpr::from(Column::from("t.id"))],
@@ -280,10 +285,10 @@ mod tests {
                 assert_eq!(
                     tq.tables,
                     vec![TableExpr {
-                        table: Relation {
+                        inner: TableExprInner::Table(Relation {
                             schema: None,
                             name: "PaperTag".into(),
-                        },
+                        }),
                         alias: None,
                     }]
                 );
@@ -315,10 +320,10 @@ mod tests {
         };
         let q = SelectStatement {
             tables: vec![TableExpr {
-                table: Relation {
+                inner: TableExprInner::Table(Relation {
                     schema: None,
                     name: "PaperTag".into(),
-                },
+                }),
                 alias: Some("t".into()),
             }],
             fields: vec![FieldDefinitionExpr::from(col_small.clone())],
@@ -350,10 +355,10 @@ mod tests {
                 assert_eq!(
                     tq.tables,
                     vec![TableExpr {
-                        table: Relation {
+                        inner: TableExprInner::Table(Relation {
                             schema: None,
                             name: "PaperTag".into(),
-                        },
+                        }),
                         alias: None,
                     }]
                 );
@@ -391,10 +396,10 @@ mod tests {
                 assert_eq!(
                     tq.tables,
                     vec![TableExpr {
-                        table: Relation {
+                        inner: TableExprInner::Table(Relation {
                             schema: None,
                             name: "__query_name__t1".into(),
-                        },
+                        }),
                         alias: None,
                     }]
                 );
@@ -403,10 +408,10 @@ mod tests {
                     vec![JoinClause {
                         operator: JoinOperator::Join,
                         right: JoinRightSide::Table(TableExpr {
-                            table: Relation {
+                            inner: TableExprInner::Table(Relation {
                                 schema: None,
                                 name: "__query_name__t2".into(),
-                            },
+                            }),
                             alias: None,
                         }),
                         constraint: JoinConstraint::On(Expr::BinaryOp {

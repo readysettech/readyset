@@ -11,8 +11,8 @@ use nom_locate::LocatedSpan;
 use serde::{Deserialize, Serialize};
 
 use crate::common::{
-    as_alias, field_definition_expr, field_list, field_reference_list,
-    terminated_with_statement_terminator, ws_sep_comma, FieldDefinitionExpr,
+    field_definition_expr, field_list, field_reference_list, terminated_with_statement_terminator,
+    ws_sep_comma, FieldDefinitionExpr,
 };
 use crate::expression::expression;
 use crate::join::{join_operator, JoinConstraint, JoinOperator, JoinRightSide};
@@ -299,23 +299,13 @@ fn join_clause(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<
 
 fn join_rhs(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], JoinRightSide> {
     move |i| {
-        let nested_select = map(
-            tuple((
-                delimited(
-                    terminated(tag("("), whitespace0),
-                    nested_selection(dialect),
-                    preceded(whitespace0, tag(")")),
-                ),
-                as_alias(dialect),
-            )),
-            |(statement, alias)| JoinRightSide::NestedSelect(Box::new(statement), alias),
-        );
-        let table = map(table_expr(dialect), JoinRightSide::Table);
-        let tables = map(
-            delimited(tag("("), table_expr_list(dialect), tag(")")),
-            JoinRightSide::Tables,
-        );
-        alt((nested_select, table, tables))(i)
+        alt((
+            map(table_expr(dialect), JoinRightSide::Table),
+            map(
+                delimited(tag("("), table_expr_list(dialect), tag(")")),
+                JoinRightSide::Tables,
+            ),
+        ))(i)
     }
 }
 
@@ -347,7 +337,6 @@ pub fn selection(
 #[derive(Debug)]
 enum FromClause {
     Tables(Vec<TableExpr>),
-    NestedSelect(Box<SelectStatement>, Option<SqlIdentifier>),
     Join {
         lhs: Box<FromClause>,
         join_clause: JoinClause,
@@ -358,13 +347,8 @@ impl FromClause {
     fn into_tables_and_joins(self) -> Result<(Vec<TableExpr>, Vec<JoinClause>), String> {
         use FromClause::*;
 
-        // The current representation means that a nested select on the lhs of a join is never
-        // allowed
-        let lhs_nested_select = Err("SELECT from subqueries is not currently supported".to_owned());
-
         match self {
             Tables(tables) => Ok((tables, vec![])),
-            NestedSelect(_, _) => lhs_nested_select,
             Join {
                 mut lhs,
                 join_clause,
@@ -373,7 +357,6 @@ impl FromClause {
                 let tables = loop {
                     match *lhs {
                         Tables(tables) => break tables,
-                        NestedSelect(_, _) => return lhs_nested_select,
                         Join {
                             lhs: new_lhs,
                             join_clause,
@@ -387,21 +370,6 @@ impl FromClause {
                 Ok((tables, joins))
             }
         }
-    }
-}
-
-fn nested_select(
-    dialect: Dialect,
-) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], FromClause> {
-    move |i| {
-        let (i, _) = tag("(")(i)?;
-        let (i, _) = whitespace0(i)?;
-        let (i, selection) = nested_selection(dialect)(i)?;
-        let (i, _) = whitespace0(i)?;
-        let (i, _) = tag(")")(i)?;
-
-        let (i, alias) = opt(as_alias(dialect))(i)?;
-        Ok((i, FromClause::NestedSelect(Box::new(selection), alias)))
     }
 }
 
@@ -428,9 +396,8 @@ fn nested_from_clause(
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], FromClause> {
     move |i| {
         alt((
-            delimited(tag("("), from_clause_join(dialect), tag(")")),
             map(table_expr_list(dialect), FromClause::Tables),
-            nested_select(dialect),
+            delimited(tag("("), from_clause_join(dialect), tag(")")),
         ))(i)
     }
 }
@@ -443,7 +410,6 @@ fn from_clause_tree(
             delimited(tag("("), from_clause_join(dialect), tag(")")),
             from_clause_join(dialect),
             map(table_expr_list(dialect), FromClause::Tables),
-            nested_select(dialect),
         ))(i)
     }
 }
@@ -565,6 +531,7 @@ mod tests {
     use crate::table::Relation;
     use crate::{
         to_nom_result, BinaryOperator, Expr, FunctionExpr, InValue, ItemPlaceholder, SqlType,
+        TableExprInner,
     };
 
     fn columns(cols: &[&str]) -> Vec<FieldDefinitionExpr> {
@@ -780,10 +747,10 @@ mod tests {
             res1,
             SelectStatement {
                 tables: vec![TableExpr {
-                    table: Relation {
+                    inner: TableExprInner::Table(Relation {
                         schema: None,
                         name: "PaperTag".into(),
-                    },
+                    }),
                     alias: Some("t".into()),
                 }],
                 fields: vec![FieldDefinitionExpr::All],
@@ -803,10 +770,10 @@ mod tests {
             res1,
             SelectStatement {
                 tables: vec![TableExpr {
-                    table: Relation {
+                    inner: TableExprInner::Table(Relation {
                         name: "PaperTag".into(),
                         schema: Some("db1".into()),
-                    },
+                    }),
                     alias: Some("t".into()),
                 },],
                 fields: vec![FieldDefinitionExpr::All],
@@ -1480,6 +1447,34 @@ mod tests {
     }
 
     #[test]
+    fn select_from_subquery() {
+        let res = test_parse!(
+            selection(Dialect::MySQL),
+            b"SELECT x FROM (SELECT x FROM t) sq WHERE x = 1"
+        );
+        assert_eq!(
+            res,
+            SelectStatement {
+                tables: vec![TableExpr {
+                    inner: TableExprInner::Subquery(Box::new(SelectStatement {
+                        tables: vec![TableExpr::from(Relation::from("t"))],
+                        fields: columns(&["x"]),
+                        ..Default::default()
+                    })),
+                    alias: Some("sq".into())
+                }],
+                fields: columns(&["x"]),
+                where_clause: Some(Expr::BinaryOp {
+                    lhs: Box::new(Expr::Column("x".into())),
+                    op: BinaryOperator::Equal,
+                    rhs: Box::new(Expr::Literal(1u64.into()))
+                }),
+                ..Default::default()
+            }
+        )
+    }
+
+    #[test]
     fn join_against_nested_select() {
         let t1 = b"(SELECT ol_i_id FROM order_line) AS ids";
 
@@ -1506,7 +1501,10 @@ mod tests {
             fields: columns(&["o_id", "ol_i_id"]),
             join: vec![JoinClause {
                 operator: JoinOperator::Join,
-                right: JoinRightSide::NestedSelect(Box::new(inner_select), "ids".into()),
+                right: JoinRightSide::Table(TableExpr {
+                    inner: TableExprInner::Subquery(Box::new(inner_select)),
+                    alias: Some("ids".into()),
+                }),
                 constraint: JoinConstraint::On(Expr::BinaryOp {
                     lhs: Box::new(Expr::Column(Column::from("orders.o_id"))),
                     op: BinaryOperator::Equal,
@@ -1954,10 +1952,10 @@ mod tests {
             assert_eq!(
                 res.tables,
                 vec![TableExpr {
-                    table: Relation {
+                    inner: TableExprInner::Table(Relation {
                         schema: Some("public".into()),
                         name: "User".into(),
-                    },
+                    }),
                     alias: None,
                 }]
             );

@@ -12,7 +12,9 @@ use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
 use crate::common::{as_alias, ws_sep_comma};
-use crate::{Dialect, NomSqlResult, SqlIdentifier};
+use crate::select::nested_selection;
+use crate::whitespace::whitespace0;
+use crate::{Dialect, NomSqlResult, SelectStatement, SqlIdentifier};
 
 /// A (potentially schema-qualified) name for a relation
 ///
@@ -79,16 +81,50 @@ impl<'a> From<&'a String> for Relation {
     }
 }
 
+/// An expression for a table in a query
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Hash, Serialize, Deserialize)]
+pub enum TableExprInner {
+    Table(Relation),
+    Subquery(Box<SelectStatement>),
+}
+
+impl TableExprInner {
+    pub fn as_table(&self) -> Option<&Relation> {
+        if let Self::Table(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
+
+    pub fn try_into_table(self) -> Result<Relation, Self> {
+        if let Self::Table(v) = self {
+            Ok(v)
+        } else {
+            Err(self)
+        }
+    }
+}
+
+impl Display for TableExprInner {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TableExprInner::Table(t) => write!(f, "{t}"),
+            TableExprInner::Subquery(sq) => write!(f, "({sq})"),
+        }
+    }
+}
+
 /// An expression for a table in the `FROM` clause of a query, with optional alias
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Hash, Serialize, Deserialize)]
 pub struct TableExpr {
-    pub table: Relation,
+    pub inner: TableExprInner,
     pub alias: Option<SqlIdentifier>,
 }
 
 impl Display for TableExpr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.table)?;
+        write!(f, "{}", self.inner)?;
         if let Some(alias) = &self.alias {
             write!(f, " AS `{alias}`")?;
         }
@@ -99,7 +135,10 @@ impl Display for TableExpr {
 /// Constructs a [`TableExpr`] with no alias
 impl From<Relation> for TableExpr {
     fn from(table: Relation) -> Self {
-        Self { table, alias: None }
+        Self {
+            inner: TableExprInner::Table(table),
+            alias: None,
+        }
     }
 }
 
@@ -119,13 +158,40 @@ pub fn table_list(
     move |i| separated_list1(ws_sep_comma, relation(dialect))(i)
 }
 
+fn subquery(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SelectStatement> {
+    move |i| {
+        let (i, _) = tag("(")(i)?;
+        let (i, _) = whitespace0(i)?;
+        let (i, stmt) = nested_selection(dialect)(i)?;
+        let (i, _) = whitespace0(i)?;
+        let (i, _) = tag(")")(i)?;
+
+        Ok((i, stmt))
+    }
+}
+
+fn table_expr_inner(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], TableExprInner> {
+    move |i| {
+        alt((
+            map(relation(dialect), TableExprInner::Table),
+            map(subquery(dialect), |sq| {
+                TableExprInner::Subquery(Box::new(sq))
+            }),
+        ))(i)
+    }
+}
+
 pub fn table_expr(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], TableExpr> {
     move |i| {
-        let (i, table) = relation(dialect)(i)?;
+        let (i, inner) = table_expr_inner(dialect)(i)?;
         let (i, alias) = opt(as_alias(dialect))(i)?;
-        Ok((i, TableExpr { table, alias }))
+        Ok((i, TableExpr { inner, alias }))
     }
 }
 

@@ -87,7 +87,8 @@ use nom_sql::{
     BinaryOperator, Column, ColumnConstraint, ColumnSpecification, CommonTableExpr,
     CreateTableStatement, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, InValue,
     ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, Literal, OrderClause,
-    OrderType, Relation, SelectStatement, SqlIdentifier, SqlType, TableExpr, TableKey,
+    OrderType, Relation, SelectStatement, SqlIdentifier, SqlType, TableExpr, TableExprInner,
+    TableKey,
 };
 use parking_lot::Mutex;
 use proptest::arbitrary::{any, any_with, Arbitrary};
@@ -1432,9 +1433,10 @@ impl<'a> QueryState<'a> {
                 JoinRightSide::Table(tbl) => Some(tbl),
                 _ => None,
             }))
+            .filter_map(|te| te.inner.as_table())
             .next()
         {
-            Some(tbl) => self.gen.table_mut(tbl.table.name.as_str()).unwrap(),
+            Some(tbl) => self.gen.table_mut(tbl.name.as_str()).unwrap(),
             None => self.some_table_mut(),
         }
     }
@@ -1445,7 +1447,12 @@ impl<'a> QueryState<'a> {
         query: &SelectStatement,
     ) -> &'b mut TableSpec {
         let tables_in_query = outermost_table_exprs(query)
-            .map(|tbl| tbl.alias.as_ref().unwrap_or(&tbl.table.name))
+            .map(|tbl| {
+                tbl.alias
+                    .as_ref()
+                    .or_else(|| tbl.inner.as_table().map(|t| &t.name))
+                    .unwrap()
+            })
             .collect::<HashSet<_>>();
         if let Some(table) = self
             .tables
@@ -2062,16 +2069,25 @@ fn query_has_aggregate(query: &SelectStatement) -> bool {
 }
 
 fn column_in_query<'state>(state: &mut QueryState<'state>, query: &mut SelectStatement) -> Column {
-    match query.tables.last() {
-        Some(table_expr) => {
+    match query
+        .tables
+        .iter()
+        .chain(query.join.iter().filter_map(|jc| match &jc.right {
+            JoinRightSide::Table(tbl) => Some(tbl),
+            _ => None,
+        }))
+        .filter_map(|te| te.inner.as_table())
+        .next()
+    {
+        Some(tbl) => {
             let column = state
                 .gen
-                .table_mut(table_expr.table.name.as_str())
+                .table_mut(tbl.name.as_str())
                 .unwrap()
                 .some_column_name();
             Column {
                 name: column.into(),
-                table: Some(table_expr.table.clone()),
+                table: Some(tbl.clone()),
             }
         }
         None => {
@@ -2803,7 +2819,10 @@ impl Subquery {
                 )
             }
             SubqueryPosition::Join(operator) => (
-                JoinRightSide::NestedSelect(Box::new(subquery), subquery_name.clone()),
+                JoinRightSide::Table(TableExpr {
+                    inner: TableExprInner::Subquery(Box::new(subquery)),
+                    alias: Some(subquery_name.clone()),
+                }),
                 operator,
             ),
 
@@ -2816,8 +2835,17 @@ impl Subquery {
                         name: outer_col.into(),
                     };
 
-                    let subquery_table = if let Some(table_expr) = subquery.tables.first() {
-                        table_expr.table.name.clone().into()
+                    let subquery_table = if let Some(table) = query
+                        .tables
+                        .iter()
+                        .chain(query.join.iter().filter_map(|jc| match &jc.right {
+                            JoinRightSide::Table(tbl) => Some(tbl),
+                            _ => None,
+                        }))
+                        .filter_map(|te| te.inner.as_table())
+                        .next()
+                    {
+                        table.name.clone().into()
                     } else {
                         let subquery_table = state.some_table_not_in_query_mut(query);
                         subquery
