@@ -584,12 +584,6 @@ impl SqlIncorporator {
         debug!(%query_name, "registering query");
         self.view_schemas.insert(query_name, fields);
     }
-
-    /// Upgrades the schema version for the
-    /// internal [`SqlToMirConverter`].
-    pub(super) fn upgrade_version(&mut self) {
-        self.mir_converter.upgrade_version();
-    }
 }
 
 #[cfg(test)]

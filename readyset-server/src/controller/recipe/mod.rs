@@ -462,10 +462,6 @@ impl Recipe {
             }
         }
 
-        // We upgrade schema version *after* applying changes, so that the initial
-        // queries get correctly tagged with version 0.
-        self.inc.upgrade_version();
-
         Ok(())
     }
 

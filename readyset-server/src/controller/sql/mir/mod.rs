@@ -141,8 +141,6 @@ pub(super) struct SqlToMirConverter {
     /// replicated (either due to lack of support, or because the user explicitly opted out from
     /// them being replicated)
     pub(in crate::controller::sql) non_replicated_relations: HashSet<Relation>,
-
-    pub(in crate::controller::sql) schema_version: usize,
 }
 
 impl SqlToMirConverter {
@@ -1848,10 +1846,5 @@ impl SqlToMirConverter {
 
         // finally, we output all the nodes we generated
         Ok(leaf)
-    }
-
-    /// Upgrades the schema version of the MIR nodes.
-    pub(super) fn upgrade_version(&mut self) {
-        self.schema_version += 1;
     }
 }
