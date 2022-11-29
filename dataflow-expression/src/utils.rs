@@ -1,4 +1,5 @@
 use readyset_data::{DfType, DfValue};
+use serde::Serialize;
 
 use crate::{BuiltinFunction, Expr};
 
@@ -57,6 +58,30 @@ pub fn normalize_json(json: &str) -> String {
     json.parse::<serde_json::Value>().unwrap().to_string()
 }
 
+/// Creates an empty array expression with the given number of dimensions.
+///
+/// Not intended for use outside of tests.
+#[cfg(test)]
+pub fn empty_array_expr(dimensions: usize) -> String {
+    (std::iter::repeat("array[").take(dimensions))
+        .chain(std::iter::repeat("]").take(dimensions))
+        .collect()
+}
+
+/// Converts a sequence of values to array expression syntax.
+///
+/// Not intended for use outside of tests.
+#[cfg(test)]
+pub fn iter_to_array_expr<I>(iter: I) -> String
+where
+    I: IntoIterator,
+    I::Item: std::fmt::Display,
+{
+    use itertools::Itertools;
+
+    format!("array[{}]", iter.into_iter().join(", "))
+}
+
 /// Converts a sequence of strings to array expression syntax.
 ///
 /// Not intended for use outside of tests.
@@ -66,12 +91,7 @@ where
     S: IntoIterator,
     S::Item: std::fmt::Display,
 {
-    use itertools::Itertools;
-
-    format!(
-        "array[{}]",
-        strings.into_iter().map(|s| format!("'{s}'")).join(", "),
-    )
+    iter_to_array_expr(strings.into_iter().map(|s| format!("'{s}'")))
 }
 
 /// Converts `index` to be a reverse index of `slice` if negative.
@@ -130,6 +150,29 @@ pub fn remove_bidirectional<T>(vec: &mut Vec<T>, index: isize) -> Option<T> {
     } else {
         None
     }
+}
+
+/// Returns a wrapper over a slice that can be serialized as a key/value map.
+pub fn serialize_slice_as_map<K: Serialize, V: Serialize>(slice: &[(K, V)]) -> impl Serialize + '_ {
+    struct Wrapper<'a, T> {
+        slice: &'a [T],
+    }
+
+    impl<K: Serialize, V: Serialize> Serialize for Wrapper<'_, (K, V)> {
+        fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            use serde::ser::SerializeMap;
+
+            let mut map = serializer.serialize_map(Some(self.slice.len()))?;
+
+            for (k, v) in self.slice {
+                map.serialize_entry(k, v)?;
+            }
+
+            map.end()
+        }
+    }
+
+    Wrapper { slice }
 }
 
 #[cfg(test)]

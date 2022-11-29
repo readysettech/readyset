@@ -56,6 +56,14 @@ pub enum BuiltinFunction {
     JsonOverlaps(Expr, Expr),
     /// [`json[b]_typeof`](https://www.postgresql.org/docs/current/functions-json.html)
     JsonTypeof(Expr),
+    /// [`json[b]_object`](https://www.postgresql.org/docs/current/functions-json.html)
+    JsonObject {
+        arg1: Expr,
+        arg2: Option<Expr>,
+
+        /// `json_object` allows for duplicate keys whereas `jsonb_object` does not.
+        allow_duplicate_keys: bool,
+    },
     /// [`json[b]_array_length`](https://www.postgresql.org/docs/current/functions-json.html)
     JsonArrayLength(Expr),
     /// [`json[b]_strip_nulls`](https://www.postgresql.org/docs/current/functions-json.html)
@@ -125,6 +133,7 @@ impl BuiltinFunction {
             JsonQuote { .. } => "json_quote",
             JsonOverlaps { .. } => "json_overlaps",
             JsonTypeof { .. } => "json_typeof",
+            JsonObject { .. } => "json_object",
             JsonArrayLength { .. } => "json_array_length",
             JsonStripNulls { .. } => "json_strip_nulls",
             JsonExtractPath { .. } => "json_extract_path",
@@ -182,6 +191,13 @@ impl Display for BuiltinFunction {
             }
             JsonOverlaps(arg1, arg2) => {
                 write!(f, "({}, {})", arg1, arg2)
+            }
+            JsonObject { arg1, arg2, .. } => {
+                write!(f, "({arg1}")?;
+                if let Some(arg2) = arg2 {
+                    write!(f, ", {arg2}")?;
+                }
+                write!(f, ")")
             }
             JsonExtractPath { json, keys } => {
                 write!(f, "({}, {})", json, keys.iter().join(", "))

@@ -592,6 +592,23 @@ impl BuiltinFunction {
                 &non_null!(expr2.eval(record)?).to_json()?,
             )
             .into()),
+            BuiltinFunction::JsonObject {
+                arg1: kv_pairs,
+                arg2: None,
+                allow_duplicate_keys,
+            } => crate::eval::json::json_object_from_pairs(
+                non_null!(kv_pairs.eval(record)?).as_array()?,
+                *allow_duplicate_keys,
+            ),
+            BuiltinFunction::JsonObject {
+                arg1: keys,
+                arg2: Some(values),
+                allow_duplicate_keys,
+            } => crate::eval::json::json_object_from_keys_and_values(
+                non_null!(keys.eval(record)?).as_array()?,
+                non_null!(values.eval(record)?).as_array()?,
+                *allow_duplicate_keys,
+            ),
             BuiltinFunction::JsonTypeof(expr) => {
                 let json = non_null!(expr.eval(record)?).to_json()?;
                 Ok(get_json_value_type(&json).into())
@@ -2253,6 +2270,181 @@ mod tests {
                 test_non_null(obj4, obj4, true);
                 test_non_null(obj3, obj4, false);
                 test_non_null(obj4, obj3, false);
+            }
+        }
+
+        mod json_object {
+            use super::*;
+            use crate::utils::{empty_array_expr, iter_to_array_expr};
+
+            #[track_caller]
+            fn test_nullable(
+                arg1_expr: &str,
+                arg2_expr: Option<&str>,
+                expected_json: Option<&str>,
+            ) {
+                // Normalize formatting and convert.
+                let expected_json = expected_json
+                    .map(normalize_json)
+                    .map(DfValue::from)
+                    .unwrap_or_default();
+
+                for f in ["json_object", "jsonb_object"] {
+                    let expr = match arg2_expr {
+                        None => format!("{f}({arg1_expr})"),
+                        Some(arg2_expr) => format!("{f}({arg1_expr}, {arg2_expr})"),
+                    };
+
+                    assert_eq!(
+                        eval_expr(&expr, PostgreSQL),
+                        expected_json,
+                        "incorrect result for for `{expr}`"
+                    );
+                }
+            }
+
+            #[track_caller]
+            fn test_non_null(arg1_expr: &str, arg2_expr: Option<&str>, expected_json: &str) {
+                test_nullable(arg1_expr, arg2_expr, Some(expected_json))
+            }
+
+            #[track_caller]
+            fn test_error(arg1_expr: &str, arg2_expr: Option<&str>) {
+                for f in ["json_object", "jsonb_object"] {
+                    let expr = match arg2_expr {
+                        None => format!("{f}({arg1_expr})"),
+                        Some(arg2_expr) => format!("{f}({arg1_expr}, {arg2_expr})"),
+                    };
+
+                    if let Ok(value) = try_eval_expr(&expr, PostgreSQL) {
+                        panic!("Expected error for `{expr}`, got {value:?}");
+                    };
+                }
+            }
+
+            #[test]
+            fn null_propagation() {
+                test_nullable("null", None, None);
+                test_nullable("null", Some("array[]"), None);
+                test_nullable("array[]", Some("null"), None);
+            }
+
+            #[test]
+            fn pairs_1d() {
+                #[track_caller]
+                fn test(pairs: &[&str], expected_json: &str) {
+                    let pairs = strings_to_array_expr(pairs);
+                    test_non_null(&pairs, None, expected_json);
+                }
+
+                test(&[], "{}");
+                test(&["abc", "123"], r#"{ "abc": "123" }"#);
+                test(
+                    &["abc", "123", "hello", "world"],
+                    r#"{ "abc": "123", "hello": "world" }"#,
+                );
+            }
+
+            #[test]
+            fn pairs_1d_error() {
+                #[track_caller]
+                fn test(pairs: &[&str]) {
+                    let pairs = strings_to_array_expr(pairs);
+                    test_error(&pairs, None);
+                }
+
+                // Missing pair value:
+                test(&["abc"]);
+
+                // Missing value in second pair:
+                test(&["abc", "123", "hello"]);
+            }
+
+            #[test]
+            fn pairs_2d() {
+                #[track_caller]
+                fn test(pairs: &[[&str; 2]], expected_json: &str) {
+                    let pairs = iter_to_array_expr(pairs.iter().map(strings_to_array_expr));
+                    test_non_null(&pairs, None, expected_json);
+                }
+
+                test(&[], "{}");
+                test(&[["abc", "123"]], r#"{ "abc": "123" }"#);
+                test(
+                    &[["abc", "123"], ["hello", "world"]],
+                    r#"{ "abc": "123", "hello": "world" }"#,
+                );
+            }
+
+            #[test]
+            fn pairs_2d_error() {
+                #[track_caller]
+                fn test(pairs: &[&[&str]]) {
+                    let pairs =
+                        iter_to_array_expr(pairs.iter().map(|&pair| strings_to_array_expr(pair)));
+
+                    test_error(&pairs, None);
+                }
+
+                // Missing pair value:
+                test(&[&["abc"]]);
+
+                // Extra pair elements:
+                test(&[&["abc", "123", "hello"]]);
+                test(&[&["abc", "123", "hello", "world"]]);
+
+                // Missing value in second pair:
+                test(&[&["abc", "123"], &["hello"]]);
+            }
+
+            #[test]
+            fn keys_and_values() {
+                #[track_caller]
+                fn test(keys: &[&str], values: &[&str], expected_json: &str) {
+                    let keys = strings_to_array_expr(keys);
+                    let values = strings_to_array_expr(values);
+                    test_non_null(&keys, Some(&values), expected_json);
+                }
+
+                test(&[], &[], "{}");
+                test(&["abc"], &["123"], r#"{ "abc": "123" }"#);
+                test(
+                    &["abc", "hello"],
+                    &["123", "world"],
+                    r#"{ "abc": "123", "hello": "world" }"#,
+                );
+            }
+
+            #[test]
+            fn keys_and_values_error() {
+                #[track_caller]
+                fn test(keys: &[&str], values: &[&str]) {
+                    let keys = strings_to_array_expr(keys);
+                    let values = strings_to_array_expr(values);
+                    test_error(&keys, Some(&values));
+                }
+
+                // Missing pair key:
+                test(&[], &["123"]);
+                test(&["abc"], &["123", "world"]);
+
+                // Missing pair value:
+                test(&["abc"], &[]);
+                test(&["abc", "hello"], &["123"]);
+            }
+
+            #[test]
+            fn empty() {
+                // PostgreSQL allows empty arrays of any number of dimensions.
+                for arg1_dimensions in 1..=5 {
+                    let arg1 = empty_array_expr(arg1_dimensions);
+                    test_non_null(&arg1, None, "{}");
+
+                    for arg2_dimensions in 1..=5 {
+                        let arg2 = empty_array_expr(arg2_dimensions);
+                        test_non_null(&arg1, Some(&arg2), "{}");
+                    }
+                }
             }
         }
 

@@ -1,10 +1,10 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::fmt::Write;
 use std::hash::{Hash, Hasher};
 use std::str::FromStr;
 use std::{fmt, mem};
 
-use readyset_data::DfValue;
+use readyset_data::{Array, DfValue};
 use readyset_errors::{invalid_err, ReadySetError, ReadySetResult};
 use serde::Serialize;
 use serde_json::map::Entry as JsonEntry;
@@ -187,6 +187,135 @@ pub(crate) fn json_remove_path<'k>(
     }
 
     Ok(())
+}
+
+/// A collection of key/value pairs stored as either a vector (if duplicate keys are allowed) or a
+/// hash map.
+enum EitherPairs<K, V> {
+    Vec(Vec<(K, V)>),
+    Map(BTreeMap<K, V>),
+}
+
+impl<K, V> EitherPairs<K, V> {
+    fn with_capacity(capacity: usize, allow_duplicate_keys: bool) -> Self {
+        if allow_duplicate_keys {
+            Self::Vec(Vec::with_capacity(capacity))
+        } else {
+            Self::Map(BTreeMap::new())
+        }
+    }
+
+    fn insert(&mut self, k: K, v: V)
+    where
+        K: Ord,
+    {
+        match self {
+            Self::Vec(vec) => {
+                vec.push((k, v));
+            }
+            Self::Map(map) => {
+                map.insert(k, v);
+            }
+        }
+    }
+
+    fn to_json_string(&self) -> serde_json::Result<String>
+    where
+        K: Ord + Serialize,
+        V: Serialize,
+    {
+        match self {
+            Self::Map(map) => serde_json::to_string(map),
+            Self::Vec(vec) => serde_json::to_string(&utils::serialize_slice_as_map(vec)),
+        }
+    }
+}
+
+/// Constructs a [`DfValue`] with the textual representation of a JSON object from a sequence of
+/// key/value pairs in an array.
+///
+/// If the array is 1D, the array is expected to have alternating key/value pairs. If the array is
+/// 2D, each each inner array is expected to contain a single key/value pair.
+pub(crate) fn json_object_from_pairs(
+    kv_pairs: &Array,
+    allow_duplicate_keys: bool,
+) -> ReadySetResult<DfValue> {
+    // PostgreSQL allows empty arrays of any number of dimensions.
+    if kv_pairs.is_empty() {
+        return Ok("{}".into());
+    }
+
+    // HACK: Values borrowed by `result` below need to be owned because `ArrayView::values` does not
+    // have a lifetime over `&DfValue` but rather `&ArrayView`.
+    let mut result_kv_pairs: Vec<(DfValue, DfValue)> = Vec::new();
+
+    match kv_pairs.num_dimensions() {
+        1 => {
+            if kv_pairs.total_len() % 2 != 0 {
+                return Err(invalid_err!("array must have even number of elements"));
+            }
+
+            let mut kv_pairs = kv_pairs.values();
+
+            while let (Some(k), Some(v)) = (kv_pairs.next(), kv_pairs.next()) {
+                result_kv_pairs.push((k.clone(), v.clone()));
+            }
+        }
+        2 => {
+            let arity_error = || invalid_err!("array must have two columns");
+
+            for outer_view in kv_pairs.outer_dimension() {
+                let mut kv_pair = outer_view.values();
+
+                let k = kv_pair.next().ok_or_else(arity_error)?;
+                let v = kv_pair.next().ok_or_else(arity_error)?;
+
+                if kv_pair.next().is_some() {
+                    return Err(arity_error());
+                }
+
+                result_kv_pairs.push((k.clone(), v.clone()));
+            }
+        }
+        _ => return Err(invalid_err!("wrong number of array dimensions")),
+    }
+
+    let mut result =
+        EitherPairs::<&str, &str>::with_capacity(result_kv_pairs.len(), allow_duplicate_keys);
+
+    for (k, v) in &result_kv_pairs {
+        result.insert(<&str>::try_from(k)?, <&str>::try_from(v)?);
+    }
+
+    Ok(result.to_json_string()?.into())
+}
+
+pub(crate) fn json_object_from_keys_and_values(
+    keys: &Array,
+    values: &Array,
+    allow_duplicate_keys: bool,
+) -> ReadySetResult<DfValue> {
+    // PostgreSQL allows empty arrays of any number of dimensions.
+    if keys.is_empty() && values.is_empty() {
+        return Ok("{}".into());
+    }
+
+    if keys.num_dimensions() != 1 || values.num_dimensions() != 1 {
+        return Err(invalid_err!("wrong number of array dimensions"));
+    }
+
+    if keys.total_len() != values.total_len() {
+        return Err(invalid_err!("mismatched array dimensions"));
+    }
+
+    let mut result =
+        EitherPairs::<&str, &str>::with_capacity(keys.total_len(), allow_duplicate_keys);
+
+    for (k, v) in keys.values().zip(values.values()) {
+        result.insert(<&str>::try_from(k)?, <&str>::try_from(v)?);
+    }
+
+    Ok(result.to_json_string()?.into())
 }
 
 /// Returns `true` if `parent` immediately contains all of the values in `child`.

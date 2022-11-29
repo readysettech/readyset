@@ -227,6 +227,26 @@ impl BuiltinFunction {
                 // Always returns text containing the JSON type.
                 DfType::DEFAULT_TEXT,
             ),
+            "json_object" => match dialect.engine() {
+                // TODO(ENG-1536): https://dev.mysql.com/doc/refman/8.0/en/json-creation-functions.html#function_json-object
+                SqlEngine::MySQL => unsupported!("MySQL 'json_object' not yet supported"),
+                SqlEngine::PostgreSQL => (
+                    Self::JsonObject {
+                        arg1: next_arg()?,
+                        arg2: args.next(),
+                        allow_duplicate_keys: true,
+                    },
+                    DfType::Json,
+                ),
+            },
+            "jsonb_object" => (
+                Self::JsonObject {
+                    arg1: next_arg()?,
+                    arg2: args.next(),
+                    allow_duplicate_keys: false,
+                },
+                DfType::Jsonb,
+            ),
             "json_array_length" | "jsonb_array_length" => {
                 (Self::JsonArrayLength(next_arg()?), DfType::Int)
             }
