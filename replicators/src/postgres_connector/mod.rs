@@ -1,5 +1,6 @@
 mod connector;
 mod ddl_replication;
+mod lsn;
 mod snapshot;
 mod wal;
 mod wal_reader;
@@ -10,20 +11,22 @@ pub use connector::PostgresWalConnector;
 use readyset_client::replication::ReplicationOffset;
 pub use snapshot::PostgresReplicator;
 
+use self::lsn::Lsn;
+
 pub(crate) const REPLICATION_SLOT: &str = "readyset";
 pub(crate) const PUBLICATION_NAME: &str = "readyset";
 
 #[derive(Debug, PartialEq, PartialOrd, Ord, Eq, Clone, Copy, Default)]
 pub struct PostgresPosition {
     /// Postgres Log Sequence Number
-    pub lsn: i64,
+    pub lsn: Lsn,
 }
 
 impl From<&PostgresPosition> for ReplicationOffset {
     fn from(value: &PostgresPosition) -> Self {
         ReplicationOffset {
             replication_log_name: String::new(),
-            offset: value.lsn as _,
+            offset: value.lsn.0 as _,
         }
     }
 }
@@ -37,7 +40,7 @@ impl From<PostgresPosition> for ReplicationOffset {
 impl From<ReplicationOffset> for PostgresPosition {
     fn from(val: ReplicationOffset) -> Self {
         PostgresPosition {
-            lsn: val.offset as _,
+            lsn: (val.offset as i64).into(),
         }
     }
 }
@@ -45,19 +48,25 @@ impl From<ReplicationOffset> for PostgresPosition {
 impl From<&ReplicationOffset> for PostgresPosition {
     fn from(val: &ReplicationOffset) -> Self {
         PostgresPosition {
-            lsn: val.offset as _,
+            lsn: (val.offset as i64).into(),
         }
     }
 }
 
 impl From<i64> for PostgresPosition {
-    fn from(val: i64) -> Self {
-        PostgresPosition { lsn: val }
+    fn from(i: i64) -> Self {
+        PostgresPosition { lsn: Lsn(i) }
+    }
+}
+
+impl From<Lsn> for PostgresPosition {
+    fn from(lsn: Lsn) -> Self {
+        PostgresPosition { lsn }
     }
 }
 
 impl Display for PostgresPosition {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:X}/{:X}", self.lsn >> 32, self.lsn & 0xffffffff)
+        write!(f, "{}", self.lsn)
     }
 }

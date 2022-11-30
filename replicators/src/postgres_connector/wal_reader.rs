@@ -14,6 +14,7 @@ use tokio_postgres as pgsql;
 use tracing::{debug, error, trace};
 
 use super::ddl_replication::DdlEvent;
+use super::lsn::Lsn;
 use super::wal::{self, RelationMapping, WalData, WalError, WalRecord};
 use crate::postgres_connector::wal::TupleEntry;
 
@@ -84,7 +85,7 @@ impl WalReader {
         }
     }
 
-    pub(crate) async fn next_event(&mut self) -> Result<(WalEvent, i64), WalError> {
+    pub(crate) async fn next_event(&mut self) -> Result<(WalEvent, Lsn), WalError> {
         let WalReader {
             wal,
             relations,

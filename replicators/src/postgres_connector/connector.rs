@@ -11,6 +11,7 @@ use tokio_postgres as pgsql;
 use tracing::{debug, error, info, trace, warn};
 
 use super::ddl_replication::setup_ddl_replication;
+use super::lsn::Lsn;
 use super::wal_reader::{WalEvent, WalReader};
 use super::{PostgresPosition, PUBLICATION_NAME, REPLICATION_SLOT};
 use crate::db_util::error_is_slot_not_found;
@@ -37,7 +38,7 @@ pub struct PostgresWalConnector {
     /// Reader is a decoder for binlog events
     reader: Option<WalReader>,
     /// Stores an event that was read but not handled
-    peek: Option<(WalEvent, i64)>,
+    peek: Option<(WalEvent, Lsn)>,
     /// If we just want to continue reading the log from a previous point
     next_position: Option<PostgresPosition>,
     /// The replication slot if was created for this connector
@@ -152,7 +153,7 @@ impl PostgresWalConnector {
 
     /// Waits and returns the next WAL event, while monitoring the connection
     /// handle for errors.
-    async fn next_event(&mut self) -> Result<(WalEvent, i64), WalError> {
+    async fn next_event(&mut self) -> Result<(WalEvent, Lsn), WalError> {
         let PostgresWalConnector {
             reader,
             connection_handle,
@@ -323,7 +324,7 @@ impl PostgresWalConnector {
             .as_micros() as u64
             - J2000_EPOCH_GAP;
 
-        let pos = ack.lsn + 1;
+        let pos = ack.lsn.0 + 1;
 
         // Can reply with StandbyStatusUpdate or HotStandbyFeedback
         let mut b = BytesMut::with_capacity(39);

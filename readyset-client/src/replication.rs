@@ -43,8 +43,8 @@ impl fmt::Display for ReplicationOffset {
                 self.replication_log_name, suffix, suffix_len, position
             )
         } else {
-            // Wish we could simply convert to PostgresPosition, but including it in the manifest
-            // creates a cyclic dependency hell, so duplicate the code here.
+            // Wish we could simply convert to Lsn, but it's not quite worth extracting an entire
+            // crate for Lsn to live in yet, so just duplicate the formatting here.
             let lsn = self.offset as i64;
             write!(f, "wal[{:X}/{:X}]", lsn >> 32, lsn & 0xffffffff)
         }

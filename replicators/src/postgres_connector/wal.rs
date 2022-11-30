@@ -8,6 +8,8 @@ use std::convert::{TryFrom, TryInto};
 
 use bytes::Bytes;
 
+use crate::postgres_connector::lsn::Lsn;
+
 /// An parse error
 #[derive(Debug)]
 pub enum WalError {
@@ -112,9 +114,9 @@ impl From<mysql_time::ConvertError> for WalError {
 pub enum WalData {
     XLogData {
         /// The starting point of the WAL data in this message.
-        start: i64,
+        start: Lsn,
         /// The current end of WAL on the server.
-        end: i64,
+        end: Lsn,
         /// The server's system clock at the time of transmission, as microseconds since midnight
         /// on 2000-01-01.
         time: i64,
@@ -128,7 +130,7 @@ pub enum WalData {
     /// Primary keepalive message
     Keepalive {
         /// The current end of WAL on the server.
-        end: i64,
+        end: Lsn,
         /// The server's system clock at the time of transmission, as microseconds since midnight
         /// on 2000-01-01.
         time: i64,
@@ -140,11 +142,11 @@ pub enum WalData {
     },
     StandbyStatusUpdate {
         /// The location of the last WAL byte + 1 received and written to disk in the standby.
-        ack: i64,
+        ack: Lsn,
         /// The location of the last WAL byte + 1 flushed to disk in the standby.
-        flushed: i64,
+        flushed: Lsn,
         /// The location of the last WAL byte + 1 applied in the standby.
-        applied: i64,
+        applied: Lsn,
         /// The client's system clock at the time of transmission, as microseconds since midnight
         /// on 2000-01-01.
         time: i64,
@@ -201,7 +203,7 @@ pub enum WalRecord {
     /// Sent to indicate a transaction block
     Begin {
         /// The final LSN of the transaction.
-        final_lsn: i64,
+        final_lsn: Lsn,
         /// Commit timestamp of the transaction. The value is in number of microseconds since
         /// PostgreSQL epoch (2000-01-01).
         timestamp: i64,
@@ -213,16 +215,16 @@ pub enum WalRecord {
         /// Flags; currently unused (must be 0).
         flags: u8,
         /// The LSN of the commit.
-        lsn: i64,
+        lsn: Lsn,
         /// The end LSN of the transaction
-        end_lsn: i64,
+        end_lsn: Lsn,
         /// Commit timestamp of the transaction. The value is in number of microseconds since
         /// PostgreSQL epoch (2000-01-01).
         timestamp: i64,
     },
     Origin {
         /// The LSN of the commit on the origin server.
-        lsn: i64,
+        lsn: Lsn,
         /// Name of the origin.
         /// Note that there can be multiple Origin messages inside a single transaction.
         name: Bytes,
@@ -288,7 +290,7 @@ pub enum WalRecord {
         /// Flags; Either 0 for no flags or 1 if the logical decoding message is transactional.
         transactional: bool,
         /// The LSN of the logical decoding message.
-        lsn: i64,
+        lsn: Lsn,
         /// The prefix of the logical decoding message.
         prefix: Bytes,
         /// Length of the content.
@@ -370,7 +372,7 @@ impl WalData {
             return Err(WalError::IncorrectLen(b[0]));
         }
 
-        let end = i64::from_be_bytes(b[1..9].try_into()?);
+        let end = i64::from_be_bytes(b[1..9].try_into()?).into();
         let time = i64::from_be_bytes(b[9..17].try_into()?);
         let reply = b[17];
         Ok(WalData::Keepalive { end, time, reply })
@@ -382,8 +384,8 @@ impl WalData {
             return Err(WalError::IncorrectLen(b[0]));
         }
 
-        let start = i64::from_be_bytes(b[1..9].try_into()?);
-        let end = i64::from_be_bytes(b[9..17].try_into()?);
+        let start = i64::from_be_bytes(b[1..9].try_into()?).into();
+        let end = i64::from_be_bytes(b[9..17].try_into()?).into();
         let time = i64::from_be_bytes(b[17..25].try_into()?);
         let data = b.split_off(25).try_into()?;
 
@@ -401,9 +403,9 @@ impl WalData {
             return Err(WalError::IncorrectLen(b[0]));
         }
 
-        let ack = i64::from_be_bytes(b[1..9].try_into()?);
-        let flushed = i64::from_be_bytes(b[9..17].try_into()?);
-        let applied = i64::from_be_bytes(b[17..25].try_into()?);
+        let ack = i64::from_be_bytes(b[1..9].try_into()?).into();
+        let flushed = i64::from_be_bytes(b[9..17].try_into()?).into();
+        let applied = i64::from_be_bytes(b[17..25].try_into()?).into();
         let time = i64::from_be_bytes(b[25..33].try_into()?);
         let reply = b[33];
 
@@ -445,7 +447,7 @@ impl WalRecord {
             return Err(WalError::IncorrectLen(b[0]));
         }
 
-        let final_lsn = i64::from_be_bytes(b[1..9].try_into()?);
+        let final_lsn = i64::from_be_bytes(b[1..9].try_into()?).into();
         let timestamp = i64::from_be_bytes(b[9..17].try_into()?);
         let xid = i32::from_be_bytes(b[17..21].try_into()?);
 
@@ -463,8 +465,8 @@ impl WalRecord {
         }
 
         let flags = b[1];
-        let lsn = i64::from_be_bytes(b[2..10].try_into()?);
-        let end_lsn = i64::from_be_bytes(b[10..18].try_into()?);
+        let lsn = i64::from_be_bytes(b[2..10].try_into()?).into();
+        let end_lsn = i64::from_be_bytes(b[10..18].try_into()?).into();
         let timestamp = i64::from_be_bytes(b[18..26].try_into()?);
 
         Ok(WalRecord::Commit {
@@ -731,7 +733,7 @@ impl WalRecord {
             return Err(WalError::CorruptMessage);
         }
         let transactional = b[1] == 1;
-        let lsn = i64::from_be_bytes(b[2..10].try_into()?);
+        let lsn = i64::from_be_bytes(b[2..10].try_into()?).into();
         let _ = b.split_to(10);
         let prefix = Self::consume_string(&mut b)?;
         if b.len() < 4 {
@@ -773,7 +775,7 @@ mod tests {
         assert_eq!(
             wal,
             WalData::Keepalive {
-                end: 23759656,
+                end: 23759656.into(),
                 time: 676472169479037,
                 reply: 0
             }
@@ -790,8 +792,8 @@ mod tests {
         assert_eq!(
             wal,
             WalData::XLogData {
-                start: 0,
-                end: 0,
+                start: 0.into(),
+                end: 0.into(),
                 time: 676472897894731,
                 data: WalRecord::Relation(RelationMapping {
                     id: 16431,
@@ -840,8 +842,8 @@ mod tests {
         assert_eq!(
             wal,
             WalData::XLogData {
-                start: 23900024,
-                end: 23900024,
+                start: 23900024.into(),
+                end: 23900024.into(),
                 time: 676472897894844,
                 data: WalRecord::Insert {
                     relation_id: 16431,
@@ -870,8 +872,8 @@ mod tests {
         assert_eq!(
             wal,
             WalData::XLogData {
-                start: 23900024,
-                end: 23900024,
+                start: 23900024.into(),
+                end: 23900024.into(),
                 time: 676472897894844,
                 data: WalRecord::Type {
                     id: 82161,
