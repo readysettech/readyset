@@ -731,7 +731,7 @@ mod tests {
     use test_strategy::proptest;
 
     use super::*;
-    use crate::eval::tests::eval_expr;
+    use crate::eval::tests::{eval_expr, try_eval_expr};
     use crate::lower::tests::resolve_columns;
     use crate::utils::{make_call, make_column, make_literal, strings_to_array_expr};
     use crate::Dialect;
@@ -1906,7 +1906,7 @@ mod tests {
                     assert_eq!(
                         eval_expr(&expr, PostgreSQL),
                         expected_json,
-                        "incorrect result for for `{expr}`"
+                        "incorrect result for `{expr}`"
                     );
                 }
             }
@@ -1928,6 +1928,17 @@ mod tests {
                 )
             }
 
+            #[track_caller]
+            fn test_error(json: &str, keys: &[&str], inserted_json: &str, insert_after: bool) {
+                let keys = strings_to_array_expr(keys);
+                let expr =
+                    format!("jsonb_insert('{json}', {keys}, '{inserted_json}', {insert_after})");
+
+                if let Ok(value) = try_eval_expr(&expr, PostgreSQL) {
+                    panic!("Expected error for `{expr}`, got {value:?}");
+                }
+            }
+
             #[test]
             fn null_propagation() {
                 test_nullable("null", "array[]", "'42'", Some(false), None);
@@ -1938,20 +1949,20 @@ mod tests {
 
             #[test]
             fn scalar() {
-                test_non_null("1", &["0"], "42", false, "1");
-                test_non_null("1", &["0"], "42", true, "1");
+                test_error("1", &["0"], "42", false);
+                test_error("1", &["0"], "42", true);
 
-                test_non_null("1.5", &["0"], "42", false, "1.5");
-                test_non_null("1.5", &["0"], "42", true, "1.5");
+                test_error("1.5", &["0"], "42", false);
+                test_error("1.5", &["0"], "42", true);
 
-                test_non_null("true", &["0"], "42", false, "true");
-                test_non_null("true", &["0"], "42", true, "true");
+                test_error("true", &["0"], "42", false);
+                test_error("true", &["0"], "42", true);
 
-                test_non_null("\"hi\"", &["0"], "42", false, "\"hi\"");
-                test_non_null("\"hi\"", &["0"], "42", true, "\"hi\"");
+                test_error("\"hi\"", &["0"], "42", false);
+                test_error("\"hi\"", &["0"], "42", true);
 
-                test_non_null("null", &["0"], "42", false, "null");
-                test_non_null("null", &["0"], "42", true, "null");
+                test_error("null", &["0"], "42", false);
+                test_error("null", &["0"], "42", true);
             }
 
             // NOTE: Tests for one-dimension array cases are done directly on the

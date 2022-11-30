@@ -15,8 +15,10 @@ pub(crate) fn json_remove_path<'k>(
     json: &mut JsonValue,
     keys: impl IntoIterator<Item = &'k DfValue>,
 ) -> ReadySetResult<()> {
-    if json_is_scalar(json) {
-        return Err(invalid_err!("cannot delete path in scalar"));
+    if !json.is_array() && !json.is_object() {
+        return Err(invalid_err!(
+            "Cannot delete path in non-array, non-object JSON value"
+        ));
     }
 
     // Nulls are not allowed as path keys. Otherwise, converting to `&str` should succeed because
@@ -202,6 +204,12 @@ pub(crate) fn json_insert<'k>(
     inserted_json: JsonValue,
     insert_after: bool,
 ) -> ReadySetResult<()> {
+    if !target_json.is_array() && !target_json.is_object() {
+        return Err(invalid_err!(
+            "Cannot insert path in non-array, non-object JSON value"
+        ));
+    }
+
     let key_path: Vec<&str> = key_path
         .into_iter()
         .map(TryInto::try_into)
@@ -276,14 +284,6 @@ fn parse_json_index_error(iter_count: usize) -> ReadySetError {
         "path element at position {} is not an integer",
         iter_count + 1
     )
-}
-
-fn json_is_collection(json: &JsonValue) -> bool {
-    matches!(json, JsonValue::Array { .. } | JsonValue::Object { .. })
-}
-
-fn json_is_scalar(json: &JsonValue) -> bool {
-    !json_is_collection(json)
 }
 
 // `JsonNumber` does not handle -0.0 when `arbitrary_precision` is enabled, so we special case it
