@@ -48,6 +48,23 @@ pub fn make_call(func: BuiltinFunction) -> Expr {
     }
 }
 
+/// Converts a sequence of strings to array expression syntax.
+///
+/// Not intended for use outside of tests.
+#[cfg(test)]
+pub fn strings_to_array_expr<S>(strings: S) -> String
+where
+    S: IntoIterator,
+    S::Item: std::fmt::Display,
+{
+    use itertools::Itertools;
+
+    format!(
+        "array[{}]",
+        strings.into_iter().map(|s| format!("'{s}'")).join(", "),
+    )
+}
+
 /// Converts `index` to be a reverse index of `slice` if negative.
 ///
 /// Note that the result must still be bounds-checked.

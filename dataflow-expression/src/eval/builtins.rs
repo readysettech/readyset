@@ -733,7 +733,7 @@ mod tests {
     use super::*;
     use crate::eval::tests::eval_expr;
     use crate::lower::tests::resolve_columns;
-    use crate::utils::{make_call, make_column, make_literal};
+    use crate::utils::{make_call, make_column, make_literal, strings_to_array_expr};
     use crate::Dialect;
 
     #[test]
@@ -1921,17 +1921,9 @@ mod tests {
                 insert_after: bool,
                 expected_json: &str,
             ) {
-                use itertools::Itertools;
-
-                // Convert keys to array syntax.
-                let keys = format!(
-                    "array[{}]",
-                    keys.iter().map(|k| format!("'{k}'")).join(", "),
-                );
-
                 test_nullable(
                     &format!("'{json}'"),
-                    &keys,
+                    &strings_to_array_expr(keys),
                     &format!("'{inserted_json}'"),
                     Some(insert_after),
                     Some(expected_json),
