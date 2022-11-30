@@ -9255,3 +9255,33 @@ async fn multiple_schemas_explicit() {
         vec![vec![DfValue::from("schema_1"), DfValue::from("schema_2")]]
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn multiple_aggregates_and_predicates() {
+    let mut g = start_simple_unsharded("multiple_aggregates_and_predicates").await;
+    g.extend_recipe(
+        ChangeList::from_str(
+            "CREATE TABLE t (a int, b int, c int);
+            CREATE CACHE q FROM
+                SELECT count(t.a), min(t.b) FROM t WHERE (t.a) = (t.c) AND (t.b) = (t.c)",
+            Dialect::DEFAULT_MYSQL,
+        )
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+
+    let mut t = g.table("t").await.unwrap();
+    t.insert_many(vec![
+        vec![DfValue::None, DfValue::from(5), DfValue::from(5)],
+        vec![DfValue::from(4), DfValue::from(4), DfValue::from(4)],
+        vec![DfValue::from(1), DfValue::from(3), DfValue::from(3)],
+        vec![DfValue::from(2), DfValue::from(1), DfValue::from(2)],
+    ])
+    .await
+    .unwrap();
+
+    let mut q = g.view("q").await.unwrap();
+    let res = q.lookup(&[0.into()], true).await.unwrap().into_vec();
+    assert_eq!(res, vec![vec![DfValue::from(1), DfValue::from(4)]]);
+}
