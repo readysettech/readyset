@@ -7,6 +7,13 @@ insert into t1 (x, y) values
 (1, 2),
 (2, 3)
 
+statement ok
+create table t2 (x int, y int);
+
+statement ok
+insert into t2 (x, y) values
+(1, 100)
+
 query I valuesort
 SELECT sq.x FROM (SELECT x FROM t1) sq;
 ----
@@ -27,3 +34,11 @@ SELECT * FROM (SELECT x FROM t1) sq;
 1
 1
 2
+
+query II rowsort
+SELECT sq.x, t2.y FROM (SELECT x FROM t1) sq JOIN t2 ON sq.x = t2.x
+----
+1
+100
+1
+100

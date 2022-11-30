@@ -105,40 +105,61 @@ fn check_select_statement<'a>(
             }
 
             let mut res = None;
-            for j in &stmt.join {
-                match &j.right {
-                    JoinRightSide::Table(
-                        te @ TableExpr {
-                            inner: TableExprInner::Table(t),
-                            ..
-                        },
-                    ) if table_matches(te) => {
-                        res = Some(once_ok!(t.clone(), col.name.as_str()));
-                        break;
-                    }
-                    JoinRightSide::Table(TableExpr {
-                        inner: TableExprInner::Subquery(sq),
-                        alias: Some(alias),
-                    }) if table.schema.is_none() && *alias == table.name => {
-                        res = Some(Either::Right(trace_subquery(
-                            sq,
-                            table.clone(),
-                            &col.name,
-                            &ctes,
-                        )?));
-                        break;
-                    }
-                    JoinRightSide::Tables(ts) => {
-                        if let Some(TableExpr {
-                            inner: TableExprInner::Table(tbl),
-                            ..
-                        }) = ts.iter().find(|t| table_matches(t))
-                        {
-                            res = Some(once_ok!(tbl.clone(), col.name.as_str()));
+            for te in &stmt.tables {
+                if table_matches(te) {
+                    match &te.inner {
+                        TableExprInner::Table(t) => {
+                            res = Some(once_ok!(t.clone(), col.name.as_str()));
                             break;
                         }
+                        TableExprInner::Subquery(sq) => {
+                            res = Some(Either::Right(trace_subquery(
+                                sq.as_ref(),
+                                table.clone(),
+                                &col.name,
+                                &ctes,
+                            )?));
+                        }
                     }
-                    _ => {}
+                    break;
+                }
+            }
+            if res.is_none() {
+                for j in &stmt.join {
+                    match &j.right {
+                        JoinRightSide::Table(
+                            te @ TableExpr {
+                                inner: TableExprInner::Table(t),
+                                ..
+                            },
+                        ) if table_matches(te) => {
+                            res = Some(once_ok!(t.clone(), col.name.as_str()));
+                            break;
+                        }
+                        JoinRightSide::Table(TableExpr {
+                            inner: TableExprInner::Subquery(sq),
+                            alias: Some(alias),
+                        }) if table.schema.is_none() && *alias == table.name => {
+                            res = Some(Either::Right(trace_subquery(
+                                sq,
+                                table.clone(),
+                                &col.name,
+                                &ctes,
+                            )?));
+                            break;
+                        }
+                        JoinRightSide::Tables(ts) => {
+                            if let Some(TableExpr {
+                                inner: TableExprInner::Table(tbl),
+                                ..
+                            }) = ts.iter().find(|t| table_matches(t))
+                            {
+                                res = Some(once_ok!(tbl.clone(), col.name.as_str()));
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
                 }
             }
 
