@@ -569,6 +569,7 @@ impl<'a> PostgresReplicator<'a> {
         table: &TableDescription,
         noria_table: readyset_client::Table,
         snapshot_report_interval_secs: u16,
+        snapshot_name: String,
     ) -> ReadySetResult<()> {
         let mut client = pool.get().await?;
 
@@ -579,6 +580,10 @@ impl<'a> PostgresReplicator<'a> {
             .read_only(true)
             .start()
             .await?;
+
+        // Ensure each table has a consistent view by using the same snapshot
+        let query = format!("SET TRANSACTION SNAPSHOT '{}'", snapshot_name);
+        transaction.query(query.as_str(), &[]).await?;
 
         table
             .dump(&transaction, noria_table, snapshot_report_interval_secs)
@@ -741,12 +746,15 @@ impl<'a> PostgresReplicator<'a> {
             noria_table.set_snapshot_mode(true).await?;
 
             let pool = self.pool.clone();
+
+            let snapshot_name = replication_slot.snapshot_name.clone();
             futs.push(Self::snapshot_table(
                 pool,
                 span,
                 table,
                 noria_table,
                 snapshot_report_interval_secs,
+                snapshot_name,
             ))
         }
 
