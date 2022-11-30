@@ -16,8 +16,8 @@ use nom_sql::{
 };
 use readyset_client::{PlaceholderIdx, ViewPlaceholder};
 use readyset_errors::{
-    internal, invalid_err, invariant, invariant_eq, no_table_for_col, unsupported, unsupported_err,
-    ReadySetResult,
+    internal, invalid, invalid_err, invariant, invariant_eq, no_table_for_col, unsupported,
+    unsupported_err, ReadySetResult,
 };
 use readyset_sql_passes::{is_aggregate, is_predicate, map_aggregates, LogicalOp};
 use serde::{Deserialize, Serialize};
@@ -905,8 +905,13 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
     let mut add_table_expr = |table_expr: &TableExpr| -> ReadySetResult<Relation> {
         match &table_expr.inner {
             TableExprInner::Table(t) => {
-                qg.relations
-                    .insert(t.clone(), new_node(t.clone(), vec![], st)?);
+                if qg
+                    .relations
+                    .insert(t.clone(), new_node(t.clone(), vec![], st)?)
+                    .is_some()
+                {
+                    invalid!("Table name {t} specified more than once");
+                };
                 Ok(t.clone())
             }
             TableExprInner::Subquery(sq) => {
@@ -921,6 +926,8 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                     let mut node = new_node(rel.clone(), vec![], st)?;
                     node.subgraph = Some((Box::new(to_query_graph(sq)?), sq.as_ref().clone()));
                     e.insert(node);
+                } else {
+                    invalid!("Table name {rel} specified more than once");
                 }
 
                 Ok(rel)
@@ -1350,7 +1357,7 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
 #[cfg(test)]
 mod tests {
     use assert_unordered::assert_eq_unordered;
-    use nom_sql::{parse_query, Dialect, FunctionExpr, SqlQuery};
+    use nom_sql::{parse_query, parse_select_statement, Dialect, FunctionExpr, SqlQuery};
 
     use super::*;
 
@@ -1501,6 +1508,16 @@ mod tests {
 
         let subquery_rel = qg.relations.get(&Relation::from("sq")).unwrap();
         assert!(subquery_rel.subgraph.is_some());
+    }
+
+    #[test]
+    fn duplicate_subquery_name() {
+        let query = parse_select_statement(
+            Dialect::MySQL,
+            "select * from (select * from t) q1, (select * from t) q1;",
+        )
+        .unwrap();
+        to_query_graph(&query).unwrap_err();
     }
 
     #[test]

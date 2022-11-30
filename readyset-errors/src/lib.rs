@@ -842,6 +842,18 @@ macro_rules! internal {
     };
 }
 
+/// Return a [`ReadySetError::InvalidQuery`] from the current function.
+///
+/// Usage is like [`panic!`], in that you can pass a format string and arguments.
+/// When building in debug mode, the returned error also captures file, line, and column information
+/// for further debugging purposes.
+#[macro_export]
+macro_rules! invalid {
+    ($($format_args:tt)*) => {
+        return Err($crate::invalid_err!($($format_args)*).into())
+    };
+}
+
 /// Return a [`ReadySetError::Unsupported`] from the current function.
 ///
 /// Usage is like [`panic!`], in that you can pass a format string and arguments.
