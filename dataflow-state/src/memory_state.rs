@@ -144,7 +144,9 @@ impl State for MemoryState {
             }
         }
 
-        self.replication_offset = replication_offset;
+        if let Some(replication_offset) = replication_offset {
+            self.replication_offset = Some(replication_offset);
+        }
     }
 
     fn key_count(&self) -> KeyCount {

@@ -3963,9 +3963,7 @@ impl Domain {
     pub fn replication_offsets(&self) -> NodeMap<Option<ReplicationOffset>> {
         self.state
             .iter()
-            .filter_map(|(ni, state)| {
-                Some((ni, state.as_persistent()?.replication_offset().cloned()))
-            })
+            .map(|(ni, state)| (ni, state.replication_offset().cloned()))
             .collect()
     }
 
