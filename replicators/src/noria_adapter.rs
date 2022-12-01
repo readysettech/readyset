@@ -755,8 +755,12 @@ impl NoriaAdapter {
             trace!(?action);
 
             if let Err(err) = self.handle_action(action, pos, until.is_some()).await {
-                error!(error = %err, "Aborting replication task on error");
-                counter!(recorded::REPLICATOR_FAILURE, 1u64,);
+                if matches!(err, ReadySetError::ResnapshotNeeded) {
+                    info!("Change in DDL requires partial resnapshot");
+                } else {
+                    error!(error = %err, "Aborting replication task on error");
+                    counter!(recorded::REPLICATOR_FAILURE, 1u64,);
+                }
                 return Err(err);
             };
             counter!(recorded::REPLICATOR_SUCCESS, 1u64);

@@ -1292,18 +1292,6 @@ async fn writes_survive_restarts() {
     deployment.teardown().await.unwrap();
 }
 
-// Perform an operation on the upstream MySQL DB that ReadySet can't yet handle
-// replication for, and validate that the relevant metric records the failure
-#[clustertest]
-async fn replication_failure_metrics() {
-    replication_test_inner(
-        "ct_replication_failure_metrics",
-        "CREATE TABLE t1 (id int); ALTER TABLE t1 ENGINE = InnoDB;",
-        recorded::REPLICATOR_FAILURE,
-    )
-    .await;
-}
-
 // Perform an operation on the upstream MySQL DB that ReadySet should be able to
 // successfully handle the replication for, and validate that the relevant
 // metric records the success
