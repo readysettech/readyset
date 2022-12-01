@@ -82,7 +82,7 @@
 //! ```
 
 #![feature(never_type)]
-#![feature(type_alias_impl_trait)]
+#![feature(const_float_bits_conv, type_alias_impl_trait)]
 
 pub mod benchmark;
 pub mod reporting;

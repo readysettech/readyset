@@ -37,7 +37,7 @@ use crate::{benchmark_counter, benchmark_histogram, benchmark_increment_counter}
 
 const REPORT_RESULTS_INTERVAL: Duration = Duration::from_secs(2);
 
-static SCALE: AtomicU64 = AtomicU64::new(unsafe { std::mem::transmute(1.0f64) });
+static SCALE: AtomicU64 = AtomicU64::new(1.0f64.to_bits());
 
 fn get_scale() -> f64 {
     f64::from_bits(SCALE.load(Relaxed))
