@@ -677,7 +677,7 @@ pub(crate) fn materialize(
     }
 
     // yes!
-    trace!(?rs, "materializing");
+    trace!(?rs, ?replication_offset, "materializing");
     state
         .unwrap()
         .process_records(rs, partial, replication_offset);

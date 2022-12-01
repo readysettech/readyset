@@ -506,6 +506,7 @@ impl NoriaAdapter {
             .await?;
 
         let replication_offsets = noria.replication_offsets().await?;
+        trace!(?replication_offsets, "Loaded replication offsets");
         let mut min_pos = replication_offsets
             .min_present_offset()?
             .expect("Minimal offset must be present after snapshot")
@@ -703,7 +704,12 @@ impl NoriaAdapter {
                         }
                         return Ok(());
                     }
-                    _ => {}
+                    Some(Some(cur)) => {
+                        trace!(%table, %cur);
+                    }
+                    _ => {
+                        trace!(%table, "no replication offset for table");
+                    }
                 }
 
                 if !self.table_filter.should_be_processed(

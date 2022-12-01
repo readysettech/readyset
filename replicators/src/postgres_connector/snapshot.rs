@@ -769,7 +769,7 @@ impl<'a> PostgresReplicator<'a> {
             let wal_position = wal_position.clone();
             compacting.push(async move {
                 let span = info_span!("Compacting table", table = %table.name);
-                span.in_scope(|| info!("Setting replication offset"));
+                span.in_scope(|| info!(%wal_position, "Setting replication offset"));
                 if let Err(error) = noria_table
                     .set_replication_offset(wal_position)
                     .instrument(span.clone())
