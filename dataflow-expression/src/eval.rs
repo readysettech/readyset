@@ -329,19 +329,27 @@ mod tests {
     /// Note that parsing is expected to succeed, since this is strictly meant to test evaluation.
     #[track_caller]
     pub(crate) fn try_eval_expr(expr: &str, dialect: nom_sql::Dialect) -> ReadySetResult<DfValue> {
-        let ast = parse_expr(dialect, expr).unwrap();
+        let ast = parse_expr(dialect, expr).unwrap_or_else(|error| eval_expr_fail(expr, error));
+
         let expr_dialect = match dialect {
             PostgreSQL => crate::Dialect::DEFAULT_POSTGRESQL,
             MySQL => crate::Dialect::DEFAULT_MYSQL,
         };
-        let expr = Expr::lower(ast, expr_dialect, no_op_lower_context()).unwrap();
-        expr.eval::<DfValue>(&[])
+
+        Expr::lower(ast, expr_dialect, no_op_lower_context())
+            .unwrap_or_else(|error| eval_expr_fail(expr, error))
+            .eval::<DfValue>(&[])
     }
 
     /// Returns the value from evaluating an expression, panicking if parsing or evaluation fails.
     #[track_caller]
     pub(crate) fn eval_expr(expr: &str, dialect: nom_sql::Dialect) -> DfValue {
-        try_eval_expr(expr, dialect).unwrap()
+        try_eval_expr(expr, dialect).unwrap_or_else(|error| eval_expr_fail(expr, error))
+    }
+
+    #[track_caller]
+    fn eval_expr_fail(expr: &str, error: impl std::fmt::Display) -> ! {
+        panic!("Failed to evaluate `{expr}`: {error}")
     }
 
     #[test]
