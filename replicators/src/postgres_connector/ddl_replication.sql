@@ -73,7 +73,8 @@ BEGIN
     )
     INTO create_message
     FROM pg_event_trigger_ddl_commands() object
-    WHERE object.object_type = 'table';
+    WHERE object.object_type = 'table'
+    AND object.schema_name != 'pg_temp';
 
     IF readyset.is_pre14() THEN
         UPDATE readyset.ddl_replication_log SET "ddl" = create_message;
@@ -158,7 +159,8 @@ BEGIN
     )
     INTO drop_message
     FROM pg_event_trigger_dropped_objects()
-    WHERE object_type IN ('table', 'view', 'type');
+    WHERE object_type IN ('table', 'view', 'type')
+    AND schema_name != 'pg_temp';
 
     IF readyset.is_pre14() THEN
         UPDATE readyset.ddl_replication_log SET "ddl" = drop_message;
@@ -204,6 +206,19 @@ BEGIN
     END IF;
 END $$;
 
+CREATE OR REPLACE FUNCTION readyset.pre_alter_type()
+RETURNS event_trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  -- PostgreSQL doesn't give us any information about *which* types are being
+  -- modified in `ddl_command_start`, so we just put all variants for all enums
+  -- in a temp table, under the assumption that (hopefully) there aren't going
+  -- to be that many in practice
+  CREATE TEMP TABLE pg_enum_original
+  AS SELECT * FROM pg_catalog.pg_enum;
+END $$;
+
 CREATE OR REPLACE FUNCTION readyset.replicate_alter_type()
 RETURNS event_trigger
 LANGUAGE plpgsql
@@ -213,14 +228,20 @@ DECLARE
 BEGIN
     SELECT
         json_build_object(
-            'schema', schema_name,
+            'schema', object.schema_name,
             'data', json_build_object('AlterType', json_build_object(
                 'name', t.typname,
                 'oid', t.oid::INT,
                 'variants', json_agg(json_build_object(
                     'oid', e.oid::int,
                     'label', e.enumlabel
-                ) ORDER BY e.enumsortorder ASC)
+                ) ORDER BY e.enumsortorder ASC),
+                'original_variants', (SELECT json_agg(json_build_object(
+                    'oid', e_orig.oid::int,
+                    'label', e_orig.enumlabel
+                ) ORDER BY e_orig.enumsortorder ASC)
+                FROM pg_enum_original e_orig
+                WHERE e_orig.enumtypid = t.oid)
             ))
         )
     INTO alter_message
@@ -230,6 +251,8 @@ BEGIN
     JOIN pg_catalog.pg_enum e
       ON e.enumtypid = t.oid
     GROUP BY object.objid, object.schema_name, t.oid;
+
+    DROP TABLE pg_enum_original;
 
     IF readyset.is_pre14() THEN
         UPDATE readyset.ddl_replication_log SET "ddl" = alter_message;
@@ -269,6 +292,12 @@ CREATE EVENT TRIGGER readyset_replicate_create_type
     ON ddl_command_end
     WHEN TAG IN ('CREATE TYPE')
     EXECUTE PROCEDURE readyset.replicate_create_type();
+
+DROP EVENT TRIGGER IF EXISTS readyset_pre_alter_type;
+CREATE EVENT TRIGGER readyset_pre_alter_type
+    ON ddl_command_start
+    WHEN TAG IN ('ALTER TYPE')
+    EXECUTE PROCEDURE readyset.pre_alter_type();
 
 DROP EVENT TRIGGER IF EXISTS readyset_replicate_alter_type;
 CREATE EVENT TRIGGER readyset_replicate_alter_type

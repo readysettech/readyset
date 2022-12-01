@@ -16,6 +16,7 @@ async fn setup() -> (tokio_postgres::Config, Handle) {
 mod types {
     use std::fmt::Display;
     use std::net::IpAddr;
+    use std::time::Duration;
 
     use eui48::MacAddress;
     use launchpad::arbitrary::{
@@ -646,6 +647,87 @@ mod types {
         assert_eq!(
             last_query_info(&client).await.destination,
             QueryDestination::Readyset
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[serial_test::serial]
+    async fn alter_enum_complex_variant_changes() {
+        readyset_tracing::init_test_logging();
+        let (config, _handle) = setup().await;
+        let client = connect(config.clone()).await;
+
+        client
+            .simple_query("CREATE TYPE abc AS ENUM ('a', 'b', 'c');")
+            .await
+            .unwrap();
+
+        client
+            .simple_query("CREATE TABLE t (x abc);")
+            .await
+            .unwrap();
+
+        client
+            .simple_query("INSERT INTO t (x) VALUES ('b'), ('c'), ('a'), ('a')")
+            .await
+            .unwrap();
+
+        // Add a new variant in the middle of the list
+        client
+            .simple_query("ALTER TYPE abc ADD VALUE 'ab' BEFORE 'b'")
+            .await
+            .unwrap();
+
+        #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+        enum Abc {
+            A,
+            AB,
+            B,
+            C,
+        }
+
+        impl<'a> FromSql<'a> for Abc {
+            fn from_sql(
+                _ty: &postgres_types::Type,
+                raw: &'a [u8],
+            ) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
+                match raw {
+                    b"a" => Ok(Self::A),
+                    b"ab" => Ok(Self::AB),
+                    b"b" => Ok(Self::B),
+                    b"c" => Ok(Self::C),
+                    r => Err(format!("Unknown variant: '{}'", String::from_utf8_lossy(r)).into()),
+                }
+            }
+
+            fn accepts(ty: &postgres_types::Type) -> bool {
+                ty.name() == "abc"
+            }
+        }
+
+        client
+            .simple_query("INSERT INTO t (x) VALUES ('ab')")
+            .await
+            .unwrap();
+
+        tokio::time::sleep(Duration::from_secs(5)).await;
+
+        let post_insert_value_res = client
+            .query("SELECT x FROM t ORDER BY x ASC", &[])
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|r| r.get(0))
+            .collect::<Vec<Abc>>();
+
+        assert_eq!(
+            last_query_info(&client).await.destination,
+            QueryDestination::Readyset
+        );
+
+        assert_eq!(
+            post_insert_value_res,
+            vec![Abc::A, Abc::A, Abc::AB, Abc::B, Abc::C]
         );
     }
 }

@@ -376,6 +376,10 @@ impl ExprRegistry {
         Ok(())
     }
 
+    pub(crate) fn contains_custom_type(&self, name: &Relation) -> bool {
+        self.custom_type_dependencies.contains_key(name)
+    }
+
     pub(crate) fn add_custom_type(&mut self, name: Relation) {
         self.custom_type_dependencies.entry(name).or_default();
     }

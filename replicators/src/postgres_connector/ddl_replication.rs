@@ -158,6 +158,7 @@ pub(crate) enum DdlEventData {
         oid: u32,
         name: String,
         variants: Vec<DdlEnumVariant>,
+        original_variants: Option<Vec<DdlEnumVariant>>,
     },
 }
 
@@ -266,17 +267,20 @@ impl DdlEvent {
             },
             DdlEventData::AlterType {
                 name,
-                variants,
                 oid,
+                variants,
+                original_variants,
             } => Change::AlterType {
                 oid,
                 name: Relation {
                     schema: Some(self.schema.clone().into()),
                     name: name.into(),
                 },
-                change: AlterTypeChange::SetVariants(
-                    variants.into_iter().map(|v| v.label).collect(),
-                ),
+                change: AlterTypeChange::SetVariants {
+                    new_variants: variants.into_iter().map(|v| v.label).collect(),
+                    original_variants: original_variants
+                        .map(|vs| vs.into_iter().map(|v| v.label).collect()),
+                },
             },
         }
     }
@@ -687,6 +691,56 @@ mod tests {
             .await
             .unwrap();
         get_last_ddl(&client, "rollback_no_ddl").await.unwrap();
+
+        client.teardown().await;
+    }
+
+    #[parallel_group(GROUP)]
+    #[tokio::test]
+    async fn alter_type_add_value_before() {
+        readyset_tracing::init_test_logging();
+        let client = setup("alter_type_add_value_before").await;
+
+        client
+            .simple_query("create type my_type as enum ('x', 'y');")
+            .await
+            .unwrap();
+        get_last_ddl(&client, "alter_type_add_value_before")
+            .await
+            .unwrap();
+
+        client
+            .simple_query("alter type my_type add value 'xy' before 'y';")
+            .await
+            .unwrap();
+        let ddl = get_last_ddl(&client, "alter_type_add_value_before")
+            .await
+            .unwrap();
+
+        assert_eq!(ddl.schema(), "public");
+        match ddl.data {
+            DdlEventData::AlterType {
+                name,
+                variants,
+                original_variants,
+                ..
+            } => {
+                assert_eq!(name, "my_type");
+                assert_eq!(
+                    variants.into_iter().map(|v| v.label).collect::<Vec<_>>(),
+                    vec!["x", "xy", "y"]
+                );
+                assert_eq!(
+                    original_variants
+                        .unwrap()
+                        .into_iter()
+                        .map(|v| v.label)
+                        .collect::<Vec<_>>(),
+                    vec!["x", "y"]
+                );
+            }
+            ev => panic!("{ev:?}"),
+        }
 
         client.teardown().await;
     }

@@ -1,4 +1,4 @@
-use std::collections::{hash_map, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::str;
 use std::vec::Vec;
 
@@ -211,23 +211,15 @@ impl SqlIncorporator {
 
     /// Add a new user-defined custom type (represented internally as a named alias for a
     /// [`DfType`]). Will return an error if a type already exists with the same name
-    pub(crate) fn add_custom_type(&mut self, name: Relation, ty: DfType) -> ReadySetResult<()> {
-        match self.custom_types.entry(name.clone()) {
-            hash_map::Entry::Occupied(_) => {
-                Err(invalid_err!("Custom type named {name} already exists"))
-            }
-            hash_map::Entry::Vacant(e) => {
-                if let DfType::Enum {
-                    metadata: Some(PgEnumMetadata { oid, .. }),
-                    ..
-                } = ty
-                {
-                    self.custom_types_by_oid.insert(oid, name);
-                }
-                e.insert(ty);
-                Ok(())
-            }
+    pub(crate) fn add_custom_type(&mut self, name: Relation, ty: DfType) {
+        if let DfType::Enum {
+            metadata: Some(PgEnumMetadata { oid, .. }),
+            ..
+        } = ty
+        {
+            self.custom_types_by_oid.insert(oid, name.clone());
         }
+        self.custom_types.insert(name, ty);
     }
 
     /// Alter the definition of the given custom type according to the given `change`, and ensuring
@@ -262,7 +254,7 @@ impl SqlIncorporator {
             .expect("just ensured the key was present");
 
         match change {
-            AlterTypeChange::SetVariants(new_variants) => {
+            AlterTypeChange::SetVariants { new_variants, .. } => {
                 let metadata = match ty {
                     DfType::Enum { variants, metadata } => {
                         if new_variants.len() > variants.len()
@@ -295,6 +287,10 @@ impl SqlIncorporator {
 
     pub(crate) fn drop_custom_type(&mut self, name: &Relation) -> Option<DfType> {
         self.custom_types.remove(name)
+    }
+
+    pub(crate) fn get_custom_type(&self, name: &Relation) -> Option<&DfType> {
+        self.custom_types.get(name)
     }
 
     /// Return a set of all relations (tables or views) which are known to exist in the upstream

@@ -265,10 +265,14 @@ impl ChangeList {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AlterTypeChange {
     /// Set the variants of this custom type to the given list of variants.
-    ///
-    /// Currently, if the change does not involve exclusively adding variants to the end of the
-    /// existing list of variants, an error will be returned
-    SetVariants(Vec<String>),
+    SetVariants {
+        /// The new variants for the enum after the change
+        new_variants: Vec<String>,
+        /// Optional list of variants for the enum *before* the change, which can be used to
+        /// determine if the change does not require resnapshotting all tables with the enum in
+        /// their columns' types.
+        original_variants: Option<Vec<String>>,
+    },
 }
 
 /// Describes a singe change to be made to the MIR and dataflow graphs.
@@ -347,28 +351,56 @@ impl Change {
     /// Return true if this change requires noria to resnapshot the database in order to properly
     /// update the schema
     pub fn requires_resnapshot(&self) -> bool {
-        let alter_table = match self {
-            Change::AlterTable(a) => a,
-            _ => return false,
-        };
-
-        if let Ok(ref definitions) = alter_table.definitions {
-            // NOTE: This exhaustive list is here so that we remember to think about the behavior of
-            // any additional alter table additions we add support for. We may not need to
-            // resnapshot for them. As such, this list should not be removed.
-            definitions.iter().any(|def| match def {
-                nom_sql::AlterTableDefinition::AddColumn(_)
-                | nom_sql::AlterTableDefinition::AlterColumn { .. }
-                | nom_sql::AlterTableDefinition::DropColumn { .. }
-                | nom_sql::AlterTableDefinition::ChangeColumn { .. }
-                | nom_sql::AlterTableDefinition::RenameColumn { .. }
-                | nom_sql::AlterTableDefinition::AddKey(_)
-                | nom_sql::AlterTableDefinition::DropConstraint { .. } => true,
-            })
-        } else {
-            // We know it's an alter table, but we couldn't fully parse it.
-            // Trigger a resnapshot.
-            true
+        match self {
+            Change::AlterTable(alter_table) => {
+                if let Ok(definitions) = &alter_table.definitions {
+                    // NOTE: This exhaustive list is here so that we remember to think about the
+                    // behavior of any additional alter table additions we add
+                    // support for. We may not need to resnapshot for them. As
+                    // such, this list should not be removed.
+                    definitions.iter().any(|def| match def {
+                        nom_sql::AlterTableDefinition::AddColumn(_)
+                        | nom_sql::AlterTableDefinition::AlterColumn { .. }
+                        | nom_sql::AlterTableDefinition::DropColumn { .. }
+                        | nom_sql::AlterTableDefinition::ChangeColumn { .. }
+                        | nom_sql::AlterTableDefinition::RenameColumn { .. }
+                        | nom_sql::AlterTableDefinition::AddKey(_)
+                        | nom_sql::AlterTableDefinition::DropConstraint { .. } => true,
+                    })
+                } else {
+                    // We know it's an alter table, but we couldn't fully parse it.
+                    // Trigger a resnapshot.
+                    true
+                }
+            }
+            Change::AlterType {
+                change:
+                    AlterTypeChange::SetVariants {
+                        new_variants,
+                        original_variants: Some(original_variants),
+                    },
+                ..
+            } => {
+                // Don't resnapshot enum changes that add new variants at the end
+                new_variants.len() > original_variants.len()
+                    && new_variants[..original_variants.len()] != *original_variants
+            }
+            Change::AlterType {
+                change:
+                    AlterTypeChange::SetVariants {
+                        // If we don't *know* the original variants, we have to assume that the
+                        // change requires a resnapshot
+                        original_variants: None,
+                        ..
+                    },
+                ..
+            } => true,
+            Change::CreateTable(_)
+            | Change::CreateView(_)
+            | Change::CreateCache(_)
+            | Change::CreateType { .. }
+            | Change::Drop { .. }
+            | Change::AddNonReplicatedRelation(_) => false,
         }
     }
 }
@@ -496,5 +528,49 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    mod requires_resnapshot {
+        use super::*;
+
+        #[test]
+        fn alter_enum_without_original_variants() {
+            let change = Change::AlterType {
+                oid: 1234,
+                name: "my_enum".into(),
+                change: AlterTypeChange::SetVariants {
+                    new_variants: vec!["a".into(), "b".into(), "c".into()],
+                    original_variants: None,
+                },
+            };
+
+            assert!(change.requires_resnapshot())
+        }
+
+        #[test]
+        fn alter_enum_with_variant_at_end() {
+            let change = Change::AlterType {
+                oid: 1234,
+                name: "my_enum".into(),
+                change: AlterTypeChange::SetVariants {
+                    new_variants: vec!["a".into(), "b".into(), "c".into()],
+                    original_variants: Some(vec!["a".into(), "b".into()]),
+                },
+            };
+            assert!(!change.requires_resnapshot())
+        }
+
+        #[test]
+        fn alter_enum_with_variant_in_middle() {
+            let change = Change::AlterType {
+                oid: 1234,
+                name: "my_enum".into(),
+                change: AlterTypeChange::SetVariants {
+                    new_variants: vec!["a".into(), "b".into(), "c".into()],
+                    original_variants: Some(vec!["a".into(), "c".into()]),
+                },
+            };
+            assert!(change.requires_resnapshot())
+        }
     }
 }

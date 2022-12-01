@@ -12,7 +12,7 @@ use petgraph::graph::NodeIndex;
 use petgraph::visit::Bfs;
 use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::ViewCreateRequest;
-use readyset_data::Dialect;
+use readyset_data::{DfType, Dialect};
 use readyset_errors::{
     internal, invariant, invariant_eq, unsupported, ReadySetError, ReadySetResult,
 };
@@ -364,8 +364,52 @@ impl Recipe {
                             name.schema = Some(first_schema.clone())
                         }
                     }
+                    let needs_resnapshot =
+                        if let Some(existing_ty) = self.inc.get_custom_type(&name) {
+                            invariant!(self.registry.contains_custom_type(&name));
+                            // Type already exists, so check if it has been changed in a way that
+                            // requires dropping and recreating dependent tables
+                            match (existing_ty, &ty) {
+                                (
+                                    DfType::Enum {
+                                        variants: original_variants,
+                                        ..
+                                    },
+                                    DfType::Enum {
+                                        variants: new_variants,
+                                        ..
+                                    },
+                                ) => {
+                                    new_variants.len() > original_variants.len()
+                                        && new_variants[..original_variants.len()]
+                                            != **original_variants
+                                }
+                                _ => true,
+                            }
+                        } else {
+                            false
+                        };
+
                     self.registry.add_custom_type(name.clone());
-                    self.inc.add_custom_type(name, ty)?;
+                    self.inc.add_custom_type(name.clone(), ty);
+                    if needs_resnapshot {
+                        debug!(name = %name.clone(), "Replacing existing custom type");
+                        for expr in self
+                            .registry
+                            .expressions_referencing_custom_type(&name)
+                            .cloned()
+                            .collect::<Vec<_>>()
+                        {
+                            match expr {
+                                RecipeExpr::Table { name, body } => {
+                                    self.drop_and_recreate_table(&name, body, mig)?;
+                                }
+                                RecipeExpr::View { name, .. } | RecipeExpr::Cache { name, .. } => {
+                                    self.remove_expression(&name, mig)?;
+                                }
+                            }
+                        }
+                    }
                 }
                 Change::Drop {
                     mut name,
