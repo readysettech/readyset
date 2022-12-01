@@ -439,37 +439,62 @@ impl DfState {
             }
         };
 
-        let (node, mapping) = match get_index_or_traverse(&view_req.name) {
-            Some(ni) => (ni, None),
+        match get_index_or_traverse(&view_req.name) {
+            // A view for this node exists.
+            Some(ni) => self
+                .view_builder_inner(ni, None, view_req)
+                .map(|opt| opt.map(|vb| ViewBuilder::Single(vb))),
             None => {
                 // Does this query reuse another cache?
-                if let Some((Some(ni), cache)) = self
-                    .recipe
-                    .reused_cache(&view_req.name)
-                    .map(|m| (get_index_or_traverse(m.name()), m))
-                {
-                    (ni, Some(cache))
-                } else {
-                    return Ok(None);
+                match self.recipe.reused_caches(&view_req.name) {
+                    Some(reused_caches) => {
+                        let mut view_builders = Vec::new();
+                        for cache in reused_caches {
+                            view_builders.push(
+                                get_index_or_traverse(cache.name())
+                                    .map(|ni| {
+                                        self.view_builder_inner(
+                                            ni,
+                                            Some(cache.name()),
+                                            view_req.clone(),
+                                        )
+                                    })
+                                    .transpose()
+                                    .map(|vb| {
+                                        vb.flatten().map(|vb| ReusedReaderHandleBuilder {
+                                            builder: vb,
+                                            key_remapping: cache.key_mapping().clone(),
+                                            required_values: cache.required_values().clone(),
+                                        })
+                                    }),
+                            );
+                        }
+                        let mut last_error = None;
+                        let mut builders = Vec::new();
+                        for vb in view_builders {
+                            match vb {
+                                Ok(Some(vb)) => builders.push(vb),
+                                Err(e) => last_error = Some(e),
+                                Ok(None) => { /* We'll catch this if we have no builders or errors */
+                                }
+                            }
+                        }
+                        if builders.is_empty() {
+                            if let Some(e) = last_error {
+                                Err(e)
+                            } else {
+                                Ok(None)
+                            }
+                        } else {
+                            #[allow(clippy::unwrap_used)] // builders has at least 1 element
+                            Ok(Some(ViewBuilder::MultipleReused(
+                                Vec1::try_from(builders).unwrap(),
+                            )))
+                        }
+                    }
+                    None => Ok(None),
                 }
             }
-        };
-
-        let builder = match self.view_builder_inner(node, mapping.map(|m| m.name()), view_req)? {
-            Some(vb) => vb,
-            None => {
-                return Ok(None);
-            }
-        };
-        match mapping {
-            Some(mapping) => Ok(Some(ViewBuilder::MultipleReused(Vec1::new(
-                ReusedReaderHandleBuilder {
-                    builder,
-                    required_values: mapping.required_values().clone(),
-                    key_remapping: mapping.key_mapping().clone(),
-                },
-            )))),
-            None => Ok(Some(ViewBuilder::Single(builder))),
         }
     }
 

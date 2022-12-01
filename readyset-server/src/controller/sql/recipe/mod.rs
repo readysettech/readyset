@@ -12,6 +12,7 @@ use readyset_data::Dialect;
 use readyset_errors::ReadySetResult;
 use readyset_tracing::warn;
 use serde::{Deserialize, Serialize};
+use vec1::Vec1;
 
 use super::registry::{MatchedCache, RecipeExpr};
 use crate::controller::sql::SqlIncorporator;
@@ -184,8 +185,8 @@ impl Recipe {
         Ok(self.inc.registry.contains(&statement))
     }
 
-    /// Returns a MatchedCache for the query if one exists.
-    pub fn reused_cache(&self, name: &Relation) -> Option<&MatchedCache> {
-        self.inc.registry.reused_cache(name)
+    /// Returns the MatchedCaches for the query if they exists.
+    pub fn reused_caches(&self, name: &Relation) -> Option<&Vec1<MatchedCache>> {
+        self.inc.registry.reused_caches(name)
     }
 }

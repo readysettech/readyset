@@ -380,7 +380,7 @@ pub(super) struct ExprRegistry {
 
     /// Queries that can reuse the view for a different [`RecipeExpr::Cache`], specified by
     /// [`QueryID`]
-    reused_caches: HashMap<Relation, MatchedCache>,
+    reused_caches: HashMap<Relation, Vec1<MatchedCache>>,
 }
 
 impl ExprRegistry {
@@ -481,10 +481,24 @@ impl ExprRegistry {
             .drain_filter(|_, v| *v == query_id)
             .map(|(k, _)| k)
             .collect();
-        // Remove any queries that reuse this query's cache.
+        // Remove any queries that reuse this query's cache, or the query itself if we are removing
+        // a query that reuses a cache.
+        //
+        // Since Vec1::retain will not remove all entries, we filter out any that are left in the
+        // DrainFilter so that we don't accidentally use them later.
         let mut removed_reused_cache = self
             .reused_caches
-            .drain_filter(|k, v| expr_aliases.contains(k) || expr_aliases.contains(&v.name));
+            .drain_filter(|k, v| {
+                expr_aliases.contains(k) || {
+                    // We are retaining, not removing elements here, so we retain if the element is
+                    // not in expr_aliases
+                    let res = v.retain(|cache| !expr_aliases.contains(&cache.name));
+                    // If we've removed all `MatchedCache`s, then remove the entire entry.
+                    // Vec1::retain gives an error if all the elements would have been removed.
+                    res.is_err()
+                }
+            })
+            .map(|c| c.0);
         // Remove the entry for this query's skeleton.
         self.skeletons.remove_expressions(&expr_aliases);
         let expression = self.expressions.remove(&query_id)?;
@@ -500,7 +514,7 @@ impl ExprRegistry {
         }
         // If we have only removed a reused cache, there is nothing else to clean up because the
         // expression does not exist in the graph.
-        if removed_reused_cache.any(|(n, _)| expr_aliases.contains(&n)) {
+        if removed_reused_cache.any(|name| expr_aliases.contains(&name)) {
             None
         } else {
             Some(expression)
@@ -593,12 +607,11 @@ impl ExprRegistry {
     pub(super) fn add_reused_caches(&mut self, name: Relation, caches: Vec1<MatchedCache>) {
         // TODO: handle multiple caches for a single query
         #[allow(clippy::unwrap_used)] // Vec1 is guaranteed to have one element
-        self.reused_caches
-            .insert(name, caches.into_iter().next().unwrap());
+        self.reused_caches.insert(name, caches);
     }
 
     /// Returns a MatchedCache for the query if one exists.
-    pub fn reused_cache(&self, name: &Relation) -> Option<&MatchedCache> {
+    pub fn reused_caches(&self, name: &Relation) -> Option<&Vec1<MatchedCache>> {
         self.reused_caches.get(name)
     }
 

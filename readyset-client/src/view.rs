@@ -923,16 +923,16 @@ pub struct ReusedReaderHandleBuilder {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-/// A single [`ReaderHandleBuilder`] or a collection of [`ReusedreaderHandleBuilder`]s
+/// A single [`ReaderHandleBuilder`] or a collection of [`ReusedReaderHandleBuilder`]s
 pub enum ViewBuilder {
     /// A [`ViewBuilder`]
     Single(ReaderHandleBuilder),
-    /// A collection of [`BorrowedViewBuilder`]s
+    /// A collection of [`ReusedReaderHandleBuilder`]s
     MultipleReused(Vec1<ReusedReaderHandleBuilder>),
 }
 
 impl ReaderHandleBuilder {
-    /// Build a `ReaderHandle` out of a `ReaderHandleBuilder`.
+    /// Build a [`ReaderHandle`] out of a [`ReaderHandleBuilder`].
     ///
     /// If `replica` is specified, this selects the reader replica with that index, returning an
     /// error if the index is out of bounds. Otherwise, a replica is selected at random
