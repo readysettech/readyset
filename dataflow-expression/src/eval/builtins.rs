@@ -635,6 +635,10 @@ impl BuiltinFunction {
 
                 Ok(target_json.into())
             }
+            BuiltinFunction::JsonbPretty(json) => {
+                let json = json.eval(record)?.to_json()?;
+                Ok(crate::eval::json::json_to_pretty(&json).into())
+            }
             BuiltinFunction::Coalesce(arg1, rest_args) => {
                 let val1 = arg1.eval(record)?;
                 let rest_vals = rest_args

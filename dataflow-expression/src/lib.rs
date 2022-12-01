@@ -58,6 +58,8 @@ pub enum BuiltinFunction {
     JsonbInsert(Expr, Expr, Expr, Option<Expr>),
     /// [`jsonb_set`](https://www.postgresql.org/docs/current/functions-json.html)
     JsonbSet(Expr, Expr, Expr, Option<Expr>),
+    /// [`jsonb_pretty`](https://www.postgresql.org/docs/current/functions-json.html)
+    JsonbPretty(Expr),
     /// [`coalesce`](https://www.postgresql.org/docs/current/functions-conditional.html#FUNCTIONS-COALESCE-NVL-IFNULL)
     Coalesce(Expr, Vec<Expr>),
     /// [`concat`](https://dev.mysql.com/doc/refman/8.0/en/string-functions.html#function_concat)
@@ -113,6 +115,7 @@ impl BuiltinFunction {
             JsonExtractPath { .. } => "json_extract_path",
             JsonbInsert { .. } => "jsonb_insert",
             JsonbSet { .. } => "jsonb_set",
+            JsonbPretty { .. } => "jsonb_pretty",
             Coalesce { .. } => "coalesce",
             Concat { .. } => "concat",
             Substring { .. } => "substring",
@@ -157,7 +160,7 @@ impl Display for BuiltinFunction {
             Round(arg1, precision) => {
                 write!(f, "({}, {})", arg1, precision)
             }
-            JsonTypeof(arg) | JsonArrayLength(arg) | JsonStripNulls(arg) => {
+            JsonTypeof(arg) | JsonArrayLength(arg) | JsonStripNulls(arg) | JsonbPretty(arg) => {
                 write!(f, "({})", arg)
             }
             JsonExtractPath { json, keys } => {

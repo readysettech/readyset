@@ -4,12 +4,38 @@ use std::mem;
 
 use readyset_data::DfValue;
 use readyset_errors::{invalid_err, ReadySetError, ReadySetResult};
+use serde::Serialize;
 use serde_json::map::Entry as JsonEntry;
 use serde_json::{Number as JsonNumber, Value as JsonValue};
 
 use crate::utils;
 
 type JsonObject = serde_json::Map<String, JsonValue>;
+
+/// Serializes `json` to a pretty-printed [`String`] with 4-space indentation.
+///
+/// This differs from [`serde_json::to_string_pretty`] which uses 2 spaces.
+pub(crate) fn json_to_pretty(json: &JsonValue) -> String {
+    use serde_json::ser::{PrettyFormatter, Serializer};
+
+    let indent = b"    ";
+
+    // `serde_json` also uses 128 as an initial capacity.
+    let mut buf = Vec::with_capacity(128);
+
+    // We assume serialization won't fail similarly to how we assume `JsonValue` to `DfValue` string
+    // won't fail serialization.
+    #[allow(clippy::unwrap_used)]
+    json.serialize(&mut Serializer::with_formatter(
+        &mut buf,
+        PrettyFormatter::with_indent(indent),
+    ))
+    .unwrap();
+
+    // SAFETY: `JsonValue` does not emit invalid UTF-8 and `indent` is UTF-8.
+    // `serde_json::to_string_pretty` makes this same assumption.
+    unsafe { String::from_utf8_unchecked(buf) }
+}
 
 /// Removes a value from JSON using PostgreSQL `#-` semantics.
 pub(crate) fn json_remove_path<'k>(

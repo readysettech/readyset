@@ -1121,6 +1121,21 @@ mod tests {
         test("{ \"abc\": [1] }", "array['abc', '0']", "{ \"abc\": [] }");
     }
 
+    #[test]
+    fn eval_jsonb_pretty() {
+        let input = r#"[{"f1": 1, "f2": null}, 2]"#;
+        let expected = r#"[
+    {
+        "f1": 1,
+        "f2": null
+    },
+    2
+]"#;
+
+        let result = eval_expr(&format!("jsonb_pretty('{input}')"), PostgreSQL);
+        assert_eq!(result, expected.into())
+    }
+
     /// Tests evaluation of `JsonContains` and `JsonContainedIn` binary ops.
     mod json_contains {
         use super::*;

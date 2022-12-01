@@ -252,6 +252,7 @@ impl BuiltinFunction {
                 Self::JsonbSet(next_arg()?, next_arg()?, next_arg()?, args.next()),
                 DfType::Jsonb,
             ),
+            "jsonb_pretty" => (Self::JsonbPretty(next_arg()?), DfType::DEFAULT_TEXT),
             "coalesce" => {
                 let arg1 = next_arg()?;
                 let ty = arg1.ty().clone();
