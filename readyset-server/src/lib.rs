@@ -600,11 +600,15 @@ pub struct WorkerOptions {
     #[clap(long, env = "VOLUME_ID")]
     pub volume_id: Option<VolumeId>,
 
-    /// Enable experimental support for TopK in dataflow
+    /// Enable experimental support for TopK in dataflow.
+    ///
+    /// NOTE If enabled, this must be set for all ReadySet processes (both servers and adapters).
     #[clap(long, env = "EXPERIMENTAL_TOPK_SUPPORT", hide = true)]
     pub enable_experimental_topk_support: bool,
 
-    /// Enable experimental support for Paginate in dataflow
+    /// Enable experimental support for Paginate in dataflow.
+    ///
+    /// NOTE If enabled, this must be set for all ReadySet processes (both servers and adapters).
     #[clap(long, env = "EXPERIMENTAL_PAGINATE_SUPPORT", hide = true)]
     pub enable_experimental_paginate_support: bool,
 

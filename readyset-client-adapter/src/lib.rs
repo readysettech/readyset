@@ -480,6 +480,13 @@ where
         let deployment = options.deployment.clone();
         let migration_request_timeout = options.migration_request_timeout_ms;
         let controller_request_timeout = options.controller_request_timeout_ms;
+        let server_supports_pagination = options
+            .server_worker_options
+            .enable_experimental_topk_support
+            && options
+                .server_worker_options
+                .enable_experimental_paginate_support;
+
         let rh = rt.block_on(async {
             let authority = authority
                 .to_authority(&authority_address, &deployment)
@@ -712,7 +719,7 @@ where
 
         if let MigrationMode::OutOfBand = migration_mode {
             set_failpoint!("adapter-out-of-band");
-            let mut rh = rh.clone();
+            let rh = rh.clone();
             let (auto_increments, query_cache) = (auto_increments.clone(), query_cache.clone());
             let shutdown_recv = shutdown_sender.subscribe();
             let loop_interval = options.migration_task_interval;
@@ -746,11 +753,6 @@ where
                 } else {
                     Default::default()
                 };
-
-                let server_supports_pagination = rh
-                    .supports_pagination()
-                    .await
-                    .expect("Failed to query readyset-server for pagination support status");
 
                 //TODO(DAN): allow compatibility with async and explicit migrations
                 let noria =
@@ -875,11 +877,6 @@ where
         };
 
         health_reporter.set_state(AdapterState::Healthy);
-
-        let server_supports_pagination = {
-            let mut rh = rh.clone();
-            rt.block_on(async { rh.supports_pagination().await })?
-        };
 
         if internal_server_handle.is_none() {
             // Validate compatibility with the external readyset-server instance
