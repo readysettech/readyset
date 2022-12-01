@@ -34,7 +34,9 @@ use nom_sql::{
     CacheInner, CreateCacheStatement, Relation, SelectStatement, SqlIdentifier, SqlQuery,
 };
 use petgraph::visit::Bfs;
-use readyset_client::builders::{TableBuilder, ViewBuilder};
+use readyset_client::builders::{
+    ReaderHandleBuilder, ReusedReaderHandleBuilder, TableBuilder, ViewBuilder,
+};
 use readyset_client::consensus::{Authority, AuthorityControl};
 use readyset_client::debug::info::GraphInfo;
 use readyset_client::debug::stats::{DomainStats, GraphStats, NodeStats};
@@ -55,6 +57,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, MutexGuard, RwLock, RwLockReadGuard};
 use tracing::instrument;
+use vec1::Vec1;
 
 use super::migrate::DomainSettings;
 use super::replication::ReplicationStrategy;
@@ -339,46 +342,17 @@ impl DfState {
         None
     }
 
-    /// Obtain a `ViewBuilder` that can be sent to a client and then used to query a given
-    /// (already maintained) reader node called `name`.
-    pub(super) fn view_builder(
+    /// Create a ViewBuilder given the node, the ViewRequest, and an optional name if this view
+    /// request is for a reused cache.
+    fn view_builder_inner(
         &self,
+        node: NodeIndex,
+        name: Option<&Relation>,
         view_req: ViewRequest,
-    ) -> Result<Option<ViewBuilder>, ReadySetError> {
-        let get_index_or_traverse = |name: &Relation| {
-            // first try to resolve the node via the recipe, which handles aliasing between
-            // identical queries.
-            match self.recipe.node_addr_for(name) {
-                Ok(ni) => Some(ni),
-                // if the recipe doesn't know about this query, traverse the graph.
-                // we need this do deal with manually constructed graphs (e.g., in tests).
-                Err(_) => self.views().get(name).copied(),
-            }
-        };
-
-        let (node, cache_mapping) = match get_index_or_traverse(&view_req.name) {
-            Some(ni) => (ni, None),
-            None => {
-                // Does this query reuse another cache?
-                if let Some((Some(ni), cache)) = self
-                    .recipe
-                    .reused_cache(&view_req.name)
-                    .map(|m| (get_index_or_traverse(m.name()), m))
-                {
-                    (ni, Some(cache))
-                } else {
-                    return Ok(None);
-                }
-            }
-        };
-
-        let name = self
-            .recipe
-            .resolve_alias(
-                // Use name of borrowed relation in migration_mapping if present
-                cache_mapping.map(|m| m.name()).unwrap_or(&view_req.name),
-            )
-            .unwrap_or(&view_req.name);
+    ) -> ReadySetResult<Option<ReaderHandleBuilder>> {
+        // This function is provided a name if the view is for a reused cache.
+        let name = name.unwrap_or(&view_req.name);
+        let name = self.recipe.resolve_alias(name).unwrap_or(name);
 
         let reader_node = if let Some(r) = self.find_reader_for(node, name, &view_req.filter) {
             r
@@ -437,7 +411,7 @@ impl DfState {
             })
             .collect::<ReadySetResult<Vec<_>>>()?;
 
-        Ok(Some(ViewBuilder {
+        Ok(Some(ReaderHandleBuilder {
             name: name.clone(),
             node: reader_node,
             columns: columns.into(),
@@ -445,9 +419,58 @@ impl DfState {
             replica_shard_addrs: Array2::from_rows(replicas),
             key_mapping,
             view_request_timeout: self.domain_config.view_request_timeout,
-            required_values: cache_mapping.map(|m| m.required_values()).cloned(),
-            key_remapping: cache_mapping.map(|m| m.key_mapping()).cloned(),
         }))
+    }
+
+    /// Obtain a `ViewBuilder` that can be sent to a client and then used to query a given
+    /// (already maintained) reader node called `name`.
+    pub(super) fn view_builder(
+        &self,
+        view_req: ViewRequest,
+    ) -> ReadySetResult<Option<ViewBuilder>> {
+        let get_index_or_traverse = |name: &Relation| {
+            // first try to resolve the node via the recipe, which handles aliasing between
+            // identical queries.
+            match self.recipe.node_addr_for(name) {
+                Ok(ni) => Some(ni),
+                // if the recipe doesn't know about this query, traverse the graph.
+                // we need this do deal with manually constructed graphs (e.g., in tests).
+                Err(_) => self.views().get(name).copied(),
+            }
+        };
+
+        let (node, mapping) = match get_index_or_traverse(&view_req.name) {
+            Some(ni) => (ni, None),
+            None => {
+                // Does this query reuse another cache?
+                if let Some((Some(ni), cache)) = self
+                    .recipe
+                    .reused_cache(&view_req.name)
+                    .map(|m| (get_index_or_traverse(m.name()), m))
+                {
+                    (ni, Some(cache))
+                } else {
+                    return Ok(None);
+                }
+            }
+        };
+
+        let builder = match self.view_builder_inner(node, mapping.map(|m| m.name()), view_req)? {
+            Some(vb) => vb,
+            None => {
+                return Ok(None);
+            }
+        };
+        match mapping {
+            Some(mapping) => Ok(Some(ViewBuilder::MultipleReused(Vec1::new(
+                ReusedReaderHandleBuilder {
+                    builder,
+                    required_values: mapping.required_values().clone(),
+                    key_remapping: mapping.key_mapping().clone(),
+                },
+            )))),
+            None => Ok(Some(ViewBuilder::Single(builder))),
+        }
     }
 
     pub(super) fn view_schema(

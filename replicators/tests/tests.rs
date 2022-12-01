@@ -387,7 +387,9 @@ impl TestHandle {
                 schema: Some("public".into()),
                 name: query_name.into(),
             })
-            .await?;
+            .await?
+            .into_reader_handle()
+            .unwrap();
         let results = getter.lookup(&[0.into()], true).await?;
         let mut results = results.into_vec();
         results.sort(); // Simple `lookup` does not sort the results, so we just sort them ourselves

@@ -2,25 +2,21 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
-use std::ops::Bound;
 use std::sync::{atomic, Arc, RwLock};
 
-use dataflow_expression::{BinaryOperator as DfBinaryOperator, Expr as DfExpr};
 use itertools::Itertools;
 use nom_sql::analysis::visit_mut::VisitorMut;
 use nom_sql::{
-    self, BinaryOperator, ColumnConstraint, DeleteStatement, Expr, InsertStatement,
-    ItemPlaceholder, Literal, Relation, SelectStatement, SqlIdentifier, SqlQuery, UnaryOperator,
-    UpdateStatement,
+    self, ColumnConstraint, DeleteStatement, Expr, InsertStatement, Literal, Relation,
+    SelectStatement, SqlIdentifier, SqlQuery, UnaryOperator, UpdateStatement,
 };
 use readyset_client::consistency::Timestamp;
 use readyset_client::internal::LocalNodeIndex;
 use readyset_client::recipe::changelist::{Change, ChangeList, IntoChanges};
 use readyset_client::results::{ResultIterator, Results};
 use readyset_client::{
-    ColumnSchema, KeyColumnIdx, KeyComparison, PlaceholderIdx, ReadQuery, ReaderAddress,
-    ReadySetError, ReadySetHandle, ReadySetResult, SchemaType, Table, TableOperation, View,
-    ViewCreateRequest, ViewPlaceholder, ViewQuery, ViewSchema,
+    ColumnSchema, ReadQuery, ReaderAddress, ReaderHandle, ReadySetError, ReadySetHandle,
+    ReadySetResult, SchemaType, Table, TableOperation, View, ViewCreateRequest, ViewQuery,
 };
 use readyset_data::{DfType, DfValue, Dialect};
 use readyset_errors::ReadySetError::PreparedStatementMissing;
@@ -32,7 +28,6 @@ use readyset_sql_passes::anonymize::anonymize_literals;
 use readyset_tracing::{error, info, trace, warn};
 use readyset_util::redacted::Sensitive;
 use tracing::instrument;
-use vec1::vec1;
 
 use crate::backend::SelectSchema;
 use crate::rewrite::{self, ProcessedQueryParams};
@@ -455,19 +450,6 @@ impl ReadBehavior {
     fn is_blocking(&self) -> bool {
         matches!(self, Self::Blocking)
     }
-}
-
-/// Used when we can determine that the params for 'OFFSET ?' or 'LIMIT ?' passed in
-/// with an execute statement will result in an empty resultset
-async fn short_circuit_empty_resultset(getter: &mut View) -> ReadySetResult<QueryResult<'_>> {
-    let getter_schema = getter
-        .schema()
-        .ok_or_else(|| internal_err!("No schema for view"))?;
-    Ok(QueryResult::empty(SelectSchema {
-        use_bogo: false,
-        schema: Cow::Borrowed(getter_schema.schema(SchemaType::ReturnedSchema)),
-        columns: Cow::Borrowed(getter.columns()),
-    }))
 }
 
 /// Provides the necessary context to execute a select statement against noria, either for a
@@ -1446,14 +1428,15 @@ impl NoriaConnector {
             .await?;
 
         // extract result schema
-        let getter_schema = if getter.reuses_cache() {
-            None
-        } else {
-            let schema = getter.schema();
-            if schema.is_none() {
-                warn!(view = %qname, "no schema for view");
+        let getter_schema = match getter {
+            View::MultipleReused(_) => None,
+            View::Single(view) => {
+                let schema = view.schema();
+                if schema.is_none() {
+                    warn!(view = %qname, "no schema for view");
+                }
+                schema
             }
-            schema
         };
 
         trace!(id = statement_id, "select::registered");
@@ -1611,320 +1594,29 @@ fn verify_no_placeholders(statement: &mut SelectStatement, query: &str) -> Ready
     }
 }
 
-/// Build a [`ViewQuery`] for performing a lookup of the given `q` with the given `raw_keys`,
-/// provided `getter_schema` and `key_map` from the [`View`] itself.
-#[allow(clippy::too_many_arguments)]
-fn build_view_query(
-    getter_schema: &ViewSchema,
-    key_map: &[(ViewPlaceholder, KeyColumnIdx)],
-    key_remap: Option<&HashMap<PlaceholderIdx, Literal>>,
-    required_values: Option<&HashMap<PlaceholderIdx, Literal>>,
+/// Creates keys from processed query params, gets the select statement binops, and calls
+/// View::build_view_query.
+fn build_view_query<'a>(
+    getter: &'a mut View,
     processed_query_params: &ProcessedQueryParams,
     params: &[DfValue],
     q: &nom_sql::SelectStatement,
     ticket: Option<Timestamp>,
     read_behavior: ReadBehavior,
     dialect: Dialect,
-    view_name: &Relation,
-) -> ReadySetResult<ViewQuery> {
-    let mut raw_keys = processed_query_params.make_keys(params)?;
-
-    // If any placeholders in our query correspond to inlined values in the migrated query, verify
-    // that we are executing our query with these values.
-    if let Some(required) = required_values {
-        for params in raw_keys.iter() {
-            // Placeholders are 1-indexed, but params are 0-indexed
-            required.iter().try_for_each(|(idx, val)| {
-                let client_val = params.get(idx - 1).ok_or_else(|| {
-                    internal_err!(
-                        "Received fewer parameters than expected. Error indexing at position {}",
-                        idx - 1
-                    )
-                })?;
-                if DfValue::try_from(val)? != *client_val {
-                    Err(ReadySetError::ViewParameterMismatch {
-                        name: view_name.to_string(),
-                        idx: *idx,
-                    })
-                } else {
-                    Ok(())
-                }
-            })?;
-        }
-    }
-
-    let projected_schema = getter_schema.schema(SchemaType::ProjectedSchema);
-
+) -> ReadySetResult<Option<(&'a mut ReaderHandle, ViewQuery)>> {
     let (limit, offset) = processed_query_params.limit_offset_params(params)?;
+    let raw_keys = processed_query_params.make_keys(params)?;
 
-    let mut key_types = getter_schema.col_types(
-        key_map.iter().map(|(_, key_column_idx)| *key_column_idx),
-        SchemaType::ProjectedSchema,
-    )?;
-
-    trace!("select::lookup");
-    let bogo = vec![vec1![DfValue::from(0i32)].into()];
-    let mut binops = utils::get_select_statement_binops(q);
-    let mut filter_op_idx = None;
-    let mut filters = binops
-        .iter()
-        .enumerate()
-        .filter(|(_, (_, binop))| matches!(binop, BinaryOperator::Like | BinaryOperator::ILike))
-        .map(|(idx, (col, op))| -> ReadySetResult<_> {
-            let key = raw_keys.drain(0..1).next().ok_or(ReadySetError::EmptyKey)?;
-            if !raw_keys.is_empty() {
-                unsupported!(
-                    "LIKE/ILIKE not currently supported for more than one lookup key at a time"
-                );
-            }
-            let column = projected_schema
-                .iter()
-                .position(|x| x.column.name == col.name)
-                .ok_or_else(|| ReadySetError::NoSuchColumn(col.name.to_string()))?;
-
-            let key_type = key_types.remove(idx);
-            let value = key[idx].coerce_to(key_type, &DfType::Unknown)?; // No from_ty, key values are literals
-
-            if !key.is_empty() {
-                // the LIKE/ILIKE isn't our only key, add the rest back to `keys`
-                raw_keys.push(key);
-            }
-
-            filter_op_idx = Some(idx);
-
-            // LIKE/ILIKE resolve to bool
-            Ok(DfExpr::Op {
-                left: Box::new(DfExpr::Column {
-                    index: column,
-                    ty: key_type.clone(),
-                }),
-                op: DfBinaryOperator::from_sql_op(*op, dialect, key_type, key_type)?,
-                right: Box::new(DfExpr::Literal {
-                    val: value,
-                    ty: key_type.clone(),
-                }),
-                ty: DfType::Bool,
-            })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-
-    if let Some(filter_op_idx) = filter_op_idx {
-        // if we're using a column for a post-lookup filter, remove it from our list of binops
-        // so we can use the remaining list for our keys
-        binops.remove(filter_op_idx);
-    }
-
-    let keys = if raw_keys.is_empty()
-        || matches!(
-            required_values.map(|rv| rv.len() == raw_keys[0].len()),
-            Some(true)
-        ) {
-        bogo
-    } else {
-        let mut unique_binops = binops.iter().map(|(_, b)| *b).unique();
-        let binop_to_use = unique_binops.next().unwrap_or(BinaryOperator::Equal);
-        let mixed_binops = unique_binops.next().is_some();
-
-        let key_types: HashMap<usize, &DfType> = key_map
-            .iter()
-            .zip(key_types)
-            .map(|((_, key_column_idx), key_type)| (*key_column_idx, key_type))
-            .collect();
-
-        // parameter numbering is 1-based, but vecs are 0-based, so subtract 1
-        // also, no from_ty since the key value is a literal
-        let remap_key = |key: &[DfValue], idx: &usize, key_type: &DfType| -> ReadySetResult<_> {
-            Ok(match key_remap {
-                Some(remap) => {
-                    match remap.get(idx).ok_or_else(|| {
-                        internal_err!("Key remapping for borrowed view is missing indices")
-                    })? {
-                        Literal::Placeholder(ItemPlaceholder::DollarNumber(idx)) => key
-                            .get(*idx as usize - 1)
-                            .ok_or_else(|| {
-                                internal_err!(
-                                    "Key remapping for borrowed view contains erroneous index"
-                                )
-                            })?
-                            .coerce_to(key_type, &DfType::Unknown)?,
-                        Literal::Placeholder(_) => {
-                            internal!(
-                                "Key remapping for borrowed view contains non-numbered placeholder"
-                            )
-                        }
-                        literal => {
-                            DfValue::try_from(literal)?.coerce_to(key_type, &DfType::Unknown)?
-                        }
-                    }
-                }
-                None => key[*idx - 1].coerce_to(key_type, &DfType::Unknown)?,
-            })
-        };
-
-        raw_keys
-            .into_iter()
-            .map(|key| {
-                let mut k = vec![];
-                let mut bounds: Option<(Vec<DfValue>, Vec<DfValue>)> = if mixed_binops {
-                    Some((vec![], vec![]))
-                } else {
-                    None
-                };
-                // All ViewPlaceholder indices must be remapped using key_remap
-                for (view_placeholder, key_column_idx) in key_map {
-                    match view_placeholder {
-                        ViewPlaceholder::Generated => continue,
-                        ViewPlaceholder::OneToOne(idx) => {
-                            // If the key isn't in the list of key types, that means it was removed
-                            // during post-read filter construction (for LIKE/ILIKE) above, so just
-                            // skip it in the lookup key.
-                            let key_type = match key_types.get(key_column_idx) {
-                                Some(&ty) => ty,
-                                None => continue,
-                            };
-
-                            let value = remap_key(key.as_ref(), idx, key_type)?;
-
-                            let make_op = |op: DfBinaryOperator| DfExpr::Op {
-                                left: Box::new(DfExpr::Column {
-                                    index: *key_column_idx,
-                                    ty: key_type.clone(),
-                                }),
-                                op,
-                                right: Box::new(DfExpr::Literal {
-                                    val: value.clone(),
-                                    ty: key_type.clone(),
-                                }),
-                                ty: DfType::Bool, // TODO: infer type
-                            };
-
-                            if let Some((lower_bound, upper_bound)) = &mut bounds {
-                                let binop = binops[*idx - 1].1;
-                                match binop {
-                                    BinaryOperator::Like
-                                    | BinaryOperator::NotLike
-                                    | BinaryOperator::ILike
-                                    | BinaryOperator::NotILike => {
-                                        internal!("Already should have matched on LIKE above")
-                                    }
-
-                                    BinaryOperator::Equal => {
-                                        lower_bound.push(value.clone());
-                                        upper_bound.push(value);
-                                    }
-                                    BinaryOperator::GreaterOrEqual => {
-                                        filters.push(make_op(DfBinaryOperator::GreaterOrEqual));
-                                        lower_bound.push(value);
-                                        upper_bound.push(DfValue::Max);
-                                    }
-                                    BinaryOperator::LessOrEqual => {
-                                        filters.push(make_op(DfBinaryOperator::LessOrEqual));
-                                        lower_bound.push(DfValue::None); // NULL is the minimum DfValue
-                                        upper_bound.push(value);
-                                    }
-                                    BinaryOperator::Greater => {
-                                        filters.push(make_op(DfBinaryOperator::Greater));
-                                        lower_bound.push(value);
-                                        upper_bound.push(DfValue::Max);
-                                    }
-                                    BinaryOperator::Less => {
-                                        filters.push(make_op(DfBinaryOperator::Less));
-                                        lower_bound.push(DfValue::None); // NULL is the minimum DfValue
-                                        upper_bound.push(value);
-                                    }
-                                    op => unsupported!(
-                                        "Unsupported binary operator in query: `{}`",
-                                        op
-                                    ),
-                                }
-                            } else {
-                                // We need to additionally filter post-lookup for certain compound
-                                // ranges, since we always sort keys lexicographically within the
-                                // reader map. This is the case for...
-                                if (
-                                    // All keys within open (exclusive) ranges (consider eg:
-                                    //     (1, 2) > (1, 1)
-                                    //     even though
-                                    //     NOT (1 > 1 && 2 > 1)
-                                    // )
-                                    matches!(
-                                        binop_to_use,
-                                        BinaryOperator::Less | BinaryOperator::Greater
-                                    )
-                                        // As long as the range is actually compound
-                                        && key_map.len() > 1
-                                ) || (
-                                    // Or all other range keys beyond the *first* key within a
-                                    // compound range
-                                    binop_to_use != BinaryOperator::Equal && !k.is_empty()
-                                ) {
-                                    filters.push(make_op(DfBinaryOperator::from_sql_op(
-                                        binop_to_use,
-                                        dialect,
-                                        key_type,
-                                        key_type,
-                                    )?));
-                                }
-                                k.push(value);
-                            }
-                        }
-                        ViewPlaceholder::Between(lower_idx, upper_idx) => {
-                            let key_type = key_types[key_column_idx];
-
-                            let lower_value = remap_key(key.as_ref(), lower_idx, key_type)?;
-                            let upper_value = remap_key(key.as_ref(), upper_idx, key_type)?;
-                            let (lower_key, upper_key) =
-                                bounds.get_or_insert_with(Default::default);
-                            lower_key.push(lower_value);
-                            upper_key.push(upper_value);
-                        }
-                        ViewPlaceholder::PageNumber {
-                            offset_placeholder,
-                            limit,
-                        } => {
-                            // offset parameters should always be a BigInt
-                            let offset: u64 =
-                                remap_key(key.as_ref(), offset_placeholder, &DfType::BigInt)?
-                                    .try_into()?;
-                            if offset % *limit != 0 {
-                                unsupported!(
-                                    "OFFSET must currently be an integer multiple of LIMIT"
-                                );
-                            }
-                            let page_number = offset / *limit;
-                            k.push(page_number.into());
-                        }
-                    };
-                }
-
-                if let Some((lower, upper)) = bounds {
-                    debug_assert!(k.is_empty());
-                    Ok(KeyComparison::Range((
-                        Bound::Included(lower.try_into()?),
-                        Bound::Included(upper.try_into()?),
-                    )))
-                } else {
-                    KeyComparison::from_key_and_operator(k, binop_to_use)
-                }
-            })
-            .collect::<ReadySetResult<Vec<_>>>()?
-    };
-
-    trace!(?keys, ?filters, "Built view query");
-
-    Ok(ViewQuery {
-        key_comparisons: keys,
-        block: read_behavior.is_blocking(),
-        filter: filters.into_iter().reduce(|expr1, expr2| DfExpr::Op {
-            left: Box::new(expr1),
-            op: DfBinaryOperator::And,
-            right: Box::new(expr2),
-            ty: DfType::Bool, // AND is a boolean operator
-        }),
+    getter.build_view_query(
+        raw_keys,
         limit,
         offset,
-        timestamp: ticket,
-    })
+        ticket,
+        read_behavior.is_blocking(),
+        dialect,
+        utils::get_select_statement_binops(q),
+    )
 }
 
 /// Run the supplied [`SelectStatement`] on the supplied [`View`]
@@ -1942,34 +1634,26 @@ async fn do_read<'a>(
     event: &mut readyset_client_metrics::QueryExecutionEvent,
     dialect: Dialect,
 ) -> ReadySetResult<QueryResult<'a>> {
-    let (limit, _) = processed_query_params.limit_offset_params(params)?;
-    if limit == Some(0) {
-        return short_circuit_empty_resultset(getter).await;
-    }
-
-    let vq = build_view_query(
-        getter
-            .schema()
-            .ok_or_else(|| internal_err!("No schema for view"))?,
-        getter.key_map(),
-        getter.key_remap(),
-        getter.required_values(),
+    let (reader_handle, vq) = match build_view_query(
+        getter,
         processed_query_params,
         params,
         q,
         ticket,
         read_behavior,
         dialect,
-        getter.name(),
-    )?;
+    )? {
+        Some(res) => res,
+        None => return Err(ReadySetError::NoCacheForQuery),
+    };
 
     event.num_keys = Some(vq.key_comparisons.len() as _);
 
     let data = if let Some(rh) = read_request_handler {
         let request = readyset_client::Tagged::from(ReadQuery::Normal {
             target: ReaderAddress {
-                node: *getter.node(),
-                name: getter.name().clone(),
+                node: *reader_handle.node(),
+                name: reader_handle.name().clone(),
                 shard: 0,
             },
             query: vq.clone(),
@@ -1996,10 +1680,10 @@ async fn do_read<'a>(
                 .into_unserialized()
                 .expect("Requested raw result")
         } else {
-            getter.raw_lookup(vq).await?
+            reader_handle.raw_lookup(vq).await?
         }
     } else {
-        getter.raw_lookup(vq).await?
+        reader_handle.raw_lookup(vq).await?
     };
 
     event.cache_misses = data.total_stats().map(|s| s.cache_misses);
@@ -2010,8 +1694,13 @@ async fn do_read<'a>(
         SelectSchema {
             // TODO(vlad): looks like poor `use_bogo` is unused except in js? Should just remove it.
             use_bogo: false,
-            schema: Cow::Borrowed(getter.schema().unwrap().schema(SchemaType::ReturnedSchema)), /* Safe because we already unwrapped above */
-            columns: Cow::Borrowed(getter.columns()),
+            schema: Cow::Borrowed(
+                reader_handle
+                    .schema()
+                    .unwrap()
+                    .schema(SchemaType::ReturnedSchema),
+            ), /* Safe because we already unwrapped above */
+            columns: Cow::Borrowed(reader_handle.columns()),
         },
         data,
     ))
@@ -2073,370 +1762,6 @@ mod tests {
             assert_eq!(view_cache.view_create_request_from_name(&"q1".into()), None);
             assert_eq!(view_cache.view_create_request_from_name(&"q2".into()), None);
             assert!(global.read().unwrap().is_empty());
-        }
-    }
-
-    mod build_view_query {
-        use dataflow_expression::Dialect as DfDialect;
-        use lazy_static::lazy_static;
-        use nom_sql::{parse_query, Column, Dialect, SelectStatement};
-        use readyset_client::ColumnBase;
-
-        use super::*;
-
-        lazy_static! {
-            static ref SCHEMA: ViewSchema = ViewSchema::new(
-                vec![
-                    ColumnSchema {
-                        column: Column {
-                            name: "x".into(),
-                            table: Some("t".into()),
-                        },
-                        column_type: DfType::Int,
-                        base: Some(ColumnBase {
-                            table: "t".into(),
-                            column: "x".into(),
-                            constraints: vec![],
-                        }),
-                    },
-                    ColumnSchema {
-                        column: Column {
-                            name: "y".into(),
-                            table: Some("t".into()),
-                        },
-                        column_type: DfType::DEFAULT_TEXT,
-                        base: Some(ColumnBase {
-                            table: "t".into(),
-                            column: "y".into(),
-                            constraints: vec![],
-                        }),
-                    }
-                ],
-                vec![
-                    ColumnSchema {
-                        column: Column {
-                            name: "x".into(),
-                            table: Some("t".into()),
-                        },
-                        column_type: DfType::Int,
-                        base: Some(ColumnBase {
-                            table: "t".into(),
-                            column: "x".into(),
-                            constraints: vec![],
-                        }),
-                    },
-                    ColumnSchema {
-                        column: Column {
-                            name: "y".into(),
-                            table: Some("t".into()),
-                        },
-                        column_type: DfType::DEFAULT_TEXT,
-                        base: Some(ColumnBase {
-                            table: "t".into(),
-                            column: "y".into(),
-                            constraints: vec![],
-                        }),
-                    }
-                ],
-            );
-        }
-
-        fn parse_select_statement(src: &str) -> SelectStatement {
-            match parse_query(Dialect::MySQL, src).unwrap() {
-                SqlQuery::Select(stmt) => stmt,
-                _ => panic!("Unexpected query type"),
-            }
-        }
-
-        fn make_build_query(
-            query: &str,
-            key_map: &[(ViewPlaceholder, KeyColumnIdx)],
-            params: &[DfValue],
-            dialect: Dialect,
-        ) -> ViewQuery {
-            let dataflow_dialect = match dialect {
-                Dialect::MySQL => DfDialect::DEFAULT_MYSQL,
-                Dialect::PostgreSQL => DfDialect::DEFAULT_POSTGRESQL,
-            };
-
-            let mut q = parse_select_statement(query);
-            let pp = rewrite::process_query(&mut q, true).unwrap();
-            build_view_query(
-                &SCHEMA,
-                key_map,
-                None,
-                None,
-                &pp,
-                params,
-                &q,
-                None,
-                ReadBehavior::Blocking,
-                dataflow_dialect,
-                &"test".into(),
-            )
-            .unwrap()
-        }
-
-        #[test]
-        fn simple_point_lookup() {
-            let query = make_build_query(
-                "SELECT t.x FROM t WHERE t.x = $1",
-                &[(ViewPlaceholder::OneToOne(1), 0)],
-                &[DfValue::from(1)],
-                Dialect::MySQL,
-            );
-
-            assert!(query.filter.is_none());
-            assert_eq!(
-                query.key_comparisons,
-                vec![KeyComparison::from(vec1![DfValue::from(1)])]
-            );
-        }
-
-        #[test]
-        fn single_between() {
-            let query = make_build_query(
-                "SELECT t.x FROM t WHERE t.x BETWEEN $1 AND $2",
-                &[(ViewPlaceholder::Between(1, 2), 0)],
-                &[DfValue::from(1), DfValue::from(2)],
-                Dialect::MySQL,
-            );
-
-            assert!(query.filter.is_none());
-            assert_eq!(
-                query.key_comparisons,
-                vec![KeyComparison::from_range(
-                    &(vec1![DfValue::from(1)]..=vec1![DfValue::from(2)])
-                )]
-            );
-        }
-
-        #[test]
-        fn ilike_and_equality() {
-            let query = make_build_query(
-                "SELECT t.x FROM t WHERE t.x = $1 AND t.y ILIKE $2",
-                &[
-                    (ViewPlaceholder::OneToOne(1), 0),
-                    (ViewPlaceholder::OneToOne(2), 1),
-                ],
-                &[DfValue::from(1), DfValue::from("%a%")],
-                Dialect::MySQL,
-            );
-
-            assert_eq!(
-                query.filter,
-                Some(DfExpr::Op {
-                    left: Box::new(DfExpr::Column {
-                        index: 1,
-                        ty: DfType::DEFAULT_TEXT
-                    }),
-                    op: DfBinaryOperator::ILike,
-                    right: Box::new(DfExpr::Literal {
-                        val: DfValue::from("%a%"),
-                        ty: DfType::DEFAULT_TEXT
-                    }),
-                    ty: DfType::Bool,
-                })
-            );
-        }
-
-        #[test]
-        fn mixed_equal_and_inclusive() {
-            let query = make_build_query(
-                "SELECT t.x FROM t WHERE t.x >= $1 AND t.y = $2",
-                &[
-                    (ViewPlaceholder::OneToOne(2), 1),
-                    (ViewPlaceholder::OneToOne(1), 0),
-                ],
-                &[DfValue::from(1), DfValue::from("a")],
-                Dialect::MySQL,
-            );
-
-            assert_eq!(
-                query.key_comparisons,
-                vec![KeyComparison::from_range(
-                    &(vec1![DfValue::from("a"), DfValue::from(1)]
-                        ..=vec1![DfValue::from("a"), DfValue::Max])
-                )]
-            );
-        }
-
-        #[test]
-        fn mixed_equal_and_between() {
-            let query = make_build_query(
-                "SELECT t.x FROM t WHERE t.x BETWEEN $1 AND $2 AND t.y = $3",
-                &[
-                    (ViewPlaceholder::OneToOne(3), 1),
-                    (ViewPlaceholder::Between(1, 2), 0),
-                ],
-                &[DfValue::from(1), DfValue::from(2), DfValue::from("a")],
-                Dialect::MySQL,
-            );
-
-            assert!(query.filter.is_none());
-            assert_eq!(
-                query.key_comparisons,
-                vec![KeyComparison::from_range(
-                    &(vec1![DfValue::from("a"), DfValue::from(1)]
-                        ..=vec1![DfValue::from("a"), DfValue::from(2)])
-                )]
-            );
-        }
-
-        #[test]
-        fn mixed_equal_and_exclusive() {
-            let query = make_build_query(
-                "SELECT t.x FROM t WHERE t.x > $1 AND t.y = $2",
-                &[
-                    (ViewPlaceholder::OneToOne(2), 1),
-                    (ViewPlaceholder::OneToOne(1), 0),
-                ],
-                &[DfValue::from(1), DfValue::from("a")],
-                Dialect::MySQL,
-            );
-
-            assert_eq!(
-                query.filter,
-                Some(DfExpr::Op {
-                    left: Box::new(DfExpr::Column {
-                        index: 0,
-                        ty: DfType::Int
-                    }),
-                    op: DfBinaryOperator::Greater,
-                    right: Box::new(DfExpr::Literal {
-                        val: 1.into(),
-                        ty: DfType::Int
-                    }),
-                    ty: DfType::Bool,
-                })
-            );
-            assert_eq!(
-                query.key_comparisons,
-                vec![KeyComparison::from_range(
-                    &(vec1![DfValue::from("a"), DfValue::from(1)]
-                        ..=vec1![DfValue::from("a"), DfValue::Max])
-                )]
-            );
-        }
-
-        #[test]
-        fn compound_range_open() {
-            let query = make_build_query(
-                "SELECT t.x FROM t WHERE t.x > $1 AND t.y > $2",
-                &[
-                    (ViewPlaceholder::OneToOne(1), 0),
-                    (ViewPlaceholder::OneToOne(2), 1),
-                ],
-                &[DfValue::from(1), DfValue::from("a")],
-                Dialect::MySQL,
-            );
-
-            assert_eq!(
-                query.filter,
-                Some(DfExpr::Op {
-                    left: Box::new(DfExpr::Op {
-                        left: Box::new(DfExpr::Column {
-                            index: 0,
-                            ty: DfType::Int
-                        }),
-                        op: DfBinaryOperator::Greater,
-                        right: Box::new(DfExpr::Literal {
-                            val: 1.into(),
-                            ty: DfType::Int
-                        }),
-                        ty: DfType::Bool
-                    }),
-                    op: DfBinaryOperator::And,
-                    right: Box::new(DfExpr::Op {
-                        left: Box::new(DfExpr::Column {
-                            index: 1,
-                            ty: DfType::DEFAULT_TEXT
-                        }),
-                        op: DfBinaryOperator::Greater,
-                        right: Box::new(DfExpr::Literal {
-                            val: "a".into(),
-                            ty: DfType::DEFAULT_TEXT
-                        }),
-                        ty: DfType::Bool
-                    }),
-                    ty: DfType::Bool
-                })
-            );
-
-            assert_eq!(
-                query.key_comparisons,
-                vec![KeyComparison::Range((
-                    Bound::Excluded(vec1![DfValue::from(1), DfValue::from("a")]),
-                    Bound::Unbounded
-                ))]
-            );
-        }
-
-        #[test]
-        fn compound_range_closed() {
-            let query = make_build_query(
-                "SELECT t.x FROM t WHERE t.x >= $1 AND t.y >= $2",
-                &[
-                    (ViewPlaceholder::OneToOne(1), 0),
-                    (ViewPlaceholder::OneToOne(2), 1),
-                ],
-                &[DfValue::from(1), DfValue::from("a")],
-                Dialect::MySQL,
-            );
-
-            assert_eq!(
-                query.filter,
-                Some(DfExpr::Op {
-                    left: Box::new(DfExpr::Column {
-                        index: 1,
-                        ty: DfType::DEFAULT_TEXT
-                    }),
-                    op: DfBinaryOperator::GreaterOrEqual,
-                    right: Box::new(DfExpr::Literal {
-                        val: "a".into(),
-                        ty: DfType::DEFAULT_TEXT
-                    }),
-                    ty: DfType::Bool
-                })
-            );
-
-            assert_eq!(
-                query.key_comparisons,
-                vec![KeyComparison::Range((
-                    Bound::Included(vec1![DfValue::from(1), DfValue::from("a")]),
-                    Bound::Unbounded
-                ))]
-            );
-        }
-
-        #[test]
-        fn paginated_with_key() {
-            let query = make_build_query(
-                "SELECT t.x FROM t WHERE t.x = $1 ORDER BY t.y ASC LIMIT 3 OFFSET $2",
-                &[
-                    (ViewPlaceholder::OneToOne(1), 0),
-                    (
-                        ViewPlaceholder::PageNumber {
-                            offset_placeholder: 2,
-                            limit: 3,
-                        },
-                        1,
-                    ),
-                ],
-                &[DfValue::from(1), DfValue::from(3)],
-                Dialect::MySQL,
-            );
-
-            assert_eq!(query.filter, None);
-
-            assert_eq!(
-                query.key_comparisons,
-                vec![vec1![
-                    DfValue::from(1),
-                    DfValue::from(1) // page 2
-                ]
-                .into()]
-            );
         }
     }
 

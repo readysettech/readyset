@@ -276,14 +276,12 @@ pub enum ReadySetError {
     #[error("View '{0}' already exists")]
     ViewAlreadyExists(String),
 
-    /// A client parameter does not match the inlined value in the query for this View.
-    #[error("The parameter at idx '{idx}' does not match the inlined value in the query for View '{name}'")]
-    ViewParameterMismatch {
-        /// The name of the View
-        name: String,
-        /// The position of the parameter that does not match the inlined value.
-        idx: usize,
-    },
+    /// No cache found for the given query parameters.
+    ///
+    /// This error may occur when attempting to find an inlined cache to satisfy a parametrized
+    /// query. This error should not reach the client when an upstream database is present.
+    #[error("Existing caches do not satisfy the given query parameters.")]
+    NoCacheForQuery,
 
     /// A reader could not be found at the given worker.
     #[error("Reader not found")]

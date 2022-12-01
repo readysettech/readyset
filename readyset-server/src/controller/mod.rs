@@ -1245,7 +1245,13 @@ mod tests {
         let mut table = noria.table("key_count_test").await.unwrap();
         // The table only contains the local index, so we use `tables()` to get the global index
         let table_idx = noria.tables().await.unwrap()[&"key_count_test".into()];
-        let view_idx = *noria.view("q1").await.unwrap().node();
+        let view_idx = *noria
+            .view("q1")
+            .await
+            .unwrap()
+            .into_reader_handle()
+            .unwrap()
+            .node();
 
         let key_counts = noria.node_sizes().await.unwrap();
 

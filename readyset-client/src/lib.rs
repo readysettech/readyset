@@ -90,7 +90,12 @@
 //!     .unwrap();
 //!
 //!     // and then get handles that let us execute those queries to fetch their results
-//!     let mut awvc = db.view("ArticleWithVoteCount").await.unwrap();
+//!     let mut awvc = db
+//!         .view("ArticleWithVoteCount")
+//!         .await
+//!         .unwrap()
+//!         .into_reader_handle()
+//!         .unwrap();
 //!     // looking up article 42 should yield the article we inserted with a vote count of 1
 //!     assert_eq!(
 //!         awvc.lookup(&[aid.into()], true).await.unwrap().into_vec(),
@@ -277,7 +282,8 @@ pub use readyset_errors::{ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
 use tokio::task_local;
 pub use view::{
-    ColumnBase, ColumnSchema, KeyColumnIdx, PlaceholderIdx, ViewPlaceholder, ViewSchema,
+    ColumnBase, ColumnSchema, KeyColumnIdx, PlaceholderIdx, ReaderHandle, ViewPlaceholder,
+    ViewSchema,
 };
 
 pub use crate::consensus::ZookeeperAuthority;
@@ -375,7 +381,7 @@ pub use crate::view::{
 #[doc(hidden)]
 pub mod builders {
     pub use super::table::TableBuilder;
-    pub use super::view::ViewBuilder;
+    pub use super::view::{ReaderHandleBuilder, ReusedReaderHandleBuilder, ViewBuilder};
 }
 
 /// Types used when debugging ReadySet.

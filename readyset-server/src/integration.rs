@@ -83,7 +83,7 @@ async fn it_completes() {
         })
         .await;
 
-    let mut cq = g.view("c").await.unwrap();
+    let mut cq = g.view("c").await.unwrap().into_reader_handle().unwrap();
     let mut muta = g.table_by_index(a).await.unwrap();
     let mut mutb = g.table_by_index(b).await.unwrap();
     let id: DfValue = 1.into();
@@ -153,7 +153,7 @@ async fn test_timestamp_propagation_simple() {
         })
         .await;
 
-    let mut cq = g.view("c").await.unwrap();
+    let mut cq = g.view("c").await.unwrap().into_reader_handle().unwrap();
     let mut muta = g.table_by_index(a).await.unwrap();
 
     // Insert <1, 2> into table "a".
@@ -223,7 +223,7 @@ async fn test_timestamp_propagation_multitable() {
         })
         .await;
 
-    let mut cq = g.view("c").await.unwrap();
+    let mut cq = g.view("c").await.unwrap().into_reader_handle().unwrap();
     let mut muta = g.table_by_index(a).await.unwrap();
     let mut mutb = g.table_by_index(b).await.unwrap();
 
@@ -307,7 +307,7 @@ async fn sharded_shuffle() {
     eprintln!("{}", g.graphviz().await.unwrap());
 
     let mut base = g.table_by_index(a).await.unwrap();
-    let mut view = g.view("base").await.unwrap();
+    let mut view = g.view("base").await.unwrap().into_reader_handle().unwrap();
 
     // make sure there is data on >1 shard, and that we'd get multiple rows by querying the reader
     // for a single key.
@@ -391,7 +391,12 @@ async fn broad_recursing_upquery() {
     eprintln!("{}", g.graphviz().await.unwrap());
 
     let mut base_x = g.table_by_index(x).await.unwrap();
-    let mut reader = g.view("reader").await.unwrap();
+    let mut reader = g
+        .view("reader")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     // we want to make sure that all the upqueries recurse all the way to cause maximum headache
     // for the partial logic. we do this by ensuring that every shard at every operator has at
@@ -442,7 +447,7 @@ async fn base_mutation() {
         })
         .await;
 
-    let mut read = g.view("a").await.unwrap();
+    let mut read = g.view("a").await.unwrap().into_reader_handle().unwrap();
     let mut write = g.table_by_index(a).await.unwrap();
 
     // insert a new record
@@ -548,8 +553,8 @@ async fn shared_interdomain_ancestor() {
         })
         .await;
 
-    let mut bq = g.view("b").await.unwrap();
-    let mut cq = g.view("c").await.unwrap();
+    let mut bq = g.view("b").await.unwrap().into_reader_handle().unwrap();
+    let mut cq = g.view("c").await.unwrap().into_reader_handle().unwrap();
     let mut muta = g.table_by_index(a).await.unwrap();
     let id: DfValue = 1.into();
 
@@ -598,7 +603,7 @@ async fn it_works_w_mat() {
         })
         .await;
 
-    let mut cq = g.view("c").await.unwrap();
+    let mut cq = g.view("c").await.unwrap().into_reader_handle().unwrap();
     let mut muta = g.table_by_index(a).await.unwrap();
     let mut mutb = g.table_by_index(b).await.unwrap();
     let id: DfValue = 1.into();
@@ -676,7 +681,7 @@ async fn it_works_w_partial_mat() {
     // give it some time to propagate
     sleep().await;
 
-    let mut cq = g.view("c").await.unwrap();
+    let mut cq = g.view("c").await.unwrap().into_reader_handle().unwrap();
 
     // because the reader is partial, we should have no key until we read
     assert_eq!(cq.len().await.unwrap(), 0);
@@ -722,7 +727,7 @@ async fn it_works_w_partial_mat_below_empty() {
     // give it some time to propagate
     sleep().await;
 
-    let mut cq = g.view("c").await.unwrap();
+    let mut cq = g.view("c").await.unwrap().into_reader_handle().unwrap();
 
     // despite the empty base tables, we'll make the reader partial and therefore we should have no
     // key until we read
@@ -766,7 +771,7 @@ async fn it_works_deletion() {
         })
         .await;
 
-    let mut cq = g.view("c").await.unwrap();
+    let mut cq = g.view("c").await.unwrap().into_reader_handle().unwrap();
     let mut muta = g.table_by_index(a).await.unwrap();
     let mut mutb = g.table_by_index(b).await.unwrap();
 
@@ -812,7 +817,12 @@ async fn delete_row() {
     .await
     .unwrap();
     let mut t = g.table("t1").await.unwrap();
-    let mut all_rows = g.view("all_rows").await.unwrap();
+    let mut all_rows = g
+        .view("all_rows")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     t.insert_many(vec![
         vec![DfValue::from(1), DfValue::from(2), DfValue::from(3)],
@@ -847,7 +857,12 @@ async fn it_works_with_sql_recipe() {
         .unwrap();
 
     let mut mutator = g.table("Car").await.unwrap();
-    let mut getter = g.view("CountCars").await.unwrap();
+    let mut getter = g
+        .view("CountCars")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     assert_eq!(*mutator.table_name(), "Car".into());
     assert_eq!(mutator.columns(), &["id", "brand"]);
@@ -894,7 +909,12 @@ async fn it_works_with_vote() {
         .unwrap();
     let mut article = g.table("Article").await.unwrap();
     let mut vote = g.table("Vote").await.unwrap();
-    let mut awvc = g.view("ArticleWithVoteCount").await.unwrap();
+    let mut awvc = g
+        .view("ArticleWithVoteCount")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     article
         .insert(vec![0i64.into(), "Article".try_into().unwrap()])
@@ -936,8 +956,8 @@ async fn it_works_with_identical_queries() {
         .await
         .unwrap();
     let mut article = g.table("Article").await.unwrap();
-    let mut aq1 = g.view("aq1").await.unwrap();
-    let mut aq2 = g.view("aq2").await.unwrap();
+    let mut aq1 = g.view("aq1").await.unwrap().into_reader_handle().unwrap();
+    let mut aq2 = g.view("aq2").await.unwrap().into_reader_handle().unwrap();
 
     let aid = 1u64;
 
@@ -983,7 +1003,12 @@ async fn it_works_with_double_query_through() {
         .unwrap();
     let mut a = g.table("A").await.unwrap();
     let mut b = g.table("B").await.unwrap();
-    let mut getter = g.view("ReadJoin").await.unwrap();
+    let mut getter = g
+        .view("ReadJoin")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     a.insert(vec![1i64.into(), 5.into()]).await.unwrap();
     a.insert(vec![2i64.into(), 10.into()]).await.unwrap();
@@ -1037,7 +1062,12 @@ async fn it_works_with_duplicate_subquery() {
         .unwrap();
     let mut a = g.table("A").await.unwrap();
     let mut b = g.table("B").await.unwrap();
-    let mut getter = g.view("ReadJoin2").await.unwrap();
+    let mut getter = g
+        .view("ReadJoin2")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     a.insert(vec![1i64.into(), 5.into()]).await.unwrap();
     a.insert(vec![2i64.into(), 10.into()]).await.unwrap();
@@ -1077,7 +1107,12 @@ async fn it_works_with_reads_before_writes() {
         .unwrap();
     let mut article = g.table("Article").await.unwrap();
     let mut vote = g.table("Vote").await.unwrap();
-    let mut awvc = g.view("ArticleVote").await.unwrap();
+    let mut awvc = g
+        .view("ArticleVote")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     let aid = 1;
     let uid = 10;
@@ -1117,7 +1152,12 @@ async fn forced_shuffle_despite_same_shard() {
 
     let mut car_mutator = g.table("Car").await.unwrap();
     let mut price_mutator = g.table("Price").await.unwrap();
-    let mut getter = g.view("CarPrice").await.unwrap();
+    let mut getter = g
+        .view("CarPrice")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
     let cid = 1;
     let pid = 1;
     let price = 100;
@@ -1155,7 +1195,12 @@ async fn double_shuffle() {
 
     let mut car_mutator = g.table("Car").await.unwrap();
     let mut price_mutator = g.table("Price").await.unwrap();
-    let mut getter = g.view("CarPrice").await.unwrap();
+    let mut getter = g
+        .view("CarPrice")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
     let cid = 1;
     let pid = 1;
     let price = 100;
@@ -1191,7 +1236,12 @@ async fn it_works_with_arithmetic_aliases() {
         .unwrap();
 
     let mut price_mutator = g.table("Price").await.unwrap();
-    let mut getter = g.view("AltPrice").await.unwrap();
+    let mut getter = g
+        .view("AltPrice")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
     let pid = 1;
     let price = 10000;
     price_mutator
@@ -1266,7 +1316,12 @@ async fn it_recovers_persisted_bases() {
     let mut g = g.start(authority.clone()).await.unwrap();
     g.backend_ready().await;
     {
-        let mut getter = g.view("CarPrice").await.unwrap();
+        let mut getter = g
+            .view("CarPrice")
+            .await
+            .unwrap()
+            .into_reader_handle()
+            .unwrap();
 
         // Make sure that the new graph contains the old writes
         for i in 1..10 {
@@ -1341,7 +1396,12 @@ async fn it_recovers_persisted_bases_with_volume_id() {
     let mut g = g.start(authority.clone()).await.unwrap();
     g.backend_ready().await;
     {
-        let mut getter = g.view("CarPrice").await.unwrap();
+        let mut getter = g
+            .view("CarPrice")
+            .await
+            .unwrap()
+            .into_reader_handle()
+            .unwrap();
 
         // Make sure that the new graph contains the old writes
         for i in 1..10 {
@@ -1442,7 +1502,12 @@ async fn mutator_churn() {
         })
         .await;
 
-    let mut vc_state = g.view("votecount").await.unwrap();
+    let mut vc_state = g
+        .view("votecount")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     let ids = 10;
     let votes = 7;
@@ -1512,6 +1577,8 @@ async fn view_connection_churn() {
 
                 g.view("AID")
                     .await
+                    .unwrap()
+                    .into_reader_handle()
                     .unwrap()
                     .lookup(&[DfValue::from(i)], true)
                     .await
@@ -1650,7 +1717,12 @@ async fn it_recovers_persisted_bases_w_multiple_nodes() {
     let mut g = g.start(authority.clone()).await.unwrap();
     g.backend_ready().await;
     for (i, table) in tables.iter().enumerate() {
-        let mut getter = g.view(&format!("{}ID", table)).await.unwrap();
+        let mut getter = g
+            .view(&format!("{}ID", table))
+            .await
+            .unwrap()
+            .into_reader_handle()
+            .unwrap();
         let result = getter.lookup(&[i.into()], true).await.unwrap().into_vec();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0][0], i.into());
@@ -1723,7 +1795,12 @@ async fn it_recovers_persisted_bases_w_multiple_nodes_and_volume_id() {
     g.backend_ready().await;
     std::thread::sleep(Duration::from_secs(10));
     for (i, table) in tables.iter().enumerate() {
-        let mut getter = g.view(&format!("{}ID", table)).await.unwrap();
+        let mut getter = g
+            .view(&format!("{}ID", table))
+            .await
+            .unwrap()
+            .into_reader_handle()
+            .unwrap();
         let result = getter.lookup(&[i.into()], true).await.unwrap().into_vec();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0][0], i.into());
@@ -1748,7 +1825,12 @@ async fn it_works_with_simple_arithmetic() {
     .unwrap();
 
     let mut mutator = g.table("Car").await.unwrap();
-    let mut getter = g.view("CarPrice").await.unwrap();
+    let mut getter = g
+        .view("CarPrice")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
     let id: DfValue = 1.into();
     let price: DfValue = 123.into();
     mutator.insert(vec![id.clone(), price]).await.unwrap();
@@ -1773,7 +1855,12 @@ async fn it_works_with_multiple_arithmetic_expressions() {
         .unwrap();
 
     let mut mutator = g.table("Car").await.unwrap();
-    let mut getter = g.view("CarPrice").await.unwrap();
+    let mut getter = g
+        .view("CarPrice")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
     let id: DfValue = 1.into();
     let price: DfValue = 123.into();
     mutator.insert(vec![id.clone(), price]).await.unwrap();
@@ -1808,7 +1895,12 @@ async fn it_works_with_join_arithmetic() {
     let mut car_mutator = g.table("Car").await.unwrap();
     let mut price_mutator = g.table("Price").await.unwrap();
     let mut sales_mutator = g.table("Sales").await.unwrap();
-    let mut getter = g.view("CarPrice").await.unwrap();
+    let mut getter = g
+        .view("CarPrice")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
     let id: i32 = 1;
     let price: i32 = 123;
     let fraction = 0.7;
@@ -1854,7 +1946,7 @@ async fn it_works_with_function_arithmetic() {
         .unwrap();
 
     let mut mutator = g.table("Bread").await.unwrap();
-    let mut getter = g.view("Price").await.unwrap();
+    let mut getter = g.view("Price").await.unwrap().into_reader_handle().unwrap();
     let max_price = 20;
     for (i, price) in (10..=max_price).enumerate() {
         let id = i + 1;
@@ -1912,9 +2004,14 @@ async fn votes() {
         })
         .await;
 
-    let mut articleq = g.view("article").await.unwrap();
-    let mut vcq = g.view("vc").await.unwrap();
-    let mut endq = g.view("end").await.unwrap();
+    let mut articleq = g
+        .view("article")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
+    let mut vcq = g.view("vc").await.unwrap().into_reader_handle().unwrap();
+    let mut endq = g.view("end").await.unwrap().into_reader_handle().unwrap();
 
     let mut mut1 = g.table_by_index(article1).await.unwrap();
     let mut mut2 = g.table_by_index(article2).await.unwrap();
@@ -2011,7 +2108,7 @@ async fn empty_migration() {
         })
         .await;
 
-    let mut cq = g.view("c").await.unwrap();
+    let mut cq = g.view("c").await.unwrap().into_reader_handle().unwrap();
     let mut muta = g.table_by_index(a).await.unwrap();
     let mut mutb = g.table_by_index(b).await.unwrap();
     let id: DfValue = 1.into();
@@ -2054,7 +2151,7 @@ async fn simple_migration() {
         })
         .await;
 
-    let mut aq = g.view("a").await.unwrap();
+    let mut aq = g.view("a").await.unwrap().into_reader_handle().unwrap();
     let mut muta = g.table_by_index(a).await.unwrap();
 
     // send a value on a
@@ -2078,7 +2175,7 @@ async fn simple_migration() {
         })
         .await;
 
-    let mut bq = g.view("b").await.unwrap();
+    let mut bq = g.view("b").await.unwrap().into_reader_handle().unwrap();
     let mut mutb = g.table_by_index(b).await.unwrap();
 
     // send a value on b
@@ -2111,7 +2208,7 @@ async fn add_columns() {
             a
         })
         .await;
-    let mut aq = g.view("a").await.unwrap();
+    let mut aq = g.view("a").await.unwrap().into_reader_handle().unwrap();
     let mut muta = g.table_by_index(a).await.unwrap();
 
     // send a value on a
@@ -2197,7 +2294,7 @@ async fn migrate_added_columns() {
         })
         .await;
 
-    let mut bq = g.view("x").await.unwrap();
+    let mut bq = g.view("x").await.unwrap().into_reader_handle().unwrap();
 
     // send another (old) value on a
     muta.insert(vec![id.clone(), "z".try_into().unwrap()])
@@ -2243,7 +2340,7 @@ async fn migrate_drop_columns() {
             a
         })
         .await;
-    let mut aq = g.view("a").await.unwrap();
+    let mut aq = g.view("a").await.unwrap().into_reader_handle().unwrap();
     let mut muta1 = g.table("a").await.unwrap();
 
     // send a value on a
@@ -2353,7 +2450,7 @@ async fn key_on_added() {
         .await;
 
     // make sure we can read (may trigger a replay)
-    let mut bq = g.view("x").await.unwrap();
+    let mut bq = g.view("x").await.unwrap().into_reader_handle().unwrap();
     assert!(bq
         .lookup(&[3.into()], true)
         .await
@@ -2448,7 +2545,7 @@ async fn replay_during_replay() {
 
     // since u and target are both partial, the writes should not actually have propagated through
     // yet. do a read to see that one makes it through correctly:
-    let mut r = g.view("end").await.unwrap();
+    let mut r = g.view("end").await.unwrap().into_reader_handle().unwrap();
 
     assert_eq!(
         r.lookup(&[1.into()], true).await.unwrap().into_vec(),
@@ -2462,7 +2559,7 @@ async fn replay_during_replay() {
     })
     .await;
 
-    let mut second = g.view("u").await.unwrap();
+    let mut second = g.view("u").await.unwrap().into_reader_handle().unwrap();
 
     // second is partial and empty, so any read should trigger a replay.
     // though that shouldn't interact with target in any way.
@@ -2578,7 +2675,7 @@ async fn cascading_replays_with_sharding() {
 
     sleep().await;
 
-    let mut e = g.view("end").await.unwrap();
+    let mut e = g.view("end").await.unwrap().into_reader_handle().unwrap();
 
     assert_eq!(
         e.lookup(&["u1".try_into().unwrap()], true)
@@ -2620,7 +2717,7 @@ async fn replay_multiple_keys_then_write() {
     .await
     .unwrap();
     let mut t = g.table("t").await.unwrap();
-    let mut q = g.view("q").await.unwrap();
+    let mut q = g.view("q").await.unwrap().into_reader_handle().unwrap();
 
     t.insert_many(vec![
         vec![DfValue::from(1), DfValue::from(1)],
@@ -2685,7 +2782,7 @@ async fn full_aggregation_with_bogokey() {
         })
         .await;
 
-    let mut aggq = g.view("agg").await.unwrap();
+    let mut aggq = g.view("agg").await.unwrap().into_reader_handle().unwrap();
     let mut base = g.table_by_index(base).await.unwrap();
 
     // insert some values
@@ -2747,8 +2844,13 @@ async fn pkey_then_full_table_with_bogokey() {
     .unwrap();
 
     let mut posts = g.table("posts").await.unwrap();
-    let mut by_id = g.view("by_id").await.unwrap();
-    let mut all_posts = g.view("all_posts").await.unwrap();
+    let mut by_id = g.view("by_id").await.unwrap().into_reader_handle().unwrap();
+    let mut all_posts = g
+        .view("all_posts")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     let rows: Vec<Vec<DfValue>> = (0..10)
         .map(|n| vec![n.into(), format!("post {}", n).try_into().unwrap()])
@@ -2817,7 +2919,7 @@ async fn materialization_frontier() {
 
     let mut a = g.table_by_index(article).await.unwrap();
     let mut v = g.table_by_index(vote).await.unwrap();
-    let mut r = g.view("awvc").await.unwrap();
+    let mut r = g.view("awvc").await.unwrap().into_reader_handle().unwrap();
 
     // seed votes
     v.insert(vec!["a".try_into().unwrap(), 1.into()])
@@ -2922,7 +3024,7 @@ async fn crossing_migration() {
         })
         .await;
 
-    let mut cq = g.view("c").await.unwrap();
+    let mut cq = g.view("c").await.unwrap().into_reader_handle().unwrap();
 
     let id: DfValue = 1.into();
 
@@ -2959,7 +3061,7 @@ async fn independent_domain_migration() {
         })
         .await;
 
-    let mut aq = g.view("a").await.unwrap();
+    let mut aq = g.view("a").await.unwrap().into_reader_handle().unwrap();
     let mut muta = g.table_by_index(a).await.unwrap();
 
     // send a value on a
@@ -2983,7 +3085,7 @@ async fn independent_domain_migration() {
         })
         .await;
 
-    let mut bq = g.view("b").await.unwrap();
+    let mut bq = g.view("b").await.unwrap().into_reader_handle().unwrap();
     let mut mutb = g.table_by_index(b).await.unwrap();
 
     // send a value on b
@@ -3024,7 +3126,7 @@ async fn domain_amend_migration() {
             c
         })
         .await;
-    let mut cq = g.view("c").await.unwrap();
+    let mut cq = g.view("c").await.unwrap().into_reader_handle().unwrap();
 
     let id: DfValue = 1.into();
 
@@ -3136,7 +3238,7 @@ async fn do_full_vote_migration(sharded: bool, old_puts_after: bool) {
         mutv.insert(vec![1.into(), i.into()]).await.unwrap();
     }
 
-    let mut last = g.view("awvc").await.unwrap();
+    let mut last = g.view("awvc").await.unwrap().into_reader_handle().unwrap();
     thread::sleep(get_settle_time().checked_mul(3).unwrap());
     for i in 0..n {
         let rows = last.lookup(&[i.into()], true).await.unwrap().into_vec();
@@ -3190,7 +3292,7 @@ async fn do_full_vote_migration(sharded: bool, old_puts_after: bool) {
         })
         .await;
 
-    let mut last = g.view("awr").await.unwrap();
+    let mut last = g.view("awr").await.unwrap().into_reader_handle().unwrap();
     let mut mutr = g.table_by_index(rating).await.unwrap();
     for i in 0..n {
         if old_puts_after {
@@ -3272,7 +3374,12 @@ async fn live_writes() {
         })
         .await;
 
-    let mut vc_state = g.view("votecount").await.unwrap();
+    let mut vc_state = g
+        .view("votecount")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
     let mut add = g.table_by_index(vote).await.unwrap();
 
     let ids = 1000;
@@ -3310,7 +3417,12 @@ async fn live_writes() {
         })
         .await;
 
-    let mut vc2_state = g.view("votecount2").await.unwrap();
+    let mut vc2_state = g
+        .view("votecount2")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     // TODO: check that the writer did indeed complete writes during the migration
 
@@ -3383,7 +3495,7 @@ async fn state_replay_migration_query() {
             j
         })
         .await;
-    let mut out = g.view("j").await.unwrap();
+    let mut out = g.view("j").await.unwrap().into_reader_handle().unwrap();
     sleep().await;
 
     // if all went according to plan, the join should now be fully populated!
@@ -3538,7 +3650,7 @@ async fn node_removal() {
         })
         .await;
 
-    let mut cq = g.view("c").await.unwrap();
+    let mut cq = g.view("c").await.unwrap().into_reader_handle().unwrap();
     let mut muta = g.table_by_index(a).await.unwrap();
     let mut mutb = g.table_by_index(b).await.unwrap();
     let id: DfValue = 1.into();
@@ -3604,8 +3716,8 @@ async fn remove_query() {
     assert_eq!(g.views().await.unwrap().len(), 2);
 
     let mut mutb = g.table("b").await.unwrap();
-    let mut qa = g.view("qa").await.unwrap();
-    let mut qb = g.view("qb").await.unwrap();
+    let mut qa = g.view("qa").await.unwrap().into_reader_handle().unwrap();
+    let mut qb = g.view("qb").await.unwrap().into_reader_handle().unwrap();
 
     mutb.insert(vec![
         42.into(),
@@ -3752,8 +3864,18 @@ SELECT photo.p_id FROM photo JOIN album ON (photo.album = album.a_id) WHERE albu
         .await
         .unwrap();
 
-    let mut private = g.view("private_photos").await.unwrap();
-    let mut public = g.view("public_photos").await.unwrap();
+    let mut private = g
+        .view("private_photos")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
+    let mut public = g
+        .view("public_photos")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     sleep().await;
 
@@ -3815,7 +3937,7 @@ async fn union_basic() {
 
     // Check that a UNION query returns deduplicated results. (Each number appearing in either
     // 'twos' or 'threes' appears just once.)
-    let mut query = g.view("query").await.unwrap();
+    let mut query = g.view("query").await.unwrap().into_reader_handle().unwrap();
     let result_ids: Vec<i32> = sorted(
         query
             .lookup(&[0.into()], true)
@@ -3865,7 +3987,7 @@ async fn union_all_basic() {
 
     // Check that a UNION ALL query includes duplicate results. (Every entry from 'twos' and
     // 'threes' appear once.)
-    let mut query = g.view("query").await.unwrap();
+    let mut query = g.view("query").await.unwrap().into_reader_handle().unwrap();
     let result_ids: Vec<i32> = sorted(
         query
             .lookup(&[0.into()], true)
@@ -3910,7 +4032,12 @@ async fn between() {
         things.insert(vec![i.into()]).await.unwrap();
     }
 
-    let mut between_query = g.view("between").await.unwrap();
+    let mut between_query = g
+        .view("between")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     sleep().await;
 
@@ -3948,7 +4075,7 @@ async fn between_parametrized() {
 
     eprintln!("{}", g.graphviz().await.unwrap());
 
-    let mut q = g.view("q").await.unwrap();
+    let mut q = g.view("q").await.unwrap().into_reader_handle().unwrap();
     assert_eq!(q.key_map(), &[(ViewPlaceholder::Between(1, 2), 0)]);
 
     let expected: Vec<Vec<DfValue>> = (3..6).map(|i| vec![DfValue::from(i)]).collect();
@@ -3982,7 +4109,12 @@ async fn topk_updates() {
     .unwrap();
 
     let mut posts = g.table("posts").await.unwrap();
-    let mut top_posts = g.view("top_posts").await.unwrap();
+    let mut top_posts = g
+        .view("top_posts")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     posts
         .insert_many((1..10).map(|i| vec![i.into(), i.into()]))
@@ -4048,7 +4180,7 @@ async fn simple_pagination() {
     .await
     .unwrap();
 
-    let mut q = g.view("q").await.unwrap();
+    let mut q = g.view("q").await.unwrap().into_reader_handle().unwrap();
     assert_eq!(
         q.key_map(),
         &[
@@ -4128,7 +4260,7 @@ async fn correct_nested_view_schema() {
         .await
         .unwrap();
 
-    let q = g.view("swvc").await.unwrap();
+    let q = g.view("swvc").await.unwrap().into_reader_handle().unwrap();
 
     let expected_schema = vec![
         ("swvc.id".try_into().unwrap(), DfType::Int),
@@ -4168,7 +4300,12 @@ async fn join_column_projection() {
     .await
     .unwrap();
 
-    let query = g.view("stories_authors_explicit").await.unwrap();
+    let query = g
+        .view("stories_authors_explicit")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
     assert_eq!(
         query.columns(),
         vec![
@@ -4182,7 +4319,12 @@ async fn join_column_projection() {
         ]
     );
 
-    let query = g.view("stories_authors_tables_star").await.unwrap();
+    let query = g
+        .view("stories_authors_tables_star")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
     assert_eq!(
         query.columns(),
         vec![
@@ -4196,7 +4338,12 @@ async fn join_column_projection() {
         ]
     );
 
-    let query = g.view("stories_authors_star").await.unwrap();
+    let query = g
+        .view("stories_authors_star")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
     assert_eq!(
         query.columns(),
         vec![
@@ -4247,7 +4394,12 @@ async fn test_join_across_shards() {
     sleep().await;
 
     // Check 'all_user_recs' results.
-    let mut query = g.view("all_user_recs").await.unwrap();
+    let mut query = g
+        .view("all_user_recs")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
     let results: Vec<(i32, i32)> = query
         .lookup(&[0i32.into()], true)
         .await
@@ -4307,7 +4459,12 @@ async fn test_join_across_shards_with_param() {
     sleep().await;
 
     // Check 'user_recs' results.
-    let mut query = g.view("user_recs").await.unwrap();
+    let mut query = g
+        .view("user_recs")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
     let results: Vec<(i32, i32)> = query
         .lookup(&[1i32.into()], true)
         .await
@@ -4355,7 +4512,12 @@ async fn test_join_with_reused_column_name() {
     recs.insert(vec![3i32.into(), 3i32.into()]).await.unwrap();
 
     // Check 'all_user_recs' results.
-    let mut query = g.view("all_user_recs").await.unwrap();
+    let mut query = g
+        .view("all_user_recs")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
     let results: Vec<(i32, i32)> = query
         .lookup(&[0i32.into()], true)
         .await
@@ -4415,7 +4577,12 @@ async fn test_join_with_reused_column_name_with_param() {
     recs.insert(vec![3i32.into(), 3i32.into()]).await.unwrap();
 
     // Check 'user_recs' results.
-    let mut query = g.view("user_recs").await.unwrap();
+    let mut query = g
+        .view("user_recs")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
     let results: Vec<(i32, i32)> = query
         .lookup(&[1i32.into()], true)
         .await
@@ -4473,7 +4640,12 @@ async fn self_join_basic() {
 
     // Check follow_on
 
-    let mut query = g.view("follow_on").await.unwrap();
+    let mut query = g
+        .view("follow_on")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
     assert_eq!(query.columns(), vec!["user", "agreer"]);
     let results: Vec<(i32, i32)> = query
         .lookup(&[0i32.into()], true)
@@ -4522,7 +4694,7 @@ async fn self_join_param() {
 
     // Check fof
 
-    let mut query = g.view("fof").await.unwrap();
+    let mut query = g.view("fof").await.unwrap().into_reader_handle().unwrap();
     assert_eq!(query.columns(), vec!["user", "fof"]);
     let results: Vec<(i32, i32)> = query
         .lookup(&[1i32.into()], true)
@@ -4543,7 +4715,12 @@ async fn self_join_param() {
 
     // Check follow_on
 
-    let mut query = g.view("follow_on").await.unwrap();
+    let mut query = g
+        .view("follow_on")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     // Disabled because a "bogokey" column is present as well.
     // assert_eq!(query.columns(), vec!["user", "fof"]);
@@ -4590,7 +4767,7 @@ async fn non_sql_materialized_range_query() {
         .await;
 
     let mut a = g.table_by_index(a).await.unwrap();
-    let mut reader = g.view("a").await.unwrap();
+    let mut reader = g.view("a").await.unwrap().into_reader_handle().unwrap();
     a.insert_many((0i32..10).map(|n| vec![DfValue::from(n), DfValue::from(n)]))
         .await
         .unwrap();
@@ -4636,7 +4813,7 @@ async fn non_sql_range_upquery() {
         .await;
 
     let mut a = g.table_by_index(a).await.unwrap();
-    let mut reader = g.view("a").await.unwrap();
+    let mut reader = g.view("a").await.unwrap().into_reader_handle().unwrap();
     a.insert_many((0i32..10).map(|n| vec![DfValue::from(n), DfValue::from(n)]))
         .await
         .unwrap();
@@ -4718,8 +4895,18 @@ async fn range_upquery_after_point_queries() {
 
     let mut a = g.table_by_index(a).await.unwrap();
     let mut b = g.table_by_index(b).await.unwrap();
-    let mut btree_reader = g.view("btree_reader").await.unwrap();
-    let mut hash_reader = g.view("hash_reader").await.unwrap();
+    let mut btree_reader = g
+        .view("btree_reader")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
+    let mut hash_reader = g
+        .view("hash_reader")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
     a.insert_many((0i32..10).map(|n| vec![DfValue::from(n), DfValue::from(n)]))
         .await
         .unwrap();
@@ -4840,7 +5027,7 @@ async fn same_table_columns_inequal() {
 
     sleep().await;
 
-    let mut q = g.view("q").await.unwrap();
+    let mut q = g.view("q").await.unwrap().into_reader_handle().unwrap();
     let res = q.lookup(&[0i32.into()], true).await.unwrap().into_vec();
     assert_eq!(
         res,
@@ -4916,7 +5103,7 @@ async fn post_read_ilike() {
         .await;
 
     let mut a = g.table_by_index(a).await.unwrap();
-    let mut reader = g.view("a").await.unwrap();
+    let mut reader = g.view("a").await.unwrap().into_reader_handle().unwrap();
     a.insert_many(vec![
         vec![DfValue::from("foo"), DfValue::from(1i32)],
         vec![DfValue::from("bar"), DfValue::from(2i32)],
@@ -4989,7 +5176,7 @@ async fn cast_projection() {
 
     sleep().await;
 
-    let mut view = g.view("user").await.unwrap();
+    let mut view = g.view("user").await.unwrap().into_reader_handle().unwrap();
 
     let result = view
         .lookup(&[1i32.into()], true)
@@ -5020,7 +5207,7 @@ async fn aggregate_expression() {
     .unwrap();
 
     let mut t = g.table("t").await.unwrap();
-    let mut q = g.view("q").await.unwrap();
+    let mut q = g.view("q").await.unwrap().into_reader_handle().unwrap();
 
     t.insert_many(vec![vec![DfValue::from("100")], vec![DfValue::from("5")]])
         .await
@@ -5083,7 +5270,7 @@ async fn post_join_filter() {
 
     let mut t1 = g.table("t1").await.unwrap();
     let mut t2 = g.table("t2").await.unwrap();
-    let mut q = g.view("q").await.unwrap();
+    let mut q = g.view("q").await.unwrap().into_reader_handle().unwrap();
 
     t1.insert_many(vec![
         vec![DfValue::from(1), DfValue::from(1)],
@@ -5141,7 +5328,7 @@ async fn duplicate_column_names() {
 
     let mut t1 = g.table("t1").await.unwrap();
     let mut t2 = g.table("t2").await.unwrap();
-    let mut q = g.view("q").await.unwrap();
+    let mut q = g.view("q").await.unwrap().into_reader_handle().unwrap();
 
     t1.insert_many(vec![
         vec![DfValue::from(1), DfValue::from(1)],
@@ -5190,7 +5377,12 @@ async fn filter_on_expression() {
     .unwrap();
 
     let mut t = g.table("users").await.unwrap();
-    let mut q = g.view("friday_babies").await.unwrap();
+    let mut q = g
+        .view("friday_babies")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     t.insert_many(vec![
         vec![
@@ -5234,7 +5426,7 @@ async fn compound_join_key() {
 
     let mut t1 = g.table("t1").await.unwrap();
     let mut t2 = g.table("t2").await.unwrap();
-    let mut q = g.view("q").await.unwrap();
+    let mut q = g.view("q").await.unwrap().into_reader_handle().unwrap();
 
     t1.insert_many(vec![
         vec![
@@ -5320,7 +5512,7 @@ async fn left_join_null() {
 
     let mut t = g.table("jim").await.unwrap();
     let mut t2 = g.table("bob").await.unwrap();
-    let mut q = g.view("funky").await.unwrap();
+    let mut q = g.view("funky").await.unwrap().into_reader_handle().unwrap();
 
     t.insert_many(vec![
         vec![DfValue::from(1), DfValue::from(2)],
@@ -5353,7 +5545,12 @@ async fn overlapping_indices() {
     .unwrap();
 
     let mut t = g.table("test").await.unwrap();
-    let mut q = g.view("overlapping").await.unwrap();
+    let mut q = g
+        .view("overlapping")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     t.insert_many(vec![
         vec![DfValue::from(1), DfValue::from(1), DfValue::from(1)],
@@ -5403,7 +5600,12 @@ async fn aggregate_after_filter_non_equality() {
     .unwrap();
 
     let mut t = g.table("test").await.unwrap();
-    let mut q = g.view("filteragg").await.unwrap();
+    let mut q = g
+        .view("filteragg")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     t.insert_many(vec![
         vec![DfValue::from(1i32), DfValue::from(1i32)],
@@ -5449,7 +5651,12 @@ async fn join_simple_cte() {
 
     let mut t1 = g.table("t1").await.unwrap();
     let mut t2 = g.table("t2").await.unwrap();
-    let mut view = g.view("join_simple_cte").await.unwrap();
+    let mut view = g
+        .view("join_simple_cte")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     t1.insert_many(vec![
         vec![DfValue::from(1i32), DfValue::from(2i32)],
@@ -5487,7 +5694,12 @@ async fn multiple_aggregate_sum() {
     .unwrap();
 
     let mut t = g.table("test").await.unwrap();
-    let mut q = g.view("multiagg").await.unwrap();
+    let mut q = g
+        .view("multiagg")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     t.insert_many(vec![
         vec![
@@ -5553,7 +5765,12 @@ async fn multiple_aggregate_same_col() {
     .unwrap();
 
     let mut t = g.table("test").await.unwrap();
-    let mut q = g.view("multiaggsamecol").await.unwrap();
+    let mut q = g
+        .view("multiaggsamecol")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     t.insert_many(vec![
         vec![DfValue::from(1i32), DfValue::from(1i32)],
@@ -5596,7 +5813,12 @@ async fn multiple_aggregate_sum_sharded() {
     .unwrap();
 
     let mut t = g.table("test").await.unwrap();
-    let mut q = g.view("multiaggsharded").await.unwrap();
+    let mut q = g
+        .view("multiaggsharded")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     t.insert_many(vec![
         vec![
@@ -5659,7 +5881,12 @@ async fn multiple_aggregate_same_col_sharded() {
     .unwrap();
 
     let mut t = g.table("test").await.unwrap();
-    let mut q = g.view("multiaggsamecolsharded").await.unwrap();
+    let mut q = g
+        .view("multiaggsamecolsharded")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     t.insert_many(vec![
         vec![DfValue::from(1i32), DfValue::from(1i32)],
@@ -5702,7 +5929,12 @@ async fn multiple_aggregate_over_two() {
     .unwrap();
 
     let mut t = g.table("test").await.unwrap();
-    let mut q = g.view("multiaggovertwo").await.unwrap();
+    let mut q = g
+        .view("multiaggovertwo")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     t.insert_many(vec![
         vec![DfValue::from(1i32), DfValue::from(1i32)],
@@ -5749,7 +5981,12 @@ async fn multiple_aggregate_over_two_sharded() {
     .unwrap();
 
     let mut t = g.table("test").await.unwrap();
-    let mut q = g.view("multiaggovertwosharded").await.unwrap();
+    let mut q = g
+        .view("multiaggovertwosharded")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     t.insert_many(vec![
         vec![DfValue::from(1i32), DfValue::from(1i32)],
@@ -5794,7 +6031,12 @@ async fn multiple_aggregate_with_expressions() {
     .unwrap();
 
     let mut t = g.table("test").await.unwrap();
-    let mut q = g.view("multiaggwexpressions").await.unwrap();
+    let mut q = g
+        .view("multiaggwexpressions")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     t.insert_many(vec![
         vec![DfValue::from(1i32), DfValue::from(1i32)],
@@ -5838,7 +6080,12 @@ async fn multiple_aggregate_with_expressions_sharded() {
     .unwrap();
 
     let mut t = g.table("test").await.unwrap();
-    let mut q = g.view("multiaggwexpressionssharded").await.unwrap();
+    let mut q = g
+        .view("multiaggwexpressionssharded")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     t.insert_many(vec![
         vec![DfValue::from(1i32), DfValue::from(1i32)],
@@ -5881,7 +6128,12 @@ async fn multiple_aggregate_reuse() {
     .unwrap();
 
     let mut t = g.table("test").await.unwrap();
-    let mut q = g.view("multiaggfirstquery").await.unwrap();
+    let mut q = g
+        .view("multiaggfirstquery")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     t.insert_many(vec![
         vec![DfValue::from(1i32), DfValue::from(1i32)],
@@ -5918,7 +6170,12 @@ async fn multiple_aggregate_reuse() {
     .await
     .unwrap();
 
-    q = g.view("multiaggsecondquery").await.unwrap();
+    q = g
+        .view("multiaggsecondquery")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     sleep().await;
 
@@ -6002,7 +6259,7 @@ async fn simple_enum() {
         .unwrap();
 
     let mut mutator = g.table("t1").await.unwrap();
-    let mut getter = g.view("c1").await.unwrap();
+    let mut getter = g.view("c1").await.unwrap().into_reader_handle().unwrap();
 
     let color_idxs = HashMap::from([("red", 1), ("yellow", 2), ("green", 3)]);
     let rows = vec!["green", "red", "purple"];
@@ -6069,7 +6326,12 @@ async fn round_int_to_int() {
     .unwrap();
 
     let mut t = g.table("test").await.unwrap();
-    let mut q = g.view("roundinttoint").await.unwrap();
+    let mut q = g
+        .view("roundinttoint")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     t.insert(vec![DfValue::from(888i32)]).await.unwrap();
 
@@ -6101,7 +6363,12 @@ async fn round_float_to_float() {
     .unwrap();
 
     let mut t = g.table("test").await.unwrap();
-    let mut q = g.view("roundfloattofloat").await.unwrap();
+    let mut q = g
+        .view("roundfloattofloat")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     t.insert(vec![DfValue::try_from(2.2222_f64).unwrap()])
         .await
@@ -6135,7 +6402,12 @@ async fn round_float() {
     .unwrap();
 
     let mut t = g.table("test").await.unwrap();
-    let mut q = g.view("roundfloat").await.unwrap();
+    let mut q = g
+        .view("roundfloat")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     t.insert(vec![DfValue::try_from(2.2222_f64).unwrap()])
         .await
@@ -6172,7 +6444,12 @@ async fn round_with_precision_float() {
     .unwrap();
 
     let mut t = g.table("test").await.unwrap();
-    let mut q = g.view("roundwithprecisionfloat").await.unwrap();
+    let mut q = g
+        .view("roundwithprecisionfloat")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     t.insert(vec![DfValue::try_from(123.0_f64).unwrap()])
         .await
@@ -6206,7 +6483,12 @@ async fn round_bigint_to_bigint() {
     .unwrap();
 
     let mut t = g.table("test").await.unwrap();
-    let mut q = g.view("roundbiginttobigint").await.unwrap();
+    let mut q = g
+        .view("roundbiginttobigint")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     t.insert(vec![DfValue::from(888i32)]).await.unwrap();
 
@@ -6238,7 +6520,12 @@ async fn round_unsignedint_to_unsignedint() {
     .unwrap();
 
     let mut t = g.table("test").await.unwrap();
-    let mut q = g.view("roundunsignedtounsigned").await.unwrap();
+    let mut q = g
+        .view("roundunsignedtounsigned")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     t.insert(vec![DfValue::from(888i32)]).await.unwrap();
 
@@ -6267,7 +6554,12 @@ async fn round_unsignedbigint_to_unsignedbitint() {
     .unwrap();
 
     let mut t = g.table("test").await.unwrap();
-    let mut q = g.view("roundunsignedbiginttounsignedbigint").await.unwrap();
+    let mut q = g
+        .view("roundunsignedbiginttounsignedbigint")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     t.insert(vec![DfValue::from(888i32)]).await.unwrap();
 
@@ -6299,7 +6591,12 @@ async fn round_with_no_precision() {
     .unwrap();
 
     let mut t = g.table("test").await.unwrap();
-    let mut q = g.view("roundwithnoprecision").await.unwrap();
+    let mut q = g
+        .view("roundwithnoprecision")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     t.insert(vec![DfValue::try_from(56.2578_f64).unwrap()])
         .await
@@ -6333,7 +6630,12 @@ async fn distinct_select_works() {
     .unwrap();
 
     let mut t = g.table("test").await.unwrap();
-    let mut q = g.view("distinctselect").await.unwrap();
+    let mut q = g
+        .view("distinctselect")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     t.insert_many(vec![
         vec![DfValue::from(1i32)],
@@ -6374,7 +6676,12 @@ async fn partial_distinct() {
     .unwrap();
 
     let mut t = g.table("test").await.unwrap();
-    let mut q = g.view("distinctselect").await.unwrap();
+    let mut q = g
+        .view("distinctselect")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     macro_rules! do_lookup {
         ($q: expr, $k: expr) => {{
@@ -6421,7 +6728,12 @@ async fn partial_distinct_multi() {
     eprintln!("{}", g.graphviz().await.unwrap());
 
     let mut t = g.table("test").await.unwrap();
-    let mut q = g.view("distinctselectmulti").await.unwrap();
+    let mut q = g
+        .view("distinctselectmulti")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     t.insert_many(vec![
         vec![DfValue::from(1i32), DfValue::from(2i32), DfValue::from(0)],
@@ -6464,7 +6776,12 @@ async fn distinct_select_multi_col() {
     .unwrap();
 
     let mut t = g.table("test").await.unwrap();
-    let mut q = g.view("distinctselectmulticol").await.unwrap();
+    let mut q = g
+        .view("distinctselectmulticol")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     t.insert_many(vec![
         vec![DfValue::from(1i32), DfValue::from(4i32)],
@@ -6561,7 +6878,12 @@ async fn join_straddled_columns() {
 
     let mut a = g.table("a").await.unwrap();
     let mut b = g.table("b").await.unwrap();
-    let mut q = g.view("straddle").await.unwrap();
+    let mut q = g
+        .view("straddle")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     eprintln!("{}", g.graphviz().await.unwrap());
 
@@ -6609,7 +6931,12 @@ async fn straddled_join_range_query() {
 
     let mut a = g.table("a").await.unwrap();
     let mut b = g.table("b").await.unwrap();
-    let mut q = g.view("straddle").await.unwrap();
+    let mut q = g
+        .view("straddle")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     a.insert_many(vec![
         vec![DfValue::from(1i32), DfValue::from(2i32)],
@@ -6682,7 +7009,7 @@ async fn overlapping_range_queries() {
         let tx = tx.clone();
         let mut g = g.clone();
         tokio::spawn(async move {
-            let mut q = g.view("q").await.unwrap();
+            let mut q = g.view("q").await.unwrap().into_reader_handle().unwrap();
             let results = q
                 .multi_lookup(
                     vec![KeyComparison::Range((
@@ -6754,7 +7081,7 @@ async fn overlapping_remapped_range_queries() {
         let tx = tx.clone();
         let mut g = g.clone();
         tokio::spawn(async move {
-            let mut q = g.view("q").await.unwrap();
+            let mut q = g.view("q").await.unwrap().into_reader_handle().unwrap();
             let results = q
                 .multi_lookup(
                     vec![KeyComparison::Range((
@@ -6815,7 +7142,7 @@ async fn range_query_through_union() {
     .unwrap();
 
     let mut t = g.table("t").await.unwrap();
-    let mut q = g.view("q").await.unwrap();
+    let mut q = g.view("q").await.unwrap().into_reader_handle().unwrap();
 
     t.insert_many(vec![
         vec![DfValue::from(1), DfValue::from(1)],
@@ -6894,7 +7221,7 @@ async fn mixed_inclusive_range_and_equality() {
     .await
     .unwrap();
 
-    let mut q = g.view("q").await.unwrap();
+    let mut q = g.view("q").await.unwrap().into_reader_handle().unwrap();
 
     // Columns should be (y, w, x, z)
     //
@@ -6971,7 +7298,12 @@ async fn group_by_agg_col_count() {
     .unwrap();
 
     let mut t = g.table("test").await.unwrap();
-    let mut q = g.view("groupbyaggcolcount").await.unwrap();
+    let mut q = g
+        .view("groupbyaggcolcount")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     t.insert_many(vec![
         vec![DfValue::from(1i32), DfValue::from(4i32)],
@@ -7010,7 +7342,12 @@ async fn group_by_agg_col_multi() {
     .unwrap();
 
     let mut t = g.table("test").await.unwrap();
-    let mut q = g.view("groupbyaggcolmulti").await.unwrap();
+    let mut q = g
+        .view("groupbyaggcolmulti")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     t.insert_many(vec![
         vec![DfValue::from(1i32), DfValue::from(4i32)],
@@ -7060,7 +7397,12 @@ async fn group_by_agg_col_with_join() {
         .unwrap();
     let mut test = g.table("test").await.unwrap();
     let mut test2 = g.table("test2").await.unwrap();
-    let mut q = g.view("groupbyaggcolwithjoin").await.unwrap();
+    let mut q = g
+        .view("groupbyaggcolwithjoin")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     test.insert_many(vec![
         vec![0i64.into(), 10i64.into()],
@@ -7110,7 +7452,12 @@ async fn count_emit_zero() {
         .unwrap();
 
     // With no data in the table, we should get no results with a GROUP BY
-    let mut q = g.view("countemitzero").await.unwrap();
+    let mut q = g
+        .view("countemitzero")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
     let rows = q.lookup(&[0i32.into()], true).await.unwrap();
     let res = rows
         .into_iter()
@@ -7120,7 +7467,12 @@ async fn count_emit_zero() {
     assert_eq!(res, Vec::<i32>::new());
 
     // With no data in the table, we should get results _without_ a GROUP BY
-    let mut q = g.view("countemitzeronogroup").await.unwrap();
+    let mut q = g
+        .view("countemitzeronogroup")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
     let rows = q.lookup(&[0i32.into()], true).await.unwrap();
     let res = rows
         .into_iter()
@@ -7130,7 +7482,12 @@ async fn count_emit_zero() {
     assert_eq!(res, vec![0]);
 
     // With no data in the table, we should get results with two COUNT()s and no GROUP BY
-    let mut q = g.view("countemitzeromultiple").await.unwrap();
+    let mut q = g
+        .view("countemitzeromultiple")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
     let rows = q.lookup(&[0i32.into()], true).await.unwrap();
     let res = rows
         .into_iter()
@@ -7140,13 +7497,23 @@ async fn count_emit_zero() {
     assert_eq!(res, vec![vec![0, 0]]);
 
     // With no data in the table, we should get a NULL for any columns, and a 0 for COUNT()
-    let mut q = g.view("countemitzerowithcolumn").await.unwrap();
+    let mut q = g
+        .view("countemitzerowithcolumn")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
     let rows = q.lookup(&[0i32.into()], true).await.unwrap();
     let res = rows.into_iter().collect::<Vec<Vec<DfValue>>>();
     assert_eq!(res, vec![vec![DfValue::None, DfValue::Int(0)]]);
 
     // With no data in the table, we should get a 0 for COUNT(), and a NULL for other aggregations
-    let mut q = g.view("countemitzerowithotheraggregations").await.unwrap();
+    let mut q = g
+        .view("countemitzerowithotheraggregations")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
     let rows = q.lookup(&[0i32.into()], true).await.unwrap();
     let res = rows.into_iter().collect::<Vec<Vec<DfValue>>>();
     assert_eq!(
@@ -7165,7 +7532,12 @@ async fn count_emit_zero() {
     .unwrap();
     sleep().await;
 
-    let mut q = g.view("countemitzero").await.unwrap();
+    let mut q = g
+        .view("countemitzero")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
     let rows = q.lookup(&[0i32.into()], true).await.unwrap();
     let res = rows
         .into_iter()
@@ -7174,7 +7546,12 @@ async fn count_emit_zero() {
         .collect::<Vec<i32>>();
     assert_eq!(res, vec![3]);
 
-    let mut q = g.view("countemitzeronogroup").await.unwrap();
+    let mut q = g
+        .view("countemitzeronogroup")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
     let rows = q.lookup(&[0i32.into()], true).await.unwrap();
     let res = rows
         .into_iter()
@@ -7183,7 +7560,12 @@ async fn count_emit_zero() {
         .collect::<Vec<i32>>();
     assert_eq!(res, vec![3]);
 
-    let mut q = g.view("countemitzeromultiple").await.unwrap();
+    let mut q = g
+        .view("countemitzeromultiple")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
     let rows = q.lookup(&[0i32.into()], true).await.unwrap();
     let res = rows
         .into_iter()
@@ -7192,12 +7574,22 @@ async fn count_emit_zero() {
         .collect::<Vec<Vec<i32>>>();
     assert_eq!(res, vec![vec![3, 3]]);
 
-    let mut q = g.view("countemitzerowithcolumn").await.unwrap();
+    let mut q = g
+        .view("countemitzerowithcolumn")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
     let rows = q.lookup(&[0i32.into()], true).await.unwrap();
     let res = rows.into_iter().collect::<Vec<Vec<DfValue>>>();
     assert_eq!(res, vec![vec![DfValue::Int(0), DfValue::Int(3)]]);
 
-    let mut q = g.view("countemitzerowithotheraggregations").await.unwrap();
+    let mut q = g
+        .view("countemitzerowithotheraggregations")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
     let rows = q.lookup(&[0i32.into()], true).await.unwrap();
     let res = rows.into_iter().collect::<Vec<Vec<DfValue>>>();
     assert_eq!(
@@ -7251,7 +7643,7 @@ async fn partial_join_on_one_parent() {
     .await
     .unwrap();
 
-    let mut q = g.view("q").await.unwrap();
+    let mut q = g.view("q").await.unwrap().into_reader_handle().unwrap();
 
     let res1 = q
         .lookup(&[DfValue::from(1i32)], true)
@@ -7344,7 +7736,7 @@ async fn aggressive_eviction_setup() -> crate::Handle {
 
 async fn aggressive_eviction_impl() {
     let mut g = aggressive_eviction_setup().await;
-    let mut view = g.view("w").await.unwrap();
+    let mut view = g.view("w").await.unwrap().into_reader_handle().unwrap();
 
     for i in 0..500 {
         let offset = i % 10;
@@ -7362,7 +7754,7 @@ async fn aggressive_eviction_impl() {
 async fn aggressive_eviction_range_impl() {
     let mut g = aggressive_eviction_setup().await;
 
-    let mut view = g.view("v").await.unwrap();
+    let mut view = g.view("v").await.unwrap().into_reader_handle().unwrap();
 
     for i in (0..500).rev() {
         let offset = i % 10;
@@ -7441,10 +7833,10 @@ async fn partial_ingress_above_full_reader() {
     m2.insert(vec![1.into(), 1.into()]).await.unwrap();
     m2.insert(vec![3.into(), 3.into()]).await.unwrap();
 
-    let mut g1 = g.view("q1").await.unwrap();
+    let mut g1 = g.view("q1").await.unwrap().into_reader_handle().unwrap();
     let r1 = g1.lookup(&[2i64.into()], true).await.unwrap().into_vec();
 
-    let mut g2 = g.view("q2").await.unwrap();
+    let mut g2 = g.view("q2").await.unwrap().into_reader_handle().unwrap();
     let r2 = g2.lookup(&[0i64.into()], true).await.unwrap().into_vec();
 
     assert_eq!(
@@ -7509,7 +7901,7 @@ async fn reroutes_recursively() {
 
     sleep().await;
 
-    let mut getter = g.view("q4").await.unwrap();
+    let mut getter = g.view("q4").await.unwrap().into_reader_handle().unwrap();
     let res = getter
         .lookup(&[0i64.into()], true)
         .await
@@ -7556,13 +7948,13 @@ async fn reroutes_two_children_at_once() {
     m2.insert(vec![1.into(), 1.into()]).await.unwrap();
     m2.insert(vec![3.into(), 3.into()]).await.unwrap();
 
-    let mut g1 = g.view("q1").await.unwrap();
+    let mut g1 = g.view("q1").await.unwrap().into_reader_handle().unwrap();
     let r1 = g1.lookup(&[2i64.into()], true).await.unwrap().into_vec();
 
-    let mut g2 = g.view("q2").await.unwrap();
+    let mut g2 = g.view("q2").await.unwrap().into_reader_handle().unwrap();
     let r2 = g2.lookup(&[0i64.into()], true).await.unwrap().into_vec();
 
-    let mut g3 = g.view("q3").await.unwrap();
+    let mut g3 = g.view("q3").await.unwrap().into_reader_handle().unwrap();
     let r3 = g3.lookup(&[0i64.into()], true).await.unwrap().into_vec();
 
     assert_eq!(
@@ -7612,13 +8004,13 @@ async fn reroutes_same_migration() {
     m2.insert(vec![1.into(), 1.into()]).await.unwrap();
     m2.insert(vec![3.into(), 3.into()]).await.unwrap();
 
-    let mut g1 = g.view("q1").await.unwrap();
+    let mut g1 = g.view("q1").await.unwrap().into_reader_handle().unwrap();
     let r1 = g1.lookup(&[2i64.into()], true).await.unwrap();
 
-    let mut g2 = g.view("q2").await.unwrap();
+    let mut g2 = g.view("q2").await.unwrap().into_reader_handle().unwrap();
     let r2 = g2.lookup(&[0i64.into()], true).await.unwrap();
 
-    let mut g3 = g.view("q3").await.unwrap();
+    let mut g3 = g.view("q3").await.unwrap().into_reader_handle().unwrap();
     let r3 = g3.lookup(&[0i64.into()], true).await.unwrap();
 
     assert_eq!(
@@ -7675,13 +8067,13 @@ async fn reroutes_dependent_children() {
     m2.insert(vec![1.into(), 1.into()]).await.unwrap();
     m2.insert(vec![3.into(), 3.into()]).await.unwrap();
 
-    let mut g1 = g.view("q1").await.unwrap();
+    let mut g1 = g.view("q1").await.unwrap().into_reader_handle().unwrap();
     let r1 = g1.lookup(&[2i64.into()], true).await.unwrap().into_vec();
 
-    let mut g2 = g.view("q2").await.unwrap();
+    let mut g2 = g.view("q2").await.unwrap().into_reader_handle().unwrap();
     let r2 = g2.lookup(&[0i64.into()], true).await.unwrap().into_vec();
 
-    let mut g3 = g.view("q3").await.unwrap();
+    let mut g3 = g.view("q3").await.unwrap().into_reader_handle().unwrap();
     let r3 = g3.lookup(&[0i64.into()], true).await.unwrap().into_vec();
 
     assert_eq!(
@@ -7723,8 +8115,8 @@ async fn reroutes_count() {
         .unwrap();
 
     let mut m = g.table("votes").await.unwrap();
-    let mut g1 = g.view("q1").await.unwrap();
-    let mut g2 = g.view("q2").await.unwrap();
+    let mut g1 = g.view("q1").await.unwrap().into_reader_handle().unwrap();
+    let mut g2 = g.view("q2").await.unwrap().into_reader_handle().unwrap();
 
     m.insert(vec![1.into(), 1.into()]).await.unwrap();
     m.insert(vec![1.into(), 2.into()]).await.unwrap();
@@ -7781,7 +8173,12 @@ async fn multi_diamond_union() {
         .await
         .unwrap();
 
-    let mut q = g.view("multi_diamond_union").await.unwrap();
+    let mut q = g
+        .view("multi_diamond_union")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
     let rows = q.lookup(&[0i32.into()], true).await.unwrap();
     let res = rows
         .into_iter()
@@ -7925,7 +8322,7 @@ async fn it_recovers_fully_materialized() {
     g.backend_ready().await;
 
     {
-        let mut getter = g.view("tv").await.unwrap();
+        let mut getter = g.view("tv").await.unwrap().into_reader_handle().unwrap();
 
         // Make sure that the new graph contains the old writes
         let result = getter.lookup(&[0.into()], true).await.unwrap().into_vec();
@@ -7948,7 +8345,7 @@ async fn it_recovers_fully_materialized() {
         }
     }
     {
-        let mut getter = g.view("tv").await.unwrap();
+        let mut getter = g.view("tv").await.unwrap().into_reader_handle().unwrap();
         // Make sure that the new graph contains the old writes
         let result = getter.lookup(&[0.into()], true).await.unwrap().into_vec();
         assert_eq!(
@@ -8054,7 +8451,7 @@ async fn simple_drop_tables_with_data() {
     table_1.insert(vec![11.into()]).await.unwrap();
     table_1.insert(vec![12.into()]).await.unwrap();
 
-    let mut view = g.view("t1").await.unwrap();
+    let mut view = g.view("t1").await.unwrap().into_reader_handle().unwrap();
     eventually!(run_test: {
         view.lookup(&[0.into()], true).await.unwrap().into_vec()
     }, then_assert: |results| {
@@ -8085,7 +8482,7 @@ async fn simple_drop_tables_with_data() {
 
     sleep().await;
 
-    let mut view = g.view("t2").await.unwrap();
+    let mut view = g.view("t2").await.unwrap().into_reader_handle().unwrap();
     let results = view.lookup(&[0.into()], true).await.unwrap().into_vec();
     assert!(results.is_empty());
 }
@@ -8127,7 +8524,7 @@ async fn simple_drop_tables_with_persisted_data() {
     table_1.insert(vec![11.into()]).await.unwrap();
     table_1.insert(vec![12.into()]).await.unwrap();
 
-    let mut view = g.view("t1").await.unwrap();
+    let mut view = g.view("t1").await.unwrap().into_reader_handle().unwrap();
     let results = view.lookup(&[0.into()], true).await.unwrap().into_vec();
     assert!(!results.is_empty());
     assert_eq!(results[0][0], 11.into());
@@ -8158,7 +8555,7 @@ async fn simple_drop_tables_with_persisted_data() {
 
     sleep().await;
 
-    let mut view = g.view("t2").await.unwrap();
+    let mut view = g.view("t2").await.unwrap().into_reader_handle().unwrap();
     let results = view.lookup(&[0.into()], true).await.unwrap();
     assert!(results.into_vec().is_empty());
 }
@@ -8203,7 +8600,7 @@ async fn drop_and_recreate_different_columns() {
     let mut table = g.table("table_1").await.unwrap();
     table.insert(vec![11.into(), 12.into()]).await.unwrap();
 
-    let mut view = g.view("t1").await.unwrap();
+    let mut view = g.view("t1").await.unwrap().into_reader_handle().unwrap();
     let results = view.lookup(&[0.into()], true).await.unwrap().into_vec();
     assert!(!results.is_empty());
     assert_eq!(results[0][0], 11.into());
@@ -8318,7 +8715,7 @@ async fn read_from_dropped_query() {
     .await
     .unwrap();
 
-    let mut view = g.view("q").await.unwrap();
+    let mut view = g.view("q").await.unwrap().into_reader_handle().unwrap();
 
     g.extend_recipe(ChangeList::from_str("DROP TABLE t1;", Dialect::DEFAULT_MYSQL).unwrap())
         .await
@@ -8365,7 +8762,7 @@ async fn double_create_table_with_multiple_modifications() {
         .await
         .unwrap();
 
-    let mut view = g.view("t1").await.unwrap();
+    let mut view = g.view("t1").await.unwrap().into_reader_handle().unwrap();
     let results = view.lookup(&[0.into()], true).await.unwrap().into_vec();
     assert!(results.is_empty());
 
@@ -8412,7 +8809,7 @@ async fn double_identical_create_table() {
         .await
         .unwrap();
 
-    let mut view = g.view("t1").await.unwrap();
+    let mut view = g.view("t1").await.unwrap().into_reader_handle().unwrap();
     let results = view.lookup(&[0.into()], true).await.unwrap().into_vec();
     assert!(!results.is_empty());
     assert_eq!(results[0][0], 1.into());
@@ -8453,7 +8850,7 @@ async fn multiple_schemas_explicit() {
         })
         .await
         .unwrap();
-    let mut q = g.view("q").await.unwrap();
+    let mut q = g.view("q").await.unwrap().into_reader_handle().unwrap();
 
     schema_1_t
         .insert(vec![DfValue::from(1), DfValue::from("schema_1")])
@@ -8500,7 +8897,7 @@ async fn multiple_aggregates_and_predicates() {
     .await
     .unwrap();
 
-    let mut q = g.view("q").await.unwrap();
+    let mut q = g.view("q").await.unwrap().into_reader_handle().unwrap();
     let res = q.lookup(&[0.into()], true).await.unwrap().into_vec();
     assert_eq!(res, vec![vec![DfValue::from(1), DfValue::from(4)]]);
 }

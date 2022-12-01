@@ -211,7 +211,12 @@ impl Writer {
             true,
         ));
 
-        let res = view.raw_lookup(vq).await?.into_vec();
+        let res = view
+            .as_mut_reader_handle()
+            .unwrap()
+            .raw_lookup(vq)
+            .await?
+            .into_vec();
         assert_eq!(res.len(), 1);
         Ok(())
     }

@@ -262,8 +262,18 @@ async fn replicated_readers() {
     .await
     .unwrap();
 
-    let mut view_0 = lh.view_with_replica("q", 0).await.unwrap();
-    let mut view_1 = lh.view_with_replica("q", 1).await.unwrap();
+    let mut view_0 = lh
+        .view_with_replica("q", 0)
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
+    let mut view_1 = lh
+        .view_with_replica("q", 1)
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     // We should schedule the readers onto different workers (with different addresses)
     assert_eq!(view_0.num_shards(), 1);
@@ -355,8 +365,18 @@ async fn replicated_readers_with_unions() {
     .await
     .unwrap();
 
-    let mut view_0 = lh.view_with_replica("q", 0).await.unwrap();
-    let mut view_1 = lh.view_with_replica("q", 1).await.unwrap();
+    let mut view_0 = lh
+        .view_with_replica("q", 0)
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
+    let mut view_1 = lh
+        .view_with_replica("q", 1)
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     assert_eq!(view_0.num_shards(), 1);
     assert_eq!(view_1.num_shards(), 1);
@@ -402,10 +422,10 @@ async fn no_readers_worker_doesnt_get_readers() {
 
     eprintln!("{}", lh.graphviz().await.unwrap());
 
-    let view_0 = lh.view("q0").await.unwrap();
-    let view_1 = lh.view("q1").await.unwrap();
-    let view_2 = lh.view("q2").await.unwrap();
-    let view_3 = lh.view("q3").await.unwrap();
+    let view_0 = lh.view("q0").await.unwrap().into_reader_handle().unwrap();
+    let view_1 = lh.view("q1").await.unwrap().into_reader_handle().unwrap();
+    let view_2 = lh.view("q2").await.unwrap().into_reader_handle().unwrap();
+    let view_3 = lh.view("q3").await.unwrap().into_reader_handle().unwrap();
 
     // All views should be scheduled onto the same worker, regardless of balance
     //

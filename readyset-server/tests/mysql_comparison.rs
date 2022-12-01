@@ -291,7 +291,12 @@ async fn check_query(
 
     tokio::time::sleep(time::Duration::from_millis(300)).await;
 
-    let mut getter = g.view(query_name).await.unwrap();
+    let mut getter = g
+        .view(query_name)
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
 
     for (i, query_parameter) in query.values.iter().enumerate() {
         let query_param = query.types[0].make_dataflow_value(&query_parameter[0]);

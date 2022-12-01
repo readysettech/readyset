@@ -304,7 +304,13 @@ impl NoriaExecutor {
 
             let vq = ViewQuery::from((keys, true));
 
-            let r = self.view.raw_lookup(vq).await?.into_vec();
+            let r = self
+                .view
+                .as_mut_reader_handle()
+                .unwrap()
+                .raw_lookup(vq)
+                .await?
+                .into_vec();
             assert_eq!(r.len(), batch.len());
             assert!(r.iter().all(|rset| !rset.is_empty()));
 

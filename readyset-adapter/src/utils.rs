@@ -877,4 +877,207 @@ mod tests {
             ]
         );
     }
+
+    mod build_view_query {
+        use nom_sql::parse_select_statement;
+
+        use super::*;
+
+        #[test]
+        fn extracts_select_statement_binops() {
+            let stmt =
+                parse_select_statement(Dialect::MySQL, "SELECT t.x FROM t WHERE t.x = $1").unwrap();
+            let binops = get_select_statement_binops(&stmt);
+            assert_eq!(
+                binops,
+                vec![(
+                    &Column {
+                        name: "x".into(),
+                        table: Some("t".into())
+                    },
+                    BinaryOperator::Equal
+                )]
+            );
+
+            let stmt = parse_select_statement(
+                Dialect::MySQL,
+                "SELECT t.x FROM t WHERE t.x BETWEEN $1 AND $2",
+            )
+            .unwrap();
+            let binops = get_select_statement_binops(&stmt);
+            assert_eq!(
+                binops,
+                vec![
+                    (
+                        &Column {
+                            name: "x".into(),
+                            table: Some("t".into())
+                        },
+                        BinaryOperator::GreaterOrEqual
+                    ),
+                    (
+                        &Column {
+                            name: "x".into(),
+                            table: Some("t".into())
+                        },
+                        BinaryOperator::LessOrEqual
+                    )
+                ]
+            );
+
+            let stmt = parse_select_statement(
+                Dialect::MySQL,
+                "SELECT t.x FROM t WHERE t.x = $1 AND t.y ILIKE $2",
+            )
+            .unwrap();
+            let binops = get_select_statement_binops(&stmt);
+            assert_eq!(
+                binops,
+                vec![
+                    (
+                        &Column {
+                            name: "x".into(),
+                            table: Some("t".into())
+                        },
+                        BinaryOperator::Equal
+                    ),
+                    (
+                        &Column {
+                            name: "y".into(),
+                            table: Some("t".into())
+                        },
+                        BinaryOperator::ILike
+                    )
+                ]
+            );
+
+            let stmt = parse_select_statement(
+                Dialect::MySQL,
+                "SELECT t.x FROM t WHERE t.x >= $1 AND t.y = $2",
+            )
+            .unwrap();
+            let binops = get_select_statement_binops(&stmt);
+            assert_eq!(
+                binops,
+                vec![
+                    (
+                        &Column {
+                            name: "x".into(),
+                            table: Some("t".into())
+                        },
+                        BinaryOperator::GreaterOrEqual
+                    ),
+                    (
+                        &Column {
+                            name: "y".into(),
+                            table: Some("t".into())
+                        },
+                        BinaryOperator::Equal
+                    )
+                ]
+            );
+
+            let stmt = parse_select_statement(
+                Dialect::MySQL,
+                "SELECT t.x FROM t WHERE t.x BETWEEN $1 AND $2 AND t.y = $3",
+            )
+            .unwrap();
+            let binops = get_select_statement_binops(&stmt);
+            assert_eq!(
+                binops,
+                vec![
+                    (
+                        &Column {
+                            name: "x".into(),
+                            table: Some("t".into())
+                        },
+                        BinaryOperator::GreaterOrEqual
+                    ),
+                    (
+                        &Column {
+                            name: "x".into(),
+                            table: Some("t".into())
+                        },
+                        BinaryOperator::LessOrEqual
+                    ),
+                    (
+                        &Column {
+                            name: "y".into(),
+                            table: Some("t".into())
+                        },
+                        BinaryOperator::Equal
+                    )
+                ]
+            );
+
+            let stmt = parse_select_statement(
+                Dialect::MySQL,
+                "SELECT t.x FROM t WHERE t.x > $1 AND t.y = $2",
+            )
+            .unwrap();
+            let binops = get_select_statement_binops(&stmt);
+            assert_eq!(
+                binops,
+                vec![
+                    (
+                        &Column {
+                            name: "x".into(),
+                            table: Some("t".into())
+                        },
+                        BinaryOperator::Greater
+                    ),
+                    (
+                        &Column {
+                            name: "y".into(),
+                            table: Some("t".into())
+                        },
+                        BinaryOperator::Equal
+                    ),
+                ]
+            );
+
+            let stmt = parse_select_statement(
+                Dialect::MySQL,
+                "SELECT t.x FROM t WHERE t.x > $1 AND t.y > $2",
+            )
+            .unwrap();
+            let binops = get_select_statement_binops(&stmt);
+            assert_eq!(
+                binops,
+                vec![
+                    (
+                        &Column {
+                            name: "x".into(),
+                            table: Some("t".into())
+                        },
+                        BinaryOperator::Greater
+                    ),
+                    (
+                        &Column {
+                            name: "y".into(),
+                            table: Some("t".into())
+                        },
+                        BinaryOperator::Greater
+                    ),
+                ]
+            );
+
+            let stmt = parse_select_statement(
+                Dialect::MySQL,
+                "SELECT t.x FROM t WHERE t.x = $1 ORDER BY t.y ASC LIMIT 3 OFFSET $2",
+            )
+            .unwrap();
+            let binops = get_select_statement_binops(&stmt);
+            assert_eq!(
+                binops,
+                vec![(
+                    &Column {
+                        name: "x".into(),
+                        table: Some("t".into())
+                    },
+                    BinaryOperator::Equal
+                ),]
+            );
+        }
+    }
 }

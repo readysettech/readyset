@@ -1251,7 +1251,10 @@ where
                         info.execute_unsupported();
                     }
                 }
-                if !matches!(noria_err, ReadySetError::ReaderMissingKey) {
+                if !matches!(
+                    noria_err,
+                    ReadySetError::ReaderMissingKey | ReadySetError::NoCacheForQuery
+                ) {
                     warn!(error = %noria_err,
                           "Error received from noria, sending query to fallback");
                 }

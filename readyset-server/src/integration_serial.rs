@@ -87,7 +87,7 @@ async fn it_works_basic_impl() {
         .await;
     let mut metrics_client = initialize_metrics(&mut g).await;
 
-    let mut cq = g.view("c").await.unwrap();
+    let mut cq = g.view("c").await.unwrap().into_reader_handle().unwrap();
     let mut muta = g.table_by_index(a).await.unwrap();
     let mut mutb = g.table_by_index(b).await.unwrap();
     let id: DfValue = 1.into();
@@ -265,7 +265,7 @@ async fn it_works_basic_standalone_impl() {
     .await
     .unwrap();
 
-    let mut cq = g.view("q").await.unwrap();
+    let mut cq = g.view("q").await.unwrap().into_reader_handle().unwrap();
     let mut muta = g.table("a").await.unwrap();
     let mut mutb = g.table("b").await.unwrap();
     let id: DfValue = 1.into();
@@ -301,7 +301,7 @@ async fn it_works_basic_standalone_impl() {
     let mut g = start_standalone().await.unwrap();
 
     // Check that everything was restored properly
-    let mut cq = g.view("q").await.unwrap();
+    let mut cq = g.view("q").await.unwrap().into_reader_handle().unwrap();
 
     let res = cq.lookup(&[id.clone()], true).await.unwrap().into_vec();
     assert_eq!(
