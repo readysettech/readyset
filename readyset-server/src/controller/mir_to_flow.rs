@@ -49,21 +49,13 @@ pub(super) fn mir_query_to_flow_parts(
     custom_types: &HashMap<Relation, DfType>,
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<NodeIndex> {
-    let mut new_nodes = Vec::new();
-    let mut reused_nodes = Vec::new();
-
     for n in mir_query.topo_nodes() {
-        let flow_node =
-            mir_node_to_flow_parts(mir_query.graph, n, custom_types, mig).map_err(|e| {
-                ReadySetError::MirNodeToDataflowFailed {
-                    index: n,
-                    source: Box::new(e),
-                }
-            })?;
-        match flow_node {
-            FlowNode::New(na) => new_nodes.push(na),
-            FlowNode::Existing(na) => reused_nodes.push(na),
-        }
+        mir_node_to_flow_parts(mir_query.graph, n, custom_types, mig).map_err(|e| {
+            ReadySetError::MirNodeToDataflowFailed {
+                index: n,
+                source: Box::new(e),
+            }
+        })?;
     }
 
     let leaf_na = mir_query
