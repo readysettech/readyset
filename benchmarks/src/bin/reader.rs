@@ -40,7 +40,7 @@ struct NoriaClientOpts {
         short,
         required_if_eq("database-type", "noria"),
         long,
-        env("NORIA_DEPLOYMENT")
+        env("DEPLOYMENT")
     )]
     deployment: Option<String>,
 

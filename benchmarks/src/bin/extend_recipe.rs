@@ -11,7 +11,7 @@ struct ExtendRecipe {
     authority_address: String,
     #[clap(long, env("AUTHORITY"), default_value("zookeeper"), possible_values = &["consul", "zookeeper"])]
     authority: AuthorityType,
-    #[clap(short, long, env("NORIA_DEPLOYMENT"))]
+    #[clap(short, long, env("DEPLOYMENT"))]
     deployment: String,
 }
 

@@ -156,7 +156,7 @@ pub struct Options {
     address: Option<SocketAddr>,
 
     /// ReadySet deployment ID to attach to
-    #[clap(long, env = "NORIA_DEPLOYMENT", forbid_empty_values = true)]
+    #[clap(long, env = "DEPLOYMENT", forbid_empty_values = true)]
     deployment: String,
 
     /// The authority to use. Possible values: zookeeper, consul, standalone.

@@ -40,7 +40,7 @@ pub struct Options {
     consul_address: String,
 
     /// ReadySet deployment ID to filter by when aggregating metrics.
-    #[clap(long, env = "NORIA_DEPLOYMENT", forbid_empty_values = true)]
+    #[clap(long, env = "DEPLOYMENT", forbid_empty_values = true)]
     deployment: String,
 
     /// Prometheus connection string.

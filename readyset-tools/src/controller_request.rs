@@ -16,7 +16,7 @@ struct ControllerRequest {
     #[clap(long, env("AUTHORITY"), default_value("zookeeper"), possible_values = &["consul", "zookeeper"])]
     authority: AuthorityType,
 
-    #[clap(short, long, env("NORIA_DEPLOYMENT"))]
+    #[clap(short, long, env("DEPLOYMENT"))]
     deployment: String,
 
     /// The name of the endpoint to issue a controller request to.

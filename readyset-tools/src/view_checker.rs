@@ -12,7 +12,7 @@ struct ViewChecker {
     #[clap(long, env("AUTHORITY"), default_value("zookeeper"), possible_values = &["consul", "zookeeper"])]
     authority: AuthorityType,
 
-    #[clap(short, long, env("NORIA_DEPLOYMENT"), forbid_empty_values = true)]
+    #[clap(short, long, env("DEPLOYMENT"), forbid_empty_values = true)]
     deployment: String,
 
     #[clap(short, long)]

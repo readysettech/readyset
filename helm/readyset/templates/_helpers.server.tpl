@@ -205,7 +205,7 @@ ReadySet server, main configuration envionment variables.
 */}}
 {{- define "readyset.server.dynamicEnvironmentVars" -}}
 # ReadySet Deployment Name (Unique per Consul Cluster)
-- name: NORIA_DEPLOYMENT
+- name: DEPLOYMENT
   value: {{ template "readyset.generic.deploymentName" .config.deploymentName | quote }}
 # ReadySet Server Configs
 - name: NORIA_QUORUM

@@ -76,7 +76,7 @@ struct Options {
     use_aws_external_address: bool,
 
     /// ReadySet deployment ID.
-    #[clap(long, env = "NORIA_DEPLOYMENT", forbid_empty_values = true)]
+    #[clap(long, env = "DEPLOYMENT", forbid_empty_values = true)]
     deployment: String,
 
     /// Authority connection string.

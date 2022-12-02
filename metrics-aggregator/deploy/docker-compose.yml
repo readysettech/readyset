@@ -40,7 +40,7 @@ services:
       AUTHORITY: consul
       LISTEN_ADDRESS: 0.0.0.0
       EXTERNAL_ADDRESS: readyset-server
-      NORIA_DEPLOYMENT: frameworktests
+      DEPLOYMENT: frameworktests
       UPSTREAM_DB_URL: mysql://root:root@mysql/test
       LOG_LEVEL: trace
     links:
@@ -69,7 +69,7 @@ services:
       AUTHORITY: consul
       LISTEN_ADDRESS: 0.0.0.0:3333
       METRICS_ADDRESS: 0.0.0.0:8089
-      NORIA_DEPLOYMENT: frameworktests
+      DEPLOYMENT: frameworktests
       UPSTREAM_DB_URL: mysql://root:root@mysql/test
       LOG_LEVEL: trace
       ASYNC_MIGRATIONS: "true"
@@ -117,7 +117,7 @@ services:
       - "8090:8090"
     environment:
       LISTEN_ADDRESS: 0.0.0.0:8090
-      NORIA_DEPLOYMENT: frameworktests
+      DEPLOYMENT: frameworktests
       PROMETHEUS_ADDRESS: prometheus:9090
       AUTHORITY_ADDRESS: consul:8500
     links:

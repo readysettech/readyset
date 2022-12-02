@@ -103,7 +103,7 @@ ReadySet adapter, main configuration envionment variables.
   value: "0.0.0.0:5432"
 {{- end -}}
 # ReadySet Deployment Name (Unique per Consul Cluster)
-- name: NORIA_DEPLOYMENT
+- name: DEPLOYMENT
   value: {{ template "readyset.generic.deploymentName" .config.deploymentName | quote }}
 # Database ReadySet is proxying to
 - name: UPSTREAM_DB_URL
