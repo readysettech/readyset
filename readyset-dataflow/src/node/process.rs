@@ -9,6 +9,7 @@ use readyset_client::{KeyComparison, PacketData, ReadySetError};
 use readyset_errors::ReadySetResult;
 use tracing::{debug_span, trace};
 
+use super::special::base::FailedOpLogger;
 use crate::node::special::base::{BaseWrite, SetSnapshotMode};
 use crate::node::NodeType;
 use crate::prelude::*;
@@ -151,11 +152,30 @@ impl Node {
                             .map(|p| p.snapshot_mode())
                             .unwrap_or(SnapshotMode::SnapshotModeDisabled);
 
+                        let mut failed_log = FailedOpLogger::default();
                         let BaseWrite {
                             records: mut rs,
                             replication_offset,
                             set_snapshot_mode,
-                        } = b.process(addr, &self.columns, data, &*env.state, snapshot_mode)?;
+                        } = b
+                            .process_ops(
+                                addr,
+                                &self.columns,
+                                data,
+                                &*env.state,
+                                snapshot_mode,
+                                &mut failed_log,
+                            )
+                            .map_err(|e| match e {
+                                ReadySetError::FailedBaseOps => {
+                                    failed_log.log_errors(&self.name);
+                                    ReadySetError::TableError {
+                                        table: self.name.clone(),
+                                        source: Box::new(e),
+                                    }
+                                }
+                                _ => e,
+                            })?;
 
                         if let (Some(SetSnapshotMode::EnterSnapshotMode), Some(s)) = (
                             set_snapshot_mode,

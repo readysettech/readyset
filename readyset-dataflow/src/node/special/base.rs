@@ -8,12 +8,13 @@ use itertools::Itertools;
 use launchpad::redacted::Sensitive;
 use launchpad::Indices;
 use maplit::hashmap;
+use nom_sql::Relation;
 use readyset_client::replication::ReplicationOffset;
 use readyset_client::{Modification, Operation, TableOperation};
 use readyset_data::{DfValue, DfValueKind};
 use readyset_errors::ReadySetResult;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, trace, warn};
+use tracing::{debug, error, trace};
 use vec_map::VecMap;
 
 use crate::node::Column;
@@ -275,13 +276,14 @@ impl Base {
 
     /// Compute the deltas required to apply the list of the provided `TableOperation` to the base
     /// table
-    pub(in crate::node) fn process(
+    pub(in crate::node) fn process_ops(
         &mut self,
         our_index: LocalNodeIndex,
         columns: &[Column],
         mut ops: Vec<TableOperation>,
         state: &StateMap,
         snapshot_mode: SnapshotMode,
+        failed_log: &mut FailedOpLogger,
     ) -> ReadySetResult<BaseWrite> {
         trace!(node = %our_index, base_ops = ?ops);
         for op in ops.iter_mut() {
@@ -292,8 +294,6 @@ impl Base {
             Some(key) if !ops.is_empty() => key.as_ref(),
             _ => return self.process_unkeyed(ops),
         };
-
-        let mut failed_log = FailedOpLogger::default();
 
         let mut n_ops = ops.len();
         // Sort all of the operations lexicographically by key types, all unkeyed operations will
@@ -479,7 +479,7 @@ impl Base {
             self.fix(r);
         }
 
-        failed_log.warn();
+        failed_log.ensure_empty()?;
 
         Ok(BaseWrite {
             records: results.into(),
@@ -501,7 +501,7 @@ impl Base {
 
 /// A helper to log information about failed table updates without leaking data
 #[derive(Default)]
-struct FailedOpLogger {
+pub struct FailedOpLogger {
     insert_existing: usize,
     update_non_existing: usize,
     delete_non_existing: usize,
@@ -563,13 +563,19 @@ impl FailedOpLogger {
             && self.delete_row_data_mismatch.is_empty()
     }
 
-    fn warn(&mut self) {
+    fn ensure_empty(&mut self) -> ReadySetResult<()> {
         if self.is_empty() {
             // We got nothing to warn about
-            return;
+            return Ok(());
         }
 
-        warn!(insert = %self.insert_existing,
+        // If we failed to apply an op to the base table, our state is no longer correct
+        Err(ReadySetError::FailedBaseOps)
+    }
+
+    pub fn log_errors(&self, node_name: &Relation) {
+        error!(node=%node_name,
+              insert = %self.insert_existing,
               update = %self.update_non_existing,
               delete_non_existing = %self.delete_non_existing,
               delete_type_mismatch = %self.delete_type_mismatch.len(),
@@ -577,7 +583,7 @@ impl FailedOpLogger {
               "Table failed to apply operations");
 
         if !self.delete_type_mismatch.is_empty() || !self.delete_row_data_mismatch.is_empty() {
-            warn!(type_mismatch = ?self.delete_type_mismatch,
+            error!(node=%node_name, type_mismatch = ?self.delete_type_mismatch,
                   data_mismatch = ?self.delete_row_data_mismatch,
                   "Table failed to apply delete operations");
         }
@@ -669,11 +675,19 @@ mod tests {
             let n = graph[global].take();
             let mut n = n.finalize(&graph);
 
+            let mut op_logger = FailedOpLogger::default();
             let mut one = move |u: Vec<TableOperation>| {
                 let mut m = n
                     .get_base_mut()
                     .unwrap()
-                    .process(local, &[], u, &states, SnapshotMode::SnapshotModeDisabled)
+                    .process_ops(
+                        local,
+                        &[],
+                        u,
+                        &states,
+                        SnapshotMode::SnapshotModeDisabled,
+                        &mut op_logger,
+                    )
                     .unwrap()
                     .records;
                 node::materialize(&mut m, None, None, states.get_mut(local));
@@ -767,8 +781,9 @@ mod tests {
             let mut state_map = NodeMap::new();
             state_map.insert(ni, state);
 
+            let mut op_logger = FailedOpLogger::default();
             assert_eq!(
-                b.process(
+                b.process_ops(
                     ni,
                     &[],
                     vec![
@@ -778,7 +793,8 @@ mod tests {
                         }
                     ],
                     &state_map,
-                    SnapshotMode::SnapshotModeDisabled
+                    SnapshotMode::SnapshotModeDisabled,
+                    &mut op_logger,
                 )
                 .unwrap(),
                 BaseWrite {
@@ -813,8 +829,9 @@ mod tests {
             let mut state_map = NodeMap::new();
             state_map.insert(ni, state);
 
+            let mut op_logger = FailedOpLogger::default();
             assert_eq!(
-                b.process(
+                b.process_ops(
                     ni,
                     &[],
                     vec![
@@ -824,7 +841,8 @@ mod tests {
                         }
                     ],
                     &state_map,
-                    SnapshotMode::SnapshotModeDisabled
+                    SnapshotMode::SnapshotModeDisabled,
+                    &mut op_logger,
                 )
                 .unwrap(),
                 BaseWrite {
@@ -859,8 +877,9 @@ mod tests {
             let mut state_map = NodeMap::new();
             state_map.insert(ni, state);
 
+            let mut op_logger = FailedOpLogger::default();
             assert_eq!(
-                b.process(
+                b.process_ops(
                     ni,
                     &[],
                     vec![
@@ -877,7 +896,8 @@ mod tests {
                         }
                     ],
                     &state_map,
-                    SnapshotMode::SnapshotModeDisabled
+                    SnapshotMode::SnapshotModeDisabled,
+                    &mut op_logger,
                 )
                 .unwrap(),
                 BaseWrite {
@@ -917,13 +937,15 @@ mod tests {
             let mut state_map = NodeMap::new();
             state_map.insert(ni, state);
 
+            let mut op_logger = FailedOpLogger::default();
             let res = b
-                .process(
+                .process_ops(
                     ni,
                     &[],
                     vec![TableOperation::Truncate],
                     &state_map,
                     SnapshotMode::SnapshotModeDisabled,
+                    &mut op_logger,
                 )
                 .unwrap();
             assert_eq!(
