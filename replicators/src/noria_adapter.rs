@@ -505,8 +505,6 @@ impl NoriaAdapter {
             .start_replication(REPLICATION_SLOT, PUBLICATION_NAME)
             .await?;
 
-        info!("Streaming replication started");
-
         let replication_offsets = noria.replication_offsets().await?;
         let mut min_pos = replication_offsets
             .min_present_offset()?
@@ -537,6 +535,8 @@ impl NoriaAdapter {
         if let Some(notify) = ready_notify.take() {
             notify.notify_one();
         }
+
+        info!("Streaming replication started");
 
         adapter.main_loop(&mut min_pos, None).await?;
 
