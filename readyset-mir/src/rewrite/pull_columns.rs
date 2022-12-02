@@ -42,267 +42,176 @@ pub(crate) fn pull_all_required_columns(query: &mut MirQuery<'_>) -> ReadySetRes
     Ok(())
 }
 
-// TODO(fran): Uncomment and fix compilation issues
-// #[cfg(test)]
-// mod tests {
-//     use common::IndexType;
-//     use dataflow::ops::grouped::aggregate::Aggregation;
-//     use nom_sql::{BinaryOperator, ColumnSpecification, Expr, FunctionExpr, Literal, SqlType};
-//     use readyset_client::ViewPlaceholder;
-//     use crate::graph::MirSupergraph;
-//
-//     use super::*;
-//     use crate::node::node_inner::MirNodeInner;
-//     use crate::node::MirNode;
-//
-//     #[test]
-//     fn changing_index() {
-//         let mut supergraph = MirSupergraph::new();
-//         let base = MirNode::temp_new(
-//             "base".into(),
-//             MirNodeInner::Base {
-//                 column_specs: vec![
-//                     (
-//                         ColumnSpecification {
-//                             column: nom_sql::Column::from("a"),
-//                             sql_type: SqlType::Int(None),
-//                             constraints: vec![],
-//                             comment: None,
-//                         },
-//                         None,
-//                     ),
-//                     (
-//                         ColumnSpecification {
-//                             column: nom_sql::Column::from("b"),
-//                             sql_type: SqlType::Int(None),
-//                             constraints: vec![],
-//                             comment: None,
-//                         },
-//                         None,
-//                     ),
-//                     (
-//                         ColumnSpecification {
-//                             column: nom_sql::Column::from("c"),
-//                             sql_type: SqlType::Int(None),
-//                             constraints: vec![],
-//                             comment: None,
-//                         },
-//                         None,
-//                     ),
-//                 ],
-//                 temp_column_specs: vec![
-//                     ColumnSpecification {
-//                         column: nom_sql::Column::from("a"),
-//                         sql_type: SqlType::Int(None),
-//                         constraints: vec![],
-//                         comment: None,
-//                     },
-//                     ColumnSpecification {
-//                         column: nom_sql::Column::from("b"),
-//                         sql_type: SqlType::Int(None),
-//                         constraints: vec![],
-//                         comment: None,
-//                     },
-//                     ColumnSpecification {
-//                         column: nom_sql::Column::from("c"),
-//                         sql_type: SqlType::Int(None),
-//                         constraints: vec![],
-//                         comment: None,
-//                     },
-//                 ],
-//                 primary_key: Some([Column::from("a")].into()),
-//                 unique_keys: Default::default(),
-//                 adapted_over: None,
-//             },
-//         );
-//
-//         // SUM(b)
-//         let grp = MirNode::temp_new(
-//             "grp".into(),
-//             MirNodeInner::Aggregation {
-//                 on: "b".into(),
-//                 group_by: vec![],
-//                 output_column: Column::named("agg"),
-//                 kind: Aggregation::Sum,
-//             },
-//         );
-//
-//         let condition_expression_1 = Expr::BinaryOp {
-//             op: BinaryOperator::Equal,
-//             lhs: Box::new(Expr::Column("a".into())),
-//             rhs: Box::new(Expr::Literal(Literal::Integer(1))),
-//         };
-//
-//         // σ[a = 1]
-//         let fil = MirNode::new(
-//             "fil".into(),
-//             0,
-//             MirNodeInner::Filter {
-//                 conditions: condition_expression_1.clone(),
-//             },
-//             vec![MirNodeRef::downgrade(&grp)],
-//             vec![],
-//         );
-//
-//         // a, agg, IFNULL(c, 0) as c0
-//         let prj = MirNode::new(
-//             "prj".into(),
-//             0,
-//             MirNodeInner::Project {
-//                 emit: vec!["a".into(), "agg".into()],
-//                 expressions: vec![(
-//                     "c0".into(),
-//                     Expr::Call(FunctionExpr::Call {
-//                         name: "ifnull".into(),
-//                         arguments: vec![Expr::Column("c".into()), Expr::Literal(0.into())],
-//                     }),
-//                 )],
-//                 literals: vec![],
-//             },
-//             vec![MirNodeRef::downgrade(&fil)],
-//             vec![],
-//         );
-//
-//         let mut query = MirQuery {
-//             name: "changing_index".into(),
-//             roots: vec![base],
-//             leaf: prj,
-//             fields: vec!["a".into(), "agg".into()],
-//         };
-//
-//         pull_all_required_columns(&mut query).unwrap();
-//
-//         assert_eq!(
-//             grp.borrow().columns(),
-//             &[Column::from("a"), Column::from("c"), Column::from("agg")]
-//         );
-//
-//         // The filter has to add the column in the same place as the aggregate
-//         assert_eq!(
-//             fil.borrow().columns(),
-//             &[Column::from("a"), Column::from("c"), Column::from("agg")]
-//         );
-//
-//         // The filter has to filter on the correct field
-//         match &fil.borrow().inner {
-//             MirNodeInner::Filter { conditions, .. } => {
-//                 assert_eq!(conditions, &condition_expression_1)
-//             }
-//             _ => unreachable!(),
-//         };
-//     }
-//
-//     #[test]
-//     fn unprojected_leaf_key() {
-//         let base = MirNode::new(
-//             "base".into(),
-//             0,
-//             MirNodeInner::Base {
-//                 column_specs: vec![
-//                     (
-//                         ColumnSpecification {
-//                             column: nom_sql::Column::from("a"),
-//                             sql_type: SqlType::Int(None),
-//                             constraints: vec![],
-//                             comment: None,
-//                         },
-//                         None,
-//                     ),
-//                     (
-//                         ColumnSpecification {
-//                             column: nom_sql::Column::from("b"),
-//                             sql_type: SqlType::Int(None),
-//                             constraints: vec![],
-//                             comment: None,
-//                         },
-//                         None,
-//                     ),
-//                     (
-//                         ColumnSpecification {
-//                             column: nom_sql::Column::from("c"),
-//                             sql_type: SqlType::Int(None),
-//                             constraints: vec![],
-//                             comment: None,
-//                         },
-//                         None,
-//                     ),
-//                 ],
-//                 temp_column_specs: vec![
-//                     ColumnSpecification {
-//                         column: nom_sql::Column::from("a"),
-//                         sql_type: SqlType::Int(None),
-//                         constraints: vec![],
-//                         comment: None,
-//                     },
-//                     ColumnSpecification {
-//                         column: nom_sql::Column::from("b"),
-//                         sql_type: SqlType::Int(None),
-//                         constraints: vec![],
-//                         comment: None,
-//                     },
-//                     ColumnSpecification {
-//                         column: nom_sql::Column::from("c"),
-//                         sql_type: SqlType::Int(None),
-//                         constraints: vec![],
-//                         comment: None,
-//                     },
-//                 ],
-//                 primary_key: Some([Column::from("a")].into()),
-//                 unique_keys: Default::default(),
-//                 adapted_over: None,
-//             },
-//             vec![],
-//             vec![],
-//         );
-//
-//         let prj = MirNode::new(
-//             "prj".into(),
-//             0,
-//             MirNodeInner::Project {
-//                 emit: vec!["a".into()],
-//                 expressions: vec![],
-//                 literals: vec![],
-//             },
-//             vec![MirNodeRef::downgrade(&base)],
-//             vec![],
-//         );
-//
-//         let alias_table = MirNode::new(
-//             "alias_table".into(),
-//             0,
-//             MirNodeInner::AliasTable {
-//                 table: "unprojected_leaf_key".into(),
-//             },
-//             vec![MirNodeRef::downgrade(&prj)],
-//             vec![],
-//         );
-//
-//         let leaf = MirNode::new(
-//             "leaf".into(),
-//             0,
-//             MirNodeInner::leaf(
-//                 vec![(
-//                     Column::named("b").aliased_as_table("unprojected_leaf_key"),
-//                     ViewPlaceholder::OneToOne(1),
-//                 )],
-//                 IndexType::HashMap,
-//             ),
-//             vec![MirNodeRef::downgrade(&alias_table)],
-//             vec![],
-//         );
-//
-//         let mut query = MirQuery {
-//             name: "unprojected_leaf_key".into(),
-//             roots: vec![base],
-//             leaf,
-//             fields: vec!["a".into()],
-//         };
-//
-//         pull_all_required_columns(&mut query).unwrap();
-//
-//         assert_eq!(
-//             prj.borrow().columns(),
-//             vec![Column::named("a"), Column::named("b")]
-//         );
-//     }
-// }
+#[cfg(test)]
+mod tests {
+    use common::IndexType;
+    use dataflow::ops::grouped::aggregate::Aggregation;
+    use nom_sql::{
+        BinaryOperator, ColumnSpecification, Expr, FunctionExpr, Literal, Relation, SqlType,
+    };
+    use petgraph::graph::NodeIndex;
+    use readyset_client::ViewPlaceholder;
+
+    use super::*;
+    use crate::graph::MirGraph;
+    use crate::node::node_inner::MirNodeInner;
+    use crate::node::MirNode;
+
+    fn create_base_node(mir_graph: &mut MirGraph) -> NodeIndex {
+        mir_graph.add_node(MirNode::new(
+            "base".into(),
+            MirNodeInner::Base {
+                column_specs: vec![
+                    ColumnSpecification {
+                        column: nom_sql::Column::from("a"),
+                        sql_type: SqlType::Int(None),
+                        constraints: vec![],
+                        comment: None,
+                    },
+                    ColumnSpecification {
+                        column: nom_sql::Column::from("b"),
+                        sql_type: SqlType::Int(None),
+                        constraints: vec![],
+                        comment: None,
+                    },
+                    ColumnSpecification {
+                        column: nom_sql::Column::from("c"),
+                        sql_type: SqlType::Int(None),
+                        constraints: vec![],
+                        comment: None,
+                    },
+                ],
+                primary_key: Some([Column::from("a")].into()),
+                unique_keys: Default::default(),
+            },
+        ))
+    }
+
+    #[test]
+    fn changing_index() {
+        let query_name: Relation = "changing_index".into();
+        let mut mir_graph = MirGraph::new();
+        let base = create_base_node(&mut mir_graph);
+        mir_graph[base].add_owner(query_name.clone());
+
+        // SUM(b)
+        let grp = mir_graph.add_node(MirNode::new(
+            "grp".into(),
+            MirNodeInner::Aggregation {
+                on: "b".into(),
+                group_by: vec![],
+                output_column: Column::named("agg"),
+                kind: Aggregation::Sum,
+            },
+        ));
+        mir_graph[grp].add_owner(query_name.clone());
+        mir_graph.add_edge(base, grp, 0);
+
+        let condition_expression_1 = Expr::BinaryOp {
+            op: BinaryOperator::Equal,
+            lhs: Box::new(Expr::Column("a".into())),
+            rhs: Box::new(Expr::Literal(Literal::Integer(1))),
+        };
+
+        // σ[a = 1]
+        let fil = mir_graph.add_node(MirNode::new(
+            "fil".into(),
+            MirNodeInner::Filter {
+                conditions: condition_expression_1.clone(),
+            },
+        ));
+        mir_graph[fil].add_owner(query_name.clone());
+        mir_graph.add_edge(grp, fil, 0);
+
+        // a, agg, IFNULL(c, 0) as c0
+        let prj = mir_graph.add_node(MirNode::new(
+            "prj".into(),
+            MirNodeInner::Project {
+                emit: vec!["a".into(), "agg".into()],
+                expressions: vec![(
+                    "c0".into(),
+                    Expr::Call(FunctionExpr::Call {
+                        name: "ifnull".into(),
+                        arguments: vec![Expr::Column("c".into()), Expr::Literal(0.into())],
+                    }),
+                )],
+                literals: vec![],
+            },
+        ));
+        mir_graph[prj].add_owner(query_name.clone());
+        mir_graph.add_edge(fil, prj, 0);
+
+        let mut query = MirQuery::new(query_name, prj, &mut mir_graph);
+
+        pull_all_required_columns(&mut query).unwrap();
+
+        assert_eq!(
+            mir_graph.columns(grp),
+            &[Column::from("a"), Column::from("c"), Column::from("agg")]
+        );
+
+        // The filter has to add the column in the same place as the aggregate
+        assert_eq!(
+            mir_graph.columns(fil),
+            &[Column::from("a"), Column::from("c"), Column::from("agg")]
+        );
+
+        // The filter has to filter on the correct field
+        match &mir_graph[fil].inner {
+            MirNodeInner::Filter { conditions, .. } => {
+                assert_eq!(conditions, &condition_expression_1)
+            }
+            _ => unreachable!(),
+        };
+    }
+
+    #[test]
+    fn unprojected_leaf_key() {
+        let query_name: Relation = "unprojected_leaf_key".into();
+        let mut mir_graph = MirGraph::new();
+        let base = create_base_node(&mut mir_graph);
+        mir_graph[base].add_owner(query_name.clone());
+
+        let prj = mir_graph.add_node(MirNode::new(
+            "prj".into(),
+            MirNodeInner::Project {
+                emit: vec!["a".into()],
+                expressions: vec![],
+                literals: vec![],
+            },
+        ));
+        mir_graph[prj].add_owner(query_name.clone());
+        mir_graph.add_edge(base, prj, 0);
+
+        let alias_table = mir_graph.add_node(MirNode::new(
+            "alias_table".into(),
+            MirNodeInner::AliasTable {
+                table: "unprojected_leaf_key".into(),
+            },
+        ));
+        mir_graph[alias_table].add_owner(query_name.clone());
+        mir_graph.add_edge(prj, alias_table, 0);
+
+        let leaf = mir_graph.add_node(MirNode::new(
+            "leaf".into(),
+            MirNodeInner::leaf(
+                vec![(
+                    Column::named("b").aliased_as_table("unprojected_leaf_key"),
+                    ViewPlaceholder::OneToOne(1),
+                )],
+                IndexType::HashMap,
+            ),
+        ));
+        mir_graph[leaf].add_owner(query_name.clone());
+        mir_graph.add_edge(alias_table, leaf, 0);
+
+        let mut query = MirQuery::new(query_name, leaf, &mut mir_graph);
+
+        pull_all_required_columns(&mut query).unwrap();
+
+        assert_eq!(
+            mir_graph.columns(prj),
+            vec![Column::named("a"), Column::named("b")]
+        );
+    }
+}
