@@ -21,7 +21,7 @@ use mir::graph::MirGraph;
 use mir::node::node_inner::MirNodeInner;
 use mir::node::GroupedNodeType;
 use mir::query::MirQuery;
-use mir::{Column, FlowNode};
+use mir::{Column, DfNodeAddress};
 use nom_sql::{ColumnConstraint, ColumnSpecification, Expr, OrderType, Relation, SqlIdentifier};
 use petgraph::graph::NodeIndex;
 use petgraph::Direction;
@@ -58,11 +58,11 @@ pub(super) fn mir_query_to_flow_parts(
         })?;
     }
 
-    let leaf_na = mir_query
+    let df_leaf = mir_query
         .dataflow_node()
-        .ok_or_else(|| internal_err!("Leaf must have FlowNode by now"))?;
+        .ok_or_else(|| internal_err!("Leaf must have a dataflow node assigned by now"))?;
 
-    Ok(leaf_na)
+    Ok(df_leaf)
 }
 
 pub(super) fn mir_node_to_flow_parts(
@@ -70,7 +70,7 @@ pub(super) fn mir_node_to_flow_parts(
     mir_node: NodeIndex,
     custom_types: &HashMap<Relation, DfType>,
     mig: &mut Migration<'_>,
-) -> ReadySetResult<FlowNode> {
+) -> ReadySetResult<Option<DfNodeAddress>> {
     use petgraph::visit::EdgeRef;
 
     let name = graph[mir_node].name().clone();
@@ -81,7 +81,7 @@ pub(super) fn mir_node_to_flow_parts(
         .map(|e| e.source())
         .collect::<Vec<_>>();
 
-    match graph[mir_node].flow_node {
+    match graph[mir_node].df_node_address {
         None => {
             let flow_node = match graph[mir_node].inner {
                 MirNodeInner::Aggregation {
@@ -92,7 +92,7 @@ pub(super) fn mir_node_to_flow_parts(
                 } => {
                     invariant_eq!(ancestors.len(), 1);
                     let parent = ancestors[0];
-                    make_grouped_node(
+                    Some(make_grouped_node(
                         graph,
                         name,
                         parent,
@@ -101,21 +101,21 @@ pub(super) fn mir_node_to_flow_parts(
                         group_by,
                         GroupedNodeType::Aggregation(kind.clone()),
                         mig,
-                    )?
+                    )?)
                 }
                 MirNodeInner::Base {
                     ref column_specs,
                     ref primary_key,
                     ref unique_keys,
                     ..
-                } => make_base_node(
+                } => Some(make_base_node(
                     name,
                     column_specs.as_slice(),
                     custom_types,
                     primary_key.as_deref(),
                     unique_keys,
                     mig,
-                )?,
+                )?),
                 MirNodeInner::Extremum {
                     ref on,
                     ref group_by,
@@ -124,7 +124,7 @@ pub(super) fn mir_node_to_flow_parts(
                 } => {
                     invariant_eq!(ancestors.len(), 1);
                     let parent = ancestors[0];
-                    make_grouped_node(
+                    Some(make_grouped_node(
                         graph,
                         name,
                         parent,
@@ -133,12 +133,12 @@ pub(super) fn mir_node_to_flow_parts(
                         group_by,
                         GroupedNodeType::Extremum(kind.clone()),
                         mig,
-                    )?
+                    )?)
                 }
                 MirNodeInner::Filter { ref conditions } => {
                     invariant_eq!(ancestors.len(), 1);
                     let parent = ancestors[0];
-                    make_filter_node(
+                    Some(make_filter_node(
                         graph,
                         name,
                         parent,
@@ -146,18 +146,18 @@ pub(super) fn mir_node_to_flow_parts(
                         conditions.clone(),
                         custom_types,
                         mig,
-                    )?
+                    )?)
                 }
                 MirNodeInner::Identity => {
                     invariant_eq!(ancestors.len(), 1);
                     let parent = ancestors[0];
-                    make_identity_node(
+                    Some(make_identity_node(
                         graph,
                         name,
                         parent,
                         &graph.referenced_columns(mir_node),
                         mig,
-                    )?
+                    )?)
                 }
                 MirNodeInner::Join {
                     ref on,
@@ -167,7 +167,7 @@ pub(super) fn mir_node_to_flow_parts(
                     invariant_eq!(ancestors.len(), 2);
                     let left = ancestors[0];
                     let right = ancestors[1];
-                    make_join_node(
+                    Some(make_join_node(
                         graph,
                         name,
                         left,
@@ -178,20 +178,20 @@ pub(super) fn mir_node_to_flow_parts(
                         JoinType::Inner,
                         custom_types,
                         mig,
-                    )?
+                    )?)
                 }
                 MirNodeInner::JoinAggregates => {
                     invariant_eq!(ancestors.len(), 2);
                     let left = ancestors[0];
                     let right = ancestors[1];
-                    make_join_aggregates_node(
+                    Some(make_join_aggregates_node(
                         graph,
                         name,
                         left,
                         right,
                         &graph.referenced_columns(mir_node),
                         mig,
-                    )?
+                    )?)
                 }
                 MirNodeInner::DependentJoin { .. } => {
                     // See the docstring for MirNodeInner::DependentJoin
@@ -200,14 +200,14 @@ pub(super) fn mir_node_to_flow_parts(
                 MirNodeInner::Latest { ref group_by } => {
                     invariant_eq!(ancestors.len(), 1);
                     let parent = ancestors[0];
-                    make_latest_node(
+                    Some(make_latest_node(
                         graph,
                         name,
                         parent,
                         &graph.referenced_columns(mir_node),
                         group_by,
                         mig,
-                    )?
+                    )?)
                 }
                 MirNodeInner::Leaf {
                     ref keys,
@@ -239,15 +239,7 @@ pub(super) fn mir_node_to_flow_parts(
                         reader_processing,
                         mig,
                     )?;
-                    // TODO(malte): below is yucky, but required to satisfy the type system:
-                    // each match arm must return a `FlowNode`, so we use the parent's one
-                    // here.
-                    match graph[parent].flow_node.as_ref().ok_or_else(|| {
-                        internal_err!("parent of a Leaf mirnodeinner had no flow_node")
-                    })? {
-                        FlowNode::New(na) => FlowNode::Existing(*na),
-                        n @ FlowNode::Existing(..) => *n,
-                    }
+                    graph[parent].df_node_address
                 }
                 MirNodeInner::LeftJoin {
                     ref on,
@@ -257,7 +249,7 @@ pub(super) fn mir_node_to_flow_parts(
                     invariant_eq!(ancestors.len(), 2);
                     let left = ancestors[0];
                     let right = ancestors[1];
-                    make_join_node(
+                    Some(make_join_node(
                         graph,
                         name,
                         left,
@@ -268,7 +260,7 @@ pub(super) fn mir_node_to_flow_parts(
                         JoinType::Left,
                         custom_types,
                         mig,
-                    )?
+                    )?)
                 }
                 MirNodeInner::Project {
                     ref emit,
@@ -277,7 +269,7 @@ pub(super) fn mir_node_to_flow_parts(
                 } => {
                     invariant_eq!(ancestors.len(), 1);
                     let parent = ancestors[0];
-                    make_project_node(
+                    Some(make_project_node(
                         graph,
                         name,
                         parent,
@@ -287,7 +279,7 @@ pub(super) fn mir_node_to_flow_parts(
                         literals,
                         custom_types,
                         mig,
-                    )?
+                    )?)
                 }
                 MirNodeInner::Union {
                     ref emit,
@@ -295,7 +287,7 @@ pub(super) fn mir_node_to_flow_parts(
                 } => {
                     invariant_eq!(ancestors.len(), emit.len());
                     #[allow(clippy::unwrap_used)]
-                    make_union_node(
+                    Some(make_union_node(
                         graph,
                         name,
                         &graph.columns(mir_node),
@@ -305,19 +297,19 @@ pub(super) fn mir_node_to_flow_parts(
                             .collect::<Vec<_>>(),
                         duplicate_mode,
                         mig,
-                    )?
+                    )?)
                 }
                 MirNodeInner::Distinct { ref group_by } => {
                     invariant_eq!(ancestors.len(), 1);
                     let parent = ancestors[0];
-                    make_distinct_node(
+                    Some(make_distinct_node(
                         graph,
                         name,
                         parent,
                         &graph.columns(mir_node),
                         group_by,
                         mig,
-                    )?
+                    )?)
                 }
                 MirNodeInner::Paginate {
                     ref order,
@@ -332,7 +324,7 @@ pub(super) fn mir_node_to_flow_parts(
                 } => {
                     invariant_eq!(ancestors.len(), 1);
                     let parent = ancestors[0];
-                    make_paginate_or_topk_node(
+                    Some(make_paginate_or_topk_node(
                         graph,
                         name,
                         parent,
@@ -342,28 +334,23 @@ pub(super) fn mir_node_to_flow_parts(
                         limit,
                         matches!(graph[mir_node].inner, MirNodeInner::TopK { .. }),
                         mig,
-                    )?
+                    )?)
                 }
                 MirNodeInner::AliasTable { .. } => {
                     invariant_eq!(ancestors.len(), 1);
                     // Ancestors should already have a flow node set.
                     #[allow(clippy::expect_used)]
-                    graph[ancestors[0]]
-                        .flow_node
-                        .expect("Ancestor should have a FlowNode set")
+                    graph[ancestors[0]].df_node_address
                 }
             };
 
             // any new flow nodes have been instantiated by now, so we replace them with
-            // existing ones, but still return `FlowNode::New` below in order to notify higher
+            // existing ones, but still return `FlowNode` below in order to notify higher
             // layers of the new nodes.
-            graph[mir_node].flow_node = match flow_node {
-                FlowNode::New(na) => Some(FlowNode::Existing(na)),
-                n @ FlowNode::Existing(..) => Some(n),
-            };
+            graph[mir_node].df_node_address = flow_node;
             Ok(flow_node)
         }
-        Some(flow_node) => Ok(flow_node),
+        Some(flow_node) => Ok(Some(flow_node)),
     }
 }
 
@@ -378,7 +365,7 @@ fn make_base_node(
     primary_key: Option<&[Column]>,
     unique_keys: &[Box<[Column]>],
     mig: &mut Migration<'_>,
-) -> ReadySetResult<FlowNode> {
+) -> ReadySetResult<DfNodeAddress> {
     let columns = column_specs
         .iter()
         .map(|cs| DfColumn::from_spec(cs.clone(), mig.dialect, |ty| custom_types.get(&ty).cloned()))
@@ -428,7 +415,7 @@ fn make_base_node(
         base
     };
 
-    Ok(FlowNode::New(mig.add_base(name, columns, base)))
+    Ok(DfNodeAddress::new(mig.add_base(name, columns, base)))
 }
 
 fn make_union_node(
@@ -439,7 +426,7 @@ fn make_union_node(
     ancestors: &[NodeIndex],
     duplicate_mode: ops::union::DuplicateMode,
     mig: &mut Migration<'_>,
-) -> ReadySetResult<FlowNode> {
+) -> ReadySetResult<DfNodeAddress> {
     let mut emit_column_id: HashMap<NodeIndex, Vec<usize>> = HashMap::new();
 
     let mut cols = Vec::with_capacity(
@@ -485,7 +472,7 @@ fn make_union_node(
         ops::union::Union::new(emit_column_id, duplicate_mode)?,
     );
 
-    Ok(FlowNode::New(node))
+    Ok(DfNodeAddress::new(node))
 }
 
 fn make_filter_node(
@@ -496,7 +483,7 @@ fn make_filter_node(
     conditions: Expr,
     custom_types: &HashMap<Relation, DfType>,
     mig: &mut Migration<'_>,
-) -> ReadySetResult<FlowNode> {
+) -> ReadySetResult<DfNodeAddress> {
     let parent_na = graph[parent].flow_node_addr()?;
     let mut parent_cols = mig.dataflow_state.ingredients[parent_na].columns().to_vec();
     let filter_conditions = lower_expression(
@@ -515,7 +502,7 @@ fn make_filter_node(
         parent_cols,
         ops::filter::Filter::new(parent_na, filter_conditions),
     );
-    Ok(FlowNode::New(node))
+    Ok(DfNodeAddress::new(node))
 }
 
 fn make_grouped_node(
@@ -527,7 +514,7 @@ fn make_grouped_node(
     group_by: &[Column],
     kind: GroupedNodeType,
     mig: &mut Migration<'_>,
-) -> ReadySetResult<FlowNode> {
+) -> ReadySetResult<DfNodeAddress> {
     invariant!(!group_by.is_empty());
     let parent_na = graph[parent].flow_node_addr()?;
     let over_col_indx = graph.column_id_for_column(parent, on)?;
@@ -595,7 +582,7 @@ fn make_grouped_node(
             mig.add_ingredient(name, cols, grouped)
         }
     };
-    Ok(FlowNode::New(na))
+    Ok(DfNodeAddress::new(na))
 }
 
 fn make_identity_node(
@@ -604,14 +591,14 @@ fn make_identity_node(
     parent: NodeIndex,
     columns: &[Column],
     mig: &mut Migration<'_>,
-) -> ReadySetResult<FlowNode> {
+) -> ReadySetResult<DfNodeAddress> {
     let parent_na = graph[parent].flow_node_addr()?;
     // Identity mirrors the parent nodes exactly
     let mut parent_cols = mig.dataflow_state.ingredients[parent_na].columns().to_vec();
     set_names(&column_names(columns), &mut parent_cols)?;
 
     let node = mig.add_ingredient(name, parent_cols, ops::identity::Identity::new(parent_na));
-    Ok(FlowNode::New(node))
+    Ok(DfNodeAddress::new(node))
 }
 
 /// Lower a join MIR node to dataflow
@@ -629,7 +616,7 @@ fn make_join_node(
     kind: JoinType,
     custom_types: &HashMap<Relation, DfType>,
     mig: &mut Migration<'_>,
-) -> ReadySetResult<FlowNode> {
+) -> ReadySetResult<DfNodeAddress> {
     use dataflow::ops::join::JoinSource;
 
     let mut left_na = graph[left].flow_node_addr()?;
@@ -721,7 +708,7 @@ fn make_join_node(
     let j = Join::new(left_na, right_na, kind, emit);
     let n = mig.add_ingredient(name, cols, j);
 
-    Ok(FlowNode::New(n))
+    Ok(DfNodeAddress::new(n))
 }
 
 /// Joins two parent aggregate nodes together. Columns that are shared between both parents are
@@ -734,7 +721,7 @@ fn make_join_aggregates_node(
     right: NodeIndex,
     columns: &[Column],
     mig: &mut Migration<'_>,
-) -> ReadySetResult<FlowNode> {
+) -> ReadySetResult<DfNodeAddress> {
     use dataflow::ops::join::JoinSource;
 
     let left_na = graph[left].flow_node_addr()?;
@@ -801,7 +788,7 @@ fn make_join_aggregates_node(
     let j = Join::new(left_na, right_na, JoinType::Inner, join_config);
     let n = mig.add_ingredient(name, cols, j);
 
-    Ok(FlowNode::New(n))
+    Ok(DfNodeAddress::new(n))
 }
 
 fn make_latest_node(
@@ -811,7 +798,7 @@ fn make_latest_node(
     columns: &[Column],
     group_by: &[Column],
     mig: &mut Migration<'_>,
-) -> ReadySetResult<FlowNode> {
+) -> ReadySetResult<DfNodeAddress> {
     let parent_na = graph[parent].flow_node_addr()?;
     let mut cols = mig.dataflow_state.ingredients[parent_na].columns().to_vec();
 
@@ -827,7 +814,7 @@ fn make_latest_node(
         unsupported!("latest node doesn't support compound GROUP BY")
     }
     let na = mig.add_ingredient(name, cols, Latest::new(parent_na, group_col_indx[0]));
-    Ok(FlowNode::New(na))
+    Ok(DfNodeAddress::new(na))
 }
 
 #[derive(Clone)]
@@ -890,7 +877,7 @@ fn make_project_node(
     literals: &[(SqlIdentifier, DfValue)],
     custom_types: &HashMap<Relation, DfType>,
     mig: &mut Migration<'_>,
-) -> ReadySetResult<FlowNode> {
+) -> ReadySetResult<DfNodeAddress> {
     let parent_na = graph[parent].flow_node_addr()?;
     let parent_cols = mig.dataflow_state.ingredients[parent_na].columns();
 
@@ -972,7 +959,7 @@ fn make_project_node(
             Some(projected_expressions),
         ),
     );
-    Ok(FlowNode::New(n))
+    Ok(DfNodeAddress::new(n))
 }
 
 fn make_distinct_node(
@@ -982,7 +969,7 @@ fn make_distinct_node(
     columns: &[Column],
     group_by: &[Column],
     mig: &mut Migration<'_>,
-) -> ReadySetResult<FlowNode> {
+) -> ReadySetResult<DfNodeAddress> {
     let parent_na = graph[parent].flow_node_addr()?;
     let parent_cols = mig.dataflow_state.ingredients[parent_na].columns().to_vec();
 
@@ -1043,7 +1030,7 @@ fn make_distinct_node(
         // We use 0 as a placeholder value
         Aggregation::Count.over(parent_na, 0, &group_by_indx, &DfType::Unknown)?,
     );
-    Ok(FlowNode::New(na))
+    Ok(DfNodeAddress::new(na))
 }
 
 fn make_paginate_or_topk_node(
@@ -1056,7 +1043,7 @@ fn make_paginate_or_topk_node(
     limit: usize,
     is_topk: bool,
     mig: &mut Migration<'_>,
-) -> ReadySetResult<FlowNode> {
+) -> ReadySetResult<DfNodeAddress> {
     let parent_na = graph[parent].flow_node_addr()?;
     let mut parent_cols = mig.dataflow_state.ingredients[parent_na].columns().to_vec();
 
@@ -1116,7 +1103,7 @@ fn make_paginate_or_topk_node(
             ops::paginate::Paginate::new(parent_na, cmp_rows, group_by_indx, limit),
         )
     };
-    Ok(FlowNode::New(na))
+    Ok(DfNodeAddress::new(na))
 }
 
 fn make_reader_processing(

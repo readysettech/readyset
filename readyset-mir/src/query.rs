@@ -146,7 +146,7 @@ impl MirQuery<'_> {
     /// Returns the Dataflow node address of the query.
     /// Returns [`None`] if the query was not converted to Dataflow yet.
     pub fn dataflow_node(&self) -> Option<NodeIndex> {
-        self.graph[self.leaf].flow_node.map(|n| n.address())
+        self.graph[self.leaf].df_node_address.map(|n| n.address())
     }
 
     /// Returns a reference of the [`MirNode`] identified by the given node index.

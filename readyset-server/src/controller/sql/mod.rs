@@ -11,7 +11,7 @@ use nom_sql::{
 use petgraph::graph::NodeIndex;
 use readyset_client::recipe::changelist::AlterTypeChange;
 use readyset_data::{DfType, Dialect, PgEnumMetadata};
-use readyset_errors::{invalid_err, ReadySetError, ReadySetResult};
+use readyset_errors::{internal_err, invalid_err, ReadySetError, ReadySetResult};
 use readyset_sql_passes::alias_removal::TableAliasRewrite;
 use readyset_sql_passes::{AliasRemoval, Rewrite, RewriteContext};
 use readyset_tracing::{debug, trace};
@@ -383,7 +383,9 @@ impl SqlIncorporator {
 
         // no optimization, because standalone base nodes can't be optimized
         let dataflow_node =
-            mir_node_to_flow_parts(mir.graph, mir.mir_node, &self.custom_types, mig)?.address();
+            mir_node_to_flow_parts(mir.graph, mir.mir_node, &self.custom_types, mig)?
+                .ok_or_else(|| internal_err!("Base MIR nodes must have a Dataflow node assigned"))?
+                .address();
 
         self.base_schemas.insert(name.clone(), body);
 

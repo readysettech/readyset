@@ -56,16 +56,21 @@ pub mod query;
 pub(crate) mod rewrite;
 pub mod visualize;
 
+/// Represents a Dataflow node address.
+/// This is a wrapper that helps us distinguish between MIR nodes and Dataflow nodes, since both
+/// graphs are represented using petgraph and use [`NodeIndex`].
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
-pub enum FlowNode {
-    New(NodeIndex),
-    Existing(NodeIndex),
-}
-impl FlowNode {
+pub struct DfNodeAddress(NodeIndex);
+
+impl DfNodeAddress {
+    /// Creates a new [`DfNodeAddress`].
+    pub fn new(dataflow_node_idx: NodeIndex) -> DfNodeAddress {
+        DfNodeAddress(dataflow_node_idx)
+    }
+
+    /// Returns the [`NodeIndex`] address of the Dataflow node.
     pub fn address(&self) -> NodeIndex {
-        match *self {
-            FlowNode::New(na) | FlowNode::Existing(na) => na,
-        }
+        self.0
     }
 }
 

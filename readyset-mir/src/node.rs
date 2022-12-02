@@ -8,7 +8,7 @@ use readyset_errors::{internal_err, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
 pub use self::node_inner::MirNodeInner;
-use crate::FlowNode;
+use crate::DfNodeAddress;
 
 pub mod node_inner;
 
@@ -31,7 +31,7 @@ pub struct MirNode {
     ///   if the node is being set up.
     owners: HashSet<Relation>,
     pub inner: MirNodeInner,
-    pub flow_node: Option<FlowNode>,
+    pub df_node_address: Option<DfNodeAddress>,
 }
 
 impl MirNode {
@@ -41,7 +41,7 @@ impl MirNode {
             name,
             inner,
             owners: HashSet::new(),
-            flow_node: None,
+            df_node_address: None,
         }
     }
 
@@ -84,10 +84,10 @@ impl MirNode {
 
     /// Returns the Dataflow node address that corresponds to this MIR node.
     pub fn flow_node_addr(&self) -> ReadySetResult<NodeIndex> {
-        match self.flow_node {
-            Some(FlowNode::New(na)) | Some(FlowNode::Existing(na)) => Ok(na),
+        match self.df_node_address {
+            Some(DfNodeAddress(na)) => Ok(na),
             None => Err(internal_err!(
-                "MIR node \"{}\" does not have an associated FlowNode",
+                "MIR node \"{}\" does not have an associated dataflow node",
                 self.name()
             )),
         }
@@ -554,7 +554,7 @@ mod tests {
                     primary_key: Some([Column::from("c1")].into()),
                     unique_keys: Default::default(),
                 },
-                flow_node: None,
+                df_node_address: None,
             });
 
             let child_column = Column::from("c3");
@@ -598,7 +598,7 @@ mod tests {
                     primary_key: Some([Column::from("c1")].into()),
                     unique_keys: Default::default(),
                 },
-                flow_node: None,
+                df_node_address: None,
             });
 
             let idx = graph
@@ -636,7 +636,7 @@ mod tests {
                     primary_key: Some([Column::from("c1")].into()),
                     unique_keys: Default::default(),
                 },
-                flow_node: None,
+                df_node_address: None,
             });
 
             assert_eq!(graph.find_source_for_child_column(a, &child_column), None);
