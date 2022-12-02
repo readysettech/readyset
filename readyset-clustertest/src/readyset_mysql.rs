@@ -1429,6 +1429,7 @@ async fn post_deployment_permissions_lock_table() {
 }
 
 #[clustertest]
+#[ignore = "ENG-2067: flaky test"]
 #[slow]
 async fn post_deployment_permissions_replication() {
     let mut deployment = readyset_mysql("ct_post_deployment_permissions_replication")
