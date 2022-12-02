@@ -135,11 +135,13 @@ impl Leader {
                         break;
                     }
                     Err(error) => {
-                        // On each replication error we wait for 30 seconds and then try again
+                        // On each replication error we wait for `replicator_restart_timeout` then
+                        // try again
                         error!(
                             target: "replicators",
                             %error,
-                            "Unrecoverable error in replication, restarting after restart timeout"
+                            timeout_sec=replicator_restart_timeout.as_secs(),
+                            "Error in replication, will retry after timeout"
                         );
                         tokio::time::sleep(replicator_restart_timeout).await;
                     }
