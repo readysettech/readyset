@@ -179,6 +179,21 @@ fn main() -> anyhow::Result<()> {
         info!(%volume_id);
     }
 
+    let authority = opts.authority;
+    let authority_addr = match authority {
+        AuthorityType::Standalone => opts
+            .worker_options
+            .db_dir
+            .as_ref()
+            .map(|path| {
+                path.clone()
+                    .into_os_string()
+                    .into_string()
+                    .unwrap_or_else(|_| opts.authority_address.clone())
+            })
+            .unwrap_or_else(|| opts.authority_address.clone()),
+        _ => opts.authority_address.clone(),
+    };
     let mut builder = Builder::from_worker_options(opts.worker_options, &opts.deployment);
     builder.set_listen_addr(opts.address);
     builder.set_telemetry_sender(telemetry_sender.clone());
@@ -195,8 +210,6 @@ fn main() -> anyhow::Result<()> {
         builder.no_readers()
     }
 
-    let authority = opts.authority;
-    let authority_addr = opts.authority_address;
     let deployment = opts.deployment;
     let external_port = opts.external_port;
     let mut handle = rt.block_on(async move {

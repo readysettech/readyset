@@ -477,7 +477,20 @@ where
         rs_connect.in_scope(|| info!(%options.authority_address, %options.deployment));
 
         let authority = options.authority.clone();
-        let authority_address = options.authority_address.clone();
+        let authority_address = match authority {
+            AuthorityType::Standalone => options
+                .server_worker_options
+                .db_dir
+                .as_ref()
+                .map(|path| {
+                    path.clone()
+                        .into_os_string()
+                        .into_string()
+                        .unwrap_or_else(|_| options.authority_address.clone())
+                })
+                .unwrap_or_else(|| options.authority_address.clone()),
+            _ => options.authority_address.clone(),
+        };
         let deployment = options.deployment.clone();
         let migration_request_timeout = options.migration_request_timeout_ms;
         let controller_request_timeout = options.controller_request_timeout_ms;
@@ -824,7 +837,7 @@ where
             rs_connect.in_scope(|| info!("Spawning Consul session task"));
             let connection = span!(Level::DEBUG, "consul_session", addr = ?authority_address);
             let fut = reconcile_endpoint_registration(
-                authority_address,
+                authority_address.clone(),
                 deployment,
                 options.metrics_address.port(),
                 options.use_aws_external_address,
@@ -849,7 +862,6 @@ where
                 &options.deployment,
             );
             let r = readers.clone();
-            let auth_address = options.authority_address.clone();
 
             if options.embedded_readers {
                 builder.as_reader_only();
@@ -859,7 +871,11 @@ where
             builder.set_telemetry_sender(telemetry_sender.clone());
 
             let server_handle = rt.block_on(async move {
-                let authority = Arc::new(authority.to_authority(&auth_address, &deployment).await);
+                let authority = Arc::new(
+                    authority
+                        .to_authority(&authority_address, &deployment)
+                        .await,
+                );
 
                 builder
                     .start_with_readers(
