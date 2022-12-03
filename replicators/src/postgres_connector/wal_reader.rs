@@ -214,6 +214,18 @@ impl WalReader {
                     if let Some(old_tuple) = old_tuple {
                         // This happens when there is no key defined for the table and `REPLICA
                         // IDENTITY` is set to `FULL`
+
+                        // Replace TupleEntry::Unchanged in new_tuple by the corresponding value in
+                        // old_tuple
+                        let mut new_tuple = new_tuple;
+                        while let Some(pos) = new_tuple
+                            .cols
+                            .iter()
+                            .position(|x| *x == TupleEntry::Unchanged)
+                        {
+                            new_tuple.cols[pos] = old_tuple.cols[pos].clone();
+                        }
+
                         return Ok((
                             WalEvent::UpdateRow {
                                 schema: schema.clone(),
