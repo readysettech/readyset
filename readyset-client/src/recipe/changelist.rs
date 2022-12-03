@@ -274,13 +274,14 @@ pub enum AlterTypeChange {
 /// Describes a singe change to be made to the MIR and dataflow graphs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Change {
-    /// Expression that represents a `CREATE TABLE` statement.
+    /// Add a new base table to the graph, represented by the given `CREATE TABLE`` statement
     CreateTable(CreateTableStatement),
-    /// Expression that represents a `CREATE VIEW` statement.
+    /// Add a new view to the graph, represented by the given `CREATE VIEW` statement
     CreateView(CreateViewStatement),
-    /// Expression that represents a `CREATE CACHE` statement.
+    /// Add a new cached query to the graph, represented by the given `CREATE CACHE` statement
     CreateCache(CreateCacheStatement),
-    /// Expression that represents an ALTER TABLE statement.
+    /// Alter an existing table in the graph, making changes according to the given `ALTER TABLE`
+    /// statement
     AlterTable(AlterTableStatement),
     /// Add a new custom type
     ///
@@ -305,7 +306,7 @@ pub enum Change {
         /// A specification for the change to make to the type
         change: AlterTypeChange,
     },
-    /// The removal of a [`RecipeExpr`].
+    /// Remove a [`RecipeExpr`].
     Drop {
         /// The name of the relation to remove.
         name: Relation,
