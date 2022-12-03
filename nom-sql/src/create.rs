@@ -36,8 +36,11 @@ pub struct CreateTableStatement {
 
 impl fmt::Display for CreateTableStatement {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "CREATE TABLE {} ", self.table)?;
-        write!(f, "(")?;
+        write!(f, "CREATE TABLE ")?;
+        if self.if_not_exists {
+            write!(f, "IF NOT EXISTS ")?;
+        }
+        write!(f, "{} (", self.table)?;
         write!(
             f,
             "{}",
@@ -785,6 +788,17 @@ mod tests {
                 options: vec![]
             }
         );
+    }
+
+    #[test]
+    fn if_not_exists() {
+        let res = test_parse!(
+            create_table(Dialect::MySQL),
+            b"CREATE TABLE IF NOT EXISTS t (x int)"
+        );
+        assert!(res.if_not_exists);
+        let rt = res.to_string();
+        assert_eq!(rt, "CREATE TABLE IF NOT EXISTS `t` (`x` INT)");
     }
 
     #[test]
