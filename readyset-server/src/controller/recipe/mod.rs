@@ -232,6 +232,9 @@ impl Recipe {
                         }
                     }
                 }
+                Change::AddNonReplicatedTable(name) => {
+                    self.inc.add_non_replicated_table(name);
+                }
                 Change::CreateView(mut stmt) => {
                     stmt = self.inc.rewrite(
                         stmt,
@@ -344,7 +347,9 @@ impl Recipe {
                         }
                     }
 
-                    let removed = if self.registry.remove_custom_type(&name) {
+                    let removed = if self.inc.remove_non_replicated_table(&name) {
+                        true
+                    } else if self.registry.remove_custom_type(&name) {
                         for expr in self
                             .registry
                             .expressions_referencing_custom_type(&name)

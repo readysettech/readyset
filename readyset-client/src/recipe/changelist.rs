@@ -276,6 +276,13 @@ pub enum AlterTypeChange {
 pub enum Change {
     /// Add a new base table to the graph, represented by the given `CREATE TABLE`` statement
     CreateTable(CreateTableStatement),
+    /// Record that a table with the given name exists in the upstream database, but is not being
+    /// replicated.
+    ///
+    /// This is important both to have better error messages for queries that select from
+    /// non-replicated tables, and to ensure we don't skip over these tables during schema
+    /// resolution, resulting in queries that read from tables in the wrong schema.
+    AddNonReplicatedTable(Relation),
     /// Add a new view to the graph, represented by the given `CREATE VIEW` statement
     CreateView(CreateViewStatement),
     /// Add a new cached query to the graph, represented by the given `CREATE CACHE` statement
@@ -306,7 +313,15 @@ pub enum Change {
         /// A specification for the change to make to the type
         change: AlterTypeChange,
     },
-    /// Remove a [`RecipeExpr`].
+    /// Remove a relation from the graph.
+    ///
+    /// This could be one of:
+    ///
+    /// - A table in the graph
+    /// - A non-replicated table previously created via [`Change::AddNonReplicatedTable`]
+    /// - A view
+    /// - A cached query
+    /// - A custom type
     Drop {
         /// The name of the relation to remove.
         name: Relation,
