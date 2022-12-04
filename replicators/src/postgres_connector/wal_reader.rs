@@ -160,7 +160,16 @@ impl WalReader {
                             WalEvent::Insert {
                                 schema: schema.clone(),
                                 table: table.clone(),
-                                tuple: new_tuple.into_noria_vec(mapping, custom_types, false)?,
+                                tuple: new_tuple
+                                    .into_noria_vec(mapping, custom_types, false)?
+                                    .into_iter()
+                                    .collect::<Option<Vec<_>>>()
+                                    // Insert records should never have "unchanged" fields... unchanged from what?
+                                    .ok_or_else(|| WalError::UnexpectedUnchangedEntry {
+                                        reason: "WalRecord::Insert::new_tuple should never contain TupleEntry::Unchanged",
+                                        schema: schema.clone(),
+                                        table: table.clone(),
+                                    })?,
                             },
                             end,
                         ));
@@ -230,16 +239,26 @@ impl WalReader {
                             WalEvent::UpdateRow {
                                 schema: schema.clone(),
                                 table: table.clone(),
-                                old_tuple: old_tuple.into_noria_vec(
-                                    mapping,
-                                    custom_types,
-                                    false,
-                                )?,
-                                new_tuple: new_tuple.into_noria_vec(
-                                    mapping,
-                                    custom_types,
-                                    false,
-                                )?,
+                                old_tuple: old_tuple
+                                    .into_noria_vec(mapping, custom_types, false)?
+                                    .into_iter()
+                                    .collect::<Option<Vec<_>>>()
+                                    // The old row must always be complete, or we won't be able to delete (a copy of) it
+                                    .ok_or_else(|| WalError::UnexpectedUnchangedEntry {
+                                        reason: "WalRecord::Update::old_tuple should never contain TupleEntry::Unchanged",
+                                        schema: schema.clone(),
+                                        table: table.clone(),
+                                    })?,
+                                new_tuple: new_tuple
+                                    .into_noria_vec(mapping, custom_types, false)?
+                                    .into_iter()
+                                    .collect::<Option<Vec<_>>>()
+                                    // We should have filled in any "unchanged" entries in the new row above
+                                    .ok_or_else(|| WalError::UnexpectedUnchangedEntry {
+                                        reason: "All instances of TupleEntry::Unchanged in WalRecord::Update::new_tuple should have been replaced",
+                                        schema: schema.clone(),
+                                        table: table.clone(),
+                                    })?,
                             },
                             end,
                         ));
@@ -249,11 +268,20 @@ impl WalReader {
                             WalEvent::UpdateByKey {
                                 schema: schema.clone(),
                                 table: table.clone(),
-                                key: key_tuple.into_noria_vec(mapping, custom_types, true)?,
+                                key: key_tuple
+                                    .into_noria_vec(mapping, custom_types, true)?
+                                    .into_iter()
+                                    .collect::<Option<Vec<_>>>()
+                                    // The key must always be complete, or we won't be able to look up the row
+                                    .ok_or_else(|| WalError::UnexpectedUnchangedEntry {
+                                        reason: "WalRecord::Update::key_tuple should never contain TupleEntry::Unchanged",
+                                        schema: schema.clone(),
+                                        table: table.clone(),
+                                    })?,
                                 set: new_tuple
                                     .into_noria_vec(mapping, custom_types, false)?
                                     .into_iter()
-                                    .map(readyset_client::Modification::Set)
+                                    .map(Into::into)
                                     .collect(),
                             },
                             end,
@@ -266,15 +294,21 @@ impl WalReader {
                             WalEvent::UpdateByKey {
                                 schema: schema.clone(),
                                 table: table.clone(),
-                                key: new_tuple.clone().into_noria_vec(
-                                    mapping,
-                                    custom_types,
-                                    true,
-                                )?,
+                                key: new_tuple
+                                    .clone()
+                                    .into_noria_vec(mapping, custom_types, true)?
+                                    .into_iter()
+                                    .collect::<Option<Vec<_>>>()
+                                    // The key must always be complete, or we won't be able to look up the row
+                                    .ok_or_else(|| WalError::UnexpectedUnchangedEntry {
+                                        reason: "When key_tuple is not present, the key columns in WalRecord::Update::new_tuple should never contain TupleEntry::Unchanged",
+                                        schema: schema.clone(),
+                                        table: table.clone(),
+                                    })?,
                                 set: new_tuple
                                     .into_noria_vec(mapping, custom_types, false)?
                                     .into_iter()
-                                    .map(readyset_client::Modification::Set)
+                                    .map(Into::into)
                                     .collect(),
                             },
                             end,
@@ -300,11 +334,16 @@ impl WalReader {
                                 WalEvent::DeleteRow {
                                     schema: schema.clone(),
                                     table: table.clone(),
-                                    tuple: old_tuple.into_noria_vec(
-                                        mapping,
-                                        custom_types,
-                                        false,
-                                    )?,
+                                    tuple: old_tuple
+                                        .into_noria_vec(mapping, custom_types, false)?
+                                        .into_iter()
+                                        .collect::<Option<Vec<_>>>()
+                                        // The old row must always be complete, or we won't be able to delete (a copy of) it
+                                        .ok_or_else(|| WalError::UnexpectedUnchangedEntry {
+                                            reason: "WalRecord::Delete::old_tuple should never contain TupleEntry::Unchanged",
+                                            schema: schema.clone(),
+                                            table: table.clone(),
+                                        })?,
                                 },
                                 end,
                             ));
@@ -313,7 +352,16 @@ impl WalReader {
                                 WalEvent::DeleteByKey {
                                     schema: schema.clone(),
                                     table: table.clone(),
-                                    key: key_tuple.into_noria_vec(mapping, custom_types, true)?,
+                                    key: key_tuple
+                                        .into_noria_vec(mapping, custom_types, true)?
+                                        .into_iter()
+                                        .collect::<Option<Vec<_>>>()
+                                        // The key must always be complete, or we won't be able to look up the row to delete it
+                                        .ok_or_else(|| WalError::UnexpectedUnchangedEntry {
+                                            reason: "WalRecord::Delete::key_tuple should never contain TupleEntry::Unchanged",
+                                            schema: schema.clone(),
+                                            table: table.clone(),
+                                        })?,
                                 },
                                 end,
                             ));
@@ -373,12 +421,15 @@ impl WalReader {
 }
 
 impl wal::TupleData {
+    /// Converts a WAL tuple into a row of *maybe* DfValues.
+    /// WAL tuple entries for update records can be "unchanged", which we represent here as None so
+    /// that we don't have to add a DfValue variant that gets used nowhere else.
     pub(crate) fn into_noria_vec(
         self,
         relation: &RelationMapping,
         custom_types: &HashSet<u32>,
         is_key: bool,
-    ) -> Result<Vec<DfValue>, WalError> {
+    ) -> Result<Vec<Option<DfValue>>, WalError> {
         use postgres_types::Type as PGType;
 
         if self.n_cols != relation.n_cols {
@@ -397,13 +448,11 @@ impl wal::TupleData {
             }
 
             match data {
-                wal::TupleEntry::Null => ret.push(DfValue::None),
-                wal::TupleEntry::Unchanged => {
-                    return Err(WalError::ToastNotSupported {
-                        schema: relation.schema.clone(),
-                        table: relation.name.clone(),
-                    })
-                }
+                wal::TupleEntry::Null => ret.push(Some(DfValue::None)),
+                // This can only occur within an update record, specifically when there is an update
+                // for a row containing one or more TOAST values, and at least one of the TOAST
+                // values was unmodified
+                wal::TupleEntry::Unchanged => ret.push(None),
                 wal::TupleEntry::Text(text) => {
                     // WAL delivers all entries as text, and it is up to us to parse to the proper
                     // ReadySet type
@@ -540,7 +589,7 @@ impl wal::TupleData {
                         }
                     };
 
-                    ret.push(val);
+                    ret.push(Some(val));
                 }
             }
         }

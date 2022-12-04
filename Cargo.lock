@@ -4989,6 +4989,7 @@ dependencies = [
  "nom_locate",
  "postgres-native-tls",
  "postgres-types",
+ "rand 0.8.5",
  "readyset-client",
  "readyset-data",
  "readyset-errors",

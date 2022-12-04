@@ -58,12 +58,12 @@ pub enum Modification {
     None,
 }
 
-impl<T> From<T> for Modification
-where
-    T: Into<DfValue>,
-{
-    fn from(t: T) -> Modification {
-        Modification::Set(t.into())
+impl From<Option<DfValue>> for Modification {
+    fn from(opt: Option<DfValue>) -> Modification {
+        match opt {
+            Some(val) => Modification::Set(val),
+            None => Modification::None,
+        }
     }
 }
 

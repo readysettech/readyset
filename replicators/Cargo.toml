@@ -50,6 +50,7 @@ deadpool-postgres = "0.10.3"
 readyset-server = { path = "../readyset-server" }
 readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter", features = ["test-util"] }
 serial_test = "0.5"
+rand = "0.8.5"
 
 [features]
 failure_injection = ["fail/failpoints"]

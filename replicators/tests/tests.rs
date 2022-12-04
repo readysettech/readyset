@@ -9,6 +9,8 @@ use launchpad::eventually;
 use mysql_async::prelude::Queryable;
 use mysql_time::MySqlTime;
 use nom_sql::Relation;
+use rand::distributions::Alphanumeric;
+use rand::{Rng, SeedableRng};
 use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use readyset_client::recipe::changelist::ChangeList;
 use readyset_client::{ReadySetError, ReadySetHandle, ReadySetResult};
@@ -1739,4 +1741,217 @@ async fn postgresql_drop_nonexistent_replication_slot() -> ReadySetResult<()> {
     ));
 
     Ok(())
+}
+
+/// Given a table, check that it has an associated TOAST table
+async fn postgresql_is_toasty(client: &tokio_postgres::client::Client, table: &str) -> bool {
+    let res = client
+        .query(
+            "SELECT pg_table_size(c.reltoastrelid) AS toast_size
+         FROM pg_catalog.pg_class c
+         WHERE c.relname = $1 AND c.reltoastrelid > 0",
+            &[&table],
+        )
+        .await
+        .unwrap();
+    res.len() == 1
+}
+
+/// An UPDATE to a TOAST-containing row, where one or more TOAST values are unmodified, should
+/// replicate correctly.
+/// Case 1: The table is unkeyed.
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn postgresql_toast_update_unkeyed() {
+    readyset_tracing::init_test_logging();
+
+    let connector = native_tls::TlsConnector::builder()
+        .danger_accept_invalid_certs(true)
+        .build()
+        .unwrap();
+    let tls_connector = postgres_native_tls::MakeTlsConnector::new(connector);
+    let url = pgsql_url();
+    let (client, conn) = tokio_postgres::Config::from_str(&url)
+        .unwrap()
+        .connect(tls_connector)
+        .await
+        .unwrap();
+    let _conn = tokio::spawn(async move { conn.await.unwrap() });
+
+    // Make the TOAST random so it doesn't get compressed below the TOAST threshold
+    let toast = rand::rngs::StdRng::seed_from_u64(0)
+        .sample_iter(&Alphanumeric)
+        .take(9001)
+        .map(char::from)
+        .collect::<String>();
+
+    // Create a TOAST-able table (one with potentially large columns)
+    // Set REPLICA IDENTITY FULL to allow updates to an unkeyed table
+    // Create a view so we can check it in ReadySet later
+    // Insert some TOAST
+    client
+        .simple_query(&format!(
+            "DROP TABLE IF EXISTS t CASCADE;
+             CREATE TABLE t (col1 INT, col2 TEXT);
+             ALTER TABLE t REPLICA IDENTITY FULL;
+             CREATE VIEW v AS SELECT * FROM t;
+             INSERT INTO t VALUES (0, '{toast}');"
+        ))
+        .await
+        .unwrap();
+
+    // Check that the table contains TOAST
+    assert!(postgresql_is_toasty(&client, "t").await);
+
+    // Snapshot the table
+    let mut ctx = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
+    ctx.ready_notify.as_ref().unwrap().notified().await;
+
+    // Update the row, leaving the TOAST unchanged
+    client
+        .simple_query("UPDATE t SET col1 = 1 where col1 = 0")
+        .await
+        .unwrap();
+
+    // Check that ReadySet replicated the update
+    ctx.check_results(
+        "v",
+        "toast_update_unkeyed",
+        &[&[DfValue::from(1), DfValue::from(toast)]],
+    )
+    .await
+    .unwrap();
+}
+
+/// An UPDATE to a TOAST-containing row, where one or more TOAST values are unmodified, should
+/// replicate correctly.
+/// Case 2: The table is keyed, and one or more key columns is modified.
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn postgresql_toast_update_key() {
+    readyset_tracing::init_test_logging();
+
+    let connector = native_tls::TlsConnector::builder()
+        .danger_accept_invalid_certs(true)
+        .build()
+        .unwrap();
+    let tls_connector = postgres_native_tls::MakeTlsConnector::new(connector);
+    let url = pgsql_url();
+    let (client, conn) = tokio_postgres::Config::from_str(&url)
+        .unwrap()
+        .connect(tls_connector)
+        .await
+        .unwrap();
+    let _conn = tokio::spawn(async move { conn.await.unwrap() });
+
+    let toast = rand::rngs::StdRng::seed_from_u64(0)
+        .sample_iter(&Alphanumeric)
+        .take(9001)
+        .map(char::from)
+        .collect::<String>();
+
+    // Create a TOAST-able table (one with potentially large columns)
+    // Create a view so we can check it in ReadySet later
+    // Insert some TOAST
+    client
+        .simple_query(&format!(
+            "DROP TABLE IF EXISTS t CASCADE;
+             CREATE TABLE t (col1 INT PRIMARY KEY, col2 TEXT);
+             CREATE VIEW v AS SELECT * FROM t;
+             INSERT INTO t VALUES (0, '{toast}');"
+        ))
+        .await
+        .unwrap();
+
+    // Check that the table contains TOAST
+    assert!(postgresql_is_toasty(&client, "t").await);
+
+    // Snapshot the table
+    let mut ctx = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
+    ctx.ready_notify.as_ref().unwrap().notified().await;
+
+    // Update the row, leaving the TOAST unchanged
+    client
+        .simple_query("UPDATE t SET col1 = 1 where col1 = 0")
+        .await
+        .unwrap();
+
+    // Check that ReadySet replicated the update
+    ctx.check_results(
+        "v",
+        "toast_update_key",
+        &[&[DfValue::from(1), DfValue::from(toast)]],
+    )
+    .await
+    .unwrap();
+}
+
+/// An UPDATE to a TOAST-containing row, where one or more TOAST values are unmodified, should
+/// replicate correctly.
+/// Case 3: The table is keyed, but no key columns are modified.
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn postgresql_toast_update_not_key() {
+    readyset_tracing::init_test_logging();
+
+    let connector = native_tls::TlsConnector::builder()
+        .danger_accept_invalid_certs(true)
+        .build()
+        .unwrap();
+    let tls_connector = postgres_native_tls::MakeTlsConnector::new(connector);
+    let url = pgsql_url();
+    let (client, conn) = tokio_postgres::Config::from_str(&url)
+        .unwrap()
+        .connect(tls_connector)
+        .await
+        .unwrap();
+    let _conn = tokio::spawn(async move { conn.await.unwrap() });
+
+    let toast = rand::rngs::StdRng::seed_from_u64(0)
+        .sample_iter(&Alphanumeric)
+        .take(9001)
+        .map(char::from)
+        .collect::<String>();
+
+    // Create a TOAST-able table (one with potentially large columns)
+    // Create a view so we can check it in ReadySet later
+    // Insert some TOAST
+    client
+        .simple_query(&format!(
+            "DROP TABLE IF EXISTS t CASCADE;
+             CREATE TABLE t (col1 INT PRIMARY KEY, col2 INT, col3 TEXT);
+             CREATE VIEW v AS SELECT * FROM t;
+             INSERT INTO t VALUES (0, 0, '{toast}');"
+        ))
+        .await
+        .unwrap();
+
+    // Check that the table contains TOAST
+    assert!(postgresql_is_toasty(&client, "t").await);
+
+    // Snapshot the table
+    let mut ctx = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
+    ctx.ready_notify.as_ref().unwrap().notified().await;
+
+    // Update the row, leaving the TOAST unchanged
+    // Changing col2 here because its not the key
+    client
+        .simple_query("UPDATE t SET col2 = 1 where col2 = 0")
+        .await
+        .unwrap();
+
+    // Check that ReadySet replicated the update
+    ctx.check_results(
+        "v",
+        "toast_update_not_key",
+        &[&[DfValue::from(0), DfValue::from(1), DfValue::from(toast)]],
+    )
+    .await
+    .unwrap();
 }
