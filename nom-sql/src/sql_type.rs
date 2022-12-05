@@ -5,7 +5,7 @@ use std::{fmt, str};
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::character::complete::digit1;
-use nom::combinator::{map, map_parser, not, opt};
+use nom::combinator::{map, map_parser, opt};
 use nom::error::{ErrorKind, ParseError};
 use nom::multi::{fold_many0, separated_list0};
 use nom::sequence::{delimited, preceded, terminated, tuple};
@@ -640,15 +640,8 @@ fn type_identifier_part3(
     move |i| {
         alt((
             map(tag_no_case("citext"), |_| SqlType::Citext),
-            map(
-                preceded(
-                    // TODO(ENG-1910): We can remove this filter when ReadySet fully support the
-                    // PostgreSQL quoted-char type
-                    not(tag_no_case("\"char\"")),
-                    other_type(dialect),
-                ),
-                SqlType::Other,
-            ),
+            |i| int_type("\"char\"", SqlType::UnsignedTinyInt, SqlType::TinyInt, i),
+            map(other_type(dialect), SqlType::Other),
         ))(i)
     }
 }
@@ -848,6 +841,12 @@ mod tests {
             let res = type_identifier(Dialect::PostgreSQL)(LocatedSpan::new(qs));
             assert!(res.is_ok());
             assert_eq!(res.unwrap().1, SqlType::Numeric(Some((10, Some(20)))));
+        }
+
+        #[test]
+        fn quoted_char_type() {
+            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"\"char\"");
+            assert_eq!(res, SqlType::TinyInt(None));
         }
 
         #[test]

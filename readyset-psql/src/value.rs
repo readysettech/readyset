@@ -41,8 +41,6 @@ impl TryFrom<Value> for ps::Value {
         match (v.col_type, v.value) {
             (_, DfValue::None) => Ok(ps::Value::Null),
             (Type::CHAR, DfValue::Int(v)) => Ok(ps::Value::Char(v.try_into()?)),
-            (Type::CHAR, DfValue::UnsignedInt(v)) => Ok(ps::Value::Char(v.try_into()?)),
-
             (Type::VARCHAR, DfValue::Text(v)) => Ok(ps::Value::VarChar(v)),
             (Type::VARCHAR, DfValue::TinyText(t)) => Ok(ps::Value::VarChar(t.as_str().into())),
             (Type::NAME, DfValue::Text(t)) => Ok(ps::Value::Name(t)),

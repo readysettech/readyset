@@ -532,10 +532,25 @@ impl wal::TupleData {
                                 PGType::NUMERIC => Decimal::from_str(str.as_ref())
                                     .map_err(|_| WalError::NumericParseError)
                                     .map(|d| DfValue::Numeric(Arc::new(d)))?,
+                                PGType::CHAR => match text.as_ref() {
+                                    [] => DfValue::None,
+                                    [c] => DfValue::Int(i8::from_ne_bytes([*c]).into()),
+                                    [b'\\', _, _, _] => {
+                                        // The input in this case is in the bytea escaped input
+                                        // representation. See https://www.postgresql.org/docs/current/datatype-binary.html#DATATYPE-BINARY-SQLESC
+                                        // for details
+
+                                        // Decode the octet string representation of the byte
+                                        let byte = u8::from_str_radix(&str[1..], 8)?;
+                                        // Create the i8 from the byte
+                                        let ch = i8::from_ne_bytes([byte]);
+                                        DfValue::Int(ch.into())
+                                    }
+                                    _ => return Err(WalError::IntParseError),
+                                },
                                 PGType::TEXT
                                 | PGType::JSON
                                 | PGType::VARCHAR
-                                | PGType::CHAR
                                 | PGType::BPCHAR
                                 | PGType::MACADDR
                                 | PGType::INET

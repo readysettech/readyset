@@ -317,9 +317,7 @@ fn get_binary_value(src: &mut Bytes, t: &Type) -> Result<Value, Error> {
         Kind::Enum(_) => Ok(Value::Text(str::from_utf8(buf)?.into())),
         _ => match *t {
             // Postgres does not allow interior 0 bytes, even though it is valid UTF-8
-            Type::BPCHAR | Type::CHAR | Type::VARCHAR | Type::TEXT | Type::NAME
-                if buf.contains(&0) =>
-            {
+            Type::BPCHAR | Type::VARCHAR | Type::TEXT | Type::NAME if buf.contains(&0) => {
                 Err(Error::InvalidUtf8)
             }
             Type::BOOL => Ok(Value::Bool(bool::from_sql(t, buf)?)),

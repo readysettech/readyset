@@ -468,7 +468,7 @@ fn put_text_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
             dst.extend_from_slice(v.as_bytes());
         }
         Value::Char(v) => {
-            write!(dst, "{}", v)?;
+            dst.put_i8(v);
         }
         Value::Int(v) => {
             write!(dst, "{}", v)?;
@@ -1366,10 +1366,10 @@ mod tests {
     #[test]
     fn test_encode_text_char() {
         let mut buf = BytesMut::new();
-        put_text_value(DataValue::Char(8), &mut buf).unwrap();
+        put_text_value(DataValue::Char('d' as i8), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(1); // length
-        exp.extend_from_slice(b"8"); // value
+        exp.extend_from_slice(&[b'd']); // value
         assert_eq!(buf, exp);
     }
 

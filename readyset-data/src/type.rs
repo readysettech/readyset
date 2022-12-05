@@ -57,7 +57,7 @@ pub enum DfType {
     /// [`u64`].
     UnsignedBigInt,
 
-    /// [`i8`].
+    /// [`i8`] and Postgres's "char" (with quotes) type.
     TinyInt,
 
     /// [`u8`].
@@ -111,6 +111,11 @@ pub enum DfType {
     Text(Collation),
 
     /// `CHAR(n)`: fixed-length character string.
+    ///
+    /// Note: Postgres additionally has a different type named "char" (*with* the quotes!), which
+    /// corresponds to a single 1-byte character. The naming of these two types aren't
+    /// consistent across RS's code base, Postgres itself, and the postgres rust crate, so
+    /// caution must be taken.
     // FIXME(ENG-1839): Should have `Option<u16>` to determine how `cast` is done for MySQL. The
     // dialect field provides context for semantics.
     Char(u16, Collation, Dialect),

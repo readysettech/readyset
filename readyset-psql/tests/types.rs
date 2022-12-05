@@ -70,7 +70,10 @@ mod types {
         // check parameter parsing
         if type_name.to_string().as_str() != "json" {
             let count_where_result = client
-                .query_one("SELECT count(*) FROM t WHERE x = $1", &[&val])
+                .query_one(
+                    format!("SELECT count(*) FROM t WHERE x = cast($1 as {type_name})").as_str(),
+                    &[&val],
+                )
                 .await
                 .unwrap()
                 .get::<_, i64>(0);
@@ -126,7 +129,7 @@ mod types {
         bigint_i64("bigint", i64);
         real_f32("real", f32);
         double_f64("double precision", f64);
-        char_i8("\"char\"", #[strategy(proptest::prelude::prop_oneof![1..=i8::MAX, i8::MIN..=-1])] i8);
+        char_i8("\"char\"", i8);
         text_string("text", String);
         bpchar_string("bpchar", String);
         bytea_bytes("bytea", Vec<u8>);
