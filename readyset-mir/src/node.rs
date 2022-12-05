@@ -49,6 +49,11 @@ impl MirNode {
         &self.name
     }
 
+    /// The dataflow node address assigned to this node.
+    pub fn df_node_address(&self) -> Option<DfNodeAddress> {
+        self.df_node_address
+    }
+
     /// The set of queries that own (make use of) this node.
     /// See <a href="struct.MirNode.html#structfield.owners">`owners`</a> for more information.
     pub fn owners(&self) -> &HashSet<Relation> {

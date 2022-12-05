@@ -11,7 +11,7 @@ use itertools::Itertools;
 use nom_sql::analysis::ReferredColumns;
 use petgraph::graph::NodeIndex;
 use petgraph::stable_graph::StableGraph;
-use petgraph::visit::EdgeRef;
+use petgraph::visit::{Bfs, EdgeRef, Reversed};
 use petgraph::Direction;
 use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
@@ -361,6 +361,20 @@ impl MirGraph {
         }
 
         Ok(())
+    }
+
+    /// Returns the Dataflow node address for the given node.
+    /// Returns [`None`] if the query was not converted to Dataflow yet or if the given node does
+    /// not belong to the query.
+    pub fn resolve_dataflow_node(&self, node_idx: NodeIndex) -> Option<NodeIndex> {
+        let mut bfs = Bfs::new(Reversed(&self.graph), node_idx);
+        while let Some(ancestor) = bfs.next(Reversed(&self.graph)) {
+            let df_node_address_opt = self.graph[ancestor].df_node_address();
+            if df_node_address_opt.is_some() {
+                return df_node_address_opt.map(|df| df.address());
+            }
+        }
+        None
     }
 
     fn sorted_ancestors(&self, node: NodeIndex) -> impl Iterator<Item = NodeIndex> + '_ {
