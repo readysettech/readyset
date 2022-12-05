@@ -10,20 +10,16 @@ use petgraph::visit::Bfs;
 use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::ViewCreateRequest;
 use readyset_data::Dialect;
-use readyset_errors::{
-    internal, internal_err, invariant, invariant_eq, ReadySetError, ReadySetResult,
-};
+use readyset_errors::{internal, invariant, invariant_eq, ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info, trace, warn};
 
 use super::sql;
-use crate::controller::recipe::alter_table::rewrite_table_definition;
 use crate::controller::recipe::registry::{ExprRegistry, RecipeExpr};
 use crate::controller::sql::SqlIncorporator;
 use crate::controller::Migration;
 use crate::ReuseConfigType;
 
-mod alter_table;
 pub(super) mod registry;
 
 type QueryID = u128;
@@ -303,30 +299,14 @@ impl Recipe {
                     self.registry
                         .insert_invalidating_tables(name.clone(), invalidating_tables)?;
                 }
-                // We process ALTER TABLE statements in the following way:
-                // 1. Create a copy of the table that is being altered. If it doesn't exist, then
-                // return an error.
-                // 2. Rewrite the table copy to reflect the changes specified by the ALTER TABLE
-                // statement.
-                // 3. Drop the original table.
-                // 4. Install the new table.
-                Change::AlterTable(ats) => {
-                    let original_expression = self.registry.get(&ats.table).ok_or_else(|| {
-                        internal_err!(
-                            "Tried to alter table {}, but table doesn't exist.",
-                            ats.table
-                        )
-                    })?;
-                    let original_table = match original_expression {
-                        RecipeExpr::Table(ref table) => table,
-                        _ => internal!(
-                            "Tried to alter table {}, but that name belongs to a different expression.",
-                            ats.table.name
-                        ),
-                    };
-                    let new_table = rewrite_table_definition(&ats, original_table.clone())?;
-                    let new_table_name = new_table.table.name.clone();
-                    self.drop_and_recreate_table(&ats.table, new_table, mig);
+                Change::AlterTable(_) => {
+                    // This should not get hit because all ALTER TABLE definitions currently require
+                    // a resnapshot (and as a result, nothing ever actually *sends*
+                    // Change::AlterTable to extend_recipe, instead we just get the
+                    // Change::CreateTable for the table post-altering). This *might* change in the
+                    // future if there are `AlterTableDefinition` variants which *don't* require
+                    // resnapshotting. If this error gets hit, that's probably what happened!
+                    internal!("ALTER TABLE change encountered in recipe")
                 }
                 Change::CreateType { mut name, ty } => {
                     if let Some(first_schema) = schema_search_path.first() {
