@@ -133,7 +133,7 @@ fn main() -> anyhow::Result<()> {
         .build()?;
 
     rt.block_on(async {
-        if let Err(error) = opts.tracing.init("readyset") {
+        if let Err(error) = opts.tracing.init("readyset", opts.deployment.as_ref()) {
             error!(%error, "Error initializing tracing");
             process::exit(1)
         }

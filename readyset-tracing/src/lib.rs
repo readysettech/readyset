@@ -70,7 +70,10 @@
 //! #[tokio::main]
 //! async fn main() {
 //!     let options = Options::parse();
-//!     options.tracing.init("propagation-example").unwrap();
+//!     options
+//!         .tracing
+//!         .init("propagation-example", "example-deployment-id")
+//!         .unwrap();
 //!
 //!     for id in 0..100 {
 //!         process_id(id).await;
@@ -138,6 +141,7 @@ mod logformat;
 use logformat::LogFormat;
 mod percent;
 use percent::Percent;
+use tracing_wrapper::set_log_field;
 pub mod presampled;
 pub mod propagation;
 pub mod tracing_wrapper;
@@ -286,12 +290,16 @@ impl Options {
     /// #[tokio::main]
     /// async fn main() {
     ///     let options = Options::parse();
-    ///     options.tracing.init("tracing-example").unwrap();
+    ///     options
+    ///         .tracing
+    ///         .init("tracing-example", "example-deplyoment")
+    ///         .unwrap();
     ///
     ///     // Perform work!
     /// }
     /// ```
-    pub fn init(&self, service_name: &str) -> Result<(), Error> {
+    pub fn init(&self, service_name: &str, deployment: &str) -> Result<(), Error> {
+        set_log_field("deployment".into(), deployment.into());
         if self.tracing_host.is_some() {
             self.init_logging_and_tracing(service_name)
         } else {

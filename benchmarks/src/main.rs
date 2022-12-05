@@ -430,7 +430,9 @@ impl BenchmarkRunner {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let benchmark_cmd_runner = BenchmarkRunner::parse();
-    benchmark_cmd_runner.tracing.init("benchmarks")?;
+    benchmark_cmd_runner
+        .tracing
+        .init("benchmarks", "benchmark-deployment")?;
 
     benchmark_cmd_runner.run().await
 }

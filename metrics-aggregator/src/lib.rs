@@ -68,7 +68,9 @@ pub struct Options {
 }
 
 pub fn run(options: Options) -> anyhow::Result<()> {
-    options.tracing.init("metrics-aggregator")?;
+    options
+        .tracing
+        .init("metrics-aggregator", options.deployment.as_ref())?;
     info!(version = %VERSION_STR_ONELINE);
 
     let prom_address_res: Vec<SocketAddr> = options.prom_address.to_socket_addrs()?.collect();

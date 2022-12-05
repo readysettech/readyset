@@ -422,7 +422,7 @@ where
 {
     pub fn run(&mut self, options: Options) -> anyhow::Result<()> {
         let rt = tokio::runtime::Runtime::new()?;
-        rt.block_on(async { options.tracing.init("adapter") })?;
+        rt.block_on(async { options.tracing.init("adapter", options.deployment.as_ref()) })?;
         info!(?options, "Starting ReadySet adapter");
         let users: &'static HashMap<String, String> = Box::leak(Box::new(
             if !options.allow_unauthenticated_connections {

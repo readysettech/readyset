@@ -387,7 +387,8 @@ impl Verify {
 
     #[tokio::main]
     async fn run(&self) -> anyhow::Result<()> {
-        self.tracing.init("noria-logictest")?;
+        self.tracing
+            .init("noria-logictest", "logictest-deployment")?;
 
         let result = Arc::new(Mutex::new(VerifyResult::default()));
         let mut tasks = FuturesUnordered::new();
