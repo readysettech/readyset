@@ -133,7 +133,7 @@ impl DatabaseSchema {
                             }
                         });
 
-                    for col in &mut s.fields {
+                    for col in &mut s.body.as_mut().unwrap().fields {
                         if let Some(ref mut comment) = col.comment {
                             // We stupidly go over each comment and replace each var
                             // definition with its value instead

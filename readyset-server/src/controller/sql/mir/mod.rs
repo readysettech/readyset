@@ -16,7 +16,7 @@ use mir::query::{MirBase, MirQuery};
 pub use mir::Column;
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
-    BinaryOperator, ColumnSpecification, CompoundSelectOperator, CreateTableStatement, Expr,
+    BinaryOperator, ColumnSpecification, CompoundSelectOperator, CreateTableBody, Expr,
     FieldDefinitionExpr, FieldReference, FunctionExpr, Literal, OrderClause, OrderType, Relation,
     SelectStatement, SqlIdentifier, TableKey, UnaryOperator,
 };
@@ -315,13 +315,18 @@ impl SqlToMirConverter {
 
     pub(super) fn named_base_to_mir(
         &mut self,
-        ctq: &CreateTableStatement,
+        name: Relation,
+        body: &CreateTableBody,
     ) -> ReadySetResult<MirBase<'_>> {
-        let n = self.make_base_node(&ctq.table, &ctq.fields, ctq.keys.as_ref())?;
+        let n = self.make_base_node(&name, &body.fields, body.keys.as_ref())?;
         Ok(MirBase {
-            name: ctq.table.clone(),
+            name,
             mir_node: n,
-            fields: ctq.fields.iter().map(|cs| cs.column.name.clone()).collect(),
+            fields: body
+                .fields
+                .iter()
+                .map(|cs| cs.column.name.clone())
+                .collect(),
             graph: &mut self.mir_graph,
         })
     }

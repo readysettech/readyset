@@ -1,16 +1,19 @@
 use std::str;
 use std::vec::Vec;
 
+use launchpad::redacted::Sensitive;
 use nom_sql::{
-    CacheInner, CreateCacheStatement, CreateTableStatement, CreateViewStatement, Relation,
-    SqlQuery, SqlType,
+    CacheInner, CreateCacheStatement, CreateTableBody, CreateTableStatement, CreateViewStatement,
+    Relation, SqlQuery, SqlType,
 };
 use petgraph::graph::NodeIndex;
 use petgraph::visit::Bfs;
 use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::ViewCreateRequest;
 use readyset_data::Dialect;
-use readyset_errors::{internal, invariant, invariant_eq, ReadySetError, ReadySetResult};
+use readyset_errors::{
+    internal, invariant, invariant_eq, unsupported, ReadySetError, ReadySetResult,
+};
 use readyset_tracing::{debug, error, info, trace, warn};
 use serde::{Deserialize, Serialize};
 
@@ -46,7 +49,7 @@ impl PartialEq for Recipe {
 
 #[derive(Debug)]
 pub(super) enum Schema {
-    Table(CreateTableStatement),
+    Table(CreateTableBody),
     View(Vec<String>),
 }
 
@@ -55,7 +58,12 @@ impl Recipe {
     /// Get the id associated with an alias
     pub(crate) fn expression_by_alias(&self, alias: &Relation) -> Option<SqlQuery> {
         let expr = self.registry.get(alias).map(|e| match e {
-            RecipeExpr::Table(cts) => SqlQuery::CreateTable(cts.clone()),
+            RecipeExpr::Table { name, body } => SqlQuery::CreateTable(CreateTableStatement {
+                if_not_exists: false,
+                table: name.clone(),
+                body: Ok(body.clone()),
+                options: Ok(vec![]),
+            }),
             RecipeExpr::View(cvs) => SqlQuery::CreateView(cvs.clone()),
             RecipeExpr::Cache {
                 name,
@@ -185,16 +193,26 @@ impl Recipe {
             match change {
                 Change::CreateTable(mut cts) => {
                     cts = self.inc.rewrite(cts, &schema_search_path, dialect, None)?;
+                    let body = match cts.body {
+                        Ok(body) => body,
+                        Err(unparsed) => unsupported!(
+                            "CREATE TABLE {} body failed to parse: {}",
+                            cts.table,
+                            Sensitive(&unparsed)
+                        ),
+                    };
                     match self.registry.get(&cts.table) {
-                        Some(RecipeExpr::Table(current_cts)) => {
+                        Some(RecipeExpr::Table {
+                            body: current_body, ..
+                        }) => {
                             // Table already exists, so check if it has been changed.
-                            if current_cts != &cts {
+                            if current_body != &body {
                                 // Table has changed. Drop and recreate.
                                 trace!(
                                     table = %cts.table,
                                     "table exists and has changed. Dropping and recreating..."
                                 );
-                                self.drop_and_recreate_table(&cts.table.clone(), cts, mig);
+                                self.drop_and_recreate_table(&cts.table.clone(), body, mig);
                                 continue;
                             }
                             trace!(
@@ -223,8 +241,11 @@ impl Recipe {
                                 );
                                 self.remove_expression(&invalidate_query, mig)?;
                             }
-                            self.inc.add_table(cts.clone(), mig)?;
-                            self.registry.add_query(RecipeExpr::Table(cts))?;
+                            self.inc.add_table(cts.table.clone(), body.clone(), mig)?;
+                            self.registry.add_query(RecipeExpr::Table {
+                                name: cts.table,
+                                body,
+                            })?;
                         }
                     }
                 }
@@ -341,7 +362,7 @@ impl Recipe {
                                 // before removing tables and views referencing those custom types -
                                 // but we might as well be more
                                 // permissive here
-                                RecipeExpr::Table(CreateTableStatement { table: name, .. })
+                                RecipeExpr::Table { name, .. }
                                 | RecipeExpr::View(CreateViewStatement { name, .. })
                                 | RecipeExpr::Cache { name, .. } => {
                                     self.remove_expression(&name, mig)?;
@@ -373,11 +394,14 @@ impl Recipe {
                     let mut queries_to_remove = vec![];
                     for expr in self.registry.expressions_referencing_custom_type(&name) {
                         match expr {
-                            RecipeExpr::Table(table) => {
-                                for field in table.fields.iter() {
+                            RecipeExpr::Table {
+                                name: table_name,
+                                body,
+                            } => {
+                                for field in body.fields.iter() {
                                     if matches!(&field.sql_type, SqlType::Other(t) if t == &name) {
                                         self.inc.set_base_column_type(
-                                            &table.table,
+                                            table_name,
                                             &field.column,
                                             ty.clone(),
                                             mig,
@@ -387,7 +411,7 @@ impl Recipe {
 
                                 let ni = self
                                     .inc
-                                    .get_query_address(&table.table)
+                                    .get_query_address(table_name)
                                     .expect("Already validated above");
                                 table_nodes.push(ni);
                             }
@@ -425,20 +449,25 @@ impl Recipe {
     fn drop_and_recreate_table(
         &mut self,
         table: &Relation,
-        new_table: CreateTableStatement,
+        body: CreateTableBody,
         mig: &mut Migration,
     ) -> ReadySetResult<()> {
         let removed_node_indices = self.remove_expression(table, mig)?;
         if removed_node_indices.is_none() {
-            error!(table = %table,
-                "attempted to issue ALTER TABLE, but table does not exist");
+            error!(
+                table = %table,
+                "attempted to issue ALTER TABLE, but table does not exist"
+            );
             return Err(ReadySetError::TableNotFound {
                 name: table.name.clone().into(),
                 schema: table.schema.clone().map(Into::into),
             });
         };
-        self.inc.add_table(new_table.clone(), mig)?;
-        self.registry.add_query(RecipeExpr::Table(new_table))?;
+        self.inc.add_table(table.clone(), body.clone(), mig)?;
+        self.registry.add_query(RecipeExpr::Table {
+            name: table.clone(),
+            body,
+        })?;
         Ok(())
     }
 
@@ -471,7 +500,7 @@ impl Recipe {
         };
         let name = expression.name();
         let ni = match expression {
-            RecipeExpr::Table(_) => {
+            RecipeExpr::Table { .. } => {
                 // a base may have many dependent queries, including ones that also lost
                 // nodes; the code handling `removed_leaves` therefore needs to take care
                 // not to remove bases while they still have children, or to try removing

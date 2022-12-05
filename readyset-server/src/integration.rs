@@ -3570,12 +3570,10 @@ async fn finkelstein1982_queries() {
             let q = parse_query(nom_sql::Dialect::MySQL, q).unwrap();
             match q {
                 SqlQuery::CreateTable(stmt) => {
-                    inc.add_table(
-                        inc.rewrite(stmt, &[], Dialect::DEFAULT_MYSQL, None)
-                            .unwrap(),
-                        mig,
-                    )
-                    .unwrap();
+                    let stmt = inc
+                        .rewrite(stmt, &[], Dialect::DEFAULT_MYSQL, None)
+                        .unwrap();
+                    inc.add_table(stmt.table, stmt.body.unwrap(), mig).unwrap();
                 }
                 SqlQuery::Select(stmt) => {
                     inc.add_query(

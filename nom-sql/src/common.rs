@@ -353,6 +353,27 @@ impl Display for FieldReference {
         }
     }
 }
+
+pub(crate) fn parse_fallible<'a, F, G, R>(
+    mut success: F,
+    mut failure: G,
+) -> impl FnMut(LocatedSpan<&'a [u8]>) -> NomSqlResult<&'a [u8], Result<R, String>>
+where
+    F: FnMut(LocatedSpan<&'a [u8]>) -> NomSqlResult<&'a [u8], R>,
+    G: FnMut(LocatedSpan<&'a [u8]>) -> NomSqlResult<&'a [u8], LocatedSpan<&'a [u8]>>,
+{
+    move |i| {
+        map(&mut success, Ok)(i).or_else(|_| {
+            map(
+                map_res(&mut failure, |i: LocatedSpan<&[u8]>| {
+                    str::from_utf8(i.as_ref())
+                }),
+                |s| Err(s.to_owned()),
+            )(i)
+        })
+    }
+}
+
 pub(crate) fn opt_delimited<I: Clone, O1, O2, O3, E: ParseError<I>, F, G, H>(
     mut first: F,
     mut second: G,

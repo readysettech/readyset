@@ -17,7 +17,7 @@ pub use self::column::{Column, ColumnConstraint, ColumnSpecification};
 pub use self::common::{FieldDefinitionExpr, FieldReference, IndexType, TableKey};
 pub use self::compound_select::{CompoundSelectOperator, CompoundSelectStatement};
 pub use self::create::{
-    CacheInner, CreateCacheStatement, CreateTableStatement, CreateViewStatement,
+    CacheInner, CreateCacheStatement, CreateTableBody, CreateTableStatement, CreateViewStatement,
     SelectSpecification,
 };
 pub use self::create_table_options::CreateTableOption;

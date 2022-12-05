@@ -10,7 +10,7 @@ use futures::{pin_mut, StreamExt, TryFutureExt};
 use metrics::register_gauge;
 use nom_sql::{
     parse_key_specification_string, parse_sql_type, Column, ColumnConstraint, ColumnSpecification,
-    CreateTableStatement, Dialect, Relation, SqlIdentifier, SqlQuery, TableKey,
+    CreateTableBody, CreateTableStatement, Dialect, Relation, SqlIdentifier, SqlQuery, TableKey,
 };
 use postgres_types::{accepts, FromSql, Kind, Type};
 use readyset_client::metrics::recorded;
@@ -409,34 +409,36 @@ impl TableDescription {
 
     fn try_into_change(self) -> ReadySetResult<Change> {
         Ok(Change::CreateTable(CreateTableStatement {
-            table: self.name.clone(),
-            fields: self
-                .columns
-                .into_iter()
-                .map(|c| {
-                    Ok(ColumnSpecification {
-                        column: Column {
-                            name: c.name.into(),
-                            table: Some(self.name.clone()),
-                        },
-                        sql_type: parse_sql_type(Dialect::PostgreSQL, c.sql_type)
-                            .map_err(|e| internal_err!("Could not parse SQL type: {e}"))?,
-                        constraints: if c.not_null {
-                            vec![ColumnConstraint::NotNull]
-                        } else {
-                            vec![]
-                        },
-                        comment: None,
-                    })
-                })
-                .collect::<ReadySetResult<_>>()?,
-            keys: if self.constraints.is_empty() {
-                None
-            } else {
-                Some(self.constraints.into_iter().map(|c| c.definition).collect())
-            },
             if_not_exists: false,
-            options: vec![],
+            table: self.name.clone(),
+            body: Ok(CreateTableBody {
+                fields: self
+                    .columns
+                    .into_iter()
+                    .map(|c| {
+                        Ok(ColumnSpecification {
+                            column: Column {
+                                name: c.name.into(),
+                                table: Some(self.name.clone()),
+                            },
+                            sql_type: parse_sql_type(Dialect::PostgreSQL, c.sql_type)
+                                .map_err(|e| internal_err!("Could not parse SQL type: {e}"))?,
+                            constraints: if c.not_null {
+                                vec![ColumnConstraint::NotNull]
+                            } else {
+                                vec![]
+                            },
+                            comment: None,
+                        })
+                    })
+                    .collect::<ReadySetResult<_>>()?,
+                keys: if self.constraints.is_empty() {
+                    None
+                } else {
+                    Some(self.constraints.into_iter().map(|c| c.definition).collect())
+                },
+            }),
+            options: Ok(vec![]),
         }))
     }
 
@@ -969,10 +971,28 @@ mod tests {
         };
 
         assert_eq!(create_table.table.name, "ar_internal_metadata");
-        assert_eq!(create_table.fields.len(), 4);
-        assert!(create_table.keys.is_some());
-        assert_eq!(create_table.keys.as_ref().unwrap().len(), 1);
-        let pkey = create_table.keys.as_ref().unwrap().first().unwrap();
+        assert_eq!(create_table.body.as_ref().unwrap().fields.len(), 4);
+        assert!(create_table.body.as_ref().unwrap().keys.is_some());
+        assert_eq!(
+            create_table
+                .body
+                .as_ref()
+                .unwrap()
+                .keys
+                .as_ref()
+                .unwrap()
+                .len(),
+            1
+        );
+        let pkey = create_table
+            .body
+            .as_ref()
+            .unwrap()
+            .keys
+            .as_ref()
+            .unwrap()
+            .first()
+            .unwrap();
         match pkey {
             TableKey::PrimaryKey {
                 constraint_name,

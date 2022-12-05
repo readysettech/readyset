@@ -693,18 +693,22 @@ pub fn walk_create_table_statement<'a, V: Visitor<'a>>(
 ) -> Result<(), V::Error> {
     visitor.visit_table(&create_table_statement.table)?;
 
-    for field in &create_table_statement.fields {
-        visitor.visit_column_specification(field)?;
-    }
+    if let Ok(body) = &create_table_statement.body {
+        for field in &body.fields {
+            visitor.visit_column_specification(field)?;
+        }
 
-    if let Some(keys) = &create_table_statement.keys {
-        for key in keys {
-            visitor.visit_table_key(key)?;
+        if let Some(keys) = &body.keys {
+            for key in keys {
+                visitor.visit_table_key(key)?;
+            }
         }
     }
 
-    for option in &create_table_statement.options {
-        visitor.visit_create_table_option(option)?;
+    if let Ok(options) = &create_table_statement.options {
+        for option in options {
+            visitor.visit_create_table_option(option)?;
+        }
     }
 
     Ok(())

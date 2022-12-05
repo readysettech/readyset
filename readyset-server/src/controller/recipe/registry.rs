@@ -3,12 +3,13 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 
 use launchpad::hash::hash;
+use launchpad::redacted::Sensitive;
 use nom_sql::analysis::visit::{self, Visitor};
 use nom_sql::{
-    CreateTableStatement, CreateViewStatement, Relation, SelectSpecification, SelectStatement,
-    SqlType,
+    CreateTableBody, CreateTableStatement, CreateViewStatement, Relation, SelectSpecification,
+    SelectStatement, SqlType,
 };
-use readyset_errors::{ReadySetError, ReadySetResult};
+use readyset_errors::{unsupported_err, ReadySetError, ReadySetResult};
 use readyset_tracing::debug;
 use serde::{Deserialize, Serialize};
 
@@ -19,7 +20,10 @@ use crate::controller::recipe::QueryID;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) enum RecipeExpr {
     /// Expression that represents a `CREATE TABLE` statement.
-    Table(CreateTableStatement),
+    Table {
+        name: Relation,
+        body: CreateTableBody,
+    },
     /// Expression that represents a `CREATE VIEW` statement.
     View(CreateViewStatement),
     /// Expression that represents a `CREATE CACHE` statement.
@@ -34,7 +38,7 @@ impl RecipeExpr {
     /// Returns the name associated with the [`RecipeExpr`].
     pub(crate) fn name(&self) -> &Relation {
         match self {
-            RecipeExpr::Table(stmt) => &stmt.table,
+            RecipeExpr::Table { name, .. } => name,
             RecipeExpr::View(cvs) => &cvs.name,
             RecipeExpr::Cache { name, .. } => name,
         }
@@ -45,7 +49,7 @@ impl RecipeExpr {
     /// If the [`RecipeExpr`] is a [`RecipeExpr::Table`], then the set will be empty.
     pub(super) fn table_references(&self) -> HashSet<Relation> {
         match self {
-            RecipeExpr::Table(_) => HashSet::new(),
+            RecipeExpr::Table { .. } => HashSet::new(),
             RecipeExpr::View(cvs) => {
                 let mut references = HashSet::new();
                 let select = cvs.definition.borrow();
@@ -87,7 +91,7 @@ impl RecipeExpr {
     /// Returns a list of names of custom types referenced by this [`RecipeExpr`]
     pub(super) fn custom_type_references(&self) -> Vec<&Relation> {
         match self {
-            RecipeExpr::Table(table) => table
+            RecipeExpr::Table { body, .. } => body
                 .fields
                 .iter()
                 .filter_map(|field| match field.sql_type.innermost_array_type() {
@@ -129,7 +133,10 @@ impl RecipeExpr {
         use sha1::{Digest, Sha1};
         let mut hasher = Sha1::new();
         match self {
-            RecipeExpr::Table(cts) => hasher.update(hash(cts).to_le_bytes()),
+            RecipeExpr::Table { name, body } => {
+                hasher.update(hash(name).to_le_bytes());
+                hasher.update(hash(body).to_le_bytes());
+            }
             RecipeExpr::View(cvs) => hasher.update(hash(cvs).to_le_bytes()),
             RecipeExpr::Cache { statement, .. } => hasher.update(hash(statement).to_le_bytes()),
         };
@@ -265,7 +272,7 @@ impl ExprRegistry {
         let query_id = *self.aliases.get(name_or_alias)?;
         self.aliases.retain(|_, v| *v != query_id);
         let expression = self.expressions.remove(&query_id)?;
-        if !matches!(expression, RecipeExpr::Table(_)) {
+        if !matches!(expression, RecipeExpr::Table { .. }) {
             self.dependencies.iter_mut().for_each(|(_, deps)| {
                 deps.remove(&query_id);
             });
@@ -376,9 +383,19 @@ impl ExprRegistry {
     }
 }
 
-impl From<CreateTableStatement> for RecipeExpr {
-    fn from(cts: CreateTableStatement) -> Self {
-        RecipeExpr::Table(cts)
+impl TryFrom<CreateTableStatement> for RecipeExpr {
+    type Error = ReadySetError;
+
+    fn try_from(stmt: CreateTableStatement) -> Result<Self, Self::Error> {
+        Ok(RecipeExpr::Table {
+            name: stmt.table,
+            body: stmt.body.map_err(|unparsed| {
+                unsupported_err!(
+                    "CREATE table statement failed to parse: {}",
+                    Sensitive(&unparsed)
+                )
+            })?,
+        })
     }
 }
 
@@ -423,9 +440,10 @@ mod tests {
         #[test]
         fn name() {
             let table_name: Relation = "test_table".into();
-            let create_table = RecipeExpr::Table(
+            let create_table = RecipeExpr::try_from(
                 parse_create_table(Dialect::MySQL, "CREATE TABLE test_table (col1 INT);").unwrap(),
-            );
+            )
+            .unwrap();
 
             assert_eq!(create_table.name(), &table_name);
 
@@ -455,9 +473,10 @@ mod tests {
         #[test]
         fn table_references() {
             let table_name = "test_table".into();
-            let create_table = RecipeExpr::Table(
+            let create_table = RecipeExpr::try_from(
                 parse_create_table(Dialect::MySQL, "CREATE TABLE test_table (col1 INT);").unwrap(),
-            );
+            )
+            .unwrap();
 
             assert!(create_table.table_references().is_empty());
 
@@ -496,10 +515,13 @@ mod tests {
             let mut registry = ExprRegistry::new();
 
             registry
-                .add_query(RecipeExpr::Table(
-                    parse_create_table(Dialect::MySQL, "CREATE TABLE test_table (col1 INT);")
-                        .unwrap(),
-                ))
+                .add_query(
+                    RecipeExpr::try_from(
+                        parse_create_table(Dialect::MySQL, "CREATE TABLE test_table (col1 INT);")
+                            .unwrap(),
+                    )
+                    .unwrap(),
+                )
                 .unwrap();
 
             let statement =
@@ -687,9 +709,10 @@ mod tests {
         fn add_table() {
             let mut registry = setup();
 
-            let expr = RecipeExpr::Table(
+            let expr = RecipeExpr::try_from(
                 parse_create_table(Dialect::MySQL, "CREATE TABLE test_table2 (col1 INT);").unwrap(),
-            );
+            )
+            .unwrap();
             assert!(registry.add_query(expr.clone()).unwrap());
 
             let result = registry.get(&"test_table2".into()).unwrap();
@@ -702,10 +725,11 @@ mod tests {
 
             assert!(!registry
                 .add_query(
-                    RecipeExpr::Table(
+                    RecipeExpr::try_from(
                         parse_create_table(Dialect::MySQL, "CREATE TABLE test_table (col1 INT);")
                             .unwrap(),
                     )
+                    .unwrap()
                     .clone()
                 )
                 .unwrap());
@@ -873,18 +897,18 @@ mod tests {
             )
             .unwrap();
             assert!(registry
-                .add_query(RecipeExpr::Table(table.clone()))
+                .add_query(RecipeExpr::try_from(table.clone()).unwrap())
                 .unwrap());
 
             assert_eq!(
                 registry
                     .expressions_referencing_custom_type(&ty)
                     .map(|expr| match expr {
-                        RecipeExpr::Table(table) => table,
+                        RecipeExpr::Table { body, .. } => body,
                         _ => panic!(),
                     })
                     .collect::<Vec<_>>(),
-                vec![&table]
+                vec![table.body.as_ref().unwrap()]
             )
         }
 

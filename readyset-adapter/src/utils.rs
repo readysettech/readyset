@@ -5,7 +5,7 @@ use std::iter;
 use launchpad::hash::hash;
 use nom_sql::analysis::visit::{self, Visitor};
 use nom_sql::{
-    BinaryOperator, Column, ColumnConstraint, CreateTableStatement, DeleteStatement, Expr,
+    BinaryOperator, Column, ColumnConstraint, CreateTableBody, DeleteStatement, Expr,
     InsertStatement, Literal, SelectStatement, SqlIdentifier, SqlQuery, TableKey, UpdateStatement,
 };
 use readyset_client::{Modification, Operation};
@@ -145,7 +145,7 @@ pub(crate) fn flatten_conditional(
 
 // Finds the primary for the given table, both by looking at constraints on individual
 // columns and by searching through keys.
-pub(crate) fn get_primary_key(schema: &CreateTableStatement) -> Vec<(usize, &Column)> {
+pub(crate) fn get_primary_key(schema: &CreateTableBody) -> Vec<(usize, &Column)> {
     schema
         .fields
         .iter()
@@ -404,7 +404,7 @@ where
 pub(crate) fn extract_update_params_and_fields<I>(
     q: &mut UpdateStatement,
     params: &mut Option<I>,
-    schema: &CreateTableStatement,
+    schema: &CreateTableBody,
     dialect: Dialect,
 ) -> ReadySetResult<Vec<(usize, Modification)>>
 where
@@ -467,7 +467,7 @@ where
 pub(crate) fn extract_pkey_where<I>(
     where_clause: Expr,
     mut params: Option<I>,
-    schema: &CreateTableStatement,
+    schema: &CreateTableBody,
 ) -> ReadySetResult<Vec<DfValue>>
 where
     I: Iterator<Item = DfValue>,
@@ -491,7 +491,7 @@ type ExtractedUpdate = (Vec<DfValue>, Vec<(usize, Modification)>);
 pub(crate) fn extract_update<I>(
     mut q: UpdateStatement,
     mut params: Option<I>,
-    schema: &CreateTableStatement,
+    schema: &CreateTableBody,
     dialect: Dialect,
 ) -> ReadySetResult<ExtractedUpdate>
 where
@@ -508,7 +508,7 @@ where
 pub(crate) fn extract_delete<I>(
     q: DeleteStatement,
     params: Option<I>,
-    schema: &CreateTableStatement,
+    schema: &CreateTableBody,
 ) -> ReadySetResult<Vec<DfValue>>
 where
     I: Iterator<Item = DfValue>,
@@ -523,7 +523,7 @@ where
 pub(crate) fn coerce_params(
     params: Option<&[DfValue]>,
     q: &SqlQuery,
-    schema: &CreateTableStatement,
+    schema: &CreateTableBody,
     dialect: Dialect,
 ) -> ReadySetResult<Option<Vec<DfValue>>> {
     if let Some(prms) = params {
@@ -557,7 +557,7 @@ pub(crate) fn generate_query_name(
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{self, Dialect, SqlQuery};
+    use nom_sql::{self, parse_create_table, Dialect, SqlQuery};
 
     use super::*;
 
@@ -595,11 +595,11 @@ mod tests {
         }
     }
 
-    fn get_schema(query: &str) -> CreateTableStatement {
-        match nom_sql::parse_query(Dialect::MySQL, query).unwrap() {
-            SqlQuery::CreateTable(c) => c,
-            _ => unreachable!(),
-        }
+    fn get_schema(query: &str) -> CreateTableBody {
+        parse_create_table(Dialect::MySQL, query)
+            .unwrap()
+            .body
+            .unwrap()
     }
 
     #[test]

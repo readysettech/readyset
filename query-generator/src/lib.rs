@@ -85,10 +85,10 @@ use lazy_static::lazy_static;
 use nom_sql::analysis::{contains_aggregate, ReferredColumns};
 use nom_sql::{
     BinaryOperator, Column, ColumnConstraint, ColumnSpecification, CommonTableExpr,
-    CreateTableStatement, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, InValue,
-    ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, Literal, OrderClause,
-    OrderType, Relation, SelectStatement, SqlIdentifier, SqlType, TableExpr, TableExprInner,
-    TableKey,
+    CreateTableBody, CreateTableStatement, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr,
+    InValue, ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, Literal,
+    OrderClause, OrderType, Relation, SelectStatement, SqlIdentifier, SqlType, TableExpr,
+    TableExprInner, TableKey,
 };
 use parking_lot::Mutex;
 use proptest::arbitrary::{any, any_with, Arbitrary};
@@ -503,7 +503,8 @@ impl From<nom_sql::Column> for ColumnName {
 /// deep inside readyset-server - if we ever get a chance to extract rewrite passes to their own
 /// crate, this should be updated to use that
 pub fn find_primary_keys(stmt: &CreateTableStatement) -> Option<&ColumnSpecification> {
-    stmt.fields
+    let body = stmt.body.as_ref().unwrap();
+    body.fields
         .iter()
         // Look for a column with a PRIMARY KEY constraint on the spec first
         .find(|f| {
@@ -513,7 +514,7 @@ pub fn find_primary_keys(stmt: &CreateTableStatement) -> Option<&ColumnSpecifica
         })
         // otherwise, find a column corresponding to a standalone PRIMARY KEY table constraint
         .or_else(|| {
-            stmt.keys
+            body.keys
                 .iter()
                 .flatten()
                 .find_map(|k| match k {
@@ -521,7 +522,7 @@ pub fn find_primary_keys(stmt: &CreateTableStatement) -> Option<&ColumnSpecifica
                     TableKey::PrimaryKey { columns, .. } => columns.first(),
                     _ => None,
                 })
-                .and_then(|col| stmt.fields.iter().find(|f| f.column == *col))
+                .and_then(|col| body.fields.iter().find(|f| f.column == *col))
         })
 }
 
@@ -942,9 +943,11 @@ impl From<CreateTableStatement> for TableSpec {
         let primary_key: Option<ColumnName> =
             find_primary_keys(&stmt).map(|cspec| cspec.column.clone().into());
 
+        let body = stmt.body.unwrap();
+
         let mut spec = TableSpec {
             name: stmt.table.name.into(),
-            columns: stmt
+            columns: body
                 .fields
                 .iter()
                 .map(|field| {
@@ -980,7 +983,7 @@ impl From<CreateTableStatement> for TableSpec {
             primary_key: primary_key.clone(),
         };
 
-        for col in stmt
+        for col in body
             .keys
             .into_iter()
             .flatten()
@@ -1006,7 +1009,7 @@ impl From<CreateTableStatement> for TableSpec {
         }
 
         // Apply annotations in the end
-        for field in stmt.fields.iter() {
+        for field in body.fields.iter() {
             if let Some(d) = field
                 .comment
                 .as_deref()
@@ -1033,26 +1036,28 @@ impl From<CreateTableStatement> for TableSpec {
 impl From<TableSpec> for CreateTableStatement {
     fn from(spec: TableSpec) -> Self {
         CreateTableStatement {
-            table: spec.name.into(),
-            fields: spec
-                .columns
-                .into_iter()
-                .map(|(col_name, col_type)| ColumnSpecification {
-                    column: col_name.into(),
-                    sql_type: col_type.sql_type,
-                    constraints: vec![],
-                    comment: None,
-                })
-                .collect(),
-            keys: spec.primary_key.map(|cn| {
-                vec![TableKey::PrimaryKey {
-                    index_name: None,
-                    constraint_name: None,
-                    columns: vec![cn.into()],
-                }]
-            }),
             if_not_exists: false,
-            options: vec![],
+            table: spec.name.into(),
+            body: Ok(CreateTableBody {
+                fields: spec
+                    .columns
+                    .into_iter()
+                    .map(|(col_name, col_type)| ColumnSpecification {
+                        column: col_name.into(),
+                        sql_type: col_type.sql_type,
+                        constraints: vec![],
+                        comment: None,
+                    })
+                    .collect(),
+                keys: spec.primary_key.map(|cn| {
+                    vec![TableKey::PrimaryKey {
+                        index_name: None,
+                        constraint_name: None,
+                        columns: vec![cn.into()],
+                    }]
+                }),
+            }),
+            options: Ok(vec![]),
         }
     }
 }

@@ -124,9 +124,9 @@ impl fmt::Display for AlterTableDefinition {
 pub struct AlterTableStatement {
     pub table: Relation,
     /// The result of parsing the alter table definitions.
-    /// If the parsing succeeded, then this will be an `Ok` result
-    /// with the list of [`AlterTableDefinition`]s.
-    /// If it failed to parse, this will be an `Err` with the remainder
+    ///
+    /// If the parsing succeeded, then this will be an `Ok` result with the list of
+    /// [`AlterTableDefinition`]s.  If it failed to parse, this will be an `Err` with the remainder
     /// [`String`] that could not be parsed.
     pub definitions: Result<Vec<AlterTableDefinition>, String>,
     pub only: bool,

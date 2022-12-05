@@ -22,7 +22,7 @@ use std::collections::{HashMap, HashSet};
 use dataflow_expression::Dialect;
 pub use nom_sql::analysis::{contains_aggregate, is_aggregate};
 use nom_sql::{
-    CompoundSelectStatement, CreateTableStatement, CreateViewStatement, Relation,
+    CompoundSelectStatement, CreateTableBody, CreateTableStatement, CreateViewStatement, Relation,
     SelectSpecification, SelectStatement, SqlIdentifier,
 };
 use readyset_errors::ReadySetResult;
@@ -52,9 +52,10 @@ pub struct RewriteContext<'a> {
     /// in those views
     pub view_schemas: &'a HashMap<Relation, Vec<SqlIdentifier>>,
 
-    /// Map from names of *tables* in the database, to the [`CreateTableStatement`] that was used
-    /// to create that table. Each key in this map should also exist in [`view_schemas`].
-    pub base_schemas: &'a HashMap<Relation, CreateTableStatement>,
+    /// Map from names of *tables* in the database, to the body of the `CREATE TABLE` statement
+    /// that was used to create that table. Each key in this map should also exist in
+    /// [`view_schemas`].
+    pub base_schemas: &'a HashMap<Relation, CreateTableBody>,
 
     /// Map from schema name to the set of custom types in that schema
     pub custom_types: &'a HashMap<&'a SqlIdentifier, HashSet<&'a SqlIdentifier>>,

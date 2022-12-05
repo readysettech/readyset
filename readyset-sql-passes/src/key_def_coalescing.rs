@@ -7,42 +7,46 @@ pub trait KeyDefinitionCoalescing {
 impl KeyDefinitionCoalescing for CreateTableStatement {
     fn coalesce_key_definitions(mut self) -> CreateTableStatement {
         // TODO(malte): only handles primary keys so far!
-        let pkeys: Vec<&ColumnSpecification> = self
-            .fields
-            .iter()
-            .filter(|cs| cs.constraints.contains(&ColumnConstraint::PrimaryKey))
-            .collect();
-        let mut pk = vec![];
-        for cs in pkeys {
-            pk.push(cs.column.clone())
-        }
-        if !pk.is_empty() {
-            self.keys = match self.keys {
-                None => Some(vec![TableKey::PrimaryKey {
-                    index_name: None,
-                    constraint_name: None,
-                    columns: pk,
-                }]),
-                Some(mut ks) => {
-                    let new_key = TableKey::PrimaryKey {
+        self.body = self.body.map(|mut body| {
+            let pkeys: Vec<&ColumnSpecification> = body
+                .fields
+                .iter()
+                .filter(|cs| cs.constraints.contains(&ColumnConstraint::PrimaryKey))
+                .collect();
+            let mut pk = vec![];
+            for cs in pkeys {
+                pk.push(cs.column.clone())
+            }
+            if !pk.is_empty() {
+                body.keys = match body.keys {
+                    None => Some(vec![TableKey::PrimaryKey {
                         index_name: None,
                         constraint_name: None,
                         columns: pk,
-                    };
-                    if !ks.contains(&new_key) {
-                        ks.push(new_key);
+                    }]),
+                    Some(mut ks) => {
+                        let new_key = TableKey::PrimaryKey {
+                            index_name: None,
+                            constraint_name: None,
+                            columns: pk,
+                        };
+                        if !ks.contains(&new_key) {
+                            ks.push(new_key);
+                        }
+                        Some(ks)
                     }
-                    Some(ks)
                 }
             }
-        }
+            body
+        });
+
         self
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{Column, Relation, SqlType};
+    use nom_sql::{Column, CreateTableBody, Relation, SqlType};
 
     use super::*;
 
@@ -54,24 +58,26 @@ mod tests {
         // -->
         // CREATE TABLE t (id text, val text, PRIMARY KEY (id))
         let q = CreateTableStatement {
-            table: Relation::from("t"),
-            fields: vec![
-                ColumnSpecification::with_constraints(
-                    Column::from("t.id"),
-                    SqlType::Text,
-                    vec![ColumnConstraint::PrimaryKey],
-                ),
-                ColumnSpecification::new(Column::from("t.val"), SqlType::Text),
-            ],
-            keys: None,
             if_not_exists: false,
-            options: vec![],
+            table: Relation::from("t"),
+            body: Ok(CreateTableBody {
+                fields: vec![
+                    ColumnSpecification::with_constraints(
+                        Column::from("t.id"),
+                        SqlType::Text,
+                        vec![ColumnConstraint::PrimaryKey],
+                    ),
+                    ColumnSpecification::new(Column::from("t.val"), SqlType::Text),
+                ],
+                keys: None,
+            }),
+            options: Ok(vec![]),
         };
 
         let ctq = q.coalesce_key_definitions();
         assert_eq!(ctq.table, Relation::from("t"));
         assert_eq!(
-            ctq.fields,
+            ctq.body.as_ref().unwrap().fields,
             vec![
                 ColumnSpecification::with_constraints(
                     Column::from("t.id"),
@@ -82,7 +88,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            ctq.keys,
+            ctq.body.as_ref().unwrap().keys,
             Some(vec![TableKey::PrimaryKey {
                 index_name: None,
                 constraint_name: None,

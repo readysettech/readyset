@@ -40,7 +40,8 @@
 
 use nom_sql::{
     parse_query, AlterTableStatement, Column, ColumnConstraint, ColumnSpecification,
-    CreateTableStatement, CreateViewStatement, Dialect, Relation, SqlQuery, SqlType, TableKey,
+    CreateTableBody, CreateTableStatement, CreateViewStatement, Dialect, Relation, SqlQuery,
+    SqlType, TableKey,
 };
 use pgsql::tls::MakeTlsConnect;
 use readyset_client::recipe::changelist::{AlterTypeChange, Change};
@@ -178,30 +179,32 @@ impl DdlEvent {
                     name: name.into(),
                 };
                 Change::CreateTable(CreateTableStatement {
-                    table: table.clone(),
-                    fields: columns
-                        .into_iter()
-                        .map(|col| ColumnSpecification {
-                            column: Column {
-                                name: col.name.into(),
-                                table: Some(table.clone()),
-                            },
-                            sql_type: col.column_type,
-                            constraints: if col.not_null {
-                                vec![ColumnConstraint::NotNull]
-                            } else {
-                                vec![]
-                            },
-                            comment: None,
-                        })
-                        .collect(),
-                    keys: if constraints.is_empty() {
-                        None
-                    } else {
-                        Some(constraints.into_iter().map(|c| c.definition).collect())
-                    },
                     if_not_exists: false,
-                    options: vec![],
+                    table: table.clone(),
+                    body: Ok(CreateTableBody {
+                        fields: columns
+                            .into_iter()
+                            .map(|col| ColumnSpecification {
+                                column: Column {
+                                    name: col.name.into(),
+                                    table: Some(table.clone()),
+                                },
+                                sql_type: col.column_type,
+                                constraints: if col.not_null {
+                                    vec![ColumnConstraint::NotNull]
+                                } else {
+                                    vec![]
+                                },
+                                comment: None,
+                            })
+                            .collect(),
+                        keys: if constraints.is_empty() {
+                            None
+                        } else {
+                            Some(constraints.into_iter().map(|c| c.definition).collect())
+                        },
+                    }),
+                    options: Ok(vec![]),
                 })
             }
             DdlEventData::AlterTable(stmt) => Change::AlterTable(stmt),

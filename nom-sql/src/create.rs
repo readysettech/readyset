@@ -1,3 +1,4 @@
+use std::fmt::Display;
 use std::str::FromStr;
 use std::{fmt, str};
 
@@ -13,8 +14,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::column::{column_specification, Column, ColumnSpecification};
 use crate::common::{
-    column_identifier_no_alias, debug_print, if_not_exists, statement_terminator, ws_sep_comma,
-    IndexType, ReferentialAction, TableKey,
+    column_identifier_no_alias, debug_print, if_not_exists, parse_fallible, statement_terminator,
+    ws_sep_comma, IndexType, ReferentialAction, TableKey,
 };
 use crate::compound_select::{nested_compound_selection, CompoundSelectStatement};
 use crate::create_table_options::{table_options, CreateTableOption};
@@ -26,68 +27,103 @@ use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Dialect, NomSqlResult, SqlIdentifier};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
-pub struct CreateTableStatement {
-    pub table: Relation,
+pub struct CreateTableBody {
     pub fields: Vec<ColumnSpecification>,
     pub keys: Option<Vec<TableKey>>,
-    pub if_not_exists: bool,
-    pub options: Vec<CreateTableOption>,
 }
 
-impl fmt::Display for CreateTableStatement {
+impl Display for CreateTableBody {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (i, field) in self.fields.iter().enumerate() {
+            if i != 0 {
+                write!(f, ", ")?;
+            }
+            write!(f, "{field}")?;
+        }
+        if let Some(keys) = &self.keys {
+            for key in keys {
+                write!(f, ", {key}")?;
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+pub struct CreateTableStatement {
+    pub if_not_exists: bool,
+    pub table: Relation,
+    /// The result of parsing the body of the `CREATE TABLE statement`.
+    ///
+    /// If parsing succeeded, then this will be an `Ok` result with the body of the statement. If
+    /// it failed to parse, this will be an `Err` with the remainder [`String`] that could not
+    /// be parsed.
+    pub body: Result<CreateTableBody, String>,
+    /// The result of parsing the options for the `CREATE TABLE statement`.
+    ///
+    /// If parsing succeeded, then this will be an `Ok` result with the options for the statement.
+    /// If it failed to parse, this will be an `Err` with the remainder [`String`] that could not
+    /// be parsed.
+    pub options: Result<Vec<CreateTableOption>, String>,
+}
+
+impl Display for CreateTableStatement {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "CREATE TABLE ")?;
         if self.if_not_exists {
             write!(f, "IF NOT EXISTS ")?;
         }
         write!(f, "{} (", self.table)?;
-        write!(
-            f,
-            "{}",
-            self.fields
-                .iter()
-                .map(|field| field.to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )?;
-        if let Some(ref keys) = self.keys {
-            write!(
-                f,
-                ", {}",
-                keys.iter()
-                    .map(|key| key.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )?;
+
+        match &self.body {
+            Ok(body) => write!(f, "{body}")?,
+            Err(unparsed) => write!(f, "{unparsed}")?,
         }
+
         write!(f, ")")?;
-        write!(
-            f,
-            "{}",
-            self.options
-                .iter()
-                .map(|option| option.to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
+
+        match &self.options {
+            Ok(options) => {
+                for (i, option) in options.iter().enumerate() {
+                    if i == 0 {
+                        write!(f, " ")?;
+                    } else {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{option}")?;
+                }
+            }
+
+            Err(unparsed) => write!(f, "{unparsed}")?,
+        }
+
+        Ok(())
     }
 }
 
 impl CreateTableStatement {
     /// If the create statement contained a comment, return it
     pub fn get_comment(&self) -> Option<&str> {
-        self.options.iter().find_map(|opt| match opt {
-            CreateTableOption::Comment(s) => Some(s.as_str()),
-            _ => None,
-        })
+        self.options
+            .as_ref()
+            .ok()?
+            .iter()
+            .find_map(|opt| match opt {
+                CreateTableOption::Comment(s) => Some(s.as_str()),
+                _ => None,
+            })
     }
 
     /// If the create statement contained AUTOINCREMENT, return it
     pub fn get_autoincrement(&self) -> Option<u64> {
-        self.options.iter().find_map(|opt| match opt {
-            CreateTableOption::AutoIncrement(i) => Some(*i),
-            _ => None,
-        })
+        self.options
+            .as_ref()
+            .ok()?
+            .iter()
+            .find_map(|opt| match opt {
+                CreateTableOption::AutoIncrement(i) => Some(*i),
+                _ => None,
+            })
     }
 }
 
@@ -98,7 +134,7 @@ pub enum SelectSpecification {
     Simple(SelectStatement),
 }
 
-impl fmt::Display for SelectSpecification {
+impl Display for SelectSpecification {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             SelectSpecification::Compound(ref csq) => write!(f, "{}", csq),
@@ -115,7 +151,7 @@ pub struct CreateViewStatement {
     pub definition: Box<SelectSpecification>,
 }
 
-impl fmt::Display for CreateViewStatement {
+impl Display for CreateViewStatement {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "CREATE VIEW {} ", self.name)?;
         if !self.fields.is_empty() {
@@ -153,7 +189,7 @@ pub struct CreateCacheStatement {
     pub always: bool,
 }
 
-impl fmt::Display for CreateCacheStatement {
+impl Display for CreateCacheStatement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "CREATE CACHE ")?;
         if self.always {
@@ -523,6 +559,20 @@ pub fn field_specification_list(
     move |i| separated_list1(ws_sep_comma, column_specification(dialect))(i)
 }
 
+fn create_table_body(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CreateTableBody> {
+    move |i| {
+        let (i, _) = whitespace0(i)?;
+        let (i, fields) = field_specification_list(dialect)(i)?;
+        let (i, _) = whitespace0(i)?;
+        let (i, keys) = opt(preceded(ws_sep_comma, key_specification_list(dialect)))(i)?;
+        let (i, _) = whitespace0(i)?;
+
+        Ok((i, CreateTableBody { fields, keys }))
+    }
+}
+
 /// Parse rule for a SQL CREATE TABLE query.
 pub fn create_table(
     dialect: Dialect,
@@ -535,24 +585,20 @@ pub fn create_table(
         let (i, if_not_exists) = if_not_exists(i)?;
         let (i, table) = relation(dialect)(i)?;
         let (i, _) = whitespace0(i)?;
+
         let (i, _) = tag("(")(i)?;
-        let (i, _) = whitespace0(i)?;
-        let (i, fields) = field_specification_list(dialect)(i)?;
-        let (i, _) = whitespace0(i)?;
-        let (i, keys) = opt(preceded(ws_sep_comma, key_specification_list(dialect)))(i)?;
-        let (i, _) = whitespace0(i)?;
+        let (i, body) = parse_fallible(create_table_body(dialect), is_not(")"))(i)?;
         let (i, _) = tag(")")(i)?;
         let (i, _) = whitespace0(i)?;
-        let (i, options) = table_options(dialect)(i)?;
+        let (i, options) = parse_fallible(table_options(dialect), is_not(";"))(i)?;
         let (i, _) = statement_terminator(i)?;
 
         Ok((
             i,
             CreateTableStatement {
                 table,
-                fields,
-                keys,
                 if_not_exists,
+                body,
                 options,
             },
         ))
@@ -736,15 +782,20 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             CreateTableStatement {
-                table: Relation::from("users"),
-                fields: vec![
-                    ColumnSpecification::new(Column::from("id"), SqlType::BigInt(Some(20))),
-                    ColumnSpecification::new(Column::from("name"), SqlType::VarChar(Some(255))),
-                    ColumnSpecification::new(Column::from("email"), SqlType::VarChar(Some(255))),
-                ],
                 if_not_exists: true,
-                keys: None,
-                options: vec![]
+                table: Relation::from("users"),
+                body: Ok(CreateTableBody {
+                    fields: vec![
+                        ColumnSpecification::new(Column::from("id"), SqlType::BigInt(Some(20))),
+                        ColumnSpecification::new(Column::from("name"), SqlType::VarChar(Some(255))),
+                        ColumnSpecification::new(
+                            Column::from("email"),
+                            SqlType::VarChar(Some(255))
+                        ),
+                    ],
+                    keys: None,
+                }),
+                options: Ok(vec![])
             }
         );
     }
@@ -756,14 +807,16 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             CreateTableStatement {
-                table: Relation::from("t"),
-                fields: vec![ColumnSpecification::new(
-                    Column::from("x"),
-                    SqlType::Int(None)
-                ),],
-                keys: None,
                 if_not_exists: false,
-                options: vec![]
+                table: Relation::from("t"),
+                body: Ok(CreateTableBody {
+                    fields: vec![ColumnSpecification::new(
+                        Column::from("x"),
+                        SqlType::Int(None)
+                    ),],
+                    keys: None,
+                }),
+                options: Ok(vec![])
             }
         );
     }
@@ -775,17 +828,19 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             CreateTableStatement {
+                if_not_exists: false,
                 table: Relation {
                     schema: Some("db1".into()),
                     name: "t".into(),
                 },
-                fields: vec![ColumnSpecification::new(
-                    Column::from("x"),
-                    SqlType::Int(None)
-                ),],
-                keys: None,
-                if_not_exists: false,
-                options: vec![]
+                body: Ok(CreateTableBody {
+                    fields: vec![ColumnSpecification::new(
+                        Column::from("x"),
+                        SqlType::Int(None)
+                    ),],
+                    keys: None,
+                }),
+                options: Ok(vec![])
             }
         );
     }
@@ -811,19 +866,24 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             CreateTableStatement {
-                table: Relation::from("users"),
-                fields: vec![
-                    ColumnSpecification::new(Column::from("id"), SqlType::BigInt(Some(20))),
-                    ColumnSpecification::new(Column::from("name"), SqlType::VarChar(Some(255))),
-                    ColumnSpecification::new(Column::from("email"), SqlType::VarChar(Some(255))),
-                ],
-                keys: Some(vec![TableKey::PrimaryKey {
-                    constraint_name: None,
-                    index_name: None,
-                    columns: vec![Column::from("id")]
-                }]),
                 if_not_exists: false,
-                options: vec![]
+                table: Relation::from("users"),
+                body: Ok(CreateTableBody {
+                    fields: vec![
+                        ColumnSpecification::new(Column::from("id"), SqlType::BigInt(Some(20))),
+                        ColumnSpecification::new(Column::from("name"), SqlType::VarChar(Some(255))),
+                        ColumnSpecification::new(
+                            Column::from("email"),
+                            SqlType::VarChar(Some(255))
+                        ),
+                    ],
+                    keys: Some(vec![TableKey::PrimaryKey {
+                        constraint_name: None,
+                        index_name: None,
+                        columns: vec![Column::from("id")]
+                    }]),
+                }),
+                options: Ok(vec![])
             }
         );
 
@@ -835,20 +895,25 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             CreateTableStatement {
-                table: Relation::from("users"),
-                fields: vec![
-                    ColumnSpecification::new(Column::from("id"), SqlType::BigInt(Some(20))),
-                    ColumnSpecification::new(Column::from("name"), SqlType::VarChar(Some(255))),
-                    ColumnSpecification::new(Column::from("email"), SqlType::VarChar(Some(255))),
-                ],
-                keys: Some(vec![TableKey::UniqueKey {
-                    constraint_name: None,
-                    index_name: Some("id_k".into()),
-                    columns: vec![Column::from("id")],
-                    index_type: None
-                },]),
                 if_not_exists: false,
-                options: vec![]
+                table: Relation::from("users"),
+                body: Ok(CreateTableBody {
+                    fields: vec![
+                        ColumnSpecification::new(Column::from("id"), SqlType::BigInt(Some(20))),
+                        ColumnSpecification::new(Column::from("name"), SqlType::VarChar(Some(255))),
+                        ColumnSpecification::new(
+                            Column::from("email"),
+                            SqlType::VarChar(Some(255))
+                        ),
+                    ],
+                    keys: Some(vec![TableKey::UniqueKey {
+                        constraint_name: None,
+                        index_name: Some("id_k".into()),
+                        columns: vec![Column::from("id")],
+                        index_type: None
+                    },]),
+                }),
+                options: Ok(vec![])
             }
         );
     }
@@ -908,29 +973,31 @@ mod tests {
         assert_eq!(
             res,
             CreateTableStatement {
-                table: "users".into(),
-                fields: vec![
-                    ColumnSpecification::new("id".into(), SqlType::Int(None),),
-                    ColumnSpecification::new("group_id".into(), SqlType::Int(None),),
-                ],
-                keys: Some(vec![
-                    TableKey::PrimaryKey {
-                        constraint_name: None,
-                        index_name: None,
-                        columns: vec!["id".into()],
-                    },
-                    TableKey::ForeignKey {
-                        constraint_name: Some("users_group".into()),
-                        columns: vec!["group_id".into()],
-                        target_table: "groups".into(),
-                        target_columns: vec!["id".into()],
-                        index_name: None,
-                        on_delete: None,
-                        on_update: None,
-                    }
-                ]),
                 if_not_exists: false,
-                options: vec![CreateTableOption::AutoIncrement(1000)],
+                table: "users".into(),
+                body: Ok(CreateTableBody {
+                    fields: vec![
+                        ColumnSpecification::new("id".into(), SqlType::Int(None),),
+                        ColumnSpecification::new("group_id".into(), SqlType::Int(None),),
+                    ],
+                    keys: Some(vec![
+                        TableKey::PrimaryKey {
+                            constraint_name: None,
+                            index_name: None,
+                            columns: vec!["id".into()],
+                        },
+                        TableKey::ForeignKey {
+                            constraint_name: Some("users_group".into()),
+                            columns: vec!["group_id".into()],
+                            target_table: "groups".into(),
+                            target_columns: vec!["id".into()],
+                            index_name: None,
+                            on_delete: None,
+                            on_update: None,
+                        }
+                    ]),
+                }),
+                options: Ok(vec![CreateTableOption::AutoIncrement(1000)],)
             }
         )
     }
@@ -959,42 +1026,44 @@ mod tests {
         assert_eq!(
             res,
             CreateTableStatement {
-                table: "addresses".into(),
-                fields: vec![
-                    ColumnSpecification::with_constraints(
-                        "id".into(),
-                        SqlType::Int(None),
-                        vec![
-                            ColumnConstraint::NotNull,
-                            ColumnConstraint::AutoIncrement,
-                            ColumnConstraint::PrimaryKey,
-                        ]
-                    ),
-                    non_null_col("customer_id", SqlType::Int(None)),
-                    non_null_col("street", SqlType::VarChar(Some(255))),
-                    non_null_col("city", SqlType::VarChar(Some(255))),
-                    non_null_col("state", SqlType::VarChar(Some(255))),
-                    non_null_col("zip", SqlType::VarChar(Some(255))),
-                    non_null_col(
-                        "type",
-                        SqlType::from_enum_variants([
-                            "SHIPPING".into(),
-                            "BILLING".into(),
-                            "LIVING".into(),
-                        ]),
-                    ),
-                ],
-                keys: Some(vec![TableKey::ForeignKey {
-                    constraint_name: None,
-                    columns: vec!["customer_id".into()],
-                    target_table: "customers".into(),
-                    target_columns: vec!["id".into()],
-                    index_name: None,
-                    on_delete: None,
-                    on_update: None,
-                },]),
                 if_not_exists: false,
-                options: vec![CreateTableOption::AutoIncrement(10)],
+                table: "addresses".into(),
+                body: Ok(CreateTableBody {
+                    fields: vec![
+                        ColumnSpecification::with_constraints(
+                            "id".into(),
+                            SqlType::Int(None),
+                            vec![
+                                ColumnConstraint::NotNull,
+                                ColumnConstraint::AutoIncrement,
+                                ColumnConstraint::PrimaryKey,
+                            ]
+                        ),
+                        non_null_col("customer_id", SqlType::Int(None)),
+                        non_null_col("street", SqlType::VarChar(Some(255))),
+                        non_null_col("city", SqlType::VarChar(Some(255))),
+                        non_null_col("state", SqlType::VarChar(Some(255))),
+                        non_null_col("zip", SqlType::VarChar(Some(255))),
+                        non_null_col(
+                            "type",
+                            SqlType::from_enum_variants([
+                                "SHIPPING".into(),
+                                "BILLING".into(),
+                                "LIVING".into(),
+                            ]),
+                        ),
+                    ],
+                    keys: Some(vec![TableKey::ForeignKey {
+                        constraint_name: None,
+                        columns: vec!["customer_id".into()],
+                        target_table: "customers".into(),
+                        target_columns: vec!["id".into()],
+                        index_name: None,
+                        on_delete: None,
+                        on_update: None,
+                    },]),
+                }),
+                options: Ok(vec![CreateTableOption::AutoIncrement(10)],)
             }
         )
     }
@@ -1015,50 +1084,52 @@ mod tests {
         assert_eq!(
             res,
             CreateTableStatement {
-                table: "orders".into(),
-                fields: vec![
-                    ColumnSpecification::with_constraints(
-                        "order_number".into(),
-                        SqlType::Int(None),
-                        vec![
-                            ColumnConstraint::NotNull,
-                            ColumnConstraint::AutoIncrement,
-                            ColumnConstraint::PrimaryKey,
-                        ]
-                    ),
-                    ColumnSpecification::with_constraints(
-                        "purchaser".into(),
-                        SqlType::Int(None),
-                        vec![ColumnConstraint::NotNull]
-                    ),
-                    ColumnSpecification::with_constraints(
-                        "product_id".into(),
-                        SqlType::Int(None),
-                        vec![ColumnConstraint::NotNull]
-                    ),
-                ],
-                keys: Some(vec![
-                    TableKey::ForeignKey {
-                        constraint_name: None,
-                        columns: vec!["purchaser".into()],
-                        target_table: "customers".into(),
-                        target_columns: vec!["id".into()],
-                        index_name: Some("order_customer".into()),
-                        on_delete: None,
-                        on_update: None,
-                    },
-                    TableKey::ForeignKey {
-                        constraint_name: None,
-                        columns: vec!["product_id".into()],
-                        target_table: "products".into(),
-                        target_columns: vec!["id".into()],
-                        index_name: Some("ordered_product".into()),
-                        on_delete: None,
-                        on_update: None,
-                    },
-                ]),
                 if_not_exists: false,
-                options: vec![],
+                table: "orders".into(),
+                body: Ok(CreateTableBody {
+                    fields: vec![
+                        ColumnSpecification::with_constraints(
+                            "order_number".into(),
+                            SqlType::Int(None),
+                            vec![
+                                ColumnConstraint::NotNull,
+                                ColumnConstraint::AutoIncrement,
+                                ColumnConstraint::PrimaryKey,
+                            ]
+                        ),
+                        ColumnSpecification::with_constraints(
+                            "purchaser".into(),
+                            SqlType::Int(None),
+                            vec![ColumnConstraint::NotNull]
+                        ),
+                        ColumnSpecification::with_constraints(
+                            "product_id".into(),
+                            SqlType::Int(None),
+                            vec![ColumnConstraint::NotNull]
+                        ),
+                    ],
+                    keys: Some(vec![
+                        TableKey::ForeignKey {
+                            constraint_name: None,
+                            columns: vec!["purchaser".into()],
+                            target_table: "customers".into(),
+                            target_columns: vec!["id".into()],
+                            index_name: Some("order_customer".into()),
+                            on_delete: None,
+                            on_update: None,
+                        },
+                        TableKey::ForeignKey {
+                            constraint_name: None,
+                            columns: vec!["product_id".into()],
+                            target_table: "products".into(),
+                            target_columns: vec!["id".into()],
+                            index_name: Some("ordered_product".into()),
+                            on_delete: None,
+                            on_update: None,
+                        },
+                    ]),
+                }),
+                options: Ok(vec![],)
             }
         )
     }
@@ -1078,31 +1149,33 @@ mod tests {
         assert_eq!(
             res,
             CreateTableStatement {
-                table: "customers".into(),
-                fields: vec![
-                    ColumnSpecification::with_constraints(
-                        "id".into(),
-                        SqlType::Int(None),
-                        vec![
-                            ColumnConstraint::NotNull,
-                            ColumnConstraint::AutoIncrement,
-                            ColumnConstraint::PrimaryKey,
-                        ]
-                    ),
-                    ColumnSpecification::with_constraints(
-                        "last_name".into(),
-                        SqlType::VarChar(Some(255)),
-                        vec![ColumnConstraint::NotNull, ColumnConstraint::Unique,]
-                    ),
-                    ColumnSpecification::with_constraints(
-                        "email".into(),
-                        SqlType::VarChar(Some(255)),
-                        vec![ColumnConstraint::NotNull, ColumnConstraint::Unique,]
-                    ),
-                ],
-                keys: None,
                 if_not_exists: false,
-                options: vec![CreateTableOption::AutoIncrement(1001)],
+                table: "customers".into(),
+                body: Ok(CreateTableBody {
+                    fields: vec![
+                        ColumnSpecification::with_constraints(
+                            "id".into(),
+                            SqlType::Int(None),
+                            vec![
+                                ColumnConstraint::NotNull,
+                                ColumnConstraint::AutoIncrement,
+                                ColumnConstraint::PrimaryKey,
+                            ]
+                        ),
+                        ColumnSpecification::with_constraints(
+                            "last_name".into(),
+                            SqlType::VarChar(Some(255)),
+                            vec![ColumnConstraint::NotNull, ColumnConstraint::Unique,]
+                        ),
+                        ColumnSpecification::with_constraints(
+                            "email".into(),
+                            SqlType::VarChar(Some(255)),
+                            vec![ColumnConstraint::NotNull, ColumnConstraint::Unique,]
+                        ),
+                    ],
+                    keys: None,
+                }),
+                options: Ok(vec![CreateTableOption::AutoIncrement(1001)],)
             }
         )
     }
@@ -1117,7 +1190,7 @@ mod tests {
               )"
         );
         assert_eq!(
-            res.keys,
+            res.body.unwrap().keys,
             Some(vec![TableKey::Key {
                 constraint_name: None,
                 index_name: Some("age_key".into()),
@@ -1207,16 +1280,18 @@ mod tests {
             assert_eq!(
                 res,
                 CreateTableStatement {
-                    table: "t".into(),
-                    fields: vec![ColumnSpecification {
-                        column: "x".into(),
-                        sql_type: SqlType::Double,
-                        constraints: vec![],
-                        comment: None,
-                    }],
-                    keys: None,
                     if_not_exists: false,
-                    options: vec![],
+                    table: "t".into(),
+                    body: Ok(CreateTableBody {
+                        fields: vec![ColumnSpecification {
+                            column: "x".into(),
+                            sql_type: SqlType::Double,
+                            constraints: vec![],
+                            comment: None,
+                        }],
+                        keys: None,
+                    }),
+                    options: Ok(vec![],)
                 }
             );
         }
@@ -1236,51 +1311,53 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 CreateTableStatement {
-                    table: Relation::from("django_admin_log"),
-                    fields: vec![
-                        ColumnSpecification::with_constraints(
-                            Column::from("id"),
-                            SqlType::Int(None),
-                            vec![
-                                ColumnConstraint::AutoIncrement,
-                                ColumnConstraint::NotNull,
-                                ColumnConstraint::PrimaryKey,
-                            ],
-                        ),
-                        ColumnSpecification::with_constraints(
-                            Column::from("action_time"),
-                            SqlType::DateTime(None),
-                            vec![ColumnConstraint::NotNull],
-                        ),
-                        ColumnSpecification::with_constraints(
-                            Column::from("user_id"),
-                            SqlType::Int(None),
-                            vec![ColumnConstraint::NotNull],
-                        ),
-                        ColumnSpecification::new(
-                            Column::from("content_type_id"),
-                            SqlType::Int(None),
-                        ),
-                        ColumnSpecification::new(Column::from("object_id"), SqlType::LongText,),
-                        ColumnSpecification::with_constraints(
-                            Column::from("object_repr"),
-                            SqlType::VarChar(Some(200)),
-                            vec![ColumnConstraint::NotNull],
-                        ),
-                        ColumnSpecification::with_constraints(
-                            Column::from("action_flag"),
-                            SqlType::UnsignedSmallInt(None),
-                            vec![ColumnConstraint::NotNull],
-                        ),
-                        ColumnSpecification::with_constraints(
-                            Column::from("change_message"),
-                            SqlType::LongText,
-                            vec![ColumnConstraint::NotNull],
-                        ),
-                    ],
-                    keys: None,
                     if_not_exists: false,
-                    options: vec![],
+                    table: Relation::from("django_admin_log"),
+                    body: Ok(CreateTableBody {
+                        fields: vec![
+                            ColumnSpecification::with_constraints(
+                                Column::from("id"),
+                                SqlType::Int(None),
+                                vec![
+                                    ColumnConstraint::AutoIncrement,
+                                    ColumnConstraint::NotNull,
+                                    ColumnConstraint::PrimaryKey,
+                                ],
+                            ),
+                            ColumnSpecification::with_constraints(
+                                Column::from("action_time"),
+                                SqlType::DateTime(None),
+                                vec![ColumnConstraint::NotNull],
+                            ),
+                            ColumnSpecification::with_constraints(
+                                Column::from("user_id"),
+                                SqlType::Int(None),
+                                vec![ColumnConstraint::NotNull],
+                            ),
+                            ColumnSpecification::new(
+                                Column::from("content_type_id"),
+                                SqlType::Int(None),
+                            ),
+                            ColumnSpecification::new(Column::from("object_id"), SqlType::LongText,),
+                            ColumnSpecification::with_constraints(
+                                Column::from("object_repr"),
+                                SqlType::VarChar(Some(200)),
+                                vec![ColumnConstraint::NotNull],
+                            ),
+                            ColumnSpecification::with_constraints(
+                                Column::from("action_flag"),
+                                SqlType::UnsignedSmallInt(None),
+                                vec![ColumnConstraint::NotNull],
+                            ),
+                            ColumnSpecification::with_constraints(
+                                Column::from("change_message"),
+                                SqlType::LongText,
+                                vec![ColumnConstraint::NotNull],
+                            ),
+                        ],
+                        keys: None,
+                    }),
+                    options: Ok(vec![],)
                 }
             );
 
@@ -1291,26 +1368,28 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 CreateTableStatement {
-                    table: Relation::from("auth_group"),
-                    fields: vec![
-                        ColumnSpecification::with_constraints(
-                            Column::from("id"),
-                            SqlType::Int(None),
-                            vec![
-                                ColumnConstraint::AutoIncrement,
-                                ColumnConstraint::NotNull,
-                                ColumnConstraint::PrimaryKey,
-                            ],
-                        ),
-                        ColumnSpecification::with_constraints(
-                            Column::from("name"),
-                            SqlType::VarChar(Some(80)),
-                            vec![ColumnConstraint::NotNull, ColumnConstraint::Unique],
-                        ),
-                    ],
-                    keys: None,
                     if_not_exists: false,
-                    options: vec![],
+                    table: Relation::from("auth_group"),
+                    body: Ok(CreateTableBody {
+                        fields: vec![
+                            ColumnSpecification::with_constraints(
+                                Column::from("id"),
+                                SqlType::Int(None),
+                                vec![
+                                    ColumnConstraint::AutoIncrement,
+                                    ColumnConstraint::NotNull,
+                                    ColumnConstraint::PrimaryKey,
+                                ],
+                            ),
+                            ColumnSpecification::with_constraints(
+                                Column::from("name"),
+                                SqlType::VarChar(Some(80)),
+                                vec![ColumnConstraint::NotNull, ColumnConstraint::Unique],
+                            ),
+                        ],
+                        keys: None,
+                    }),
+                    options: Ok(vec![],)
                 }
             );
         }
@@ -1323,7 +1402,7 @@ mod tests {
             // TODO(malte): INTEGER isn't quite reflected right here, perhaps
             let expected = "CREATE TABLE `auth_group` (\
                         `id` INT AUTO_INCREMENT NOT NULL PRIMARY KEY, \
-                        `name` VARCHAR(80) NOT NULL UNIQUE)\
+                        `name` VARCHAR(80) NOT NULL UNIQUE) \
                         ENGINE=InnoDB, AUTO_INCREMENT=495209, DEFAULT CHARSET=utf8mb4, COLLATE=utf8mb4_unicode_ci";
             let res = create_table(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
             assert_eq!(res.unwrap().1.to_string(), expected);
@@ -1474,60 +1553,62 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 CreateTableStatement {
-                    table: Relation::from("comments"),
-                    fields: vec![
-                        ColumnSpecification::with_constraints(
-                            Column::from("id"),
-                            SqlType::UnsignedInt(None),
-                            vec![
-                                ColumnConstraint::NotNull,
-                                ColumnConstraint::AutoIncrement,
-                                ColumnConstraint::PrimaryKey,
-                            ],
-                        ),
-                        ColumnSpecification::new(Column::from("hat_id"), SqlType::Int(None),),
-                    ],
-                    keys: Some(vec![
-                        TableKey::FulltextKey {
-                            index_name: Some("index_comments_on_comment".into()),
-                            columns: vec![Column::from("comment")]
-                        },
-                        TableKey::Key {
-                            constraint_name: None,
-                            index_name: Some("confidence_idx".into()),
-                            columns: vec![Column::from("confidence")],
-                            index_type: None
-                        },
-                        TableKey::UniqueKey {
-                            constraint_name: None,
-                            index_name: Some("short_id".into()),
-                            columns: vec![Column::from("short_id")],
-                            index_type: None
-                        },
-                        TableKey::Key {
-                            constraint_name: None,
-                            index_name: Some("story_id_short_id".into()),
-                            columns: vec![Column::from("story_id"), Column::from("short_id")],
-                            index_type: None
-                        },
-                        TableKey::Key {
-                            constraint_name: None,
-                            index_name: Some("thread_id".into()),
-                            columns: vec![Column::from("thread_id")],
-                            index_type: None,
-                        },
-                        TableKey::Key {
-                            constraint_name: None,
-                            index_name: Some("index_comments_on_user_id".into()),
-                            columns: vec![Column::from("user_id")],
-                            index_type: None
-                        },
-                    ]),
                     if_not_exists: false,
-                    options: vec![
+                    table: Relation::from("comments"),
+                    body: Ok(CreateTableBody {
+                        fields: vec![
+                            ColumnSpecification::with_constraints(
+                                Column::from("id"),
+                                SqlType::UnsignedInt(None),
+                                vec![
+                                    ColumnConstraint::NotNull,
+                                    ColumnConstraint::AutoIncrement,
+                                    ColumnConstraint::PrimaryKey,
+                                ],
+                            ),
+                            ColumnSpecification::new(Column::from("hat_id"), SqlType::Int(None),),
+                        ],
+                        keys: Some(vec![
+                            TableKey::FulltextKey {
+                                index_name: Some("index_comments_on_comment".into()),
+                                columns: vec![Column::from("comment")]
+                            },
+                            TableKey::Key {
+                                constraint_name: None,
+                                index_name: Some("confidence_idx".into()),
+                                columns: vec![Column::from("confidence")],
+                                index_type: None
+                            },
+                            TableKey::UniqueKey {
+                                constraint_name: None,
+                                index_name: Some("short_id".into()),
+                                columns: vec![Column::from("short_id")],
+                                index_type: None
+                            },
+                            TableKey::Key {
+                                constraint_name: None,
+                                index_name: Some("story_id_short_id".into()),
+                                columns: vec![Column::from("story_id"), Column::from("short_id")],
+                                index_type: None
+                            },
+                            TableKey::Key {
+                                constraint_name: None,
+                                index_name: Some("thread_id".into()),
+                                columns: vec![Column::from("thread_id")],
+                                index_type: None,
+                            },
+                            TableKey::Key {
+                                constraint_name: None,
+                                index_name: Some("index_comments_on_user_id".into()),
+                                columns: vec![Column::from("user_id")],
+                                index_type: None
+                            },
+                        ]),
+                    }),
+                    options: Ok(vec![
                         CreateTableOption::Engine(Some("InnoDB".to_string())),
                         CreateTableOption::Charset(CharsetName::Unquoted("utf8mb4".into())),
-                    ],
+                    ])
                 }
             );
         }
@@ -1541,32 +1622,34 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 CreateTableStatement {
+                    if_not_exists: false,
                     table: Relation::from("user_newtalk"),
-                    fields: vec![
-                        ColumnSpecification::with_constraints(
-                            Column::from("user_id"),
-                            SqlType::Int(Some(5)),
-                            vec![
-                                ColumnConstraint::NotNull,
-                                ColumnConstraint::DefaultValue(Expr::Literal(Literal::String(
-                                    String::from("0")
-                                ))),
-                            ],
-                        ),
-                        ColumnSpecification::with_constraints(
-                            Column::from("user_ip"),
-                            SqlType::VarChar(Some(40)),
-                            vec![
-                                ColumnConstraint::NotNull,
-                                ColumnConstraint::DefaultValue(Expr::Literal(Literal::String(
-                                    String::from("")
-                                ))),
-                            ],
-                        ),
-                    ],
-                    options: vec![CreateTableOption::Other],
-                    keys: None,
-                    if_not_exists: false
+                    body: Ok(CreateTableBody {
+                        fields: vec![
+                            ColumnSpecification::with_constraints(
+                                Column::from("user_id"),
+                                SqlType::Int(Some(5)),
+                                vec![
+                                    ColumnConstraint::NotNull,
+                                    ColumnConstraint::DefaultValue(Expr::Literal(Literal::String(
+                                        String::from("0")
+                                    ))),
+                                ],
+                            ),
+                            ColumnSpecification::with_constraints(
+                                Column::from("user_ip"),
+                                SqlType::VarChar(Some(40)),
+                                vec![
+                                    ColumnConstraint::NotNull,
+                                    ColumnConstraint::DefaultValue(Expr::Literal(Literal::String(
+                                        String::from("")
+                                    ))),
+                                ],
+                            ),
+                        ],
+                        keys: None,
+                    }),
+                    options: Ok(vec![CreateTableOption::Other]),
                 }
             );
         }
@@ -1693,16 +1776,18 @@ mod tests {
             assert_eq!(
                 res,
                 CreateTableStatement {
-                    table: "t".into(),
-                    fields: vec![ColumnSpecification {
-                        column: "x".into(),
-                        sql_type: SqlType::Double,
-                        constraints: vec![],
-                        comment: None,
-                    }],
-                    keys: None,
                     if_not_exists: false,
-                    options: vec![],
+                    table: "t".into(),
+                    body: Ok(CreateTableBody {
+                        fields: vec![ColumnSpecification {
+                            column: "x".into(),
+                            sql_type: SqlType::Double,
+                            constraints: vec![],
+                            comment: None,
+                        }],
+                        keys: None,
+                    }),
+                    options: Ok(vec![])
                 }
             );
         }
@@ -1714,14 +1799,16 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 CreateTableStatement {
-                    table: Relation::from("groups"),
-                    fields: vec![ColumnSpecification::new(
-                        Column::from("id"),
-                        SqlType::Int(None)
-                    ),],
-                    keys: None,
                     if_not_exists: false,
-                    options: vec![]
+                    table: Relation::from("groups"),
+                    body: Ok(CreateTableBody {
+                        fields: vec![ColumnSpecification::new(
+                            Column::from("id"),
+                            SqlType::Int(None)
+                        ),],
+                        keys: None,
+                    }),
+                    options: Ok(vec![])
                 }
             );
         }
@@ -1748,51 +1835,53 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 CreateTableStatement {
-                    table: Relation::from("django_admin_log"),
-                    fields: vec![
-                        ColumnSpecification::with_constraints(
-                            Column::from("id"),
-                            SqlType::Int(None),
-                            vec![
-                                ColumnConstraint::AutoIncrement,
-                                ColumnConstraint::NotNull,
-                                ColumnConstraint::PrimaryKey,
-                            ],
-                        ),
-                        ColumnSpecification::with_constraints(
-                            Column::from("action_time"),
-                            SqlType::DateTime(None),
-                            vec![ColumnConstraint::NotNull],
-                        ),
-                        ColumnSpecification::with_constraints(
-                            Column::from("user_id"),
-                            SqlType::Int(None),
-                            vec![ColumnConstraint::NotNull],
-                        ),
-                        ColumnSpecification::new(
-                            Column::from("content_type_id"),
-                            SqlType::Int(None),
-                        ),
-                        ColumnSpecification::new(Column::from("object_id"), SqlType::LongText,),
-                        ColumnSpecification::with_constraints(
-                            Column::from("object_repr"),
-                            SqlType::VarChar(Some(200)),
-                            vec![ColumnConstraint::NotNull],
-                        ),
-                        ColumnSpecification::with_constraints(
-                            Column::from("action_flag"),
-                            SqlType::UnsignedSmallInt(None),
-                            vec![ColumnConstraint::NotNull],
-                        ),
-                        ColumnSpecification::with_constraints(
-                            Column::from("change_message"),
-                            SqlType::LongText,
-                            vec![ColumnConstraint::NotNull],
-                        ),
-                    ],
-                    keys: None,
                     if_not_exists: false,
-                    options: vec![],
+                    table: Relation::from("django_admin_log"),
+                    body: Ok(CreateTableBody {
+                        fields: vec![
+                            ColumnSpecification::with_constraints(
+                                Column::from("id"),
+                                SqlType::Int(None),
+                                vec![
+                                    ColumnConstraint::AutoIncrement,
+                                    ColumnConstraint::NotNull,
+                                    ColumnConstraint::PrimaryKey,
+                                ],
+                            ),
+                            ColumnSpecification::with_constraints(
+                                Column::from("action_time"),
+                                SqlType::DateTime(None),
+                                vec![ColumnConstraint::NotNull],
+                            ),
+                            ColumnSpecification::with_constraints(
+                                Column::from("user_id"),
+                                SqlType::Int(None),
+                                vec![ColumnConstraint::NotNull],
+                            ),
+                            ColumnSpecification::new(
+                                Column::from("content_type_id"),
+                                SqlType::Int(None),
+                            ),
+                            ColumnSpecification::new(Column::from("object_id"), SqlType::LongText,),
+                            ColumnSpecification::with_constraints(
+                                Column::from("object_repr"),
+                                SqlType::VarChar(Some(200)),
+                                vec![ColumnConstraint::NotNull],
+                            ),
+                            ColumnSpecification::with_constraints(
+                                Column::from("action_flag"),
+                                SqlType::UnsignedSmallInt(None),
+                                vec![ColumnConstraint::NotNull],
+                            ),
+                            ColumnSpecification::with_constraints(
+                                Column::from("change_message"),
+                                SqlType::LongText,
+                                vec![ColumnConstraint::NotNull],
+                            ),
+                        ],
+                        keys: None,
+                    }),
+                    options: Ok(vec![])
                 }
             );
 
@@ -1803,26 +1892,28 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 CreateTableStatement {
-                    table: Relation::from("auth_group"),
-                    fields: vec![
-                        ColumnSpecification::with_constraints(
-                            Column::from("id"),
-                            SqlType::Int(None),
-                            vec![
-                                ColumnConstraint::AutoIncrement,
-                                ColumnConstraint::NotNull,
-                                ColumnConstraint::PrimaryKey,
-                            ],
-                        ),
-                        ColumnSpecification::with_constraints(
-                            Column::from("name"),
-                            SqlType::VarChar(Some(80)),
-                            vec![ColumnConstraint::NotNull, ColumnConstraint::Unique],
-                        ),
-                    ],
-                    keys: None,
                     if_not_exists: false,
-                    options: vec![],
+                    table: Relation::from("auth_group"),
+                    body: Ok(CreateTableBody {
+                        fields: vec![
+                            ColumnSpecification::with_constraints(
+                                Column::from("id"),
+                                SqlType::Int(None),
+                                vec![
+                                    ColumnConstraint::AutoIncrement,
+                                    ColumnConstraint::NotNull,
+                                    ColumnConstraint::PrimaryKey,
+                                ],
+                            ),
+                            ColumnSpecification::with_constraints(
+                                Column::from("name"),
+                                SqlType::VarChar(Some(80)),
+                                vec![ColumnConstraint::NotNull, ColumnConstraint::Unique],
+                            ),
+                        ],
+                        keys: None,
+                    }),
+                    options: Ok(vec![]),
                 }
             );
         }
@@ -1892,60 +1983,62 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 CreateTableStatement {
-                    table: Relation::from("comments"),
-                    fields: vec![
-                        ColumnSpecification::with_constraints(
-                            Column::from("id"),
-                            SqlType::UnsignedInt(None),
-                            vec![
-                                ColumnConstraint::NotNull,
-                                ColumnConstraint::AutoIncrement,
-                                ColumnConstraint::PrimaryKey,
-                            ],
-                        ),
-                        ColumnSpecification::new(Column::from("hat_id"), SqlType::Int(None),),
-                    ],
-                    keys: Some(vec![
-                        TableKey::FulltextKey {
-                            index_name: Some("index_comments_on_comment".into()),
-                            columns: vec![Column::from("comment")]
-                        },
-                        TableKey::Key {
-                            constraint_name: None,
-                            index_name: Some("confidence_idx".into()),
-                            columns: vec![Column::from("confidence")],
-                            index_type: None
-                        },
-                        TableKey::UniqueKey {
-                            constraint_name: None,
-                            index_name: Some("short_id".into()),
-                            columns: vec![Column::from("short_id")],
-                            index_type: None,
-                        },
-                        TableKey::Key {
-                            constraint_name: None,
-                            index_name: Some("story_id_short_id".into()),
-                            columns: vec![Column::from("story_id"), Column::from("short_id")],
-                            index_type: None
-                        },
-                        TableKey::Key {
-                            constraint_name: None,
-                            index_name: Some("thread_id".into()),
-                            columns: vec![Column::from("thread_id")],
-                            index_type: None
-                        },
-                        TableKey::Key {
-                            constraint_name: None,
-                            index_name: Some("index_comments_on_user_id".into()),
-                            columns: vec![Column::from("user_id")],
-                            index_type: None
-                        },
-                    ]),
                     if_not_exists: false,
-                    options: vec![
+                    table: Relation::from("comments"),
+                    body: Ok(CreateTableBody {
+                        fields: vec![
+                            ColumnSpecification::with_constraints(
+                                Column::from("id"),
+                                SqlType::UnsignedInt(None),
+                                vec![
+                                    ColumnConstraint::NotNull,
+                                    ColumnConstraint::AutoIncrement,
+                                    ColumnConstraint::PrimaryKey,
+                                ],
+                            ),
+                            ColumnSpecification::new(Column::from("hat_id"), SqlType::Int(None),),
+                        ],
+                        keys: Some(vec![
+                            TableKey::FulltextKey {
+                                index_name: Some("index_comments_on_comment".into()),
+                                columns: vec![Column::from("comment")]
+                            },
+                            TableKey::Key {
+                                constraint_name: None,
+                                index_name: Some("confidence_idx".into()),
+                                columns: vec![Column::from("confidence")],
+                                index_type: None
+                            },
+                            TableKey::UniqueKey {
+                                constraint_name: None,
+                                index_name: Some("short_id".into()),
+                                columns: vec![Column::from("short_id")],
+                                index_type: None,
+                            },
+                            TableKey::Key {
+                                constraint_name: None,
+                                index_name: Some("story_id_short_id".into()),
+                                columns: vec![Column::from("story_id"), Column::from("short_id")],
+                                index_type: None
+                            },
+                            TableKey::Key {
+                                constraint_name: None,
+                                index_name: Some("thread_id".into()),
+                                columns: vec![Column::from("thread_id")],
+                                index_type: None
+                            },
+                            TableKey::Key {
+                                constraint_name: None,
+                                index_name: Some("index_comments_on_user_id".into()),
+                                columns: vec![Column::from("user_id")],
+                                index_type: None
+                            },
+                        ]),
+                    }),
+                    options: Ok(vec![
                         CreateTableOption::Engine(Some("InnoDB".to_string())),
                         CreateTableOption::Charset(CharsetName::Unquoted("utf8mb4".into()))
-                    ],
+                    ]),
                 }
             );
         }
@@ -1959,32 +2052,34 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 CreateTableStatement {
+                    if_not_exists: false,
                     table: Relation::from("user_newtalk"),
-                    fields: vec![
-                        ColumnSpecification::with_constraints(
-                            Column::from("user_id"),
-                            SqlType::Int(Some(5)),
-                            vec![
-                                ColumnConstraint::NotNull,
-                                ColumnConstraint::DefaultValue(Expr::Literal(Literal::String(
-                                    String::from("0")
-                                ))),
-                            ],
-                        ),
-                        ColumnSpecification::with_constraints(
-                            Column::from("user_ip"),
-                            SqlType::VarChar(Some(40)),
-                            vec![
-                                ColumnConstraint::NotNull,
-                                ColumnConstraint::DefaultValue(Expr::Literal(Literal::String(
-                                    String::from("")
-                                ))),
-                            ],
-                        ),
-                    ],
-                    options: vec![CreateTableOption::Other],
-                    keys: None,
-                    if_not_exists: false
+                    body: Ok(CreateTableBody {
+                        fields: vec![
+                            ColumnSpecification::with_constraints(
+                                Column::from("user_id"),
+                                SqlType::Int(Some(5)),
+                                vec![
+                                    ColumnConstraint::NotNull,
+                                    ColumnConstraint::DefaultValue(Expr::Literal(Literal::String(
+                                        String::from("0")
+                                    ))),
+                                ],
+                            ),
+                            ColumnSpecification::with_constraints(
+                                Column::from("user_ip"),
+                                SqlType::VarChar(Some(40)),
+                                vec![
+                                    ColumnConstraint::NotNull,
+                                    ColumnConstraint::DefaultValue(Expr::Literal(Literal::String(
+                                        String::from("")
+                                    ))),
+                                ],
+                            ),
+                        ],
+                        keys: None,
+                    }),
+                    options: Ok(vec![CreateTableOption::Other]),
                 }
             );
         }
@@ -2067,111 +2162,113 @@ mod tests {
         assert_eq!(
             res,
             CreateTableStatement {
-                table: "access_tokens".into(),
-                fields: vec![
-                    ColumnSpecification::with_constraints(
-                        "id".into(),
-                        SqlType::UnsignedInt(Some(10)),
-                        vec![ColumnConstraint::NotNull, ColumnConstraint::AutoIncrement,]
-                    ),
-                    ColumnSpecification::with_constraints(
-                        "token".into(),
-                        SqlType::VarChar(Some(40)),
-                        vec![
-                            ColumnConstraint::Collation("utf8mb4_unicode_ci".into()),
-                            ColumnConstraint::NotNull
-                        ]
-                    ),
-                    ColumnSpecification::with_constraints(
-                        "user_id".into(),
-                        SqlType::UnsignedInt(Some(10)),
-                        vec![ColumnConstraint::NotNull]
-                    ),
-                    ColumnSpecification::with_constraints(
-                        "last_activity_at".into(),
-                        SqlType::DateTime(None),
-                        vec![ColumnConstraint::NotNull]
-                    ),
-                    ColumnSpecification::with_constraints(
-                        "created_at".into(),
-                        SqlType::DateTime(None),
-                        vec![ColumnConstraint::NotNull],
-                    ),
-                    ColumnSpecification::with_constraints(
-                        "type".into(),
-                        SqlType::VarChar(Some(100)),
-                        vec![
-                            ColumnConstraint::Collation("utf8mb4_unicode_ci".into()),
-                            ColumnConstraint::NotNull,
-                        ]
-                    ),
-                    ColumnSpecification::with_constraints(
-                        "title".into(),
-                        SqlType::VarChar(Some(150)),
-                        vec![
-                            ColumnConstraint::Collation("utf8mb4_unicode_ci".into()),
-                            ColumnConstraint::DefaultValue(Expr::Literal(Literal::Null)),
-                        ]
-                    ),
-                    ColumnSpecification::with_constraints(
-                        "last_ip_address".into(),
-                        SqlType::VarChar(Some(45)),
-                        vec![
-                            ColumnConstraint::Collation("utf8mb4_unicode_ci".into()),
-                            ColumnConstraint::DefaultValue(Expr::Literal(Literal::Null)),
-                        ]
-                    ),
-                    ColumnSpecification::with_constraints(
-                        "last_user_agent".into(),
-                        SqlType::VarChar(Some(255)),
-                        vec![
-                            ColumnConstraint::Collation("utf8mb4_unicode_ci".into()),
-                            ColumnConstraint::DefaultValue(Expr::Literal(Literal::Null)),
-                        ]
-                    ),
-                ],
-                keys: Some(vec![
-                    TableKey::PrimaryKey {
-                        constraint_name: None,
-                        index_name: None,
-                        columns: vec!["id".into()]
-                    },
-                    TableKey::UniqueKey {
-                        constraint_name: None,
-                        index_name: Some("access_tokens_token_unique".into()),
-                        columns: vec!["token".into()],
-                        index_type: None,
-                    },
-                    TableKey::Key {
-                        constraint_name: None,
-                        index_name: Some("access_tokens_user_id_foreign".into()),
-                        columns: vec!["user_id".into()],
-                        index_type: None,
-                    },
-                    TableKey::Key {
-                        constraint_name: None,
-                        index_name: Some("access_tokens_type_index".into()),
-                        columns: vec!["type".into()],
-                        index_type: None,
-                    },
-                    TableKey::ForeignKey {
-                        constraint_name: Some("access_tokens_user_id_foreign".into()),
-                        columns: vec!["user_id".into()],
-                        target_table: "users".into(),
-                        target_columns: vec!["id".into()],
-                        index_name: None,
-                        on_delete: Some(ReferentialAction::Cascade),
-                        on_update: Some(ReferentialAction::Cascade),
-                    },
-                ]),
                 if_not_exists: false,
-                options: vec![
+                table: "access_tokens".into(),
+                body: Ok(CreateTableBody {
+                    fields: vec![
+                        ColumnSpecification::with_constraints(
+                            "id".into(),
+                            SqlType::UnsignedInt(Some(10)),
+                            vec![ColumnConstraint::NotNull, ColumnConstraint::AutoIncrement,]
+                        ),
+                        ColumnSpecification::with_constraints(
+                            "token".into(),
+                            SqlType::VarChar(Some(40)),
+                            vec![
+                                ColumnConstraint::Collation("utf8mb4_unicode_ci".into()),
+                                ColumnConstraint::NotNull
+                            ]
+                        ),
+                        ColumnSpecification::with_constraints(
+                            "user_id".into(),
+                            SqlType::UnsignedInt(Some(10)),
+                            vec![ColumnConstraint::NotNull]
+                        ),
+                        ColumnSpecification::with_constraints(
+                            "last_activity_at".into(),
+                            SqlType::DateTime(None),
+                            vec![ColumnConstraint::NotNull]
+                        ),
+                        ColumnSpecification::with_constraints(
+                            "created_at".into(),
+                            SqlType::DateTime(None),
+                            vec![ColumnConstraint::NotNull],
+                        ),
+                        ColumnSpecification::with_constraints(
+                            "type".into(),
+                            SqlType::VarChar(Some(100)),
+                            vec![
+                                ColumnConstraint::Collation("utf8mb4_unicode_ci".into()),
+                                ColumnConstraint::NotNull,
+                            ]
+                        ),
+                        ColumnSpecification::with_constraints(
+                            "title".into(),
+                            SqlType::VarChar(Some(150)),
+                            vec![
+                                ColumnConstraint::Collation("utf8mb4_unicode_ci".into()),
+                                ColumnConstraint::DefaultValue(Expr::Literal(Literal::Null)),
+                            ]
+                        ),
+                        ColumnSpecification::with_constraints(
+                            "last_ip_address".into(),
+                            SqlType::VarChar(Some(45)),
+                            vec![
+                                ColumnConstraint::Collation("utf8mb4_unicode_ci".into()),
+                                ColumnConstraint::DefaultValue(Expr::Literal(Literal::Null)),
+                            ]
+                        ),
+                        ColumnSpecification::with_constraints(
+                            "last_user_agent".into(),
+                            SqlType::VarChar(Some(255)),
+                            vec![
+                                ColumnConstraint::Collation("utf8mb4_unicode_ci".into()),
+                                ColumnConstraint::DefaultValue(Expr::Literal(Literal::Null)),
+                            ]
+                        ),
+                    ],
+                    keys: Some(vec![
+                        TableKey::PrimaryKey {
+                            constraint_name: None,
+                            index_name: None,
+                            columns: vec!["id".into()]
+                        },
+                        TableKey::UniqueKey {
+                            constraint_name: None,
+                            index_name: Some("access_tokens_token_unique".into()),
+                            columns: vec!["token".into()],
+                            index_type: None,
+                        },
+                        TableKey::Key {
+                            constraint_name: None,
+                            index_name: Some("access_tokens_user_id_foreign".into()),
+                            columns: vec!["user_id".into()],
+                            index_type: None,
+                        },
+                        TableKey::Key {
+                            constraint_name: None,
+                            index_name: Some("access_tokens_type_index".into()),
+                            columns: vec!["type".into()],
+                            index_type: None,
+                        },
+                        TableKey::ForeignKey {
+                            constraint_name: Some("access_tokens_user_id_foreign".into()),
+                            columns: vec!["user_id".into()],
+                            target_table: "users".into(),
+                            target_columns: vec!["id".into()],
+                            index_name: None,
+                            on_delete: Some(ReferentialAction::Cascade),
+                            on_update: Some(ReferentialAction::Cascade),
+                        },
+                    ]),
+                }),
+                options: Ok(vec![
                     CreateTableOption::Engine(Some("InnoDB".to_string())),
                     CreateTableOption::Charset(CharsetName::Unquoted("utf8mb4".into())),
                     CreateTableOption::Collate(CollationName::Unquoted(
                         "utf8mb4_unicode_ci".into()
                     ))
-                ],
+                ]),
             }
         )
     }
@@ -2184,25 +2281,27 @@ mod tests {
         assert_eq!(
             res,
             CreateTableStatement {
-                table: "mentions_posts".into(),
-                fields: vec![
-                    ColumnSpecification::with_constraints(
-                        "post_id".into(),
-                        SqlType::UnsignedInt(None),
-                        vec![ColumnConstraint::NotNull],
-                    ),
-                    ColumnSpecification::with_constraints(
-                        "mentions_id".into(),
-                        SqlType::UnsignedInt(None),
-                        vec![ColumnConstraint::NotNull],
-                    ),
-                ],
-                keys: None,
                 if_not_exists: false,
-                options: vec![
+                table: "mentions_posts".into(),
+                body: Ok(CreateTableBody {
+                    fields: vec![
+                        ColumnSpecification::with_constraints(
+                            "post_id".into(),
+                            SqlType::UnsignedInt(None),
+                            vec![ColumnConstraint::NotNull],
+                        ),
+                        ColumnSpecification::with_constraints(
+                            "mentions_id".into(),
+                            SqlType::UnsignedInt(None),
+                            vec![ColumnConstraint::NotNull],
+                        ),
+                    ],
+                    keys: None,
+                }),
+                options: Ok(vec![
                     CreateTableOption::Charset(CharsetName::Unquoted("utf8mb4".into())),
                     CreateTableOption::Collate(CollationName::Quoted("utf8mb4_unicode_ci".into()))
-                ],
+                ]),
             }
         )
     }
@@ -2262,7 +2361,7 @@ PRIMARY KEY (`key`));";
 PRIMARY KEY (`id`));";
         let res = test_parse!(create_table(Dialect::MySQL), qstring);
         assert_eq!(res.table.name, "uploads");
-        assert_eq!(res.fields.len(), 23);
+        assert_eq!(res.body.unwrap().fields.len(), 23);
     }
 
     #[test]

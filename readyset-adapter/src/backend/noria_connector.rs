@@ -1208,7 +1208,7 @@ impl NoriaConnector {
                         .find_position(|f| f.column == *c)
                         .ok_or_else(|| {
                             table_err(
-                                schema.table.clone(),
+                                putter.table_name().clone(),
                                 ReadySetError::NoSuchColumn(c.name.to_string()),
                             )
                         })?;

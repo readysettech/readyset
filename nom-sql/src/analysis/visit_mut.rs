@@ -708,18 +708,22 @@ pub fn walk_create_table_statement<'a, V: VisitorMut<'a>>(
 ) -> Result<(), V::Error> {
     visitor.visit_table(&mut create_table_statement.table)?;
 
-    for field in &mut create_table_statement.fields {
-        visitor.visit_column_specification(field)?;
-    }
+    if let Ok(body) = &mut create_table_statement.body {
+        for field in &mut body.fields {
+            visitor.visit_column_specification(field)?;
+        }
 
-    if let Some(keys) = &mut create_table_statement.keys {
-        for key in keys {
-            visitor.visit_table_key(key)?;
+        if let Some(keys) = &mut body.keys {
+            for key in keys {
+                visitor.visit_table_key(key)?;
+            }
         }
     }
 
-    for option in &mut create_table_statement.options {
-        visitor.visit_create_table_option(option)?;
+    if let Ok(options) = &mut create_table_statement.options {
+        for option in options {
+            visitor.visit_create_table_option(option)?;
+        }
     }
 
     Ok(())

@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use nom_sql::{
-    BinaryOperator, Column, ColumnConstraint, CreateTableStatement, Expr, Relation,
-    SelectStatement, SqlQuery, TableExpr, TableKey,
+    BinaryOperator, Column, ColumnConstraint, CreateTableBody, Expr, Relation, SelectStatement,
+    SqlQuery, TableExpr, TableKey,
 };
 use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
 
@@ -14,13 +14,13 @@ pub trait OrderLimitRemoval: Sized {
     /// column have an associated table name.
     fn order_limit_removal(
         self,
-        base_schemas: &HashMap<Relation, CreateTableStatement>,
+        base_schemas: &HashMap<Relation, CreateTableBody>,
     ) -> ReadySetResult<Self>;
 }
 
 fn is_unique_or_primary(
     col: &Column,
-    base_schemas: &HashMap<Relation, CreateTableStatement>,
+    base_schemas: &HashMap<Relation, CreateTableBody>,
     table_exprs: &[TableExpr],
 ) -> ReadySetResult<bool> {
     // This assumes that we will find exactly one table matching col.table and exactly one col
@@ -58,7 +58,7 @@ fn is_unique_or_primary(
     };
 
     // check to see if column is in table.keys (and whether we have a compound primary key)
-    let col_in_keys = if let Some(ref keys) = table.keys {
+    let col_in_keys = if let Some(keys) = &table.keys {
         keys.iter().any(|key| match key {
             // TODO(DAN): Support compound keys
             TableKey::PrimaryKey { columns, .. } | TableKey::UniqueKey { columns, .. } => {
@@ -90,7 +90,7 @@ fn is_unique_or_primary(
 
 fn compares_unique_key_against_literal(
     expr: &Expr,
-    base_schemas: &HashMap<Relation, CreateTableStatement>,
+    base_schemas: &HashMap<Relation, CreateTableBody>,
     table_exprs: &[TableExpr],
 ) -> ReadySetResult<bool> {
     match expr {
@@ -121,7 +121,7 @@ fn compares_unique_key_against_literal(
 impl OrderLimitRemoval for SelectStatement {
     fn order_limit_removal(
         mut self,
-        base_schemas: &HashMap<Relation, CreateTableStatement>,
+        base_schemas: &HashMap<Relation, CreateTableBody>,
     ) -> ReadySetResult<Self> {
         // If the query uses an equality filter on a column that has a unique or primary key
         // index, remove order and limit
@@ -141,7 +141,7 @@ impl OrderLimitRemoval for SelectStatement {
 impl OrderLimitRemoval for SqlQuery {
     fn order_limit_removal(
         self,
-        base_schemas: &HashMap<Relation, CreateTableStatement>,
+        base_schemas: &HashMap<Relation, CreateTableBody>,
     ) -> ReadySetResult<Self> {
         match self {
             SqlQuery::Select(stmt) => Ok(SqlQuery::Select(stmt.order_limit_removal(base_schemas)?)),
@@ -152,11 +152,11 @@ impl OrderLimitRemoval for SqlQuery {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{parse_query, ColumnSpecification, Dialect, Relation};
+    use nom_sql::{parse_query, ColumnSpecification, CreateTableBody, Dialect, Relation};
 
     use super::*;
 
-    fn generate_base_schemas() -> HashMap<Relation, CreateTableStatement> {
+    fn generate_base_schemas() -> HashMap<Relation, CreateTableBody> {
         let table = Relation::from("t");
 
         let col1 = ColumnSpecification {
@@ -213,16 +213,7 @@ mod tests {
         let if_not_exists = false;
 
         let mut base_schemas = HashMap::new();
-        base_schemas.insert(
-            "t".into(),
-            CreateTableStatement {
-                table,
-                fields,
-                keys,
-                if_not_exists,
-                options: vec![],
-            },
-        );
+        base_schemas.insert("t".into(), CreateTableBody { fields, keys });
         base_schemas
     }
 

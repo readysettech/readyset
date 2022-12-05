@@ -14,7 +14,7 @@ use futures_util::stream::futures_unordered::FuturesUnordered;
 use futures_util::stream::TryStreamExt;
 use futures_util::{future, ready};
 use itertools::Either;
-use nom_sql::{CreateTableStatement, Relation, SqlIdentifier};
+use nom_sql::{CreateTableBody, Relation, SqlIdentifier};
 use petgraph::graph::NodeIndex;
 use readyset_data::DfValue;
 use readyset_errors::{
@@ -283,7 +283,7 @@ pub struct TableBuilder {
 
     pub table_name: Relation,
     pub columns: Vec<SqlIdentifier>,
-    pub schema: Option<CreateTableStatement>,
+    pub schema: Option<CreateTableBody>,
 
     /// The amount of time before a table request RPC is terminated.
     pub table_request_timeout: Duration,
@@ -362,7 +362,7 @@ pub struct Table {
     columns: Vec<SqlIdentifier>,
     dropped: VecMap<DfValue>,
     table_name: Relation,
-    schema: Option<CreateTableStatement>,
+    schema: Option<CreateTableBody>,
     shards: Vec<TableRpc>,
     shard_addrs: Vec<SocketAddr>,
     last_trace_sample: Instant,
@@ -674,7 +674,7 @@ impl Table {
     ///
     /// Note that this will *not* be updated if the underlying recipe changes and adds or removes
     /// columns!
-    pub fn schema(&self) -> Option<&CreateTableStatement> {
+    pub fn schema(&self) -> Option<&CreateTableBody> {
         self.schema.as_ref()
     }
 
