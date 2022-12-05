@@ -126,7 +126,7 @@ use clap::Parser;
 use opentelemetry::runtime;
 use opentelemetry::sdk::trace::Tracer;
 pub use readyset_tracing_proc_macros::{instrument_child, instrument_remote, instrument_root};
-use tracing::{warn, Subscriber};
+use tracing::Subscriber;
 use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::filter::{Filtered, ParseError, Targets};
 use tracing_subscriber::registry::LookupSpan;
@@ -140,10 +140,13 @@ mod percent;
 use percent::Percent;
 pub mod presampled;
 pub mod propagation;
+pub mod tracing_wrapper;
+#[macro_use]
+mod macros;
 
 pub fn warn_if_debug_build() {
     if cfg!(debug) {
-        warn!("Running a debug build")
+        tracing::warn!("Running a debug build")
     }
 }
 
