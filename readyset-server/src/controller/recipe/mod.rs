@@ -11,8 +11,8 @@ use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::ViewCreateRequest;
 use readyset_data::Dialect;
 use readyset_errors::{internal, invariant, invariant_eq, ReadySetError, ReadySetResult};
+use readyset_tracing::{debug, error, info, trace, warn};
 use serde::{Deserialize, Serialize};
-use tracing::{debug, error, info, trace, warn};
 
 use super::sql;
 use crate::controller::recipe::registry::{ExprRegistry, RecipeExpr};

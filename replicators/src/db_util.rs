@@ -6,6 +6,7 @@ use nom_sql::Dialect;
 use readyset_client::ReadySetError;
 use readyset_sql_passes::anonymize::{Anonymize, Anonymizer};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
+use readyset_tracing::{trace, warn};
 
 #[derive(Debug, Default)]
 pub struct DatabaseSchemas {
@@ -107,7 +108,7 @@ impl CreateSchema {
 
     fn anonymize_tables(&mut self, anonymizer: &mut Anonymizer) {
         for (_, table) in self.table_creates.iter_mut() {
-            tracing::trace!("create table: {table:?}");
+            trace!("create table: {table:?}");
             if let Dialect::PostgreSQL = self.dialect {
                 // HACK: strip out the backticks from these since they aren't valid in PostgreSQL
                 // until we handle formatting by dialect correctly
@@ -126,7 +127,7 @@ impl CreateSchema {
 
     fn anonymize_views(&mut self, anonymizer: &mut Anonymizer) {
         for (_, view) in self.view_creates.iter_mut() {
-            tracing::trace!("create view: {view:?}");
+            trace!("create view: {view:?}");
             *view = match nom_sql::parse_create_view(self.dialect, view.clone()) {
                 Ok(mut parsed_view) => {
                     parsed_view.anonymize(anonymizer);
@@ -144,7 +145,7 @@ impl CreateSchema {
             TelemetryBuilder::new().schema(create).build(),
         ) {
             Ok(_) => {}
-            Err(_) => tracing::warn!("Failed to send create schema telemetry"),
+            Err(_) => warn!("Failed to send create schema telemetry"),
         }
     }
 
@@ -182,6 +183,7 @@ pub fn error_is_slot_not_found(err: &ReadySetError, slot_name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use nom_sql::SqlIdentifier;
+    use readyset_tracing::info;
 
     use super::*;
 
@@ -247,14 +249,14 @@ mod tests {
         // We don't anonymize the name keys, so iterate over the values for assertion
         for (_, table) in create_schema.table_creates {
             for scrubbed in should_be_scrubbed.iter() {
-                tracing::info!("{:?}", table.to_string());
+                info!("{:?}", table.to_string());
                 assert!(!table.to_string().contains(scrubbed.as_str()));
             }
         }
 
         for (_, view) in create_schema.view_creates {
             for scrubbed in should_be_scrubbed.iter() {
-                tracing::info!("{:?}", view.to_string());
+                info!("{:?}", view.to_string());
                 assert!(!view.to_string().contains(scrubbed.as_str()));
             }
         }

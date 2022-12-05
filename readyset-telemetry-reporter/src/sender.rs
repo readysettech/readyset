@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use readyset_tracing::{debug, warn};
 use tokio::sync::mpsc::Sender;
 use tokio::sync::{oneshot, Mutex};
 
@@ -49,9 +50,9 @@ impl TelemetrySender {
     /// If this reporter was initialized with an API key equal to [`HARDCODED_API_KEY`], this
     /// function is a no-op.
     pub fn send_event_with_payload(&self, event: TelemetryEvent, payload: Telemetry) -> Result<()> {
-        tracing::debug!("sending {event:?} with payload {payload:?}");
+        debug!("sending {event:?} with payload {payload:?}");
         if self.no_op {
-            tracing::debug!("Ignoring ({event:?} {payload:?}) in no-op mode");
+            debug!("Ignoring ({event:?} {payload:?}) in no-op mode");
             return Ok(());
         }
 
@@ -74,7 +75,7 @@ impl TelemetrySender {
         if let Some(tx) = tx {
             tx.send(()).expect("failed to shut down");
         } else {
-            tracing::warn!("Received shutdown signal but dont have a sender");
+            warn!("Received shutdown signal but dont have a sender");
         }
     }
 
@@ -89,7 +90,7 @@ impl TelemetrySender {
                 .map_err(|_| Error::Sender("graceful shutdown timeout".to_string()))?
                 .map_err(|_| Error::Sender("sending shutdown signal to reporter failed".into())),
             None => {
-                tracing::warn!("graceful shutdown not possible, no ack_rx found");
+                warn!("graceful shutdown not possible, no ack_rx found");
                 Ok(())
             }
         }

@@ -9,7 +9,7 @@ use nom_sql::{
     Column, FieldDefinitionExpr, Relation, SelectStatement, SqlIdentifier, SqlQuery, TableExprInner,
 };
 use readyset_errors::{internal, invalid_err, ReadySetError, ReadySetResult};
-use tracing::warn;
+use readyset_tracing::warn;
 
 use crate::{outermost_table_exprs, util};
 

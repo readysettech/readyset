@@ -9,7 +9,7 @@ use nom_sql::analysis::visit_mut::{self, VisitorMut};
 use nom_sql::{BinaryOperator, Expr, InValue, ItemPlaceholder, Literal, SelectStatement};
 use readyset_data::{DfType, DfValue};
 use readyset_errors::{invalid_err, unsupported, ReadySetError, ReadySetResult};
-use tracing::trace;
+use readyset_tracing::trace;
 
 /// Struct storing information about parameters processed from a raw user supplied query, which
 /// provides support for converting a user-supplied parameter list into a set of lookup keys to pass

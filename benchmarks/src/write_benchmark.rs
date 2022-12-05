@@ -13,9 +13,9 @@ use nom_sql::Expr;
 use parking_lot::Mutex;
 use query_generator::TableSpec;
 use rand::Rng;
+use readyset_tracing::debug;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
-use tracing::debug;
 
 use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters, MetricGoal};
 use crate::utils::multi_thread::{self, MultithreadBenchmark};

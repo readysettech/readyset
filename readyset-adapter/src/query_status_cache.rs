@@ -10,7 +10,7 @@ use anyhow::anyhow;
 use dashmap::DashMap;
 use launchpad::hash::hash;
 use readyset_client::query::*;
-use tracing::error;
+use readyset_tracing::error;
 
 /// A metadata cache for all queries that have been processed by this
 /// adapter. Thread-safe.

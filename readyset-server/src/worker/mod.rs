@@ -19,6 +19,7 @@ use readyset_client::internal::ReplicaAddress;
 use readyset_client::metrics::recorded;
 use readyset_client::{channel, ReadySetError};
 use readyset_errors::internal_err;
+use readyset_tracing::{debug, error, info, trace, warn};
 use serde::{Deserialize, Serialize};
 use stream_cancel::Valve;
 use tikv_jemalloc_ctl::stats::allocated_mib;
@@ -27,7 +28,7 @@ use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinError;
 use tokio::time::Interval;
-use tracing::{debug, error, info, info_span, trace, warn};
+use tracing::info_span;
 use url::Url;
 
 use self::replica::Replica;

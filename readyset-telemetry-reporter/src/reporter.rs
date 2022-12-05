@@ -15,6 +15,7 @@ use backoff::ExponentialBackoffBuilder;
 use blake2::digest::{Update, VariableOutput};
 use blake2::Blake2bVar;
 use lazy_static::lazy_static;
+use readyset_tracing::{debug, info, trace, warn};
 use readyset_version::COMMIT_ID;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use reqwest::{Client, RequestBuilder, Response, StatusCode, Url};
@@ -186,7 +187,7 @@ impl TelemetryReporter {
     }
 
     async fn send_event(&self, event: TelemetryEvent, payload: &Telemetry) {
-        tracing::debug!(?event, ?payload, "sending event");
+        debug!(?event, ?payload, "sending event");
         let backoff = ExponentialBackoffBuilder::new()
             .with_max_elapsed_time(Some(TIMEOUT))
             .build();
@@ -209,7 +210,7 @@ impl TelemetryReporter {
         .await;
 
         if res.is_err() {
-            tracing::warn!(?res, ?event, ?payload, "failed to send telemetry");
+            warn!(?res, ?event, ?payload, "failed to send telemetry");
         }
     }
 
@@ -236,20 +237,20 @@ impl TelemetryReporter {
 
     /// Returns true if we are still running, false if we should shut down
     async fn run_once(&mut self, interval: &mut Interval) -> bool {
-        tracing::trace!("TelemetryReporter run_once");
+        trace!("TelemetryReporter run_once");
         tokio::select! {
             biased;
             _ = &mut self.shutdown_rx => {
-                tracing::info!("shutting down telemetry reporter. will attempt to drain in-flight metrics");
+                info!("shutting down telemetry reporter. will attempt to drain in-flight metrics");
                 while let Ok((event, telemetry)) = self.rx.try_recv() {
-                    tracing::debug!(?event, ?telemetry, "TelemetryEvent received");
+                    debug!(?event, ?telemetry, "TelemetryEvent received");
                     self.process_event(event, &telemetry).await;
                 }
 
                 if let Some(shutdown_ack_tx) = self.shutdown_ack_tx.take() {
                     let _ = shutdown_ack_tx.send(());
                 } else {
-                    tracing::trace!("unable to acknowledge shutdown");
+                    trace!("unable to acknowledge shutdown");
                 };
 
                 self.rx.close();
@@ -259,7 +260,7 @@ impl TelemetryReporter {
                 self.process_event(event, &telemetry).await;
             }
             _ = interval.tick() => {
-                tracing::debug!("starting periodic report");
+                debug!("starting periodic report");
                 let periodic_reporters = self.periodic_reporters.lock().await;
 
                 for reporter in periodic_reporters.iter() {
@@ -286,7 +287,7 @@ impl TelemetryReporter {
     }
 
     pub async fn register_periodic_reporter(&mut self, periodic_reporter: PeriodicReporter) {
-        tracing::debug!("registering periodic reporter");
+        debug!("registering periodic reporter");
         let mut periodic_reporters = self.periodic_reporters.lock().await;
         periodic_reporters.push(periodic_reporter);
     }

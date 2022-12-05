@@ -5,6 +5,8 @@ use dataflow::prelude::*;
 use readyset_client::consensus::Authority;
 use readyset_client::prelude::*;
 use readyset_data::Dialect;
+#[cfg(feature = "failure_injection")]
+use readyset_tracing::info;
 use reqwest::Url;
 use stream_cancel::Trigger;
 use tokio::sync::mpsc::Sender;
@@ -134,7 +136,7 @@ impl Handle {
     #[cfg(feature = "failure_injection")]
     /// Injects a failpoint with the provided name/action
     pub async fn set_failpoint<S: std::fmt::Display>(&mut self, name: S, action: S) {
-        tracing::info!(%name, %action, "Handle::set_failpoint");
+        info!(%name, %action, "Handle::set_failpoint");
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.event_tx
             .as_mut()

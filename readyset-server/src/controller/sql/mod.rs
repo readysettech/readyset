@@ -14,7 +14,7 @@ use readyset_data::{DfType, Dialect, PgEnumMetadata};
 use readyset_errors::{invalid_err, ReadySetError, ReadySetResult};
 use readyset_sql_passes::alias_removal::TableAliasRewrite;
 use readyset_sql_passes::{AliasRemoval, Rewrite, RewriteContext};
-use tracing::{debug, trace};
+use readyset_tracing::{debug, trace};
 
 use self::mir::SqlToMirConverter;
 use self::query_graph::{to_query_graph, QueryGraph};

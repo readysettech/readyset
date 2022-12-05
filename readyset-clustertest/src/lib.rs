@@ -224,6 +224,7 @@ use mysql_async::prelude::Queryable;
 use rand::Rng;
 #[cfg(test)]
 use readyset_clustertest_macros::clustertest;
+use readyset_tracing::{debug, warn};
 use serde::Deserialize;
 use server::{AdapterBuilder, ProcessHandle, ReadysetServerBuilder};
 use tokio::time::sleep;
@@ -793,8 +794,8 @@ async fn wait_for_adapter_router(
     )
     .await;
     match res {
-        Ok(_) => tracing::debug!("Adapter http router is active"),
-        Err(_) => tracing::warn!("Adpater http router failed to become active"),
+        Ok(_) => debug!("Adapter http router is active"),
+        Err(_) => warn!("Adpater http router failed to become active"),
     }
 
     res
@@ -809,8 +810,8 @@ async fn wait_for_server_router(
 ) -> anyhow::Result<()> {
     let res = wait_for_poller(http_router_is_up, port, timeout, poll_interval, "server").await;
     match res {
-        Ok(_) => tracing::debug!("Server http router is active"),
-        Err(_) => tracing::warn!("Server http router failed to become active"),
+        Ok(_) => debug!("Server http router is active"),
+        Err(_) => warn!("Server http router failed to become active"),
     }
 
     res
@@ -834,7 +835,7 @@ where
     F: Fn(u16) -> Fut,
     Fut: Future<Output = bool>,
 {
-    tracing::debug!(
+    debug!(
         ?poll_interval,
         "Waiting for {destination} on port {metrics_port}"
     );
@@ -846,7 +847,7 @@ where
                 break Ok(());
             }
 
-            tracing::debug!(
+            debug!(
                 "{destination} on port {metrics_port} not ready. Sleeping for {:?}",
                 &poll_interval,
             );
@@ -1061,7 +1062,7 @@ impl DeploymentHandle {
         if self.expected_workers().await.is_empty() {
             return Ok(());
         }
-        tracing::debug!("Waiting {max_wait:?} for workers to be healthy");
+        debug!("Waiting {max_wait:?} for workers to be healthy");
 
         let start = Instant::now();
         loop {
@@ -1146,7 +1147,7 @@ impl DeploymentHandle {
 
     /// Waits for the back-end to return that it is ready to process queries.
     pub async fn backend_ready(&mut self, timeout: Duration) -> ReadySetResult<()> {
-        tracing::debug!("Waiting {timeout:?} for backend to be ready to process queries");
+        debug!("Waiting {timeout:?} for backend to be ready to process queries");
         let mut e = None;
         let start = Instant::now();
         let check_leader_loop = async {

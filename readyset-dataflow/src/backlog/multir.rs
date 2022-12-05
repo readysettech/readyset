@@ -11,8 +11,8 @@ use readyset_client::consistency::Timestamp;
 use readyset_client::results::{SharedResults, SharedRows};
 use readyset_client::KeyComparison;
 use readyset_errors::ReadySetError;
+use readyset_tracing::warn;
 use serde::{Deserialize, Serialize};
-use tracing::warn;
 use vec1::{vec1, Vec1};
 
 /// A [`ReadHandle`] to a map whose key is a single [`DfValue`], for faster lookup (compared to a

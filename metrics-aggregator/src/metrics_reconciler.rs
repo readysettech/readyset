@@ -11,9 +11,9 @@ use prometheus_http_query::response::{InstantVector, QueryResultType};
 use prometheus_http_query::{Client, InstantVector as InstantVectorReq, Selector};
 use readyset_client::consensus::{AuthorityControl, ConsulAuthority};
 use readyset_client::ReadySetResult;
+use readyset_tracing::{error, info};
 use tokio::select;
 use tokio::sync::Mutex;
-use tracing::{error, info};
 
 /// A timeout for the prometheus query to scrape relevant metrics.
 /// Constant is in a string format, because that's what the prometheus client library we're using

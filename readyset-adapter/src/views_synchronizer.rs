@@ -3,8 +3,9 @@ use std::sync::Arc;
 use dataflow_expression::Dialect;
 use readyset_client::query::MigrationState;
 use readyset_client::ReadySetHandle;
+use readyset_tracing::{debug, info, trace, warn};
 use tokio::select;
-use tracing::{debug, info, instrument, trace, warn};
+use tracing::instrument;
 
 use crate::query_status_cache::QueryStatusCache;
 

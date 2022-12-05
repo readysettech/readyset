@@ -5,7 +5,8 @@ use nom_sql::analysis::ReferredColumns;
 use nom_sql::{BinaryOperator, Expr};
 use petgraph::graph::NodeIndex;
 use readyset_errors::{internal, invariant, unsupported, ReadySetResult};
-use tracing::{instrument, trace};
+use readyset_tracing::trace;
+use tracing::instrument;
 
 use crate::node::MirNodeInner;
 use crate::query::MirQuery;

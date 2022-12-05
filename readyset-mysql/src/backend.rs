@@ -19,9 +19,9 @@ use readyset_adapter::backend::{
 };
 use readyset_data::{DfType, DfValue, DfValueKind};
 use readyset_errors::{internal, internal_err, ReadySetError};
+use readyset_tracing::{error, trace};
 use streaming_iterator::StreamingIterator;
 use tokio::io::{self, AsyncWrite};
-use tracing::{error, trace};
 use upstream::StatementMeta;
 
 use crate::constants::DEFAULT_CHARACTER_SET;

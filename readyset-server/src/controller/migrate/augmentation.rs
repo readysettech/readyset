@@ -11,7 +11,8 @@ use std::collections::{HashMap, HashSet};
 use dataflow::prelude::*;
 use dataflow::DomainRequest;
 use petgraph::graph::NodeIndex;
-use tracing::{debug_span, trace};
+use readyset_tracing::trace;
+use tracing::debug_span;
 
 use crate::controller::migrate::DomainMigrationPlan;
 use crate::controller::state::DfState;

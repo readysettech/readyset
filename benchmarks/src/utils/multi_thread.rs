@@ -4,10 +4,10 @@ use anyhow::Result;
 use async_trait::async_trait;
 use futures::stream::futures_unordered::FuturesUnordered;
 use futures::StreamExt;
+use readyset_tracing::error;
 use tokio::select;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::time::Interval;
-use tracing::error;
 
 use crate::benchmark::BenchmarkResults;
 

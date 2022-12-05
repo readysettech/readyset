@@ -6,6 +6,7 @@ use readyset_sql_passes::anonymize::Anonymizer;
 use readyset_telemetry_reporter::{
     PeriodicReport, ReporterResult as Result, Telemetry, TelemetryBuilder, TelemetryEvent,
 };
+use readyset_tracing::debug;
 use tokio::sync::Mutex;
 
 use crate::query_status_cache::QueryStatusCache;
@@ -31,7 +32,7 @@ impl ProxiedQueriesReporter {
         &self,
         query: &mut DeniedQuery,
     ) -> Option<(TelemetryEvent, Telemetry)> {
-        tracing::debug!(?query, "reporting query");
+        debug!(?query, "reporting query");
         let mut reported_queries = self.reported_queries.lock().await;
         let mut anonymizer = self.anonymizer.lock().await;
         let mut build_event = || {
@@ -66,18 +67,18 @@ impl ProxiedQueriesReporter {
 #[async_trait]
 impl PeriodicReport for ProxiedQueriesReporter {
     async fn report(&self) -> Result<Vec<(TelemetryEvent, Telemetry)>> {
-        tracing::debug!("running report for proxied queries");
+        debug!("running report for proxied queries");
         let mut denied_queries = self.query_status_cache.deny_list();
         Ok(futures::future::join_all(
             denied_queries
                 .iter_mut()
-                .inspect(|q| tracing::debug!("{q:?}"))
+                .inspect(|q| debug!("{q:?}"))
                 .map(|q| self.report_query(q)),
         )
         .await
         .into_iter()
         .flatten()
-        .inspect(|(e, t)| tracing::debug!("{e:?} {t:?}"))
+        .inspect(|(e, t)| debug!("{e:?} {t:?}"))
         .collect())
     }
 }

@@ -3,8 +3,8 @@ use std::time::SystemTime;
 use anyhow::Context;
 use async_trait::async_trait;
 use hdrhistogram::Histogram;
+use readyset_tracing::{info, warn};
 use tokio_postgres::{Client, NoTls, Transaction};
-use tracing::{info, warn};
 
 use super::Storage;
 use crate::reporting::analysis::Stats;

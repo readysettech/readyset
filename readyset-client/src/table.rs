@@ -20,6 +20,7 @@ use readyset_data::DfValue;
 use readyset_errors::{
     internal, internal_err, rpc_err, table_err, unsupported, ReadySetError, ReadySetResult,
 };
+use readyset_tracing::{error, trace};
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 use tokio_tower::multiplex;
@@ -27,7 +28,6 @@ use tower::balance::p2c::Balance;
 use tower::buffer::Buffer;
 use tower::limit::concurrency::ConcurrencyLimit;
 use tower_service::Service;
-use tracing::error;
 use vec_map::VecMap;
 
 use crate::channel::CONNECTION_FROM_BASE;
@@ -471,7 +471,7 @@ impl Table {
             Some(table_rpc) if nshards == 1 => {
                 let request = Tagged::from(i);
                 let _guard = span.as_ref().map(tracing::Span::enter);
-                tracing::trace!("submit request");
+                trace!("submit request");
                 future::Either::Left(future::Either::Right(
                     table_rpc.call(request).map_err(rpc_err!("Table::input")),
                 ))
@@ -498,7 +498,7 @@ impl Table {
                 };
 
                 let _guard = span.as_ref().map(tracing::Span::enter);
-                tracing::trace!("shard request");
+                trace!("shard request");
                 let mut shard_writes = vec![Vec::new(); nshards];
                 let ops: &mut Vec<TableOperation> = match (&mut i.data).try_into() {
                     Ok(v) => v,
@@ -535,7 +535,7 @@ impl Table {
                             None
                         };
                         let _guard = span.as_ref().map(tracing::Span::enter);
-                        tracing::trace!("submit request shard");
+                        trace!("submit request shard");
 
                         // `s` is within the range of `0..nshards`, so it is not out of bounds
                         // for the `self.shards` vector.

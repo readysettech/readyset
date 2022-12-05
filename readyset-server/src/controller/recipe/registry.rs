@@ -9,8 +9,8 @@ use nom_sql::{
     SqlType,
 };
 use readyset_errors::{ReadySetError, ReadySetResult};
+use readyset_tracing::debug;
 use serde::{Deserialize, Serialize};
-use tracing::debug;
 
 use crate::controller::recipe::QueryID;
 

@@ -8,10 +8,10 @@ use postgres_types::Kind;
 use readyset_client::ReadySetError;
 use readyset_data::{Array, Collation, DfType, DfValue, Dialect};
 use readyset_errors::unsupported;
+use readyset_tracing::{debug, error, trace};
 use rust_decimal::prelude::FromStr;
 use rust_decimal::Decimal;
 use tokio_postgres as pgsql;
-use tracing::{debug, error, trace};
 
 use super::ddl_replication::DdlEvent;
 use super::lsn::Lsn;

@@ -55,6 +55,7 @@ merging-interval-tree = { path = "../merging-interval-tree" }
 launchpad = { path = "../launchpad" }
 readyset-errors = { path = "../readyset-errors" }
 readyset-data = { path = "../readyset-data" }
+readyset-tracing = { path = "../readyset-tracing" }
 reader-map = { path = "../reader-map" }
 partial-map = { path = "../partial-map" }
 failpoint-macros = { path = "../failpoint-macros" }

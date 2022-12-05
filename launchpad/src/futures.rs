@@ -5,7 +5,7 @@ use std::panic::AssertUnwindSafe;
 use std::process;
 
 use futures::{FutureExt, TryFutureExt};
-use tracing::error;
+use readyset_tracing::error;
 
 /// A version of the [`tokio::select`] macro that also emits an `allow` annotation for
 /// `clippy::unreachable` and `clippy::panic`, since both are internal to the expansion of the macro

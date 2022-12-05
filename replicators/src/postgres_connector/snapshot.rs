@@ -18,8 +18,9 @@ use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::{ReadySetError, ReadySetResult};
 use readyset_data::{DfType, DfValue, Dialect as DataDialect, PgEnumMetadata};
 use readyset_errors::{internal, internal_err, unsupported};
+use readyset_tracing::{debug, error, info, trace, warn};
 use tokio_postgres as pgsql;
-use tracing::{debug, error, info, info_span, trace, warn, Instrument};
+use tracing::{info_span, Instrument};
 
 use super::connector::CreatedSlot;
 use super::PostgresPosition;

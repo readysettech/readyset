@@ -29,7 +29,8 @@ use readyset_errors::{
 };
 use readyset_server::worker::readers::{CallResult, ReadRequestHandler};
 use readyset_sql_passes::anonymize::anonymize_literals;
-use tracing::{error, info, instrument, trace};
+use readyset_tracing::{error, info, trace};
+use tracing::instrument;
 use vec1::vec1;
 
 use crate::backend::SelectSchema;

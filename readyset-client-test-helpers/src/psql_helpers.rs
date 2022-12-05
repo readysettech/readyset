@@ -4,9 +4,9 @@ use async_trait::async_trait;
 use readyset_adapter::backend::{QueryDestination, QueryInfo};
 use readyset_adapter::Backend;
 use readyset_psql::{PostgreSqlQueryHandler, PostgreSqlUpstream};
+use readyset_tracing::error;
 use tokio::net::TcpStream;
 use tokio_postgres::{Client, NoTls, SimpleQueryMessage};
-use tracing::error;
 
 use crate::{sleep, Adapter};
 

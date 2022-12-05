@@ -5,8 +5,8 @@ use anyhow::Result;
 use async_trait::async_trait;
 use clap::Parser;
 use metrics::Unit;
+use readyset_tracing::info;
 use serde::{Deserialize, Serialize};
-use tracing::info;
 
 use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters, MetricGoal};
 use crate::utils::prometheus::ForwardPrometheusMetrics;

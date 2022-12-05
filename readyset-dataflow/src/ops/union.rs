@@ -9,9 +9,9 @@ use launchpad::intervals::{cmp_endbound, cmp_startbound};
 use launchpad::Indices;
 use readyset_client::KeyComparison;
 use readyset_errors::{invariant, ReadySetResult};
+use readyset_tracing::{debug, error, trace};
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
-use tracing::{debug, error, trace};
 use vec1::Vec1;
 
 use super::Side;

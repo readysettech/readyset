@@ -22,9 +22,9 @@ use nom_sql::{Dialect, Expr, NomSqlResult};
 use query_generator::{ColumnName, TableName, TableSpec};
 use readyset_adapter::backend::Backend;
 use readyset_mysql::{MySqlQueryHandler, MySqlUpstream};
+use readyset_tracing::warn;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tracing::warn;
 
 use super::spec::{DatabaseGenerationSpec, DatabaseSchema, TableGenerationSpec};
 use crate::utils::path::benchmark_path;

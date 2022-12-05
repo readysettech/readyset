@@ -1,5 +1,5 @@
 use metrics_exporter_prometheus::PrometheusRecorder;
-use tracing::warn;
+use readyset_tracing::warn;
 
 use crate::metrics::{Clear, Render};
 

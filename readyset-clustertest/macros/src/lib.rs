@@ -14,7 +14,7 @@ pub fn clustertest(_attr: TokenStream, input: TokenStream) -> TokenStream {
     // log
     let fn_block_with_tracing = parse_quote! {{
         ::readyset_tracing::init_test_logging();
-        tracing::debug!("Starting {}", #fn_name);
+        debug!("Starting {}", #fn_name);
         #fn_block
     }};
 

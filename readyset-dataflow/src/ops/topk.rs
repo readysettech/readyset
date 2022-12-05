@@ -12,8 +12,8 @@ use maplit::hashmap;
 use nom_sql::OrderType;
 use readyset_client::internal;
 use readyset_errors::{internal, internal_err, invariant, ReadySetResult};
+use readyset_tracing::trace;
 use serde::{Deserialize, Serialize};
-use tracing::trace;
 
 use crate::ops::utils::Order;
 use crate::prelude::*;

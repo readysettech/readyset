@@ -95,11 +95,11 @@ use readyset_data::{DfType, DfValue};
 use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
 use readyset_errors::{internal, internal_err, unsupported, ReadySetResult};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
-use readyset_tracing::instrument_root;
+use readyset_tracing::{error, instrument_root, trace, warn};
 use readyset_version::READYSET_VERSION;
 use timestamp_service::client::{TimestampClient, WriteId, WriteKey};
 use tokio::sync::mpsc::UnboundedSender;
-use tracing::{error, instrument, trace, warn};
+use tracing::instrument;
 
 use crate::backend::noria_connector::ExecuteSelectContext;
 use crate::query_handler::SetBehavior;

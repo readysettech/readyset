@@ -1,8 +1,9 @@
 use async_trait::async_trait;
 use mysql_srv::MySqlIntermediary;
 use readyset_mysql::{MySqlQueryHandler, MySqlUpstream};
+use readyset_tracing::error;
 use tokio::net::TcpStream;
-use tracing::{error, instrument};
+use tracing::instrument;
 
 use crate::ConnectionHandler;
 

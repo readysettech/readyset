@@ -137,10 +137,10 @@ use futures::stream::FuturesOrdered;
 use futures::TryStreamExt;
 use metrics::gauge;
 use readyset_errors::internal_err;
+use readyset_tracing::{error, warn};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use thiserror::Error as ThisError;
-use tracing::{error, warn};
 
 use super::{
     AdapterId, AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult, LeaderPayload,

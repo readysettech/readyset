@@ -28,7 +28,8 @@ use array2::Array2;
 use dataflow::prelude::*;
 use readyset_client::consensus::NodeTypeSchedulingRestriction;
 use readyset_client::internal::DomainIndex;
-use tracing::{instrument, trace};
+use readyset_tracing::trace;
+use tracing::instrument;
 
 use crate::controller::state::DfState;
 use crate::controller::{DomainPlacementRestriction, NodeRestrictionKey, Worker, WorkerIdentifier};

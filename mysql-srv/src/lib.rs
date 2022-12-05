@@ -168,9 +168,9 @@ use constants::{CLIENT_PLUGIN_AUTH, PROTOCOL_41, RESERVED, SECURE_CONNECTION};
 use error::{other_error, OtherErrorKind};
 use mysql_common::constants::CapabilityFlags;
 use readyset_data::DfType;
+use readyset_tracing::{debug, trace};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net;
-use tracing::{debug, trace};
 use writers::write_err;
 
 use crate::authentication::{generate_auth_data, hash_password, AUTH_PLUGIN_NAME};

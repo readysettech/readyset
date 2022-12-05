@@ -17,9 +17,9 @@ use readyset_adapter::BackendBuilder;
 use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
 use readyset_client_test_helpers::TestBuilder;
 use readyset_server::Handle;
+use readyset_tracing::warn;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
-use tracing::warn;
 
 const PUSH_GATEWAY_PUSH_INTERVAL: Duration = Duration::from_secs(5);
 

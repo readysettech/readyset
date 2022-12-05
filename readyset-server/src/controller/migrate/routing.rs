@@ -15,7 +15,7 @@ use petgraph::graph::NodeIndex;
 use readyset_errors::{
     internal, internal_err, invariant, invariant_eq, ReadySetError, ReadySetResult,
 };
-use tracing::trace;
+use readyset_tracing::trace;
 
 use crate::controller::migrate::DomainMigrationPlan;
 use crate::controller::state::DfState;

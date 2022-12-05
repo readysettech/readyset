@@ -26,12 +26,12 @@ use readyset_client::ControllerDescriptor;
 use readyset_data::Dialect;
 use readyset_errors::{internal, internal_err, ReadySetError};
 use readyset_telemetry_reporter::TelemetrySender;
+use readyset_tracing::{debug, error, info, warn};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use stream_cancel::Valve;
 use tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{Notify, RwLock, RwLockReadGuard, RwLockWriteGuard};
-use tracing::{debug, error, info, warn};
 use tracing_futures::Instrument;
 use url::Url;
 
@@ -407,7 +407,7 @@ impl Controller {
                 action,
                 done_tx,
             } => {
-                tracing::info!(%name, %action, "handling failpoint request");
+                info!(%name, %action, "handling failpoint request");
                 fail::cfg(name, action.as_str()).expect("failed to set failpoint");
                 if done_tx.send(()).is_err() {
                     warn!("handle-based failpoint sender hung up!");
@@ -957,12 +957,12 @@ async fn authority_inner(
             select! {
                 watch_result = leader_election_state.watch_leader() => {
                     if let Err(e) = watch_result {
-                        tracing::warn!(error = %e, "failure creating worker watch");
+                        warn!(error = %e, "failure creating worker watch");
                     }
                 },
                 watch_result = worker_state.watch_workers() => {
                     if let Err(e) = watch_result {
-                        tracing::warn!(error = %e, "failure creating worker watch");
+                        warn!(error = %e, "failure creating worker watch");
                     }
                 },
                 () = tokio::time::sleep(WATCH_DURATION) => {}

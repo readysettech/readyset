@@ -12,10 +12,10 @@ use async_trait::async_trait;
 use backoff::exponential::ExponentialBackoff;
 use backoff::SystemClock;
 use readyset_errors::internal_err;
+use readyset_tracing::{error, info, warn};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use tokio::sync::Notify;
-use tracing::{error, info, warn};
 use zookeeper_async::{
     Acl, CreateMode, KeeperState, Stat, WatchedEvent, Watcher, ZkError, ZooKeeper,
 };

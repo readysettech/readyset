@@ -13,8 +13,9 @@ use dataflow::{DomainRequest, LookupIndex};
 use maplit::hashmap;
 use petgraph::graph::NodeIndex;
 use readyset_errors::{internal, internal_err, invariant, ReadySetError, ReadySetResult};
+use readyset_tracing::{debug, error, trace};
 use serde::{Deserialize, Serialize};
-use tracing::{debug, error, info_span, trace};
+use tracing::info_span;
 use vec1::Vec1;
 
 use crate::controller::keys;

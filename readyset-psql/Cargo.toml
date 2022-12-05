@@ -18,6 +18,7 @@ readyset-data = { path = "../readyset-data/" }
 readyset-adapter = { path = "../readyset-adapter" }
 readyset-version = { path = "../readyset-version" }
 failpoint-macros = { path = "../failpoint-macros" }
+readyset-tracing = { path = "../readyset-tracing" }
 nom-sql = { path = "../nom-sql" }
 psql-srv = { path = "../psql-srv" }
 tokio = "1.15"
@@ -50,7 +51,6 @@ tokio = { version = "1.15", features = ["full"] }
 launchpad = { path = "../launchpad" }
 readyset-client-test-helpers = { path = "../readyset-client-test-helpers", features = ["postgres"] }
 criterion = { version = "0.3.5", features = ["async_tokio"] }
-readyset-tracing = { path = "../readyset-tracing" }
 
 [[bench]]
 name = "proxy"

@@ -82,13 +82,13 @@ use readyset_client::replication::ReplicationOffset;
 use readyset_client::{KeyComparison, KeyCount, SqlIdentifier};
 use readyset_data::DfValue;
 use readyset_errors::{ReadySetError, ReadySetResult};
+use readyset_tracing::{debug, error, info, warn};
 use rocksdb::{self, IteratorMode, PlainTableFactoryOptions, SliceTransform, WriteBatch, DB};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tempfile::{tempdir, TempDir};
 use test_strategy::Arbitrary;
 use thiserror::Error;
-use tracing::{debug, error, info, warn};
 
 use crate::{
     EvictKeysResult, LookupResult, PointKey, RangeKey, RangeLookupResult, RecordResult, State,

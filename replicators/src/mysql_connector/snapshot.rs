@@ -18,8 +18,9 @@ use readyset_client::recipe::changelist::ChangeList;
 use readyset_client::replication::{ReplicationOffset, ReplicationOffsets};
 use readyset_client::ReadySetResult;
 use readyset_data::Dialect;
+use readyset_tracing::{debug, error, info, warn};
 use tokio::task::JoinHandle;
-use tracing::{debug, error, info, info_span, warn};
+use tracing::info_span;
 use tracing_futures::Instrument;
 
 use super::BinlogPosition;

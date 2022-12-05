@@ -43,7 +43,8 @@ use nom_sql::Relation;
 use readyset_client::metrics::recorded;
 use readyset_client::{KeyColumnIdx, ReadySetError, ViewPlaceholder};
 use readyset_data::{DfType, Dialect};
-use tracing::{debug, debug_span, error, info, info_span, instrument, trace};
+use readyset_tracing::{debug, error, info, trace};
+use tracing::{debug_span, info_span, instrument};
 
 use crate::controller::migrate::materialization::InvalidEdge;
 use crate::controller::migrate::node_changes::{MigrationNodeChanges, NodeChanges};

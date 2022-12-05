@@ -15,8 +15,9 @@ use readyset_client::query::{MigrationState, Query};
 use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::{ReadySetHandle, ReadySetResult, ViewCreateRequest};
 use readyset_client_metrics::recorded;
+use readyset_tracing::{error, info, warn};
 use tokio::select;
-use tracing::{error, info, instrument, warn};
+use tracing::instrument;
 
 use crate::backend::{noria_connector, NoriaConnector};
 use crate::query_status_cache::QueryStatusCache;
@@ -268,7 +269,7 @@ where
         if Instant::now() - *start_time > self.max_retry {
             // We've exceeded the max amount of times we'll try running dry runs with this query.
             // It's probably unsupported, but we'll allow a proper migration determine that.
-            tracing::error!(
+            error!(
                 "Max retry time of {:?} exceeded for dry run migration. {:?} is probably unsupported",
                 self.max_retry,
                 view_request.to_anonymized_string()

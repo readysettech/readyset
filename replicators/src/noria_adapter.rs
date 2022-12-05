@@ -24,8 +24,9 @@ use readyset_client::{ReadySetError, ReadySetHandle, ReadySetResult, Table, Tabl
 use readyset_data::Dialect;
 use readyset_errors::{internal_err, invalid_err};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
+use readyset_tracing::{debug, error, info, trace, warn};
 use tokio::sync::Notify;
-use tracing::{debug, error, info, info_span, trace, warn, Instrument};
+use tracing::{info_span, Instrument};
 use {mysql_async as mysql, tokio_postgres as pgsql};
 
 use crate::db_util::{CreateSchema, DatabaseSchemas};

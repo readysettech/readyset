@@ -25,6 +25,7 @@ nom-sql = { path = "../nom-sql" }
 readyset-client = { path = "../readyset-client", features = ["failure_injection"] }
 readyset-data = { path = "../readyset-data" }
 launchpad = { path = "../launchpad" }
+readyset-tracing = { path = "../readyset-tracing" }
 
 [dev-dependencies]
 serial_test = "0.5.1"
@@ -34,7 +35,6 @@ readyset-adapter = { path = "../readyset-adapter" }
 readyset-client-metrics = { path = "../readyset-client-metrics" }
 test-utils = { path = "../test-utils" }
 readyset-clustertest-macros = { path = "./macros" }
-readyset-tracing = { path = "../readyset-tracing" }
 rust_decimal = "1.26"
 
 [[bench]]

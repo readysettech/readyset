@@ -26,7 +26,8 @@ use readyset_client::ColumnSchema;
 use readyset_client_metrics::QueryDestination;
 use readyset_data::DfValue;
 use readyset_errors::{internal_err, ReadySetError};
-use tracing::{error, info, info_span, Instrument};
+use readyset_tracing::{error, info};
+use tracing::{info_span, Instrument};
 
 use crate::schema::{convert_column, is_subtype};
 use crate::Error;

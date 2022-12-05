@@ -10,9 +10,9 @@ use metrics::Unit;
 use mysql_async::prelude::Queryable;
 use mysql_async::Row;
 use rand::{thread_rng, Rng};
+use readyset_tracing::{debug, error};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
-use tracing::{debug, error};
 
 use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters, MetricGoal};
 use crate::utils::generate::DataGenerator;

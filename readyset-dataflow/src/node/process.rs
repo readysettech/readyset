@@ -7,7 +7,8 @@ use readyset_client::consistency::Timestamp;
 use readyset_client::replication::ReplicationOffset;
 use readyset_client::{KeyComparison, PacketData, ReadySetError};
 use readyset_errors::ReadySetResult;
-use tracing::{debug_span, trace};
+use readyset_tracing::trace;
+use tracing::debug_span;
 
 use super::special::base::FailedOpLogger;
 use crate::node::special::base::{BaseWrite, SetSnapshotMode};

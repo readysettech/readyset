@@ -34,6 +34,7 @@ use readyset_errors::{
 use readyset_sql_passes::anonymize::{Anonymize, Anonymizer};
 use readyset_tracing::presampled::instrument_if_enabled;
 use readyset_tracing::propagation::Instrumented;
+use readyset_tracing::{error, trace};
 use serde::{Deserialize, Serialize};
 use tokio_tower::multiplex;
 use tower::balance::p2c::Balance;
@@ -41,7 +42,7 @@ use tower::buffer::Buffer;
 use tower::limit::concurrency::ConcurrencyLimit;
 use tower::timeout::Timeout;
 use tower_service::Service;
-use tracing::{error, instrument};
+use tracing::instrument;
 use tracing_futures::Instrument;
 use vec1::Vec1;
 
@@ -1103,7 +1104,7 @@ impl Service<ViewQuery> for View {
                 }))
             });
 
-            tracing::trace!("submit request");
+            trace!("submit request");
 
             return future::Either::Left(
                 self.shards
@@ -1130,7 +1131,7 @@ impl Service<ViewQuery> for View {
             );
         }
 
-        span.in_scope(|| tracing::trace!("shard request"));
+        span.in_scope(|| trace!("shard request"));
         let mut shard_queries = vec![Vec::new(); self.shards.len()];
         for comparison in query.key_comparisons.drain(..) {
             for shard in comparison.shard_keys(self.shards.len()) {
@@ -1185,7 +1186,7 @@ impl Service<ViewQuery> for View {
                         },
                     }));
 
-                    tracing::trace!("submit request shard");
+                    trace!("submit request shard");
 
                     shard
                         .call(request)

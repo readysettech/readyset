@@ -3,6 +3,7 @@ use ::readyset_client::recipe::changelist::ChangeList;
 use ::readyset_client::{failpoints, get_metric};
 use launchpad::eventually;
 use readyset_data::{DfValue, Dialect};
+use readyset_tracing::info;
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
 use serial_test::serial;
@@ -671,7 +672,7 @@ impl ClusterComponent {
         authority_up: &mut bool,
         upstream_up: &mut bool,
     ) {
-        tracing::debug!("Starting up {:?}", self);
+        debug!("Starting up {:?}", self);
         let server_url = deployment.server_addrs().first().cloned();
         let server_handle = server_url
             .and_then(|server_url| deployment.server_handles().get_mut(&server_url).cloned());
@@ -690,7 +691,7 @@ impl ClusterComponent {
                         .await;
                 }
                 *authority_up = true;
-                tracing::debug!("Authority up");
+                debug!("Authority up");
             }
             ClusterComponent::Upstream => {
                 if let Some(adapter_handle) = adapter_handle {
@@ -704,7 +705,7 @@ impl ClusterComponent {
                         .await;
                 }
                 *upstream_up = true;
-                tracing::debug!("Upstream up");
+                debug!("Upstream up");
             }
             ClusterComponent::Adapter => {
                 deployment
@@ -721,7 +722,7 @@ impl ClusterComponent {
                 .await
                 .unwrap();
 
-                tracing::debug!("Adapter up");
+                debug!("Adapter up");
             }
             ClusterComponent::Server => {
                 let server_url = deployment
@@ -738,7 +739,7 @@ impl ClusterComponent {
                 .await
                 .unwrap();
 
-                tracing::debug!("Server up");
+                debug!("Server up");
             }
         }
 
@@ -754,19 +755,19 @@ impl ClusterComponent {
         let adapter_handle = deployment
             .first_adapter_handle()
             .expect("adapter handle expected to exist");
-        tracing::debug!("sending sleep failpoint to adapter");
+        debug!("sending sleep failpoint to adapter");
         adapter_handle.set_failpoint(failpoint, "sleep(1)").await;
 
         assert_eq!(1, deployment.server_addrs().len());
         let server_url = deployment.server_addrs().first().unwrap().clone();
         let server_handle = deployment.server_handles().get_mut(&server_url).unwrap();
-        tracing::debug!("sending sleep failpoint to server");
+        debug!("sending sleep failpoint to server");
         server_handle.set_failpoint(failpoint, "sleep(1)").await;
     }
 }
 
 async fn test_deployment_startup_order(startup_order: Vec<ClusterComponent>) {
-    tracing::info!(?startup_order, "Testing deployment startup");
+    info!(?startup_order, "Testing deployment startup");
 
     let mut deployment = DeploymentBuilder::new(
         format!(

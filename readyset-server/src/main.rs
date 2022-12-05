@@ -13,8 +13,8 @@ use readyset_server::metrics::{
 };
 use readyset_server::{resolve_addr, Builder, NoriaMetricsRecorder, WorkerOptions};
 use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer};
+use readyset_tracing::{error, info};
 use readyset_version::*;
-use tracing::{error, info};
 
 #[cfg(not(target_env = "msvc"))]
 #[global_allocator]

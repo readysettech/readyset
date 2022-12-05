@@ -1,7 +1,8 @@
 use async_trait::async_trait;
 use readyset_psql::{PostgreSqlQueryHandler, PostgreSqlUpstream};
+use readyset_tracing::error;
 use tokio::net;
-use tracing::{error, instrument};
+use tracing::instrument;
 
 use crate::ConnectionHandler;
 

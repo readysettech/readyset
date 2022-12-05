@@ -98,8 +98,8 @@ use nom_sql::SqlQuery;
 use rand::Rng;
 use rand_distr::{Uniform, WeightedAliasIndex};
 use readyset_data::DfValue;
+use readyset_tracing::info;
 use serde::{Deserialize, Serialize};
-use tracing::info;
 use zipf::ZipfDistribution;
 
 use crate::workload_emulator::{ColGenerator, Distributions, Query, QuerySet, Sampler};
