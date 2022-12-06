@@ -499,14 +499,9 @@ impl Packet {
         }
     }
 
-    pub(crate) fn map_data<F>(&mut self, map: F)
-    where
-        F: FnOnce(&mut Records),
-    {
+    pub(crate) fn mut_data(&mut self) -> &mut Records {
         match *self {
-            Packet::Message { ref mut data, .. } | Packet::ReplayPiece { ref mut data, .. } => {
-                map(data);
-            }
+            Packet::Message { ref mut data, .. } | Packet::ReplayPiece { ref mut data, .. } => data,
             _ => {
                 unreachable!();
             }

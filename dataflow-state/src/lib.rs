@@ -113,7 +113,7 @@ pub trait State: SizeOf + Send {
         records: &mut Records,
         partial_tag: Option<Tag>,
         replication_offset: Option<ReplicationOffset>,
-    );
+    ) -> ReadySetResult<()>;
 
     /// Returns the current replication offset written to this state.
     ///
@@ -284,7 +284,7 @@ impl State for MaterializedNodeState {
         records: &mut Records,
         partial_tag: Option<Tag>,
         replication_offset: Option<ReplicationOffset>,
-    ) {
+    ) -> ReadySetResult<()> {
         match self {
             MaterializedNodeState::Memory(ms) => {
                 ms.process_records(records, partial_tag, replication_offset)

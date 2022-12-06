@@ -538,17 +538,17 @@ impl State for PersistentState {
         records: &mut Records,
         partial_tag: Option<Tag>,
         replication_offset: Option<ReplicationOffset>,
-    ) {
+    ) -> ReadySetResult<()> {
         assert!(partial_tag.is_none(), "PersistentState can't be partial");
         if records.len() == 0 && replication_offset.is_none() {
-            return;
+            return Ok(());
         }
 
         // Don't process records if the replication offset is less than our current.
         if let (Some(new), Some(current)) = (&replication_offset, &self.db.replication_offset) {
             if new <= current {
                 warn!("Dropping writes we have already processed");
-                return;
+                return Ok(());
             }
         }
 
@@ -599,6 +599,8 @@ impl State for PersistentState {
         }
 
         self.db.handle().write_opt(batch, &opts).unwrap();
+
+        Ok(())
     }
 
     fn replication_offset(&self) -> Option<&ReplicationOffset> {
@@ -750,13 +752,15 @@ impl State for PersistentStateHandle {
         _: &mut Records,
         _: Option<Tag>,
         replication_offset: Option<ReplicationOffset>,
-    ) {
+    ) -> ReadySetResult<()> {
         // We ignore all the records, as record processing is handled by the [`PersistentState`], we
         // only read records. However we must know that we are up to date when reading from the base
         // table, and have to compare our replication offset to that of the table.
         if let Some(replication_offset) = replication_offset {
             self.replication_offset = Some(replication_offset);
         }
+
+        Ok(())
     }
 
     fn is_useful(&self) -> bool {
@@ -1876,7 +1880,9 @@ mod tests {
 
     fn insert<S: State>(state: &mut S, row: Vec<DfValue>) {
         let record: Record = row.into();
-        state.process_records(&mut record.into(), None, None);
+        state
+            .process_records(&mut record.into(), None, None)
+            .unwrap();
     }
 
     fn get_tmp_path() -> (TempDir, String) {
@@ -1957,7 +1963,9 @@ mod tests {
         let second: Vec<DfValue> = vec![20.into(), "Cat".into(), 1.into()];
         state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
         state.add_key(Index::new(IndexType::HashMap, vec![1, 2]), None);
-        state.process_records(&mut vec![first.clone(), second.clone()].into(), None, None);
+        state
+            .process_records(&mut vec![first.clone(), second.clone()].into(), None, None)
+            .unwrap();
 
         match state.lookup(&[0], &PointKey::Single(10.into())) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
@@ -1993,7 +2001,9 @@ mod tests {
             ],
         ];
 
-        state.process_records(&mut abc.clone().into(), None, None);
+        state
+            .process_records(&mut abc.clone().into(), None, None)
+            .unwrap();
 
         let res = state
             .lookup(
@@ -2015,11 +2025,13 @@ mod tests {
             let fourth: Vec<DfValue> = vec![40.into(), "Dog".into(), 1.into()];
             state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
             state.add_key(Index::new(IndexType::HashMap, vec![1, 2]), None);
-            state.process_records(
-                &mut vec![first.clone(), second.clone(), third.clone(), fourth.clone()].into(),
-                None,
-                None,
-            );
+            state
+                .process_records(
+                    &mut vec![first.clone(), second.clone(), third.clone(), fourth.clone()].into(),
+                    None,
+                    None,
+                )
+                .unwrap();
 
             match state
                 .lookup_multi(
@@ -2095,7 +2107,9 @@ mod tests {
         let second: Vec<DfValue> = vec![10.into(), 20.into(), "Cat".into()];
         state.add_key(pk, None);
         state.add_key(Index::new(IndexType::HashMap, vec![2]), None);
-        state.process_records(&mut vec![first.clone(), second.clone()].into(), None, None);
+        state
+            .process_records(&mut vec![first.clone(), second.clone()].into(), None, None)
+            .unwrap();
 
         match state.lookup(&pk_cols, &PointKey::Double((1.into(), 2.into()))) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
@@ -2141,7 +2155,9 @@ mod tests {
         let first: Vec<DfValue> = vec![1.into(), 2.into()];
         let second: Vec<DfValue> = vec![10.into(), 20.into()];
         state.add_key(pk, None);
-        state.process_records(&mut vec![first.clone(), second.clone()].into(), None, None);
+        state
+            .process_records(&mut vec![first.clone(), second.clone()].into(), None, None)
+            .unwrap();
         match state.lookup(&[0], &PointKey::Single(1.into())) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
                 assert_eq!(rows.len(), 1);
@@ -2150,7 +2166,9 @@ mod tests {
             _ => unreachable!(),
         }
 
-        state.process_records(&mut vec![(first, false)].into(), None, None);
+        state
+            .process_records(&mut vec![(first, false)].into(), None, None)
+            .unwrap();
         match state.lookup(&[0], &PointKey::Single(1.into())) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
                 assert_eq!(rows.len(), 0);
@@ -2174,7 +2192,9 @@ mod tests {
         let second: Vec<DfValue> = vec![0.into(), 1.into()];
         state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
         state.add_key(Index::new(IndexType::HashMap, vec![1]), None);
-        state.process_records(&mut vec![first.clone(), second.clone()].into(), None, None);
+        state
+            .process_records(&mut vec![first.clone(), second.clone()].into(), None, None)
+            .unwrap();
 
         match state.lookup(&[0], &PointKey::Single(0.into())) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
@@ -2201,7 +2221,9 @@ mod tests {
         let second: Vec<DfValue> = vec![20.into(), "Bob".into()];
         state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
         state.add_key(Index::new(IndexType::HashMap, vec![1]), None);
-        state.process_records(&mut vec![first.clone(), second.clone()].into(), None, None);
+        state
+            .process_records(&mut vec![first.clone(), second.clone()].into(), None, None)
+            .unwrap();
 
         match state.lookup(&[0], &PointKey::Single(10.into())) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
@@ -2231,7 +2253,9 @@ mod tests {
             let mut state = PersistentState::new(name.clone(), Vec::<Box<[usize]>>::new(), &params);
             state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
             state.add_key(Index::new(IndexType::HashMap, vec![1]), None);
-            state.process_records(&mut vec![first.clone(), second.clone()].into(), None, None);
+            state
+                .process_records(&mut vec![first.clone(), second.clone()].into(), None, None)
+                .unwrap();
         }
 
         let state = PersistentState::new(name, Vec::<Box<[usize]>>::new(), &params);
@@ -2263,7 +2287,9 @@ mod tests {
             let mut state = PersistentState::new(name.clone(), Some(&[0]), &params);
             state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
             state.add_key(Index::new(IndexType::HashMap, vec![1]), None);
-            state.process_records(&mut vec![first.clone(), second.clone()].into(), None, None);
+            state
+                .process_records(&mut vec![first.clone(), second.clone()].into(), None, None)
+                .unwrap();
         }
 
         let state = PersistentState::new(name, Some(&[0]), &params);
@@ -2292,16 +2318,20 @@ mod tests {
         let second: Vec<DfValue> = vec![20.into(), "Cat".into()];
         state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
         state.add_key(Index::new(IndexType::HashMap, vec![1]), None);
-        state.process_records(
-            &mut vec![first.clone(), duplicate.clone(), second.clone()].into(),
-            None,
-            None,
-        );
-        state.process_records(
-            &mut vec![(first.clone(), false), (first.clone(), false)].into(),
-            None,
-            None,
-        );
+        state
+            .process_records(
+                &mut vec![first.clone(), duplicate.clone(), second.clone()].into(),
+                None,
+                None,
+            )
+            .unwrap();
+        state
+            .process_records(
+                &mut vec![(first.clone(), false), (first.clone(), false)].into(),
+                None,
+                None,
+            )
+            .unwrap();
 
         // We only want to remove rows that match exactly, not all rows that match the key
         match state.lookup(&[0], &PointKey::Single(first[0].clone())) {
@@ -2349,16 +2379,20 @@ mod tests {
         state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
         state.add_key(Index::new(IndexType::HashMap, vec![1]), None);
         state.add_key(Index::new(IndexType::HashMap, vec![2]), None);
-        state.process_records(
-            &mut vec![first.clone(), duplicate.clone(), second.clone()].into(),
-            None,
-            None,
-        );
-        state.process_records(
-            &mut vec![(first.clone(), false), (first.clone(), false)].into(),
-            None,
-            None,
-        );
+        state
+            .process_records(
+                &mut vec![first.clone(), duplicate.clone(), second.clone()].into(),
+                None,
+                None,
+            )
+            .unwrap();
+        state
+            .process_records(
+                &mut vec![(first.clone(), false), (first.clone(), false)].into(),
+                None,
+                None,
+            )
+            .unwrap();
 
         for i in 0..3usize {
             // Make sure we removed the row for every CF
@@ -2417,7 +2451,9 @@ mod tests {
         let second: Vec<DfValue> = vec![20.into(), "Cat".into()];
         state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
         state.add_key(Index::new(IndexType::HashMap, vec![1]), None);
-        state.process_records(&mut vec![first.clone(), second.clone()].into(), None, None);
+        state
+            .process_records(&mut vec![first.clone(), second.clone()].into(), None, None)
+            .unwrap();
 
         assert_eq!(state.cloned_records(), vec![first, second]);
     }
@@ -2465,8 +2501,12 @@ mod tests {
         .into();
 
         state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
-        state.process_records(&mut Vec::from(&records[..3]).into(), None, None);
-        state.process_records(&mut records[3].clone().into(), None, None);
+        state
+            .process_records(&mut Vec::from(&records[..3]).into(), None, None)
+            .unwrap();
+        state
+            .process_records(&mut records[3].clone().into(), None, None)
+            .unwrap();
 
         // Make sure the first record has been deleted:
         match state.lookup(&[0], &PointKey::Single(records[0][0].clone())) {
@@ -2492,7 +2532,9 @@ mod tests {
             offset: 12,
             replication_log_name: "binlog".to_owned(),
         };
-        state.process_records(&mut records, None, Some(replication_offset.clone()));
+        state
+            .process_records(&mut records, None, Some(replication_offset.clone()))
+            .unwrap();
         let result = state.replication_offset();
         assert_eq!(result, Some(&replication_offset));
     }
@@ -2546,32 +2588,36 @@ mod tests {
         let mut state = setup_persistent("read_handle_misses_on_binlog", None);
         state.add_key(Index::hash_map(vec![0]), None);
 
-        state.process_records(
-            &mut (0..10)
-                .map(|n| Record::from(vec![n.into()]))
-                .collect::<Records>(),
-            None,
-            Some(ReplicationOffset {
-                offset: 1,
-                replication_log_name: String::new(),
-            }),
-        );
+        state
+            .process_records(
+                &mut (0..10)
+                    .map(|n| Record::from(vec![n.into()]))
+                    .collect::<Records>(),
+                None,
+                Some(ReplicationOffset {
+                    offset: 1,
+                    replication_log_name: String::new(),
+                }),
+            )
+            .unwrap();
 
         let mut rh = state.read_handle();
         // When we first create the rh, it is up to date
         assert!(rh.do_lookup(&[0], &PointKey::Single(0.into())).is_some());
 
         // Process more records ...
-        state.process_records(
-            &mut (0..10)
-                .map(|n| Record::from(vec![n.into()]))
-                .collect::<Records>(),
-            None,
-            Some(ReplicationOffset {
-                offset: 2,
-                replication_log_name: String::new(),
-            }),
-        );
+        state
+            .process_records(
+                &mut (0..10)
+                    .map(|n| Record::from(vec![n.into()]))
+                    .collect::<Records>(),
+                None,
+                Some(ReplicationOffset {
+                    offset: 2,
+                    replication_log_name: String::new(),
+                }),
+            )
+            .unwrap();
 
         // Now read handle is behind, since it didn't get the forward processing yet
         assert!(rh.do_lookup(&[0], &PointKey::Single(0.into())).is_none());
@@ -2583,7 +2629,8 @@ mod tests {
                 offset: 2,
                 replication_log_name: String::new(),
             }),
-        );
+        )
+        .unwrap();
 
         // Read handle is up to date now
         assert!(rh.do_lookup(&[0], &PointKey::Single(0.into())).is_some());
@@ -2601,13 +2648,15 @@ mod tests {
         fn setup() -> PersistentState {
             let mut state = setup_persistent("persistent_state_single_key", None);
             state.add_key(Index::btree_map(vec![0]), None);
-            state.process_records(
-                &mut (0..10)
-                    .map(|n| Record::from(vec![n.into()]))
-                    .collect::<Records>(),
-                None,
-                None,
-            );
+            state
+                .process_records(
+                    &mut (0..10)
+                        .map(|n| Record::from(vec![n.into()]))
+                        .collect::<Records>(),
+                    None,
+                    None,
+                )
+                .unwrap();
             state
         }
 
@@ -2673,7 +2722,9 @@ mod tests {
             let mut state = setup();
             // ENG-1559: If state has more than one key for the exclusive start bound, it has to
             // skip them all
-            state.process_records(&mut vec![Record::from(vec![3.into()])].into(), None, None);
+            state
+                .process_records(&mut vec![Record::from(vec![3.into()])].into(), None, None)
+                .unwrap();
             assert_eq!(
                 state.lookup_range(
                     &[0],
@@ -2718,11 +2769,13 @@ mod tests {
             let mut state = setup();
             // ENG-1560: When the upper included bound is not actually in the map, shouldn't read
             // past it anyway
-            state.process_records(
-                &mut vec![Record::from((vec![7.into()], false))].into(),
-                None,
-                None,
-            );
+            state
+                .process_records(
+                    &mut vec![Record::from((vec![7.into()], false))].into(),
+                    None,
+                    None,
+                )
+                .unwrap();
 
             assert_eq!(
                 state.lookup_range(
@@ -2754,7 +2807,9 @@ mod tests {
         #[test]
         fn unbounded_inclusive_multiple_rows_in_upper_bound() {
             let mut state = setup();
-            state.process_records(&mut vec![vec![DfValue::from(3)]].into(), None, None);
+            state
+                .process_records(&mut vec![vec![DfValue::from(3)]].into(), None, None)
+                .unwrap();
 
             assert_eq!(
                 state.lookup_range(&[0], &RangeKey::from(&(..=vec1![DfValue::from(3)]))),
@@ -2774,15 +2829,17 @@ mod tests {
         #[test]
         fn non_unique_then_reindex() {
             let mut state = setup_persistent("persistent_state_single_key", Some(&[1][..]));
-            state.process_records(
-                &mut [0, 0, 1, 1, 2, 2, 3, 3]
-                    .iter()
-                    .enumerate()
-                    .map(|(i, n)| Record::from(vec![(*n).into(), i.into()]))
-                    .collect::<Records>(),
-                None,
-                None,
-            );
+            state
+                .process_records(
+                    &mut [0, 0, 1, 1, 2, 2, 3, 3]
+                        .iter()
+                        .enumerate()
+                        .map(|(i, n)| Record::from(vec![(*n).into(), i.into()]))
+                        .collect::<Records>(),
+                    None,
+                    None,
+                )
+                .unwrap();
             state.add_key(Index::btree_map(vec![0]), None);
 
             assert_eq!(
@@ -2817,13 +2874,15 @@ mod tests {
 
         fn setup_secondary() -> PersistentState {
             let mut state = setup_persistent("reindexed", Some(&[0usize][..]));
-            state.process_records(
-                &mut (-10..10)
-                    .map(|n| Record::from(vec![n.into(), n.into(), n.into()]))
-                    .collect::<Records>(),
-                None,
-                None,
-            );
+            state
+                .process_records(
+                    &mut (-10..10)
+                        .map(|n| Record::from(vec![n.into(), n.into(), n.into()]))
+                        .collect::<Records>(),
+                    None,
+                    None,
+                )
+                .unwrap();
             state.add_key(Index::btree_map(vec![1]), None);
             state
         }
@@ -2849,26 +2908,28 @@ mod tests {
         fn exclusive_unbounded_secondary_big_values() {
             let mut state =
                 setup_persistent("exclusive_unbounded_secondary_2", Some(&[0usize][..]));
-            state.process_records(
-                &mut [
-                    (0, 1221662829),
-                    (1, -1708946381),
-                    (2, -1499655272),
-                    (3, -2116759780),
-                    (4, -156921416),
-                    (5, -2088438952),
-                    (6, -567360636),
-                    (7, -2025118595),
-                    (8, 555671065),
-                    (9, 925768521),
-                ]
-                .iter()
-                .copied()
-                .map(|(n1, n2)| Record::from(vec![n1.into(), n2.into()]))
-                .collect::<Records>(),
-                None,
-                None,
-            );
+            state
+                .process_records(
+                    &mut [
+                        (0, 1221662829),
+                        (1, -1708946381),
+                        (2, -1499655272),
+                        (3, -2116759780),
+                        (4, -156921416),
+                        (5, -2088438952),
+                        (6, -567360636),
+                        (7, -2025118595),
+                        (8, 555671065),
+                        (9, 925768521),
+                    ]
+                    .iter()
+                    .copied()
+                    .map(|(n1, n2)| Record::from(vec![n1.into(), n2.into()]))
+                    .collect::<Records>(),
+                    None,
+                    None,
+                )
+                .unwrap();
             state.add_key(Index::btree_map(vec![1]), None);
             assert_eq!(
                 state.lookup_range(
@@ -3027,11 +3088,13 @@ mod tests {
             let extra_row_beginning = vec![DfValue::from(11), DfValue::from(3), DfValue::from(3)];
             let extra_row_end = vec![DfValue::from(12), DfValue::from(9), DfValue::from(9)];
 
-            state.process_records(
-                &mut vec![extra_row_beginning.clone(), extra_row_end.clone()].into(),
-                None,
-                None,
-            );
+            state
+                .process_records(
+                    &mut vec![extra_row_beginning.clone(), extra_row_end.clone()].into(),
+                    None,
+                    None,
+                )
+                .unwrap();
 
             assert_eq!(
                 state.lookup_range(
@@ -3053,17 +3116,19 @@ mod tests {
         fn citext() {
             let mut state = setup();
             state.add_key(Index::btree_map(vec![0]), None);
-            state.process_records(
-                &mut vec![
-                    vec![DfValue::from_str_and_collation("a", Collation::Citext)],
-                    vec![DfValue::from_str_and_collation("B", Collation::Citext)],
-                    vec![DfValue::from_str_and_collation("c", Collation::Citext)],
-                    vec![DfValue::from_str_and_collation("D", Collation::Citext)],
-                ]
-                .into(),
-                None,
-                None,
-            );
+            state
+                .process_records(
+                    &mut vec![
+                        vec![DfValue::from_str_and_collation("a", Collation::Citext)],
+                        vec![DfValue::from_str_and_collation("B", Collation::Citext)],
+                        vec![DfValue::from_str_and_collation("c", Collation::Citext)],
+                        vec![DfValue::from_str_and_collation("D", Collation::Citext)],
+                    ]
+                    .into(),
+                    None,
+                    None,
+                )
+                .unwrap();
 
             let result = state
                 .lookup_range(

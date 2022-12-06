@@ -488,7 +488,7 @@ mod tests {
         let row: Record = vec![1.into(), 2.into(), 3.into()].into();
         state.add_key(Index::hash_map(vec![0]), None);
         state.add_key(Index::hash_map(vec![1]), None);
-        state.process_records(&mut row.into(), None, None);
+        state.process_records(&mut row.into(), None, None).unwrap();
         states.insert(local, state);
 
         let mut project = Project::new(global, permutation, additional, expressions);

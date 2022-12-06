@@ -3004,20 +3004,18 @@ impl Domain {
                     let partial_index = partial_key_cols.as_ref().unwrap();
                     #[allow(clippy::unwrap_used)]
                     // We would have bailed earlier (break 'outer, above) if m wasn't Some
-                    m.as_mut().unwrap().map_data(|rs| {
-                        rs.retain(|r| {
-                            // XXX: don't we technically need to translate the columns a
-                            // bunch here? what if two key columns are reordered?
-                            // XXX: this clone and collect here is *really* sad
-                            let r = r.rec();
-                            !missed_on.iter().any(|miss| {
-                                miss.contains(partial_index.columns.iter().map(|&c| {
-                                    #[allow(clippy::indexing_slicing)]
-                                    // record came from processing, which means it
-                                    // must have the right number of columns
-                                    &r[c]
-                                }))
-                            })
+                    m.as_mut().unwrap().mut_data().retain(|r| {
+                        // XXX: don't we technically need to translate the columns a
+                        // bunch here? what if two key columns are reordered?
+                        // XXX: this clone and collect here is *really* sad
+                        let r = r.rec();
+                        !missed_on.iter().any(|miss| {
+                            miss.contains(partial_index.columns.iter().map(|&c| {
+                                #[allow(clippy::indexing_slicing)]
+                                // record came from processing, which means it
+                                // must have the right number of columns
+                                &r[c]
+                            }))
                         })
                     });
                 }

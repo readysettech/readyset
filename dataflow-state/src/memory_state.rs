@@ -107,7 +107,7 @@ impl State for MemoryState {
         records: &mut Records,
         partial_tag: Option<Tag>,
         replication_offset: Option<ReplicationOffset>,
-    ) {
+    ) -> ReadySetResult<()> {
         if self.is_partial() {
             records.retain(|r| {
                 // we need to check that we're not erroneously filling any holes
@@ -147,6 +147,8 @@ impl State for MemoryState {
         if let Some(replication_offset) = replication_offset {
             self.replication_offset = Some(replication_offset);
         }
+
+        Ok(())
     }
 
     fn key_count(&self) -> KeyCount {

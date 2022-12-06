@@ -383,7 +383,9 @@ pub mod test {
 
             // if the base node has state, keep it
             if let Some(ref mut state) = self.states.get_mut(*base) {
-                state.process_records(&mut vec![data].into(), None, None);
+                state
+                    .process_records(&mut vec![data].into(), None, None)
+                    .unwrap();
             } else {
                 panic!(
                     "unnecessary seed value for {} (never used by any node)",
@@ -441,7 +443,8 @@ pub mod test {
                     None,
                     tag,
                     self.states.get_mut(*self.nut.unwrap()),
-                );
+                )
+                .unwrap();
             }
 
             res

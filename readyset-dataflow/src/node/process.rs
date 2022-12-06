@@ -132,9 +132,7 @@ impl Node {
             NodeType::Ingress => {
                 let m = m.as_mut().unwrap();
                 let tag = m.tag();
-                m.map_data(|rs| {
-                    materialize(rs, None, tag, env.state.get_mut(addr));
-                });
+                materialize(m.mut_data(), None, tag, env.state.get_mut(addr))?;
             }
             NodeType::Base(ref mut b) => {
                 // NOTE: bases only accept BaseOperations
@@ -174,7 +172,12 @@ impl Node {
                         //
                         // So: only materialize if the message we're processing is not a replay!
                         if keyed_by.is_none() {
-                            materialize(&mut rs, replication_offset, None, env.state.get_mut(addr));
+                            materialize(
+                                &mut rs,
+                                replication_offset,
+                                None,
+                                env.state.get_mut(addr),
+                            )?;
                         }
 
                         if let (Some(SetSnapshotMode::FinishSnapshotMode), Some(s)) = (
@@ -405,9 +408,7 @@ impl Node {
                     }
                     _ => None,
                 };
-                m.map_data(|rs| {
-                    materialize(rs, None, tag, env.state.get_mut(addr));
-                });
+                materialize(m.mut_data(), None, tag, env.state.get_mut(addr))?;
 
                 for miss in misses.iter_mut() {
                     if miss.on != addr {
@@ -670,18 +671,13 @@ pub(crate) fn materialize(
     replication_offset: Option<ReplicationOffset>,
     partial: Option<Tag>,
     state: Option<&mut MaterializedNodeState>,
-) {
-    // our output changed -- do we need to modify materialized state?
-    if state.is_none() {
-        // nope
-        return;
+) -> ReadySetResult<()> {
+    if let Some(state) = state {
+        trace!(?rs, ?replication_offset, "materializing");
+        state.process_records(rs, partial, replication_offset)?;
     }
 
-    // yes!
-    trace!(?rs, ?replication_offset, "materializing");
-    state
-        .unwrap()
-        .process_records(rs, partial, replication_offset);
+    Ok(())
 }
 
 #[cfg(feature = "bench")]

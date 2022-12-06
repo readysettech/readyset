@@ -676,7 +676,7 @@ mod tests {
                     .process(local, &[], u, &states, SnapshotMode::SnapshotModeDisabled)
                     .unwrap()
                     .records;
-                node::materialize(&mut m, None, None, states.get_mut(local));
+                node::materialize(&mut m, None, None, states.get_mut(local)).unwrap();
                 m
             };
 
@@ -808,7 +808,7 @@ mod tests {
             state.add_key(Index::hash_map(vec![0]), None);
 
             let mut recs = vec![Record::Positive(vec![2.into(), 3.into(), 4.into()])].into();
-            state.process_records(&mut recs, None, None);
+            state.process_records(&mut recs, None, None).unwrap();
 
             let mut state_map = NodeMap::new();
             state_map.insert(ni, state);
@@ -854,7 +854,7 @@ mod tests {
             state.add_key(Index::hash_map(vec![0]), None);
 
             let mut recs = vec![Record::Positive(vec![2.into(), 3.into(), 4.into()])].into();
-            state.process_records(&mut recs, None, None);
+            state.process_records(&mut recs, None, None).unwrap();
 
             let mut state_map = NodeMap::new();
             state_map.insert(ni, state);
@@ -912,7 +912,7 @@ mod tests {
                 Record::Positive(vec![3.into(), "c".into()]),
             ]
             .into();
-            state.process_records(&mut recs, None, None);
+            state.process_records(&mut recs, None, None).unwrap();
 
             let mut state_map = NodeMap::new();
             state_map.insert(ni, state);

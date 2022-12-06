@@ -156,7 +156,7 @@ impl Sharder {
                 .sharded
                 .entry(shard)
                 .or_insert_with(|| Box::new(m.clone_data()));
-            p.map_data(|rs| rs.push(record));
+            p.mut_data().push(record);
         }
 
         enum Destination {
