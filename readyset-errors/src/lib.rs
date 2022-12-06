@@ -621,6 +621,11 @@ pub enum ReadySetError {
         /// The base table being manipulated.
         table: Relation,
     },
+
+    /// Error when a MIR node does not have dataflow node assigned, in contexts
+    /// where it should had one.
+    #[error("MIR node should have a dataflow node assigned: {mir_node_index}")]
+    MirNodeMustHaveDfNodeAssigned { mir_node_index: usize },
 }
 
 impl ReadySetError {
