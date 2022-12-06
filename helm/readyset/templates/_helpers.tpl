@@ -235,6 +235,6 @@ data:
 {{/* Template representing the port associated with the ReadySet adapter service */}}
 {{- define "readyset.port" -}}
 {{ $port := 0 }}
-{{- if eq "mysql" .Values.readyset.common.config.engine }}{{ $port = 3306 }}{{ else }}{{ $port = 5432 }}{{ end }}
+{{- if eq "mysql" .Values.readyset.common.config.database_type }}{{ $port = 3306 }}{{ else }}{{ $port = 5432 }}{{ end }}
 {{- printf "%d" $port -}}
 {{- end -}}

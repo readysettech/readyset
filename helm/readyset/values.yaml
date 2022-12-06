@@ -114,9 +114,10 @@ readyset:
       # -- Format for ReadySet logs to be emitted to STDOUT/STDERR.
       logFormat: compact
 
-      # -- Flag to instruct entrypoint script which adapter binary to use.
-      # Supported values: mysql, psql
-      engine: "mysql"
+      # -- Flag to instruct readyset binary which adapter binary to use.
+      # -- Also used to configure listening port for the helm chart.
+      # Supported values: mysql, postgresql
+      database_type: "mysql"
 
       # -- Consul authority address override.
       # Empty value uses chart generated value.
@@ -414,7 +415,7 @@ readyset:
     image:
 
       # -- Image repository to use for ReadySet adapter containers.
-      repository: public.ecr.aws/readyset/readyset-adapter
+      repository: public.ecr.aws/readyset/readyset
 
       # -- Image tag to use for ReadySet adapter containers.
       tag: "latest"
@@ -506,10 +507,11 @@ readyset:
         protocol: TCP
 
     # -- Entrypoint for ReadySet adapter containers.
-    entrypoint: "/usr/local/bin/docker-entrypoint.sh"
+    entrypoint: "/usr/local/bin/readyset"
 
     # -- Entrypoint arguments for ReadySet adapter containers.
-    args: ["--prometheus-metrics"]
+    # -- database-type possible values: mysql, postgresql
+    args: ["--prometheus-metrics", "--database-type", "mysql"]
 
     # -- Static environment variables applied to ReadySet adapter containers.
     # @default -- Truncated due to length.

@@ -73,8 +73,8 @@ readyset:
       # -- Name of the ReadySet deployment
       deploymentName: "myapp-1"
       # -- Flag to instruct entrypoint script which adapter binary to use
-      # Supported values: mysql,psql
-      engine: "mysql"
+      # Supported values: mysql,postgresql
+      database_type: "mysql"
 ```
 
 To install the chart, you can use the below command:

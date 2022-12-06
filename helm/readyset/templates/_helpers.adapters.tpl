@@ -93,12 +93,12 @@ volumes:
 ReadySet adapter, main configuration envionment variables.
 */}}
 {{- define "readyset.adapter.dynamicEnvironmentVars" -}}
-- name: ENGINE
-  value: {{ .config.engine | quote }}
-{{- if eq .config.engine "mysql" }}
+- name: DATABASE_TYPE
+  value: {{ .config.database_type | quote }}
+{{- if eq .config.database_type "mysql" }}
 - name: LISTEN_ADDRESS
   value: "0.0.0.0:3306"
-{{ else if eq .config.engine "psql" }}
+{{ else if eq .config.database_type "postgresql" }}
 - name: LISTEN_ADDRESS
   value: "0.0.0.0:5432"
 {{- end -}}
