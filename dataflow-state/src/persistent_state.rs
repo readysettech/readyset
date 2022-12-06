@@ -1663,7 +1663,7 @@ impl PersistentState {
                 let key = iter
                     .key()
                     .filter(|k| k.starts_with(&prefix))
-                    .expect("tried removing non-existant row");
+                    .expect("tried removing non-existent row");
                 let val = deserialize_row(iter.value().unwrap());
                 if val == r {
                     break key.to_vec();
