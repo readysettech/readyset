@@ -77,9 +77,10 @@ pub(crate) struct SqlIncorporator {
     /// All values in this map will also be keys in `self.custom_types`.
     custom_types_by_oid: HashMap<u32, Relation>,
 
-    /// Set of tables that exist in the upstream database, but are not being replicated (either due
-    /// to lack of support, or because the user explicitly opted out from them being replicated)
-    non_replicated_tables: HashSet<Relation>,
+    /// Set of relations (tables or views) that exist in the upstream database, but are not being
+    /// replicated (either due to lack of support, or because the user explicitly opted out from
+    /// them being replicated)
+    non_replicated_relations: HashSet<Relation>,
 
     pub(crate) config: Config,
 }
@@ -288,16 +289,16 @@ impl SqlIncorporator {
         self.custom_types.remove(name)
     }
 
-    /// Record that a table with the given `name` exists in the upstream database, but is not being
-    /// replicated
-    pub(crate) fn add_non_replicated_table(&mut self, name: Relation) {
-        self.non_replicated_tables.insert(name);
+    /// Record that a relation (a table or view) with the given `name` exists in the upstream
+    /// database, but is not being replicated
+    pub(crate) fn add_non_replicated_relation(&mut self, name: Relation) {
+        self.non_replicated_relations.insert(name);
     }
 
     /// Remove the given `name` from the set of tables that are known to exist in the upstream
     /// database, but are not being replicated. Returns whether the table was in the set.
-    pub(crate) fn remove_non_replicated_table(&mut self, name: &Relation) -> bool {
-        self.non_replicated_tables.remove(name)
+    pub(crate) fn remove_non_replicated_relation(&mut self, name: &Relation) -> bool {
+        self.non_replicated_relations.remove(name)
     }
 
     pub(super) fn set_base_column_type(
