@@ -134,6 +134,7 @@ impl SqlIncorporator {
         stmt.rewrite(&mut RewriteContext {
             view_schemas: &self.view_schemas,
             base_schemas: &self.base_schemas,
+            non_replicated_relations: &self.non_replicated_relations,
             custom_types: &self
                 .custom_types
                 .keys()

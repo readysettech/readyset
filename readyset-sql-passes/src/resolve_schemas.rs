@@ -6,10 +6,13 @@ use std::collections::{HashMap, HashSet};
 
 use nom_sql::analysis::visit_mut::{self, walk_select_statement, VisitorMut};
 use nom_sql::{CreateTableStatement, Relation, SelectStatement, SqlIdentifier, SqlType, TableExpr};
+use readyset_errors::{ReadySetError, ReadySetResult};
+
+use crate::CanQuery;
 
 struct ResolveSchemaVisitor<'schema> {
     /// Map from schema name to the set of table names in that schema
-    tables: HashMap<&'schema SqlIdentifier, HashSet<&'schema SqlIdentifier>>,
+    tables: HashMap<&'schema SqlIdentifier, HashMap<&'schema SqlIdentifier, CanQuery>>,
 
     /// Map from schema name to the set of custom types in that schema
     custom_types: &'schema HashMap<&'schema SqlIdentifier, HashSet<&'schema SqlIdentifier>>,
@@ -36,7 +39,7 @@ impl<'schema> ResolveSchemaVisitor<'schema> {
 }
 
 impl<'ast, 'schema> VisitorMut<'ast> for ResolveSchemaVisitor<'schema> {
-    type Error = !;
+    type Error = ReadySetError;
 
     fn visit_sql_type(&mut self, sql_type: &'ast mut nom_sql::SqlType) -> Result<(), Self::Error> {
         if let SqlType::Other(ty) = sql_type {
@@ -119,22 +122,30 @@ impl<'ast, 'schema> VisitorMut<'ast> for ResolveSchemaVisitor<'schema> {
             return Ok(());
         }
 
-        if let Some(schema) = self.search_path.iter().find(|schema| {
+        if let Some(schema) = self.search_path.iter().try_find(|schema| {
             let found = self
                 .tables
                 .get(schema)
                 .into_iter()
-                .any(|ts| ts.contains(&table.name));
-            if !found {
-                if let Some(invalidating) = self.invalidating_tables.as_deref_mut() {
-                    invalidating.push(Relation {
-                        schema: Some((**schema).clone()),
-                        name: table.name.clone(),
-                    });
+                .find_map(|ts| ts.get(&table.name).copied());
+            match found {
+                Some(CanQuery::Yes) => Ok(true),
+                Some(CanQuery::No) => Err(ReadySetError::TableNotReplicated {
+                    name: table.name.clone().into(),
+                    schema: Some((*schema).into()),
+                }),
+                None => {
+                    if let Some(invalidating) = self.invalidating_tables.as_deref_mut() {
+                        invalidating.push(Relation {
+                            schema: Some((**schema).clone()),
+                            name: table.name.clone(),
+                        });
+                    }
+
+                    Ok(false)
                 }
             }
-            found
-        }) {
+        })? {
             table.schema = Some(schema.clone());
         }
 
@@ -142,13 +153,13 @@ impl<'ast, 'schema> VisitorMut<'ast> for ResolveSchemaVisitor<'schema> {
     }
 }
 
-pub trait ResolveSchemas {
+pub trait ResolveSchemas: Sized {
     /// Attempt to resolve schemas for all non-schema-qualified table references in `self` by
     /// looking up those tables in `tables`, using `search_path` for precedence.
     ///
     /// During resolution, if any schema is "skipped over" when resolving a table, that table will
     /// be added to `invalidating_tables` if provided, to mark that if that table is later created
-    /// this query should be invalidated
+    /// then this query should be invalidated.
     ///
     /// A couple of details worth noting:
     ///
@@ -161,52 +172,52 @@ pub trait ResolveSchemas {
     ///   as they should take precedence over tables in the database
     fn resolve_schemas<'schema>(
         self,
-        tables: HashMap<&'schema SqlIdentifier, HashSet<&'schema SqlIdentifier>>,
+        tables: HashMap<&'schema SqlIdentifier, HashMap<&'schema SqlIdentifier, CanQuery>>,
         custom_types: &'schema HashMap<&'schema SqlIdentifier, HashSet<&'schema SqlIdentifier>>,
         search_path: &'schema [SqlIdentifier],
         invalidating_tables: Option<&'schema mut Vec<Relation>>,
-    ) -> Self;
+    ) -> ReadySetResult<Self>;
 }
 
 impl ResolveSchemas for SelectStatement {
     fn resolve_schemas<'schema>(
         mut self,
-        tables: HashMap<&'schema SqlIdentifier, HashSet<&'schema SqlIdentifier>>,
+        tables: HashMap<&'schema SqlIdentifier, HashMap<&'schema SqlIdentifier, CanQuery>>,
         custom_types: &'schema HashMap<&'schema SqlIdentifier, HashSet<&'schema SqlIdentifier>>,
         search_path: &'schema [SqlIdentifier],
         invalidating_tables: Option<&'schema mut Vec<Relation>>,
-    ) -> Self {
-        let Ok(()) = ResolveSchemaVisitor {
+    ) -> ReadySetResult<Self> {
+        ResolveSchemaVisitor {
             tables,
             custom_types,
             search_path,
             alias_stack: Default::default(),
             invalidating_tables,
         }
-        .visit_select_statement(&mut self);
+        .visit_select_statement(&mut self)?;
 
-        self
+        Ok(self)
     }
 }
 
 impl ResolveSchemas for CreateTableStatement {
     fn resolve_schemas<'schema>(
         mut self,
-        tables: HashMap<&'schema SqlIdentifier, HashSet<&'schema SqlIdentifier>>,
+        tables: HashMap<&'schema SqlIdentifier, HashMap<&'schema SqlIdentifier, CanQuery>>,
         custom_types: &'schema HashMap<&'schema SqlIdentifier, HashSet<&'schema SqlIdentifier>>,
         search_path: &'schema [SqlIdentifier],
         invalidating_tables: Option<&'schema mut Vec<Relation>>,
-    ) -> Self {
-        let Ok(()) = ResolveSchemaVisitor {
+    ) -> ReadySetResult<Self> {
+        ResolveSchemaVisitor {
             tables,
             custom_types,
             search_path,
             alias_stack: Default::default(),
             invalidating_tables,
         }
-        .visit_create_table_statement(&mut self);
+        .visit_create_table_statement(&mut self)?;
 
-        self
+        Ok(self)
     }
 }
 
@@ -226,19 +237,31 @@ mod tests {
     {
         let input = parser(input);
         let expected = parser(expected);
-        let result = input.resolve_schemas(
-            HashMap::from([
-                (&"s1".into(), HashSet::from([&"t1".into(), &"t2".into()])),
-                (
-                    &"s2".into(),
-                    HashSet::from([&"t1".into(), &"t2".into(), &"t3".into()]),
-                ),
-                (&"s3".into(), HashSet::from([&"t4".into()])),
-            ]),
-            &HashMap::from([(&"s2".into(), HashSet::from([&"abc".into()]))]),
-            &["s1".into(), "s2".into()],
-            None,
-        );
+        let result = input
+            .resolve_schemas(
+                HashMap::from([
+                    (
+                        &"s1".into(),
+                        HashMap::from([
+                            (&"t1".into(), CanQuery::Yes),
+                            (&"t2".into(), CanQuery::Yes),
+                        ]),
+                    ),
+                    (
+                        &"s2".into(),
+                        HashMap::from([
+                            (&"t1".into(), CanQuery::Yes),
+                            (&"t2".into(), CanQuery::Yes),
+                            (&"t3".into(), CanQuery::Yes),
+                        ]),
+                    ),
+                    (&"s3".into(), HashMap::from([(&"t4".into(), CanQuery::Yes)])),
+                ]),
+                &HashMap::from([(&"s2".into(), HashSet::from([&"abc".into()]))]),
+                &["s1".into(), "s2".into()],
+                None,
+            )
+            .unwrap();
         assert_eq!(
             result, expected,
             "\nExpected: {expected}\n     Got: {result}"
@@ -362,12 +385,14 @@ mod tests {
     fn writes_to_invalidating_tables() {
         let input = parse_select_statement("select * from t");
         let mut invalidating_tables = vec![];
-        let _result = input.resolve_schemas(
-            HashMap::from([(&"s2".into(), HashSet::from([&"t".into()]))]),
-            &HashMap::new(),
-            &["s1".into(), "s2".into()],
-            Some(&mut invalidating_tables),
-        );
+        let _result = input
+            .resolve_schemas(
+                HashMap::from([(&"s2".into(), HashMap::from([(&"t".into(), CanQuery::Yes)]))]),
+                &HashMap::new(),
+                &["s1".into(), "s2".into()],
+                Some(&mut invalidating_tables),
+            )
+            .unwrap();
 
         assert_eq!(
             invalidating_tables,
@@ -376,5 +401,44 @@ mod tests {
                 name: "t".into(),
             }]
         );
+    }
+
+    #[test]
+    fn cant_query_returns_error() {
+        let input = parse_select_statement("select * from t");
+        let result = input.resolve_schemas(
+            HashMap::from([
+                (&"s1".into(), HashMap::from([(&"t".into(), CanQuery::No)])),
+                (&"s2".into(), HashMap::from([(&"t".into(), CanQuery::Yes)])),
+            ]),
+            &HashMap::new(),
+            &["s1".into(), "s2".into()],
+            None,
+        );
+        let err = result.unwrap_err();
+        assert_eq!(
+            err,
+            ReadySetError::TableNotReplicated {
+                name: "t".into(),
+                schema: Some("s1".into())
+            }
+        )
+    }
+
+    #[test]
+    fn unresolved_cant_query_works() {
+        let input = parse_select_statement("select * from t");
+        let result = input
+            .resolve_schemas(
+                HashMap::from([
+                    (&"s1".into(), HashMap::from([(&"t".into(), CanQuery::Yes)])),
+                    (&"s2".into(), HashMap::from([(&"t".into(), CanQuery::No)])),
+                ]),
+                &HashMap::new(),
+                &["s1".into(), "s2".into()],
+                None,
+            )
+            .unwrap();
+        assert_eq!(result, parse_select_statement("select * from s1.t"));
     }
 }

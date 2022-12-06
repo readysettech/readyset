@@ -1,4 +1,10 @@
-#![feature(box_patterns, result_flattening, never_type, exhaustive_patterns)]
+#![feature(
+    box_patterns,
+    result_flattening,
+    never_type,
+    exhaustive_patterns,
+    try_find
+)]
 
 pub mod alias_removal;
 pub mod anonymize;
@@ -57,6 +63,11 @@ pub struct RewriteContext<'a> {
     /// [`view_schemas`].
     pub base_schemas: &'a HashMap<Relation, CreateTableBody>,
 
+    /// Set of relations that are known to exist in the upstream database, but are not being
+    /// replicated. Used as part of schema resolution to ensure that queries that would resolve to
+    /// these tables if they *were* being replicated correctly return an error
+    pub non_replicated_relations: &'a HashSet<Relation>,
+
     /// Map from schema name to the set of custom types in that schema
     pub custom_types: &'a HashMap<&'a SqlIdentifier, HashSet<&'a SqlIdentifier>>,
 
@@ -75,17 +86,35 @@ pub struct RewriteContext<'a> {
     pub invalidating_tables: Option<&'a mut Vec<Relation>>,
 }
 
+/// Can a particular relation (in the map passed to [`ResolveSchemas::resolve_schemas`]) be queried
+/// from?
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CanQuery {
+    Yes,
+    No,
+}
+
 impl<'a> RewriteContext<'a> {
-    pub(crate) fn tables(&self) -> HashMap<&'a SqlIdentifier, HashSet<&'a SqlIdentifier>> {
-        self.view_schemas.keys().fold(
-            HashMap::<&SqlIdentifier, HashSet<&SqlIdentifier>>::new(),
-            |mut acc, tbl| {
-                if let Some(schema) = &tbl.schema {
-                    acc.entry(schema).or_default().insert(&tbl.name);
-                }
-                acc
-            },
-        )
+    pub(crate) fn tables(
+        &self,
+    ) -> HashMap<&'a SqlIdentifier, HashMap<&'a SqlIdentifier, CanQuery>> {
+        self.view_schemas
+            .keys()
+            .map(|t| (t, CanQuery::Yes))
+            .chain(
+                self.non_replicated_relations
+                    .iter()
+                    .map(|t| (t, CanQuery::No)),
+            )
+            .fold(
+                HashMap::<&SqlIdentifier, HashMap<&SqlIdentifier, CanQuery>>::new(),
+                |mut acc, (tbl, replicated)| {
+                    if let Some(schema) = &tbl.schema {
+                        acc.entry(schema).or_default().insert(&tbl.name, replicated);
+                    }
+                    acc
+                },
+            )
     }
 }
 
@@ -110,7 +139,7 @@ impl Rewrite for CreateTableStatement {
                 context.custom_types,
                 context.search_path,
                 context.invalidating_tables.as_deref_mut(),
-            )
+            )?
             .normalize_create_table_columns()
             .coalesce_key_definitions())
     }
@@ -126,7 +155,7 @@ impl Rewrite for SelectStatement {
                 context.custom_types,
                 context.search_path,
                 context.invalidating_tables.as_deref_mut(),
-            )
+            )?
             .expand_stars(context.view_schemas)?
             .expand_implied_tables(context.view_schemas)?
             .normalize_topk_with_aggregate()?

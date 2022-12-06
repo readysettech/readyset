@@ -233,6 +233,18 @@ pub enum ReadySetError {
         schema: Option<String>,
     },
 
+    /// A query was made referencing a table that exists in the upstream database, but is not being
+    /// replicated
+    #[error(
+        "Table '{}{}' is not being replicated by ReadySet",
+        schema.as_ref().map(|s| format!("{}.", s)).unwrap_or_default(),
+        name
+    )]
+    TableNotReplicated {
+        name: String,
+        schema: Option<String>,
+    },
+
     /// A view is not yet available.
     #[error("view not yet available")]
     ViewNotYetAvailable,
