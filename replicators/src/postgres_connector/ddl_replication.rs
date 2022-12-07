@@ -47,7 +47,7 @@ use pgsql::tls::MakeTlsConnect;
 use readyset_client::recipe::changelist::{AlterTypeChange, Change};
 use readyset_data::{DfType, PgEnumMetadata};
 use readyset_errors::ReadySetResult;
-use readyset_tracing::debug;
+use readyset_tracing::info;
 use serde::{Deserialize, Deserializer};
 use tokio_postgres as pgsql;
 
@@ -63,11 +63,11 @@ where
 {
     let (client, conn) = config.connect(tls).await?;
     let conn_handle = tokio::spawn(conn);
-    debug!("Setting up DDL replication");
+    info!("Setting up DDL replication");
     client
         .batch_execute(include_str!("./ddl_replication.sql"))
         .await?;
-    debug!("Set up DDL replication");
+    info!("Set up DDL replication");
     conn_handle.abort();
 
     Ok(())
