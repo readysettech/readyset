@@ -70,17 +70,6 @@ fn telemetry_url(path: &str) -> Url {
     Url::parse(TELEMETRY_BASE_URL).unwrap().join(path).unwrap()
 }
 
-impl From<String> for DeploymentEnv {
-    fn from(s: String) -> Self {
-        match s.as_str() {
-            "installer_compose" => DeploymentEnv::InstallerCompose,
-            "eks" => DeploymentEnv::Eks,
-            "helm" => DeploymentEnv::Helm,
-            _ => DeploymentEnv::Unknown,
-        }
-    }
-}
-
 #[async_trait]
 pub trait PeriodicReport: Send + Sync {
     async fn report(&self) -> Result<Vec<(TelemetryEvent, Telemetry)>>;
@@ -170,9 +159,6 @@ impl TelemetryReporter {
     /// Send a telemetry payload to Segment. If the initial request fails for a non-permanent
     /// reason (eg, not a 4XX or IO error), this function will retry with an exponential
     /// backoff, timing out at [`TIMEOUT`].
-    ///
-    /// If this reporter was initialized with an API key equal to [`HARDCODED_API_KEY`], this
-    /// function is a no-op.
     async fn send_event_with_payload_inner(
         &self,
         event: TelemetryEvent,

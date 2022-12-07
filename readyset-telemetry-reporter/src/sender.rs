@@ -46,9 +46,6 @@ impl TelemetrySender {
     /// Send a telemetry payload to Segment. If the initial request fails for a non-permanent
     /// reason (eg, not a 4XX or IO error), this function will retry with an exponential
     /// backoff, timing out at [`TIMEOUT`].
-    ///
-    /// If this reporter was initialized with an API key equal to [`HARDCODED_API_KEY`], this
-    /// function is a no-op.
     pub fn send_event_with_payload(&self, event: TelemetryEvent, payload: Telemetry) -> Result<()> {
         debug!("sending {event:?} with payload {payload:?}");
         if self.no_op {
