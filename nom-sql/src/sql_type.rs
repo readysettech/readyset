@@ -2,9 +2,12 @@ use std::ops::Deref;
 use std::str::FromStr;
 use std::{fmt, str};
 
+use failpoint_macros::set_failpoint;
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::character::complete::digit1;
+#[cfg(feature = "failure_injection")]
+use nom::combinator::fail;
 use nom::combinator::{map, map_parser, opt};
 use nom::error::{ErrorKind, ParseError};
 use nom::multi::{fold_many0, separated_list0};
@@ -682,6 +685,7 @@ pub fn type_identifier(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlType> {
     move |i| {
+        set_failpoint!("parse-sql-type", |_| fail(i));
         // need to pull a bit of a trick here to properly recursive-descent arrays since they're a
         // suffix. First, we parse the type, then we parse any number of `[]` or `[<n>]` suffixes,
         // and use those to construct the multiple levels of `SqlType::Array`

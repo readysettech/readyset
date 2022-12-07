@@ -1,8 +1,6 @@
 use chrono::NaiveDate;
 use readyset_adapter::backend::{MigrationMode, UnsupportedSetMode};
 use readyset_adapter::BackendBuilder;
-#[cfg(feature = "failure_injection")]
-use readyset_client::failpoints;
 use readyset_client_test_helpers::psql_helpers::{upstream_config, PostgreSQLAdapter};
 use readyset_client_test_helpers::{sleep, Adapter, TestBuilder};
 use readyset_server::Handle;
@@ -11,8 +9,6 @@ use serial_test::serial;
 mod common;
 use common::connect;
 use postgres_types::{FromSql, ToSql};
-use rand::distributions::Alphanumeric;
-use rand::Rng;
 use tokio_postgres::{Client, SimpleQueryMessage};
 
 async fn setup() -> (tokio_postgres::Config, Handle) {
@@ -231,6 +227,54 @@ async fn proxy_unsupported_type() {
         _ => panic!(),
     };
     assert_eq!(simple_res.get(0).unwrap(), "(1,2)");
+}
+
+#[cfg(feature = "failure_injection")]
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn schema_resolution_with_unreplicated_tables() {
+    readyset_tracing::init_test_logging();
+    let (config, mut handle) = setup().await;
+    let client = connect(config).await;
+
+    client
+        .simple_query(
+            "CREATE SCHEMA s1; CREATE SCHEMA s2;
+             CREATE TABLE s2.t (x INT)",
+        )
+        .await
+        .unwrap();
+
+    sleep().await;
+
+    handle.set_failpoint("parse-sql-type", "return(fail)").await;
+
+    client
+        .simple_query("CREATE TABLE s1.t (x INT)")
+        .await
+        .unwrap();
+
+    sleep().await;
+
+    client
+        .simple_query("INSERT INTO s1.t (x) VALUES (1)")
+        .await
+        .unwrap();
+    client
+        .simple_query("INSERT INTO s2.t (x) VALUES (2)")
+        .await
+        .unwrap();
+    client
+        .simple_query("SET search_path = s1, s2")
+        .await
+        .unwrap();
+
+    let result = client
+        .query_one("SELECT x FROM t", &[])
+        .await
+        .unwrap()
+        .get::<_, i32>(0);
+    assert_eq!(result, 1);
 }
 
 #[tokio::test(flavor = "multi_thread")]

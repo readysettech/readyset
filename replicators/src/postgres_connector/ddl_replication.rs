@@ -87,14 +87,14 @@ pub(crate) enum DdlEventOperation {
 pub(crate) struct DdlCreateTableColumn {
     name: String,
     #[serde(deserialize_with = "parse_sql_type")]
-    column_type: SqlType,
+    column_type: Result<SqlType, String>,
     not_null: bool,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 pub(crate) struct DdlCreateTableConstraint {
     #[serde(deserialize_with = "parse_table_key")]
-    definition: TableKey,
+    definition: Result<TableKey, String>,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -118,8 +118,23 @@ macro_rules! make_parse_deserialize_with {
     };
 }
 
-make_parse_deserialize_with!(parse_sql_type -> SqlType);
-make_parse_deserialize_with!(parse_table_key -> TableKey, parse_key_specification_string);
+macro_rules! make_fallible_parse_deserialize_with {
+    ($name: ident -> $res: ty) => {
+        make_fallible_parse_deserialize_with!($name -> $res, $name);
+    };
+    ($name: ident -> $res: ty, $parser: ident) => {
+        fn $name<'de, D>(deserializer: D) -> Result<Result<$res, String>, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let ty = String::deserialize(deserializer)?;
+            Ok(nom_sql::$parser(Dialect::PostgreSQL, ty))
+        }
+    };
+}
+
+make_fallible_parse_deserialize_with!(parse_sql_type -> SqlType);
+make_fallible_parse_deserialize_with!(parse_table_key -> TableKey, parse_key_specification_string);
 make_parse_deserialize_with!(parse_alter_table_statement -> AlterTableStatement, parse_alter_table);
 make_parse_deserialize_with!(parse_create_view_statement -> CreateViewStatement, parse_create_view);
 
@@ -178,34 +193,50 @@ impl DdlEvent {
                     schema: Some(self.schema.into()),
                     name: name.into(),
                 };
-                Change::CreateTable(CreateTableStatement {
-                    if_not_exists: false,
-                    table: table.clone(),
-                    body: Ok(CreateTableBody {
-                        fields: columns
-                            .into_iter()
-                            .map(|col| ColumnSpecification {
-                                column: Column {
-                                    name: col.name.into(),
-                                    table: Some(table.clone()),
-                                },
-                                sql_type: col.column_type,
-                                constraints: if col.not_null {
-                                    vec![ColumnConstraint::NotNull]
-                                } else {
-                                    vec![]
-                                },
-                                comment: None,
-                            })
-                            .collect(),
-                        keys: if constraints.is_empty() {
-                            None
-                        } else {
-                            Some(constraints.into_iter().map(|c| c.definition).collect())
-                        },
+
+                let create_table_body: Result<_, String> = columns
+                    .into_iter()
+                    .map(|col| {
+                        Ok(ColumnSpecification {
+                            column: Column {
+                                name: col.name.into(),
+                                table: Some(table.clone()),
+                            },
+                            sql_type: col.column_type?,
+                            constraints: if col.not_null {
+                                vec![ColumnConstraint::NotNull]
+                            } else {
+                                vec![]
+                            },
+                            comment: None,
+                        })
+                    })
+                    .collect::<Result<_, _>>()
+                    .and_then(|fields| {
+                        Ok(CreateTableBody {
+                            fields,
+                            keys: if constraints.is_empty() {
+                                None
+                            } else {
+                                Some(
+                                    constraints
+                                        .into_iter()
+                                        .map(|c| c.definition)
+                                        .collect::<Result<_, _>>()?,
+                                )
+                            },
+                        })
+                    });
+
+                match create_table_body {
+                    Ok(body) => Change::CreateTable(CreateTableStatement {
+                        if_not_exists: false,
+                        table,
+                        body: Ok(body),
+                        options: Ok(vec![]),
                     }),
-                    options: Ok(vec![]),
-                })
+                    Err(_) => Change::AddNonReplicatedRelation(table),
+                }
             }
             DdlEventData::AlterTable(stmt) => Change::AlterTable(stmt),
             DdlEventData::CreateView(stmt) => Change::CreateView(stmt),
@@ -442,12 +473,12 @@ mod tests {
                     vec![
                         DdlCreateTableColumn {
                             name: "id".into(),
-                            column_type: SqlType::Int(None),
+                            column_type: Ok(SqlType::Int(None)),
                             not_null: true
                         },
                         DdlCreateTableColumn {
                             name: "value".into(),
-                            column_type: SqlType::Text,
+                            column_type: Ok(SqlType::Text),
                             not_null: false
                         },
                     ]
@@ -456,19 +487,19 @@ mod tests {
                     constraints,
                     vec![
                         DdlCreateTableConstraint {
-                            definition: TableKey::PrimaryKey {
+                            definition: Ok(TableKey::PrimaryKey {
                                 constraint_name: None,
                                 index_name: None,
                                 columns: vec!["id".into()]
-                            },
+                            }),
                         },
                         DdlCreateTableConstraint {
-                            definition: TableKey::UniqueKey {
+                            definition: Ok(TableKey::UniqueKey {
                                 constraint_name: None,
                                 index_name: None,
                                 columns: vec!["value".into()],
                                 index_type: None
-                            }
+                            })
                         }
                     ]
                 );

@@ -30,8 +30,10 @@ bit-vec = { version = "0.6", features = ["serde"] }
 triomphe = "0.1"
 lazy_static = "1.4"
 nom_locate = "4.0.0"
+fail = "0.5.0"
 
 concrete-iter = { path = "../concrete-iter" }
+failpoint-macros = { path = "../failpoint-macros" }
 
 [dev-dependencies]
 assert_approx_eq = "1.1.0"
@@ -45,3 +47,4 @@ harness = false
 
 [features]
 debug = []
+failure_injection = ["fail/failpoints"]

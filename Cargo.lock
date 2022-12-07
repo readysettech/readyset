@@ -3044,6 +3044,8 @@ dependencies = [
  "criterion",
  "derive_more",
  "eui48",
+ "fail",
+ "failpoint-macros",
  "hex",
  "itertools",
  "launchpad",
