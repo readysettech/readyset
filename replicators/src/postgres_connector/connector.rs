@@ -450,18 +450,6 @@ impl Connector for PostgresWalConnector {
                 "We should either have no current table, or the current table should have a schema"
             );
 
-            // Don't accumulate too many actions between calls
-            if actions.len() > MAX_QUEUED_ACTIONS {
-                return Ok((
-                    ReplicationAction::TableAction {
-                        table: cur_table,
-                        actions,
-                        txid: None,
-                    },
-                    cur_lsn.into(),
-                ));
-            }
-
             let (mut event, lsn) = match self.peek.take() {
                 Some(event) => event,
                 None => match self.next_event().await {
@@ -484,6 +472,19 @@ impl Connector for PostgresWalConnector {
                     Err(err) => return Err(err.into()),
                 },
             };
+
+            // Don't accumulate too many actions between calls
+            if actions.len() > MAX_QUEUED_ACTIONS {
+                self.peek = Some((event, lsn));
+                return Ok((
+                    ReplicationAction::TableAction {
+                        table: cur_table,
+                        actions,
+                        txid: None,
+                    },
+                    cur_lsn.into(),
+                ));
+            }
 
             trace!(?event);
 
