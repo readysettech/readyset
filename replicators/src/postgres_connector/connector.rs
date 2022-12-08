@@ -434,15 +434,17 @@ impl Connector for PostgresWalConnector {
         last_pos: &ReplicationOffset,
         _until: Option<&ReplicationOffset>,
     ) -> ReadySetResult<(ReplicationAction, ReplicationOffset)> {
-        // Calling the ReadySet API is a bit expensive, therefore we try to queue as many
-        // actions as possible before calling into the API.
-        const MAX_QUEUED_ACTIONS: usize = 100;
+        // Calling the ReadySet API is a bit expensive, therefore we try to queue as many actions
+        // as possible before calling into the API. We therefore try to stop batching actions when
+        // we hit this limit, BUT note that we may substantially exceed this limit in cases where
+        // we receive many consecutive events that share the same LSN:
+        const MAX_QUEUED_INDEPENDENT_ACTIONS: usize = 100;
         let mut cur_table = Relation {
             schema: None,
             name: "".into(),
         };
         let mut cur_lsn: PostgresPosition = 0.into();
-        let mut actions = Vec::with_capacity(MAX_QUEUED_ACTIONS);
+        let mut actions = Vec::with_capacity(MAX_QUEUED_INDEPENDENT_ACTIONS);
 
         loop {
             debug_assert!(
@@ -473,8 +475,10 @@ impl Connector for PostgresWalConnector {
                 },
             };
 
-            // Don't accumulate too many actions between calls
-            if actions.len() >= MAX_QUEUED_ACTIONS {
+            // Try not to accumulate too many actions between calls, but if we're collecting a
+            // series of events that reuse the same LSN we have to make sure they all end up in the
+            // same batch:
+            if actions.len() >= MAX_QUEUED_INDEPENDENT_ACTIONS && lsn != cur_lsn.lsn {
                 self.peek = Some((event, lsn));
                 return Ok((
                     ReplicationAction::TableAction {

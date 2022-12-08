@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use database_utils::UpstreamConfig as Config;
+use itertools::Itertools;
 use launchpad::eventually;
 use mysql_async::prelude::Queryable;
 use mysql_time::MySqlTime;
@@ -1530,6 +1531,66 @@ async fn snapshot_telemetry_inner(url: &String) -> ReadySetResult<()> {
     assert!(schema_str.contains("CREATE VIEW"));
 
     Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn postgresql_replicate_copy_from() {
+    // Replication of data inserted via COPY is tricky due to it triggering the creation of
+    // multiple replication events with the same LSN. This test was written to reproduce the
+    // failure described in ENG-2100, where we could end up dropping rows due to multiple batches
+    // of events ending with the same LSN and being erroneously skipped.
+    readyset_tracing::init_test_logging();
+    let url = pgsql_url();
+    let mut client = DbConnection::connect(&url).await.unwrap();
+    client
+        .query(
+            "DROP TABLE IF EXISTS copy_from_t CASCADE;
+             CREATE TABLE copy_from_t(v varchar(16));
+             ALTER TABLE copy_from_t REPLICA IDENTITY FULL;
+             CREATE VIEW copy_from_v AS SELECT v FROM copy_from_t;
+             INSERT INTO copy_from_t VALUES ('snapshot check')",
+        )
+        .await
+        .unwrap();
+
+    let mut ctx = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
+    ctx.ready_notify.as_ref().unwrap().notified().await;
+
+    ctx.check_results(
+        "copy_from_v",
+        "Snapshot",
+        &[&[DfValue::from("snapshot check")]],
+    )
+    .await
+    .unwrap();
+
+    client
+        .query(
+            "DELETE FROM copy_from_t;
+             COPY copy_from_t FROM PROGRAM 'seq 0 299';",
+        )
+        .await
+        .unwrap();
+
+    let expected_vals = (0..300)
+        .into_iter()
+        .map(|i| vec![DfValue::from(i.to_string())])
+        .sorted()
+        .collect::<Vec<_>>();
+    ctx.check_results(
+        "copy_from_v",
+        "Replication",
+        expected_vals
+            .iter()
+            .map(|v| v.as_slice())
+            .collect::<Vec<_>>()
+            .as_slice(),
+    )
+    .await
+    .unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
