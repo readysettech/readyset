@@ -275,6 +275,22 @@ async fn schema_resolution_with_unreplicated_tables() {
         .unwrap()
         .get::<_, i32>(0);
     assert_eq!(result, 1);
+
+    // Now drop the non-replicated table, and make sure the next query reads from the second table,
+    // against readyset
+
+    client.simple_query("DROP TABLE s1.t").await.unwrap();
+
+    sleep().await;
+
+    let result = client
+        .query_one("SELECT x FROM t", &[])
+        .await
+        .unwrap()
+        .get::<_, i32>(0);
+    assert_eq!(result, 2);
+
+    assert!(last_statement_matches("readyset", "ok", &client).await)
 }
 
 #[tokio::test(flavor = "multi_thread")]
