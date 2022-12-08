@@ -54,6 +54,7 @@ pub enum SqlType {
     LongText,
     Text,
     Citext,
+    QuotedChar,
     Date,
     DateTime(#[strategy(proptest::option::of(1..=6u16))] Option<u16>),
     // FIXME(ENG-1832): Parse subsecond digit count.
@@ -199,6 +200,7 @@ impl fmt::Display for SqlType {
             SqlType::LongText => write!(f, "LONGTEXT"),
             SqlType::Text => write!(f, "TEXT"),
             SqlType::Citext => write!(f, "CITEXT"),
+            SqlType::QuotedChar => write!(f, "\"char\""),
             SqlType::Date => write!(f, "DATE"),
             SqlType::DateTime(subsecond_digits) => write_with_len(f, "DATETIME", subsecond_digits),
             SqlType::Time => write!(f, "TIME"),
@@ -643,7 +645,7 @@ fn type_identifier_part3(
     move |i| {
         alt((
             map(tag_no_case("citext"), |_| SqlType::Citext),
-            |i| int_type("\"char\"", SqlType::UnsignedTinyInt, SqlType::TinyInt, i),
+            map(tag("\"char\""), |_| SqlType::QuotedChar),
             map(other_type(dialect), SqlType::Other),
         ))(i)
     }
@@ -850,7 +852,7 @@ mod tests {
         #[test]
         fn quoted_char_type() {
             let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"\"char\"");
-            assert_eq!(res, SqlType::TinyInt(None));
+            assert_eq!(res, SqlType::QuotedChar);
         }
 
         #[test]

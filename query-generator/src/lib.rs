@@ -127,6 +127,7 @@ fn value_of_type(typ: &SqlType) -> DfValue {
         | SqlType::Binary(_)
         | SqlType::VarBinary(_)
         | SqlType::Citext => "a".into(),
+        SqlType::QuotedChar => 1i8.into(),
         SqlType::ByteArray => {
             // Zero is an interesting value, because it can only occur for
             // byte arrays, since character strings don't allow zero
@@ -185,6 +186,7 @@ fn random_value_of_type(typ: &SqlType) -> DfValue {
             let length: usize = rng.gen_range(1..=*x).into();
             "a".repeat(length).into()
         }
+        SqlType::QuotedChar => rng.gen::<i8>().into(),
         SqlType::TinyBlob | SqlType::TinyText => {
             // 2^8 bytes
             let length: usize = rng.gen_range(1..256);
@@ -339,6 +341,7 @@ fn unique_value_of_type(typ: &SqlType, idx: u32) -> DfValue {
         | SqlType::Citext
         | SqlType::Binary(_)
         | SqlType::VarBinary(_) => idx.to_string().into(),
+        SqlType::QuotedChar => (idx as i8).into(),
         SqlType::Int(_) => (idx as i32).into(),
         SqlType::BigInt(_) => (idx as i64).into(),
         SqlType::UnsignedInt(_) => (idx as u32).into(),

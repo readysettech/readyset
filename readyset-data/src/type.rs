@@ -271,6 +271,7 @@ impl DfType {
             Text | TinyText | MediumText | LongText | VarChar(None) => Self::DEFAULT_TEXT,
             VarChar(Some(len)) => Self::VarChar(len, Collation::default()),
             Char(len) => Self::Char(len.unwrap_or(1), Collation::default(), dialect),
+            QuotedChar => Self::TinyInt,
 
             Blob | TinyBlob | MediumBlob | LongBlob | ByteArray => Self::Blob,
             VarBinary(len) => Self::VarBinary(len),
