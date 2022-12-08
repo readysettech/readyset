@@ -474,7 +474,7 @@ impl Connector for PostgresWalConnector {
             };
 
             // Don't accumulate too many actions between calls
-            if actions.len() > MAX_QUEUED_ACTIONS {
+            if actions.len() >= MAX_QUEUED_ACTIONS {
                 self.peek = Some((event, lsn));
                 return Ok((
                     ReplicationAction::TableAction {
