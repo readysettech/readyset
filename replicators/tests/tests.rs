@@ -1004,6 +1004,12 @@ async fn replication_filter_inner(url: &str) -> ReadySetResult<()> {
     ctx.assert_table_exists("public", "t3").await;
     ctx.assert_table_exists("noria2", "t4").await;
 
+    let non_replicated_rels = ctx.noria.non_replicated_relations().await.unwrap();
+    assert!(non_replicated_rels.contains(&Relation {
+        schema: Some("public".into()),
+        name: "t2".into()
+    }));
+
     client
         .query(
             "

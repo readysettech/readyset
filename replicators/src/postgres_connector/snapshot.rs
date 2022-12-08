@@ -605,11 +605,11 @@ impl<'a> PostgresReplicator<'a> {
         let wal_position = PostgresPosition::from(replication_slot.consistent_point).into();
         self.set_snapshot(&replication_slot.snapshot_name).await?;
 
-        let mut table_list = self.get_table_list(TableKind::RegularTable).await?;
+        let table_list = self.get_table_list(TableKind::RegularTable).await?;
         let view_list = self.get_table_list(TableKind::View).await?;
         let custom_types = self.get_custom_types().await?;
 
-        table_list.retain(|tbl| {
+        let (table_list, non_replicated) = table_list.into_iter().partition::<Vec<_>, _>(|tbl| {
             self.table_filter
                 .should_be_processed(tbl.schema.as_str(), tbl.name.as_str())
         });
@@ -623,6 +623,21 @@ impl<'a> PostgresReplicator<'a> {
         trace!(?table_list, "Loaded table list");
         trace!(?view_list, "Loaded view list");
         trace!(?custom_types, "Loaded custom types");
+
+        self.noria
+            .extend_recipe_no_leader_ready(ChangeList::from_changes(
+                non_replicated
+                    .into_iter()
+                    .map(|te| {
+                        Change::AddNonReplicatedRelation(Relation {
+                            schema: Some(te.schema.into()),
+                            name: te.name.into(),
+                        })
+                    })
+                    .collect::<Vec<_>>(),
+                DataDialect::DEFAULT_POSTGRESQL,
+            ))
+            .await?;
 
         for ty in custom_types {
             let variants = match ty.get_variants(&self.transaction).await {

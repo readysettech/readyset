@@ -14,7 +14,7 @@ use mysql::{Transaction, TxOpts};
 use mysql_async as mysql;
 use nom_sql::Relation;
 use readyset_client::metrics::recorded;
-use readyset_client::recipe::changelist::ChangeList;
+use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::replication::{ReplicationOffset, ReplicationOffsets};
 use readyset_client::ReadySetResult;
 use readyset_data::Dialect;
@@ -155,15 +155,29 @@ impl MySqlReplicator {
         // >> until the transaction ends. This principle applies not only to transactional tables,
         // >> but also to nontransactional tables.
         let all_tables = get_table_list(&mut tx, TableKind::BaseTable).await?;
-        let all_tables = all_tables
+        let (replicated_tables, non_replicated_tables) = all_tables
             .into_iter()
-            .filter(|(schema, table)| {
+            .partition::<Vec<_>, _>(|(schema, table)| {
                 self.table_filter
                     .should_be_processed(schema.as_str(), table.as_str())
-            })
-            .collect::<Vec<_>>();
+            });
 
-        let all_tables_formatted = all_tables
+        noria
+            .extend_recipe_no_leader_ready(ChangeList::from_changes(
+                non_replicated_tables
+                    .into_iter()
+                    .map(|(schema, name)| {
+                        Change::AddNonReplicatedRelation(Relation {
+                            schema: Some(schema.into()),
+                            name: name.into(),
+                        })
+                    })
+                    .collect::<Vec<_>>(),
+                Dialect::DEFAULT_MYSQL,
+            ))
+            .await?;
+
+        let all_tables_formatted = replicated_tables
             .iter()
             .map(|(db, tbl)| format!("`{db}`.`{tbl}`"))
             .collect::<Vec<_>>();
@@ -177,7 +191,7 @@ impl MySqlReplicator {
 
         let mut bad_tables = Vec::new();
         // Process `CREATE TABLE` statements
-        for (db, table) in all_tables.iter() {
+        for (db, table) in replicated_tables.iter() {
             let create_table = create_for_table(&mut tx, db, table, TableKind::BaseTable).await?;
             debug!(%create_table, "Extending recipe");
             db_schemas.extend_create_schema_for_table(
@@ -244,7 +258,7 @@ impl MySqlReplicator {
             .set_schema_replication_offset(Some(&binlog_position.try_into()?))
             .await?;
 
-        let table_list = all_tables
+        let table_list = replicated_tables
             .into_iter()
             // refilter to remove any bad tables that failed to extend recipe
             .filter(|(schema, table)| {
