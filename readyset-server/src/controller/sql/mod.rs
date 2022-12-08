@@ -5,8 +5,8 @@ use std::vec::Vec;
 use ::mir::visualize::GraphViz;
 use ::serde::{Deserialize, Serialize};
 use nom_sql::{
-    CompoundSelectOperator, CompoundSelectStatement, CreateTableBody, CreateViewStatement,
-    FieldDefinitionExpr, Relation, SelectSpecification, SelectStatement, SqlIdentifier, TableExpr,
+    CompoundSelectOperator, CompoundSelectStatement, CreateTableBody, FieldDefinitionExpr,
+    Relation, SelectSpecification, SelectStatement, SqlIdentifier, TableExpr,
 };
 use petgraph::graph::NodeIndex;
 use readyset_client::recipe::changelist::AlterTypeChange;
@@ -167,11 +167,11 @@ impl SqlIncorporator {
     /// given `mig` to track changes.
     pub(crate) fn add_view(
         &mut self,
-        statement: CreateViewStatement,
+        name: Relation,
+        definition: SelectSpecification,
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<()> {
-        let name = statement.name;
-        let mir_leaf = match *statement.definition {
+        let mir_leaf = match definition {
             SelectSpecification::Compound(query) => {
                 self.add_compound_query(name.clone(), query, /* is_leaf = */ true, mig)?
             }

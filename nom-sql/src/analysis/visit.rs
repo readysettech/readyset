@@ -856,10 +856,14 @@ pub fn walk_create_view_statement<'a, V: Visitor<'a>>(
         visitor.visit_column(column)?;
     }
 
-    match create_view_statement.definition.as_ref() {
-        SelectSpecification::Compound(stmt) => visitor.visit_compound_select_statement(stmt),
-        SelectSpecification::Simple(stmt) => visitor.visit_select_statement(stmt),
+    if let Ok(definition) = &create_view_statement.definition {
+        match definition.as_ref() {
+            SelectSpecification::Compound(stmt) => visitor.visit_compound_select_statement(stmt)?,
+            SelectSpecification::Simple(stmt) => visitor.visit_select_statement(stmt)?,
+        }
     }
+
+    Ok(())
 }
 
 pub fn walk_alter_table_statement<'a, V: Visitor<'a>>(

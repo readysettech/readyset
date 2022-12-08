@@ -175,21 +175,24 @@ impl Rewrite for CreateViewStatement {
         }
 
         Ok(Self {
-            definition: Box::new(match *self.definition {
-                SelectSpecification::Compound(cqs) => {
-                    SelectSpecification::Compound(CompoundSelectStatement {
-                        selects: cqs
-                            .selects
-                            .into_iter()
-                            .map(|(op, sq)| Ok((op, sq.rewrite(context)?)))
-                            .collect::<ReadySetResult<_>>()?,
-                        ..cqs
-                    })
-                }
-                SelectSpecification::Simple(sq) => {
-                    SelectSpecification::Simple(sq.rewrite(context)?)
-                }
-            }),
+            definition: match self.definition {
+                Ok(def) => Ok(Box::new(match *def {
+                    SelectSpecification::Compound(cqs) => {
+                        SelectSpecification::Compound(CompoundSelectStatement {
+                            selects: cqs
+                                .selects
+                                .into_iter()
+                                .map(|(op, sq)| Ok((op, sq.rewrite(context)?)))
+                                .collect::<ReadySetResult<_>>()?,
+                            ..cqs
+                        })
+                    }
+                    SelectSpecification::Simple(sq) => {
+                        SelectSpecification::Simple(sq.rewrite(context)?)
+                    }
+                })),
+                Err(unparsed) => Err(unparsed),
+            },
             ..self
         })
     }

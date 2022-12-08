@@ -148,7 +148,12 @@ pub struct CreateViewStatement {
     pub name: Relation,
     pub or_replace: bool,
     pub fields: Vec<Column>,
-    pub definition: Box<SelectSpecification>,
+    /// The result of parsing the definition of the `CREATE VIEW` statement.
+    ///
+    /// If parsing succeeded, then this will be an `Ok` result with the definition of the
+    /// statement. If it failed to parse, this will be an `Err` with the remainder [`String`]
+    /// that could not be parsed.
+    pub definition: Result<Box<SelectSpecification>, String>,
 }
 
 impl Display for CreateViewStatement {
@@ -168,7 +173,10 @@ impl Display for CreateViewStatement {
             write!(f, ") ")?;
         }
         write!(f, "AS ")?;
-        write!(f, "{}", self.definition)
+        match &self.definition {
+            Ok(def) => write!(f, "{def}"),
+            Err(unparsed) => write!(f, "{unparsed}"),
+        }
     }
 }
 
@@ -692,17 +700,22 @@ pub fn view_creation(
         let (i, _) = whitespace1(i)?;
         let (i, _) = tag_no_case("as")(i)?;
         let (i, _) = whitespace1(i)?;
-        let (i, def) = alt((
+        let (i, definition) = parse_fallible(
             map(
-                nested_compound_selection(dialect),
-                SelectSpecification::Compound,
+                alt((
+                    map(
+                        nested_compound_selection(dialect),
+                        SelectSpecification::Compound,
+                    ),
+                    map(nested_selection(dialect), SelectSpecification::Simple),
+                )),
+                Box::new,
             ),
-            map(nested_selection(dialect), SelectSpecification::Simple),
-        ))(i)?;
+            until_statement_terminator,
+        )(i)?;
         let (i, _) = statement_terminator(i)?;
 
         let fields = vec![]; // TODO(malte): support
-        let definition = Box::new(def);
         Ok((
             i,
             CreateViewStatement {
@@ -935,29 +948,31 @@ mod tests {
                 name: "v".into(),
                 or_replace: false,
                 fields: vec![],
-                definition: Box::new(SelectSpecification::Compound(CompoundSelectStatement {
-                    selects: vec![
-                        (
-                            None,
-                            SelectStatement {
-                                tables: vec![TableExpr::from(Relation::from("users"))],
-                                fields: vec![FieldDefinitionExpr::All],
-                                ..Default::default()
-                            },
-                        ),
-                        (
-                            Some(CompoundSelectOperator::DistinctUnion),
-                            SelectStatement {
-                                tables: vec![TableExpr::from(Relation::from("old_users"))],
-                                fields: vec![FieldDefinitionExpr::All],
-                                ..Default::default()
-                            },
-                        ),
-                    ],
-                    order: None,
-                    limit: None,
-                    offset: None,
-                })),
+                definition: Ok(Box::new(SelectSpecification::Compound(
+                    CompoundSelectStatement {
+                        selects: vec![
+                            (
+                                None,
+                                SelectStatement {
+                                    tables: vec![TableExpr::from(Relation::from("users"))],
+                                    fields: vec![FieldDefinitionExpr::All],
+                                    ..Default::default()
+                                },
+                            ),
+                            (
+                                Some(CompoundSelectOperator::DistinctUnion),
+                                SelectStatement {
+                                    tables: vec![TableExpr::from(Relation::from("old_users"))],
+                                    fields: vec![FieldDefinitionExpr::All],
+                                    ..Default::default()
+                                },
+                            ),
+                        ],
+                        order: None,
+                        limit: None,
+                        offset: None,
+                    }
+                ))),
             }
         );
     }
@@ -1425,7 +1440,7 @@ mod tests {
                     name: "v".into(),
                     or_replace: false,
                     fields: vec![],
-                    definition: Box::new(SelectSpecification::Simple(SelectStatement {
+                    definition: Ok(Box::new(SelectSpecification::Simple(SelectStatement {
                         tables: vec![TableExpr::from(Relation::from("users"))],
                         fields: vec![FieldDefinitionExpr::All],
                         where_clause: Some(Expr::BinaryOp {
@@ -1434,7 +1449,7 @@ mod tests {
                             op: BinaryOperator::Equal,
                         }),
                         ..Default::default()
-                    })),
+                    }))),
                 }
             );
         }
@@ -1948,7 +1963,7 @@ mod tests {
                     name: "v".into(),
                     or_replace: false,
                     fields: vec![],
-                    definition: Box::new(SelectSpecification::Simple(SelectStatement {
+                    definition: Ok(Box::new(SelectSpecification::Simple(SelectStatement {
                         tables: vec![TableExpr::from(Relation::from("users"))],
                         fields: vec![FieldDefinitionExpr::All],
                         where_clause: Some(Expr::BinaryOp {
@@ -1957,7 +1972,7 @@ mod tests {
                             op: BinaryOperator::Equal,
                         }),
                         ..Default::default()
-                    })),
+                    }))),
                 }
             );
         }

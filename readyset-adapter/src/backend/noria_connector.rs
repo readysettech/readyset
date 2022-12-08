@@ -1492,8 +1492,6 @@ impl NoriaConnector {
         // TODO(malte): we should perhaps check our usual caches here, rather than just blindly
         // doing a migration on ReadySet every time. On the other hand, CREATE VIEW is rare...
 
-        info!(view = %Sensitive(&q.definition), name = %q.name, "view::create");
-
         let changelist = ChangeList::from_change(Change::CreateView(q.clone()), self.dialect)
             .with_schema_search_path(self.schema_search_path.clone());
 

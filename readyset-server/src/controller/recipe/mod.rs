@@ -64,7 +64,12 @@ impl Recipe {
                 body: Ok(body.clone()),
                 options: Ok(vec![]),
             }),
-            RecipeExpr::View(cvs) => SqlQuery::CreateView(cvs.clone()),
+            RecipeExpr::View { name, definition } => SqlQuery::CreateView(CreateViewStatement {
+                name: name.clone(),
+                or_replace: false,
+                fields: vec![],
+                definition: Ok(Box::new(definition.clone())),
+            }),
             RecipeExpr::Cache {
                 name,
                 statement,
@@ -220,7 +225,7 @@ impl Recipe {
                                 "table exists, but hasn't changed. Ignoring..."
                             );
                         }
-                        Some(RecipeExpr::View(_)) => {
+                        Some(RecipeExpr::View { .. }) => {
                             return Err(ReadySetError::ViewAlreadyExists(
                                 cts.table.name.clone().into(),
                             ))
@@ -261,15 +266,26 @@ impl Recipe {
                                * want to invalidate them if tables get created like we do
                                * for queries */
                     )?;
-                    let expression = RecipeExpr::View(stmt.clone());
-                    if !self.registry.add_query(expression)? {
+                    let definition = match stmt.definition {
+                        Ok(definition) => *definition,
+                        Err(unparsed) => unsupported!(
+                            "CREATE VIEW {} body failed to parse: {}",
+                            stmt.name,
+                            Sensitive(&unparsed)
+                        ),
+                    };
+
+                    if !self.registry.add_query(RecipeExpr::View {
+                        name: stmt.name.clone(),
+                        definition: definition.clone(),
+                    })? {
                         // The expression is already present, and we successfully added
                         // a new alias for it.
                         continue;
                     }
 
                     // add the query
-                    self.inc.add_view(stmt, mig)?;
+                    self.inc.add_view(stmt.name, definition, mig)?;
                 }
                 Change::CreateCache(mut ccqs) => {
                     let (statement, invalidating_tables) = match &ccqs.inner {
@@ -363,7 +379,7 @@ impl Recipe {
                                 // but we might as well be more
                                 // permissive here
                                 RecipeExpr::Table { name, .. }
-                                | RecipeExpr::View(CreateViewStatement { name, .. })
+                                | RecipeExpr::View { name, .. }
                                 | RecipeExpr::Cache { name, .. } => {
                                     self.remove_expression(&name, mig)?;
                                 }
@@ -416,8 +432,7 @@ impl Recipe {
                                 table_nodes.push(ni);
                             }
 
-                            RecipeExpr::View(CreateViewStatement { name, .. })
-                            | RecipeExpr::Cache { name, .. } => {
+                            RecipeExpr::View { name, .. } | RecipeExpr::Cache { name, .. } => {
                                 queries_to_remove.push(name.clone());
                             }
                         }

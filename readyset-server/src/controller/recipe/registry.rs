@@ -1,4 +1,3 @@
-use std::borrow::Borrow;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 
@@ -25,7 +24,10 @@ pub(super) enum RecipeExpr {
         body: CreateTableBody,
     },
     /// Expression that represents a `CREATE VIEW` statement.
-    View(CreateViewStatement),
+    View {
+        name: Relation,
+        definition: SelectSpecification,
+    },
     /// Expression that represents a `CREATE CACHE` statement.
     Cache {
         name: Relation,
@@ -38,9 +40,9 @@ impl RecipeExpr {
     /// Returns the name associated with the [`RecipeExpr`].
     pub(crate) fn name(&self) -> &Relation {
         match self {
-            RecipeExpr::Table { name, .. } => name,
-            RecipeExpr::View(cvs) => &cvs.name,
-            RecipeExpr::Cache { name, .. } => name,
+            RecipeExpr::Table { name, .. }
+            | RecipeExpr::View { name, .. }
+            | RecipeExpr::Cache { name, .. } => name,
         }
     }
 
@@ -50,10 +52,9 @@ impl RecipeExpr {
     pub(super) fn table_references(&self) -> HashSet<Relation> {
         match self {
             RecipeExpr::Table { .. } => HashSet::new(),
-            RecipeExpr::View(cvs) => {
+            RecipeExpr::View { definition, .. } => {
                 let mut references = HashSet::new();
-                let select = cvs.definition.borrow();
-                match select {
+                match definition {
                     SelectSpecification::Compound(compound_select) => {
                         references.extend(compound_select.selects.iter().flat_map(
                             |(_, select)| {
@@ -99,10 +100,10 @@ impl RecipeExpr {
                     _ => None,
                 })
                 .collect(),
-            RecipeExpr::View(CreateViewStatement {
-                definition: box SelectSpecification::Simple(statement),
+            RecipeExpr::View {
+                definition: SelectSpecification::Simple(statement),
                 ..
-            })
+            }
             | RecipeExpr::Cache { statement, .. } => {
                 #[derive(Default)]
                 struct CollectCustomTypesVisitor<'a>(Vec<&'a Relation>);
@@ -137,7 +138,10 @@ impl RecipeExpr {
                 hasher.update(hash(name).to_le_bytes());
                 hasher.update(hash(body).to_le_bytes());
             }
-            RecipeExpr::View(cvs) => hasher.update(hash(cvs).to_le_bytes()),
+            RecipeExpr::View { name, definition } => {
+                hasher.update(hash(name).to_le_bytes());
+                hasher.update(hash(definition).to_le_bytes());
+            }
             RecipeExpr::Cache { statement, .. } => hasher.update(hash(statement).to_le_bytes()),
         };
         // Sha1 digest is 20 byte long, so it is safe to consume only 16 bytes
@@ -391,7 +395,7 @@ impl TryFrom<CreateTableStatement> for RecipeExpr {
             name: stmt.table,
             body: stmt.body.map_err(|unparsed| {
                 unsupported_err!(
-                    "CREATE table statement failed to parse: {}",
+                    "CREATE TABLE statement failed to parse: {}",
                     Sensitive(&unparsed)
                 )
             })?,
@@ -399,9 +403,19 @@ impl TryFrom<CreateTableStatement> for RecipeExpr {
     }
 }
 
-impl From<CreateViewStatement> for RecipeExpr {
-    fn from(cvs: CreateViewStatement) -> Self {
-        RecipeExpr::View(cvs)
+impl TryFrom<CreateViewStatement> for RecipeExpr {
+    type Error = ReadySetError;
+
+    fn try_from(stmt: CreateViewStatement) -> Result<Self, Self::Error> {
+        Ok(RecipeExpr::View {
+            name: stmt.name,
+            definition: *stmt.definition.map_err(|unparsed| {
+                unsupported_err!(
+                    "CREATE VIEW statement failed to parse: {}",
+                    Sensitive(&unparsed)
+                )
+            })?,
+        })
     }
 }
 
@@ -458,14 +472,12 @@ mod tests {
             assert_eq!(cached_query.name(), &query_name);
 
             let view_name: Relation = "test_view".into();
-            let view = RecipeExpr::View(CreateViewStatement {
+            let view = RecipeExpr::View {
                 name: view_name.clone(),
-                fields: vec![],
-                or_replace: false,
-                definition: Box::new(SelectSpecification::Simple(
+                definition: SelectSpecification::Simple(
                     parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table;").unwrap(),
-                )),
-            });
+                ),
+            };
 
             assert_eq!(view.name(), &view_name);
         }
@@ -491,14 +503,12 @@ mod tests {
             assert_eq!(cached_query_table_refs.len(), 1);
             assert_eq!(cached_query_table_refs.iter().next().unwrap(), &table_name);
 
-            let view = RecipeExpr::View(CreateViewStatement {
+            let view = RecipeExpr::View {
                 name: "test_view".into(),
-                fields: vec![],
-                or_replace: false,
-                definition: Box::new(SelectSpecification::Simple(
+                definition: SelectSpecification::Simple(
                     parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table;").unwrap(),
-                )),
-            });
+                ),
+            };
 
             let view_table_refs = view.table_references();
             assert_eq!(view_table_refs.len(), 1);
@@ -563,21 +573,17 @@ mod tests {
                     .unwrap(),
             );
             registry
-                .add_query(RecipeExpr::View(CreateViewStatement {
+                .add_query(RecipeExpr::View {
                     name: "test_view".into(),
-                    fields: vec![],
-                    or_replace: false,
-                    definition: Box::new(view.clone()),
-                }))
+                    definition: view.clone(),
+                })
                 .unwrap();
 
             registry
-                .add_query(RecipeExpr::View(CreateViewStatement {
+                .add_query(RecipeExpr::View {
                     name: "test_view_alias".into(),
-                    fields: vec![],
-                    or_replace: false,
-                    definition: Box::new(view),
-                }))
+                    definition: view,
+                })
                 .unwrap();
 
             registry
@@ -631,15 +637,13 @@ mod tests {
         fn add_view() {
             let mut registry = setup();
             let view_name: Relation = "test_view2".into();
-            let view = RecipeExpr::View(CreateViewStatement {
+            let view = RecipeExpr::View {
                 name: view_name.clone(),
-                fields: vec![],
-                or_replace: false,
-                definition: Box::new(SelectSpecification::Simple(
+                definition: SelectSpecification::Simple(
                     parse_select_statement(Dialect::MySQL, "SELECT DISTINCT * FROM test_table;")
                         .unwrap(),
-                )),
-            });
+                ),
+            };
             let num_expressions = registry.expressions.len();
             let num_dependencies = registry.dependencies.len();
             let num_aliases = registry.aliases.len();
@@ -669,12 +673,10 @@ mod tests {
             let select =
                 parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table;").unwrap();
             let view_name: Relation = "test_view2".into();
-            let view = RecipeExpr::View(CreateViewStatement {
+            let view = RecipeExpr::View {
                 name: view_name.clone(),
-                fields: vec![],
-                or_replace: false,
-                definition: Box::new(SelectSpecification::Simple(select.clone())),
-            });
+                definition: SelectSpecification::Simple(select.clone()),
+            };
             let num_expressions = registry.expressions.len();
             let num_dependencies = registry.dependencies.len();
             let num_aliases = registry.aliases.len();
@@ -684,10 +686,9 @@ mod tests {
             assert_eq!(registry.aliases.len(), num_aliases + 1);
             let view_qid = registry.aliases.get(&view_name).unwrap();
             let stored_expression = registry.expressions.get(view_qid).unwrap();
-            if let RecipeExpr::View(cvs) = stored_expression {
-                assert_ne!(cvs.name.clone(), view_name);
-                let stored_select = cvs.definition.as_ref();
-                if let SelectSpecification::Simple(stored_select) = stored_select {
+            if let RecipeExpr::View { name, definition } = stored_expression {
+                assert_ne!(name, &view_name);
+                if let SelectSpecification::Simple(stored_select) = definition {
                     assert_eq!(stored_select.clone(), select);
                 } else {
                     panic!("Expected SimpleSelect");

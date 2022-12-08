@@ -594,7 +594,7 @@ mod tests {
                         name: "v".into()
                     }
                 );
-                match *definition {
+                match *definition.unwrap() {
                     SelectSpecification::Simple(select_stmt) => {
                         assert_eq!(
                             select_stmt.fields,

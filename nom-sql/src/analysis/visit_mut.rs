@@ -871,10 +871,14 @@ pub fn walk_create_view_statement<'a, V: VisitorMut<'a>>(
         visitor.visit_column(column)?;
     }
 
-    match create_view_statement.definition.as_mut() {
-        SelectSpecification::Compound(stmt) => visitor.visit_compound_select_statement(stmt),
-        SelectSpecification::Simple(stmt) => visitor.visit_select_statement(stmt),
+    if let Ok(definition) = &mut create_view_statement.definition {
+        match definition.as_mut() {
+            SelectSpecification::Compound(stmt) => visitor.visit_compound_select_statement(stmt)?,
+            SelectSpecification::Simple(stmt) => visitor.visit_select_statement(stmt)?,
+        }
     }
+
+    Ok(())
 }
 
 pub fn walk_alter_table_statement<'a, V: VisitorMut<'a>>(
