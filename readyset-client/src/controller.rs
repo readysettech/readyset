@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -15,6 +15,7 @@ use readyset_errors::{
     internal, internal_err, rpc_err, rpc_err_no_downcast, ReadySetError, ReadySetResult,
 };
 use readyset_tracing::trace;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tower::buffer::Buffer;
 use tower::ServiceExt;
@@ -288,20 +289,36 @@ impl ReadySetHandle {
         Self::make(authority.into(), request_timeout, migration_timeout)
     }
 
-    /// Enumerate all known base tables.
-    ///
-    /// These have all been created in response to a `CREATE TABLE` statement in a recipe.
-    pub async fn tables(&mut self) -> ReadySetResult<BTreeMap<Relation, NodeIndex>> {
+    async fn simple_get_request<R>(&mut self, path: &'static str) -> ReadySetResult<R>
+    where
+        R: DeserializeOwned,
+    {
         let body: hyper::body::Bytes = self
             .handle
             .ready()
             .await
-            .map_err(rpc_err!("ReadySetHandle::tables"))?
-            .call(ControllerRequest::new("tables", &(), None)?)
+            .map_err(rpc_err!(format_args!("ReadySetHandle::{}", path)))?
+            .call(ControllerRequest::new(path, &(), None)?)
             .await
-            .map_err(rpc_err!("ReadySetHandle::tables"))?;
+            .map_err(rpc_err!(format_args!("ReadySetHandle::{}", path)))?;
 
         Ok(bincode::deserialize(&body)?)
+    }
+
+    /// Enumerate all known base tables.
+    ///
+    /// These have all been created in response to a `CREATE TABLE` statement in a recipe.
+    pub async fn tables(&mut self) -> ReadySetResult<BTreeMap<Relation, NodeIndex>> {
+        self.simple_get_request("tables").await
+    }
+
+    /// Return a list of all relations (tables or views) which are known to exist in the upstream
+    /// database that we are replicating from, but are not being replicated to ReadySet (which are
+    /// recorded via [`Change::AddNonReplicatedRelation`]).
+    ///
+    /// [`Change::AddNonReplicatedRelation`]: readyset_client::recipe::changelist::Change::AddNonReplicatedRelation
+    pub async fn non_replicated_relations(&mut self) -> ReadySetResult<HashSet<Relation>> {
+        self.simple_get_request("non_replicated_relations").await
     }
 
     /// Enumerate all known external views.
@@ -311,16 +328,7 @@ impl ReadySetHandle {
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub async fn views(&mut self) -> ReadySetResult<BTreeMap<Relation, NodeIndex>> {
-        let body: hyper::body::Bytes = self
-            .handle
-            .ready()
-            .await
-            .map_err(rpc_err!("ReadySetHandle::views"))?
-            .call(ControllerRequest::new("views", &(), self.request_timeout)?)
-            .await
-            .map_err(rpc_err!("ReadySetHandle::views"))?;
-
-        Ok(bincode::deserialize(&body)?)
+        self.simple_get_request("views").await
     }
 
     /// Enumerate all known external views. Includes the SqlQuery that created the view
@@ -329,20 +337,7 @@ impl ReadySetHandle {
     pub async fn verbose_views(
         &mut self,
     ) -> ReadySetResult<BTreeMap<Relation, (SelectStatement, bool)>> {
-        let body: hyper::body::Bytes = self
-            .handle
-            .ready()
-            .await
-            .map_err(rpc_err!("ReadySetHandle::verbose_views"))?
-            .call(ControllerRequest::new(
-                "verbose_views",
-                &(),
-                self.request_timeout,
-            )?)
-            .await
-            .map_err(rpc_err!("ReadySetHandle::verbose_views"))?;
-
-        Ok(bincode::deserialize(&body)?)
+        self.simple_get_request("verbose_views").await
     }
 
     /// For each of the given list of queries, determine whether that query (or a semantically

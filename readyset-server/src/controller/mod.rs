@@ -1096,9 +1096,11 @@ async fn handle_controller_request(
 #[cfg(test)]
 mod tests {
 
+    use std::collections::HashSet;
+
     use launchpad::eventually;
-    use nom_sql::{parse_select_statement, Dialect};
-    use readyset_client::recipe::changelist::ChangeList;
+    use nom_sql::{parse_select_statement, Dialect, Relation};
+    use readyset_client::recipe::changelist::{Change, ChangeList};
     use readyset_client::replication::ReplicationOffset;
     use readyset_client::{KeyCount, ViewCreateRequest};
     use readyset_data::Dialect as DataDialect;
@@ -1339,5 +1341,41 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(res3, vec![false]);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn non_replicated_relations() {
+        let mut noria = start_simple("non_replicated_tables").await;
+        noria
+            .extend_recipe(ChangeList::from_changes(
+                vec![
+                    Change::AddNonReplicatedRelation(Relation {
+                        schema: Some("s1".into()),
+                        name: "t".into(),
+                    }),
+                    Change::AddNonReplicatedRelation(Relation {
+                        schema: Some("s2".into()),
+                        name: "t".into(),
+                    }),
+                ],
+                DataDialect::DEFAULT_MYSQL,
+            ))
+            .await
+            .unwrap();
+
+        let rels = noria.non_replicated_relations().await.unwrap();
+        assert_eq!(
+            rels,
+            HashSet::from([
+                Relation {
+                    schema: Some("s1".into()),
+                    name: "t".into(),
+                },
+                Relation {
+                    schema: Some("s2".into()),
+                    name: "t".into(),
+                },
+            ])
+        );
     }
 }

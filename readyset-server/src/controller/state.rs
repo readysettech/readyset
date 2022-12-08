@@ -226,6 +226,15 @@ impl DfState {
             .collect()
     }
 
+    /// Return a list of all relations (tables or views) which are known to exist in the upstream
+    /// database that we are replicating from, but are not being replicated to ReadySet (which are
+    /// recorded via [`Change::AddNonReplicatedRelation`]).
+    ///
+    /// [`Change::AddNonReplicatedRelation`]: readyset_client::recipe::changelist::Change::AddNonReplicatedRelation
+    pub(super) fn non_replicated_relations(&self) -> &HashSet<Relation> {
+        self.recipe.sql_inc().non_replicated_relations()
+    }
+
     /// Get a map of all known views, mapping the name of the view to that node's [index](NodeIndex)
     pub(super) fn views(&self) -> BTreeMap<Relation, NodeIndex> {
         self.ingredients

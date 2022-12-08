@@ -276,6 +276,11 @@ impl Leader {
                     check_quorum!(ds);
                     return_serialized!(ds.tables())
                 }
+                (&Method::POST, "/non_replicated_relations") => {
+                    let ds = futures::executor::block_on(self.dataflow_state_handle.read());
+                    check_quorum!(ds);
+                    return_serialized!(ds.non_replicated_relations())
+                }
                 (&Method::POST, "/views") => {
                     let ds = futures::executor::block_on(self.dataflow_state_handle.read());
                     check_quorum!(ds);

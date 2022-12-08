@@ -290,6 +290,12 @@ impl SqlIncorporator {
         self.custom_types.remove(name)
     }
 
+    /// Return a set of all relations (tables or views) which are known to exist in the upstream
+    /// database that we are replicating from, but are not being replicated to ReadySet
+    pub(crate) fn non_replicated_relations(&self) -> &HashSet<Relation> {
+        &self.non_replicated_relations
+    }
+
     /// Record that a relation (a table or view) with the given `name` exists in the upstream
     /// database, but is not being replicated
     pub(crate) fn add_non_replicated_relation(&mut self, name: Relation) {
