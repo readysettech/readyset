@@ -157,8 +157,6 @@ mod tests {
     use super::*;
 
     fn generate_base_schemas() -> HashMap<Relation, CreateTableBody> {
-        let table = Relation::from("t");
-
         let col1 = ColumnSpecification {
             column: Column {
                 name: "c1".into(),
@@ -210,7 +208,6 @@ mod tests {
                 columns: vec![col1.column],
             },
         ]);
-        let if_not_exists = false;
 
         let mut base_schemas = HashMap::new();
         base_schemas.insert("t".into(), CreateTableBody { fields, keys });

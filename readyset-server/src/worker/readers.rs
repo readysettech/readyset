@@ -606,7 +606,7 @@ mod readreply {
                 for (got, expected) in got
                     .into_iter()
                     .flatten()
-                    .zip(data.iter().map(|r| r.iter()).flatten())
+                    .zip(data.iter().flat_map(|r| r.iter()))
                 {
                     assert_eq!(got.as_slice(), &expected[..]);
                 }
@@ -778,7 +778,7 @@ mod readreply {
                     for (got, expected) in got
                         .into_iter()
                         .flatten()
-                        .zip(data.iter().map(|r| r.iter()).flatten())
+                        .zip(data.iter().flat_map(|r| r.iter()))
                     {
                         assert_eq!(got.as_slice(), &expected[..]);
                     }

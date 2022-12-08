@@ -60,7 +60,7 @@ async fn query_failure_recovery_with_volume_id() {
     deployment.kill_server(&r1_addr, true).await.unwrap();
 
     let res = deployment.leader_handle().view("q").await;
-    assert!(res.is_err());
+    res.unwrap_err();
 
     deployment.teardown().await.unwrap();
 }
@@ -116,12 +116,10 @@ async fn balance_base_table_domains() {
 
     let info = deployment.leader_handle().get_info().await.unwrap();
 
-    dbg!(&info);
-
     // 2 workers
     assert_eq!(info.len(), 2);
     // each with 1 domain shard
-    for (_, domains) in &*info {
+    for domains in info.values() {
         assert_eq!(domains.len(), 1);
     }
 
@@ -468,7 +466,7 @@ async fn server_auto_restarts() {
 /// Performs a simple create table, insert, and query to verify that the deployment is healthy.
 async fn assert_deployment_health(mut dh: DeploymentHandle) {
     let mut adapter = dh.first_adapter().await;
-    let _ = adapter
+    adapter
         .query_drop(
             r"CREATE TABLE t1 (
         uid INT NOT NULL,

@@ -1386,7 +1386,7 @@ async fn write_timestamps() {
     assert_eq!(result.0, 1);
     assert_eq!(
         result.1,
-        NaiveDate::from_ymd(2020, 1, 23).and_hms(17, 08, 24)
+        NaiveDate::from_ymd(2020, 1, 23).and_hms(17, 8, 24)
     );
 
     conn.query_drop("UPDATE posts SET created_at = '2021-01-25 17:08:24' WHERE id = 1")
@@ -1401,7 +1401,7 @@ async fn write_timestamps() {
     assert_eq!(result.0, 1);
     assert_eq!(
         result.1,
-        NaiveDate::from_ymd(2021, 1, 25).and_hms(17, 08, 24)
+        NaiveDate::from_ymd(2021, 1, 25).and_hms(17, 8, 24)
     );
 }
 
@@ -1632,7 +1632,7 @@ async fn show_readyset_status() {
     let (opts, _handle) = setup().await;
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
     let ret: Vec<mysql::Row> = conn.query("SHOW READYSET STATUS;").await.unwrap();
-    assert!(ReadySetStatus::try_from(ret).is_ok());
+    ReadySetStatus::try_from(ret).unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1667,7 +1667,7 @@ async fn simple_nonblocking_select() {
         last_query_info(&mut conn).await.noria_error,
         ReadySetError::ReaderMissingKey.to_string()
     );
-    assert!(res.is_err());
+    res.unwrap_err();
 
     // Long enough to wait for upquery.
     sleep().await;

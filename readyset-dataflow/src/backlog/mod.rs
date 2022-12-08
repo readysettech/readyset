@@ -551,6 +551,7 @@ impl SingleReadHandle {
 }
 
 #[cfg(test)]
+#[allow(clippy::panic)]
 mod tests {
     use std::ops::Bound;
 

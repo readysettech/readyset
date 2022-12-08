@@ -289,6 +289,7 @@ mod tests {
     /// queries, they come out in left-to-right order.  Anything else it covers is a happy
     /// accident.
     #[test]
+    #[allow(clippy::approx_constant)]
     fn test_prepared_statement_value_extraction() {
         use Literal::*;
 

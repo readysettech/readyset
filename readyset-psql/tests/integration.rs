@@ -999,7 +999,7 @@ async fn write_timestamps() {
     assert_eq!(row.get::<usize, i32>(0), 1);
     assert_eq!(
         row.get::<usize, NaiveDateTime>(1),
-        NaiveDate::from_ymd(2020, 1, 23).and_hms(17, 08, 24)
+        NaiveDate::from_ymd(2020, 1, 23).and_hms(17, 8, 24)
     );
 
     // Test text format response.
@@ -1033,7 +1033,7 @@ async fn write_timestamps() {
     assert_eq!(row.get::<usize, i32>(0), 1);
     assert_eq!(
         row.get::<usize, NaiveDateTime>(1),
-        NaiveDate::from_ymd(2021, 1, 25).and_hms(17, 08, 24)
+        NaiveDate::from_ymd(2021, 1, 25).and_hms(17, 8, 24)
     );
 }
 
@@ -1221,14 +1221,14 @@ async fn placeholder_numbering_does_not_break_postgres_ignore() {
 async fn show_readyset_status() {
     let (opts, _handle) = setup().await;
     let conn = connect(opts).await;
-    assert!(conn.simple_query("SHOW READYSET STATUS;").await.is_ok())
+    conn.simple_query("SHOW READYSET STATUS;").await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn show_readyset_version() {
     let (opts, _handle) = setup().await;
     let conn = connect(opts).await;
-    assert!(conn.simple_query("SHOW READYSET VERSION;").await.is_ok())
+    conn.simple_query("SHOW READYSET VERSION;").await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]

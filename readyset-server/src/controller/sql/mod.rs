@@ -654,20 +654,18 @@ mod tests {
                 &Relation::from("users")
             );
 
-            assert!(inc
-                .add_query(
+            inc.add_query(
+                None,
+                inc.rewrite(
+                    parse_select_statement(Dialect::MySQL, "SELECT users.id from users;").unwrap(),
+                    &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
-                    inc.rewrite(
-                        parse_select_statement(Dialect::MySQL, "SELECT users.id from users;")
-                            .unwrap(),
-                        &[],
-                        DataDialect::DEFAULT_MYSQL,
-                        None,
-                    )
-                    .unwrap(),
-                    mig
                 )
-                .is_ok());
+                .unwrap(),
+                mig,
+            )
+            .unwrap();
             // Should now have source, "users", a leaf projection node for the new selection, a
             // reorder projection and a reader node
             assert_eq!(mig.graph().node_count(), ncount + 3);
@@ -681,11 +679,11 @@ mod tests {
         let mut g = integration_utils::start_simple_unsharded("it_parses_parameter_column").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
-            assert!(add_create_table(
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(
                         Dialect::MySQL,
-                        "CREATE TABLE users (id int, name varchar(40), age int);"
+                        "CREATE TABLE users (id int, name varchar(40), age int);",
                     )
                     .unwrap(),
                     &[],
@@ -694,9 +692,9 @@ mod tests {
                 )
                 .unwrap(),
                 &mut inc,
-                mig
+                mig,
             )
-            .is_ok());
+            .unwrap();
 
             // Add a new query with a parameter
             let res = inc.add_query(
@@ -738,11 +736,11 @@ mod tests {
                 .await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
-            assert!(add_create_table(
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(
                         Dialect::MySQL,
-                        "CREATE TABLE users (id int, name varchar(40), age int);"
+                        "CREATE TABLE users (id int, name varchar(40), age int);",
                     )
                     .unwrap(),
                     &[],
@@ -753,7 +751,7 @@ mod tests {
                 &mut inc,
                 mig,
             )
-            .is_ok());
+            .unwrap();
 
             // Add a new query with a parameter
             let res = inc.add_query(
@@ -796,11 +794,11 @@ mod tests {
                 .await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
-            assert!(add_create_table(
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(
                         Dialect::MySQL,
-                        "CREATE TABLE users (id int, name varchar(40), age int);"
+                        "CREATE TABLE users (id int, name varchar(40), age int);",
                     )
                     .unwrap(),
                     &[],
@@ -811,7 +809,7 @@ mod tests {
                 &mut inc,
                 mig,
             )
-            .is_ok());
+            .unwrap();
 
             // Add a new query with a parameter
             let res = inc.add_query(
@@ -862,11 +860,11 @@ mod tests {
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type for "users"
-            assert!(add_create_table(
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(
                         Dialect::MySQL,
-                        "CREATE TABLE users (id int, name varchar(40));"
+                        "CREATE TABLE users (id int, name varchar(40));",
                     )
                     .unwrap(),
                     &[],
@@ -877,7 +875,7 @@ mod tests {
                 &mut inc,
                 mig,
             )
-            .is_ok());
+            .unwrap();
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(
@@ -895,11 +893,11 @@ mod tests {
             assert!(get_node(&inc, mig, &"users".into()).is_base());
 
             // Establish a base write type for "articles"
-            assert!(add_create_table(
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(
                         Dialect::MySQL,
-                        "CREATE TABLE articles (id int, author int, title varchar(255));"
+                        "CREATE TABLE articles (id int, author int, title varchar(255));",
                     )
                     .unwrap(),
                     &[],
@@ -910,7 +908,7 @@ mod tests {
                 &mut inc,
                 mig,
             )
-            .is_ok());
+            .unwrap();
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 3);
             assert_eq!(
@@ -966,11 +964,11 @@ mod tests {
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
-            assert!(add_create_table(
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(
                         Dialect::MySQL,
-                        "CREATE TABLE users (id int, name varchar(40));"
+                        "CREATE TABLE users (id int, name varchar(40));",
                     )
                     .unwrap(),
                     &[],
@@ -981,7 +979,7 @@ mod tests {
                 &mut inc,
                 mig,
             )
-            .is_ok());
+            .unwrap();
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(
@@ -1034,7 +1032,7 @@ mod tests {
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write types
-            assert!(add_create_table(
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(Dialect::MySQL, "CREATE TABLE votes (aid int, userid int);")
                         .unwrap(),
@@ -1044,9 +1042,9 @@ mod tests {
                 )
                 .unwrap(),
                 &mut inc,
-                mig
+                mig,
             )
-            .is_ok());
+            .unwrap();
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(
@@ -1100,11 +1098,11 @@ mod tests {
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             inc.disable_reuse();
-            assert!(add_create_table(
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(
                         Dialect::MySQL,
-                        "CREATE TABLE users (id int, name varchar(40));"
+                        "CREATE TABLE users (id int, name varchar(40));",
                     )
                     .unwrap(),
                     &[],
@@ -1115,7 +1113,7 @@ mod tests {
                 &mut inc,
                 mig,
             )
-            .is_ok());
+            .unwrap();
             let res = inc.add_query(
                 None,
                 inc.rewrite(
@@ -1131,7 +1129,7 @@ mod tests {
                 .unwrap(),
                 mig,
             );
-            assert!(res.is_ok());
+            res.unwrap();
 
             // Add the same query again; this should NOT reuse here.
             let ncount = mig.graph().node_count();
@@ -1150,7 +1148,7 @@ mod tests {
                 .unwrap(),
                 mig,
             );
-            assert!(res.is_ok());
+            res.unwrap();
             // expect three new nodes: filter, project, project (for reorder), reader
             assert_eq!(mig.graph().node_count(), ncount + 4);
         })
@@ -1166,11 +1164,11 @@ mod tests {
             let mut inc = SqlIncorporator::default();
             inc.enable_reuse(crate::ReuseConfigType::Finkelstein);
             // Establish a base write type
-            assert!(add_create_table(
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(
                         Dialect::MySQL,
-                        "CREATE TABLE users (id int, name varchar(40));"
+                        "CREATE TABLE users (id int, name varchar(40));",
                     )
                     .unwrap(),
                     &[],
@@ -1181,7 +1179,7 @@ mod tests {
                 &mut inc,
                 mig,
             )
-            .is_ok());
+            .unwrap();
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(
@@ -1252,7 +1250,7 @@ mod tests {
                 .unwrap(),
                 mig,
             );
-            assert!(res.is_ok());
+            res.unwrap();
             // should have added three more nodes (project, reorder project and reader)
             assert_eq!(mig.graph().node_count(), ncount + 3);
         })
@@ -1268,11 +1266,11 @@ mod tests {
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
-            assert!(add_create_table(
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(
                         Dialect::MySQL,
-                        "CREATE TABLE users (id int, name varchar(40), address varchar(40));"
+                        "CREATE TABLE users (id int, name varchar(40), address varchar(40));",
                     )
                     .unwrap(),
                     &[],
@@ -1283,7 +1281,7 @@ mod tests {
                 &mut inc,
                 mig,
             )
-            .is_ok());
+            .unwrap();
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(
@@ -1316,7 +1314,7 @@ mod tests {
                 .unwrap(),
                 mig,
             );
-            assert!(res.is_ok());
+            res.unwrap();
 
             // Add the same query again, but with a parameter on a different column.
             // Project the same columns, so we can reuse the projection that already exists and only
@@ -1381,11 +1379,11 @@ mod tests {
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
-            assert!(add_create_table(
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(
                         Dialect::MySQL,
-                        "CREATE TABLE users (id int, name varchar(40), address varchar(40));"
+                        "CREATE TABLE users (id int, name varchar(40), address varchar(40));",
                     )
                     .unwrap(),
                     &[],
@@ -1396,7 +1394,7 @@ mod tests {
                 &mut inc,
                 mig,
             )
-            .is_ok());
+            .unwrap();
 
             // Add a new "full table" query. The view is expected to contain projected columns plus
             // the special 'bogokey' literal column.
@@ -1514,11 +1512,11 @@ mod tests {
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
-            assert!(add_create_table(
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(
                         Dialect::MySQL,
-                        "CREATE TABLE users (id int, name varchar(40), address varchar(40));"
+                        "CREATE TABLE users (id int, name varchar(40), address varchar(40));",
                     )
                     .unwrap(),
                     &[],
@@ -1529,7 +1527,7 @@ mod tests {
                 &mut inc,
                 mig,
             )
-            .is_ok());
+            .unwrap();
 
             // Add a new parameterized query.
             let res = inc.add_query(
@@ -1607,11 +1605,11 @@ mod tests {
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
-            assert!(add_create_table(
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(
                         Dialect::MySQL,
-                        "CREATE TABLE users (id int, name varchar(40), address varchar(40));"
+                        "CREATE TABLE users (id int, name varchar(40), address varchar(40));",
                     )
                     .unwrap(),
                     &[],
@@ -1622,7 +1620,7 @@ mod tests {
                 &mut inc,
                 mig,
             )
-            .is_ok());
+            .unwrap();
 
             // Add a query with a parameter and a literal projection.
             let res = inc.add_query(
@@ -1706,7 +1704,7 @@ mod tests {
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
-            assert!(add_create_table(
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(Dialect::MySQL, "CREATE TABLE votes (aid int, userid int);")
                         .unwrap(),
@@ -1716,9 +1714,9 @@ mod tests {
                 )
                 .unwrap(),
                 &mut inc,
-                mig
+                mig,
             )
-            .is_ok());
+            .unwrap();
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(
@@ -1780,7 +1778,7 @@ mod tests {
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
-            assert!(add_create_table(
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(Dialect::MySQL, "CREATE TABLE votes (userid int, aid int);")
                         .unwrap(),
@@ -1790,9 +1788,9 @@ mod tests {
                 )
                 .unwrap(),
                 &mut inc,
-                mig
+                mig,
             )
-            .is_ok());
+            .unwrap();
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(
@@ -1854,7 +1852,7 @@ mod tests {
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
-            assert!(add_create_table(
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(Dialect::MySQL, "CREATE TABLE votes (userid int, aid int);")
                         .unwrap(),
@@ -1864,9 +1862,9 @@ mod tests {
                 )
                 .unwrap(),
                 &mut inc,
-                mig
+                mig,
             )
-            .is_ok());
+            .unwrap();
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(
@@ -1930,11 +1928,11 @@ mod tests {
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
-            assert!(add_create_table(
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(
                         Dialect::MySQL,
-                        "CREATE TABLE votes (userid int, aid int, sign int);"
+                        "CREATE TABLE votes (userid int, aid int, sign int);",
                     )
                     .unwrap(),
                     &[],
@@ -1945,7 +1943,7 @@ mod tests {
                 &mut inc,
                 mig,
             )
-            .is_ok());
+            .unwrap();
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(
@@ -2009,11 +2007,11 @@ mod tests {
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
-            assert!(add_create_table(
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(
                         Dialect::MySQL,
-                        "CREATE TABLE votes (userid int, aid int, sign int);"
+                        "CREATE TABLE votes (userid int, aid int, sign int);",
                     )
                     .unwrap(),
                     &[],
@@ -2024,7 +2022,7 @@ mod tests {
                 &mut inc,
                 mig,
             )
-            .is_ok());
+            .unwrap();
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(
@@ -2086,11 +2084,11 @@ mod tests {
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
-            assert!(add_create_table(
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(
                         Dialect::MySQL,
-                        "CREATE TABLE votes (userid int, aid int, sign int);"
+                        "CREATE TABLE votes (userid int, aid int, sign int);",
                     )
                     .unwrap(),
                     &[],
@@ -2101,7 +2099,7 @@ mod tests {
                 &mut inc,
                 mig,
             )
-            .is_ok());
+            .unwrap();
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(
@@ -2181,11 +2179,11 @@ mod tests {
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
-            assert!(add_create_table(
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(
                         Dialect::MySQL,
-                        "CREATE TABLE votes (userid int, aid int, sign int);"
+                        "CREATE TABLE votes (userid int, aid int, sign int);",
                     )
                     .unwrap(),
                     &[],
@@ -2196,7 +2194,7 @@ mod tests {
                 &mut inc,
                 mig,
             )
-            .is_ok());
+            .unwrap();
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(
@@ -2227,7 +2225,7 @@ mod tests {
                 .unwrap(),
                 mig,
             );
-            assert!(res.is_ok());
+            res.unwrap();
             assert_eq!(mig.graph().node_count(), 5);
         })
         .await;
@@ -2245,11 +2243,11 @@ mod tests {
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
-            assert!(add_create_table(
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(
                         Dialect::MySQL,
-                        "CREATE TABLE votes (userid int, aid int, sign int);"
+                        "CREATE TABLE votes (userid int, aid int, sign int);",
                     )
                     .unwrap(),
                     &[],
@@ -2260,7 +2258,7 @@ mod tests {
                 &mut inc,
                 mig,
             )
-            .is_ok());
+            .unwrap();
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(
@@ -2326,11 +2324,11 @@ mod tests {
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
-            assert!(add_create_table(
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(
                         Dialect::MySQL,
-                        "CREATE TABLE votes (story_id int, comment_id int, vote int);"
+                        "CREATE TABLE votes (story_id int, comment_id int, vote int);",
                     )
                     .unwrap(),
                     &[],
@@ -2341,7 +2339,7 @@ mod tests {
                 &mut inc,
                 mig,
             )
-            .is_ok());
+            .unwrap();
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(
@@ -2401,11 +2399,11 @@ mod tests {
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish base write types for "users" and "articles" and "votes"
-            assert!(add_create_table(
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(
                         Dialect::MySQL,
-                        "CREATE TABLE users (id int, name varchar(40));"
+                        "CREATE TABLE users (id int, name varchar(40));",
                     )
                     .unwrap(),
                     &[],
@@ -2416,8 +2414,8 @@ mod tests {
                 &mut inc,
                 mig,
             )
-            .is_ok());
-            assert!(add_create_table(
+            .unwrap();
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(Dialect::MySQL, "CREATE TABLE votes (aid int, uid int);")
                         .unwrap(),
@@ -2427,14 +2425,14 @@ mod tests {
                 )
                 .unwrap(),
                 &mut inc,
-                mig
+                mig,
             )
-            .is_ok());
-            assert!(add_create_table(
+            .unwrap();
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(
                         Dialect::MySQL,
-                        "CREATE TABLE articles (aid int, title varchar(255), author int);"
+                        "CREATE TABLE articles (aid int, title varchar(255), author int);",
                     )
                     .unwrap(),
                     &[],
@@ -2445,7 +2443,7 @@ mod tests {
                 &mut inc,
                 mig,
             )
-            .is_ok());
+            .unwrap();
 
             // Try an explicit multi-way-join
             let q = "SELECT users.name, articles.title, votes.uid \
@@ -2504,11 +2502,11 @@ mod tests {
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish base write types for "users" and "articles" and "votes"
-            assert!(add_create_table(
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(
                         Dialect::MySQL,
-                        "CREATE TABLE users (id int, name varchar(40));"
+                        "CREATE TABLE users (id int, name varchar(40));",
                     )
                     .unwrap(),
                     &[],
@@ -2519,8 +2517,8 @@ mod tests {
                 &mut inc,
                 mig,
             )
-            .is_ok());
-            assert!(add_create_table(
+            .unwrap();
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(Dialect::MySQL, "CREATE TABLE votes (aid int, uid int);")
                         .unwrap(),
@@ -2530,14 +2528,14 @@ mod tests {
                 )
                 .unwrap(),
                 &mut inc,
-                mig
+                mig,
             )
-            .is_ok());
-            assert!(add_create_table(
+            .unwrap();
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(
                         Dialect::MySQL,
-                        "CREATE TABLE articles (aid int, title varchar(255), author int);"
+                        "CREATE TABLE articles (aid int, title varchar(255), author int);",
                     )
                     .unwrap(),
                     &[],
@@ -2548,7 +2546,7 @@ mod tests {
                 &mut inc,
                 mig,
             )
-            .is_ok());
+            .unwrap();
 
             // Try an implicit multi-way-join
             let q = "SELECT users.name, articles.title, votes.uid \
@@ -2596,11 +2594,11 @@ mod tests {
         .await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
-            assert!(add_create_table(
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(
                         Dialect::MySQL,
-                        "CREATE TABLE users (id int, name varchar(40));"
+                        "CREATE TABLE users (id int, name varchar(40));",
                     )
                     .unwrap(),
                     &[],
@@ -2611,12 +2609,12 @@ mod tests {
                 &mut inc,
                 mig,
             )
-            .is_ok());
-            assert!(add_create_table(
+            .unwrap();
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(
                         Dialect::MySQL,
-                        "CREATE TABLE articles (id int, author int, title varchar(255));"
+                        "CREATE TABLE articles (id int, author int, title varchar(255));",
                     )
                     .unwrap(),
                     &[],
@@ -2627,7 +2625,7 @@ mod tests {
                 &mut inc,
                 mig,
             )
-            .is_ok());
+            .unwrap();
             let q = "SELECT users.id, users.name, articles.author, articles.title \
                      FROM articles, users \
                      WHERE users.id = articles.author;";
@@ -2664,7 +2662,7 @@ mod tests {
                 &["id", "author", "title", "name"]
             );
             // leaf node
-            let new_leaf_view = get_node(&inc, mig, &q.unwrap().into());
+            let new_leaf_view = get_node(&inc, mig, &q.unwrap());
             assert_eq!(
                 new_leaf_view
                     .columns()
@@ -2684,11 +2682,11 @@ mod tests {
         let mut g = integration_utils::start_simple_unsharded("it_incorporates_self_join").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
-            assert!(add_create_table(
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(
                         Dialect::MySQL,
-                        "CREATE TABLE friends (id int, friend int);"
+                        "CREATE TABLE friends (id int, friend int);",
                     )
                     .unwrap(),
                     &[],
@@ -2697,9 +2695,9 @@ mod tests {
                 )
                 .unwrap(),
                 &mut inc,
-                mig
+                mig,
             )
-            .is_ok());
+            .unwrap();
 
             // Try a friends-of-friends type computation via self join
             let q = "SELECT f1.id, f2.friend AS fof \
@@ -2743,11 +2741,11 @@ mod tests {
             integration_utils::start_simple_unsharded("it_incorporates_literal_projection").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
-            assert!(add_create_table(
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(
                         Dialect::MySQL,
-                        "CREATE TABLE users (id int, name varchar(40));"
+                        "CREATE TABLE users (id int, name varchar(40));",
                     )
                     .unwrap(),
                     &[],
@@ -2758,7 +2756,7 @@ mod tests {
                 &mut inc,
                 mig,
             )
-            .is_ok());
+            .unwrap();
 
             let res = inc.add_query(
                 None,
@@ -2793,7 +2791,7 @@ mod tests {
                 .await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
-            assert!(add_create_table(
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(Dialect::MySQL, "CREATE TABLE users (id int, age int);")
                         .unwrap(),
@@ -2803,9 +2801,9 @@ mod tests {
                 )
                 .unwrap(),
                 &mut inc,
-                mig
+                mig,
             )
-            .is_ok());
+            .unwrap();
 
             let res = inc.add_query(
                 None,
@@ -2845,11 +2843,11 @@ mod tests {
         .await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
-            assert!(add_create_table(
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(
                         Dialect::MySQL,
-                        "CREATE TABLE users (id int, age int, name varchar(40));"
+                        "CREATE TABLE users (id int, age int, name varchar(40));",
                     )
                     .unwrap(),
                     &[],
@@ -2860,7 +2858,7 @@ mod tests {
                 &mut inc,
                 mig,
             )
-            .is_ok());
+            .unwrap();
 
             let res = inc.add_query(
                 None,
@@ -2903,11 +2901,11 @@ mod tests {
                 .await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
-            assert!(add_create_table(
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(
                         Dialect::MySQL,
-                        "CREATE TABLE users (id int, name varchar(40));"
+                        "CREATE TABLE users (id int, name varchar(40));",
                     )
                     .unwrap(),
                     &[],
@@ -2918,12 +2916,12 @@ mod tests {
                 &mut inc,
                 mig,
             )
-            .is_ok());
-            assert!(add_create_table(
+            .unwrap();
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(
                         Dialect::MySQL,
-                        "CREATE TABLE articles (id int, author int, title varchar(255));"
+                        "CREATE TABLE articles (id int, author int, title varchar(255));",
                     )
                     .unwrap(),
                     &[],
@@ -2934,7 +2932,7 @@ mod tests {
                 &mut inc,
                 mig,
             )
-            .is_ok());
+            .unwrap();
 
             let q = "SELECT nested_users.name, articles.title \
                      FROM articles \
@@ -2977,11 +2975,11 @@ mod tests {
         .await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
-            assert!(add_create_table(
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(
                         Dialect::MySQL,
-                        "CREATE TABLE users (id int, name varchar(40));"
+                        "CREATE TABLE users (id int, name varchar(40));",
                     )
                     .unwrap(),
                     &[],
@@ -2992,12 +2990,12 @@ mod tests {
                 &mut inc,
                 mig,
             )
-            .is_ok());
-            assert!(add_create_table(
+            .unwrap();
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(
                         Dialect::MySQL,
-                        "CREATE TABLE articles (id int, author int, title varchar(255));"
+                        "CREATE TABLE articles (id int, author int, title varchar(255));",
                     )
                     .unwrap(),
                     &[],
@@ -3008,22 +3006,21 @@ mod tests {
                 &mut inc,
                 mig,
             )
-            .is_ok());
+            .unwrap();
 
             // Add a simple query on users, which will be duplicated in the subquery below.
-            assert!(inc
-                .add_query(
+            inc.add_query(
+                None,
+                inc.rewrite(
+                    parse_select_statement(Dialect::MySQL, "SELECT * FROM users;").unwrap(),
+                    &[],
+                    DataDialect::DEFAULT_MYSQL,
                     None,
-                    inc.rewrite(
-                        parse_select_statement(Dialect::MySQL, "SELECT * FROM users;").unwrap(),
-                        &[],
-                        DataDialect::DEFAULT_MYSQL,
-                        None,
-                    )
-                    .unwrap(),
-                    mig
                 )
-                .is_ok());
+                .unwrap(),
+                mig,
+            )
+            .unwrap();
 
             // Ensure that the JOIN with nested_users still works as expected, even though an
             // an identical query already exists with a different name.
@@ -3067,11 +3064,11 @@ mod tests {
             integration_utils::start_simple_unsharded("it_incorporates_compound_selection").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
-            assert!(add_create_table(
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(
                         Dialect::MySQL,
-                        "CREATE TABLE users (id int, name varchar(40));"
+                        "CREATE TABLE users (id int, name varchar(40));",
                     )
                     .unwrap(),
                     &[],
@@ -3082,7 +3079,7 @@ mod tests {
                 &mut inc,
                 mig,
             )
-            .is_ok());
+            .unwrap();
 
             let res = inc.add_query(
                 None,
@@ -3121,11 +3118,11 @@ mod tests {
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
-            assert!(add_create_table(
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(
                         Dialect::MySQL,
-                        "CREATE TABLE users (id int, name varchar(40));"
+                        "CREATE TABLE users (id int, name varchar(40));",
                     )
                     .unwrap(),
                     &[],
@@ -3136,7 +3133,7 @@ mod tests {
                 &mut inc,
                 mig,
             )
-            .is_ok());
+            .unwrap();
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(
@@ -3169,7 +3166,7 @@ mod tests {
                 .unwrap(),
                 mig,
             );
-            assert!(res.is_ok());
+            res.unwrap();
 
             // Add query with a different predicate
             let ncount = mig.graph().node_count();
@@ -3188,7 +3185,7 @@ mod tests {
                 .unwrap(),
                 mig,
             );
-            assert!(res.is_ok());
+            res.unwrap();
             // should have added three more nodes (filter, project, reorder project and reader)
             assert_eq!(mig.graph().node_count(), ncount + 4);
         })
@@ -3250,11 +3247,11 @@ mod tests {
         let mut g = integration_utils::start_simple_unsharded("it_queries_over_aliased_view").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
-            assert!(add_create_table(
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(
                         Dialect::MySQL,
-                        "CREATE TABLE users (id int, name varchar(40));"
+                        "CREATE TABLE users (id int, name varchar(40));",
                     )
                     .unwrap(),
                     &[],
@@ -3265,7 +3262,7 @@ mod tests {
                 &mut inc,
                 mig,
             )
-            .is_ok());
+            .unwrap();
             // Add first copy of new query, called "tq1"
             let res = inc.add_query(
                 Some("tq1".into()),
@@ -3282,7 +3279,7 @@ mod tests {
                 .unwrap(),
                 mig,
             );
-            assert!(res.is_ok());
+            res.unwrap();
 
             // Add the same query again, this time as "tq2"
             let ncount = mig.graph().node_count();
@@ -3301,7 +3298,7 @@ mod tests {
                 .unwrap(),
                 mig,
             );
-            assert!(res.is_ok());
+            res.unwrap();
             assert_eq!(mig.graph().node_count(), ncount);
 
             // Add a query over tq2, which really is tq1
@@ -3333,7 +3330,7 @@ mod tests {
                 ..Default::default()
             });
             // Must have a base node for type inference to work, so make one manually
-            assert!(add_create_table(
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(Dialect::MySQL, "CREATE TABLE t1 (a int, b float, c Text);")
                         .unwrap(),
@@ -3343,9 +3340,9 @@ mod tests {
                 )
                 .unwrap(),
                 &mut inc,
-                mig
+                mig,
             )
-            .is_ok());
+            .unwrap();
 
             let _ = inc
                 .add_query(
@@ -3391,7 +3388,7 @@ mod tests {
                 ..Default::default()
             });
             // Must have a base node for type inference to work, so make one manually
-            assert!(add_create_table(
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(Dialect::MySQL, "CREATE TABLE t1 (a int, b float, c Text);")
                         .unwrap(),
@@ -3401,9 +3398,9 @@ mod tests {
                 )
                 .unwrap(),
                 &mut inc,
-                mig
+                mig,
             )
-            .is_ok());
+            .unwrap();
 
             let _ = inc
                 .add_query(
@@ -3451,11 +3448,11 @@ mod tests {
                 ..Default::default()
             });
             // Must have a base node for type inference to work, so make one manually
-            assert!(add_create_table(
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(
                         Dialect::MySQL,
-                        "CREATE TABLE t1 (a int, b float, c Text, d Text);"
+                        "CREATE TABLE t1 (a int, b float, c Text, d Text);",
                     )
                     .unwrap(),
                     &[],
@@ -3466,7 +3463,7 @@ mod tests {
                 &mut inc,
                 mig,
             )
-            .is_ok());
+            .unwrap();
 
             let _ = inc
                 .add_query(
@@ -3527,7 +3524,7 @@ mod tests {
                 ..Default::default()
             });
             // Must have a base node for type inference to work, so make one manually
-            assert!(add_create_table(
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(Dialect::MySQL, "CREATE TABLE t1 (a int, b float, c Text);")
                         .unwrap(),
@@ -3537,10 +3534,10 @@ mod tests {
                 )
                 .unwrap(),
                 &mut inc,
-                mig
+                mig,
             )
-            .is_ok());
-            assert!(add_create_table(
+            .unwrap();
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(Dialect::MySQL, "CREATE TABLE t2 (a int, b float, c Text);")
                         .unwrap(),
@@ -3550,9 +3547,9 @@ mod tests {
                 )
                 .unwrap(),
                 &mut inc,
-                mig
+                mig,
             )
-            .is_ok());
+            .unwrap();
 
             let _ = inc
                 .add_query(
@@ -3603,7 +3600,7 @@ mod tests {
                 ..Default::default()
             });
             // Must have a base node for type inference to work, so make one manually
-            assert!(add_create_table(
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(Dialect::MySQL, "CREATE TABLE t1 (a int, b float, c Text);")
                         .unwrap(),
@@ -3613,10 +3610,10 @@ mod tests {
                 )
                 .unwrap(),
                 &mut inc,
-                mig
+                mig,
             )
-            .is_ok());
-            assert!(add_create_table(
+            .unwrap();
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(Dialect::MySQL, "CREATE TABLE t2 (a int, b float, c Text);")
                         .unwrap(),
@@ -3626,9 +3623,9 @@ mod tests {
                 )
                 .unwrap(),
                 &mut inc,
-                mig
+                mig,
             )
-            .is_ok());
+            .unwrap();
 
             let _ = inc
                 .add_query(
@@ -3673,7 +3670,7 @@ mod tests {
                 ..Default::default()
             });
             // Must have a base node for type inference to work, so make one manually
-            assert!(add_create_table(
+            add_create_table(
                 inc.rewrite(
                     parse_create_table(Dialect::MySQL, "CREATE TABLE t1 (a int, b float, c Text);")
                         .unwrap(),
@@ -3683,9 +3680,9 @@ mod tests {
                 )
                 .unwrap(),
                 &mut inc,
-                mig
+                mig,
             )
-            .is_ok());
+            .unwrap();
 
             let _ = inc
                 .add_query(

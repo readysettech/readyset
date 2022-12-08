@@ -1066,6 +1066,7 @@ impl Ingredient for Union {
 }
 
 #[cfg(test)]
+#[allow(clippy::panic, clippy::unreachable)]
 mod tests {
     use super::*;
     use crate::ops;

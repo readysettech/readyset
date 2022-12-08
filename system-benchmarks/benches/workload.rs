@@ -22,13 +22,13 @@ use futures::StreamExt;
 use mysql_async::prelude::Queryable;
 use mysql_async::Conn;
 use nperf_core::args::{FlamegraphArgs, RecordArgs};
-use parking_lot::Mutex;
 use readyset::mysql::MySqlHandler;
 use readyset::{NoriaAdapter, Options};
 use readyset_client::get_metric;
 use readyset_client::metrics::{recorded, MetricsDump};
 use regex::Regex;
 use structopt::StructOpt;
+use tokio::sync::Mutex;
 use tokio::time::sleep;
 
 /// Subdirectory where the benchmarks are kept
@@ -43,9 +43,6 @@ const BENCH_BATH_SIZE: u64 = 8192;
 const WORKLOAD_DURATION: Duration = Duration::from_secs(30);
 /// The controller address to make RPC calls to
 const LEADER_URI: &str = "http://127.0.0.1:6033";
-
-#[global_allocator]
-static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 /// The MySQL instance backing the databases used in those benchmarks
 fn mysql_url(db: impl Display) -> String {
@@ -163,7 +160,7 @@ impl PreparedPool {
             }));
         }
 
-        while running_statements.len() > 0 {
+        while !running_statements.is_empty() {
             self.conns.push(running_statements.next().await.unwrap()?);
         }
 
@@ -183,17 +180,15 @@ impl Benchmark {
     /// Enumerate all benchmarks in the default benchmarks directory
     fn find_benchmarks(filter: regex::Regex) -> anyhow::Result<Vec<Self>> {
         let bench_dir = Path::new(BENCHMARK_DATA_PATH);
-        let subdirs = read_dir(benchmark_path(&bench_dir)?)?;
+        let subdirs = read_dir(benchmark_path(bench_dir)?)?;
 
         // Find all subdirectories in the benchmarks directory
         let subdirs = subdirs
             .filter(|d| d.as_ref().unwrap().metadata().unwrap().is_dir())
-            .map(|d| std::fs::canonicalize(d.unwrap().path()).unwrap())
-            .collect::<Vec<_>>();
+            .map(|d| std::fs::canonicalize(d.unwrap().path()).unwrap());
 
         // Find the schema file (.sql) and all workload files (.yaml) for each benchmark subdir
         Ok(subdirs
-            .into_iter()
             .map(|path| {
                 let mut schema = None;
                 let mut workloads = Vec::new();
@@ -288,7 +283,7 @@ impl Benchmark {
                                 commands
                             },
                             |commands| async move {
-                                let mut pool = pool.lock();
+                                let mut pool = pool.lock().await;
                                 pool.run_all(Arc::new(commands)).await.unwrap();
                             },
                             BatchSize::SmallInput,
@@ -480,9 +475,9 @@ impl AdapterHandle {
                 // CPU cores alltogether
                 set_cpu_affinity(true);
                 drop(sock2);
-                sock1.read(&mut [0u8])?;
+                sock1.read_exact(&mut [0u8])?;
                 std::thread::spawn(start_adapter);
-                sock1.read(&mut [0u8])?;
+                sock1.read_exact(&mut [0u8])?;
                 std::process::exit(0);
             }
             Fork::Parent(child_pid) => {
@@ -493,7 +488,7 @@ impl AdapterHandle {
                 rt.block_on(prepare_db(schema))?;
 
                 // Write a byte to indicate database is ready and fork can initiate replication
-                sock2.write(&[1u8]).unwrap();
+                sock2.write_all(&[1u8]).unwrap();
 
                 rt.block_on(wait_adapter_ready());
                 Ok(AdapterHandle {
@@ -605,7 +600,7 @@ fn start_adapter_with_options(fallback_cache_options: FallbackCacheOptions) {
         description: "ReadySet benchmark adapter",
         default_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), BENCHMARK_PORT),
         connection_handler: MySqlHandler,
-        database_type: DatabaseType::MySql,
+        database_type: DatabaseType::MySQL,
         parse_dialect: nom_sql::Dialect::MySQL,
         expr_dialect: readyset_data::Dialect::DEFAULT_MYSQL,
     };
@@ -665,25 +660,23 @@ fn set_cpu_affinity(for_adapter: bool) {
             // And the remaining ones for the benchmark
             format!("{}-{}", adapter_cores, physical_cpus - 1)
         }
+    } else if for_adapter {
+        // With SMT the logical cores follow the physical cores, so the first N cores are
+        // physical and the remaining N cores are logical
+        format!(
+            "0-{},{}-{}",
+            adapter_cores - 1,
+            physical_cpus,
+            physical_cpus + adapter_cores - 1
+        )
     } else {
-        if for_adapter {
-            // With SMT the logical cores follow the physical cores, so the first N cores are
-            // physical and the remaining N cores are logical
-            format!(
-                "0-{},{}-{}",
-                adapter_cores - 1,
-                physical_cpus,
-                physical_cpus + adapter_cores - 1
-            )
-        } else {
-            format!(
-                "{}-{},{}-{}",
-                adapter_cores,
-                physical_cpus - 1,
-                physical_cpus + adapter_cores,
-                logical_cpus - 1
-            )
-        }
+        format!(
+            "{}-{},{}-{}",
+            adapter_cores,
+            physical_cpus - 1,
+            physical_cpus + adapter_cores,
+            logical_cpus - 1
+        )
     };
 
     std::process::Command::new("taskset")
@@ -716,7 +709,7 @@ impl FromStr for MemoryLimit {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if let Some(percent) = s.strip_suffix("%") {
+        if let Some(percent) = s.strip_suffix('%') {
             let percent: usize = percent.parse()?;
             if percent == 0 || percent >= 100 {
                 Err(anyhow::Error::msg("Expected 0 < percentage < 100"))?;

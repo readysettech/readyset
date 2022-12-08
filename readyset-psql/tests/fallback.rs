@@ -59,25 +59,21 @@ async fn delete_case_sensitive() {
             .unwrap();
         sleep().await;
 
-        assert!(conn
-            .simple_query(r#"INSERT INTO cats (id) VALUES (1)"#)
+        conn.simple_query(r#"INSERT INTO cats (id) VALUES (1)"#)
             .await
-            .is_err());
+            .unwrap_err();
 
-        assert!(conn
-            .simple_query(r#"INSERT INTO "cats" (id) VALUES (1)"#)
+        conn.simple_query(r#"INSERT INTO "cats" (id) VALUES (1)"#)
             .await
-            .is_err());
+            .unwrap_err();
 
-        assert!(conn
-            .simple_query(r#"INSERT INTO Cats (id) VALUES (1)"#)
+        conn.simple_query(r#"INSERT INTO Cats (id) VALUES (1)"#)
             .await
-            .is_err());
+            .unwrap_err();
 
-        assert!(conn
-            .simple_query(r#"INSERT INTO "Cats" (id, "Id") VALUES (1, 2)"#)
+        conn.simple_query(r#"INSERT INTO "Cats" (id, "Id") VALUES (1, 2)"#)
             .await
-            .is_err());
+            .unwrap_err();
 
         conn.simple_query(r#"INSERT INTO "Cats" (iD, "ID") VALUES (1, 2)"#)
             .await

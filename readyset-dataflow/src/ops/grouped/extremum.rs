@@ -168,6 +168,7 @@ impl GroupedOperation for ExtremumOperator {
 }
 
 #[cfg(test)]
+#[allow(clippy::panic, clippy::unreachable)]
 mod tests {
     use super::*;
     use crate::{ops, LookupIndex};

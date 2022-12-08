@@ -114,10 +114,7 @@ mod tests {
         proxied_queries_reporter.report_query(&mut init_q).await;
         let status = {
             let queries = proxied_queries_reporter.reported_queries.lock().await;
-            queries
-                .get(&query_id)
-                .expect("query should be mapped")
-                .clone()
+            *queries.get(&query_id).expect("query should be mapped")
         };
         assert_eq!(MigrationState::Pending, status);
 
@@ -135,10 +132,7 @@ mod tests {
         proxied_queries_reporter.report_query(&mut updated_q).await;
         let status = {
             let queries = proxied_queries_reporter.reported_queries.lock().await;
-            queries
-                .get(&query_id)
-                .expect("query should be mapped")
-                .clone()
+            *queries.get(&query_id).expect("query should be mapped")
         };
         assert_eq!(MigrationState::Successful, status);
     }

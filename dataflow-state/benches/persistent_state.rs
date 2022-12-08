@@ -35,7 +35,7 @@ lazy_static::lazy_static! {
                 (i % 99).into(),
                 i.into(),
             ];
-            state.process_records(&mut vec![rec].into(), None, None);
+            state.process_records(&mut vec![rec].into(), None, None).unwrap();
         }
 
         state.set_snapshot_mode(SnapshotMode::SnapshotModeDisabled);
@@ -69,7 +69,7 @@ lazy_static::lazy_static! {
                 (i % 99).into(),
                 i.into(),
             ];
-            state.process_records(&mut vec![rec].into(), None, None);
+            state.process_records(&mut vec![rec].into(), None, None).unwrap();
         }
 
         state.set_snapshot_mode(SnapshotMode::SnapshotModeDisabled);
@@ -107,18 +107,18 @@ pub fn rocksdb_get_primary_key(c: &mut Criterion) {
     group.bench_function("lookup", |b| {
         let mut iter = 0usize;
         b.iter(|| {
-            black_box({
-                state.lookup(&[0], &PointKey::Single(iter.into()));
-                state.lookup(&[0], &PointKey::Single((iter + 100).into()));
-                state.lookup(&[0], &PointKey::Single((iter + 200).into()));
-                state.lookup(&[0], &PointKey::Single((iter + 300).into()));
-                state.lookup(&[0], &PointKey::Single((iter + 400).into()));
-                state.lookup(&[0], &PointKey::Single((iter + 500).into()));
-                state.lookup(&[0], &PointKey::Single((iter + 600).into()));
-                state.lookup(&[0], &PointKey::Single((iter + 700).into()));
-                state.lookup(&[0], &PointKey::Single((iter + 800).into()));
-                state.lookup(&[0], &PointKey::Single((iter + 900).into()));
-            });
+            black_box((
+                state.lookup(&[0], &PointKey::Single(iter.into())),
+                state.lookup(&[0], &PointKey::Single((iter + 100).into())),
+                state.lookup(&[0], &PointKey::Single((iter + 200).into())),
+                state.lookup(&[0], &PointKey::Single((iter + 300).into())),
+                state.lookup(&[0], &PointKey::Single((iter + 400).into())),
+                state.lookup(&[0], &PointKey::Single((iter + 500).into())),
+                state.lookup(&[0], &PointKey::Single((iter + 600).into())),
+                state.lookup(&[0], &PointKey::Single((iter + 700).into())),
+                state.lookup(&[0], &PointKey::Single((iter + 800).into())),
+                state.lookup(&[0], &PointKey::Single((iter + 900).into())),
+            ));
             iter = (iter + 1) % (UNIQUE_ENTIRES - 1000);
         })
     });
@@ -144,10 +144,10 @@ pub fn rocksdb_get_secondary_key(c: &mut Criterion) {
 
     group.bench_function("lookup", |b| {
         b.iter(|| {
-            black_box({
-                state.lookup(&[1, 2], &PointKey::Double(("Dog".into(), 1.into())));
-                state.lookup(&[1, 2], &PointKey::Double(("Cat".into(), 2.into())));
-            })
+            black_box((
+                state.lookup(&[1, 2], &PointKey::Double(("Dog".into(), 1.into()))),
+                state.lookup(&[1, 2], &PointKey::Double(("Cat".into(), 2.into()))),
+            ))
         })
     });
 
@@ -183,18 +183,18 @@ pub fn rocksdb_get_secondary_unique_key(c: &mut Criterion) {
     group.bench_function("lookup", |b| {
         let mut iter = 0usize;
         b.iter(|| {
-            black_box({
-                state.lookup(&[3], &PointKey::Single(iter.into()));
-                state.lookup(&[3], &PointKey::Single((iter + 100).into()));
-                state.lookup(&[3], &PointKey::Single((iter + 200).into()));
-                state.lookup(&[3], &PointKey::Single((iter + 300).into()));
-                state.lookup(&[3], &PointKey::Single((iter + 400).into()));
-                state.lookup(&[3], &PointKey::Single((iter + 500).into()));
-                state.lookup(&[3], &PointKey::Single((iter + 600).into()));
-                state.lookup(&[3], &PointKey::Single((iter + 700).into()));
-                state.lookup(&[3], &PointKey::Single((iter + 800).into()));
-                state.lookup(&[3], &PointKey::Single((iter + 900).into()));
-            });
+            black_box((
+                state.lookup(&[3], &PointKey::Single(iter.into())),
+                state.lookup(&[3], &PointKey::Single((iter + 100).into())),
+                state.lookup(&[3], &PointKey::Single((iter + 200).into())),
+                state.lookup(&[3], &PointKey::Single((iter + 300).into())),
+                state.lookup(&[3], &PointKey::Single((iter + 400).into())),
+                state.lookup(&[3], &PointKey::Single((iter + 500).into())),
+                state.lookup(&[3], &PointKey::Single((iter + 600).into())),
+                state.lookup(&[3], &PointKey::Single((iter + 700).into())),
+                state.lookup(&[3], &PointKey::Single((iter + 800).into())),
+                state.lookup(&[3], &PointKey::Single((iter + 900).into())),
+            ));
             iter = (iter + 1) % (UNIQUE_ENTIRES - 1000);
         })
     });

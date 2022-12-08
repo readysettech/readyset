@@ -2245,8 +2245,10 @@ mod tests {
     #[test]
     fn persistent_state_recover() {
         let (_dir, name) = get_tmp_path();
-        let mut params = PersistenceParameters::default();
-        params.mode = DurabilityMode::Permanent;
+        let params = PersistenceParameters {
+            mode: DurabilityMode::Permanent,
+            ..Default::default()
+        };
         let first: Vec<DfValue> = vec![10.into(), "Cat".into()];
         let second: Vec<DfValue> = vec![20.into(), "Bob".into()];
         {
@@ -2279,8 +2281,10 @@ mod tests {
     #[test]
     fn persistent_state_recover_unique_key() {
         let (_dir, name) = get_tmp_path();
-        let mut params = PersistenceParameters::default();
-        params.mode = DurabilityMode::Permanent;
+        let params = PersistenceParameters {
+            mode: DurabilityMode::Permanent,
+            ..Default::default()
+        };
         let first: Vec<DfValue> = vec![10.into(), "Cat".into()];
         let second: Vec<DfValue> = vec![20.into(), "Bob".into()];
         {

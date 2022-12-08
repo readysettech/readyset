@@ -242,8 +242,10 @@ impl TestHandle {
         mut builder: Builder,
     ) -> ReadySetResult<TestHandle> {
         readyset_tracing::init_test_logging();
-        let mut persistence = readyset_server::PersistenceParameters::default();
-        persistence.mode = readyset_server::DurabilityMode::DeleteOnExit;
+        let persistence = readyset_server::PersistenceParameters {
+            mode: readyset_server::DurabilityMode::DeleteOnExit,
+            ..Default::default()
+        };
         builder.set_persistence(persistence);
         let telemetry_sender = builder.telemetry.clone();
         let noria = builder.start(Arc::clone(&authority)).await.unwrap();
@@ -1203,13 +1205,12 @@ async fn resnapshot_inner(url: &str) -> ReadySetResult<()> {
 
     // Check everything adds up for both the altered and unaltered tables
     let rs: Vec<_> = (0..ROWS)
-        .map(|i| {
+        .flat_map(|i| {
             [
                 [DfValue::from(i as i32), DfValue::from("I am a teapot")],
                 [DfValue::from(i as i32), DfValue::from("I am a teapot")],
             ]
         })
-        .flatten()
         .collect();
     let rs: Vec<&[DfValue]> = rs.iter().map(|r| r.as_slice()).collect();
     ctx.check_results("repl1_view", "Resnapshot repl1", rs.as_slice())
@@ -1224,7 +1225,7 @@ async fn resnapshot_inner(url: &str) -> ReadySetResult<()> {
         .await?;
 
     let rs: Vec<_> = (0..ROWS)
-        .map(|i| {
+        .flat_map(|i| {
             [
                 [
                     DfValue::from(i as i32),
@@ -1238,7 +1239,6 @@ async fn resnapshot_inner(url: &str) -> ReadySetResult<()> {
                 ],
             ]
         })
-        .flatten()
         .collect();
     let rs: Vec<&[DfValue]> = rs.iter().map(|r| r.as_slice()).collect();
     ctx.check_results("repl2_view", "Resnapshot repl2", rs.as_slice())
@@ -1520,7 +1520,7 @@ async fn snapshot_telemetry_inner(url: &String) -> ReadySetResult<()> {
         .check_event(TelemetryEvent::Schema)
         .await
         .into_iter()
-        .map(|t| t.schema.clone().expect("should be some"))
+        .map(|t| t.schema.expect("should be some"))
         .collect::<Vec<_>>();
     let schema_str = format!("{:?}", schemas);
 

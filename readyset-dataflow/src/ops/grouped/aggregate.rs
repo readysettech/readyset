@@ -293,6 +293,7 @@ impl GroupedOperation for Aggregator {
 // logic and create test cases more easily.
 
 #[cfg(test)]
+#[allow(clippy::unreachable)]
 mod tests {
     use super::*;
     use crate::{ops, LookupIndex};
@@ -767,10 +768,7 @@ mod tests {
         match rs.next().unwrap() {
             Record::Positive(r) => {
                 assert_eq!(r[0], 1.into());
-                assert_eq!(
-                    r[1],
-                    DfValue::try_from(DfValue::try_from(1.25).unwrap()).unwrap()
-                );
+                assert_eq!(r[1], DfValue::try_from(1.25).unwrap());
             }
             _ => unreachable!(),
         }

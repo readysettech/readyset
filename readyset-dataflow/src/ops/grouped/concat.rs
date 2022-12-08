@@ -213,6 +213,7 @@ impl GroupedOperation for GroupConcat {
 }
 
 #[cfg(test)]
+#[allow(clippy::unreachable)]
 mod tests {
     use std::convert::TryInto;
 

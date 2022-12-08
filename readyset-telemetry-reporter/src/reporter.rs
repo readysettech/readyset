@@ -208,7 +208,9 @@ impl TelemetryReporter {
     #[cfg(any(test, feature = "test-util"))]
     async fn process_event(&self, event: TelemetryEvent, payload: &Telemetry) {
         let mut received_events = self.received_events.lock().await;
-        let entry = received_events.entry(event).or_insert_with(|| vec![]);
+        let entry = received_events
+            .entry(event)
+            .or_insert_with(std::vec::Vec::new);
         entry.push((*payload).clone());
     }
 
@@ -371,7 +373,7 @@ mod tests {
         let (event, telemetry): (TelemetryEvent, Telemetry) =
             (TelemetryEvent::InstallerRun, Default::default());
 
-        assert!(telemetry_sender.send_event(event).is_ok());
+        telemetry_sender.send_event(event).unwrap();
 
         let mut interval = tokio::time::interval(Duration::from_millis(10));
         telemetry_reporter.run_once(&mut interval).await;
@@ -387,7 +389,7 @@ mod tests {
         telemetry_sender.shutdown().await;
         telemetry_reporter.run_once(&mut interval).await;
 
-        assert!(telemetry_sender.send_event(event).is_err());
+        telemetry_sender.send_event(event).unwrap_err();
     }
 
     #[tokio::test(start_paused = true)]

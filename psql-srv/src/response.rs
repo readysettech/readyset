@@ -117,11 +117,10 @@ mod tests {
     #[test]
     fn write_empty() {
         let response = Response::<Vec<Value>, Vec<Vec<Value>>>::Empty;
-        let validating_sink = sink::unfold(0, |i, _m: BackendMessage<Vec<Value>>| {
+        let validating_sink = sink::unfold(0, |_i, _m: BackendMessage<Vec<Value>>| {
             async move {
                 // No messages are expected.
-                assert!(false);
-                Ok::<_, EncodeError>(i + 1)
+                panic!();
             }
         });
         futures::pin_mut!(validating_sink);
@@ -137,7 +136,7 @@ mod tests {
                 match i {
                     0 => assert_eq!(m, BackendMessage::BindComplete),
                     // No further messages are expected.
-                    _ => assert!(false),
+                    _ => panic!(),
                 }
                 Ok::<_, EncodeError>(i + 1)
             }
@@ -158,7 +157,7 @@ mod tests {
                     0 => assert_eq!(m, BackendMessage::BindComplete),
                     1 => assert_eq!(m, BackendMessage::CloseComplete),
                     // No further messages are expected.
-                    _ => assert!(false),
+                    _ => panic!(),
                 }
                 Ok::<_, EncodeError>(i + 1)
             }
@@ -185,7 +184,7 @@ mod tests {
                         }
                     ),
                     // No further messages are expected.
-                    _ => assert!(false),
+                    _ => panic!(),
                 }
                 Ok::<_, EncodeError>(i + 1)
             }
@@ -250,7 +249,7 @@ mod tests {
                     ),
                     4 => assert_eq!(m, BackendMessage::ready_for_query_idle()),
                     // No further messages are expected.
-                    _ => assert!(false),
+                    _ => panic!(),
                 }
                 Ok::<_, EncodeError>(i + 1)
             }

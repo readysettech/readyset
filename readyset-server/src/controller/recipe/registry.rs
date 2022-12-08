@@ -730,7 +730,6 @@ mod tests {
                             .unwrap(),
                     )
                     .unwrap()
-                    .clone()
                 )
                 .unwrap());
         }

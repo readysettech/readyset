@@ -1,5 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, Bencher, Criterion};
-use nom_sql::{parse_select_statement, Dialect, SelectStatement};
+use nom_sql::{parse_select_statement, Dialect};
 use readyset_adapter::rewrite;
 
 fn auto_parametrize_query(c: &mut Criterion) {

@@ -1410,7 +1410,7 @@ async fn it_doesnt_recover_persisted_bases_with_wrong_volume_id() {
     let mut g = g.start(authority.clone()).await.unwrap();
     let getter = g.view("CarPrice").await;
     // This throws an error because there is no worker to place the domain on.
-    assert!(getter.is_err());
+    getter.unwrap_err();
     drop(g);
 }
 
@@ -3431,7 +3431,7 @@ async fn recipe_activates() {
             Dialect::DEFAULT_MYSQL,
         )
         .unwrap();
-        assert!(r.activate(mig, changelist).is_ok());
+        r.activate(mig, changelist).unwrap();
     })
     .await;
     // one base node
@@ -3682,7 +3682,7 @@ async fn node_removal() {
         vec![vec![1.into(), 2.into()]]
     );
 
-    let _ = g.remove_node(cid).await.unwrap();
+    g.remove_node(cid).await.unwrap();
 
     // update value again
     mutb.insert(vec![id.clone(), 4.into()]).await.unwrap();
@@ -3762,7 +3762,7 @@ async fn remove_query() {
         .unwrap();
     assert_eq!(g.tables().await.unwrap().len(), 1);
     assert_eq!(g.views().await.unwrap().len(), 1);
-    assert!(g.view("qb").await.is_err());
+    g.view("qb").await.unwrap_err();
 
     mutb.insert(vec![
         42.into(),
@@ -4947,8 +4947,8 @@ async fn query_reuse_aliases() {
     .await
     .unwrap();
 
-    assert!(g.view("q1").await.is_ok());
-    assert!(g.view("q2").await.is_ok());
+    g.view("q1").await.unwrap();
+    g.view("q2").await.unwrap();
 
     g.extend_recipe(
         ChangeList::from_str(
@@ -4960,9 +4960,9 @@ async fn query_reuse_aliases() {
     .await
     .unwrap();
 
-    assert!(g.view("q1").await.is_ok());
-    assert!(g.view("q2").await.is_ok());
-    assert!(g.view("q3").await.is_ok());
+    g.view("q1").await.unwrap();
+    g.view("q2").await.unwrap();
+    g.view("q3").await.unwrap();
 
     // query rewriting means this ends up being identical to the above query, even though the source
     // is different - let's make sure that still aliases successfully.
@@ -4976,10 +4976,10 @@ async fn query_reuse_aliases() {
     .await
     .unwrap();
 
-    assert!(g.view("q1").await.is_ok());
-    assert!(g.view("q2").await.is_ok());
-    assert!(g.view("q3").await.is_ok());
-    assert!(g.view("q4").await.is_ok());
+    g.view("q1").await.unwrap();
+    g.view("q2").await.unwrap();
+    g.view("q3").await.unwrap();
+    g.view("q4").await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -5040,10 +5040,10 @@ async fn view_reuse_aliases() {
     .await
     .unwrap();
 
-    assert!(g.view("v1").await.is_ok());
-    assert!(g.view("v2").await.is_ok());
-    assert!(g.view("q1").await.is_ok());
-    assert!(g.view("q2").await.is_ok());
+    g.view("v1").await.unwrap();
+    g.view("v2").await.unwrap();
+    g.view("q1").await.unwrap();
+    g.view("q2").await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -6210,13 +6210,13 @@ async fn simple_enum() {
     assert_eq!(
         result[1][0],
         DfValue::from("red")
-            .coerce_to(&result_type, &DfType::Unknown)
+            .coerce_to(result_type, &DfType::Unknown)
             .unwrap()
     );
     assert_eq!(
         result[2][0],
         DfValue::from("green")
-            .coerce_to(&result_type, &DfType::Unknown)
+            .coerce_to(result_type, &DfType::Unknown)
             .unwrap()
     );
 }
@@ -8648,7 +8648,7 @@ async fn overwrite_with_changed_recipe() {
             .unwrap(),
         )
         .await;
-    assert!(res.is_ok());
+    res.unwrap();
 }
 
 /// Tests that whenever we have at least two workers (including the leader), and the leader dies,
@@ -8756,9 +8756,9 @@ async fn simple_drop_tables() {
     g.extend_recipe(ChangeList::from_str(create_table, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
-    assert!(g.table("table_1").await.is_ok());
-    assert!(g.table("table_2").await.is_ok());
-    assert!(g.view("t1").await.is_ok());
+    g.table("table_1").await.unwrap();
+    g.table("table_2").await.unwrap();
+    g.view("t1").await.unwrap();
 
     let drop_table = "DROP TABLE table_1, table_2;";
     // let drop_table = "CREATE TABLE table_4 (column_4 INT);";
@@ -8776,7 +8776,7 @@ async fn simple_drop_tables() {
     g.extend_recipe(ChangeList::from_str(create_new_table, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
-    assert!(g.table("table_3").await.is_ok());
+    g.table("table_3").await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -8793,10 +8793,10 @@ async fn join_drop_tables() {
     g.extend_recipe(ChangeList::from_str(create_table, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
-    assert!(g.table("table_1").await.is_ok());
-    assert!(g.table("table_2").await.is_ok());
-    assert!(g.table("table_3").await.is_ok());
-    assert!(g.view("t1").await.is_ok());
+    g.table("table_1").await.unwrap();
+    g.table("table_2").await.unwrap();
+    g.table("table_3").await.unwrap();
+    g.view("t1").await.unwrap();
 
     let drop_table = "DROP TABLE table_1, table_2;";
     g.extend_recipe(ChangeList::from_str(drop_table, Dialect::DEFAULT_MYSQL).unwrap())
@@ -8807,14 +8807,14 @@ async fn join_drop_tables() {
 
     assert_table_not_found(g.table("table_1").await, "table_1");
     assert_table_not_found(g.table("table_2").await, "table_2");
-    assert!(g.table("table_3").await.is_ok());
+    g.table("table_3").await.unwrap();
     assert_view_not_found(g.view("t1").await, "t1");
 
     let create_new_table = "CREATE TABLE table_1 (column_1 INT);";
     g.extend_recipe(ChangeList::from_str(create_new_table, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
-    assert!(g.table("table_1").await.is_ok());
+    g.table("table_1").await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -8853,7 +8853,7 @@ async fn simple_drop_tables_with_data() {
     g.extend_recipe(ChangeList::from_str(recreate_table, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
-    assert!(g.table("table_1").await.is_ok());
+    g.table("table_1").await.unwrap();
     assert_view_not_found(g.view("t1").await, "t1");
 
     let recreate_query = "CREATE CACHE t2 FROM SELECT * FROM table_1";
@@ -8926,7 +8926,7 @@ async fn simple_drop_tables_with_persisted_data() {
     g.extend_recipe(ChangeList::from_str(recreate_table, Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
-    assert!(g.table("table_1").await.is_ok());
+    g.table("table_1").await.unwrap();
     assert_view_not_found(g.view("t1").await, "t1");
 
     let recreate_query = "CREATE CACHE t2 FROM SELECT * FROM table_1";
@@ -8957,10 +8957,10 @@ async fn create_and_drop_table() {
         .await
         .unwrap();
 
-    assert!(g.table("table_1").await.is_ok());
+    g.table("table_1").await.unwrap();
     assert_table_not_found(g.table("table_2").await, "table_2");
-    assert!(g.table("table_3").await.is_ok());
-    assert!(g.table("table_4").await.is_ok());
+    g.table("table_3").await.unwrap();
+    g.table("table_4").await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -8999,9 +8999,9 @@ async fn simple_dry_run() {
     let res = g
         .dry_run(ChangeList::from_str(query, Dialect::DEFAULT_MYSQL).unwrap())
         .await;
-    assert!(res.is_ok());
-    assert!(g.table("table_1").await.is_err());
-    assert!(g.view("t1").await.is_err());
+    res.unwrap();
+    g.table("table_1").await.unwrap_err();
+    g.view("t1").await.unwrap_err();
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -9016,8 +9016,8 @@ async fn simple_dry_run_unsupported() {
         .await
         .unwrap();
 
-    assert!(g.table("table_1").await.is_ok());
-    assert!(g.view("t1").await.is_ok());
+    g.table("table_1").await.unwrap();
+    g.view("t1").await.unwrap();
 
     let unsupported_query = "CREATE CACHE FROM SELECT 1";
     let res = g
@@ -9050,16 +9050,15 @@ async fn drop_view() {
     .await
     .unwrap();
 
-    assert!(g
-        .extend_recipe(
-            ChangeList::from_str(
-                "CREATE CACHE t1_select FROM SELECT * FROM t1_view",
-                Dialect::DEFAULT_MYSQL
-            )
-            .unwrap()
+    g.extend_recipe(
+        ChangeList::from_str(
+            "CREATE CACHE t1_select FROM SELECT * FROM t1_view",
+            Dialect::DEFAULT_MYSQL,
         )
-        .await
-        .is_ok());
+        .unwrap(),
+    )
+    .await
+    .unwrap();
 
     g.extend_recipe(ChangeList::from_str("DROP CACHE t1_select;", Dialect::DEFAULT_MYSQL).unwrap())
         .await
@@ -9137,7 +9136,7 @@ async fn double_create_table_with_multiple_modifications() {
         .unwrap();
 
     // Altering a table currently means we delete and recreate the whole thing.
-    assert!(g.view("t1").await.is_err());
+    g.view("t1").await.unwrap_err();
 
     let recreate_view = "CREATE CACHE t1 FROM SELECT * FROM table_1;";
     g.extend_recipe(ChangeList::from_str(recreate_view, Dialect::DEFAULT_MYSQL).unwrap())
@@ -9150,10 +9149,10 @@ async fn double_create_table_with_multiple_modifications() {
 
     let mut table = g.table("table_1").await.unwrap();
     // This should fail as we currently have different columns than before
-    assert!(table
+    table
         .insert(vec![11.into(), "12".into(), "13".into(), "14".into()])
         .await
-        .is_err());
+        .unwrap_err();
 
     table
         .insert_many(vec![vec!["11".into()], vec!["21".into()]])

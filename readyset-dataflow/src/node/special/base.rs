@@ -597,7 +597,7 @@ mod tests {
 
         assert_eq!(b.defaults.len(), 0);
         assert_eq!(b.dropped.len(), 0);
-        assert_eq!(b.unmodified, true);
+        assert!(b.unmodified);
     }
 
     #[test]
@@ -609,7 +609,7 @@ mod tests {
 
         assert_eq!(b.defaults.len(), 0);
         assert_eq!(b.dropped.len(), 0);
-        assert_eq!(b.unmodified, true);
+        assert!(b.unmodified);
     }
 
     mod process {

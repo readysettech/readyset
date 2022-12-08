@@ -429,12 +429,10 @@ mod tests {
             op: BinaryOperator::JsonExists,
             ty: DfType::Bool,
         };
-        assert!(expr
-            .eval(&[DfValue::from("bad_json"), DfValue::from("abc")])
-            .is_err());
-        assert!(expr
-            .eval(&[DfValue::from("{\"abc\": 42}"), DfValue::from(67)])
-            .is_err());
+        expr.eval(&[DfValue::from("bad_json"), DfValue::from("abc")])
+            .unwrap_err();
+        expr.eval(&[DfValue::from("{\"abc\": 42}"), DfValue::from(67)])
+            .unwrap_err();
     }
 
     #[test]
@@ -493,12 +491,10 @@ mod tests {
             op: BinaryOperator::JsonAnyExists,
             ty: DfType::Bool,
         };
-        assert!(expr
-            .eval(&[DfValue::from("bad_json"), DfValue::from("abc")])
-            .is_err());
-        assert!(expr
-            .eval(&[DfValue::from("{\"abc\": 42}"), DfValue::from(67)])
-            .is_err());
+        expr.eval(&[DfValue::from("bad_json"), DfValue::from("abc")])
+            .unwrap_err();
+        expr.eval(&[DfValue::from("{\"abc\": 42}"), DfValue::from(67)])
+            .unwrap_err();
     }
 
     #[test]
@@ -613,12 +609,10 @@ mod tests {
             op: BinaryOperator::JsonAllExists,
             ty: DfType::Bool,
         };
-        assert!(expr
-            .eval(&[DfValue::from("bad_json"), DfValue::from("abc")])
-            .is_err());
-        assert!(expr
-            .eval(&[DfValue::from("{\"abc\": 42}"), DfValue::from(67)])
-            .is_err());
+        expr.eval(&[DfValue::from("bad_json"), DfValue::from("abc")])
+            .unwrap_err();
+        expr.eval(&[DfValue::from("{\"abc\": 42}"), DfValue::from(67)])
+            .unwrap_err();
     }
 
     #[test]
@@ -660,13 +654,11 @@ mod tests {
 
         // Test error conditions
 
-        assert!(expr
-            .eval(&[DfValue::from("bad_json"), DfValue::from("42")])
-            .is_err());
+        expr.eval(&[DfValue::from("bad_json"), DfValue::from("42")])
+            .unwrap_err();
 
-        assert!(expr
-            .eval(&[DfValue::None, DfValue::from("\"valid_json\"")])
-            .is_err());
+        expr.eval(&[DfValue::None, DfValue::from("\"valid_json\"")])
+            .unwrap_err();
     }
 
     #[test]
@@ -771,24 +763,20 @@ mod tests {
             DfValue::from(r#"{"a":1,"b":2}"#)
         );
 
-        assert!(expr
-            .eval(&[DfValue::from("bad_json"), DfValue::from("abc")])
-            .is_err()); // Passing in bad JSON should error out
+        expr.eval(&[DfValue::from("bad_json"), DfValue::from("abc")])
+            .unwrap_err(); // Passing in bad JSON should error out
 
-        assert!(expr
-            .eval(&[DfValue::from(r#"["a","b","c"]"#), DfValue::Float(123.456)])
-            .is_err()); // Passing in a RHS that's not an int, string, or array should error out
+        expr.eval(&[DfValue::from(r#"["a","b","c"]"#), DfValue::Float(123.456)])
+            .unwrap_err(); // Passing in a RHS that's not an int, string, or array should error out
 
-        assert!(expr
-            .eval(&[DfValue::from("42"), DfValue::from("abc")])
-            .is_err()); // Subtracting a string from a non-array, non-object JSON value is an error
+        expr.eval(&[DfValue::from("42"), DfValue::from("abc")])
+            .unwrap_err(); // Subtracting a string from a non-array, non-object JSON value is an error
 
-        assert!(expr
-            .eval(&[
-                DfValue::from("42"),
-                DfValue::from(vec![DfValue::from("c"), DfValue::from("d")])
-            ])
-            .is_err()); // Subtracting an array from a non-array, non-object JSON value is an error
+        expr.eval(&[
+            DfValue::from("42"),
+            DfValue::from(vec![DfValue::from("c"), DfValue::from("d")]),
+        ])
+        .unwrap_err(); // Subtracting an array from a non-array, non-object JSON value is an error
     }
 
     #[test]

@@ -42,10 +42,10 @@ fn test_queries_from_file(dialect: Dialect, f: &Path, name: &str) -> Result<i32,
     let lines: Vec<String> = s
         .lines()
         .filter(|l| {
-            !l.is_empty()
-                && !l.starts_with('#')
-                && !l.starts_with("--")
-                && !(l.starts_with("/*") && l.ends_with("*/;"))
+            !(l.is_empty()
+                || l.starts_with('#')
+                || l.starts_with("--")
+                || l.starts_with("/*") && l.ends_with("*/;"))
         })
         .map(|l| {
             if !(l.ends_with('\n') || l.ends_with(';')) {
@@ -76,11 +76,11 @@ fn parse_file(dialect: Dialect, path: &str) -> (i32, i32) {
         .lines()
         .map(str::trim)
         .filter(|l| {
-            !l.is_empty()
-                && !l.starts_with('#')
-                && !l.starts_with("--")
-                && !l.starts_with("DROP")
-                && !(l.starts_with("/*") && l.ends_with("*/;"))
+            !(l.is_empty()
+                || l.starts_with('#')
+                || l.starts_with("--")
+                || l.starts_with("DROP")
+                || l.starts_with("/*") && l.ends_with("*/;"))
         })
         .collect();
     let mut q = String::new();

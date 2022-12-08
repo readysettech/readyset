@@ -475,7 +475,9 @@ mod tests {
 
     fn insert<S: State>(state: &mut S, row: Vec<DfValue>) {
         let record: Record = row.into();
-        state.process_records(&mut record.into(), None, None);
+        state
+            .process_records(&mut record.into(), None, None)
+            .unwrap();
     }
 
     #[test]
@@ -502,8 +504,12 @@ mod tests {
         .into();
 
         state.add_key(Index::hash_map(vec![0]), None);
-        state.process_records(&mut Vec::from(&records[..3]).into(), None, None);
-        state.process_records(&mut records[3].clone().into(), None, None);
+        state
+            .process_records(&mut Vec::from(&records[..3]).into(), None, None)
+            .unwrap();
+        state
+            .process_records(&mut records[3].clone().into(), None, None)
+            .unwrap();
 
         // Make sure the first record has been deleted:
         match state.lookup(&[0], &PointKey::Single(records[0][0].clone())) {
@@ -624,13 +630,15 @@ mod tests {
                     KeyComparison::from_range(&(vec1![DfValue::from(0)]..vec1![DfValue::from(10)])),
                     tag,
                 );
-                state.process_records(
-                    &mut (0..10)
-                        .map(|n| Record::from(vec![n.into()]))
-                        .collect::<Records>(),
-                    None,
-                    None,
-                );
+                state
+                    .process_records(
+                        &mut (0..10)
+                            .map(|n| Record::from(vec![n.into()]))
+                            .collect::<Records>(),
+                        None,
+                        None,
+                    )
+                    .unwrap();
                 state
             }
 
@@ -654,13 +662,15 @@ mod tests {
             fn setup() -> MemoryState {
                 let mut state = MemoryState::default();
                 state.add_key(Index::new(IndexType::BTreeMap, vec![0]), None);
-                state.process_records(
-                    &mut (0..10)
-                        .map(|n| Record::from(vec![n.into()]))
-                        .collect::<Records>(),
-                    None,
-                    None,
-                );
+                state
+                    .process_records(
+                        &mut (0..10)
+                            .map(|n| Record::from(vec![n.into()]))
+                            .collect::<Records>(),
+                        None,
+                        None,
+                    )
+                    .unwrap();
                 state
             }
 
@@ -804,7 +814,9 @@ mod tests {
             .into();
             state.mark_filled(KeyComparison::Equal(vec1![1.into()]), Tag::new(0));
             state.mark_filled(KeyComparison::Equal(vec1![2.into()]), Tag::new(0));
-            state.process_records(&mut records, Some(Tag::new(0)), None);
+            state
+                .process_records(&mut records, Some(Tag::new(0)), None)
+                .unwrap();
 
             assert_eq!(records.len(), 3);
 
@@ -828,11 +840,15 @@ mod tests {
             .into();
             state.mark_filled(KeyComparison::Equal(vec1![1.into()]), Tag::new(0));
             state.mark_filled(KeyComparison::Equal(vec1![2.into()]), Tag::new(0));
-            state.process_records(&mut records, Some(Tag::new(0)), None);
+            state
+                .process_records(&mut records, Some(Tag::new(0)), None)
+                .unwrap();
             assert_eq!(records.len(), 3);
 
             let mut delete_records: Records = vec![(vec![2.into(), "A".into()], false)].into();
-            state.process_records(&mut delete_records, Some(Tag::new(0)), None);
+            state
+                .process_records(&mut delete_records, Some(Tag::new(0)), None)
+                .unwrap();
             assert_eq!(delete_records.len(), 1);
 
             let result = state.lookup_weak(&[1], &PointKey::Single(DfValue::from("A")));
@@ -853,7 +869,9 @@ mod tests {
             .into();
             state.mark_filled(KeyComparison::Equal(vec1![1.into()]), Tag::new(0));
             state.mark_filled(KeyComparison::Equal(vec1![2.into()]), Tag::new(0));
-            state.process_records(&mut records, Some(Tag::new(0)), None);
+            state
+                .process_records(&mut records, Some(Tag::new(0)), None)
+                .unwrap();
             assert_eq!(records.len(), 3);
 
             state.evict_keys(Tag::new(0), &[KeyComparison::Equal(vec1![2.into()])]);

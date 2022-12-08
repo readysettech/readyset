@@ -162,16 +162,10 @@ impl<'a> OperationParameters<'a> {
             .map(|(tbl, rows)| rows.into_iter().map(|r| (tbl, r)).collect::<Vec<_>>())
             .multi_cartesian_product()
             .filter_map(move |vals| {
-                Some(
-                    self.key_columns
-                        .iter()
-                        .map(|(tbl, idx)| {
-                            Some(vals.iter().find(|(t, _)| *tbl == *t)?.1[*idx].clone())
-                        })
-                        .collect::<Option<Vec<_>>>()?
-                        .try_into()
-                        .unwrap(),
-                )
+                self.key_columns
+                    .iter()
+                    .map(|(tbl, idx)| Some(vals.iter().find(|(t, _)| *tbl == *t)?.1[*idx].clone()))
+                    .collect::<Option<Vec<_>>>()
             })
     }
 
@@ -476,7 +470,7 @@ impl Operation {
                     .zip(old_row)
                     .zip(new_row)
                     .filter_map(|((col_name, old_val), new_val)| {
-                        (old_val != new_val).then(|| (col_name, new_val))
+                        (old_val != new_val).then_some((col_name, new_val))
                     })
                     .collect::<Vec<_>>();
                 let set_clause = updates

@@ -1325,8 +1325,8 @@ mod tests {
     fn test_encode_binary_timestamp_tz() {
         let dt = DateTime::<FixedOffset>::from_utc(
             NaiveDateTime::new(
-                NaiveDate::from_ymd(2020, 01, 02),
-                NaiveTime::from_hms_milli(03, 04, 05, 660),
+                NaiveDate::from_ymd(2020, 1, 2),
+                NaiveTime::from_hms_milli(3, 4, 5, 660),
             ),
             FixedOffset::east(0),
         );
@@ -1550,8 +1550,8 @@ mod tests {
     fn test_encode_text_timestamp_tz() {
         let dt = DateTime::<FixedOffset>::from_utc(
             NaiveDateTime::new(
-                NaiveDate::from_ymd(2020, 01, 02),
-                NaiveTime::from_hms_milli(03, 04, 05, 660),
+                NaiveDate::from_ymd(2020, 1, 2),
+                NaiveTime::from_hms_milli(3, 4, 5, 660),
             ),
             FixedOffset::east(18000), // +05:00
         );

@@ -447,6 +447,6 @@ mod tests {
         instance_label: String,
     ) {
         let url = super::make_prometheus_url(&base, &benchmark_name_label, &instance_label);
-        assert!(url::Url::parse(&url).is_ok())
+        url::Url::parse(&url).unwrap();
     }
 }

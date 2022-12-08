@@ -2008,7 +2008,7 @@ mod tests {
             let mut q = parse_select_statement(query);
             let pp = rewrite::process_query(&mut q, true).unwrap();
             build_view_query(
-                &*SCHEMA,
+                &SCHEMA,
                 key_map,
                 &pp,
                 params,
@@ -2236,9 +2236,7 @@ mod tests {
         let parsed_query = nom_sql::parse_query(Dialect::MySQL, query).unwrap();
 
         match parsed_query {
-            SqlQuery::Select(mut select) => {
-                assert!(verify_no_placeholders(&mut select, query).is_ok())
-            }
+            SqlQuery::Select(mut select) => verify_no_placeholders(&mut select, query).unwrap(),
             _ => panic!(),
         }
     }
@@ -2250,7 +2248,7 @@ mod tests {
 
         match parsed_query {
             SqlQuery::Select(mut select) => {
-                assert!(verify_no_placeholders(&mut select, query).is_err())
+                verify_no_placeholders(&mut select, query).unwrap_err();
             }
             _ => panic!(),
         }

@@ -21,6 +21,7 @@ macro_rules! assert_match {
 /// Create an empty eventually consistent map with meta and timestamp information.
 ///
 /// Use the [`Options`](./struct.Options.html) builder for more control over initialization.
+#[allow(clippy::type_complexity)]
 fn with_meta_and_timestamp<K, V, M, T>(
     meta: M,
     timestamp: T,
@@ -196,7 +197,7 @@ fn paniced_reader_doesnt_block_writer() {
 
     // reader panics
     let r = std::panic::catch_unwind(move || r.get(&1).map(|_| panic!()));
-    assert!(r.is_err());
+    r.unwrap_err();
 
     // writer should still be able to continue
     w.insert(1, "b");
@@ -227,16 +228,16 @@ fn clone_types() {
     let x = b"xyz";
 
     let (mut w, r) = reader_map::new();
-    w.insert(&*x, x);
+    w.insert(x, x);
     w.publish();
 
-    assert_eq!(r.get(&*x).unwrap().map(|rs| rs.len()), Some(1));
+    assert_eq!(r.get(x).unwrap().map(|rs| rs.len()), Some(1));
     assert_eq!(
-        r.meta_get(&*x).map(|(rs, m)| (rs.map(|rs| rs.len()), m)),
+        r.meta_get(x).map(|(rs, m)| (rs.map(|rs| rs.len()), m)),
         Ok((Some(1), ()))
     );
     assert_eq!(
-        r.get(&*x).unwrap().map(|rs| rs.iter().any(|v| *v == x)),
+        r.get(x).unwrap().map(|rs| rs.iter().any(|v| *v == x)),
         Some(true)
     );
 }
@@ -819,7 +820,7 @@ fn range_works() {
     use std::ops::Bound::{Included, Unbounded};
 
     let (mut w, r) = reader_map::new();
-    for (k, v) in vec![(3, 9), (3, 30), (4, 10)] {
+    for (k, v) in [(3, 9), (3, 30), (4, 10)] {
         w.insert(k, v);
     }
     w.insert_range((Included(2), Unbounded));
@@ -827,7 +828,7 @@ fn range_works() {
 
     {
         let m = r.enter().unwrap();
-        assert!(m.range(&(3..4)).is_ok());
+        m.range(&(3..4)).unwrap();
 
         let results = m.range(&(3..4)).unwrap().collect::<Vec<_>>();
         assert_eq!(results.len(), 1);
@@ -859,7 +860,7 @@ fn insert_range_pre_publish() {
 
     {
         let m = r.enter().unwrap();
-        assert!(m.range(&(1..=2)).is_ok());
+        m.range(&(1..=2)).unwrap();
     }
 
     w.insert(1, 2);
@@ -880,7 +881,7 @@ fn insert_range_pre_publish() {
 #[test]
 fn remove_range_works() {
     let (mut w, r) = reader_map::new();
-    for (k, v) in vec![(3, 9), (3, 30), (4, 10)] {
+    for (k, v) in [(3, 9), (3, 30), (4, 10)] {
         w.insert(k, v);
     }
     w.insert_range(2..=6);
@@ -890,7 +891,7 @@ fn remove_range_works() {
 
     {
         let m = r.enter().unwrap();
-        assert!(m.range(&(3..4)).is_ok());
+        m.range(&(3..4)).unwrap();
     }
 
     w.remove_range((Bound::Included(4), Bound::Included(5)));
@@ -898,7 +899,7 @@ fn remove_range_works() {
 
     {
         let m = r.enter().unwrap();
-        assert!(m.range(&(3..=4)).is_err());
+        m.range(&(3..=4)).unwrap_err();
         assert!(m.get(&4).is_none());
         assert!(m.get(&3).is_some());
         assert!(m.get(&9).is_some());
@@ -908,7 +909,7 @@ fn remove_range_works() {
 #[test]
 fn contains_range_works() {
     let (mut w, r) = reader_map::new();
-    for (k, v) in vec![(3, 9), (3, 30), (4, 10)] {
+    for (k, v) in [(3, 9), (3, 30), (4, 10)] {
         w.insert(k, v);
     }
     w.insert_range(2..6);

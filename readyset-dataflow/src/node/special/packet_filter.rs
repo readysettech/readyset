@@ -200,6 +200,7 @@ where
 }
 
 #[cfg(test)]
+#[allow(clippy::panic)]
 mod test {
     use std::convert::TryInto;
 
@@ -243,21 +244,22 @@ mod test {
 
         #[test]
         fn process_no_keys_associated() {
-            let mut records = Vec::new();
-            records.push(Record::Positive(vec![
-                11.into(),
-                "text1-1".try_into().unwrap(),
-                "text1-2".try_into().unwrap(),
-                12.into(),
-                "text1-3".try_into().unwrap(),
-            ]));
-            records.push(Record::Positive(vec![
-                21.into(),
-                "text2-1".try_into().unwrap(),
-                "text2-2".try_into().unwrap(),
-                22.into(),
-                "text2-3".try_into().unwrap(),
-            ]));
+            let records = vec![
+                Record::Positive(vec![
+                    11.into(),
+                    "text1-1".try_into().unwrap(),
+                    "text1-2".try_into().unwrap(),
+                    12.into(),
+                    "text1-3".try_into().unwrap(),
+                ]),
+                Record::Positive(vec![
+                    21.into(),
+                    "text2-1".try_into().unwrap(),
+                    "text2-2".try_into().unwrap(),
+                    22.into(),
+                    "text2-3".try_into().unwrap(),
+                ]),
+            ];
             let mut packet = create_packet(records);
             let ni = NodeIndex::new(3);
 

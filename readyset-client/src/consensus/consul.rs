@@ -1086,7 +1086,7 @@ mod tests {
     fn test_authority_address(deployment: &str) -> String {
         format!(
             "http://{}/{}",
-            std::env::var("AUTHORITY_ADDRESS").unwrap_or("127.0.0.1:8500".to_string()),
+            std::env::var("AUTHORITY_ADDRESS").unwrap_or_else(|_| "127.0.0.1:8500".to_string()),
             deployment
         )
     }

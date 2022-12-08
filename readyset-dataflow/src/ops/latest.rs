@@ -154,6 +154,7 @@ impl Ingredient for Latest {
 }
 
 #[cfg(test)]
+#[allow(clippy::panic, clippy::unreachable)]
 mod tests {
     use super::*;
     use crate::ops;

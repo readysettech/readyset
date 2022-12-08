@@ -1200,8 +1200,8 @@ mod tests {
     fn test_decode_binary_timestamp_tz() {
         let dt = DateTime::<FixedOffset>::from_utc(
             NaiveDateTime::new(
-                NaiveDate::from_ymd(2020, 01, 02),
-                NaiveTime::from_hms_milli(03, 04, 05, 660),
+                NaiveDate::from_ymd(2020, 1, 2),
+                NaiveTime::from_hms_milli(3, 4, 5, 660),
             ),
             FixedOffset::east(18000), // +05:00
         );
@@ -1403,7 +1403,7 @@ mod tests {
     fn test_decode_text_json() {
         let json_str =
             "{\"name\":\"John Doe\",\"age\":43,\"phones\":[\"+44 1234567\",\"+44 2345678\"]}";
-        let expected = serde_json::from_str::<serde_json::Value>(json_str.clone()).unwrap();
+        let expected = serde_json::from_str::<serde_json::Value>(json_str).unwrap();
         let mut buf = BytesMut::new();
         buf.put_i32(67);
         buf.extend_from_slice(json_str.as_bytes());
@@ -1442,8 +1442,8 @@ mod tests {
         let dt_string = "2020-01-02 08:04:05.660 +05:00";
         let expected = DateTime::<FixedOffset>::from_utc(
             NaiveDateTime::new(
-                NaiveDate::from_ymd(2020, 01, 02),
-                NaiveTime::from_hms_milli(03, 04, 05, 660),
+                NaiveDate::from_ymd(2020, 1, 2),
+                NaiveTime::from_hms_milli(3, 4, 5, 660),
             ),
             FixedOffset::east(18000), // +05:00
         );

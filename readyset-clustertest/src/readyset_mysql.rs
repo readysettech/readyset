@@ -40,7 +40,7 @@ async fn create_table_insert_test() {
         .unwrap();
 
     let mut adapter = deployment.first_adapter().await;
-    let _ = adapter
+    adapter
         .query_drop(
             r"CREATE TABLE t1 (
         uid INT NOT NULL,
@@ -228,7 +228,7 @@ async fn query_cached_view_after_failure() {
         .unwrap();
 
     let mut adapter = deployment.first_adapter().await;
-    let _ = adapter
+    adapter
         .query_drop(
             r"CREATE TABLE t1 (
         uid INT NOT NULL,
@@ -253,7 +253,7 @@ async fn query_cached_view_after_failure() {
         query_until_expected_from_noria(
             &mut adapter,
             deployment.metrics(),
-            QueryExecution::PrepareExecute(query.clone(), (1,)),
+            QueryExecution::PrepareExecute(query, (1,)),
             &EventuallyConsistentResults::empty_or(&[(1, 4)]),
             PROPAGATION_DELAY_TIMEOUT,
         )
@@ -285,7 +285,7 @@ async fn query_cached_view_after_failure() {
         query_until_expected_from_noria(
             &mut adapter,
             deployment.metrics(),
-            QueryExecution::PrepareExecute(query.clone(), (1,)),
+            QueryExecution::PrepareExecute(query, (1,)),
             &EventuallyConsistentResults::empty_or(&[(1, 4)]),
             PROPAGATION_DELAY_TIMEOUT,
         )
@@ -307,7 +307,7 @@ async fn test_fallback_recovery_period() {
         .unwrap();
 
     let mut upstream = deployment.upstream().await;
-    let _ = upstream
+    upstream
         .query_drop(
             r"CREATE TABLE t1 (
         uid INT NOT NULL,
@@ -335,7 +335,7 @@ async fn test_fallback_recovery_period() {
         query_until_expected_from_noria(
             &mut adapter,
             deployment.metrics(),
-            QueryExecution::PrepareExecute(query.clone(), (1,)),
+            QueryExecution::PrepareExecute(query, (1,)),
             &EventuallyConsistentResults::empty_or(&[(1, 4)]),
             PROPAGATION_DELAY_TIMEOUT,
         )
@@ -352,11 +352,7 @@ async fn test_fallback_recovery_period() {
         .unwrap();
 
     // Prep/exec path
-    let res: (i32, i32) = adapter
-        .exec_first(query.clone(), (1,))
-        .await
-        .unwrap()
-        .unwrap();
+    let res: (i32, i32) = adapter.exec_first(query, (1,)).await.unwrap().unwrap();
 
     assert_eq!(res, (1, 4));
 
@@ -370,11 +366,7 @@ async fn test_fallback_recovery_period() {
 
     // Standard query path (not prep/exec)
     let flattened_query = "SELECT * FROM t1 WHERE uid = 1";
-    let res: (i32, i32) = adapter
-        .query_first(flattened_query.clone())
-        .await
-        .unwrap()
-        .unwrap();
+    let res: (i32, i32) = adapter.query_first(flattened_query).await.unwrap().unwrap();
 
     assert_eq!(res, (1, 4));
 
@@ -652,7 +644,7 @@ async fn correct_data_after_restart() {
         .unwrap();
 
     let mut adapter = deployment.first_adapter().await;
-    let _ = adapter
+    adapter
         .query_drop(
             r"CREATE TABLE t1 (
         uid INT NOT NULL,
@@ -721,7 +713,7 @@ async fn create_view_after_worker_failure() {
         .unwrap();
 
     let mut upstream = deployment.upstream().await;
-    let _ = upstream
+    upstream
         .query_drop(
             r"CREATE TABLE t1 (
                 uid INT PRIMARY KEY,
@@ -794,7 +786,7 @@ async fn update_during_failure() {
         .unwrap();
 
     let mut upstream = deployment.upstream().await;
-    let _ = upstream
+    upstream
         .query_drop(
             r"CREATE TABLE t1 (
                 uid INT NOT NULL,
@@ -1068,7 +1060,7 @@ async fn end_to_end_with_restarts() {
         .unwrap();
 
     let mut adapter = deployment.first_adapter().await;
-    let _ = adapter
+    adapter
         .query_drop(
             r"CREATE TABLE t1 (
         uid INT NOT NULL,
@@ -1140,7 +1132,7 @@ async fn view_survives_restart() {
         .unwrap();
 
     let mut adapter = deployment.first_adapter().await;
-    let _ = adapter
+    adapter
         .query_drop(
             r"CREATE TABLE t1 (
         uid INT NOT NULL,
@@ -1209,7 +1201,7 @@ async fn writes_survive_restarts() {
         .unwrap();
 
     let mut upstream = deployment.upstream().await;
-    let _ = upstream
+    upstream
         .query_drop(
             r"CREATE TABLE t1 (
                 uid INT NOT NULL,

@@ -430,11 +430,7 @@ mod tests {
 
     #[test]
     fn test_long_exact() {
-        let mut data = Vec::new();
-        data.push(0xff);
-        data.push(0xff);
-        data.push(0xff);
-        data.push(0);
+        let mut data = vec![0xff, 0xff, 0xff, 0];
         data.extend(&[0; U24_MAX][..]);
         data.push(0x00);
         data.push(0x00);
@@ -450,11 +446,7 @@ mod tests {
 
     #[test]
     fn test_long_more() {
-        let mut data = Vec::new();
-        data.push(0xff);
-        data.push(0xff);
-        data.push(0xff);
-        data.push(0);
+        let mut data = vec![0xff, 0xff, 0xff, 0];
         data.extend(&[0; U24_MAX][..]);
         data.push(0x01);
         data.push(0x00);

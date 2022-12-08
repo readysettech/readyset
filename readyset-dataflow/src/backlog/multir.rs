@@ -360,6 +360,7 @@ mod tests {
 
     use super::*;
 
+    #[allow(clippy::type_complexity)]
     fn make_single() -> (
         WriteHandle<DfValue, Box<[DfValue]>, PreInsertion, i64, Timestamp, RandomState>,
         Handle,
@@ -373,6 +374,7 @@ mod tests {
         (w, Handle::Single(r))
     }
 
+    #[allow(clippy::type_complexity)]
     fn make_many() -> (
         WriteHandle<Vec<DfValue>, Box<[DfValue]>, PreInsertion, i64, Timestamp, RandomState>,
         Handle,

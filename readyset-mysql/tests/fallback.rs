@@ -186,19 +186,18 @@ async fn set_autocommit() {
     let (opts, _handle) = setup().await;
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
     // We do not support SET autocommit = 0;
-    assert!(conn
-        .query_drop("SET @@SESSION.autocommit = 1;")
+    conn.query_drop("SET @@SESSION.autocommit = 1;")
         .await
-        .is_ok());
-    assert!(conn
-        .query_drop("SET @@SESSION.autocommit = 0;")
+        .unwrap();
+    conn.query_drop("SET @@SESSION.autocommit = 0;")
         .await
-        .is_err());
-    assert!(conn.query_drop("SET @@LOCAL.autocommit = 1;").await.is_ok());
-    assert!(conn
-        .query_drop("SET @@LOCAL.autocommit = 0;")
+        .unwrap_err();
+    conn.query_drop("SET @@LOCAL.autocommit = 1;")
         .await
-        .is_err());
+        .unwrap();
+    conn.query_drop("SET @@LOCAL.autocommit = 0;")
+        .await
+        .unwrap_err();
 }
 
 #[tokio::test(flavor = "multi_thread")]

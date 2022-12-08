@@ -3279,8 +3279,8 @@ mod tests {
             #[strategy(arbitrary_naive_date_time())] ndt: NaiveDateTime,
             subsecond_digits: Option<u16>,
         ) {
-            let subsecond_digits =
-                subsecond_digits.unwrap_or(Dialect::DEFAULT_MYSQL.default_subsecond_digits());
+            let subsecond_digits = subsecond_digits
+                .unwrap_or_else(|| Dialect::DEFAULT_MYSQL.default_subsecond_digits());
             let input = DfValue::from(ndt);
             assert_eq!(
                 input

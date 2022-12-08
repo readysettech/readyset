@@ -18,7 +18,7 @@ use std::net::SocketAddr;
 use async_trait::async_trait;
 use criterion::{criterion_group, criterion_main, Criterion};
 use futures::future::{try_select, Either};
-use psql_srv::QueryResponse;
+use psql_srv::{Credentials, CredentialsNeeded, QueryResponse};
 use readyset_psql::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, ToSocketAddrs};
@@ -62,7 +62,7 @@ where
             let (sock, _addr) = listener.accept().await.unwrap();
             sock.set_nodelay(true).unwrap();
 
-            let upstream = TcpStream::connect(upstream.clone()).await.unwrap();
+            let upstream = TcpStream::connect(upstream).await.unwrap();
             upstream.set_nodelay(true).unwrap();
 
             tokio::spawn(proxy_pipe(sock, upstream));
@@ -76,13 +76,19 @@ struct Backend {
 
 #[async_trait]
 impl psql_srv::Backend for Backend {
-    const SERVER_VERSION: &'static str = "14";
-
     type Value = Value;
     type Row = Vec<Self::Value>;
     type Resultset = Vec<Self::Row>;
 
-    async fn on_init(&mut self, _database: &str) -> Result<(), psql_srv::Error> {
+    fn version(&self) -> String {
+        "14".into()
+    }
+
+    async fn on_init(&mut self, _database: &str) -> Result<CredentialsNeeded, psql_srv::Error> {
+        Ok(CredentialsNeeded::None)
+    }
+
+    async fn on_auth(&mut self, _credentials: Credentials) -> Result<(), psql_srv::Error> {
         Ok(())
     }
 

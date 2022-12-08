@@ -1525,12 +1525,12 @@ mod tests {
             .await;
 
         // Request times out because the server panics.
-        assert!(tokio::time::timeout(
+        tokio::time::timeout(
             Duration::from_millis(300),
-            deployment.handle.healthy_workers()
+            deployment.handle.healthy_workers(),
         )
         .await
-        .is_err());
+        .unwrap_err();
         deployment.teardown().await.unwrap();
     }
 

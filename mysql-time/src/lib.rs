@@ -1003,28 +1003,28 @@ mod tests {
             assert_time!(mysql_time, false, 0, 0, 9, 654_321);
 
             let mysql_time = MySqlTime::from_str("67");
-            assert_eq!(mysql_time.is_err(), true);
+            mysql_time.unwrap_err();
 
             let mysql_time = MySqlTime::from_str("00000067");
-            assert_eq!(mysql_time.is_err(), true);
+            mysql_time.unwrap_err();
 
             let mysql_time = MySqlTime::from_str("67.654321");
-            assert_eq!(mysql_time.is_err(), true);
+            mysql_time.unwrap_err();
 
             let mysql_time = MySqlTime::from_str("00000067.654321");
-            assert_eq!(mysql_time.is_err(), true);
+            mysql_time.unwrap_err();
 
             let mysql_time = MySqlTime::from_str("-67");
-            assert_eq!(mysql_time.is_err(), true);
+            mysql_time.unwrap_err();
 
             let mysql_time = MySqlTime::from_str("-00000067");
-            assert_eq!(mysql_time.is_err(), true);
+            mysql_time.unwrap_err();
 
             let mysql_time = MySqlTime::from_str("-67.654321");
-            assert_eq!(mysql_time.is_err(), true);
+            mysql_time.unwrap_err();
 
             let mysql_time = MySqlTime::from_str("-00000067.654321");
-            assert_eq!(mysql_time.is_err(), true);
+            mysql_time.unwrap_err();
         }
 
         #[test]

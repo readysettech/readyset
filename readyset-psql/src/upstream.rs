@@ -377,7 +377,7 @@ mod tests {
         )
         .unwrap()];
 
-        assert!(s.compare(&schema_spec, &param_specs).is_ok());
+        s.compare(&schema_spec, &param_specs).unwrap();
     }
 
     #[test]
@@ -404,7 +404,7 @@ mod tests {
         )
         .unwrap()];
 
-        assert!(s.compare(&schema_spec, &param_specs).is_err());
+        s.compare(&schema_spec, &param_specs).unwrap_err();
     }
 
     #[cfg(feature = "schema-check")]

@@ -185,7 +185,6 @@ where
 
         match result {
             Ok(Ok(r)) => {
-                dbg!(&r);
                 let correct_source = match &mut source {
                     ResultSource::FromAnywhere => true,
                     ResultSource::FromNoria(metrics) => {

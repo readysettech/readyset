@@ -435,8 +435,7 @@ mod tests {
             .ids
             .iter()
             .map(|r| r.value().clone())
-            .collect::<Vec<_>>()
-            .contains(&q1.clone().into()));
+            .any(|q| q == q1.clone().into()));
         assert!(cache
             .statuses
             .insert(q1.clone().into(), status.clone())
@@ -454,8 +453,7 @@ mod tests {
             .ids
             .iter()
             .map(|r| r.value().clone())
-            .collect::<Vec<_>>()
-            .contains(&q1.clone().into()));
+            .any(|q| q == q1.clone().into()));
         assert!(cache
             .statuses
             .insert(q1.clone().into(), status.clone())

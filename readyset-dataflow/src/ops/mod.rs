@@ -208,6 +208,7 @@ impl Ingredient for NodeOperator {
 }
 
 #[cfg(test)]
+#[allow(clippy::panic, clippy::unreachable)]
 pub mod test {
     use std::cell;
     use std::collections::HashMap;
@@ -501,8 +502,7 @@ pub mod test {
             *self
                 .remap
                 .values()
-                .skip_while(|&n| n.as_global() == self.nut.unwrap().as_global())
-                .next()
+                .find(|&n| n.as_global() != self.nut.unwrap().as_global())
                 .unwrap()
         }
     }
