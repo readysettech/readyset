@@ -43,7 +43,7 @@ pub struct NoriaAdapterHttpRouter {
     pub failpoint_channel: Option<Arc<Sender<()>>>,
 
     /// Used to retrieve the prometheus scrape's render as a String when servicing
-    /// HTTP requests on /prometheus.
+    /// HTTP requests on /metrics.
     pub prometheus_handle: Option<PrometheusHandle>,
 }
 
@@ -175,7 +175,7 @@ impl Service<Request<Body>> for NoriaAdapterHttpRouter {
     ///
     /// * **URL**
     ///
-    ///   `/prometheus`
+    ///   `/metrics`
     ///
     /// * **Method:**
     ///
@@ -199,7 +199,7 @@ impl Service<Request<Body>> for NoriaAdapterHttpRouter {
     ///
     /// * **Sample Call:**
     ///
-    ///   `curl -X GET <adapter>:<adapter-port>/prometheus`
+    ///   `curl -X GET <adapter>:<adapter-port>/metrics`
     ///
     /// * **Notes:**
     ///
@@ -303,7 +303,7 @@ impl Service<Request<Body>> for NoriaAdapterHttpRouter {
                     Ok(res.unwrap())
                 })
             }
-            (&Method::GET, "/prometheus") => {
+            (&Method::GET, "/metrics") => {
                 let body = self.prometheus_handle.as_ref().map(|x| x.render());
                 let res = res.header(CONTENT_TYPE, "text/plain");
                 let res = match body {

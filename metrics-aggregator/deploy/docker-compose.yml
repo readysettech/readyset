@@ -3,7 +3,7 @@ services:
   consul:
     image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/consul
     healthcheck:
-      test: ["CMD", "nc", "-vz", "localhost", "8500"]
+      test: [ "CMD", "nc", "-vz", "localhost", "8500" ]
       interval: 10s
       timeout: 2s
       retries: 5
@@ -50,14 +50,20 @@ services:
       mysql:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "--fail", "127.0.0.1:6033/prometheus"]
+      test: [ "CMD", "curl", "--fail", "127.0.0.1:6033/metrics" ]
       interval: 10s
       timeout: 2s
       retries: 5
       start_period: 5s
   db:
     image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset:latest
-    command: ["--query-log", "--query-log-ad-hoc", "--database-type", "mysql"]
+    command:
+      [
+        "--query-log",
+        "--query-log-ad-hoc",
+        "--database-type",
+        "mysql"
+      ]
     expose:
       - 3333
       - 8089
@@ -81,7 +87,16 @@ services:
       - mysql
       - consul
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h127.0.0.1", "--port=3333", "-uroot", "-proot"]
+      test:
+        [
+          "CMD",
+          "mysqladmin",
+          "ping",
+          "-h127.0.0.1",
+          "--port=3333",
+          "-uroot",
+          "-proot"
+        ]
       interval: 10s
       timeout: 10s
       retries: 2
@@ -100,7 +115,7 @@ services:
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
     healthcheck:
-      test: ["CMD", "nc", "-vz", "localhost", "9090"]
+      test: [ "CMD", "nc", "-vz", "localhost", "9090" ]
       interval: 10s
       timeout: 2s
       retries: 5
@@ -112,7 +127,7 @@ services:
         condition: service_healthy
   aggregator:
     image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/metrics-aggregator:latest
-    command: ["--unsecured-prometheus", "--unsecured-adapters"]
+    command: [ "--unsecured-prometheus", "--unsecured-adapters" ]
     ports:
       - "8090:8090"
     environment:
@@ -124,7 +139,7 @@ services:
       - db
       - prometheus
     healthcheck:
-      test: ["CMD", "curl", "--fail", "127.0.0.1:8090/health"]
+      test: [ "CMD", "curl", "--fail", "127.0.0.1:8090/health" ]
       interval: 10s
       timeout: 2s
       retries: 5

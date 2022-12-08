@@ -181,7 +181,7 @@ readinessProbe:
     - /bin/sh
     - -ec
     - |
-      curl --fail http://127.0.0.1:6033/prometheus
+      curl --fail http://127.0.0.1:6033/metrics
 {{- end -}}
 
 {{/*
@@ -194,7 +194,7 @@ livenessProbe:
     - /bin/sh
     - -ec
     - |
-      curl --fail http://127.0.0.1:6033/prometheus
+      curl --fail http://127.0.0.1:6033/metrics
   initialDelaySeconds: 5
   periodSeconds: 5
   failureThreshold: 2

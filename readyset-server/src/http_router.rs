@@ -159,7 +159,7 @@ impl Service<Request<Body>> for NoriaServerHttpRouter {
                     Ok(res.unwrap())
                 })
             }
-            (&Method::GET, "/prometheus") => {
+            (&Method::GET, "/metrics") => {
                 let render = get_global_recorder().and_then(|r| r.render(RecorderType::Prometheus));
                 let res = res.header(CONTENT_TYPE, "text/plain");
                 let res = match render {
