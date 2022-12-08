@@ -158,6 +158,7 @@ impl SqlIncorporator {
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<()> {
         let (name, dataflow_idx) = self.add_base_via_mir(name, body, mig)?;
+        self.remove_non_replicated_relation(&name);
         self.leaf_addresses.insert(name, dataflow_idx);
         Ok(())
     }
@@ -178,7 +179,8 @@ impl SqlIncorporator {
                 self.add_select_query(name.clone(), query, /* is_leaf = */ true, mig)?
             }
         };
-        self.mir_to_dataflow(name, mir_leaf, mig)?;
+        self.mir_to_dataflow(name.clone(), mir_leaf, mig)?;
+        self.remove_non_replicated_relation(&name);
         Ok(())
     }
 
