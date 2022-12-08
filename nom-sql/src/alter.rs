@@ -6,19 +6,21 @@ use std::{fmt, str};
 use itertools::Itertools;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
-use nom::character::complete::not_line_ending;
-use nom::combinator::{map, map_res, opt};
-use nom::multi::separated_list0;
+use nom::combinator::{map, opt};
+use nom::multi::separated_list1;
 use nom::sequence::{preceded, terminated};
 use nom_locate::LocatedSpan;
 use serde::{Deserialize, Serialize};
 
 use crate::column::{column_specification, ColumnSpecification};
-use crate::common::{debug_print, statement_terminator, ws_sep_comma, TableKey};
+use crate::common::{
+    debug_print, parse_fallible, statement_terminator, until_statement_terminator, ws_sep_comma,
+    TableKey,
+};
 use crate::create::key_specification;
 use crate::literal::literal;
 use crate::table::{relation, Relation};
-use crate::whitespace::{whitespace0, whitespace1};
+use crate::whitespace::whitespace1;
 use crate::{Dialect, Literal, NomSqlResult, SqlIdentifier};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -361,48 +363,20 @@ pub fn alter_table_statement(
         let (i, table) = relation(dialect)(i)?;
         let (i, _) = whitespace1(i)?;
 
-        fn parse_remaining(
-            dialect: Dialect,
-        ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<AlterTableDefinition>> {
-            move |i: LocatedSpan<&[u8]>| {
-                let (i, definitions) =
-                    separated_list0(ws_sep_comma, alter_table_definition(dialect))(i)?;
-                let (i, _) = whitespace0(i)?;
-                let (i, _) = statement_terminator(i)?;
+        let (i, definitions) = parse_fallible(
+            separated_list1(ws_sep_comma, alter_table_definition(dialect)),
+            until_statement_terminator,
+        )(i)?;
+        let (i, _) = statement_terminator(i)?;
 
-                Ok((i, definitions))
-            }
-        }
-
-        let result = parse_remaining(dialect)(i);
-
-        if let Ok((i, definitions)) = result {
-            Ok((
-                i,
-                AlterTableStatement {
-                    table,
-                    definitions: Ok(definitions),
-                    only,
-                },
-            ))
-        } else {
-            let (i, unsupported) = map_res(
-                terminated(not_line_ending, statement_terminator),
-                |i: LocatedSpan<&[u8]>| {
-                    #[allow(clippy::explicit_auto_deref)]
-                    // for some reason, clippy was complaining
-                    str::from_utf8(*i)
-                },
-            )(i)?;
-            Ok((
-                i,
-                AlterTableStatement {
-                    table,
-                    definitions: Err(unsupported.to_string()),
-                    only,
-                },
-            ))
-        }
+        Ok((
+            i,
+            AlterTableStatement {
+                table,
+                definitions,
+                only,
+            },
+        ))
     }
 }
 
@@ -491,7 +465,7 @@ mod tests {
                     name: "t".into(),
                     schema: None,
                 },
-                definitions: Err("unsupported rest of the query;".to_string()),
+                definitions: Err("unsupported rest of the query".to_string()),
                 only: false,
             };
             let result =
@@ -821,7 +795,7 @@ mod tests {
                     name: "t".into(),
                     schema: None,
                 },
-                definitions: Err("unsupported rest of the query;".to_string()),
+                definitions: Err("unsupported rest of the query".to_string()),
                 only: false,
             };
             let result =

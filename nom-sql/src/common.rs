@@ -12,7 +12,7 @@ use nom::combinator::{map, map_res, opt};
 use nom::error::{ErrorKind, ParseError};
 use nom::multi::{separated_list0, separated_list1};
 use nom::sequence::{delimited, pair, preceded, separated_pair, terminated, tuple};
-use nom::{IResult, InputLength};
+use nom::{IResult, InputLength, InputTake};
 use nom_locate::LocatedSpan;
 use serde::{Deserialize, Serialize};
 
@@ -360,17 +360,11 @@ pub(crate) fn parse_fallible<'a, F, G, R>(
 ) -> impl FnMut(LocatedSpan<&'a [u8]>) -> NomSqlResult<&'a [u8], Result<R, String>>
 where
     F: FnMut(LocatedSpan<&'a [u8]>) -> NomSqlResult<&'a [u8], R>,
-    G: FnMut(LocatedSpan<&'a [u8]>) -> NomSqlResult<&'a [u8], LocatedSpan<&'a [u8]>>,
+    G: FnMut(LocatedSpan<&'a [u8]>) -> NomSqlResult<&'a [u8], &'a [u8]>,
 {
     move |i| {
-        map(&mut success, Ok)(i).or_else(|_| {
-            map(
-                map_res(&mut failure, |i: LocatedSpan<&[u8]>| {
-                    str::from_utf8(i.as_ref())
-                }),
-                |s| Err(s.to_owned()),
-            )(i)
-        })
+        map(&mut success, Ok)(i)
+            .or_else(|_| map(map_res(&mut failure, str::from_utf8), |s| Err(s.to_owned()))(i))
     }
 }
 
@@ -622,6 +616,16 @@ pub(crate) fn eof<I: Copy + InputLength, E: ParseError<I>>(input: I) -> IResult<
     } else {
         Err(nom::Err::Error(E::from_error_kind(input, ErrorKind::Eof)))
     }
+}
+
+/// Parse the rest of the input up to a statement terminator
+pub fn until_statement_terminator(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], &[u8]> {
+    let len = match i.last() {
+        Some(b';' | b'\n') => i.len() - 1,
+        _ => i.len(),
+    };
+    let (i, res) = i.take_split(len);
+    Ok((i, *res))
 }
 
 // Parse a terminator that ends a SQL statement.
@@ -957,6 +961,21 @@ mod tests {
     fn terminated_by_semicolon() {
         let res = to_nom_result(statement_terminator(LocatedSpan::new(b"   ;  ")));
         assert_eq!(res, Ok((&b""[..], ())));
+    }
+
+    #[test]
+    fn parse_until_statement_terminator() {
+        let (rem, res) = until_statement_terminator(LocatedSpan::new(b"abcdef;")).unwrap();
+        assert_eq!(res, b"abcdef");
+        assert_eq!(*rem, b";");
+
+        let (rem, res) = until_statement_terminator(LocatedSpan::new(b"abcdef")).unwrap();
+        assert_eq!(res, b"abcdef");
+        assert_eq!(*rem, b"");
+
+        let (rem, res) = until_statement_terminator(LocatedSpan::new(b"abc\ndef")).unwrap();
+        assert_eq!(res, b"abc\ndef");
+        assert_eq!(*rem, b"");
     }
 
     #[test]

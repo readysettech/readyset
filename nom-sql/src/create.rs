@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use crate::column::{column_specification, Column, ColumnSpecification};
 use crate::common::{
     column_identifier_no_alias, debug_print, if_not_exists, parse_fallible, statement_terminator,
-    ws_sep_comma, IndexType, ReferentialAction, TableKey,
+    until_statement_terminator, ws_sep_comma, IndexType, ReferentialAction, TableKey,
 };
 use crate::compound_select::{nested_compound_selection, CompoundSelectStatement};
 use crate::create_table_options::{table_options, CreateTableOption};
@@ -53,13 +53,13 @@ impl Display for CreateTableBody {
 pub struct CreateTableStatement {
     pub if_not_exists: bool,
     pub table: Relation,
-    /// The result of parsing the body of the `CREATE TABLE statement`.
+    /// The result of parsing the body of the `CREATE TABLE` statement.
     ///
     /// If parsing succeeded, then this will be an `Ok` result with the body of the statement. If
     /// it failed to parse, this will be an `Err` with the remainder [`String`] that could not
     /// be parsed.
     pub body: Result<CreateTableBody, String>,
-    /// The result of parsing the options for the `CREATE TABLE statement`.
+    /// The result of parsing the options for the `CREATE TABLE` statement.
     ///
     /// If parsing succeeded, then this will be an `Ok` result with the options for the statement.
     /// If it failed to parse, this will be an `Err` with the remainder [`String`] that could not
@@ -587,10 +587,13 @@ pub fn create_table(
         let (i, _) = whitespace0(i)?;
 
         let (i, _) = tag("(")(i)?;
-        let (i, body) = parse_fallible(create_table_body(dialect), is_not(")"))(i)?;
+        let (i, body) = parse_fallible(
+            create_table_body(dialect),
+            map(is_not(")"), |r: LocatedSpan<&[u8]>| *r),
+        )(i)?;
         let (i, _) = tag(")")(i)?;
         let (i, _) = whitespace0(i)?;
-        let (i, options) = parse_fallible(table_options(dialect), is_not(";"))(i)?;
+        let (i, options) = parse_fallible(table_options(dialect), until_statement_terminator)(i)?;
         let (i, _) = statement_terminator(i)?;
 
         Ok((
