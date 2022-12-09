@@ -320,10 +320,7 @@ impl SqlIncorporator {
         new_ty: DfType,
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<()> {
-        let not_found_err = || ReadySetError::TableNotFound {
-            name: table.name.clone().into(),
-            schema: table.schema.clone().map(Into::into),
-        };
+        let not_found_err = || self.mir_converter.table_not_found_err(table);
 
         let addr = self.leaf_addresses.get(table).ok_or_else(not_found_err)?;
         let idx = self

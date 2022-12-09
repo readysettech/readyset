@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::mem;
 
 use nom_sql::analysis::visit_mut::{walk_select_statement, VisitorMut};
@@ -10,6 +10,7 @@ use crate::util::outermost_named_tables;
 #[derive(Debug)]
 pub struct CountStarRewriteVisitor<'schema> {
     schemas: &'schema HashMap<Relation, Vec<SqlIdentifier>>,
+    non_replicated_relations: &'schema HashSet<Relation>,
     tables: Option<Vec<Relation>>,
 }
 
@@ -44,9 +45,18 @@ impl<'ast, 'schema> VisitorMut<'ast> for CountStarRewriteVisitor<'schema> {
             let mut schema_iter = self
                 .schemas
                 .get(&bogo_table)
-                .ok_or_else(|| ReadySetError::TableNotFound {
-                    name: bogo_table.name.clone().into(),
-                    schema: bogo_table.schema.clone().map(Into::into),
+                .ok_or_else(|| {
+                    if self.non_replicated_relations.contains(&bogo_table) {
+                        ReadySetError::TableNotReplicated {
+                            name: bogo_table.name.clone().into(),
+                            schema: bogo_table.schema.clone().map(Into::into),
+                        }
+                    } else {
+                        ReadySetError::TableNotFound {
+                            name: bogo_table.name.clone().into(),
+                            schema: bogo_table.schema.clone().map(Into::into),
+                        }
+                    }
                 })?
                 .iter();
             // The columns in the table_columns map are actually columns as seen from the
@@ -80,6 +90,7 @@ pub trait CountStarRewrite: Sized {
     fn rewrite_count_star(
         self,
         schemas: &HashMap<Relation, Vec<SqlIdentifier>>,
+        non_replicated_relations: &HashSet<Relation>,
     ) -> ReadySetResult<Self>;
 }
 
@@ -87,9 +98,11 @@ impl CountStarRewrite for SelectStatement {
     fn rewrite_count_star(
         mut self,
         schemas: &HashMap<Relation, Vec<SqlIdentifier>>,
+        non_replicated_relations: &HashSet<Relation>,
     ) -> ReadySetResult<Self> {
         let mut visitor = CountStarRewriteVisitor {
             schemas,
+            non_replicated_relations,
             tables: None,
         };
 
@@ -102,9 +115,12 @@ impl CountStarRewrite for SqlQuery {
     fn rewrite_count_star(
         self,
         schemas: &HashMap<Relation, Vec<SqlIdentifier>>,
+        non_replicated_relations: &HashSet<Relation>,
     ) -> ReadySetResult<SqlQuery> {
         match self {
-            SqlQuery::Select(sq) => Ok(SqlQuery::Select(sq.rewrite_count_star(schemas)?)),
+            SqlQuery::Select(sq) => Ok(SqlQuery::Select(
+                sq.rewrite_count_star(schemas, non_replicated_relations)?,
+            )),
             _ => Ok(self),
         }
     }
@@ -133,7 +149,7 @@ mod tests {
             vec!["id".into(), "name".into(), "age".into()],
         );
 
-        let res = q.rewrite_count_star(&schema).unwrap();
+        let res = q.rewrite_count_star(&schema, &Default::default()).unwrap();
         match res {
             SqlQuery::Select(tq) => {
                 assert_eq!(
@@ -167,7 +183,7 @@ mod tests {
             vec!["id".into(), "name".into(), "age".into()],
         );
 
-        let res = q.rewrite_count_star(&schema).unwrap();
+        let res = q.rewrite_count_star(&schema, &Default::default()).unwrap();
         match res {
             SqlQuery::Select(tq) => {
                 assert_eq!(
@@ -197,7 +213,7 @@ mod tests {
             vec!["id".into(), "name".into(), "age".into()],
         )]);
 
-        let res = q.rewrite_count_star(&schema).unwrap();
+        let res = q.rewrite_count_star(&schema, &Default::default()).unwrap();
         match res {
             SqlQuery::Select(stmt) => {
                 assert_eq!(

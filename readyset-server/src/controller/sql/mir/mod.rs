@@ -195,6 +195,25 @@ impl SqlToMirConverter {
         format!("{}_n{}", label_prefix, self.mir_graph.node_count()).into()
     }
 
+    /// Return the correct error for a table not being found during a migration.
+    ///
+    /// This is either [`ReadySetError::TableNotReplicated`] if the table is known to exist in the
+    /// upstream database but is not being replicated, or [`ReadySetError::TableNotFound`] if the
+    /// table is completely unknown
+    pub(super) fn table_not_found_err(&self, name: &Relation) -> ReadySetError {
+        if self.non_replicated_relations.contains(name) {
+            ReadySetError::TableNotReplicated {
+                name: (&name.name).into(),
+                schema: name.schema.as_ref().map(Into::into),
+            }
+        } else {
+            ReadySetError::TableNotFound {
+                name: (&name.name).into(),
+                schema: name.schema.as_ref().map(Into::into),
+            }
+        }
+    }
+
     pub(super) fn compound_query_to_mir(
         &mut self,
         query_name: &Relation,
@@ -1359,12 +1378,10 @@ impl SqlToMirConverter {
                 } else {
                     match self.get_relation(rel) {
                         Some(node_idx) => node_idx,
-                        None => anon_queries.get(rel).copied().ok_or_else(|| {
-                            ReadySetError::TableNotFound {
-                                name: rel.to_string(),
-                                schema: None,
-                            }
-                        })?,
+                        None => anon_queries
+                            .get(rel)
+                            .copied()
+                            .ok_or_else(|| self.table_not_found_err(rel))?,
                     }
                 };
 

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::mem;
 
 use nom_sql::analysis::visit_mut::{self, VisitorMut};
@@ -15,11 +15,13 @@ pub trait StarExpansion: Sized {
     fn expand_stars(
         self,
         table_columns: &HashMap<Relation, Vec<SqlIdentifier>>,
+        non_replicated_relations: &HashSet<Relation>,
     ) -> ReadySetResult<Self>;
 }
 
 struct ExpandStarsVisitor<'schema> {
     table_columns: &'schema HashMap<Relation, Vec<SqlIdentifier>>,
+    non_replicated_relations: &'schema HashSet<Relation>,
 }
 
 impl<'ast, 'schema> VisitorMut<'ast> for ExpandStarsVisitor<'schema> {
@@ -46,9 +48,18 @@ impl<'ast, 'schema> VisitorMut<'ast> for ExpandStarsVisitor<'schema> {
                 None
             }
             .or_else(|| self.table_columns.get(&table).map(|fs| fs.iter().collect()))
-            .ok_or_else(|| ReadySetError::TableNotFound {
-                name: table.name.clone().into(),
-                schema: table.schema.clone().map(Into::into),
+            .ok_or_else(|| {
+                if self.non_replicated_relations.contains(&table) {
+                    ReadySetError::TableNotReplicated {
+                        name: table.name.clone().into(),
+                        schema: table.schema.clone().map(Into::into),
+                    }
+                } else {
+                    ReadySetError::TableNotFound {
+                        name: table.name.clone().into(),
+                        schema: table.schema.clone().map(Into::into),
+                    }
+                }
             })?
             .into_iter()
             .map(move |f| FieldDefinitionExpr::Expr {
@@ -88,8 +99,12 @@ impl StarExpansion for SelectStatement {
     fn expand_stars(
         mut self,
         table_columns: &HashMap<Relation, Vec<SqlIdentifier>>,
+        non_replicated_relations: &HashSet<Relation>,
     ) -> ReadySetResult<Self> {
-        let mut visitor = ExpandStarsVisitor { table_columns };
+        let mut visitor = ExpandStarsVisitor {
+            table_columns,
+            non_replicated_relations,
+        };
         visitor.visit_select_statement(&mut self)?;
         Ok(self)
     }
@@ -99,9 +114,12 @@ impl StarExpansion for SqlQuery {
     fn expand_stars(
         self,
         write_schemas: &HashMap<Relation, Vec<SqlIdentifier>>,
+        non_replicated_relations: &HashSet<Relation>,
     ) -> ReadySetResult<Self> {
         Ok(match self {
-            SqlQuery::Select(sq) => SqlQuery::Select(sq.expand_stars(write_schemas)?),
+            SqlQuery::Select(sq) => {
+                SqlQuery::Select(sq.expand_stars(write_schemas, non_replicated_relations)?)
+            }
             _ => self,
         })
     }
@@ -119,7 +137,7 @@ mod tests {
             let q = parse_query(Dialect::MySQL, $source).unwrap();
             let expected = parse_query(Dialect::MySQL, $expected).unwrap();
             let schema = hashmap!($($schema)*);
-            let res = q.expand_stars(&schema).unwrap();
+            let res = q.expand_stars(&schema, &Default::default()).unwrap();
             assert_eq!(res, expected, "{} != {}", res, expected);
         }};
     }
