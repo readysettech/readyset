@@ -77,6 +77,10 @@ impl Base {
         Default::default()
     }
 
+    pub(in crate::node) fn take(&self) -> Self {
+        Clone::clone(self)
+    }
+
     pub fn with_default_values(mut self, defaults: Vec<DfValue>) -> Self {
         self.defaults = defaults;
         self
@@ -157,78 +161,6 @@ impl Base {
             let rlen = row.len();
             row.extend(self.defaults.iter().skip(rlen).cloned());
         }
-    }
-}
-
-/// A Base clone must have a different unique_id so that no two copies write to the same file.
-/// Resetting the writer to None in the original copy is not enough to guarantee that, as the
-/// original object can still re-open the log file on-demand from Base::persist_to_log.
-impl Clone for Base {
-    fn clone(&self) -> Base {
-        Base {
-            primary_key: self.primary_key.clone(),
-            unique_keys: self.unique_keys.clone(),
-            defaults: self.defaults.clone(),
-            dropped: self.dropped.clone(),
-            unmodified: self.unmodified,
-        }
-    }
-}
-
-impl Default for Base {
-    fn default() -> Self {
-        Base {
-            primary_key: None,
-            unique_keys: Vec::new(),
-            defaults: Vec::new(),
-            dropped: Vec::new(),
-            unmodified: true,
-        }
-    }
-}
-
-fn key_val(i: usize, col: usize, r: &TableOperation) -> Option<&DfValue> {
-    match *r {
-        TableOperation::Insert(ref row) => Some(&row[col]),
-        TableOperation::DeleteByKey { ref key } => Some(&key[i]),
-        TableOperation::DeleteRow { ref row } => Some(&row[col]),
-        TableOperation::Update { ref key, .. } => Some(&key[i]),
-        TableOperation::InsertOrUpdate { ref row, .. } => Some(&row[col]),
-        TableOperation::SetReplicationOffset(_)
-        | TableOperation::SetSnapshotMode(_)
-        | TableOperation::Truncate => None,
-    }
-}
-
-fn key_of<'a>(key_cols: &'a [usize], r: &'a TableOperation) -> impl Iterator<Item = &'a DfValue> {
-    key_cols
-        .iter()
-        .enumerate()
-        .filter_map(move |(i, col)| key_val(i, *col, r))
-}
-
-/// Coerce values in the table operation to the correct types for the underlying schema, if
-/// needed.
-///
-/// This is used to handle cases where certain types may have a different user-visible
-/// representation than their underlying database representation (for example, inserting enum
-/// values, which appear as strings to the user but must be stored as integers in the database).
-///
-/// Note that the actual type-specific logic is implemented as a [`DfValue`] method, so as to keep
-/// type logic out of the base node code.
-fn apply_table_op_coercions(op: &mut TableOperation, columns: &[Column]) -> ReadySetResult<()> {
-    if let TableOperation::Insert(vals) = op {
-        for (val, col) in vals.iter_mut().zip(columns) {
-            val.maybe_coerce_for_table_op(col.ty())?;
-        }
-    }
-
-    Ok(())
-}
-
-impl Base {
-    pub(in crate::node) fn take(&self) -> Self {
-        Clone::clone(self)
     }
 
     /// Process table operations for a base table that doesn't have a key, such tables can
@@ -497,6 +429,72 @@ impl Base {
             HashMap::new()
         }
     }
+}
+
+/// A Base clone must have a different unique_id so that no two copies write to the same file.
+/// Resetting the writer to None in the original copy is not enough to guarantee that, as the
+/// original object can still re-open the log file on-demand from Base::persist_to_log.
+impl Clone for Base {
+    fn clone(&self) -> Base {
+        Base {
+            primary_key: self.primary_key.clone(),
+            unique_keys: self.unique_keys.clone(),
+            defaults: self.defaults.clone(),
+            dropped: self.dropped.clone(),
+            unmodified: self.unmodified,
+        }
+    }
+}
+
+impl Default for Base {
+    fn default() -> Self {
+        Base {
+            primary_key: None,
+            unique_keys: Vec::new(),
+            defaults: Vec::new(),
+            dropped: Vec::new(),
+            unmodified: true,
+        }
+    }
+}
+
+fn key_val(i: usize, col: usize, r: &TableOperation) -> Option<&DfValue> {
+    match *r {
+        TableOperation::Insert(ref row) => Some(&row[col]),
+        TableOperation::DeleteByKey { ref key } => Some(&key[i]),
+        TableOperation::DeleteRow { ref row } => Some(&row[col]),
+        TableOperation::Update { ref key, .. } => Some(&key[i]),
+        TableOperation::InsertOrUpdate { ref row, .. } => Some(&row[col]),
+        TableOperation::SetReplicationOffset(_)
+        | TableOperation::SetSnapshotMode(_)
+        | TableOperation::Truncate => None,
+    }
+}
+
+fn key_of<'a>(key_cols: &'a [usize], r: &'a TableOperation) -> impl Iterator<Item = &'a DfValue> {
+    key_cols
+        .iter()
+        .enumerate()
+        .filter_map(move |(i, col)| key_val(i, *col, r))
+}
+
+/// Coerce values in the table operation to the correct types for the underlying schema, if
+/// needed.
+///
+/// This is used to handle cases where certain types may have a different user-visible
+/// representation than their underlying database representation (for example, inserting enum
+/// values, which appear as strings to the user but must be stored as integers in the database).
+///
+/// Note that the actual type-specific logic is implemented as a [`DfValue`] method, so as to keep
+/// type logic out of the base node code.
+fn apply_table_op_coercions(op: &mut TableOperation, columns: &[Column]) -> ReadySetResult<()> {
+    if let TableOperation::Insert(vals) = op {
+        for (val, col) in vals.iter_mut().zip(columns) {
+            val.maybe_coerce_for_table_op(col.ty())?;
+        }
+    }
+
+    Ok(())
 }
 
 /// A helper to log information about failed table updates without leaking data
