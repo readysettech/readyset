@@ -1026,6 +1026,14 @@ async fn replication_filter_inner(url: &str) -> ReadySetResult<()> {
         )
         .await?;
 
+    eventually! {
+        let non_replicated_rels = ctx.noria.non_replicated_relations().await.unwrap();
+        non_replicated_rels.contains(&Relation {
+            schema: Some("noria2".into()),
+            name: "t5".into()
+        })
+    }
+
     ctx.noria
         .extend_recipe(
             ChangeList::from_str(
@@ -2068,6 +2076,7 @@ async fn pgsql_unsupported() {
     client
         .query(
             "DROP DOMAIN IF EXISTS x CASCADE; CREATE DOMAIN x AS INTEGER;
+            DROP TABLE IF EXISTS t2 CASCADE;
             DROP TABLE IF EXISTS t CASCADE; CREATE TABLE t (x x);",
         )
         .await
@@ -2086,4 +2095,15 @@ async fn pgsql_unsupported() {
         }),
         "non_replicated_rels = {non_replicated_rels:?}"
     );
+
+    // Replicate a new unsupported table
+    client.query("CREATE TABLE t2 (x x);").await.unwrap();
+
+    eventually! {
+        let non_replicated_rels = ctx.noria.non_replicated_relations().await.unwrap();
+        non_replicated_rels.contains(&Relation {
+            schema: Some("public".into()),
+            name: "t2".into()
+        })
+    }
 }

@@ -1,4 +1,5 @@
 use std::collections::{hash_map, HashMap, HashSet};
+use std::mem;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -555,15 +556,33 @@ impl NoriaAdapter {
         let mut changelist = ChangeList::from_changes(changes, self.dialect);
 
         // Remove DDL changes outside the filtered scope
+        let mut non_replicated_tables = vec![];
         changelist.changes_mut().retain(|change| match change {
-            Change::CreateTable(stmt) => self
-                .table_filter
-                .should_be_processed(schema.as_str(), stmt.table.name.as_str()),
+            Change::CreateTable(stmt) => {
+                let keep = self
+                    .table_filter
+                    .should_be_processed(schema.as_str(), stmt.table.name.as_str())
+                    && stmt.body.is_ok();
+                if !keep {
+                    non_replicated_tables.push(Relation {
+                        schema: Some(schema.clone().into()),
+                        name: stmt.table.name.clone(),
+                    })
+                }
+                keep
+            }
             Change::AlterTable(stmt) => self
                 .table_filter
                 .should_be_processed(schema.as_str(), stmt.table.name.as_str()),
             _ => true,
         });
+
+        // Mark all tables that were filtered as non-replicated, too
+        changelist.changes_mut().extend(
+            non_replicated_tables
+                .into_iter()
+                .map(Change::AddNonReplicatedRelation),
+        );
 
         if self.supports_resnapshot && changelist.changes().any(Change::requires_resnapshot) {
             // In case we detect a DDL change that requires a full schema resnapshot exit the loop
@@ -576,20 +595,33 @@ impl NoriaAdapter {
             return Err(ReadySetError::ResnapshotNeeded);
         }
 
+        changelist = changelist.with_schema_search_path(vec![schema.into()]);
+
         match self
             .noria
-            .extend_recipe_with_offset(
-                changelist.with_schema_search_path(vec![schema.into()]),
-                &pos,
-                false,
-            )
+            .extend_recipe_with_offset(changelist.clone(), &pos, false)
             .await
         {
             // ReadySet likely entered an invalid state, fail the replicator.
             Err(e @ ReadySetError::RecipeInvariantViolated(_)) => return Err(e),
-            Err(e) => {
-                warn!(error = %e, "Error extending recipe, DDL statement will not be used");
+            Err(error) => {
+                warn!(%error, "Error extending recipe, DDL statement will not be used");
                 counter!(recorded::REPLICATOR_FAILURE, 1u64,);
+
+                let changes = mem::take(changelist.changes_mut());
+                // If something went wrong, mark all the tables and views that we just tried to
+                // create as non-replicated
+                changelist
+                    .changes_mut()
+                    .extend(changes.into_iter().filter_map(|change| {
+                        Some(Change::AddNonReplicatedRelation(match change {
+                            Change::CreateTable(stmt) => stmt.table,
+                            Change::CreateView(stmt) => stmt.name,
+                            Change::AddNonReplicatedRelation(rel) => rel,
+                            _ => return None,
+                        }))
+                    }));
+                self.noria.extend_recipe(changelist).await?;
             }
             Ok(_) => {}
         }
