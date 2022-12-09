@@ -691,6 +691,17 @@ impl ReadySetError {
         self.any_cause(|e| e.is_table_not_found())
     }
 
+    /// Returns `true` if self is [`TableNotReplicated`].
+    pub fn is_table_not_replicated(&self) -> bool {
+        matches!(self, Self::TableNotReplicated { .. })
+    }
+
+    /// Returns `true` if self either *is* [`TableNotReplicated`], or was *caused by*
+    /// [`TableNotReplicated`].
+    pub fn caused_by_table_not_replicated(&self) -> bool {
+        self.any_cause(|e| e.is_table_not_replicated())
+    }
+
     /// Returns `true` if the error could have been caused by a networking problem.
     pub fn is_networking_related(&self) -> bool {
         self.any_cause(|e| {
@@ -1139,5 +1150,15 @@ mod test {
             }),
         };
         assert!(err.caused_by_unsupported());
+    }
+
+    #[test]
+    fn context_caused_by_table_not_replicated() {
+        let err = ReadySetError::TableNotReplicated {
+            name: "t1".into(),
+            schema: Some("s1".into()),
+        }
+        .context("some context");
+        assert!(err.caused_by_table_not_replicated());
     }
 }

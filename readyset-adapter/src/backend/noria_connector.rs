@@ -29,7 +29,7 @@ use readyset_errors::{
 };
 use readyset_server::worker::readers::{CallResult, ReadRequestHandler};
 use readyset_sql_passes::anonymize::anonymize_literals;
-use readyset_tracing::{error, info, trace};
+use readyset_tracing::{error, info, trace, warn};
 use tracing::instrument;
 use vec1::vec1;
 
@@ -1027,12 +1027,17 @@ impl NoriaConnector {
                     )
                     .with_schema_search_path(self.schema_search_path.clone());
 
-                    if let Err(e) = noria_await!(
+                    if let Err(error) = noria_await!(
                         self.inner.get_mut()?,
                         self.inner.get_mut()?.noria.extend_recipe(changelist)
                     ) {
-                        error!(error = %e, "add query failed");
-                        return Err(e);
+                        if error.caused_by_table_not_replicated() {
+                            warn!(%error, "add query failed");
+                        } else {
+                            error!(%error, "add query failed");
+                        }
+
+                        return Err(error);
                     }
                 } else {
                     match noria_await!(
