@@ -192,28 +192,42 @@ impl MySqlReplicator {
         let mut bad_tables = Vec::new();
         // Process `CREATE TABLE` statements
         for (db, table) in replicated_tables.iter() {
-            let create_table = create_for_table(&mut tx, db, table, TableKind::BaseTable).await?;
-            debug!(%create_table, "Extending recipe");
-            db_schemas.extend_create_schema_for_table(
-                db.to_string(),
-                table.to_string(),
-                create_table.clone(),
-                nom_sql::Dialect::MySQL,
-            );
-            if let Err(err) =
-                future::ready(ChangeList::from_str(create_table, Dialect::DEFAULT_MYSQL))
-                    .and_then(|changelist| async {
-                        noria
-                            .extend_recipe_no_leader_ready(
-                                changelist.with_schema_search_path(vec![db.clone().into()]),
-                            )
-                            .await
-                    })
-                    .await
+            match create_for_table(&mut tx, db, table, TableKind::BaseTable)
+                .map_err(|e| e.into())
+                .and_then(|create_table| {
+                    debug!(%create_table, "Extending recipe");
+                    db_schemas.extend_create_schema_for_table(
+                        db.to_string(),
+                        table.to_string(),
+                        create_table.clone(),
+                        nom_sql::Dialect::MySQL,
+                    );
+
+                    future::ready(ChangeList::from_str(create_table, Dialect::DEFAULT_MYSQL))
+                })
+                .and_then(|changelist| {
+                    noria.extend_recipe_no_leader_ready(
+                        changelist.with_schema_search_path(vec![db.clone().into()]),
+                    )
+                })
+                .await
             {
-                warn!(%err, "Error extending CREATE TABLE, table will not be used");
-                // Prevent the table from being snapshotted as well
-                bad_tables.push((db.clone(), table.clone()));
+                Ok(_) => {}
+                Err(error) => {
+                    warn!(%error, "Error extending CREATE TABLE, table will not be used");
+                    // Prevent the table from being snapshotted as well
+                    bad_tables.push((db.clone(), table.clone()));
+
+                    noria
+                        .extend_recipe_no_leader_ready(ChangeList::from_change(
+                            Change::AddNonReplicatedRelation(Relation {
+                                schema: Some(db.into()),
+                                name: table.into(),
+                            }),
+                            Dialect::DEFAULT_MYSQL,
+                        ))
+                        .await?;
+                }
             }
         }
 
