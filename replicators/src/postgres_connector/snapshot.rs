@@ -754,8 +754,8 @@ impl<'a> PostgresReplicator<'a> {
         // Finally copy each table into noria
         let mut futs = Vec::with_capacity(tables.len());
         for table in &tables {
-            let span = info_span!("Replicating table", table = %table.name);
-            span.in_scope(|| info!("Replicating table"));
+            let span = info_span!("Snapshotting table", table = %table.name);
+            span.in_scope(|| info!("Snapshotting table"));
             let mut noria_table = self
                 .noria
                 .table(table.name.clone())

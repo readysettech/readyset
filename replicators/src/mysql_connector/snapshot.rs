@@ -495,13 +495,13 @@ impl MySqlReplicator {
         table: Relation,
         snapshot_report_interval_secs: u16,
     ) -> ReadySetResult<JoinHandle<(Relation, ReplicationOffset, ReadySetResult<()>)>> {
-        let span = info_span!("replicating table", %table);
+        let span = info_span!("Snapshotting table", %table);
         span.in_scope(|| info!("Acquiring read lock"));
         let mut read_lock = self.lock_table(&table).await?;
         // We acquire the position for each table individually, since it changes from
         // one lock to the other
         let repl_offset = ReplicationOffset::try_from(self.get_binlog_position().await?)?;
-        span.in_scope(|| info!("Replicating table"));
+        span.in_scope(|| info!("Snapshotting table"));
 
         let dumper = self.dump_table(&table).instrument(span.clone()).await?;
 
