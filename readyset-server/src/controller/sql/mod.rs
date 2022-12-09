@@ -77,11 +77,6 @@ pub(crate) struct SqlIncorporator {
     /// All values in this map will also be keys in `self.custom_types`.
     custom_types_by_oid: HashMap<u32, Relation>,
 
-    /// Set of relations (tables or views) that exist in the upstream database, but are not being
-    /// replicated (either due to lack of support, or because the user explicitly opted out from
-    /// them being replicated)
-    non_replicated_relations: HashSet<Relation>,
-
     pub(crate) config: Config,
 
     /// Whether or to treat failed writes to base tables as no-ops
@@ -142,7 +137,7 @@ impl SqlIncorporator {
         stmt.rewrite(&mut RewriteContext {
             view_schemas: &self.view_schemas,
             base_schemas: &self.base_schemas,
-            non_replicated_relations: &self.non_replicated_relations,
+            non_replicated_relations: &self.mir_converter.non_replicated_relations,
             custom_types: &self
                 .custom_types
                 .keys()
@@ -303,19 +298,19 @@ impl SqlIncorporator {
     /// Return a set of all relations (tables or views) which are known to exist in the upstream
     /// database that we are replicating from, but are not being replicated to ReadySet
     pub(crate) fn non_replicated_relations(&self) -> &HashSet<Relation> {
-        &self.non_replicated_relations
+        &self.mir_converter.non_replicated_relations
     }
 
     /// Record that a relation (a table or view) with the given `name` exists in the upstream
     /// database, but is not being replicated
     pub(crate) fn add_non_replicated_relation(&mut self, name: Relation) {
-        self.non_replicated_relations.insert(name);
+        self.mir_converter.non_replicated_relations.insert(name);
     }
 
     /// Remove the given `name` from the set of tables that are known to exist in the upstream
     /// database, but are not being replicated. Returns whether the table was in the set.
     pub(crate) fn remove_non_replicated_relation(&mut self, name: &Relation) -> bool {
-        self.non_replicated_relations.remove(name)
+        self.mir_converter.non_replicated_relations.remove(name)
     }
 
     pub(super) fn set_base_column_type(

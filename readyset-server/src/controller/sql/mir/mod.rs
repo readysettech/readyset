@@ -155,6 +155,12 @@ pub(super) struct SqlToMirConverter {
     /// A map to the nodes corresponding to either base table nodes or leaf nodes (in case
     /// of views or cached queries) in the MIR Supergraph.
     pub(in crate::controller::sql) relations: HashMap<Relation, NodeIndex>,
+
+    /// Set of relations (tables or views) that exist in the upstream database, but are not being
+    /// replicated (either due to lack of support, or because the user explicitly opted out from
+    /// them being replicated)
+    pub(in crate::controller::sql) non_replicated_relations: HashSet<Relation>,
+
     pub(in crate::controller::sql) schema_version: usize,
 }
 
