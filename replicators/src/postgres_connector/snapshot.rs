@@ -10,7 +10,7 @@ use futures::{pin_mut, StreamExt, TryFutureExt};
 use metrics::register_gauge;
 use nom_sql::{
     parse_key_specification_string, parse_sql_type, Column, ColumnConstraint, ColumnSpecification,
-    CreateTableBody, CreateTableStatement, Dialect, Relation, SqlIdentifier, SqlQuery, TableKey,
+    CreateTableBody, CreateTableStatement, Dialect, Relation, SqlIdentifier, TableKey,
 };
 use postgres_types::{accepts, FromSql, Kind, Type};
 use readyset_client::metrics::recorded;
@@ -719,38 +719,47 @@ impl<'a> PostgresReplicator<'a> {
         for view in view_list {
             let view_name = view.name.clone();
             let view_schema = view.schema.clone();
-            let create_view = view.get_create_view(&self.transaction).await?;
-            create_schema.add_view_create(view_name.clone(), create_view.clone());
 
-            let view = match nom_sql::parse_query(Dialect::PostgreSQL, &create_view) {
-                Ok(SqlQuery::CreateView(view)) => view,
-                Ok(query) => {
-                    error!(
-                        kind = %query.query_type(),
-                        "Unexpected query type when parsing CREATE VIEW statement"
-                    );
-                    continue;
-                }
-                Err(error) => {
-                    warn!(%error, view=%view_name, "Error parsing CREATE VIEW, view will not be used");
-                    continue;
-                }
-            };
-
-            debug!(%view, "Extending recipe");
-
-            if let Err(error) = self
-                .noria
-                .extend_recipe_no_leader_ready(
-                    ChangeList::from_change(
-                        Change::CreateView(view),
-                        DataDialect::DEFAULT_POSTGRESQL,
+            match view
+                .get_create_view(&self.transaction)
+                .map_err(|e| e.into())
+                .and_then(|create_view| {
+                    create_schema.add_view_create(view_name.clone(), create_view.clone());
+                    future::ready(
+                        nom_sql::parse_create_view(Dialect::PostgreSQL, &create_view)
+                            .map_err(|_| ReadySetError::UnparseableQuery { query: create_view }),
                     )
-                    .with_schema_search_path(vec![view_schema.into()]),
-                )
+                })
+                .and_then(|view| {
+                    debug!(%view, "Extending recipe");
+                    self.noria.extend_recipe_no_leader_ready(
+                        ChangeList::from_change(
+                            Change::CreateView(view),
+                            DataDialect::DEFAULT_POSTGRESQL,
+                        )
+                        .with_schema_search_path(vec![view_schema.clone().into()]),
+                    )
+                })
                 .await
             {
-                warn!(%error, view=%view_name, "Error extending CREATE VIEW, view will not be used");
+                Ok(_) => {}
+                Err(error) => {
+                    warn!(
+                        %error,
+                        view=%view_name,
+                        "Error extending CREATE VIEW, view will not be used"
+                    );
+
+                    self.noria
+                        .extend_recipe_no_leader_ready(ChangeList::from_change(
+                            Change::AddNonReplicatedRelation(Relation {
+                                schema: Some(view_schema.into()),
+                                name: view_name.into(),
+                            }),
+                            DataDialect::DEFAULT_POSTGRESQL,
+                        ))
+                        .await?;
+                }
             }
         }
 

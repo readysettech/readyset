@@ -241,27 +241,40 @@ impl MySqlReplicator {
 
         // Process `CREATE VIEW` statements
         for (db, view) in all_views.iter() {
-            let create_view = create_for_table(&mut tx, db, view, TableKind::View).await?;
-            db_schemas.extend_create_schema_for_view(
-                db.to_string(),
-                view.to_string(),
-                create_view.clone(),
-                nom_sql::Dialect::MySQL,
-            );
-            if let Err(err) =
-                future::ready(ChangeList::from_str(create_view, Dialect::DEFAULT_MYSQL))
-                    .and_then(|changelist| async {
-                        noria
-                            .extend_recipe_no_leader_ready(
-                                changelist.with_schema_search_path(vec![db.clone().into()]),
-                            )
-                            .await
-                    })
-                    .await
+            match create_for_table(&mut tx, db, view, TableKind::View)
+                .map_err(|e| e.into())
+                .and_then(|create_view| {
+                    db_schemas.extend_create_schema_for_view(
+                        db.to_string(),
+                        view.to_string(),
+                        create_view.clone(),
+                        nom_sql::Dialect::MySQL,
+                    );
+                    future::ready(ChangeList::from_str(create_view, Dialect::DEFAULT_MYSQL))
+                })
+                .and_then(|changelist| {
+                    noria.extend_recipe_no_leader_ready(
+                        changelist.with_schema_search_path(vec![db.clone().into()]),
+                    )
+                })
+                .await
             {
-                warn!(%view, %err, "Error extending CREATE VIEW, view will not be used");
+                Ok(_) => {}
+                Err(error) => {
+                    warn!(%view, %error, "Error extending CREATE VIEW, view will not be used");
+                    noria
+                        .extend_recipe_no_leader_ready(ChangeList::from_change(
+                            Change::AddNonReplicatedRelation(Relation {
+                                schema: Some(db.into()),
+                                name: view.into(),
+                            }),
+                            Dialect::DEFAULT_MYSQL,
+                        ))
+                        .await?;
+                }
             }
         }
+
         // Get the current binlog position, since at this point the tables are not locked, binlog
         // will advance while we are taking the snapshot. This is fine, we will catch up later.
         // We prefer to take the binlog position *after* the recipe is loaded in order to make sure
