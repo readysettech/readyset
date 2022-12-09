@@ -83,6 +83,9 @@ pub(crate) struct SqlIncorporator {
     non_replicated_relations: HashSet<Relation>,
 
     pub(crate) config: Config,
+
+    /// Whether or to treat failed writes to base tables as no-ops
+    permissive_writes: bool,
 }
 
 impl SqlIncorporator {
@@ -94,6 +97,11 @@ impl SqlIncorporator {
     /// Set the MIR configuration for future migrations
     pub(crate) fn set_mir_config(&mut self, mir_config: mir::Config) {
         self.mir_converter.set_config(mir_config);
+    }
+
+    /// Set the permissive write behavior for base tables
+    pub(crate) fn set_permissive_writes(&mut self, permissive_writes: bool) {
+        self.permissive_writes = permissive_writes;
     }
 
     pub(crate) fn mir_config(&self) -> &mir::Config {

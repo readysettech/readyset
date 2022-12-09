@@ -8,11 +8,12 @@ use itertools::Itertools;
 use launchpad::redacted::Sensitive;
 use launchpad::Indices;
 use maplit::hashmap;
+use nom_sql::Relation;
 use readyset_client::replication::ReplicationOffset;
 use readyset_client::{Modification, Operation, TableOperation};
 use readyset_data::{DfValue, DfValueKind};
 use readyset_errors::ReadySetResult;
-use readyset_tracing::{debug, trace, warn};
+use readyset_tracing::{debug, error, trace};
 use serde::{Deserialize, Serialize};
 use vec_map::VecMap;
 
@@ -69,6 +70,7 @@ pub struct Base {
     defaults: Vec<DfValue>,
     dropped: Vec<usize>,
     unmodified: bool,
+    permissive_writes: bool,
 }
 
 impl Base {
@@ -207,13 +209,14 @@ impl Base {
 
     /// Compute the deltas required to apply the list of the provided `TableOperation` to the base
     /// table
-    pub(in crate::node) fn process(
+    pub(in crate::node) fn process_ops(
         &mut self,
         our_index: LocalNodeIndex,
         columns: &[Column],
         mut ops: Vec<TableOperation>,
         state: &StateMap,
         snapshot_mode: SnapshotMode,
+        name: Relation,
     ) -> ReadySetResult<BaseWrite> {
         trace!(node = %our_index, base_ops = ?ops);
         for op in ops.iter_mut() {
@@ -224,8 +227,6 @@ impl Base {
             Some(key) if !ops.is_empty() => key.as_ref(),
             _ => return self.process_unkeyed(ops),
         };
-
-        let mut failed_log = FailedOpLogger::default();
 
         let mut n_ops = ops.len();
         // Sort all of the operations lexicographically by key types, all unkeyed operations will
@@ -301,6 +302,7 @@ impl Base {
             Inserted(Cow<'a, [DfValue]>),
         }
         let mut touched_keys: HashMap<Vec<DfValue>, TouchedKey> = HashMap::new();
+        let mut failed_log = FailedOpLogger::new(name);
 
         for (key, ops) in &ops {
             // It is not enough to check the persisted value for the key, as it may have been
@@ -411,7 +413,14 @@ impl Base {
             self.fix(r);
         }
 
-        failed_log.warn();
+        // We allow permissive writes if we are running without an upstream.
+        // If we are allowing permissive writes, we treat failed writes as no-ops
+        // instead of errors, using our base tables as a pseudo-upstream
+        // If we are replicating, we don't expect any failed writes, so we treat any
+        // as an error.
+        if self.permissive_writes {
+            failed_log.ensure_no_failed_ops()?;
+        }
 
         Ok(BaseWrite {
             records: results.into(),
@@ -442,6 +451,7 @@ impl Clone for Base {
             defaults: self.defaults.clone(),
             dropped: self.dropped.clone(),
             unmodified: self.unmodified,
+            permissive_writes: self.permissive_writes,
         }
     }
 }
@@ -454,6 +464,7 @@ impl Default for Base {
             defaults: Vec::new(),
             dropped: Vec::new(),
             unmodified: true,
+            permissive_writes: false,
         }
     }
 }
@@ -498,8 +509,7 @@ fn apply_table_op_coercions(op: &mut TableOperation, columns: &[Column]) -> Read
 }
 
 /// A helper to log information about failed table updates without leaking data
-#[derive(Default)]
-struct FailedOpLogger {
+pub(crate) struct FailedOpLogger {
     insert_existing: usize,
     update_non_existing: usize,
     delete_non_existing: usize,
@@ -508,9 +518,21 @@ struct FailedOpLogger {
     delete_type_mismatch: HashMap<(usize, Option<DfValueKind>, Option<DfValueKind>), usize>,
     // Maps from (column inxed, deleted data type) to count for columns with different values
     delete_row_data_mismatch: HashMap<(usize, DfValueKind), usize>,
+    table: Relation,
 }
 
 impl FailedOpLogger {
+    pub(crate) fn new(table: Relation) -> Self {
+        Self {
+            insert_existing: Default::default(),
+            update_non_existing: Default::default(),
+            delete_non_existing: Default::default(),
+            delete_type_mismatch: Default::default(),
+            delete_row_data_mismatch: Default::default(),
+            table,
+        }
+    }
+
     fn failed_delete(&mut self, deleted_row: Vec<DfValue>, current_row: Option<&[DfValue]>) {
         use itertools::EitherOrBoth;
 
@@ -553,31 +575,50 @@ impl FailedOpLogger {
         self.update_non_existing += 1;
     }
 
-    fn is_empty(&self) -> bool {
-        self.insert_existing == 0
-            && self.update_non_existing == 0
-            && self.delete_non_existing == 0
-            && self.delete_type_mismatch.is_empty()
-            && self.delete_row_data_mismatch.is_empty()
+    fn has_failed_inserts(&self) -> bool {
+        self.insert_existing != 0
     }
 
-    fn warn(&mut self) {
-        if self.is_empty() {
-            // We got nothing to warn about
-            return;
+    fn has_failed_deletes_or_updates(&self) -> bool {
+        !(self.update_non_existing == 0
+            && self.delete_non_existing == 0
+            && self.delete_type_mismatch.is_empty()
+            && self.delete_row_data_mismatch.is_empty())
+    }
+
+    fn ensure_no_failed_ops(self) -> ReadySetResult<()> {
+        if self.has_failed_deletes_or_updates() || self.has_failed_inserts() {
+            self.log_errors();
+            return Err(ReadySetError::FailedBaseOps { table: self.table });
         }
 
-        warn!(insert = %self.insert_existing,
+        Ok(())
+    }
+
+    pub fn log_errors(&self) {
+        if self.has_failed_inserts() {
+            // If we failed to insert an op to the base table, our state is no longer correct, even
+            // if we are allowing permissive writes.
+            error!(node=%self.table,
+                  insert = %self.insert_existing,
+              "Table failed to apply insert operations");
+        }
+
+        // If we are allowing permissive writes, we should have never called this function for
+        // failed deletes or updates, so any we see here we log an error for.
+        if self.has_failed_deletes_or_updates() {
+            error!(table=%self.table,
               update = %self.update_non_existing,
               delete_non_existing = %self.delete_non_existing,
               delete_type_mismatch = %self.delete_type_mismatch.len(),
               delete_data_mismatch = %self.delete_row_data_mismatch.len(),
-              "Table failed to apply operations");
+              "Table failed to apply update or delete operations");
 
-        if !self.delete_type_mismatch.is_empty() || !self.delete_row_data_mismatch.is_empty() {
-            warn!(type_mismatch = ?self.delete_type_mismatch,
+            if !self.delete_type_mismatch.is_empty() || !self.delete_row_data_mismatch.is_empty() {
+                error!(table=%self.table, type_mismatch = ?self.delete_type_mismatch,
                   data_mismatch = ?self.delete_row_data_mismatch,
                   "Table failed to apply delete operations");
+            }
         }
     }
 }
@@ -667,11 +708,19 @@ mod tests {
             let n = graph[global].take();
             let mut n = n.finalize(&graph);
 
+            let name = n.name().clone();
             let mut one = move |u: Vec<TableOperation>| {
                 let mut m = n
                     .get_base_mut()
                     .unwrap()
-                    .process(local, &[], u, &states, SnapshotMode::SnapshotModeDisabled)
+                    .process_ops(
+                        local,
+                        &[],
+                        u,
+                        &states,
+                        SnapshotMode::SnapshotModeDisabled,
+                        name,
+                    )
                     .unwrap()
                     .records;
                 node::materialize(&mut m, None, None, states.get_mut(local)).unwrap();
@@ -765,8 +814,12 @@ mod tests {
             let mut state_map = NodeMap::new();
             state_map.insert(ni, state);
 
+            let table = Relation {
+                name: "test".into(),
+                schema: None,
+            };
             assert_eq!(
-                b.process(
+                b.process_ops(
                     ni,
                     &[],
                     vec![
@@ -776,7 +829,8 @@ mod tests {
                         }
                     ],
                     &state_map,
-                    SnapshotMode::SnapshotModeDisabled
+                    SnapshotMode::SnapshotModeDisabled,
+                    table,
                 )
                 .unwrap(),
                 BaseWrite {
@@ -811,8 +865,12 @@ mod tests {
             let mut state_map = NodeMap::new();
             state_map.insert(ni, state);
 
+            let table = Relation {
+                name: "test".into(),
+                schema: None,
+            };
             assert_eq!(
-                b.process(
+                b.process_ops(
                     ni,
                     &[],
                     vec![
@@ -822,7 +880,8 @@ mod tests {
                         }
                     ],
                     &state_map,
-                    SnapshotMode::SnapshotModeDisabled
+                    SnapshotMode::SnapshotModeDisabled,
+                    table,
                 )
                 .unwrap(),
                 BaseWrite {
@@ -857,8 +916,12 @@ mod tests {
             let mut state_map = NodeMap::new();
             state_map.insert(ni, state);
 
+            let table = Relation {
+                name: "test".into(),
+                schema: None,
+            };
             assert_eq!(
-                b.process(
+                b.process_ops(
                     ni,
                     &[],
                     vec![
@@ -875,7 +938,8 @@ mod tests {
                         }
                     ],
                     &state_map,
-                    SnapshotMode::SnapshotModeDisabled
+                    SnapshotMode::SnapshotModeDisabled,
+                    table,
                 )
                 .unwrap(),
                 BaseWrite {
@@ -915,13 +979,18 @@ mod tests {
             let mut state_map = NodeMap::new();
             state_map.insert(ni, state);
 
+            let table = Relation {
+                name: "test".into(),
+                schema: None,
+            };
             let res = b
-                .process(
+                .process_ops(
                     ni,
                     &[],
                     vec![TableOperation::Truncate],
                     &state_map,
                     SnapshotMode::SnapshotModeDisabled,
+                    table,
                 )
                 .unwrap();
             assert_eq!(

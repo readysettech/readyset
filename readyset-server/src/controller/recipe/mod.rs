@@ -96,9 +96,13 @@ impl Recipe {
     }
 
     /// Creates a new blank recipe with the given SQL configuration and MIR configuration
-    // crate viz for tests
-    pub(crate) fn with_config(sql_config: sql::Config, mir_config: sql::mir::Config) -> Self {
+    pub(crate) fn with_config(
+        sql_config: sql::Config,
+        mir_config: sql::mir::Config,
+        permissive_writes: bool,
+    ) -> Self {
         let mut res = Recipe::blank();
+        res.set_permissive_writes(permissive_writes);
         res.set_sql_config(sql_config);
         res.set_mir_config(mir_config);
         res
@@ -118,6 +122,12 @@ impl Recipe {
     /// Set the SQL configuration for this recipe
     pub(crate) fn set_sql_config(&mut self, sql_config: sql::Config) {
         self.inc.config = sql_config;
+    }
+
+    /// Change the behavior of failed writes to base nodes
+    /// If permissive writes is true, failed writes will be no-ops, else they will return errors
+    pub(crate) fn set_permissive_writes(&mut self, permissive_writes: bool) {
+        self.inc.set_permissive_writes(permissive_writes);
     }
 
     /// Get a shared reference to this recipe's SQL configuration

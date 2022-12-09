@@ -139,7 +139,7 @@ impl Node {
                 match m.take().map(|p| *p) {
                     Some(Packet::Input { inner, .. }) => {
                         let PacketData { dst, data, trace } = inner;
-                        let data = data
+                        let ops = data
                             .try_into()
                             .expect("Payload of Input packet was not of Input type");
 
@@ -154,7 +154,14 @@ impl Node {
                             records: mut rs,
                             replication_offset,
                             set_snapshot_mode,
-                        } = b.process(addr, &self.columns, data, &*env.state, snapshot_mode)?;
+                        } = b.process_ops(
+                            addr,
+                            &self.columns,
+                            ops,
+                            &*env.state,
+                            snapshot_mode,
+                            self.name.clone(),
+                        )?;
 
                         if let (Some(SetSnapshotMode::EnterSnapshotMode), Some(s)) = (
                             set_snapshot_mode,

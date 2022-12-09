@@ -315,6 +315,9 @@ pub struct Controller {
 
     /// Provides the ability to report metrics to Segment
     telemetry_sender: TelemetrySender,
+
+    /// Whether or not to consider failed writes to base tables as no-ops
+    permissive_writes: bool,
 }
 
 impl Controller {
@@ -329,6 +332,8 @@ impl Controller {
         telemetry_sender: TelemetrySender,
         config: Config,
     ) -> Self {
+        // If we don't have an upstream, we allow permissive writes to base tables.
+        let permissive_writes = config.replicator_config.upstream_db_url.is_none();
         Self {
             inner: Arc::new(LeaderHandle::new()),
             authority,
@@ -346,6 +351,7 @@ impl Controller {
             write_processing_task: None,
             dry_run_task: None,
             telemetry_sender,
+            permissive_writes,
         }
     }
 
@@ -491,6 +497,7 @@ impl Controller {
                 self.our_descriptor.clone(),
                 self.worker_descriptor.clone(),
                 self.config.clone(),
+                self.permissive_writes,
             )
             .instrument(tracing::info_span!("authority")),
         ));
@@ -644,6 +651,8 @@ struct AuthorityLeaderElectionState {
     leader_eligible: bool,
     /// True if we are the current leader.
     is_leader: bool,
+    /// Whether or not to treat failed writes to base nodes as no-ops
+    permissive_writes: bool,
 }
 
 impl AuthorityLeaderElectionState {
@@ -651,6 +660,7 @@ impl AuthorityLeaderElectionState {
         event_tx: Sender<AuthorityUpdate>,
         authority: Arc<Authority>,
         descriptor: ControllerDescriptor,
+        permissive_writes: bool,
         config: Config,
         leader_eligible: bool,
     ) -> Self {
@@ -661,6 +671,7 @@ impl AuthorityLeaderElectionState {
             config,
             leader_eligible,
             is_leader: false,
+            permissive_writes,
         }
     }
 
@@ -729,6 +740,7 @@ impl AuthorityLeaderElectionState {
                                         ..Default::default()
                                     },
                                     self.config.mir_config.clone(),
+                                    self.permissive_writes,
                                 );
 
                                 let dataflow_state = DfState::new(
@@ -901,6 +913,7 @@ async fn authority_inner(
     descriptor: ControllerDescriptor,
     worker_descriptor: WorkerDescriptor,
     config: Config,
+    permissive_writes: bool,
 ) -> anyhow::Result<()> {
     authority.init().await?;
 
@@ -908,6 +921,7 @@ async fn authority_inner(
         event_tx.clone(),
         authority.clone(),
         descriptor,
+        permissive_writes,
         config,
         worker_descriptor.leader_eligible,
     );
@@ -979,6 +993,7 @@ pub(crate) async fn authority_runner(
     descriptor: ControllerDescriptor,
     worker_descriptor: WorkerDescriptor,
     config: Config,
+    permissive_writes: bool,
 ) -> anyhow::Result<()> {
     if let Err(e) = authority_inner(
         event_tx.clone(),
@@ -986,6 +1001,7 @@ pub(crate) async fn authority_runner(
         descriptor,
         worker_descriptor,
         config,
+        permissive_writes,
     )
     .await
     {

@@ -3498,7 +3498,7 @@ async fn test_queries(test: &str, file: &'static str, shard: bool, reuse: bool) 
 
     // move needed for some funny lifetime reason
     g.migrate(move |mig| {
-        let mut r = Recipe::with_config(Default::default(), Default::default());
+        let mut r = Recipe::with_config(Default::default(), Default::default(), false);
         if reuse {
             r.enable_reuse(ReuseConfigType::Finkelstein);
         }

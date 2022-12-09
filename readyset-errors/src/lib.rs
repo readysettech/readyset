@@ -614,6 +614,13 @@ pub enum ReadySetError {
     /// Error when a relation couldn't be found in MIR.
     #[error("Could not find MIR node for relation '{relation}'")]
     RelationNotFound { relation: String },
+
+    /// Error applying ops to base node
+    #[error("Failed to apply some operations to base node for {table}")]
+    FailedBaseOps {
+        /// The base table being manipulated.
+        table: Relation,
+    },
 }
 
 impl ReadySetError {
