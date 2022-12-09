@@ -2022,3 +2022,35 @@ async fn postgresql_toast_update_not_key() {
     .await
     .unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn pgsql_unsupported() {
+    readyset_tracing::init_test_logging();
+    let url = pgsql_url();
+    let mut client = DbConnection::connect(&url).await.unwrap();
+
+    // NOTE: We'll need to change this when we support domains; unfortunately failpoints don't work
+    // before a controller starts
+    client
+        .query(
+            "DROP DOMAIN IF EXISTS x CASCADE; CREATE DOMAIN x AS INTEGER;
+            DROP TABLE IF EXISTS t CASCADE; CREATE TABLE t (x x);",
+        )
+        .await
+        .unwrap();
+
+    let mut ctx = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
+    ctx.ready_notify.as_ref().unwrap().notified().await;
+
+    let non_replicated_rels = ctx.noria.non_replicated_relations().await.unwrap();
+    assert!(
+        non_replicated_rels.contains(&Relation {
+            schema: Some("public".into()),
+            name: "t".into()
+        }),
+        "non_replicated_rels = {non_replicated_rels:?}"
+    );
+}

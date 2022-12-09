@@ -265,6 +265,7 @@ impl Recipe {
                     }
                 }
                 Change::AddNonReplicatedRelation(name) => {
+                    debug!(%name, "Adding non-replicated relation");
                     self.inc.add_non_replicated_relation(name);
                 }
                 Change::CreateView(mut stmt) => {

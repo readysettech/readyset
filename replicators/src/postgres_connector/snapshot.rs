@@ -327,7 +327,7 @@ impl TableEntry {
     }
 
     async fn get_table<'a>(
-        self,
+        &self,
         transaction: &'a pgsql::Transaction<'a>,
     ) -> Result<TableDescription, ReadySetError> {
         let columns = Self::get_columns(self.oid, transaction)
@@ -357,8 +357,8 @@ impl TableEntry {
 
         Ok(TableDescription {
             name: Relation {
-                schema: Some(self.schema.into()),
-                name: self.name.into(),
+                schema: Some(self.schema.clone().into()),
+                name: self.name.clone().into(),
             },
             columns,
             constraints,
@@ -675,29 +675,43 @@ impl<'a> PostgresReplicator<'a> {
         let mut tables = Vec::with_capacity(table_list.len());
         for table in table_list {
             let table_name = &table.name.clone().to_string();
-            let create_table = match table.get_table(&self.transaction).await {
-                Ok(ct) => ct,
-                Err(error) => {
-                    warn!(%error, "Error looking up table, table will not be used");
-                    continue;
-                }
-            };
-
-            debug!(%create_table, "Extending recipe");
-            create_schema.add_table_create(create_table.name.to_string(), create_table.to_string());
-
-            match future::ready(
-                create_table
-                    .clone()
-                    .try_into_change()
-                    .map(|change| ChangeList::from_change(change, DataDialect::DEFAULT_POSTGRESQL)),
-            )
-            .and_then(|changelist| self.noria.extend_recipe_no_leader_ready(changelist))
-            .await
+            match table
+                .get_table(&self.transaction)
+                .and_then(|create_table| {
+                    future::ready(
+                        create_table
+                            .clone()
+                            .try_into_change()
+                            .map(move |change| (change, create_table)),
+                    )
+                })
+                .and_then(|(change, create_table)| {
+                    debug!(%create_table, "Extending recipe");
+                    create_schema
+                        .add_table_create(create_table.name.to_string(), create_table.to_string());
+                    self.noria
+                        .extend_recipe_no_leader_ready(ChangeList::from_change(
+                            change,
+                            DataDialect::DEFAULT_POSTGRESQL,
+                        ))
+                        .map_ok(|_| create_table)
+                })
+                .await
             {
-                Ok(_) => tables.push(create_table),
+                Ok(create_table) => {
+                    tables.push(create_table);
+                }
                 Err(error) => {
-                    warn!(%error, table=%table_name, "Error extending CREATE TABLE, table will not be used")
+                    warn!(%error, table=%table_name, "Error extending CREATE TABLE, table will not be used");
+                    self.noria
+                        .extend_recipe_no_leader_ready(ChangeList::from_change(
+                            Change::AddNonReplicatedRelation(Relation {
+                                schema: Some(table.schema.into()),
+                                name: table.name.clone().into(),
+                            }),
+                            DataDialect::DEFAULT_POSTGRESQL,
+                        ))
+                        .await?;
                 }
             }
         }
