@@ -709,7 +709,7 @@ mod tests {
             let mut n = n.finalize(&graph);
 
             let name = n.name().clone();
-            let mut one = move |u: Vec<TableOperation>| {
+            let one = move |u: Vec<TableOperation>| {
                 let mut m = n
                     .get_base_mut()
                     .unwrap()
