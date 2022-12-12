@@ -246,6 +246,16 @@ mod types {
             .unwrap();
 
         client
+            .simple_query("CREATE TABLE t_nulls (x abc);")
+            .await
+            .unwrap();
+
+        client
+            .simple_query("INSERT INTO t_nulls (x) VALUES ('b'), ('c'), ('a'), (null)")
+            .await
+            .unwrap();
+
+        client
             .simple_query("CREATE TABLE t_s (x text);")
             .await
             .unwrap();
@@ -310,6 +320,21 @@ mod types {
             .map(|r| r.get(0))
             .collect::<Vec<Abc>>();
         assert_eq!(upquery_res, vec![B]);
+
+        assert_eq!(
+            last_query_info(&client).await.destination,
+            QueryDestination::Readyset
+        );
+
+        let mut nulls_res = client
+            .query("SELECT x FROM t_nulls", &[])
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|r| r.get(0))
+            .collect::<Vec<Option<Abc>>>();
+        nulls_res.sort();
+        assert_eq!(nulls_res, vec![None, Some(A), Some(B), Some(C)]);
 
         assert_eq!(
             last_query_info(&client).await.destination,
