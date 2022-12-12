@@ -382,7 +382,7 @@ impl BuiltinFunction {
                 }
             }
             BuiltinFunction::DayOfWeek(arg) => {
-                let param = arg.eval(record)?;
+                let param = non_null!(arg.eval(record)?);
                 let param_cast = try_cast_or_none!(param, &DfType::Date, arg.ty());
                 Ok(DfValue::Int(
                     day_of_week(&(NaiveDate::try_from(&param_cast)?)) as i64,
@@ -835,6 +835,8 @@ mod tests {
                 .unwrap(),
             expected
         );
+
+        assert_eq!(expr.eval(&[DfValue::None]), Ok(DfValue::None));
     }
 
     #[test]
