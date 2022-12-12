@@ -214,6 +214,7 @@ impl BuiltinFunction {
                 (Self::Round(expr, prec), ty)
             }
             "json_depth" => (Self::JsonDepth(next_arg()?), DfType::Int),
+            "json_valid" => (Self::JsonValid(next_arg()?), DfType::BigInt),
             "json_typeof" | "jsonb_typeof" => (
                 Self::JsonTypeof(next_arg()?),
                 // Always returns text containing the JSON type.

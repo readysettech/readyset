@@ -48,6 +48,8 @@ pub enum BuiltinFunction {
     Round(Expr, Expr),
     /// [`json_depth`](https://dev.mysql.com/doc/refman/8.0/en/json-attribute-functions.html#function_json-depth)
     JsonDepth(Expr),
+    /// [`json_valid`](https://dev.mysql.com/doc/refman/8.0/en/json-attribute-functions.html#function_json-valid)
+    JsonValid(Expr),
     /// [`json[b]_typeof`](https://www.postgresql.org/docs/current/functions-json.html)
     JsonTypeof(Expr),
     /// [`json[b]_array_length`](https://www.postgresql.org/docs/current/functions-json.html)
@@ -112,6 +114,7 @@ impl BuiltinFunction {
             DateFormat { .. } => "date_format",
             Round { .. } => "round",
             JsonDepth { .. } => "json_depth",
+            JsonValid { .. } => "json_valid",
             JsonTypeof { .. } => "json_typeof",
             JsonArrayLength { .. } => "json_array_length",
             JsonStripNulls { .. } => "json_strip_nulls",
@@ -163,8 +166,8 @@ impl Display for BuiltinFunction {
             Round(arg1, precision) => {
                 write!(f, "({}, {})", arg1, precision)
             }
-            JsonDepth(arg) | JsonTypeof(arg) | JsonArrayLength(arg) | JsonStripNulls(arg)
-            | JsonbPretty(arg) => {
+            JsonDepth(arg) | JsonValid(arg) | JsonTypeof(arg) | JsonArrayLength(arg)
+            | JsonStripNulls(arg) | JsonbPretty(arg) => {
                 write!(f, "({})", arg)
             }
             JsonExtractPath { json, keys } => {

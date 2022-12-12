@@ -565,6 +565,21 @@ impl BuiltinFunction {
                     }
                 }
             }
+            BuiltinFunction::JsonValid(expr) => {
+                let value = expr.eval(record)?;
+
+                let valid = if expr.ty().is_known() && !expr.ty().is_any_json_like() {
+                    // Known non-json-like types return `false` and don't null-propagate.
+                    false
+                } else {
+                    // Non-text unknown-type values return `false`.
+                    <&str>::try_from(non_null!(&value))
+                        .map(|json| serde_json::from_str::<serde::de::IgnoredAny>(json).is_ok())
+                        .unwrap_or_default()
+                };
+
+                Ok(valid.into())
+            }
             BuiltinFunction::JsonTypeof(expr) => {
                 let json = non_null!(expr.eval(record)?).to_json()?;
                 Ok(get_json_value_type(&json).into())
@@ -1792,6 +1807,43 @@ mod tests {
     mod json {
         use super::*;
         use crate::utils::normalize_json;
+
+        #[test]
+        fn json_valid() {
+            #[track_caller]
+            fn test(json_expr: &str, expected: Option<bool>) {
+                let expr = format!("json_valid({json_expr})");
+
+                assert_eq!(
+                    eval_expr(&expr, MySQL),
+                    expected.into(),
+                    "incorrect result for for `{expr}`"
+                );
+            }
+
+            test("null", None);
+
+            test("'null'", Some(true));
+            test("'1'", Some(true));
+            test("'1.5'", Some(true));
+            test(r#"'"hi"'"#, Some(true));
+            test("'[]'", Some(true));
+            test("'[42]'", Some(true));
+            test("'{}'", Some(true));
+            test(r#"'{ "a": 42 }'"#, Some(true));
+
+            test("''", Some(false));
+            test("'hello'", Some(false));
+            test("'['", Some(false));
+            test("'{'", Some(false));
+            test("'+'", Some(false));
+            test("'-'", Some(false));
+
+            // Non-text types are allowed and return false.
+            test("1", Some(false));
+            test("1.5", Some(false));
+            test("dayofweek(null)", Some(false));
+        }
 
         #[test]
         fn json_array_length() {
