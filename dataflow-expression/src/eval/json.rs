@@ -244,8 +244,10 @@ pub(crate) fn json_set<'k>(
     new_json: JsonValue,
     create_if_missing: bool,
 ) -> ReadySetResult<()> {
-    if json_is_scalar(target_json) {
-        return Err(invalid_err!("cannot set path in scalar"));
+    if !target_json.is_array() && !target_json.is_object() {
+        return Err(invalid_err!(
+            "Cannot set path in non-array, non-object JSON value"
+        ));
     }
 
     let key_path: Vec<&str> = key_path
