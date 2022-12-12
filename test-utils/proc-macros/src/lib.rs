@@ -39,6 +39,40 @@ pub fn slow(_args: TokenStream, item: TokenStream) -> TokenStream {
     result.into_token_stream().into()
 }
 
+/// Annotate that the given test should be skipped when running in the nightly pipeline with
+/// `flaky_finder`
+///
+/// # Examples
+///
+/// The following test will not be run if the `FLAKY_FINDER` environment variable is set:
+///
+/// ```
+/// # use test_utils_proc_macros::skip_flaky_finder;
+/// #[test]
+/// #[skip_flaky_finder]
+/// fn my_flaky_test() {
+///     assert_eq!(1, 1);
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn skip_flaky_finder(_args: TokenStream, item: TokenStream) -> TokenStream {
+    let item = parse_macro_input!(item as ItemFn);
+    let orig_body = *item.block;
+    let body = parse_quote! {{
+        if ::test_utils::skip_with_flaky_finder() {
+            return;
+        }
+        #orig_body
+    }};
+
+    let result = ItemFn {
+        block: Box::new(body),
+        ..item
+    };
+
+    result.into_token_stream().into()
+}
+
 #[derive(Clone, Debug)]
 struct ParallelGroupArgs {
     group: Ident,
