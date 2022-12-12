@@ -1595,6 +1595,39 @@ async fn postgresql_replicate_copy_from() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
+async fn postgresql_non_base_offsets() {
+    // This test reproduces the panic described in ENG-2204.
+    // It is not clear to my why a JOIN is necessary to reproduce the problem, but a view that
+    // queries from a single table does not seem to cause the same issue, so this was the minimal
+    // failing case I was able to come up with.
+    readyset_tracing::init_test_logging();
+    let url = pgsql_url();
+    let mut client = DbConnection::connect(&url).await.unwrap();
+    client
+        .query(
+            "DROP TABLE IF EXISTS t1 CASCADE;
+             DROP TABLE IF EXISTS t2 CASCADE;
+             CREATE TABLE t1(i integer);
+             CREATE TABLE t2(j integer);
+             CREATE OR REPLACE VIEW v1 AS SELECT i FROM t1 JOIN t2 ON i = j;
+             INSERT INTO t1 VALUES (0);
+             INSERT INTO t2 VALUES (0);",
+        )
+        .await
+        .unwrap();
+
+    let mut ctx = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
+    ctx.ready_notify.as_ref().unwrap().notified().await;
+
+    ctx.check_results("v1", "Snapshot", &[&[0.into()]])
+        .await
+        .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
 async fn postgresql_replicate_citext() {
     readyset_tracing::init_test_logging();
     let url = pgsql_url();

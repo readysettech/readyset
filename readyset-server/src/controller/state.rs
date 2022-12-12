@@ -725,6 +725,11 @@ impl DfState {
                                     lni
                                 )
                             })?;
+
+                            if !self.ingredients[*ni].is_base() {
+                                continue;
+                            }
+
                             #[allow(clippy::indexing_slicing)] // internal invariant
                             let table_name = self.ingredients[*ni].name();
                             acc.tables.insert(table_name.clone(), offset); // TODO min of all
