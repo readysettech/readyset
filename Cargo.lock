@@ -4644,6 +4644,7 @@ dependencies = [
  "serial_test",
  "streaming-iterator",
  "test-strategy",
+ "test-utils",
  "thiserror",
  "tikv-jemallocator",
  "tokio",

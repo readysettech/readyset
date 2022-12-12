@@ -8,6 +8,7 @@ use readyset_client_test_helpers::mysql_helpers::{last_query_info, MySQLAdapter}
 use readyset_client_test_helpers::{self, sleep, TestBuilder};
 use readyset_server::Handle;
 use serial_test::serial;
+use test_utils::skip_flaky_finder;
 
 async fn setup_with(backend_builder: BackendBuilder) -> (mysql_async::Opts, Handle) {
     TestBuilder::new(backend_builder)
@@ -633,6 +634,7 @@ async fn drop_then_recreate_table_with_query() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
+#[skip_flaky_finder]
 async fn transaction_proxies() {
     let (opts, _handle) = setup().await;
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
@@ -704,6 +706,7 @@ async fn invalid_sql_parsing_failed_doesnt_show_proxied() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
+#[skip_flaky_finder]
 async fn switch_database_with_use() {
     let (opts, _handle) = setup().await;
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
