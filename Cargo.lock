@@ -4921,6 +4921,7 @@ dependencies = [
  "readyset-tracing",
  "serde",
  "tracing",
+ "vec1",
 ]
 
 [[package]]

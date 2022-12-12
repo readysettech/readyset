@@ -10,7 +10,7 @@ use readyset_util::redacted::Sensitive;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use url::Url;
-use vec1::Size0Error;
+use vec1::{Size0Error, Vec1};
 
 /// Wraps a boxed `std::error::Error` to make it implement, um, `std::error::Error`.
 /// Yes, I'm as disappointed as you are.
@@ -661,6 +661,18 @@ pub enum ReadySetError {
     /// Error interacting with Zookeeper
     #[error("Zookeeper error: {0}")]
     ZookeeperError(String),
+
+    /// A query contains placeholders in positions that are unsupported by ReadySet.
+    #[error("Query contains placeholders in unsupported positions")]
+    UnsupportedPlaceholders {
+        /// The placeholders that were unsupported. This is an internal field, and not displayed to
+        /// the user.
+        ///
+        /// The query must have had all placeholders converted to DollarNumber placeholders. The
+        /// values in this field correspond to the post-rewrite placeholders, which may not be what
+        /// was given by the client. As such, these values may not make sense to a user.
+        placeholders: Vec1<u32>,
+    },
 }
 
 impl ReadySetError {
