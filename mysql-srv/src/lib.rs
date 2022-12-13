@@ -292,8 +292,6 @@ pub struct CachedSchema {
     pub mysql_schema: Vec<Column>,
     /// Associated ReadySet types
     pub column_types: Vec<DfType>,
-    /// Mapping from ReadySet return schema to the MySQL return schema
-    pub column_map: Vec<Option<usize>>,
     /// Preencoded schema as a byte dump
     pub preencoded_schema: Arc<[u8]>,
 }

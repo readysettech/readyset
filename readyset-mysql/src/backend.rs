@@ -18,7 +18,7 @@ use readyset_adapter::backend::{
     noria_connector, QueryResult, SinglePrepareResult, UpstreamPrepare,
 };
 use readyset_data::{DfType, DfValue, DfValueKind};
-use readyset_errors::{internal, internal_err, ReadySetError};
+use readyset_errors::{internal, ReadySetError};
 use readyset_tracing::{error, trace};
 use streaming_iterator::StreamingIterator;
 use tokio::io::{self, AsyncWrite};
@@ -356,31 +356,17 @@ where
         }
         noria_connector::QueryResult::Select { mut rows, schema } => {
             let mysql_schema = convert_columns!(schema.schema, writer);
-            let columns = schema.columns;
             let mut rw = writer.start(&mysql_schema).await?;
             while let Some(row) = rows.next() {
-                for c in &mysql_schema {
-                    match columns.iter().position(|f| f.as_str() == c.column) {
-                        Some(coli) => {
-                            let ty = schema
-                                .schema
-                                .get(coli)
-                                .map(|cs| cs.column_type.clone())
-                                .unwrap_or_default();
+                for (coli, (val, c)) in row.iter().zip(&mysql_schema).enumerate() {
+                    let ty = schema
+                        .schema
+                        .get(coli)
+                        .map(|cs| cs.column_type.clone())
+                        .unwrap_or_default();
 
-                            if let Err(e) = write_column(&mut rw, &row[coli], c, &ty).await {
-                                return handle_column_write_err(e, rw).await;
-                            }
-                        }
-                        None => {
-                            let e = Error::from(internal_err!(
-                                "tried to emit column {:?} not in getter with schema {:?}",
-                                c.column,
-                                columns
-                            ));
-                            error!(err = %e);
-                            return rw.error(e.error_kind(), e.to_string().as_bytes()).await;
-                        }
+                    if let Err(e) = write_column(&mut rw, val, c, &ty).await {
+                        return handle_column_write_err(e, rw).await;
                     }
                 }
                 rw.end_row().await?;
@@ -589,7 +575,6 @@ where
                 let CachedSchema {
                     mysql_schema,
                     column_types,
-                    column_map,
                     preencoded_schema,
                 } = match schema_cache.entry(id) {
                     // `or_insert_with` would be cleaner but we need an async closure here
@@ -605,16 +590,9 @@ where
                         let preencoded_schema =
                             mysql_srv::prepare_column_definitions(&mysql_schema);
 
-                        // Now append the right position too
-                        let column_map = mysql_schema
-                            .iter()
-                            .map(|c| schema.columns.iter().position(|f| f == c.column.as_str()))
-                            .collect::<Vec<_>>();
-
                         entry.insert(CachedSchema {
                             mysql_schema,
                             column_types,
-                            column_map,
                             preencoded_schema: preencoded_schema.into(),
                         })
                     }
@@ -624,25 +602,11 @@ where
                     .start_with_cache(mysql_schema, preencoded_schema.clone())
                     .await?;
                 while let Some(row) = rows.next() {
-                    for (c, ty, pos) in
-                        izip!(mysql_schema.iter(), column_types.iter(), column_map.iter())
+                    for (c, ty, val) in izip!(mysql_schema.iter(), column_types.iter(), row.iter())
                     {
-                        match pos {
-                            Some(coli) => {
-                                if let Err(e) = write_column(&mut rw, &row[*coli], c, ty).await {
-                                    return handle_column_write_err(e, rw).await;
-                                };
-                            }
-                            None => {
-                                let e = Error::from(internal_err!(
-                                    "tried to emit column {:?} not in getter with schema {:?}",
-                                    c.column,
-                                    mysql_schema
-                                ));
-                                error!(err = %e);
-                                return rw.error(e.error_kind(), e.to_string().as_bytes()).await;
-                            }
-                        }
+                        if let Err(e) = write_column(&mut rw, val, c, ty).await {
+                            return handle_column_write_err(e, rw).await;
+                        };
                     }
                     rw.end_row().await?;
                 }

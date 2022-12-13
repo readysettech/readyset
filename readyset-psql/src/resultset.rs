@@ -17,40 +17,12 @@ pub struct Resultset {
     /// ReadySet interface lookups performed by the backend.
     results: ResultIterator,
 
-    /// The fields to project for each row. A `Results` returned by a ReadySet interface lookup may
-    /// contain extraneous fields that should not be projected into the query result output. In
-    /// particular, bogokeys and other lookup keys that are not requested for projection by the SQL
-    /// query may be present in `results` but should be excluded from query output. This
-    /// `project_fields` attribute contains the indices of the fields that _should_ be projected
-    /// into the output.
-    project_fields: Arc<Vec<usize>>,
-
     /// The data types of the projected fields for each row.
     project_field_types: Arc<Vec<Type>>,
 }
 
 impl Resultset {
     pub fn try_new(results: ResultIterator, schema: &SelectSchema) -> Result<Self, ps::Error> {
-        // Extract the indices of the schema's `schema` items within the schema's `columns` list.
-        // Because the ordering of `columns` is the same as the ordering of fields within the rows
-        // emitted by a `Results`, these indices also reference the fields within each row
-        // corresponding to entries in the schema's `schema`. They are the fields to be projected
-        // when iteration is performed over each `Row`'s `Value`s.
-        let project_fields = Arc::new(
-            schema
-                .0
-                .schema
-                .iter()
-                .map(|col| -> Result<usize, ps::Error> {
-                    schema
-                        .0
-                        .columns
-                        .iter()
-                        .position(|name| col.column.name == name)
-                        .ok_or_else(|| ps::Error::InternalError("inconsistent schema".to_string()))
-                })
-                .collect::<Result<Vec<usize>, ps::Error>>()?,
-        );
         // Extract the appropriate `tokio_postgres` `Type` for each column in the schema.
         let project_field_types = Arc::new(
             schema
@@ -62,7 +34,6 @@ impl Resultset {
         );
         Ok(Resultset {
             results,
-            project_fields,
             project_field_types,
         })
     }
@@ -76,13 +47,9 @@ impl IntoIterator for Resultset {
     fn into_iter(self) -> Self::IntoIter {
         self.results
             .into_iter()
-            .zip(iter::repeat((
-                self.project_fields,
-                self.project_field_types,
-            )))
-            .map(|(values, (project_fields, project_field_types))| Row {
+            .zip(iter::repeat(self.project_field_types))
+            .map(|(values, project_field_types)| Row {
                 values,
-                project_fields,
                 project_field_types,
             })
     }
@@ -114,7 +81,6 @@ impl TryFrom<Vec<tokio_postgres::Row>> for Resultset {
         let column_types: Vec<Type> = columns.iter().map(|c| c.type_().clone()).collect();
         Ok(Resultset {
             results: ResultIterator::owned(vec![Results::new(result_rows)]),
-            project_fields: Arc::new((0_usize..columns.len()).collect()),
             project_field_types: Arc::new(column_types),
         })
     }
@@ -156,7 +122,6 @@ mod tests {
         });
         let resultset = Resultset::try_new(ResultIterator::owned(results), &schema).unwrap();
         assert_eq!(resultset.results.into_vec(), Vec::<Vec<DfValue>>::new());
-        assert_eq!(resultset.project_fields, Arc::new(vec![0]));
         assert_eq!(resultset.project_field_types, Arc::new(vec![Type::INT8]));
     }
 
@@ -202,89 +167,6 @@ mod tests {
                 vec![ps::Value::BigInt(10)],
                 vec![ps::Value::BigInt(11)],
                 vec![ps::Value::BigInt(12)]
-            ]
-        );
-    }
-
-    #[test]
-    fn create_resultset_with_unprojected_fields() {
-        let results = vec![];
-        let schema = SelectSchema(cl::SelectSchema {
-            use_bogo: true,
-            schema: Cow::Owned(vec![
-                ColumnSchema {
-                    column: "tab1.col1".into(),
-                    column_type: DfType::BigInt,
-                    base: None,
-                },
-                ColumnSchema {
-                    column: "tab1.col2".into(),
-                    column_type: DfType::DEFAULT_TEXT,
-                    base: None,
-                },
-            ]),
-            columns: Cow::Owned(vec![
-                "col1".into(),
-                "col3".into(),
-                "col2".into(),
-                "bogokey".into(),
-            ]),
-        });
-        let resultset = Resultset::try_new(ResultIterator::owned(results), &schema).unwrap();
-        assert_eq!(resultset.results.into_vec(), Vec::<Vec<DfValue>>::new());
-        // The projected field indices of "col1" and "col2" within `columns` are 0 and 2. The
-        // unprojected "col3" and "bogokey" fields are excluded.
-        assert_eq!(resultset.project_fields, Arc::new(vec![0, 2]));
-        assert_eq!(
-            resultset.project_field_types,
-            Arc::new(vec![Type::INT8, Type::TEXT])
-        );
-    }
-
-    #[test]
-    fn iterate_resultset_with_unprojected_fields() {
-        let results = vec![Results::new(vec![
-            vec![
-                DfValue::Int(10),
-                DfValue::Int(99),
-                DfValue::Text("abcdef".into()),
-                DfValue::Int(0),
-            ],
-            vec![
-                DfValue::Int(11),
-                DfValue::Int(99),
-                DfValue::Text("ghijkl".into()),
-                DfValue::Int(0),
-            ],
-        ])];
-        let schema = SelectSchema(cl::SelectSchema {
-            use_bogo: true,
-            schema: Cow::Owned(vec![
-                ColumnSchema {
-                    column: "tab1.col1".into(),
-                    column_type: DfType::BigInt,
-                    base: None,
-                },
-                ColumnSchema {
-                    column: "tab1.col2".into(),
-                    column_type: DfType::DEFAULT_TEXT,
-                    base: None,
-                },
-            ]),
-            columns: Cow::Owned(vec![
-                "col1".into(),
-                "col3".into(),
-                "col2".into(),
-                "bogokey".into(),
-            ]),
-        });
-        let resultset = Resultset::try_new(ResultIterator::owned(results), &schema).unwrap();
-        // Only the columns to be projected (col1 and col2) are included in the collected values.
-        assert_eq!(
-            collect_resultset_values(resultset),
-            vec![
-                vec![ps::Value::BigInt(10), ps::Value::Text("abcdef".into())],
-                vec![ps::Value::BigInt(11), ps::Value::Text("ghijkl".into())]
             ]
         );
     }

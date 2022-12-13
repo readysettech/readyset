@@ -34,6 +34,40 @@ async fn setup_telemetry() -> (TelemetryReporter, mysql_async::Opts, Handle) {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn two_columns_with_same_name() {
+    let (opts, _handle) = setup().await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+
+    conn.query_drop("create table t1 (x int);").await.unwrap();
+
+    conn.query_drop("insert into t1 (x) values (1);")
+        .await
+        .unwrap();
+
+    conn.query_drop("create table t2 (x int);").await.unwrap();
+
+    conn.query_drop("insert into t2 (x) values (2);")
+        .await
+        .unwrap();
+
+    sleep().await;
+
+    let ad_hoc_res = conn
+        .query_first::<(i32, i32), _>("SELECT t1.x, t2.x FROM t1, t2")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(ad_hoc_res, (1, 2));
+
+    let exec_res = conn
+        .exec_first::<(i32, i32), _, _>("SELECT t1.x, t2.x FROM t1, t2", ())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(exec_res, (1, 2));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn delete_basic() {
     let (opts, _handle) = setup().await;
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();

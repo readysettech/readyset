@@ -13,14 +13,6 @@ pub struct Row {
     /// iteration. (See documentaion below for `project_fields`).
     pub values: Vec<DfValue>,
 
-    /// The fields to project. A `Vec<DfValue>` returned from a ReadySet interface lookup may
-    /// contain extraneous fields that should not be projected into the query result output. In
-    /// particular, bogokeys and other lookup keys that are not requested for projection by the SQL
-    /// query may be present in `values` but should be excluded from query output. This
-    /// `project_fields` attribute contains the indices within `values` that _should_ be projected
-    /// into the output.
-    pub project_fields: Arc<Vec<usize>>,
-
     /// The data types of the projected fields for this row.
     pub project_field_types: Arc<Vec<Type>>,
 }
@@ -49,8 +41,7 @@ impl Iterator for RowIterator {
 
     fn next(&mut self) -> Option<Value> {
         let col_type = self.row.project_field_types.get(self.pos)?.clone();
-        let i = *self.row.project_fields.get(self.pos)?;
-        let value = self.row.values.get(i)?.clone();
+        let value = self.row.values.get(self.pos)?.clone();
         self.pos += 1;
         Some(Value { col_type, value })
     }
@@ -75,7 +66,6 @@ mod tests {
     fn iterate_empty_row() {
         let row = Row {
             values: vec![],
-            project_fields: Arc::new(vec![]),
             project_field_types: Arc::new(vec![]),
         };
         assert_eq!(collect_row_values(row), Vec::<ps::Value>::new());
@@ -85,7 +75,6 @@ mod tests {
     fn iterate_singleton_row() {
         let row = Row {
             values: vec![DfValue::Int(43)],
-            project_fields: Arc::new(vec![0]),
             project_field_types: Arc::new(vec![Type::INT4]),
         };
         assert_eq!(collect_row_values(row), vec![ps::Value::Int(43)]);
@@ -101,76 +90,6 @@ mod tests {
                 DfValue::Float(8.99),
                 DfValue::from(Decimal::new(35901234, 4)), // 3590.1234
             ],
-            project_fields: Arc::new(vec![0, 1, 2, 3, 4]),
-            project_field_types: Arc::new(vec![
-                Type::INT4,
-                Type::TEXT,
-                Type::FLOAT8,
-                Type::FLOAT4,
-                Type::NUMERIC,
-            ]),
-        };
-        assert_eq!(
-            collect_row_values(row),
-            vec![
-                ps::Value::Int(43),
-                ps::Value::Text("abcde".into()),
-                ps::Value::Double(10.000000222),
-                ps::Value::Float(8.99),
-                ps::Value::Numeric(Decimal::new(35901234, 4)),
-            ]
-        );
-    }
-
-    #[test]
-    fn iterate_row_with_trailing_unprojected_fields() {
-        let row = Row {
-            values: vec![
-                DfValue::Int(43),
-                DfValue::Text("abcde".into()),
-                DfValue::Double(10.000000222),
-                DfValue::Float(8.99),
-                DfValue::from(Decimal::new(35901234, 4)), // 3590.1234
-                DfValue::Int(0),
-            ],
-            // Only the first three fields are specified for projection.
-            project_fields: Arc::new(vec![0, 1, 2, 3, 4]),
-            project_field_types: Arc::new(vec![
-                Type::INT4,
-                Type::TEXT,
-                Type::FLOAT8,
-                Type::FLOAT4,
-                Type::NUMERIC,
-            ]),
-        };
-        assert_eq!(
-            collect_row_values(row),
-            vec![
-                ps::Value::Int(43),
-                ps::Value::Text("abcde".into()),
-                ps::Value::Double(10.000000222),
-                ps::Value::Float(8.99),
-                ps::Value::Numeric(Decimal::new(35901234, 4)),
-            ]
-        );
-    }
-
-    #[test]
-    fn iterate_row_with_interleaved_unprojected_fields() {
-        let row = Row {
-            values: vec![
-                DfValue::Int(0),
-                DfValue::Int(43),
-                DfValue::Text("abcde".into()),
-                DfValue::Int(0),
-                DfValue::Int(0),
-                DfValue::Double(10.000000222),
-                DfValue::Float(8.99),
-                DfValue::from(Decimal::new(35901234, 4)), // 3590.1234
-                DfValue::Int(0),
-            ],
-            // Only some of the fields are specified for projection.
-            project_fields: Arc::new(vec![1, 2, 5, 6, 7]),
             project_field_types: Arc::new(vec![
                 Type::INT4,
                 Type::TEXT,

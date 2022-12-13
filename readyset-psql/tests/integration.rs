@@ -12,6 +12,48 @@ async fn setup() -> (tokio_postgres::Config, Handle) {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn two_columns_with_same_name() {
+    let (opts, _handle) = setup().await;
+    let conn = connect(opts).await;
+
+    conn.simple_query("create table t1 (x int);").await.unwrap();
+
+    conn.simple_query("insert into t1 (x) values (1);")
+        .await
+        .unwrap();
+
+    conn.simple_query("create table t2 (x int);").await.unwrap();
+
+    conn.simple_query("insert into t2 (x) values (2);")
+        .await
+        .unwrap();
+
+    sleep().await;
+
+    let ad_hoc_res = match conn
+        .simple_query("SELECT t1.x, t2.x FROM t1, t2")
+        .await
+        .unwrap()
+        .into_iter()
+        .next()
+        .unwrap()
+    {
+        SimpleQueryMessage::Row(r) => (r.get(0).unwrap().to_owned(), r.get(1).unwrap().to_owned()),
+        _ => panic!(),
+    };
+    assert_eq!(ad_hoc_res, ("1".to_owned(), "2".to_owned()));
+
+    let exec_res = conn
+        .query_one("SELECT t1.x, t2.x FROM t1, t2", &[])
+        .await
+        .unwrap();
+    assert_eq!(
+        (exec_res.get::<_, i32>(0), exec_res.get::<_, i32>(1)),
+        (1, 2)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn delete_basic() {
     let (opts, _handle) = setup().await;
     let conn = connect(opts).await;
