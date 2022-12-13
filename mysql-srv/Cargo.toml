@@ -13,7 +13,7 @@ categories = ["api-bindings", "network-programming", "database-implementations"]
 
 [dependencies]
 nom = "7.1"
-mysql_async = "0.29"
+mysql_async = { workspace = true }
 mysql_common = { version = "0.28.0", features = ["chrono"] }
 byteorder = "1"
 chrono = "0.4"
@@ -29,7 +29,7 @@ readyset-data = { path = "../readyset-data" }
 readyset-tracing = { path = "../readyset-tracing" }
 
 [dev-dependencies]
-tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git" }
+tokio-postgres = { workspace = true }
 mysql = "22.0.0"
 
 slab = "0.4.2"

@@ -56,5 +56,16 @@ members = [
 ]
 resolver = "2"
 
+[workspace.dependencies]
+consulrs = { git = "https://github.com/readysettech/consulrs.git", branch = "allow-disabling-rustls-tls-2" }
+eui48 = { git = "https://github.com/readysettech/eui48.git", branch = "master", default-features = false }
+mysql_async = { git = "https://github.com/readysettech/mysql_async", branch = "lru-fix" }
+nperf-core = { git = "https://github.com/readysettech/not-perf.git" }
+postgres = { git = "https://github.com/readysettech/rust-postgres.git" }
+postgres-native-tls = { git = "https://github.com/readysettech/rust-postgres.git" }
+postgres-protocol = { git = "https://github.com/readysettech/rust-postgres.git" }
+postgres-types = { git = "https://github.com/readysettech/rust-postgres.git" }
+tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git" }
+
 [profile.release]
 debug=true

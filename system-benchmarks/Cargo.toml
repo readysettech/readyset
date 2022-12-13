@@ -29,7 +29,7 @@ criterion = { version = "0.3", features = ["async_tokio"] }
 fork = "0.1"
 futures = "0.3"
 num_cpus = "1.13"
-mysql_async = "0.29"
+mysql_async = { workspace = true }
 parking_lot = "0.12"
 temp-dir = "0.1"
 tikv-jemallocator = "0.4"
@@ -38,7 +38,7 @@ regex = "1.5"
 
 bincode = "1.3"
 
-nperf-core = { git = "https://github.com/readysettech/not-perf.git" }
+nperf-core = { workspace = true }
 structopt = "0.2"
 libc = "0.2"
 

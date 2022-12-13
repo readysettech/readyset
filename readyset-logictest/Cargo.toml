@@ -12,11 +12,11 @@ console = "0.15.0"
 derive_more = "0.99.11"
 hex = "0.4.3"
 md5 = "0.7.0"
-mysql_async = "0.29.0"
+mysql_async = { workspace = true }
 mysql_common = { version = "0.28.0", features = ["chrono"] }
 tikv-jemallocator = "0.4"
-tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", features = ["with-chrono-0_4"] }
-postgres-native-tls = { git = "https://github.com/readysettech/rust-postgres.git" }
+tokio-postgres = { workspace = true, features = ["with-chrono-0_4"] }
+postgres-native-tls = { workspace = true }
 native-tls = "0.2.7"
 nom = "7.1"
 nom_locate = "4.0.0"

@@ -46,20 +46,20 @@ proptest = "1.0.0"
 derive_more = "0.99.11"
 backoff = { version = "0.4.0", features = ["tokio"] }
 url = { version = "2.2", features = ["serde"] }
-mysql_async = "0.29"
+mysql_async = { workspace = true }
 rand = "0.8.4"
 parking_lot = "0.11.2"
 cloudflare-zlib = { version = "0.2.9", features = ["arm-always"] }
 smallvec = "1.8"
 rocksdb = { version = "0.19", default-features = false, features = ["lz4"] }
 
-tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", features = ["with-chrono-0_4", "with-eui48-1", "with-uuid-0_8", "with-serde_json-1", "with-bit-vec-0_6"] }
+tokio-postgres = { workspace = true, features = ["with-chrono-0_4", "with-eui48-1", "with-uuid-0_8", "with-serde_json-1", "with-bit-vec-0_6"] }
 metrics = "0.19"
 metrics-util = "0.13"
 itertools = "0.10"
 bytes = "1.0.1"
 rust_decimal = { version = "1.26", features = ["db-tokio-postgres", "serde-str"] }
-eui48 = { version = "1.1", default-features = false }
+eui48 = { workspace = true }
 uuid = { version = "0.8", features = ["v4"] }
 bit-vec = { version = "0.6", features = ["serde"] }
 triomphe = "0.1"
@@ -69,7 +69,7 @@ streaming-iterator = "0.1"
 zookeeper-async = "4.0.1"
 enum_dispatch = "0.3.7"
 async-trait = "0.1"
-consulrs = { git = "https://github.com/readysettech/consulrs.git", branch = "allow-disabling-rustls-tls-2" }
+consulrs = { workspace = true }
 base64 = "0.13"
 
 # channel/
