@@ -580,6 +580,11 @@ impl BuiltinFunction {
 
                 Ok(valid.into())
             }
+            BuiltinFunction::JsonQuote(expr) => {
+                // MySQL does not validate the JSON text.
+                let json = non_null!(expr.eval(record)?);
+                Ok(crate::eval::json::json_quote(<&str>::try_from(&json)?).into())
+            }
             BuiltinFunction::JsonTypeof(expr) => {
                 let json = non_null!(expr.eval(record)?).to_json()?;
                 Ok(get_json_value_type(&json).into())

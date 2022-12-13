@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::fmt::Write;
 use std::hash::{Hash, Hasher};
 use std::mem;
 
@@ -60,6 +61,41 @@ pub(crate) fn json_depth(json: &JsonValue) -> u64 {
         JsonValue::Object(object) => 1 + max_depth(object.values()),
         _ => 1,
     }
+}
+
+/// Quotes and escapes a string to produce a valid JSON string literal for inclusion within a JSON
+/// document.
+pub(crate) fn json_quote(json: &str) -> String {
+    let mut result = String::with_capacity(json.len() + 2);
+    result.push('"');
+
+    // Find characters to escape.
+    let mut prev_index = 0;
+    let mut search_iter = json.as_bytes().iter().enumerate();
+
+    while let Some((next_index, &ch)) = search_iter.find(|(_, &ch)| {
+        // https://github.com/mysql/mysql-server/blob/8.0/sql-common/json_dom.cc#L1144
+        matches!(ch, 0..=0x1f | b'"' | b'\\')
+    }) {
+        // Push previous characters.
+        result.push_str(&json[prev_index..next_index]);
+
+        // Push escaped character.
+        if ch <= 0x1f {
+            write!(result, "\\u{ch:04x}").unwrap();
+        } else {
+            result.push('\\');
+            result.push(ch as char);
+        }
+
+        prev_index = next_index + 1;
+    }
+
+    // Push remaining characters.
+    result.push_str(&json[prev_index..]);
+
+    result.push('"');
+    result
 }
 
 /// Removes a value from JSON using PostgreSQL `#-` semantics.
@@ -476,7 +512,105 @@ impl Hash for JsonScalar<'_> {
 
 #[cfg(test)]
 mod tests {
+    use itertools::Itertools;
+    use proptest::prelude::*;
+
     use super::*;
+
+    mod json_quote {
+        use test_strategy::proptest;
+
+        use super::*;
+
+        #[proptest]
+        fn inputs(string: String) {
+            let quoted = json_quote(&string);
+            assert!(quoted.len() >= string.len() + 2);
+        }
+
+        #[test]
+        fn mixed() {
+            assert_eq!(json_quote("he\0ll\"o"), r#""he\u0000ll\"o""#);
+            assert_eq!(json_quote("wo\u{1f}rl\\d"), r#""wo\u001frl\\d""#);
+        }
+
+        #[proptest]
+        fn non_escaped(s: String) {
+            let contains_escapable = s
+                .chars()
+                .any(|ch| matches!(ch, '\0'..='\u{1f}' | '"' | '\\'));
+
+            prop_assume!(!contains_escapable);
+
+            assert_eq!(json_quote(&s), format!("\"{s}\""));
+        }
+
+        #[test]
+        fn escape_special() {
+            fn escape(ch: char) -> String {
+                let hexes = [
+                    "00", "01", "02", "03", "04", "05", "06", "07", "08", "09", "0a", "0b", "0c",
+                    "0d", "0e", "0f", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19",
+                    "1a", "1b", "1c", "1d", "1e", "1f",
+                ];
+                format!("\\u00{}", hexes[ch as usize])
+            }
+
+            fn test(chars: &[char]) {
+                let input = chars.iter().join("");
+
+                let expected = format!("\"{}\"", chars.iter().copied().map(escape).join(""));
+                let result = json_quote(&input);
+
+                assert_eq!(result, expected, "wrong result for {input:?}");
+            }
+
+            let iter = (0u8..=0x1f).map(|ch| ch as char);
+
+            for a in iter.clone() {
+                test(&[a]);
+
+                for b in iter.clone() {
+                    test(&[a, b]);
+
+                    for c in iter.clone() {
+                        test(&[a, b, c]);
+                    }
+                }
+            }
+        }
+
+        #[test]
+        fn escape_backslash() {
+            fn test(strings: &[&str]) {
+                let input = strings.join("");
+
+                let expected = format!("\"{}\"", strings.iter().map(|s| format!("\\{s}")).join(""));
+                let result = json_quote(&input);
+
+                assert_eq!(result, expected, "wrong result for {input:?}");
+            }
+
+            let strings = ["\"", "\\"];
+
+            for a in strings {
+                test(&[a]);
+
+                for b in strings {
+                    test(&[a, b]);
+                }
+            }
+        }
+
+        #[test]
+        fn unicode() {
+            let strings = ["año", "straße", "🙂", "🦀"];
+
+            for s in strings {
+                assert_eq!(json_quote(s), format!("\"{s}\""));
+            }
+        }
+    }
 
     mod json_scalar {
         use proptest::prelude::*;
