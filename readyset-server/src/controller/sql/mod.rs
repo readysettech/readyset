@@ -18,7 +18,7 @@ use readyset_errors::{
     internal, internal_err, invalid_err, invariant, unsupported, ReadySetError, ReadySetResult,
 };
 use readyset_sql_passes::alias_removal::TableAliasRewrite;
-use readyset_sql_passes::{AliasRemoval, Rewrite, RewriteContext};
+use readyset_sql_passes::{AliasRemoval, DetectUnsupportedPlaceholders, Rewrite, RewriteContext};
 use readyset_tracing::{debug, trace};
 use readyset_util::redacted::Sensitive;
 use tracing::{error, info, warn};
@@ -524,19 +524,31 @@ impl SqlIncorporator {
         let name = name.unwrap_or_else(|| format!("q_{}", self.num_queries).into());
 
         let mut invalidating_tables = vec![];
-        let mir_query = match self.select_query_to_mir(
-            name.clone(),
-            &mut stmt,
-            schema_search_path,
-            Some(&mut invalidating_tables),
-            LeafBehavior::Leaf,
-            mig,
-        ) {
-            Ok(mir_query) => Some(mir_query),
-            // If we fail to migrate the query, see if we can reuse an existing cached query.
-            Err(err) => {
-                let caches = self.registry.caches_for_query(stmt.clone())?;
+        let mir_query = match stmt.detect_unsupported_placeholders().and_then(|_| {
+            self.select_query_to_mir(
+                name.clone(),
+                &mut stmt,
+                schema_search_path,
+                Some(&mut invalidating_tables),
+                LeafBehavior::Leaf,
+                mig,
+            )
+        }) {
+            // Placeholders were supported and we successfully added a query
+            Ok(mir_query) => Ok(Some(mir_query)),
+            // Placeholder positions were not supported in the query, see if we can reuse an
+            // existing cached query.
+            Err(err @ ReadySetError::UnsupportedPlaceholders { .. }) => {
+                // We must rewrite before looking for a query we can reuse.
+                let rewritten_stmt = self.rewrite(
+                    stmt.clone(),
+                    schema_search_path,
+                    mig.dialect,
+                    Some(&mut invalidating_tables),
+                )?;
+                let caches = self.registry.caches_for_query(rewritten_stmt)?;
                 if caches.is_empty() {
+                    // Can't reuse anything. Return the error.
                     return Err(err);
                 } else {
                     #[allow(clippy::unwrap_used)]
@@ -549,10 +561,15 @@ impl SqlIncorporator {
                          placeholder values",
                         name.display_unquoted()
                     );
+                    // We have nothing to add to the graph so we return None. However, we can't exit
+                    // here, because we need to add the query to registry.
+                    Ok(None)
                 }
-                None
             }
-        };
+            // We did not detect unsupported placeholders, but we failed to migrate the query.
+            // Unlikely that we could reuse a cache, so we don't attempt to do so.
+            Err(err) => Err(err),
+        }?;
 
         let aliased = !self.registry.add_query(RecipeExpr::Cache {
             name: name.clone(),
@@ -560,13 +577,13 @@ impl SqlIncorporator {
             always,
         })?;
         self.registry
-            .insert_invalidating_tables(name.clone(), invalidating_tables.clone())?;
+            .insert_invalidating_tables(name.clone(), invalidating_tables)?;
 
         if aliased {
             return Ok(name);
         }
 
-        // Do not add a leaf if we are reusing a query
+        // We don't add a leaf if we're reusing a query
         if let Some(mir_query) = mir_query {
             let leaf = self.mir_to_dataflow(name.clone(), mir_query, mig)?;
             self.leaf_addresses.insert(name.clone(), leaf);
