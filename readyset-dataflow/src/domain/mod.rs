@@ -1505,6 +1505,7 @@ impl Domain {
                         for index in strict_indices {
                             debug!(
                                 key = ?index,
+                                %node,
                                 "told to prepare full state"
                             );
                             state.add_key(index, None);
