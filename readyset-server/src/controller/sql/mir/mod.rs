@@ -21,6 +21,7 @@ use nom_sql::{
     FieldDefinitionExpr, FieldReference, FunctionExpr, Literal, OrderClause, OrderType, Relation,
     SqlIdentifier, TableKey, UnaryOperator,
 };
+use petgraph::visit::Reversed;
 use petgraph::Direction;
 use readyset_errors::{
     internal, internal_err, invalid_err, invariant, invariant_eq, unsupported, ReadySetError,
@@ -78,6 +79,16 @@ fn value_columns_needed_for_predicates(
         })
         .filter(|(c, _)| pred_columns.contains(c))
         .collect()
+}
+
+/// The result of removing a relation from MIR.
+pub struct MirRemovalResult {
+    /// The dataflow nodes corresponding to the MIR nodes that
+    /// need to be removed.
+    pub dataflow_nodes_to_remove: HashSet<DfNodeIndex>,
+    /// The relations (tables, queries and views) that were removed
+    /// in the process.
+    pub relations_removed: HashSet<Relation>,
 }
 
 /// Kinds of joins in MIR
@@ -318,7 +329,9 @@ impl SqlToMirConverter {
         })
     }
 
-    pub(super) fn remove_query(&mut self, name: &Relation) -> ReadySetResult<DfNodeIndex> {
+    /// Removes a cached query/view from MIR, along with all views/cached queries that depend on
+    /// it.
+    pub(super) fn remove_query(&mut self, name: &Relation) -> ReadySetResult<MirRemovalResult> {
         let leaf_mn =
             self.relations
                 .remove(name)
@@ -326,34 +339,11 @@ impl SqlToMirConverter {
                     relation: name.to_string(),
                 })?;
 
-        // The only moment when MIR nodes might not have a flow node present,
-        // is during query creation. By now, it should have one
-        #[allow(clippy::unwrap_used)]
-        let dataflow_node = self
-            .mir_graph
-            .resolve_dataflow_node(leaf_mn)
-            .ok_or_else(|| ReadySetError::MirNodeMustHaveDfNodeAssigned {
-                mir_node_index: leaf_mn.index(),
-            })?;
-
-        let roots: Vec<NodeIndex> = self
-            .mir_graph
-            .node_indices()
-            .filter(|&n| {
-                self.mir_graph
-                    .neighbors_directed(n, Direction::Incoming)
-                    .next()
-                    .is_none()
-            })
-            .filter(|&n| self.mir_graph[n].is_owned_by(name))
-            .collect();
-
-        self.remove_owners_below(roots.as_slice(), self.mir_graph[leaf_mn].owners().clone())?;
-        Ok(dataflow_node)
+        self.remove_dependent_nodes(leaf_mn)
     }
 
     /// Removes a base table, along with all the views/cached queries associated with it.
-    pub(super) fn remove_base(&mut self, name: &Relation) -> ReadySetResult<DfNodeIndex> {
+    pub(super) fn remove_base(&mut self, name: &Relation) -> ReadySetResult<MirRemovalResult> {
         debug!(%name, "Removing base node");
         let root = self
             .relations
@@ -362,16 +352,22 @@ impl SqlToMirConverter {
                 relation: name.to_string(),
             })?;
 
-        // The only moment when MIR nodes might not have a flow node present,
-        // is during query creation. By now, it should have one
-        #[allow(clippy::unwrap_used)]
-        let dataflow_node = self.mir_graph.resolve_dataflow_node(root).ok_or_else(|| {
-            ReadySetError::MirNodeMustHaveDfNodeAssigned {
-                mir_node_index: root.index(),
-            }
-        })?;
-        self.remove_owners_below(&[root], self.mir_graph[root].owners().clone())?;
-        Ok(dataflow_node)
+        let mut mir_removal_result = self.remove_dependent_nodes(root)?;
+        // All dependent MIR nodes have been removed, except for the base table node.
+        // Add the base table node's dataflow node to the list of nodes marked for removal.
+        mir_removal_result.dataflow_nodes_to_remove.insert(
+            self.mir_graph.resolve_dataflow_node(root).ok_or_else(|| {
+                ReadySetError::MirNodeMustHaveDfNodeAssigned {
+                    mir_node_index: root.index(),
+                }
+            })?,
+        );
+        mir_removal_result.relations_removed.insert(name.clone());
+        // Finally, remove the MIR node for the base table.
+        self.mir_graph
+            .remove_node(root)
+            .ok_or_else(|| internal_err!("Table node should exist in MIR!"))?;
+        Ok(mir_removal_result)
     }
 
     pub(super) fn make_mir_query(
@@ -405,35 +401,60 @@ impl SqlToMirConverter {
         node_idx
     }
 
-    /// Removes the given owners from all nodes below the ones provided.
-    fn remove_owners_below(
-        &mut self,
-        roots: &[NodeIndex],
-        owners_to_remove: HashSet<Relation>,
-    ) -> ReadySetResult<()> {
-        for &node in roots {
-            let mut dfs = petgraph::visit::DfsPostOrder::new(&*self.mir_graph, node);
-            while let Some(node_idx) = dfs.next(&*self.mir_graph) {
+    /// Removes all the nodes that depend on the one provided, and the provided node itself (except
+    /// if it's a base table node).
+    fn remove_dependent_nodes(&mut self, node: NodeIndex) -> ReadySetResult<MirRemovalResult> {
+        let mut removed = Vec::new();
+
+        // Track down the leaves that depend on the given node, along with their owners.
+        let mut owners_to_remove = HashSet::new();
+        let mut leaves = Vec::new();
+        let mut bfs = petgraph::visit::Bfs::new(&*self.mir_graph, node);
+        while let Some(n) = bfs.next(&*self.mir_graph) {
+            owners_to_remove.extend(self.mir_graph[n].owners().iter().cloned());
+            if self
+                .mir_graph
+                .neighbors_directed(n, Direction::Outgoing)
+                .next()
+                .is_none()
+            {
+                leaves.push(n);
+            }
+        }
+
+        // Traverse the graph backwards (starting from the leaves) and gather all the nodes that
+        // need to be removed, in order. We need to traverse this from leaves to roots
+        // because attempting to remove only downstream nodes is incorrect. The best example for
+        // this are JOINs, where removing downstream nodes would only prune one part of the query,
+        // leaving MIR in an inconsistent state.
+        for leaf in leaves {
+            let mut bfs = petgraph::visit::Bfs::new(Reversed(&*self.mir_graph), leaf);
+            while let Some(node_idx) = bfs.next(Reversed(&*self.mir_graph)) {
                 self.mir_graph[node_idx].retain_owners(|n| !owners_to_remove.contains(n));
                 if self.mir_graph[node_idx].owners().is_empty()
                     && !self.mir_graph[node_idx].is_base()
                 {
-                    let num_children = self
-                        .mir_graph
-                        .neighbors_directed(node_idx, Direction::Outgoing)
-                        .count();
-                    invariant_eq!(
-                        num_children,
-                        0,
-                        "tried to remove MIR node '{:?}' that still has {} children",
-                        node_idx,
-                        num_children
-                    );
-                    self.mir_graph.remove_node(node_idx);
+                    removed.push(node_idx);
                 }
             }
         }
-        Ok(())
+
+        // Remove the MIR nodes and keep track of their Dataflow node counterparts.
+        let mut df_to_remove = HashSet::new();
+        for node_idx in removed {
+            let mir_node = self.mir_graph.remove_node(node_idx).unwrap();
+            if let Some(df_node) = mir_node.df_node_index() {
+                df_to_remove.insert(df_node);
+            }
+        }
+
+        // Finally, remove the affected queries from the state.
+        self.relations
+            .retain(|name, _| !owners_to_remove.contains(name));
+        Ok(MirRemovalResult {
+            dataflow_nodes_to_remove: df_to_remove,
+            relations_removed: owners_to_remove,
+        })
     }
 
     fn make_base_node(

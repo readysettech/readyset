@@ -66,6 +66,21 @@ impl MigrationNodeChanges {
         }
     }
 
+    /// Registers a batch of nodes for deletion in the list of changes.
+    /// If the last change registered is a `NodeChanges::Add` change, then a new `NodeChanges::Drop`
+    /// change is created, and the node is added to it. Otherwise, the node gets added to the last
+    /// `NodeChanges::Drop` change.
+    pub(in crate::controller) fn drop_nodes(&mut self, nodes_to_remove: &HashSet<NodeIndex>) {
+        match self.0.last_mut() {
+            Some(NodeChanges::Drop(nodes)) => {
+                nodes.extend(nodes_to_remove);
+            }
+            _ => {
+                self.0.push(NodeChanges::Drop(nodes_to_remove.clone()));
+            }
+        }
+    }
+
     /// Whether or not the given node is part of any of the nodes being added.
     pub(in crate::controller) fn contains_new(&self, ni: &NodeIndex) -> bool {
         let mut found = false;

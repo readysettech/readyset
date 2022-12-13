@@ -31,7 +31,7 @@ use nom_sql::{parse_query, OrderType, Relation, SqlQuery};
 use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use readyset_client::consistency::Timestamp;
 use readyset_client::internal::LocalNodeIndex;
-use readyset_client::recipe::changelist::ChangeList;
+use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::{KeyComparison, Modification, SchemaType, ViewPlaceholder, ViewQuery};
 use readyset_data::{DfType, DfValue, Dialect};
 use readyset_errors::ReadySetError::{MigrationPlanFailed, RpcFailed, SelectQueryCreationFailed};
@@ -9281,4 +9281,66 @@ async fn multiple_aggregates_and_predicates() {
     let mut q = g.view("q").await.unwrap();
     let res = q.lookup(&[0.into()], true).await.unwrap().into_vec();
     assert_eq!(res, vec![vec![DfValue::from(1), DfValue::from(4)]]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cascade_drop_view() {
+    let mut g = start_simple_unsharded("cascade_drop_view").await;
+    g.extend_recipe(
+        ChangeList::from_str(
+            "CREATE TABLE t1 (a int, b int);
+            CREATE TABLE t2 (c int, d int);
+            CREATE TABLE t3 (e int, f int);
+            CREATE VIEW v1 AS SELECT a, b FROM t1;
+            CREATE VIEW v2 AS SELECT a, c FROM v1 JOIN t2 ON v1.b = t2.d;
+            CREATE VIEW v3 AS SELECT a, e FROM v2 JOIN t3 ON v2.c = t3.f;
+            CREATE CACHE q FROM SELECT a, c, e FROM v1 JOIN v2 ON v1.a = v2.a JOIN v3 ON v2.a = v3.a",
+            Dialect::DEFAULT_MYSQL,
+        )
+            .unwrap(),
+    )
+        .await
+        .unwrap();
+
+    let mut t1 = g.table("t1").await.unwrap();
+    g.table("t2").await.unwrap();
+    g.table("t3").await.unwrap();
+    g.view("v1").await.unwrap();
+    g.view("v2").await.unwrap();
+    g.view("v3").await.unwrap();
+    g.view("q").await.unwrap();
+
+    t1.insert_many(vec![
+        vec![DfValue::from(1), DfValue::from(2)],
+        vec![DfValue::from(3), DfValue::from(4)],
+    ])
+    .await
+    .unwrap();
+
+    g.extend_recipe(ChangeList::from_change(
+        Change::Drop {
+            name: "v2".into(),
+            if_exists: false,
+        },
+        Dialect::DEFAULT_MYSQL,
+    ))
+    .await
+    .unwrap();
+
+    g.table("t1").await.unwrap();
+    g.table("t2").await.unwrap();
+    g.table("t3").await.unwrap();
+    let mut v1 = g.view("v1").await.unwrap();
+    g.view("v2").await.unwrap_err();
+    g.view("v3").await.unwrap_err();
+    g.view("q").await.unwrap_err();
+
+    let res = v1.lookup(&[0.into()], true).await.unwrap().into_vec();
+    assert_eq!(
+        res,
+        vec![
+            vec![DfValue::from(1), DfValue::from(2)],
+            vec![DfValue::from(3), DfValue::from(4)],
+        ]
+    );
 }

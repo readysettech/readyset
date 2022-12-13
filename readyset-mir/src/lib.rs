@@ -87,7 +87,7 @@ unsafe impl IndexType for Ix {
 ///
 /// This is a wrapper that helps us distinguish between MIR nodes and Dataflow nodes, since both
 /// graphs are represented using petgraph and use [`NodeIndex`].
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct DfNodeIndex(petgraph::graph::NodeIndex);
 
 impl DfNodeIndex {

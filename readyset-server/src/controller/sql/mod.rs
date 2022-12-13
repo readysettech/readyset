@@ -3,6 +3,7 @@ use std::str;
 use std::vec::Vec;
 
 use ::mir::visualize::GraphViz;
+use ::mir::DfNodeIndex;
 use ::serde::{Deserialize, Serialize};
 use nom_sql::{
     CompoundSelectOperator, CompoundSelectStatement, CreateTableBody, FieldDefinitionExpr,
@@ -20,6 +21,7 @@ use self::mir::{NodeIndex as MirNodeIndex, SqlToMirConverter};
 use self::query_graph::{to_query_graph, QueryGraph};
 use crate::controller::mir_to_flow::{mir_node_to_flow_parts, mir_query_to_flow_parts};
 use crate::controller::Migration;
+use crate::sql::mir::MirRemovalResult;
 use crate::ReuseConfigType;
 
 pub(crate) mod mir;
@@ -523,14 +525,59 @@ impl SqlIncorporator {
         Ok(df_leaf.address())
     }
 
-    pub(super) fn remove_query(&mut self, query_name: &Relation) -> ReadySetResult<NodeIndex> {
-        self.leaf_addresses.remove(query_name);
-        Ok(self.mir_converter.remove_query(query_name)?.address())
+    pub(super) fn remove_query(
+        &mut self,
+        query_name: &Relation,
+        mig: &mut Migration<'_>,
+    ) -> ReadySetResult<MirRemovalResult> {
+        let mut mir_removal_result = self.mir_converter.remove_query(query_name)?;
+        self.process_removal(&mut mir_removal_result, mig);
+        Ok(mir_removal_result)
     }
 
-    pub(super) fn remove_base(&mut self, table_name: &Relation) -> ReadySetResult<NodeIndex> {
-        self.leaf_addresses.remove(table_name);
-        Ok(self.mir_converter.remove_base(table_name)?.address())
+    pub(super) fn remove_base(
+        &mut self,
+        table_name: &Relation,
+        mig: &mut Migration<'_>,
+    ) -> ReadySetResult<MirRemovalResult> {
+        let mut mir_removal_result = self.mir_converter.remove_base(table_name)?;
+        self.process_removal(&mut mir_removal_result, mig);
+        Ok(mir_removal_result)
+    }
+
+    fn process_removal(&mut self, removal_result: &mut MirRemovalResult, mig: &mut Migration<'_>) {
+        for query in removal_result.relations_removed.iter() {
+            self.leaf_addresses.remove(query);
+        }
+        // Sadly, we don't use `DfNodeIndex` for migrations/df state, so we need to map them
+        // to `NodeIndex`.
+        // TODO(fran): Replace all occurrences of Dataflow node indices for `DfNodeIndex`.
+        mig.changes.drop_nodes(
+            &removal_result
+                .dataflow_nodes_to_remove
+                .iter()
+                .map(|df_node_idx| df_node_idx.address())
+                .collect(),
+        );
+
+        // Look for and remove ingress, egress and reader nodes, which are not present in MIR.
+        let next_for = |ni: DfNodeIndex| {
+            mig.dataflow_state
+                .ingredients
+                .neighbors_directed(ni.address(), petgraph::EdgeDirection::Outgoing)
+                .filter(|ni| !mig.dataflow_state.ingredients[*ni].is_dropped())
+                .map(|ni| DfNodeIndex::new(ni))
+        };
+        let mut removed = Vec::new();
+        for node in removal_result.dataflow_nodes_to_remove.iter() {
+            let mut stack = next_for(*node).collect::<Vec<_>>();
+            while let Some(node) = stack.pop() {
+                removed.push(node);
+                mig.changes.drop_node(node.address());
+                stack.extend(next_for(node));
+            }
+        }
+        removal_result.dataflow_nodes_to_remove.extend(removed);
     }
 
     fn register_query(&mut self, query_name: Relation, fields: Vec<SqlIdentifier>) {

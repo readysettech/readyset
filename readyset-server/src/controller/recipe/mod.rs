@@ -1,7 +1,9 @@
+use std::collections::HashSet;
 use std::str;
 use std::vec::Vec;
 
 use launchpad::redacted::Sensitive;
+use mir::DfNodeIndex;
 use nom_sql::{
     CacheInner, CreateCacheStatement, CreateTableBody, CreateTableStatement, CreateViewStatement,
     Relation, SqlQuery, SqlType,
@@ -517,7 +519,7 @@ impl Recipe {
         &mut self,
         name_or_alias: &Relation,
         mig: &mut Migration<'_>,
-    ) -> ReadySetResult<Option<Vec<NodeIndex>>> {
+    ) -> ReadySetResult<Option<HashSet<DfNodeIndex>>> {
         let expression = match self.registry.remove_expression(name_or_alias) {
             Some(expression) => expression,
             None => {
@@ -525,13 +527,13 @@ impl Recipe {
             }
         };
         let name = expression.name();
-        let ni = match expression {
+        let removal_result = match expression {
             RecipeExpr::Table { .. } => {
                 // a base may have many dependent queries, including ones that also lost
                 // nodes; the code handling `removed_leaves` therefore needs to take care
                 // not to remove bases while they still have children, or to try removing
                 // them twice.
-                match self.inc.remove_base(name) {
+                match self.inc.remove_base(name, mig) {
                     Ok(ni) => ni,
                     Err(e) => {
                         error!(
@@ -546,26 +548,16 @@ impl Recipe {
                     }
                 }
             }
-            _ => self.inc.remove_query(name)?,
+            _ => self.inc.remove_query(name, mig)?,
         };
-        let is_base = mig
-            .dataflow_state
-            .ingredients
-            .node_weight(ni)
-            .map(|x| x.is_base())
-            .unwrap_or(false);
 
-        if !is_base {
-            Ok(Some(self.remove_leaf(ni, mig)?))
-        } else {
-            let mut nodes_to_remove = vec![ni];
-            mig.changes.drop_node(ni);
-            nodes_to_remove.extend(self.remove_downstream_of(ni, mig));
-
-            Ok(Some(nodes_to_remove))
+        for query in removal_result.relations_removed {
+            self.registry.remove_expression(&query);
         }
+        Ok(Some(removal_result.dataflow_nodes_to_remove))
     }
 
+    // TODO(fran): Remove this in a follow-up commit
     fn remove_downstream_of(&mut self, ni: NodeIndex, mig: &mut Migration<'_>) -> Vec<NodeIndex> {
         let mut removed = vec![];
         let next_for = |ni| {

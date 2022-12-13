@@ -368,6 +368,10 @@ impl MirGraph {
     /// Returns [`None`] if the query was not converted to Dataflow yet or if the given node does
     /// not belong to the query.
     pub fn resolve_dataflow_node(&self, node_idx: NodeIndex) -> Option<DfNodeIndex> {
+        // This check is needed, since `Bfs` panics with a node that does not belong to the graph.
+        if !self.graph.contains_node(node_idx) {
+            return None;
+        }
         let mut bfs = Bfs::new(Reversed(&self.graph), node_idx);
         while let Some(ancestor) = bfs.next(Reversed(&self.graph)) {
             let df_node_address_opt = self.graph[ancestor].df_node_index();
