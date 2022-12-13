@@ -3,8 +3,7 @@ use std::fmt::{Debug, Display, Error, Formatter};
 
 use dataflow::ops;
 use nom_sql::Relation;
-use petgraph::stable_graph::NodeIndex;
-use readyset_errors::{internal_err, ReadySetResult};
+use readyset_errors::{internal, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
 pub use self::node_inner::MirNodeInner;
@@ -31,7 +30,7 @@ pub struct MirNode {
     ///   if the node is being set up.
     owners: HashSet<Relation>,
     pub inner: MirNodeInner,
-    pub df_node_address: Option<DfNodeAddress>,
+    df_node_address: Option<DfNodeAddress>,
 }
 
 impl MirNode {
@@ -52,6 +51,16 @@ impl MirNode {
     /// The dataflow node address assigned to this node.
     pub fn df_node_address(&self) -> Option<DfNodeAddress> {
         self.df_node_address
+    }
+
+    /// Assigns the given dataflow node address to this node.
+    /// This returns an error if the node already had a dataflow node assigned.
+    pub fn assign_df_node_address(&mut self, df_node_address: DfNodeAddress) -> ReadySetResult<()> {
+        if self.df_node_address.is_some() {
+            internal!("Cannot set DF node to a MIR node that already has one!");
+        }
+        self.df_node_address = Some(df_node_address);
+        Ok(())
     }
 
     /// The set of queries that own (make use of) this node.
@@ -87,17 +96,6 @@ impl MirNode {
         self.owners.retain(f)
     }
 
-    /// Returns the Dataflow node address that corresponds to this MIR node.
-    pub fn flow_node_addr(&self) -> ReadySetResult<NodeIndex> {
-        match self.df_node_address {
-            Some(DfNodeAddress(na)) => Ok(na),
-            None => Err(internal_err!(
-                "MIR node \"{}\" does not have an associated dataflow node",
-                self.name()
-            )),
-        }
-    }
-
     pub fn is_base(&self) -> bool {
         matches!(self.inner, MirNodeInner::Base { .. })
     }
@@ -125,6 +123,7 @@ mod tests {
         use dataflow::ops::grouped::extremum::Extremum;
         use dataflow::ops::union::DuplicateMode;
         use nom_sql::{BinaryOperator, ColumnSpecification, Expr, OrderType, SqlType};
+        use petgraph::stable_graph::NodeIndex;
         use readyset_client::ViewPlaceholder;
 
         use super::*;

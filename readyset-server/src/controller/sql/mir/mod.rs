@@ -328,8 +328,7 @@ impl SqlToMirConverter {
         match self.relations.get(name) {
             None => None,
             Some(node) => self.mir_graph[*node]
-                .df_node_address
-                .as_ref()
+                .df_node_address()
                 .map(|flow_node| flow_node.address()),
         }
     }
@@ -367,7 +366,7 @@ impl SqlToMirConverter {
         // The only moment when MIR nodes might not have a flow node present,
         // is during query creation. By now, it should have one
         #[allow(clippy::unwrap_used)]
-        let dataflow_node = self.mir_graph[leaf_mn].df_node_address.unwrap().address();
+        let dataflow_node = self.mir_graph[leaf_mn].df_node_address().unwrap().address();
 
         let roots: Vec<NodeIndex> = self
             .mir_graph
@@ -398,7 +397,7 @@ impl SqlToMirConverter {
         // The only moment when MIR nodes might not have a flow node present,
         // is during query creation. By now, it should have one
         #[allow(clippy::unwrap_used)]
-        let dataflow_node = self.mir_graph[root].df_node_address.unwrap().address();
+        let dataflow_node = self.mir_graph[root].df_node_address().unwrap().address();
         self.remove_owners_below(&[root], self.mir_graph[root].owners().clone())?;
         Ok(dataflow_node)
     }
