@@ -579,6 +579,9 @@ impl BuiltinFunction {
                 .as_array()
                 .map(|array| DfValue::from(array.len()))
                 .ok_or_else(|| invalid_err!("cannot get array length of a non-array")),
+            BuiltinFunction::JsonDepth(expr) => non_null!(expr.eval(record)?)
+                .to_json()
+                .map(|json| crate::eval::json::json_depth(&json).into()),
             BuiltinFunction::JsonExtractPath { json, keys } => {
                 let json = json.eval(record)?.to_json()?;
 
@@ -1810,6 +1813,99 @@ mod tests {
             test("'[]'", Some(0));
             test("'[1]'", Some(1));
             test("'[1, 2, 3]'", Some(3));
+        }
+
+        mod json_depth {
+            use super::*;
+
+            #[track_caller]
+            fn test(json: &str, expected: usize) {
+                let expr = format!("json_depth('{json}')");
+
+                assert_eq!(
+                    eval_expr(&expr, MySQL),
+                    expected.into(),
+                    "incorrect result for for `{expr}`"
+                )
+            }
+
+            #[test]
+            fn scalar() {
+                test("1", 1);
+                test("1.5", 1);
+                test("true", 1);
+                test("\"hi\"", 1);
+                test("null", 1);
+            }
+
+            #[test]
+            fn empty_array() {
+                test("[]", 1);
+            }
+
+            #[test]
+            fn empty_object() {
+                test("{}", 1);
+            }
+
+            #[test]
+            fn simple_array() {
+                test("[42]", 2);
+            }
+
+            #[test]
+            fn simple_object() {
+                test("{ \"a\": 42 }", 2);
+            }
+
+            #[test]
+            fn nested_array() {
+                test("[[42]]", 3);
+                test("[1, [42]]", 3);
+                test("[[42], 1]", 3);
+
+                test(r#"{ "a": [42] }"#, 3);
+            }
+
+            #[test]
+            fn nested_object() {
+                test(r#"{ "a": { "b": 42 } }"#, 3);
+                test(r#"{ "a": { "b": 42 }, "z": 42 }"#, 3);
+                test(r#"{ "z": 42, "a": { "b": 42 } }"#, 3);
+
+                test(r#"[{ "a": 42 }]"#, 3);
+                test(r#"[{ "a": 42 }, 42]"#, 3);
+                test(r#"[42, { "a": 42 }]"#, 3);
+            }
+
+            #[test]
+            fn deeply_nested_array() {
+                use std::iter::repeat;
+
+                // Recursion limit for parsing.
+                let depth = 127;
+
+                let json: String = (repeat('[').take(depth))
+                    .chain(repeat(']').take(depth))
+                    .collect();
+
+                test(&json, depth);
+            }
+
+            #[test]
+            fn deeply_nested_object() {
+                use std::iter::repeat;
+
+                // Recursion limit for parsing.
+                let depth = 127;
+
+                let json: String = (repeat("{\"a\": ").take(depth - 1))
+                    .chain(Some("{")) // innermost
+                    .chain(repeat("}").take(depth))
+                    .collect();
+
+                test(&json, depth);
+            }
         }
 
         #[test]

@@ -213,6 +213,7 @@ impl BuiltinFunction {
                 let ty = type_for_round(&expr, &prec);
                 (Self::Round(expr, prec), ty)
             }
+            "json_depth" => (Self::JsonDepth(next_arg()?), DfType::Int),
             "json_typeof" | "jsonb_typeof" => (
                 Self::JsonTypeof(next_arg()?),
                 // Always returns text containing the JSON type.

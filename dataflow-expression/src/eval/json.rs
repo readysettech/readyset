@@ -37,6 +37,31 @@ pub(crate) fn json_to_pretty(json: &JsonValue) -> String {
     unsafe { String::from_utf8_unchecked(buf) }
 }
 
+/// Calculates the maximum depth of a JSON value using [MySQL semantics](https://dev.mysql.com/doc/refman/8.0/en/json-attribute-functions.html#function_json-depth).
+///
+/// - An empty array, empty object, or scalar value has depth 1.
+/// - A nonempty array containing only elements of depth 1 or nonempty object containing only member
+///   values of depth 1 has depth 2.
+/// - Otherwise, a JSON document has depth greater than 2.
+pub(crate) fn json_depth(json: &JsonValue) -> u64 {
+    // Although recursing deeply nested JSON could theoretically blow the stack, in practice it
+    // won't since `serde_json::Value` has a recursion limit of 127 when parsing. Even if this limit
+    // is bypassed (e.g. enabling `unbounded_depth`), `Display` and `Drop` can also blow the stack
+    // (see https://github.com/serde-rs/json/issues/440).
+
+    fn max_depth<'j>(values: impl IntoIterator<Item = &'j JsonValue>) -> u64 {
+        values
+            .into_iter()
+            .fold(0, |depth, value| depth.max(json_depth(value)))
+    }
+
+    match json {
+        JsonValue::Array(array) => 1 + max_depth(array),
+        JsonValue::Object(object) => 1 + max_depth(object.values()),
+        _ => 1,
+    }
+}
+
 /// Removes a value from JSON using PostgreSQL `#-` semantics.
 pub(crate) fn json_remove_path<'k>(
     json: &mut JsonValue,
