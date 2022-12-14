@@ -228,6 +228,9 @@ pub enum MirNodeInner {
         keys: Vec<(Column, ViewPlaceholder)>,
         index_type: IndexType,
 
+        /// Whether or not this leaf node was already lowered to dataflow or not.
+        lowered_to_df: bool,
+
         /// Optional set of columns and direction to order the results of lookups to this leaf
         order_by: Option<Vec<(Column, OrderType)>>,
         /// Optional limit for the set of results to lookups to this leaf
@@ -249,6 +252,7 @@ impl MirNodeInner {
         Self::Leaf {
             keys,
             index_type,
+            lowered_to_df: false,
             order_by: None,
             limit: None,
             returned_cols: None,

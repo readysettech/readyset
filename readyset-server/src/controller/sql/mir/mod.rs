@@ -327,9 +327,7 @@ impl SqlToMirConverter {
     pub(super) fn get_flow_node_address(&self, name: &Relation) -> Option<NodeIndex> {
         match self.relations.get(name) {
             None => None,
-            Some(node) => self.mir_graph[*node]
-                .df_node_address()
-                .map(|flow_node| flow_node.address()),
+            Some(node) => self.mir_graph.resolve_dataflow_node(*node),
         }
     }
 
@@ -366,7 +364,12 @@ impl SqlToMirConverter {
         // The only moment when MIR nodes might not have a flow node present,
         // is during query creation. By now, it should have one
         #[allow(clippy::unwrap_used)]
-        let dataflow_node = self.mir_graph[leaf_mn].df_node_address().unwrap().address();
+        let dataflow_node = self
+            .mir_graph
+            .resolve_dataflow_node(leaf_mn)
+            .ok_or_else(|| ReadySetError::MirNodeMustHaveDfNodeAssigned {
+                mir_node_index: leaf_mn.index(),
+            })?;
 
         let roots: Vec<NodeIndex> = self
             .mir_graph
@@ -397,7 +400,11 @@ impl SqlToMirConverter {
         // The only moment when MIR nodes might not have a flow node present,
         // is during query creation. By now, it should have one
         #[allow(clippy::unwrap_used)]
-        let dataflow_node = self.mir_graph[root].df_node_address().unwrap().address();
+        let dataflow_node = self.mir_graph.resolve_dataflow_node(root).ok_or_else(|| {
+            ReadySetError::MirNodeMustHaveDfNodeAssigned {
+                mir_node_index: root.index(),
+            }
+        })?;
         self.remove_owners_below(&[root], self.mir_graph[root].owners().clone())?;
         Ok(dataflow_node)
     }
@@ -1836,6 +1843,7 @@ impl SqlToMirConverter {
                             .map(|(col, placeholder)| (col, placeholder))
                             .collect(),
                         index_type: view_key.index_type,
+                        lowered_to_df: false,
                         order_by: st
                             .order
                             .as_ref()

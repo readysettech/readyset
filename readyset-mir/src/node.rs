@@ -345,6 +345,7 @@ mod tests {
             same_columns_as_parent(MirNodeInner::Leaf {
                 keys: vec![(Column::new(Some("base"), "a"), ViewPlaceholder::OneToOne(1))],
                 index_type: IndexType::HashMap,
+                lowered_to_df: false,
                 order_by: None,
                 limit: None,
                 returned_cols: None,

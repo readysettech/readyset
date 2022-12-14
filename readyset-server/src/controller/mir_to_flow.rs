@@ -77,7 +77,7 @@ pub(super) fn mir_node_to_flow_parts(
 
     let ancestors = graph
         .edges_directed(mir_node, Direction::Incoming)
-        .sorted_by(|e1, e2| e1.weight().cmp(e2.weight()))
+        .sorted_by_key(|e| e.weight())
         .map(|e| e.source())
         .collect::<Vec<_>>();
 
@@ -212,6 +212,7 @@ pub(super) fn mir_node_to_flow_parts(
                 MirNodeInner::Leaf {
                     ref keys,
                     index_type,
+                    lowered_to_df,
                     ref order_by,
                     limit,
                     ref returned_cols,
@@ -219,27 +220,29 @@ pub(super) fn mir_node_to_flow_parts(
                     ref aggregates,
                     ..
                 } => {
-                    invariant_eq!(ancestors.len(), 1);
-                    let parent = ancestors[0];
-                    let reader_processing = make_reader_processing(
-                        graph,
-                        &parent,
-                        order_by,
-                        limit,
-                        returned_cols,
-                        default_row.clone(),
-                        aggregates,
-                    )?;
-                    materialize_leaf_node(
-                        graph,
-                        parent,
-                        name,
-                        keys,
-                        index_type,
-                        reader_processing,
-                        mig,
-                    )?;
-                    graph[parent].df_node_address()
+                    if !lowered_to_df {
+                        invariant_eq!(ancestors.len(), 1);
+                        let parent = ancestors[0];
+                        let reader_processing = make_reader_processing(
+                            graph,
+                            &parent,
+                            order_by,
+                            limit,
+                            returned_cols,
+                            default_row.clone(),
+                            aggregates,
+                        )?;
+                        materialize_leaf_node(
+                            graph,
+                            parent,
+                            name,
+                            keys,
+                            index_type,
+                            reader_processing,
+                            mig,
+                        )?;
+                    }
+                    None
                 }
                 MirNodeInner::LeftJoin {
                     ref on,
@@ -336,13 +339,16 @@ pub(super) fn mir_node_to_flow_parts(
                         mig,
                     )?)
                 }
-                MirNodeInner::AliasTable { .. } => {
-                    invariant_eq!(ancestors.len(), 1);
-                    // Ancestors should already have a flow node set.
-                    #[allow(clippy::expect_used)]
-                    graph[ancestors[0]].df_node_address()
-                }
+                MirNodeInner::AliasTable { .. } => None,
             };
+
+            if let MirNodeInner::Leaf {
+                ref mut lowered_to_df,
+                ..
+            } = graph[mir_node].inner
+            {
+                *lowered_to_df = true;
+            }
 
             // any new flow nodes have been instantiated by now, so we replace them with
             // existing ones, but still return `FlowNode` below in order to notify higher
@@ -448,12 +454,11 @@ fn make_union_node(
             .map(|c| graph.column_id_for_column(*n, c))
             .collect::<ReadySetResult<Vec<_>>>()?;
 
-        let ni = graph[*n]
-            .df_node_address()
-            .ok_or_else(|| ReadySetError::MirNodeMustHaveDfNodeAssigned {
+        let ni = graph.resolve_dataflow_node(*n).ok_or_else(|| {
+            ReadySetError::MirNodeMustHaveDfNodeAssigned {
                 mir_node_index: n.index(),
-            })?
-            .address();
+            }
+        })?;
 
         // Union takes columns of first ancestor
         if i == 0 {
@@ -491,12 +496,11 @@ fn make_filter_node(
     custom_types: &HashMap<Relation, DfType>,
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<DfNodeAddress> {
-    let parent_na = graph[parent]
-        .df_node_address()
-        .ok_or_else(|| ReadySetError::MirNodeMustHaveDfNodeAssigned {
+    let parent_na = graph.resolve_dataflow_node(parent).ok_or_else(|| {
+        ReadySetError::MirNodeMustHaveDfNodeAssigned {
             mir_node_index: parent.index(),
-        })?
-        .address();
+        }
+    })?;
     let mut parent_cols = mig.dataflow_state.ingredients[parent_na].columns().to_vec();
     let filter_conditions = lower_expression(
         graph,
@@ -528,12 +532,11 @@ fn make_grouped_node(
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<DfNodeAddress> {
     invariant!(!group_by.is_empty());
-    let parent_na = graph[parent]
-        .df_node_address()
-        .ok_or_else(|| ReadySetError::MirNodeMustHaveDfNodeAssigned {
+    let parent_na = graph.resolve_dataflow_node(parent).ok_or_else(|| {
+        ReadySetError::MirNodeMustHaveDfNodeAssigned {
             mir_node_index: parent.index(),
-        })?
-        .address();
+        }
+    })?;
     let over_col_indx = graph.column_id_for_column(parent, on)?;
     let group_col_indx = group_by
         .iter()
@@ -609,12 +612,11 @@ fn make_identity_node(
     columns: &[Column],
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<DfNodeAddress> {
-    let parent_na = graph[parent]
-        .df_node_address()
-        .ok_or_else(|| ReadySetError::MirNodeMustHaveDfNodeAssigned {
+    let parent_na = graph.resolve_dataflow_node(parent).ok_or_else(|| {
+        ReadySetError::MirNodeMustHaveDfNodeAssigned {
             mir_node_index: parent.index(),
-        })?
-        .address();
+        }
+    })?;
     // Identity mirrors the parent nodes exactly
     let mut parent_cols = mig.dataflow_state.ingredients[parent_na].columns().to_vec();
     set_names(&column_names(columns), &mut parent_cols)?;
@@ -641,18 +643,16 @@ fn make_join_node(
 ) -> ReadySetResult<DfNodeAddress> {
     use dataflow::ops::join::JoinSource;
 
-    let mut left_na = graph[left]
-        .df_node_address()
-        .ok_or_else(|| ReadySetError::MirNodeMustHaveDfNodeAssigned {
+    let mut left_na = graph.resolve_dataflow_node(left).ok_or_else(|| {
+        ReadySetError::MirNodeMustHaveDfNodeAssigned {
             mir_node_index: left.index(),
-        })?
-        .address();
-    let mut right_na = graph[right]
-        .df_node_address()
-        .ok_or_else(|| ReadySetError::MirNodeMustHaveDfNodeAssigned {
+        }
+    })?;
+    let mut right_na = graph.resolve_dataflow_node(right).ok_or_else(|| {
+        ReadySetError::MirNodeMustHaveDfNodeAssigned {
             mir_node_index: right.index(),
-        })?
-        .address();
+        }
+    })?;
 
     let left_cols = mig.dataflow_state.ingredients[left_na].columns();
     let right_cols = mig.dataflow_state.ingredients[right_na].columns();
@@ -756,18 +756,16 @@ fn make_join_aggregates_node(
 ) -> ReadySetResult<DfNodeAddress> {
     use dataflow::ops::join::JoinSource;
 
-    let left_na = graph[left]
-        .df_node_address()
-        .ok_or_else(|| ReadySetError::MirNodeMustHaveDfNodeAssigned {
+    let left_na = graph.resolve_dataflow_node(left).ok_or_else(|| {
+        ReadySetError::MirNodeMustHaveDfNodeAssigned {
             mir_node_index: left.index(),
-        })?
-        .address();
-    let right_na = graph[right]
-        .df_node_address()
-        .ok_or_else(|| ReadySetError::MirNodeMustHaveDfNodeAssigned {
+        }
+    })?;
+    let right_na = graph.resolve_dataflow_node(right).ok_or_else(|| {
+        ReadySetError::MirNodeMustHaveDfNodeAssigned {
             mir_node_index: right.index(),
-        })?
-        .address();
+        }
+    })?;
     let left_cols = mig.dataflow_state.ingredients[left_na].columns();
     let right_cols = mig.dataflow_state.ingredients[right_na].columns();
 
@@ -841,12 +839,11 @@ fn make_latest_node(
     group_by: &[Column],
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<DfNodeAddress> {
-    let parent_na = graph[parent]
-        .df_node_address()
-        .ok_or_else(|| ReadySetError::MirNodeMustHaveDfNodeAssigned {
+    let parent_na = graph.resolve_dataflow_node(parent).ok_or_else(|| {
+        ReadySetError::MirNodeMustHaveDfNodeAssigned {
             mir_node_index: parent.index(),
-        })?
-        .address();
+        }
+    })?;
     let mut cols = mig.dataflow_state.ingredients[parent_na].columns().to_vec();
 
     set_names(&column_names(columns), &mut cols)?;
@@ -925,12 +922,11 @@ fn make_project_node(
     custom_types: &HashMap<Relation, DfType>,
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<DfNodeAddress> {
-    let parent_na = graph[parent]
-        .df_node_address()
-        .ok_or_else(|| ReadySetError::MirNodeMustHaveDfNodeAssigned {
+    let parent_na = graph.resolve_dataflow_node(parent).ok_or_else(|| {
+        ReadySetError::MirNodeMustHaveDfNodeAssigned {
             mir_node_index: parent.index(),
-        })?
-        .address();
+        }
+    })?;
     let parent_cols = mig.dataflow_state.ingredients[parent_na].columns();
 
     let projected_column_ids = emit
@@ -1022,12 +1018,11 @@ fn make_distinct_node(
     group_by: &[Column],
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<DfNodeAddress> {
-    let parent_na = graph[parent]
-        .df_node_address()
-        .ok_or_else(|| ReadySetError::MirNodeMustHaveDfNodeAssigned {
+    let parent_na = graph.resolve_dataflow_node(parent).ok_or_else(|| {
+        ReadySetError::MirNodeMustHaveDfNodeAssigned {
             mir_node_index: parent.index(),
-        })?
-        .address();
+        }
+    })?;
     let parent_cols = mig.dataflow_state.ingredients[parent_na].columns().to_vec();
 
     let grp_by_column_ids = group_by
@@ -1101,12 +1096,11 @@ fn make_paginate_or_topk_node(
     is_topk: bool,
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<DfNodeAddress> {
-    let parent_na = graph[parent]
-        .df_node_address()
-        .ok_or_else(|| ReadySetError::MirNodeMustHaveDfNodeAssigned {
+    let parent_na = graph.resolve_dataflow_node(parent).ok_or_else(|| {
+        ReadySetError::MirNodeMustHaveDfNodeAssigned {
             mir_node_index: parent.index(),
-        })?
-        .address();
+        }
+    })?;
     let mut parent_cols = mig.dataflow_state.ingredients[parent_na].columns().to_vec();
 
     // set names using MIR columns to ensure aliases are used
@@ -1219,12 +1213,11 @@ fn materialize_leaf_node(
     reader_processing: ReaderProcessing,
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<()> {
-    let na = graph[parent]
-        .df_node_address()
-        .ok_or_else(|| ReadySetError::MirNodeMustHaveDfNodeAssigned {
+    let na = graph.resolve_dataflow_node(parent).ok_or_else(|| {
+        ReadySetError::MirNodeMustHaveDfNodeAssigned {
             mir_node_index: parent.index(),
-        })?
-        .address();
+        }
+    })?;
 
     // we must add a new reader for this query. This also requires adding an identity node (at
     // least currently), since a node can only have a single associated reader. However, the
