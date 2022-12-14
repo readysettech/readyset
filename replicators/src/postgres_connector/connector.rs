@@ -260,15 +260,8 @@ impl PostgresWalConnector {
         &mut self,
         slot: &str,
         publication: &str,
+        version: u32,
     ) -> ReadySetResult<()> {
-        let version: u32 = self
-            .one_row_query("SHOW server_version_num", 1)
-            .await?
-            .get(0)
-            .unwrap()
-            .parse()
-            .unwrap_or(0);
-
         let inner_client = self.client.inner();
         let wal_position = self.next_position.unwrap_or_default();
         let messages_support = if version >= 140000 {

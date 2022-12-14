@@ -411,6 +411,26 @@ impl NoriaAdapter {
             None,
         )?;
 
+        // For Postgres 13, once we setup ddl replication, the following query can be rejected, so
+        // run it ahead of time.
+        // TODO: (luke): We can probably consolidate this query with the db_version string query
+        // below
+        let version_num: u32 = {
+            let (client, connection) = pgsql_opts.connect(tls_connector.clone()).await?;
+            let _connection_handle = tokio::spawn(connection);
+            client
+                .query_one("SHOW server_version_num", &[])
+                .await
+                .and_then(|row| row.try_get::<_, String>(0))
+                .map_err(|e| {
+                    ReadySetError::Internal(format!("Unable to determine postgres version: {}", e))
+                })?
+                .parse()
+                .map_err(|e| {
+                    ReadySetError::Internal(format!("Unable to parse postgres version: {}", e))
+                })?
+        };
+
         let mut connector = Box::new(
             PostgresWalConnector::connect(
                 pgsql_opts.clone(),
@@ -451,7 +471,7 @@ impl NoriaAdapter {
             let snapshot_start = Instant::now();
             // If snapshot name exists, it means we need to make a snapshot to noria
 
-            let (mut client, connection) = pgsql_opts.connect(tls_connector).await?;
+            let (mut client, connection) = pgsql_opts.connect(tls_connector.clone()).await?;
 
             let connection_handle = tokio::spawn(connection);
             let db_version = client
@@ -504,7 +524,7 @@ impl NoriaAdapter {
         }
 
         connector
-            .start_replication(REPLICATION_SLOT, PUBLICATION_NAME)
+            .start_replication(REPLICATION_SLOT, PUBLICATION_NAME, version_num)
             .await?;
 
         let replication_offsets = noria.replication_offsets().await?;
