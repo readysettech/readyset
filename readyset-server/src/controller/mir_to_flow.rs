@@ -21,7 +21,7 @@ use mir::graph::MirGraph;
 use mir::node::node_inner::MirNodeInner;
 use mir::node::GroupedNodeType;
 use mir::query::MirQuery;
-use mir::{Column, DfNodeAddress};
+use mir::{Column, DfNodeIndex, NodeIndex as MirNodeIndex};
 use nom_sql::{ColumnConstraint, ColumnSpecification, Expr, OrderType, Relation, SqlIdentifier};
 use petgraph::graph::NodeIndex;
 use petgraph::Direction;
@@ -48,11 +48,11 @@ pub(super) fn mir_query_to_flow_parts(
     mir_query: &mut MirQuery<'_>,
     custom_types: &HashMap<Relation, DfType>,
     mig: &mut Migration<'_>,
-) -> ReadySetResult<NodeIndex> {
+) -> ReadySetResult<DfNodeIndex> {
     for n in mir_query.topo_nodes() {
         mir_node_to_flow_parts(mir_query.graph, n, custom_types, mig).map_err(|e| {
             ReadySetError::MirNodeToDataflowFailed {
-                index: n,
+                index: n.index(),
                 source: Box::new(e),
             }
         })?;
@@ -67,10 +67,10 @@ pub(super) fn mir_query_to_flow_parts(
 
 pub(super) fn mir_node_to_flow_parts(
     graph: &mut MirGraph,
-    mir_node: NodeIndex,
+    mir_node: MirNodeIndex,
     custom_types: &HashMap<Relation, DfType>,
     mig: &mut Migration<'_>,
-) -> ReadySetResult<Option<DfNodeAddress>> {
+) -> ReadySetResult<Option<DfNodeIndex>> {
     use petgraph::visit::EdgeRef;
 
     let name = graph[mir_node].name().clone();
@@ -81,7 +81,7 @@ pub(super) fn mir_node_to_flow_parts(
         .map(|e| e.source())
         .collect::<Vec<_>>();
 
-    match graph[mir_node].df_node_address() {
+    match graph[mir_node].df_node_index() {
         None => {
             let flow_node = match graph[mir_node].inner {
                 MirNodeInner::Aggregation {
@@ -354,7 +354,7 @@ pub(super) fn mir_node_to_flow_parts(
             // existing ones, but still return `FlowNode` below in order to notify higher
             // layers of the new nodes.
             if let Some(df_node) = flow_node {
-                graph[mir_node].assign_df_node_address(df_node)?;
+                graph[mir_node].assign_df_node_index(df_node)?;
             }
             Ok(flow_node)
         }
@@ -373,7 +373,7 @@ fn make_base_node(
     primary_key: Option<&[Column]>,
     unique_keys: &[Box<[Column]>],
     mig: &mut Migration<'_>,
-) -> ReadySetResult<DfNodeAddress> {
+) -> ReadySetResult<DfNodeIndex> {
     let columns = column_specs
         .iter()
         .map(|cs| DfColumn::from_spec(cs.clone(), mig.dialect, |ty| custom_types.get(&ty).cloned()))
@@ -423,7 +423,7 @@ fn make_base_node(
         base
     };
 
-    Ok(DfNodeAddress::new(mig.add_base(name, columns, base)))
+    Ok(DfNodeIndex::new(mig.add_base(name, columns, base)))
 }
 
 fn make_union_node(
@@ -431,10 +431,10 @@ fn make_union_node(
     name: Relation,
     columns: &[Column],
     emit: &[Vec<Column>],
-    ancestors: &[NodeIndex],
+    ancestors: &[MirNodeIndex],
     duplicate_mode: ops::union::DuplicateMode,
     mig: &mut Migration<'_>,
-) -> ReadySetResult<DfNodeAddress> {
+) -> ReadySetResult<DfNodeIndex> {
     let mut emit_column_id: HashMap<NodeIndex, Vec<usize>> = HashMap::new();
 
     let mut cols = Vec::with_capacity(
@@ -462,7 +462,7 @@ fn make_union_node(
 
         // Union takes columns of first ancestor
         if i == 0 {
-            let parent_cols = mig.dataflow_state.ingredients[ni].columns();
+            let parent_cols = mig.dataflow_state.ingredients[ni.address()].columns();
             cols = emit_cols
                 .iter()
                 .map(|i| {
@@ -474,7 +474,7 @@ fn make_union_node(
                 .collect::<ReadySetResult<Vec<_>>>()?;
         }
 
-        emit_column_id.insert(ni, emit_cols);
+        emit_column_id.insert(ni.address(), emit_cols);
     }
     set_names(&column_names(columns), &mut cols)?;
 
@@ -484,24 +484,26 @@ fn make_union_node(
         ops::union::Union::new(emit_column_id, duplicate_mode)?,
     );
 
-    Ok(DfNodeAddress::new(node))
+    Ok(DfNodeIndex::new(node))
 }
 
 fn make_filter_node(
     graph: &MirGraph,
     name: Relation,
-    parent: NodeIndex,
+    parent: MirNodeIndex,
     columns: &[Column],
     conditions: Expr,
     custom_types: &HashMap<Relation, DfType>,
     mig: &mut Migration<'_>,
-) -> ReadySetResult<DfNodeAddress> {
+) -> ReadySetResult<DfNodeIndex> {
     let parent_na = graph.resolve_dataflow_node(parent).ok_or_else(|| {
         ReadySetError::MirNodeMustHaveDfNodeAssigned {
             mir_node_index: parent.index(),
         }
     })?;
-    let mut parent_cols = mig.dataflow_state.ingredients[parent_na].columns().to_vec();
+    let mut parent_cols = mig.dataflow_state.ingredients[parent_na.address()]
+        .columns()
+        .to_vec();
     let filter_conditions = lower_expression(
         graph,
         parent,
@@ -516,21 +518,21 @@ fn make_filter_node(
     let node = mig.add_ingredient(
         name,
         parent_cols,
-        ops::filter::Filter::new(parent_na, filter_conditions),
+        ops::filter::Filter::new(parent_na.address(), filter_conditions),
     );
-    Ok(DfNodeAddress::new(node))
+    Ok(DfNodeIndex::new(node))
 }
 
 fn make_grouped_node(
     graph: &MirGraph,
     name: Relation,
-    parent: NodeIndex,
+    parent: MirNodeIndex,
     columns: &[Column],
     on: &Column,
     group_by: &[Column],
     kind: GroupedNodeType,
     mig: &mut Migration<'_>,
-) -> ReadySetResult<DfNodeAddress> {
+) -> ReadySetResult<DfNodeIndex> {
     invariant!(!group_by.is_empty());
     let parent_na = graph.resolve_dataflow_node(parent).ok_or_else(|| {
         ReadySetError::MirNodeMustHaveDfNodeAssigned {
@@ -545,7 +547,7 @@ fn make_grouped_node(
     invariant!(!group_col_indx.is_empty());
 
     // Grouped projects the group_by columns followed by computed column
-    let parent_cols = mig.dataflow_state.ingredients[parent_na].columns();
+    let parent_cols = mig.dataflow_state.ingredients[parent_na.address()].columns();
 
     // group by columns
     let mut cols = group_col_indx
@@ -576,7 +578,7 @@ fn make_grouped_node(
         // merged yet. For this reason, we need to pattern match for a groupconcat
         // aggregation before we pattern match for a generic aggregation.
         GroupedNodeType::Aggregation(Aggregation::GroupConcat { separator: sep }) => {
-            let gc = GroupConcat::new(parent_na, over_col_indx, group_col_indx, sep)?;
+            let gc = GroupConcat::new(parent_na.address(), over_col_indx, group_col_indx, sep)?;
             let agg_col = make_agg_col(DfType::Text(/* TODO */ Collation::default()));
             cols.push(agg_col);
             set_names(&column_names(columns), &mut cols)?;
@@ -584,7 +586,7 @@ fn make_grouped_node(
         }
         GroupedNodeType::Aggregation(agg) => {
             let grouped = agg.over(
-                parent_na,
+                parent_na.address(),
                 over_col_indx,
                 group_col_indx.as_slice(),
                 over_col_ty,
@@ -595,34 +597,44 @@ fn make_grouped_node(
             mig.add_ingredient(name, cols, grouped)
         }
         GroupedNodeType::Extremum(extr) => {
-            let grouped = extr.over(parent_na, over_col_indx, group_col_indx.as_slice());
+            let grouped = extr.over(
+                parent_na.address(),
+                over_col_indx,
+                group_col_indx.as_slice(),
+            );
             let agg_col = make_agg_col(grouped.output_col_type().or_ref(over_col_ty).clone());
             cols.push(agg_col);
             set_names(&column_names(columns), &mut cols)?;
             mig.add_ingredient(name, cols, grouped)
         }
     };
-    Ok(DfNodeAddress::new(na))
+    Ok(DfNodeIndex::new(na))
 }
 
 fn make_identity_node(
     graph: &MirGraph,
     name: Relation,
-    parent: NodeIndex,
+    parent: MirNodeIndex,
     columns: &[Column],
     mig: &mut Migration<'_>,
-) -> ReadySetResult<DfNodeAddress> {
+) -> ReadySetResult<DfNodeIndex> {
     let parent_na = graph.resolve_dataflow_node(parent).ok_or_else(|| {
         ReadySetError::MirNodeMustHaveDfNodeAssigned {
             mir_node_index: parent.index(),
         }
     })?;
     // Identity mirrors the parent nodes exactly
-    let mut parent_cols = mig.dataflow_state.ingredients[parent_na].columns().to_vec();
+    let mut parent_cols = mig.dataflow_state.ingredients[parent_na.address()]
+        .columns()
+        .to_vec();
     set_names(&column_names(columns), &mut parent_cols)?;
 
-    let node = mig.add_ingredient(name, parent_cols, ops::identity::Identity::new(parent_na));
-    Ok(DfNodeAddress::new(node))
+    let node = mig.add_ingredient(
+        name,
+        parent_cols,
+        ops::identity::Identity::new(parent_na.address()),
+    );
+    Ok(DfNodeIndex::new(node))
 }
 
 /// Lower a join MIR node to dataflow
@@ -632,15 +644,15 @@ fn make_identity_node(
 fn make_join_node(
     graph: &MirGraph,
     name: Relation,
-    left: NodeIndex,
-    right: NodeIndex,
+    left: MirNodeIndex,
+    right: MirNodeIndex,
     columns: &[Column],
     on: &[(Column, Column)],
     proj_cols: &[Column],
     kind: JoinType,
     custom_types: &HashMap<Relation, DfType>,
     mig: &mut Migration<'_>,
-) -> ReadySetResult<DfNodeAddress> {
+) -> ReadySetResult<DfNodeIndex> {
     use dataflow::ops::join::JoinSource;
 
     let mut left_na = graph.resolve_dataflow_node(left).ok_or_else(|| {
@@ -654,8 +666,8 @@ fn make_join_node(
         }
     })?;
 
-    let left_cols = mig.dataflow_state.ingredients[left_na].columns();
-    let right_cols = mig.dataflow_state.ingredients[right_na].columns();
+    let left_cols = mig.dataflow_state.ingredients[left_na.address()].columns();
+    let right_cols = mig.dataflow_state.ingredients[right_na.address()].columns();
 
     let mut emit = Vec::with_capacity(proj_cols.len());
     let mut cols = Vec::with_capacity(proj_cols.len());
@@ -706,7 +718,7 @@ fn make_join_node(
     // Dataflow needs a non-empty join condition, so project out a constant value on both sides to
     // use as our join key
     if on.is_empty() {
-        let mut make_cross_join_bogokey = |graph: &MirGraph, node: NodeIndex| {
+        let mut make_cross_join_bogokey = |graph: &MirGraph, node: MirNodeIndex| {
             let mut node_columns = graph.columns(node);
             node_columns.push(Column::named("cross_join_bogokey"));
 
@@ -726,8 +738,8 @@ fn make_join_node(
         let left_col_idx = graph.columns(left).len();
         let right_col_idx = graph.columns(right).len();
 
-        left_na = make_cross_join_bogokey(graph, left)?.address();
-        right_na = make_cross_join_bogokey(graph, right)?.address();
+        left_na = make_cross_join_bogokey(graph, left)?;
+        right_na = make_cross_join_bogokey(graph, right)?;
 
         emit.push(JoinSource::B(left_col_idx, right_col_idx));
         cols.push(DfColumn::new(
@@ -737,10 +749,10 @@ fn make_join_node(
         ));
     }
 
-    let j = Join::new(left_na, right_na, kind, emit);
+    let j = Join::new(left_na.address(), right_na.address(), kind, emit);
     let n = mig.add_ingredient(name, cols, j);
 
-    Ok(DfNodeAddress::new(n))
+    Ok(DfNodeIndex::new(n))
 }
 
 /// Joins two parent aggregate nodes together. Columns that are shared between both parents are
@@ -749,11 +761,11 @@ fn make_join_node(
 fn make_join_aggregates_node(
     graph: &MirGraph,
     name: Relation,
-    left: NodeIndex,
-    right: NodeIndex,
+    left: MirNodeIndex,
+    right: MirNodeIndex,
     columns: &[Column],
     mig: &mut Migration<'_>,
-) -> ReadySetResult<DfNodeAddress> {
+) -> ReadySetResult<DfNodeIndex> {
     use dataflow::ops::join::JoinSource;
 
     let left_na = graph.resolve_dataflow_node(left).ok_or_else(|| {
@@ -766,8 +778,8 @@ fn make_join_aggregates_node(
             mir_node_index: right.index(),
         }
     })?;
-    let left_cols = mig.dataflow_state.ingredients[left_na].columns();
-    let right_cols = mig.dataflow_state.ingredients[right_na].columns();
+    let left_cols = mig.dataflow_state.ingredients[left_na.address()].columns();
+    let right_cols = mig.dataflow_state.ingredients[right_na.address()].columns();
 
     // We gather up all of the columns from each respective parent. If a column is in both parents,
     // then we know it was a group_by column and create a JoinSource::B type with the indices from
@@ -825,26 +837,33 @@ fn make_join_aggregates_node(
 
     // Always treated as a JoinType::Inner based on joining on group_by cols, which always match
     // between parents.
-    let j = Join::new(left_na, right_na, JoinType::Inner, join_config);
+    let j = Join::new(
+        left_na.address(),
+        right_na.address(),
+        JoinType::Inner,
+        join_config,
+    );
     let n = mig.add_ingredient(name, cols, j);
 
-    Ok(DfNodeAddress::new(n))
+    Ok(DfNodeIndex::new(n))
 }
 
 fn make_latest_node(
     graph: &MirGraph,
     name: Relation,
-    parent: NodeIndex,
+    parent: MirNodeIndex,
     columns: &[Column],
     group_by: &[Column],
     mig: &mut Migration<'_>,
-) -> ReadySetResult<DfNodeAddress> {
+) -> ReadySetResult<DfNodeIndex> {
     let parent_na = graph.resolve_dataflow_node(parent).ok_or_else(|| {
         ReadySetError::MirNodeMustHaveDfNodeAssigned {
             mir_node_index: parent.index(),
         }
     })?;
-    let mut cols = mig.dataflow_state.ingredients[parent_na].columns().to_vec();
+    let mut cols = mig.dataflow_state.ingredients[parent_na.address()]
+        .columns()
+        .to_vec();
 
     set_names(&column_names(columns), &mut cols)?;
 
@@ -857,14 +876,18 @@ fn make_latest_node(
     if group_col_indx.len() != 1 {
         unsupported!("latest node doesn't support compound GROUP BY")
     }
-    let na = mig.add_ingredient(name, cols, Latest::new(parent_na, group_col_indx[0]));
-    Ok(DfNodeAddress::new(na))
+    let na = mig.add_ingredient(
+        name,
+        cols,
+        Latest::new(parent_na.address(), group_col_indx[0]),
+    );
+    Ok(DfNodeIndex::new(na))
 }
 
 #[derive(Clone)]
 struct LowerContext<'a> {
     graph: &'a MirGraph,
-    parent_node_idx: NodeIndex,
+    parent_node_idx: MirNodeIndex,
     parent_cols: &'a [DfColumn],
     custom_types: &'a HashMap<Relation, DfType>,
 }
@@ -893,7 +916,7 @@ impl<'a> dataflow::LowerContext for LowerContext<'a> {
 /// index up in the given parent node.
 fn lower_expression(
     graph: &MirGraph,
-    parent: NodeIndex,
+    parent: MirNodeIndex,
     expr: Expr,
     parent_cols: &[DfColumn],
     custom_types: &HashMap<Relation, DfType>,
@@ -914,20 +937,20 @@ fn lower_expression(
 fn make_project_node(
     graph: &MirGraph,
     name: Relation,
-    parent: NodeIndex,
+    parent: MirNodeIndex,
     source_columns: &[Column],
     emit: &[Column],
     expressions: &[(SqlIdentifier, Expr)],
     literals: &[(SqlIdentifier, DfValue)],
     custom_types: &HashMap<Relation, DfType>,
     mig: &mut Migration<'_>,
-) -> ReadySetResult<DfNodeAddress> {
+) -> ReadySetResult<DfNodeIndex> {
     let parent_na = graph.resolve_dataflow_node(parent).ok_or_else(|| {
         ReadySetError::MirNodeMustHaveDfNodeAssigned {
             mir_node_index: parent.index(),
         }
     })?;
-    let parent_cols = mig.dataflow_state.ingredients[parent_na].columns();
+    let parent_cols = mig.dataflow_state.ingredients[parent_na.address()].columns();
 
     let projected_column_ids = emit
         .iter()
@@ -1001,29 +1024,31 @@ fn make_project_node(
         name,
         cols,
         Project::new(
-            parent_na,
+            parent_na.address(),
             projected_column_ids.as_slice(),
             Some(literal_values),
             Some(projected_expressions),
         ),
     );
-    Ok(DfNodeAddress::new(n))
+    Ok(DfNodeIndex::new(n))
 }
 
 fn make_distinct_node(
     graph: &MirGraph,
     name: Relation,
-    parent: NodeIndex,
+    parent: MirNodeIndex,
     columns: &[Column],
     group_by: &[Column],
     mig: &mut Migration<'_>,
-) -> ReadySetResult<DfNodeAddress> {
+) -> ReadySetResult<DfNodeIndex> {
     let parent_na = graph.resolve_dataflow_node(parent).ok_or_else(|| {
         ReadySetError::MirNodeMustHaveDfNodeAssigned {
             mir_node_index: parent.index(),
         }
     })?;
-    let parent_cols = mig.dataflow_state.ingredients[parent_na].columns().to_vec();
+    let parent_cols = mig.dataflow_state.ingredients[parent_na.address()]
+        .columns()
+        .to_vec();
 
     let grp_by_column_ids = group_by
         .iter()
@@ -1080,28 +1105,30 @@ fn make_distinct_node(
         // remaining occurances of the set.
         //
         // We use 0 as a placeholder value
-        Aggregation::Count.over(parent_na, 0, &group_by_indx, &DfType::Unknown)?,
+        Aggregation::Count.over(parent_na.address(), 0, &group_by_indx, &DfType::Unknown)?,
     );
-    Ok(DfNodeAddress::new(na))
+    Ok(DfNodeIndex::new(na))
 }
 
 fn make_paginate_or_topk_node(
     graph: &MirGraph,
     name: Relation,
-    parent: NodeIndex,
+    parent: MirNodeIndex,
     columns: &[Column],
     order: &Option<Vec<(Column, OrderType)>>,
     group_by: &[Column],
     limit: usize,
     is_topk: bool,
     mig: &mut Migration<'_>,
-) -> ReadySetResult<DfNodeAddress> {
+) -> ReadySetResult<DfNodeIndex> {
     let parent_na = graph.resolve_dataflow_node(parent).ok_or_else(|| {
         ReadySetError::MirNodeMustHaveDfNodeAssigned {
             mir_node_index: parent.index(),
         }
     })?;
-    let mut parent_cols = mig.dataflow_state.ingredients[parent_na].columns().to_vec();
+    let mut parent_cols = mig.dataflow_state.ingredients[parent_na.address()]
+        .columns()
+        .to_vec();
 
     // set names using MIR columns to ensure aliases are used
     let column_names = column_names(columns);
@@ -1150,21 +1177,21 @@ fn make_paginate_or_topk_node(
         mig.add_ingredient(
             name,
             parent_cols,
-            ops::topk::TopK::new(parent_na, cmp_rows, group_by_indx, limit),
+            ops::topk::TopK::new(parent_na.address(), cmp_rows, group_by_indx, limit),
         )
     } else {
         mig.add_ingredient(
             name,
             parent_cols,
-            ops::paginate::Paginate::new(parent_na, cmp_rows, group_by_indx, limit),
+            ops::paginate::Paginate::new(parent_na.address(), cmp_rows, group_by_indx, limit),
         )
     };
-    Ok(DfNodeAddress::new(na))
+    Ok(DfNodeIndex::new(na))
 }
 
 fn make_reader_processing(
     graph: &MirGraph,
-    parent: &NodeIndex,
+    parent: &MirNodeIndex,
     order_by: &Option<Vec<(Column, OrderType)>>,
     limit: Option<usize>,
     returned_cols: &Option<Vec<Column>>,
@@ -1206,7 +1233,7 @@ fn make_reader_processing(
 
 fn materialize_leaf_node(
     graph: &MirGraph,
-    parent: NodeIndex,
+    parent: MirNodeIndex,
     name: Relation,
     key_cols: &[(Column, ViewPlaceholder)],
     index_type: IndexType,
@@ -1240,7 +1267,7 @@ fn materialize_leaf_node(
 
         mig.maintain(
             name,
-            na,
+            na.address(),
             &Index::new(index_type, columns),
             reader_processing,
             placeholder_map,
@@ -1249,7 +1276,7 @@ fn materialize_leaf_node(
         // if no key specified, default to the first column
         mig.maintain(
             name,
-            na,
+            na.address(),
             &Index::new(index_type, vec![0]),
             reader_processing,
             Vec::default(),

@@ -9,15 +9,16 @@ use std::ops::{Deref, DerefMut, Index, IndexMut};
 
 use itertools::Itertools;
 use nom_sql::analysis::ReferredColumns;
-use petgraph::graph::NodeIndex;
 use petgraph::stable_graph::StableGraph;
 use petgraph::visit::{Bfs, EdgeRef, Reversed};
-use petgraph::Direction;
+use petgraph::{Directed, Direction};
 use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
 use crate::node::{MirNode, MirNodeInner};
-use crate::{Column as MirColumn, PAGE_NUMBER_COL};
+use crate::{Column as MirColumn, DfNodeIndex, Ix, NodeIndex, PAGE_NUMBER_COL};
+
+type Graph = StableGraph<MirNode, usize, Directed, Ix>;
 
 /// The graph to store all the MIR query graphs.
 /// The nodes in this graph are [`MirNode`]s, and the edges are represented as a
@@ -34,14 +35,14 @@ use crate::{Column as MirColumn, PAGE_NUMBER_COL};
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MirGraph {
     /// The graph that stores the MIR queries.
-    graph: StableGraph<MirNode, usize>,
+    graph: Graph,
 }
 
 impl MirGraph {
     /// Creates a new, empty graph.
     pub fn new() -> Self {
         MirGraph {
-            graph: StableGraph::new(),
+            graph: StableGraph::default(),
         }
     }
 
@@ -366,12 +367,12 @@ impl MirGraph {
     /// Returns the Dataflow node address for the given node.
     /// Returns [`None`] if the query was not converted to Dataflow yet or if the given node does
     /// not belong to the query.
-    pub fn resolve_dataflow_node(&self, node_idx: NodeIndex) -> Option<NodeIndex> {
+    pub fn resolve_dataflow_node(&self, node_idx: NodeIndex) -> Option<DfNodeIndex> {
         let mut bfs = Bfs::new(Reversed(&self.graph), node_idx);
         while let Some(ancestor) = bfs.next(Reversed(&self.graph)) {
-            let df_node_address_opt = self.graph[ancestor].df_node_address();
+            let df_node_address_opt = self.graph[ancestor].df_node_index();
             if df_node_address_opt.is_some() {
-                return df_node_address_opt.map(|df| df.address());
+                return df_node_address_opt.map(|df| DfNodeIndex(df.address()));
             }
         }
         None
@@ -386,7 +387,7 @@ impl MirGraph {
 }
 
 impl Deref for MirGraph {
-    type Target = StableGraph<MirNode, usize>;
+    type Target = Graph;
 
     fn deref(&self) -> &Self::Target {
         &self.graph

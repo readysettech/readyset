@@ -49,13 +49,13 @@ mod tests {
     use nom_sql::{
         BinaryOperator, ColumnSpecification, Expr, FunctionExpr, Literal, Relation, SqlType,
     };
-    use petgraph::graph::NodeIndex;
     use readyset_client::ViewPlaceholder;
 
     use super::*;
     use crate::graph::MirGraph;
     use crate::node::node_inner::MirNodeInner;
     use crate::node::MirNode;
+    use crate::NodeIndex;
 
     fn create_base_node(mir_graph: &mut MirGraph) -> NodeIndex {
         mir_graph.add_node(MirNode::new(

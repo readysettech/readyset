@@ -16,7 +16,7 @@ use readyset_sql_passes::alias_removal::TableAliasRewrite;
 use readyset_sql_passes::{AliasRemoval, Rewrite, RewriteContext};
 use readyset_tracing::{debug, trace};
 
-use self::mir::SqlToMirConverter;
+use self::mir::{NodeIndex as MirNodeIndex, SqlToMirConverter};
 use self::query_graph::{to_query_graph, QueryGraph};
 use crate::controller::mir_to_flow::{mir_node_to_flow_parts, mir_query_to_flow_parts};
 use crate::controller::Migration;
@@ -347,13 +347,18 @@ impl SqlIncorporator {
 
     #[cfg(test)]
     fn get_flow_node_address(&self, name: &Relation) -> Option<NodeIndex> {
-        self.mir_converter.get_flow_node_address(name)
+        self.mir_converter
+            .get_flow_node_address(name)
+            .map(|na| na.address())
     }
 
     /// Retrieves the flow node associated with a given query's leaf view.
     pub(super) fn get_query_address(&self, name: &Relation) -> Option<NodeIndex> {
         match self.leaf_addresses.get(name) {
-            None => self.mir_converter.get_flow_node_address(name),
+            None => self
+                .mir_converter
+                .get_flow_node_address(name)
+                .map(|na| na.address()),
             Some(na) => Some(*na),
         }
     }
@@ -400,7 +405,7 @@ impl SqlIncorporator {
         query: CompoundSelectStatement,
         is_leaf: bool,
         mig: &mut Migration<'_>,
-    ) -> Result<NodeIndex, ReadySetError> {
+    ) -> Result<MirNodeIndex, ReadySetError> {
         let mut subqueries = Vec::new();
         for (_, stmt) in query.selects.into_iter() {
             let subquery_leaf = self.add_select_query(query_name.clone(), stmt, false, mig)?;
@@ -420,15 +425,15 @@ impl SqlIncorporator {
         Ok(mir_leaf)
     }
 
-    /// Add a new SelectStatement to the given migration, returning information about the dataflow
-    /// and MIR nodes that were added
+    /// Add a new SelectStatement to the given migration, returning the index of the leaf MIR node
+    /// that was added
     fn add_select_query(
         &mut self,
         query_name: Relation,
         mut stmt: SelectStatement,
         is_leaf: bool,
         mig: &mut Migration<'_>,
-    ) -> Result<NodeIndex, ReadySetError> {
+    ) -> Result<MirNodeIndex, ReadySetError> {
         let on_err = |e| ReadySetError::SelectQueryCreationFailed {
             qname: query_name.to_string(),
             source: Box::new(e),
@@ -494,7 +499,7 @@ impl SqlIncorporator {
     fn mir_to_dataflow(
         &mut self,
         query_name: Relation,
-        mir_leaf: NodeIndex,
+        mir_leaf: MirNodeIndex,
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<NodeIndex> {
         let on_err = |e| ReadySetError::SelectQueryCreationFailed {
@@ -515,17 +520,17 @@ impl SqlIncorporator {
 
         self.register_query(query_name, fields);
 
-        Ok(df_leaf)
+        Ok(df_leaf.address())
     }
 
     pub(super) fn remove_query(&mut self, query_name: &Relation) -> ReadySetResult<NodeIndex> {
         self.leaf_addresses.remove(query_name);
-        self.mir_converter.remove_query(query_name)
+        Ok(self.mir_converter.remove_query(query_name)?.address())
     }
 
     pub(super) fn remove_base(&mut self, table_name: &Relation) -> ReadySetResult<NodeIndex> {
         self.leaf_addresses.remove(table_name);
-        self.mir_converter.remove_base(table_name)
+        Ok(self.mir_converter.remove_base(table_name)?.address())
     }
 
     fn register_query(&mut self, query_name: Relation, fields: Vec<SqlIdentifier>) {

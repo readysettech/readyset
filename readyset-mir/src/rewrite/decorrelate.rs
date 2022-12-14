@@ -3,14 +3,13 @@ use std::iter;
 use itertools::{Either, Itertools};
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::{BinaryOperator, Expr};
-use petgraph::graph::NodeIndex;
 use readyset_errors::{internal, invariant, unsupported, ReadySetResult};
 use readyset_tracing::trace;
 use tracing::instrument;
 
 use crate::node::MirNodeInner;
 use crate::query::MirQuery;
-use crate::Column;
+use crate::{Column, NodeIndex};
 
 /// Push the given `node`, which should be a [filter][] node with the given `dependency` on columns
 /// on the left-hand side of the given `dependent_join`, one step towards being below that dependent

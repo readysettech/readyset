@@ -2,7 +2,6 @@ use std::marker::PhantomData;
 
 use itertools::Itertools;
 use nom_sql::{Relation, SqlIdentifier};
-use petgraph::graph::NodeIndex;
 use petgraph::visit::{Bfs, EdgeRef, Reversed};
 use petgraph::Direction;
 use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
@@ -11,6 +10,7 @@ use crate::graph::MirGraph;
 use crate::node::{MirNode, MirNodeInner};
 use crate::rewrite::decorrelate::eliminate_dependent_joins;
 use crate::rewrite::pull_columns::pull_all_required_columns;
+use crate::{DfNodeIndex, NodeIndex};
 
 /// MIR representation of a base table
 #[derive(Debug)]
@@ -145,7 +145,7 @@ impl MirQuery<'_> {
 
     /// Returns the Dataflow node address of the query.
     /// Returns [`None`] if the query was not converted to Dataflow yet.
-    pub fn dataflow_node(&self) -> Option<NodeIndex> {
+    pub fn dataflow_node(&self) -> Option<DfNodeIndex> {
         self.graph.resolve_dataflow_node(self.leaf)
     }
 

@@ -46,7 +46,7 @@
 pub use column::Column;
 use lazy_static::lazy_static;
 use nom_sql::SqlIdentifier;
-use petgraph::graph::NodeIndex;
+use petgraph::csr::IndexType;
 use serde::{Deserialize, Serialize};
 
 mod column;
@@ -56,20 +56,48 @@ pub mod query;
 pub(crate) mod rewrite;
 pub mod visualize;
 
-/// Represents a Dataflow node address.
+/// The index of a node within the *mir* graph
+///
+/// This is a wrapper that helps us distinguish between MIR nodes and Dataflow nodes, since both
+/// graphs are represented using petgraph and use [`NodeIndex`].
+#[derive(
+    Debug, Clone, Copy, Default, Hash, PartialOrd, Ord, PartialEq, Eq, Serialize, Deserialize,
+)]
+pub struct Ix(u32);
+
+pub type NodeIndex = petgraph::graph::NodeIndex<Ix>;
+
+/// SAFETY: This just delegates to the underlying impl of IndexType for `u32`, which is safe
+/// itself since it's defined within petgraph
+unsafe impl IndexType for Ix {
+    fn new(x: usize) -> Self {
+        Self(<u32 as IndexType>::new(x))
+    }
+
+    fn index(&self) -> usize {
+        <u32 as IndexType>::index(&self.0)
+    }
+
+    fn max() -> Self {
+        Self(<u32 as IndexType>::max())
+    }
+}
+
+/// The index of a node within the dataflow graph
+///
 /// This is a wrapper that helps us distinguish between MIR nodes and Dataflow nodes, since both
 /// graphs are represented using petgraph and use [`NodeIndex`].
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
-pub struct DfNodeAddress(NodeIndex);
+pub struct DfNodeIndex(petgraph::graph::NodeIndex);
 
-impl DfNodeAddress {
+impl DfNodeIndex {
     /// Creates a new [`DfNodeAddress`].
-    pub fn new(dataflow_node_idx: NodeIndex) -> DfNodeAddress {
-        DfNodeAddress(dataflow_node_idx)
+    pub fn new(dataflow_node_idx: petgraph::graph::NodeIndex) -> Self {
+        Self(dataflow_node_idx)
     }
 
     /// Returns the [`NodeIndex`] address of the Dataflow node.
-    pub fn address(&self) -> NodeIndex {
+    pub fn address(&self) -> petgraph::graph::NodeIndex {
         self.0
     }
 }

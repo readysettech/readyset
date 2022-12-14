@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
+use mir::NodeIndex;
 use nom_sql::Relation;
-use petgraph::graph::NodeIndex;
 use readyset_errors::{internal, internal_err, invariant};
 
 use super::JoinKind;

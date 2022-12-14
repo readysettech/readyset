@@ -13,14 +13,14 @@ use mir::graph::MirGraph;
 use mir::node::node_inner::MirNodeInner;
 use mir::node::{GroupedNodeType, MirNode};
 use mir::query::{MirBase, MirQuery};
-pub use mir::Column;
+use mir::DfNodeIndex;
+pub use mir::{Column, NodeIndex};
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
     BinaryOperator, ColumnSpecification, CompoundSelectOperator, CreateTableBody, Expr,
     FieldDefinitionExpr, FieldReference, FunctionExpr, Literal, OrderClause, OrderType, Relation,
     SqlIdentifier, TableKey, UnaryOperator,
 };
-use petgraph::graph::NodeIndex;
 use petgraph::Direction;
 use readyset_errors::{
     internal, internal_err, invalid_err, invariant, invariant_eq, unsupported, ReadySetError,
@@ -294,11 +294,10 @@ impl SqlToMirConverter {
     }
 
     // pub(super) viz for tests
-    pub(super) fn get_flow_node_address(&self, name: &Relation) -> Option<NodeIndex> {
-        match self.relations.get(name) {
-            None => None,
-            Some(node) => self.mir_graph.resolve_dataflow_node(*node),
-        }
+    pub(super) fn get_flow_node_address(&self, name: &Relation) -> Option<DfNodeIndex> {
+        self.relations
+            .get(name)
+            .and_then(|node| self.mir_graph.resolve_dataflow_node(*node))
     }
 
     pub(super) fn named_base_to_mir(
@@ -319,7 +318,7 @@ impl SqlToMirConverter {
         })
     }
 
-    pub(super) fn remove_query(&mut self, name: &Relation) -> ReadySetResult<NodeIndex> {
+    pub(super) fn remove_query(&mut self, name: &Relation) -> ReadySetResult<DfNodeIndex> {
         let leaf_mn =
             self.relations
                 .remove(name)
@@ -354,7 +353,7 @@ impl SqlToMirConverter {
     }
 
     /// Removes a base table, along with all the views/cached queries associated with it.
-    pub(super) fn remove_base(&mut self, name: &Relation) -> ReadySetResult<NodeIndex> {
+    pub(super) fn remove_base(&mut self, name: &Relation) -> ReadySetResult<DfNodeIndex> {
         debug!(%name, "Removing base node");
         let root = self
             .relations

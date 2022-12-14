@@ -6,7 +6,6 @@ use dataflow::ops::union;
 use dataflow::PostLookupAggregateFunction;
 use itertools::Itertools;
 use lazy_static::lazy_static;
-use petgraph::stable_graph::NodeIndex;
 use petgraph::visit::EdgeRef;
 use petgraph::Direction;
 use regex::Regex;
@@ -14,6 +13,7 @@ use regex::Regex;
 use crate::graph::MirGraph;
 use crate::node::node_inner::MirNodeInner;
 use crate::query::MirQuery;
+use crate::NodeIndex;
 
 pub struct GraphVizzed<'a, T: ?Sized>(&'a T);
 

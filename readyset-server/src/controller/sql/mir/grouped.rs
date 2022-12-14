@@ -2,11 +2,10 @@ use std::collections::{HashMap, HashSet};
 
 use dataflow::{PostLookupAggregate, PostLookupAggregateFunction, PostLookupAggregates};
 use mir::node::node_inner::MirNodeInner;
-use mir::Column;
+use mir::{Column, NodeIndex};
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::FunctionExpr::*;
 use nom_sql::{self, Expr, FieldDefinitionExpr, Relation, SqlIdentifier};
-use petgraph::graph::NodeIndex;
 use readyset_errors::{unsupported, ReadySetError};
 use readyset_sql_passes::is_aggregate;
 

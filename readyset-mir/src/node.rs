@@ -7,7 +7,7 @@ use readyset_errors::{internal, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
 pub use self::node_inner::MirNodeInner;
-use crate::DfNodeAddress;
+use crate::DfNodeIndex;
 
 pub mod node_inner;
 
@@ -30,7 +30,7 @@ pub struct MirNode {
     ///   if the node is being set up.
     owners: HashSet<Relation>,
     pub inner: MirNodeInner,
-    df_node_address: Option<DfNodeAddress>,
+    df_node_index: Option<DfNodeIndex>,
 }
 
 impl MirNode {
@@ -40,7 +40,7 @@ impl MirNode {
             name,
             inner,
             owners: HashSet::new(),
-            df_node_address: None,
+            df_node_index: None,
         }
     }
 
@@ -48,18 +48,18 @@ impl MirNode {
         &self.name
     }
 
-    /// The dataflow node address assigned to this node.
-    pub fn df_node_address(&self) -> Option<DfNodeAddress> {
-        self.df_node_address
+    /// The index of the dataflow node assigned to this node.
+    pub fn df_node_index(&self) -> Option<DfNodeIndex> {
+        self.df_node_index
     }
 
-    /// Assigns the given dataflow node address to this node.
+    /// Assigns the given dataflow node index to this node.
     /// This returns an error if the node already had a dataflow node assigned.
-    pub fn assign_df_node_address(&mut self, df_node_address: DfNodeAddress) -> ReadySetResult<()> {
-        if self.df_node_address.is_some() {
+    pub fn assign_df_node_index(&mut self, df_node_address: DfNodeIndex) -> ReadySetResult<()> {
+        if self.df_node_index.is_some() {
             internal!("Cannot set DF node to a MIR node that already has one!");
         }
-        self.df_node_address = Some(df_node_address);
+        self.df_node_index = Some(df_node_address);
         Ok(())
     }
 
@@ -123,12 +123,11 @@ mod tests {
         use dataflow::ops::grouped::extremum::Extremum;
         use dataflow::ops::union::DuplicateMode;
         use nom_sql::{BinaryOperator, ColumnSpecification, Expr, OrderType, SqlType};
-        use petgraph::stable_graph::NodeIndex;
         use readyset_client::ViewPlaceholder;
 
         use super::*;
         use crate::graph::MirGraph;
-        use crate::Column;
+        use crate::{Column, NodeIndex};
 
         fn base1(graph: &mut MirGraph) -> NodeIndex {
             graph.add_node(MirNode::new(
@@ -559,7 +558,7 @@ mod tests {
                     primary_key: Some([Column::from("c1")].into()),
                     unique_keys: Default::default(),
                 },
-                df_node_address: None,
+                df_node_index: None,
             });
 
             let child_column = Column::from("c3");
@@ -603,7 +602,7 @@ mod tests {
                     primary_key: Some([Column::from("c1")].into()),
                     unique_keys: Default::default(),
                 },
-                df_node_address: None,
+                df_node_index: None,
             });
 
             let idx = graph
@@ -641,7 +640,7 @@ mod tests {
                     primary_key: Some([Column::from("c1")].into()),
                     unique_keys: Default::default(),
                 },
-                df_node_address: None,
+                df_node_index: None,
             });
 
             assert_eq!(graph.find_source_for_child_column(a, &child_column), None);
