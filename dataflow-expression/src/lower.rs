@@ -217,6 +217,7 @@ impl BuiltinFunction {
             }
             "json_depth" => (Self::JsonDepth(next_arg()?), DfType::Int),
             "json_valid" => (Self::JsonValid(next_arg()?), DfType::BigInt),
+            "json_overlaps" => (Self::JsonOverlaps(next_arg()?, next_arg()?), DfType::BigInt),
             "json_quote" => (Self::JsonQuote(next_arg()?), DfType::DEFAULT_TEXT),
             "json_typeof" | "jsonb_typeof" => (
                 Self::JsonTypeof(next_arg()?),

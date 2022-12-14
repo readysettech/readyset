@@ -228,11 +228,8 @@ pub(crate) fn json_contains(parent: &JsonValue, child: &JsonValue) -> bool {
                 json_object_contains(parent, child)
             }
 
-            // `JsonNumber` does not handle -0.0 when `arbitrary_precision` is enabled.
-            (JsonValue::Number(parent), JsonValue::Number(child)) => json_number_eq(parent, child),
-
             // Check scalars if same type.
-            _ => parent == child,
+            _ => json_eq(parent, child),
         }
     }
 
@@ -281,6 +278,26 @@ pub(crate) fn json_contains(parent: &JsonValue, child: &JsonValue) -> bool {
             // Skip scalars since they're handled previously.
             _ => true,
         })
+    }
+}
+
+/// Returns `true` if the two JSON documents are equal or have any common key/value pairs or array
+/// elements.
+pub(crate) fn json_overlaps(a: &JsonValue, b: &JsonValue) -> bool {
+    // FIXME(ENG-2080): `serde_json::Number` does not compare exponents and decimals correctly when
+    // `arbitrary_precision` is enabled.
+    match (a, b) {
+        (JsonValue::Object(a), JsonValue::Object(b)) => a
+            .iter()
+            .any(|(key, a)| b.get(key).map(|b| json_eq(a, b)).unwrap_or_default()),
+
+        // PERF: O(1) best case, O(n*m) worst case.
+        (JsonValue::Array(a), JsonValue::Array(b)) => {
+            a.iter().any(|a| b.iter().any(|b| json_eq(a, b)))
+        }
+
+        // Compare scalars if same type.
+        _ => json_eq(a, b),
     }
 }
 
@@ -481,8 +498,28 @@ fn parse_json_index_error(iter_count: usize) -> ReadySetError {
 // PERF: `as_f64` is potentially expensive when `arbitrary_precision` is enabled because it must
 // parse the value each time. This can be resolved by handling -0.0 when parsing the JSON.
 
+/// Like [`JsonValue::eq`] except it handles `0.0 == -0.0`.
+fn json_eq(a: &JsonValue, b: &JsonValue) -> bool {
+    match (a, b) {
+        (JsonValue::Object(a), JsonValue::Object(b)) => {
+            a.len() == b.len()
+                && a.iter()
+                    .all(|(key, a)| b.get(key).map(|b| json_eq(a, b)).unwrap_or_default())
+        }
+        (JsonValue::Array(a), JsonValue::Array(b)) => {
+            a.len() == b.len() && a.iter().zip(b).all(|(a, b)| json_eq(a, b))
+        }
+        (JsonValue::Number(a), JsonValue::Number(b)) => json_number_eq(a, b),
+        _ => a == b,
+    }
+}
+
+/// Like [`JsonNumber::eq`] except it handles `0.0 == -0.0`.
 fn json_number_eq(a: &JsonNumber, b: &JsonNumber) -> bool {
     // If they compare correctly, then don't bother checking the -0.0 case.
+    //
+    // FIXME(ENG-2080): `serde_json::Number` does not compare exponents and decimals correctly when
+    // `arbitrary_precision` is enabled.
     if a == b {
         return true;
     }

@@ -586,6 +586,11 @@ impl BuiltinFunction {
                 let json = non_null!(expr.eval(record)?);
                 Ok(crate::eval::json::json_quote(<&str>::try_from(&json)?).into())
             }
+            BuiltinFunction::JsonOverlaps(expr1, expr2) => Ok(crate::eval::json::json_overlaps(
+                &non_null!(expr1.eval(record)?).to_json()?,
+                &non_null!(expr2.eval(record)?).to_json()?,
+            )
+            .into()),
             BuiltinFunction::JsonTypeof(expr) => {
                 let json = non_null!(expr.eval(record)?).to_json()?;
                 Ok(get_json_value_type(&json).into())
@@ -2119,6 +2124,94 @@ mod tests {
 
             test(object, "'abc'::char(3), '0'", Some("123"));
             test(object, "'abc'::char(3), null::text", None);
+        }
+
+        mod json_overlaps {
+            use super::*;
+
+            #[track_caller]
+            fn test_nullable(json1_expr: &str, json2_expr: &str, expected: Option<bool>) {
+                let expr = format!("json_overlaps({json1_expr}, {json2_expr})");
+                assert_eq!(
+                    eval_expr(&expr, PostgreSQL),
+                    expected.into(),
+                    "incorrect result for `{expr}`"
+                );
+            }
+
+            #[track_caller]
+            fn test_non_null(json1: &str, json2: &str, expected: bool) {
+                test_nullable(&format!("'{json1}'"), &format!("'{json2}'"), Some(expected));
+            }
+
+            #[test]
+            fn null_propagation() {
+                test_nullable("null", "null", None);
+                test_nullable("null", "array[]", None);
+                test_nullable("array[]", "null", None);
+            }
+
+            #[test]
+            fn scalar() {
+                test_non_null("true", "true", true);
+                test_non_null("true", "false", false);
+
+                test_non_null("1", "1", true);
+                test_non_null("1", "0", false);
+
+                test_non_null("1.5", "1.5", true);
+                test_non_null("1.5", "0.5", false);
+
+                test_non_null("\"hello\"", "\"hello\"", true);
+                test_non_null("\"hello\"", "\"world\"", false);
+            }
+
+            #[test]
+            fn array() {
+                test_non_null("[]", "[]", false);
+                test_non_null("[42]", "[]", false);
+                test_non_null("[]", "[42]", false);
+
+                test_non_null("[42]", "[42]", true);
+                test_non_null("[42]", "[0, 42]", true);
+                test_non_null("[42]", "[0, 0, 42]", true);
+                test_non_null("[42]", "[0, 42, 0]", true);
+                test_non_null("[0]", "[0, 42, 0]", true);
+
+                test_non_null("[[]]", "[[]]", true);
+                test_non_null("[[1]]", "[[1]]", true);
+                test_non_null("[[1]]", "[[1, 2]]", false);
+
+                test_non_null("[{}]", "[{}]", true);
+                test_non_null("[{ \"hello\": 42 }]", "[{ \"hello\": 42 }]", true);
+                test_non_null(
+                    "[{ \"hello\": 42 }]",
+                    "[{ \"hello\": 42, \"world\": 123 }]",
+                    false,
+                );
+            }
+
+            #[test]
+            fn object() {
+                let obj1 = r#"{ "hello": 42 }"#;
+                let obj2 = r#"{ "hello": 42, "world": 123 }"#;
+                let obj3 = r#"{ "abc": { "hello": 42 } }"#;
+                let obj4 = r#"{ "abc": { "hello": 42, "world": 123 } }"#;
+
+                test_non_null("{}", "{}", false);
+                test_non_null(obj1, "{}", false);
+                test_non_null("{}", obj1, false);
+
+                test_non_null(obj1, obj1, true);
+                test_non_null(obj1, obj2, true);
+                test_non_null(obj2, obj1, true);
+                test_non_null(obj2, obj2, true);
+
+                test_non_null(obj3, obj3, true);
+                test_non_null(obj4, obj4, true);
+                test_non_null(obj3, obj4, false);
+                test_non_null(obj4, obj3, false);
+            }
         }
 
         mod jsonb_insert {

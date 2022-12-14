@@ -52,6 +52,8 @@ pub enum BuiltinFunction {
     JsonValid(Expr),
     /// [`json_quote`](https://dev.mysql.com/doc/refman/8.0/en/json-creation-functions.html#function_json-quote)
     JsonQuote(Expr),
+    /// [`json_overlaps`](https://dev.mysql.com/doc/refman/8.0/en/json-search-functions.html#function_json-overlaps)
+    JsonOverlaps(Expr, Expr),
     /// [`json[b]_typeof`](https://www.postgresql.org/docs/current/functions-json.html)
     JsonTypeof(Expr),
     /// [`json[b]_array_length`](https://www.postgresql.org/docs/current/functions-json.html)
@@ -118,6 +120,7 @@ impl BuiltinFunction {
             JsonDepth { .. } => "json_depth",
             JsonValid { .. } => "json_valid",
             JsonQuote { .. } => "json_quote",
+            JsonOverlaps { .. } => "json_overlaps",
             JsonTypeof { .. } => "json_typeof",
             JsonArrayLength { .. } => "json_array_length",
             JsonStripNulls { .. } => "json_strip_nulls",
@@ -172,6 +175,9 @@ impl Display for BuiltinFunction {
             JsonDepth(arg) | JsonValid(arg) | JsonQuote(arg) | JsonTypeof(arg)
             | JsonArrayLength(arg) | JsonStripNulls(arg) | JsonbPretty(arg) => {
                 write!(f, "({})", arg)
+            }
+            JsonOverlaps(arg1, arg2) => {
+                write!(f, "({}, {})", arg1, arg2)
             }
             JsonExtractPath { json, keys } => {
                 write!(f, "({}, {})", json, keys.iter().join(", "))
