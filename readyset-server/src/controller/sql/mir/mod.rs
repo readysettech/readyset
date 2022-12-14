@@ -301,10 +301,6 @@ impl SqlToMirConverter {
         }
     }
 
-    pub(super) fn get_leaf(&self, name: &Relation) -> Option<NodeIndex> {
-        self.get_flow_node_address(name)
-    }
-
     pub(super) fn named_base_to_mir(
         &mut self,
         name: Relation,

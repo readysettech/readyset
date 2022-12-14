@@ -351,10 +351,9 @@ impl SqlIncorporator {
     }
 
     /// Retrieves the flow node associated with a given query's leaf view.
-    #[allow(unused)]
     pub(super) fn get_query_address(&self, name: &Relation) -> Option<NodeIndex> {
         match self.leaf_addresses.get(name) {
-            None => self.mir_converter.get_leaf(name),
+            None => self.mir_converter.get_flow_node_address(name),
             Some(na) => Some(*na),
         }
     }
