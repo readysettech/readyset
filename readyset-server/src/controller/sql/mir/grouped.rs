@@ -5,7 +5,7 @@ use mir::node::node_inner::MirNodeInner;
 use mir::Column;
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::FunctionExpr::*;
-use nom_sql::{self, Expr, FieldDefinitionExpr, Relation, SelectStatement, SqlIdentifier};
+use nom_sql::{self, Expr, FieldDefinitionExpr, Relation, SqlIdentifier};
 use petgraph::graph::NodeIndex;
 use readyset_errors::{unsupported, ReadySetError};
 use readyset_sql_passes::is_aggregate;
@@ -256,15 +256,14 @@ fn joinable_aggregate_nodes(
 /// aggregation - that's the responsibility of the caller. This function will only return [`None`]
 /// if the query contains no aggregates.
 pub(super) fn post_lookup_aggregates(
-    qg: &QueryGraph,
-    stmt: &SelectStatement,
+    query_graph: &QueryGraph,
     query_name: &Relation,
 ) -> ReadySetResult<Option<PostLookupAggregates<Column>>> {
-    if stmt.distinct {
+    if query_graph.distinct {
         // DISTINCT is the equivalent of grouping by all projected columns but not actually doing
         // any aggregation function
         return Ok(Some(PostLookupAggregates {
-            group_by: stmt
+            group_by: query_graph
                 .fields
                 .iter()
                 .filter_map(|expr| match expr {
@@ -285,12 +284,12 @@ pub(super) fn post_lookup_aggregates(
         }));
     }
 
-    if qg.aggregates.is_empty() {
+    if query_graph.aggregates.is_empty() {
         return Ok(None);
     }
 
     let mut aggregates = vec![];
-    for (function, alias) in &qg.aggregates {
+    for (function, alias) in &query_graph.aggregates {
         aggregates.push(PostLookupAggregate {
             column: Column::named(alias.clone()).aliased_as_table(query_name.clone()),
             function: match function {
@@ -311,7 +310,7 @@ pub(super) fn post_lookup_aggregates(
     }
 
     Ok(Some(PostLookupAggregates {
-        group_by: qg
+        group_by: query_graph
             .group_by
             .iter()
             .map(|c| Column::from(c).aliased_as_table(query_name.clone()))

@@ -153,19 +153,19 @@ mod tests {
         .unwrap();
 
         let qga = match qa {
-            SqlQuery::Select(ref q) => to_query_graph(q).unwrap(),
+            SqlQuery::Select(q) => to_query_graph(q).unwrap(),
             _ => panic!(),
         };
         let qgb = match qb {
-            SqlQuery::Select(ref q) => to_query_graph(q).unwrap(),
+            SqlQuery::Select(q) => to_query_graph(q).unwrap(),
             _ => panic!(),
         };
         let qgc = match qc {
-            SqlQuery::Select(ref q) => to_query_graph(q).unwrap(),
+            SqlQuery::Select(q) => to_query_graph(q).unwrap(),
             _ => panic!(),
         };
         let qgd = match qd {
-            SqlQuery::Select(ref q) => to_query_graph(q).unwrap(),
+            SqlQuery::Select(q) => to_query_graph(q).unwrap(),
             _ => panic!(),
         };
 
@@ -191,8 +191,8 @@ mod tests {
         let without_topk = parse_select("SELECT a.id FROM a").unwrap();
         let with_topk = parse_select("SELECT a.id FROM a ORDER BY n LIMIT 3").unwrap();
 
-        let without_topk_qg = to_query_graph(&without_topk).unwrap();
-        let with_topk_qg = to_query_graph(&with_topk).unwrap();
+        let without_topk_qg = to_query_graph(without_topk).unwrap();
+        let with_topk_qg = to_query_graph(with_topk).unwrap();
 
         let mut h1 = DefaultHasher::new();
         let mut h2 = DefaultHasher::new();

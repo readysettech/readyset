@@ -483,10 +483,10 @@ impl SqlIncorporator {
 
         trace!(rewritten_query = %stmt);
 
-        let qg = to_query_graph(&stmt).map_err(on_err)?;
+        let query_graph = to_query_graph(stmt).map_err(on_err)?;
         let mir_leaf = self
             .mir_converter
-            .named_query_to_mir(&query_name, stmt, &qg, anon_queries, is_leaf)
+            .named_query_to_mir(&query_name, &query_graph, anon_queries, is_leaf)
             .map_err(on_err)?;
 
         Ok(mir_leaf)

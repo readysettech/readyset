@@ -18,7 +18,7 @@ use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
     BinaryOperator, ColumnSpecification, CompoundSelectOperator, CreateTableBody, Expr,
     FieldDefinitionExpr, FieldReference, FunctionExpr, Literal, OrderClause, OrderType, Relation,
-    SelectStatement, SqlIdentifier, TableKey, UnaryOperator,
+    SqlIdentifier, TableKey, UnaryOperator,
 };
 use petgraph::graph::NodeIndex;
 use petgraph::Direction;
@@ -78,36 +78,6 @@ fn value_columns_needed_for_predicates(
         })
         .filter(|(c, _)| pred_columns.contains(c))
         .collect()
-}
-
-fn default_row_for_select(st: &SelectStatement) -> Option<Vec<DfValue>> {
-    // If this is an aggregated query AND it does not contain a GROUP BY clause,
-    // set default values based on the aggregation (or lack thereof) on each
-    // individual field
-    if !st.contains_aggregate_select() || st.group_by.is_some() {
-        return None;
-    }
-    Some(
-        st.fields
-            .iter()
-            .map(|f| match f {
-                FieldDefinitionExpr::Expr {
-                    expr: Expr::Call(func),
-                    ..
-                } => match func {
-                    FunctionExpr::Avg { .. } => DfValue::None,
-                    FunctionExpr::Count { .. } => DfValue::Int(0),
-                    FunctionExpr::CountStar => DfValue::Int(0),
-                    FunctionExpr::Sum { .. } => DfValue::None,
-                    FunctionExpr::Max(..) => DfValue::None,
-                    FunctionExpr::Min(..) => DfValue::None,
-                    FunctionExpr::GroupConcat { .. } => DfValue::None,
-                    FunctionExpr::Call { .. } | FunctionExpr::Substring { .. } => DfValue::None,
-                },
-                _ => DfValue::None,
-            })
-            .collect(),
-    )
 }
 
 /// Kinds of joins in MIR
@@ -1162,14 +1132,9 @@ impl SqlToMirConverter {
             ),
             Expr::Between { .. } => internal!("BETWEEN should have been removed earlier"),
             Expr::Exists(subquery) => {
-                let qg = to_query_graph(subquery)?;
-                let subquery_leaf = self.named_query_to_mir(
-                    query_name,
-                    (**subquery).clone(),
-                    &qg,
-                    HashMap::new(),
-                    false,
-                )?;
+                let query_graph = to_query_graph((**subquery).clone())?;
+                let subquery_leaf =
+                    self.named_query_to_mir(query_name, &query_graph, HashMap::new(), false)?;
 
                 // -> π[lit: 0, lit: 0]
                 let group_proj = self.make_project_node(
@@ -1343,8 +1308,7 @@ impl SqlToMirConverter {
     pub(super) fn named_query_to_mir(
         &mut self,
         query_name: &Relation,
-        st: SelectStatement,
-        qg: &QueryGraph,
+        query_graph: &QueryGraph,
         anon_queries: HashMap<Relation, NodeIndex>,
         has_leaf: bool,
     ) -> Result<NodeIndex, ReadySetError> {
@@ -1361,23 +1325,18 @@ impl SqlToMirConverter {
 
             // Convert the query parameters to an ordered list of columns that will comprise the
             // lookup key if a leaf node is attached.
-            let view_key = qg.view_key(self.config())?;
+            let view_key = query_graph.view_key(self.config())?;
 
             // 0. Base nodes (always reused)
             let mut base_nodes: Vec<NodeIndex> = Vec::new();
-            let mut sorted_rels: Vec<&Relation> = qg.relations.keys().collect();
+            let mut sorted_rels: Vec<&Relation> = query_graph.relations.keys().collect();
             sorted_rels.sort_unstable();
             for rel in &sorted_rels {
-                let base_for_rel = if let Some((subgraph, subquery)) = &qg.relations[*rel].subgraph
-                {
-                    let subquery_leaf = self.named_query_to_mir(
-                        query_name,
-                        subquery.clone(),
-                        subgraph,
-                        HashMap::new(),
-                        false,
-                    )?;
-                    if is_correlated(subquery) {
+                let base_for_rel = if let Some(subquery) = &query_graph.relations[*rel].subgraph {
+                    let correlated = subquery.is_correlated;
+                    let subquery_leaf =
+                        self.named_query_to_mir(query_name, subquery, HashMap::new(), false)?;
+                    if correlated {
                         correlated_relations.insert(subquery_leaf);
                     }
                     subquery_leaf
@@ -1395,7 +1354,7 @@ impl SqlToMirConverter {
 
                 let alias_table_node_name = format!(
                     "q_{:x}_{}_alias_table_{}",
-                    qg.signature().hash,
+                    query_graph.signature().hash,
                     self.mir_graph[base_for_rel].name(),
                     rel.name
                 )
@@ -1419,8 +1378,8 @@ impl SqlToMirConverter {
             let join_nodes = make_joins(
                 self,
                 query_name,
-                format!("q_{:x}", qg.signature().hash).into(),
-                qg,
+                format!("q_{:x}", query_graph.signature().hash).into(),
+                query_graph,
                 &node_for_rel,
                 &correlated_relations,
             )?;
@@ -1438,7 +1397,7 @@ impl SqlToMirConverter {
                         make_cross_joins(
                             self,
                             query_name,
-                            &format!("q_{:x}", qg.signature().hash),
+                            &format!("q_{:x}", query_graph.signature().hash),
                             base_nodes.clone(),
                             &correlated_relations,
                         )?
@@ -1457,8 +1416,8 @@ impl SqlToMirConverter {
             let expressions_above_grouped = make_expressions_above_grouped(
                 self,
                 query_name,
-                &format!("q_{:x}", qg.signature().hash),
-                qg,
+                &format!("q_{:x}", query_graph.signature().hash),
+                query_graph,
                 &mut prev_node,
             );
 
@@ -1467,11 +1426,11 @@ impl SqlToMirConverter {
             let mut column_to_predicates: HashMap<nom_sql::Column, Vec<&Expr>> = HashMap::new();
 
             for rel in &sorted_rels {
-                let qgn = qg
+                let qgn = query_graph
                     .relations
                     .get(*rel)
                     .ok_or_else(|| internal_err!("couldn't find {:?} in qg relations", rel))?;
-                for pred in qgn.predicates.iter().chain(&qg.global_predicates) {
+                for pred in qgn.predicates.iter().chain(&query_graph.global_predicates) {
                     for col in pred.referred_columns() {
                         column_to_predicates
                             .entry(col.clone())
@@ -1488,8 +1447,8 @@ impl SqlToMirConverter {
             let created_predicates = make_predicates_above_grouped(
                 self,
                 query_name,
-                format!("q_{:x}", qg.signature().hash).into(),
-                qg,
+                format!("q_{:x}", query_graph.signature().hash).into(),
+                query_graph,
                 &column_to_predicates,
                 &mut prev_node,
             )?;
@@ -1501,7 +1460,7 @@ impl SqlToMirConverter {
             // added in a different order every time, which will yield different node identifiers
             // and make it difficult for applications to check what's going on.
             for rel in &sorted_rels {
-                let qgn = qg
+                let qgn = query_graph
                     .relations
                     .get(*rel)
                     .ok_or_else(|| internal_err!("qg relations did not contain {:?}", rel))?;
@@ -1518,7 +1477,7 @@ impl SqlToMirConverter {
                             query_name,
                             format!(
                                 "q_{:x}_n{}_p{}",
-                                qg.signature().hash,
+                                query_graph.signature().hash,
                                 self.mir_graph.node_count(),
                                 i
                             )
@@ -1534,12 +1493,14 @@ impl SqlToMirConverter {
 
             // 6. Determine literals and expressions that global predicates depend
             //    on and add them here; remembering that we've already added them-
-            if let Some(projected) = self.make_value_project_node(query_name, qg, prev_node)? {
+            if let Some(projected) =
+                self.make_value_project_node(query_name, query_graph, prev_node)?
+            {
                 prev_node = projected;
             }
 
             // 7. Global predicates
-            for (i, ref p) in qg.global_predicates.iter().enumerate() {
+            for (i, ref p) in query_graph.global_predicates.iter().enumerate() {
                 if created_predicates.contains(p) {
                     continue;
                 }
@@ -1548,7 +1509,7 @@ impl SqlToMirConverter {
                     query_name,
                     format!(
                         "q_{:x}_n{}_{}",
-                        qg.signature().hash,
+                        query_graph.signature().hash,
                         self.mir_graph.node_count(),
                         i
                     )
@@ -1564,18 +1525,18 @@ impl SqlToMirConverter {
             let mut func_nodes: Vec<NodeIndex> = make_grouped(
                 self,
                 query_name,
-                format!("q_{:x}", qg.signature().hash).into(),
-                qg,
+                format!("q_{:x}", query_graph.signature().hash).into(),
+                query_graph,
                 &node_for_rel,
                 &mut prev_node,
                 &expressions_above_grouped,
             )?;
 
             // 9. Add predicate nodes for HAVING after GROUP BY nodes
-            for (i, p) in qg.having_predicates.iter().enumerate() {
+            for (i, p) in query_graph.having_predicates.iter().enumerate() {
                 let hp_name = format!(
                     "q_{:x}_h{}_{}",
-                    qg.signature().hash,
+                    query_graph.signature().hash,
                     self.mir_graph.node_count(),
                     i
                 )
@@ -1597,16 +1558,16 @@ impl SqlToMirConverter {
                 order,
                 limit,
                 offset,
-            }) = qg.pagination.as_ref()
+            }) = query_graph.pagination.as_ref()
             {
                 let make_topk = offset.is_none();
-                let group_by = if qg.parameters().is_empty() {
+                let group_by = if query_graph.parameters().is_empty() {
                     // need to add another projection to introduce a bogokey to group by if there
                     // are no query parameters
                     let cols: Vec<_> = self.mir_graph.columns(final_node);
                     let name = format!(
                         "q_{:x}_n{}",
-                        qg.signature().hash,
+                        query_graph.signature().hash,
                         self.mir_graph.node_count()
                     )
                     .into();
@@ -1646,7 +1607,7 @@ impl SqlToMirConverter {
                     query_name,
                     format!(
                         "q_{:x}_n{}",
-                        qg.signature().hash,
+                        query_graph.signature().hash,
                         self.mir_graph.node_count()
                     )
                     .into(),
@@ -1661,7 +1622,7 @@ impl SqlToMirConverter {
             }
 
             // 10. Generate leaf views that expose the query result
-            let mut projected_columns: Vec<Column> = qg
+            let mut projected_columns: Vec<Column> = query_graph
                 .columns
                 .iter()
                 .filter_map(|oc| match *oc {
@@ -1675,11 +1636,13 @@ impl SqlToMirConverter {
                 .collect();
 
             // We may already have added some of the expression and literal columns
-            let (_, already_computed): (Vec<_>, Vec<_>) =
-                value_columns_needed_for_predicates(&qg.columns, &qg.global_predicates)
-                    .into_iter()
-                    .unzip();
-            let projected_expressions: Vec<(SqlIdentifier, Expr)> = qg
+            let (_, already_computed): (Vec<_>, Vec<_>) = value_columns_needed_for_predicates(
+                &query_graph.columns,
+                &query_graph.global_predicates,
+            )
+            .into_iter()
+            .unzip();
+            let projected_expressions: Vec<(SqlIdentifier, Expr)> = query_graph
                 .columns
                 .iter()
                 .filter_map(|oc| match *oc {
@@ -1695,7 +1658,7 @@ impl SqlToMirConverter {
                     OutputColumn::Literal(_) => None,
                 })
                 .collect();
-            let mut projected_literals: Vec<(SqlIdentifier, DfValue)> = qg
+            let mut projected_literals: Vec<(SqlIdentifier, DfValue)> = query_graph
                 .columns
                 .iter()
                 .map(|oc| -> ReadySetResult<_> {
@@ -1723,7 +1686,7 @@ impl SqlToMirConverter {
             }
 
             if has_leaf {
-                if qg.parameters().is_empty()
+                if query_graph.parameters().is_empty()
                     && !create_paginate
                     && !projected_columns.contains(&Column::named("bogokey"))
                 {
@@ -1737,11 +1700,11 @@ impl SqlToMirConverter {
                 }
             }
 
-            if st.distinct {
+            if query_graph.distinct {
                 let name = if has_leaf {
                     format!(
                         "q_{:x}_n{}",
-                        qg.signature().hash,
+                        query_graph.signature().hash,
                         self.mir_graph.node_count()
                     )
                     .into()
@@ -1760,7 +1723,7 @@ impl SqlToMirConverter {
             let leaf_project_node = self.make_project_node(
                 query_name,
                 if has_leaf {
-                    format!("q_{:x}_project", qg.signature().hash).into()
+                    format!("q_{:x}_project", query_graph.signature().hash).into()
                 } else {
                     query_name.clone()
                 },
@@ -1773,7 +1736,7 @@ impl SqlToMirConverter {
             if has_leaf {
                 // We are supposed to add a `Leaf` node keyed on the query parameters. For purely
                 // internal views (e.g., subqueries), this is not set.
-                let mut returned_cols = st
+                let mut returned_cols = query_graph
                     .fields
                     .iter()
                     .map(|expression| -> ReadySetResult<_> {
@@ -1805,7 +1768,7 @@ impl SqlToMirConverter {
                     if let Some(c) = parent_columns.iter().find(|c| col.cmp(c).is_eq()) {
                         project_order.push(c.clone());
                     } else {
-                        internal!("Returned column not in projected schema");
+                        internal!("Returned column {col} not in projected schema");
                     }
                 }
                 for col in parent_columns {
@@ -1818,7 +1781,7 @@ impl SqlToMirConverter {
                 let leaf_project_reorder_node = self.make_project_node(
                     query_name,
                     if has_leaf {
-                        format!("q_{:x}_project_reorder", qg.signature().hash).into()
+                        format!("q_{:x}_project_reorder", query_graph.signature().hash).into()
                     } else {
                         query_name.clone()
                     },
@@ -1829,54 +1792,34 @@ impl SqlToMirConverter {
                 );
 
                 let aggregates = if view_key.index_type != IndexType::HashMap {
-                    post_lookup_aggregates(qg, &st, query_name)?
+                    post_lookup_aggregates(query_graph, query_name)?
                 } else {
                     None
                 };
 
-                let leaf_node = self.add_query_node(query_name.clone(), MirNode::new(
+                let leaf_node = self.add_query_node(
                     query_name.clone(),
-                    MirNodeInner::Leaf {
-                        keys: view_key
-                            .columns
-                            .into_iter()
-                            .map(|(col, placeholder)| (col, placeholder))
-                            .collect(),
-                        index_type: view_key.index_type,
-                        lowered_to_df: false,
-                        order_by: st
-                            .order
-                            .as_ref()
-                            .map(|order| {
-                                order
-                                    .order_by
-                                    .iter()
-                                    .cloned()
-                                    .map(|(expr, ot)| {
-                                        Ok((
-                                            match expr {
-                                                FieldReference::Expr(Expr::Column(
-                                                                         col,
-                                                                     )) => Column::from(col),
-                                                FieldReference::Expr(expr) => {
-                                                    Column::named(expr.to_string())
-                                                }
-                                                FieldReference::Numeric(_) => internal!(
-                                                    "Numeric field references should have been removed"
-                                                ),
-                                            },
-                                            ot.unwrap_or(OrderType::OrderAscending),
-                                        ))
-                                    })
-                                    .collect::<ReadySetResult<_>>()
-                            })
-                            .transpose()?,
-                        limit: qg.pagination.as_ref().map(|p| p.limit),
-                        returned_cols: Some(returned_cols),
-                        default_row: default_row_for_select(&st),
-                        aggregates,
-                    },
-                ), &[leaf_project_reorder_node]);
+                    MirNode::new(
+                        query_name.clone(),
+                        MirNodeInner::Leaf {
+                            keys: view_key
+                                .columns
+                                .into_iter()
+                                .map(|(col, placeholder)| (col, placeholder))
+                                .collect(),
+                            index_type: view_key.index_type,
+                            lowered_to_df: false,
+                            order_by: query_graph.order.as_ref().map(|order| {
+                                order.iter().map(|(c, ot)| (Column::from(c), *ot)).collect()
+                            }),
+                            limit: query_graph.pagination.as_ref().map(|p| p.limit),
+                            returned_cols: Some(returned_cols),
+                            default_row: query_graph.default_row.clone(),
+                            aggregates,
+                        },
+                    ),
+                    &[leaf_project_reorder_node],
+                );
 
                 self.relations.insert(query_name.clone(), leaf_node);
 

@@ -6,7 +6,7 @@ use std::hash::{Hash, Hasher};
 use std::vec::Vec;
 use std::{iter, mem};
 
-use common::IndexType;
+use common::{DfValue, IndexType};
 use nom_sql::analysis::visit_mut::{walk_expr, VisitorMut};
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
@@ -19,7 +19,7 @@ use readyset_errors::{
     internal, invalid, invalid_err, invariant, invariant_eq, no_table_for_col, unsupported,
     unsupported_err, ReadySetResult,
 };
-use readyset_sql_passes::{is_aggregate, is_predicate, map_aggregates, LogicalOp};
+use readyset_sql_passes::{is_aggregate, is_correlated, is_predicate, map_aggregates, LogicalOp};
 use serde::{Deserialize, Serialize};
 
 use super::mir::{self, PAGE_NUMBER_COL};
@@ -189,8 +189,7 @@ pub struct QueryGraphNode {
     pub parameters: Vec<Parameter>,
     /// If this query graph relation refers to a subquery, the graph of that subquery and the AST
     /// for the query itself
-    // TODO(grfn): Just pass around the SelectStatement as a field of the QueryGraph
-    pub subgraph: Option<(Box<QueryGraph>, SelectStatement)>,
+    pub subgraph: Option<Box<QueryGraph>>,
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
@@ -217,7 +216,7 @@ pub struct ViewKey {
     pub index_type: IndexType,
 }
 
-#[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 // NOTE: Keep in mind this struct has a custom Hash impl - when changing it, remember to update that
 // as well!
 // TODO(grfn): impl Arbitrary for this struct so we can make a proptest for that
@@ -227,6 +226,8 @@ pub struct QueryGraph {
     /// Joins in the query.
     #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
     pub edges: HashMap<(Relation, Relation), QueryGraphEdge>,
+    /// Whether the query has a `DISTINCT` in the `SELECT` clause
+    pub distinct: bool,
     /// Aggregates in the query, represented as a map from the aggregate function to the alias for
     /// that aggregate function
     ///
@@ -238,6 +239,12 @@ pub struct QueryGraph {
     /// Final set of projected columns in this query; may include literals in addition to the
     /// columns reflected in individual relations' `QueryGraphNode` structures.
     pub columns: Vec<OutputColumn>,
+    /// Fields projected by the original query
+    // TODO: Sort out the difference between this and `columns`
+    pub fields: Vec<FieldDefinitionExpr>,
+    /// Row of default values to return on an empty result set, for example if we're aggregating
+    /// and no rows are found
+    pub default_row: Option<Vec<DfValue>>,
     /// Establishes an order for join predicates. Each join predicate can be identified by
     /// its (src, dst) pair
     pub join_order: Vec<JoinRef>,
@@ -245,15 +252,15 @@ pub struct QueryGraph {
     pub global_predicates: Vec<Expr>,
     /// HAVING predicates (like global predicates, but applied after aggregate functions)
     pub having_predicates: Vec<Expr>,
+    /// The list of columns and directionsj that the query is ordering by, if any
+    pub order: Option<Vec<(Column, OrderType)>>,
     /// The pagination (order, limit, offset) for the query, if any
     pub pagination: Option<Pagination>,
+    /// True if the query is correlated (is a subquery that refers to columns in an outer query)
+    pub is_correlated: bool,
 }
 
 impl QueryGraph {
-    fn new() -> Self {
-        Default::default()
-    }
-
     /// Returns the set of columns on which this query is parametrized. They can come from
     /// multiple tables involved in the query.
     /// Does not include limit or offset parameters on which this query may be parametrized.
@@ -387,6 +394,8 @@ impl Hash for QueryGraph {
         });
         edges.hash(state);
 
+        self.distinct.hash(state);
+
         let mut group_by = self.group_by.iter().collect::<Vec<_>>();
         group_by.sort();
         group_by.hash(state);
@@ -395,12 +404,16 @@ impl Hash for QueryGraph {
         aggregates.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
         aggregates.hash(state);
 
-        // columns and join_order are Vecs, so already ordered
+        // these fields are Vecs, so already ordered
         self.columns.hash(state);
+        self.fields.hash(state);
+        self.default_row.hash(state);
         self.join_order.hash(state);
         self.global_predicates.hash(state);
         self.having_predicates.hash(state);
+        self.order.hash(state);
         self.pagination.hash(state);
+        self.is_correlated.hash(state);
     }
 }
 
@@ -839,10 +852,38 @@ fn table_expr_name(table_expr: &TableExpr) -> ReadySetResult<Relation> {
     }
 }
 
-#[allow(clippy::cognitive_complexity)]
-pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
-    let mut qg = QueryGraph::new();
+fn default_row_for_select(st: &SelectStatement) -> Option<Vec<DfValue>> {
+    // If this is an aggregated query AND it does not contain a GROUP BY clause,
+    // set default values based on the aggregation (or lack thereof) on each
+    // individual field
+    if !st.contains_aggregate_select() || st.group_by.is_some() {
+        return None;
+    }
+    Some(
+        st.fields
+            .iter()
+            .map(|f| match f {
+                FieldDefinitionExpr::Expr {
+                    expr: Expr::Call(func),
+                    ..
+                } => match func {
+                    FunctionExpr::Avg { .. } => DfValue::None,
+                    FunctionExpr::Count { .. } => DfValue::Int(0),
+                    FunctionExpr::CountStar => DfValue::Int(0),
+                    FunctionExpr::Sum { .. } => DfValue::None,
+                    FunctionExpr::Max(..) => DfValue::None,
+                    FunctionExpr::Min(..) => DfValue::None,
+                    FunctionExpr::GroupConcat { .. } => DfValue::None,
+                    FunctionExpr::Call { .. } | FunctionExpr::Substring { .. } => DfValue::None,
+                },
+                _ => DfValue::None,
+            })
+            .collect(),
+    )
+}
 
+#[allow(clippy::cognitive_complexity)]
+pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
     // a handy closure for making new relation nodes
     let new_node = |rel: Relation,
                     preds: Vec<Expr>,
@@ -902,12 +943,12 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
     // This is needed so that we don't end up with an empty query graph when there are no
     // conditionals, but rather with a one-node query graph that has no predicates.
 
+    let mut relations = HashMap::new();
     let mut add_table_expr = |table_expr: &TableExpr| -> ReadySetResult<Relation> {
         match &table_expr.inner {
             TableExprInner::Table(t) => {
-                if qg
-                    .relations
-                    .insert(t.clone(), new_node(t.clone(), vec![], st)?)
+                if relations
+                    .insert(t.clone(), new_node(t.clone(), vec![], &stmt)?)
                     .is_some()
                 {
                     invalid!("Table name {t} specified more than once");
@@ -922,9 +963,9 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                         .ok_or_else(|| invalid_err!("All subqueries must have an alias"))?
                         .clone(),
                 );
-                if let Entry::Vacant(e) = qg.relations.entry(rel.clone()) {
-                    let mut node = new_node(rel.clone(), vec![], st)?;
-                    node.subgraph = Some((Box::new(to_query_graph(sq)?), sq.as_ref().clone()));
+                if let Entry::Vacant(e) = relations.entry(rel.clone()) {
+                    let mut node = new_node(rel.clone(), vec![], &stmt)?;
+                    node.subgraph = Some(Box::new(to_query_graph((**sq).clone())?));
                     e.insert(node);
                 } else {
                     invalid!("Table name {rel} specified more than once");
@@ -935,12 +976,12 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
         }
     };
 
-    for table_expr in st.tables.iter() {
+    for table_expr in stmt.tables.iter() {
         let rel = add_table_expr(table_expr)?;
         inner_join_rels.insert(rel);
     }
 
-    for jc in &st.join {
+    for jc in &stmt.join {
         match &jc.right {
             JoinRightSide::Table(table_expr) => {
                 let rel = add_table_expr(table_expr)?;
@@ -954,6 +995,8 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
 
     // 2. Add edges for each pair of joined relations. Note that we must keep track of the join
     //    predicates here already, but more may be added when processing the WHERE clause lateron.
+
+    let mut edges = HashMap::new();
     let mut join_predicates = Vec::new();
     let col_expr = |tbl: &Relation, col: &SqlIdentifier| -> Expr {
         Expr::Column(Column {
@@ -965,11 +1008,11 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
     // 2a. Explicit joins
     // The table specified in the query is available for USING joins.
     let prev_table =
-        table_expr_name(st.tables.last().ok_or_else(|| {
+        table_expr_name(stmt.tables.last().ok_or_else(|| {
             unsupported_err!("SELECT statements with no tables are unsupported")
         })?)?;
 
-    for jc in &st.join {
+    for jc in &stmt.join {
         let rhs_relation = match &jc.right {
             JoinRightSide::Table(te) => table_expr_name(te)?,
             JoinRightSide::Tables(_) => unsupported!("JoinRightSide::Tables not yet implemented"),
@@ -1056,7 +1099,7 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
         // add edge for join
         // FIXME(eta): inefficient cloning!
         if let std::collections::hash_map::Entry::Vacant(e) =
-            qg.edges.entry((left_table.clone(), right_table.clone()))
+            edges.entry((left_table.clone(), right_table.clone()))
         {
             e.insert(match jc.operator {
                 JoinOperator::LeftJoin | JoinOperator::LeftOuterJoin => {
@@ -1070,10 +1113,10 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
         }
     }
 
-    if let Some(ref cond) = st.where_clause {
-        let mut local_predicates = HashMap::new();
-        let mut global_predicates = Vec::new();
-        let mut query_parameters = Vec::new();
+    let mut local_predicates = HashMap::new();
+    let mut global_predicates = Vec::new();
+    let mut query_parameters = Vec::new();
+    if let Some(ref cond) = stmt.where_clause {
         // Let's classify the predicates we have in the query
         classify_conditionals(
             cond,
@@ -1090,7 +1133,7 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
 
         // 1. Add local predicates for each node that has them
         for (name, preds) in local_predicates {
-            if !qg.relations.contains_key(&name) {
+            if !relations.contains_key(&name) {
                 // can't have predicates on tables that do not appear in the FROM part of the
                 // statement
                 internal!(
@@ -1100,11 +1143,7 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                 );
             } else {
                 #[allow(clippy::unwrap_used)] // checked that this key is in qg.relations
-                qg.relations
-                    .get_mut(&name)
-                    .unwrap()
-                    .predicates
-                    .extend(preds);
+                relations.get_mut(&name).unwrap().predicates.extend(preds);
             }
         }
 
@@ -1116,19 +1155,18 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                     let nn = new_node(
                         l.table.clone().ok_or_else(|| no_table_for_col())?,
                         Vec::new(),
-                        st,
+                        &stmt,
                     )?;
                     // If tables aren't already in the relations, add them.
-                    qg.relations
+                    relations
                         .entry(l.table.clone().ok_or_else(|| no_table_for_col())?)
                         .or_insert_with(|| nn.clone());
 
-                    qg.relations
+                    relations
                         .entry(r.table.clone().ok_or_else(|| no_table_for_col())?)
                         .or_insert_with(|| nn.clone());
 
-                    let e = qg
-                        .edges
+                    let e = edges
                         .entry((
                             l.table.clone().ok_or_else(|| no_table_for_col())?,
                             r.table.clone().ok_or_else(|| no_table_for_col())?,
@@ -1152,7 +1190,7 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                     unsupported!("each parameter's column must have an associated table! (no such column \"{}\")", param.col);
                 }
                 Some(ref table) => {
-                    let rel = qg.relations.get_mut(table).ok_or_else(|| {
+                    let rel = relations.get_mut(table).ok_or_else(|| {
                         invalid_err!(
                             "Column {} references non-existent table {}",
                             param.col.name,
@@ -1169,19 +1207,20 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                 }
             }
         }
-
-        // 4. Add global predicates
-        qg.global_predicates = global_predicates;
     }
 
     // Add HAVING predicates and aggregates. Note that unlike below for selected columns, we don't
     // add any found aggregate functions in the HAVING clause to qg.columns, since we don't want to
     // necessarily return these in the query results.
-    if let Some(having_expr) = st.having.as_ref() {
-        qg.having_predicates = extract_having_aggregates(having_expr, &mut qg.aggregates);
-    }
+    let mut aggregates = HashMap::new();
+    let having_predicates = if let Some(having_expr) = stmt.having.as_ref() {
+        extract_having_aggregates(having_expr, &mut aggregates)
+    } else {
+        vec![]
+    };
 
-    for field in st.fields.iter() {
+    let mut columns = Vec::with_capacity(stmt.fields.len());
+    for field in stmt.fields.iter() {
         match field {
             FieldDefinitionExpr::All | FieldDefinitionExpr::AllInTable(_) => {
                 internal!("Stars should have been expanded by now!")
@@ -1189,20 +1228,19 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
             FieldDefinitionExpr::Expr { expr, alias } => {
                 let name: SqlIdentifier = alias.clone().unwrap_or_else(|| expr.to_string().into());
                 match expr {
-                    Expr::Literal(l) => qg.columns.push(OutputColumn::Literal(LiteralColumn {
+                    Expr::Literal(l) => columns.push(OutputColumn::Literal(LiteralColumn {
                         name,
                         table: None,
                         value: l.clone(),
                     })),
                     Expr::Column(c) => {
-                        qg.columns.push(OutputColumn::Data {
+                        columns.push(OutputColumn::Data {
                             alias: alias.clone().unwrap_or_else(|| c.name.clone()),
                             column: c.clone(),
                         });
                     }
                     Expr::Call(function) if is_aggregate(function) => {
-                        let agg_name = qg
-                            .aggregates
+                        let agg_name = aggregates
                             .entry(function.clone())
                             .or_insert_with(|| name.clone())
                             .clone();
@@ -1213,7 +1251,7 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                         // aggregates in `qg.aggregates`). If they were `OutputColumn::Expr` here
                         // we'd try to *evaluate them* as project expressions, which obviously we
                         // can't do.
-                        qg.columns.push(OutputColumn::Data {
+                        columns.push(OutputColumn::Data {
                             alias: alias.clone().unwrap_or(name),
                             column: Column {
                                 name: agg_name,
@@ -1224,9 +1262,9 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                     _ => {
                         let mut expr = expr.clone();
                         let aggs = map_aggregates(&mut expr);
-                        qg.aggregates.extend(aggs);
+                        aggregates.extend(aggs);
 
-                        qg.columns.push(OutputColumn::Expr(ExprColumn {
+                        columns.push(OutputColumn::Expr(ExprColumn {
                             name,
                             table: None,
                             expression: expr,
@@ -1237,25 +1275,25 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
         }
     }
 
-    if let Some(group_by_clause) = &st.group_by {
-        qg.group_by.extend(
-            group_by_clause
-                .fields
-                .iter()
-                .map(|f| match f {
-                    FieldReference::Numeric(_) => {
-                        internal!("Numeric field references should have been removed")
-                    }
-                    FieldReference::Expr(Expr::Column(c)) => Ok(c.clone()),
-                    FieldReference::Expr(_) => {
-                        unsupported!("Only column references are currently supported in GROUP BY")
-                    }
-                })
-                .collect::<ReadySetResult<Vec<_>>>()?,
-        );
-    }
+    let group_by = if let Some(group_by_clause) = &stmt.group_by {
+        group_by_clause
+            .fields
+            .iter()
+            .map(|f| match f {
+                FieldReference::Numeric(_) => {
+                    internal!("Numeric field references should have been removed")
+                }
+                FieldReference::Expr(Expr::Column(c)) => Ok(c.clone()),
+                FieldReference::Expr(_) => {
+                    unsupported!("Only column references are currently supported in GROUP BY")
+                }
+            })
+            .collect::<ReadySetResult<HashSet<_>>>()?
+    } else {
+        Default::default()
+    };
 
-    if let Some(ref order) = st.order {
+    if let Some(ref order) = stmt.order {
         // For each column in the `ORDER BY` clause, check if it needs to be projected
         order
             .order_by
@@ -1269,13 +1307,12 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                     // This is a reference to a column in a table, we need to project it if it is
                     // not yet projected in order to be able to execute `ORDER
                     // BY` post lookup.
-                    if !qg
-                        .columns
+                    if !columns
                         .iter()
                         .any(|e| matches!(e, OutputColumn::Data {  column, .. } if column == col))
                     {
                         // The projected column does not already contains that column, so add it
-                        qg.columns.push(OutputColumn::Data {
+                        columns.push(OutputColumn::Data {
                             alias: col.name.clone(),
                             column: col.clone(),
                         })
@@ -1287,13 +1324,13 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                     // we don't necessarily need it projected in the result set of the query, and
                     // the pull_columns pass will make sure the topk/paginate node gets the
                     // aggregate result column
-                    qg.aggregates
+                    aggregates
                         .entry(func.clone())
                         .or_insert_with(|| func.to_string().into());
                 }
                 FieldReference::Expr(expr) => {
                     // This is an expression that we need to add to the list of projected columns
-                    qg.columns.push(OutputColumn::Expr(ExprColumn {
+                    columns.push(OutputColumn::Expr(ExprColumn {
                         name: expr.to_string().into(),
                         table: None,
                         expression: expr.clone(),
@@ -1304,52 +1341,98 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
             })
     }
 
-    // Extract pagination parameters
-    if let Some((limit, offset)) = extract_limit_offset(&st.limit, &st.offset)? {
-        qg.pagination = Some(Pagination {
-            order: st
-                .order
-                .as_ref()
-                .map(|o| {
-                    o.order_by
-                        .iter()
-                        .cloned()
-                        .map(|(field, ot)| {
-                            Ok((
-                                match field {
-                                    FieldReference::Numeric(_) => {
-                                        internal!(
-                                            "Numeric field references should have been removed"
-                                        )
-                                    }
-                                    FieldReference::Expr(expr) => expr,
-                                },
-                                ot.unwrap_or(OrderType::OrderAscending),
-                            ))
-                        })
-                        .collect::<ReadySetResult<_>>()
+    let order = stmt
+        .order
+        .as_ref()
+        .map(|order| {
+            order
+                .order_by
+                .iter()
+                .cloned()
+                .map(|(expr, ot)| {
+                    Ok((
+                        match expr {
+                            FieldReference::Expr(Expr::Column(col)) => col,
+                            FieldReference::Expr(expr) => Column {
+                                name: expr.to_string().into(),
+                                table: None,
+                            },
+                            FieldReference::Numeric(_) => {
+                                internal!("Numeric field references should have been removed")
+                            }
+                        },
+                        ot.unwrap_or(OrderType::OrderAscending),
+                    ))
                 })
-                .transpose()?,
-            limit,
-            offset,
+                .collect::<ReadySetResult<_>>()
         })
-    }
+        .transpose()?;
+
+    // Extract pagination parameters
+    let pagination = extract_limit_offset(&stmt.limit, &stmt.offset)?
+        .map(|(limit, offset)| -> ReadySetResult<Pagination> {
+            Ok(Pagination {
+                order: stmt
+                    .order
+                    .as_ref()
+                    .map(|o| {
+                        o.order_by
+                            .iter()
+                            .cloned()
+                            .map(|(field, ot)| {
+                                Ok((
+                                    match field {
+                                        FieldReference::Numeric(_) => {
+                                            internal!(
+                                                "Numeric field references should have been removed"
+                                            )
+                                        }
+                                        FieldReference::Expr(expr) => expr,
+                                    },
+                                    ot.unwrap_or(OrderType::OrderAscending),
+                                ))
+                            })
+                            .collect::<ReadySetResult<_>>()
+                    })
+                    .transpose()?,
+                limit,
+                offset,
+            })
+        })
+        .transpose()?;
 
     // create initial join order
-    {
+    let join_order = {
         let mut sorted_edges: Vec<(&(Relation, Relation), &QueryGraphEdge)> =
-            qg.edges.iter().collect();
+            edges.iter().collect();
         // Sort the edges to ensure deterministic join order.
         sorted_edges.sort_by(|&(a, _), &(b, _)| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
 
-        qg.join_order
-            .extend(sorted_edges.iter().map(|((src, dst), _)| JoinRef {
+        sorted_edges
+            .iter()
+            .map(|((src, dst), _)| JoinRef {
                 src: src.clone(),
                 dst: dst.clone(),
-            }));
-    }
+            })
+            .collect()
+    };
 
-    Ok(qg)
+    Ok(QueryGraph {
+        distinct: stmt.distinct,
+        relations,
+        edges,
+        aggregates,
+        group_by,
+        columns,
+        fields: stmt.fields.clone(),
+        default_row: default_row_for_select(&stmt),
+        join_order,
+        global_predicates,
+        having_predicates,
+        pagination,
+        order,
+        is_correlated: is_correlated(&stmt),
+    })
 }
 
 #[allow(clippy::unwrap_used)]
@@ -1370,7 +1453,7 @@ mod tests {
             ),
         };
 
-        to_query_graph(&query).unwrap()
+        to_query_graph(query).unwrap()
     }
 
     #[test]
@@ -1517,7 +1600,7 @@ mod tests {
             "select * from (select * from t) q1, (select * from t) q1;",
         )
         .unwrap();
-        to_query_graph(&query).unwrap_err();
+        to_query_graph(query).unwrap_err();
     }
 
     #[test]
