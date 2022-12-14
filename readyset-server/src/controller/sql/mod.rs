@@ -18,7 +18,7 @@ use readyset_sql_passes::{AliasRemoval, Rewrite, RewriteContext};
 use readyset_tracing::{debug, trace};
 
 use self::mir::{NodeIndex as MirNodeIndex, SqlToMirConverter};
-use self::query_graph::{to_query_graph, QueryGraph};
+use self::query_graph::to_query_graph;
 use crate::controller::mir_to_flow::{mir_node_to_flow_parts, mir_query_to_flow_parts};
 use crate::controller::Migration;
 use crate::sql::mir::MirRemovalResult;
@@ -61,7 +61,6 @@ pub(crate) struct SqlIncorporator {
 
     /// Stores VIEWs and CACHE queries.
     named_queries: HashMap<Relation, u64>,
-    query_graphs: HashMap<u64, QueryGraph>,
     num_queries: usize,
 
     base_schemas: HashMap<Relation, CreateTableBody>,
