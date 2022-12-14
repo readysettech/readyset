@@ -839,14 +839,14 @@ impl DfState {
         dry_run: bool,
         dialect: Dialect,
         f: F,
-    ) -> Result<T, ReadySetError>
+    ) -> ReadySetResult<T>
     where
-        F: FnOnce(&mut Migration<'_>) -> T,
+        F: FnOnce(&mut Migration<'_>) -> ReadySetResult<T>,
     {
         debug!("starting migration");
         gauge!(recorded::CONTROLLER_MIGRATION_IN_PROGRESS, 1.0);
         let mut m = Migration::new(self, dialect);
-        let r = f(&mut m);
+        let r = f(&mut m)?;
         m.commit(dry_run).await?;
         debug!("finished migration");
         gauge!(recorded::CONTROLLER_MIGRATION_IN_PROGRESS, 0.0);
@@ -1149,11 +1149,11 @@ impl DfState {
             .migrate(dry_run, changelist.dialect, |mig| {
                 new.activate(mig, changelist)
             })
-            .await?;
+            .await;
 
-        match r {
+        match &r {
             Ok(_) => self.recipe = new,
-            Err(ref e) => {
+            Err(e) => {
                 tracing::
                     warn!(error = %e, "failed to apply recipe. Will retry periodically up to max_processing_minutes.");
             }

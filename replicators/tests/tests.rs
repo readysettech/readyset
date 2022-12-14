@@ -1636,6 +1636,44 @@ async fn postgresql_non_base_offsets() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
+async fn postgresql_orphaned_nodes() {
+    // This test checks for the error described in ENG-2190.
+    // The bug would be triggered when a view would fail to be added due to certain types of
+    // errors, because we would still call `commit` on the migration after the error occurred,
+    // resulting in nodes being created in the domain without being added to the controller.
+    readyset_tracing::init_test_logging();
+    let url = pgsql_url();
+    let mut client = DbConnection::connect(&url).await.unwrap();
+
+    // The important thing about creating RS_FAKE_TEST_FUN is that it's not a builtin function, so
+    // we will get a ReadySetError::NoSuchFunction during lowering and view creation will fail.
+    client
+        .query(
+            "CREATE OR REPLACE FUNCTION RS_FAKE_TEST_FUN(bigint) RETURNS bigint
+                 AS 'select $1' LANGUAGE SQL;
+             DROP TABLE IF EXISTS t1 CASCADE;
+             CREATE TABLE t1(i INTEGER);
+             CREATE OR REPLACE VIEW v1 AS
+                SELECT RS_FAKE_TEST_FUN(subq.my_count) FROM
+                    (SELECT count(*) AS my_count FROM t1 GROUP BY i) subq;
+             CREATE OR REPLACE VIEW check_t1 AS SELECT * FROM t1;
+             INSERT INTO t1 VALUES(99);",
+        )
+        .await
+        .unwrap();
+
+    let mut ctx = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
+    ctx.ready_notify.as_ref().unwrap().notified().await;
+
+    ctx.check_results("check_t1", "Snapshot", &[&[99.into()]])
+        .await
+        .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
 async fn postgresql_replicate_citext() {
     readyset_tracing::init_test_logging();
     let url = pgsql_url();

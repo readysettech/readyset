@@ -395,12 +395,15 @@ impl Controller {
                 if let Some(ref mut inner) = *guard {
                     let mut writer = inner.dataflow_state_handle.write().await;
                     let ds = writer.as_mut();
-                    let ret = ds.migrate(false, dialect, move |m| func(m)).await?;
-                    inner
-                        .dataflow_state_handle
-                        .commit(writer, &self.authority)
-                        .await?;
-                    if done_tx.send(ret).is_err() {
+                    let res = ds.migrate(false, dialect, move |m| func(m)).await;
+                    if res.is_ok() {
+                        inner
+                            .dataflow_state_handle
+                            .commit(writer, &self.authority)
+                            .await?;
+                    }
+
+                    if done_tx.send(res).is_err() {
                         warn!("handle-based migration sender hung up!");
                     }
                 } else {
