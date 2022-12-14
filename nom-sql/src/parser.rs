@@ -191,6 +191,11 @@ export_parser!(expression -> Expr, parse_expr_bytes, parse_expr);
 export_parser!(create_table -> CreateTableStatement, parse_create_table_bytes, parse_create_table);
 export_parser!(view_creation -> CreateViewStatement, parse_create_view_bytes, parse_create_view);
 export_parser!(
+    create_cached_query -> CreateCacheStatement,
+    parse_create_cache_bytes,
+    parse_create_cache
+);
+export_parser!(
     alter_table_statement -> AlterTableStatement,
     parse_alter_table_bytes,
     parse_alter_table

@@ -9,11 +9,11 @@ use itertools::Itertools;
 use launchpad::eventually;
 use mysql_async::prelude::Queryable;
 use mysql_time::MySqlTime;
-use nom_sql::Relation;
+use nom_sql::{parse_create_cache, Relation};
 use rand::distributions::Alphanumeric;
 use rand::{Rng, SeedableRng};
 use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
-use readyset_client::recipe::changelist::ChangeList;
+use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::{ReadySetError, ReadySetHandle, ReadySetResult};
 use readyset_data::{Collation, DfValue, Dialect, TinyText};
 use readyset_server::Builder;
@@ -115,6 +115,7 @@ const RECONNECT_RESULT: &[&[DfValue]] = &[
 
 struct TestHandle {
     url: String,
+    dialect: Dialect,
     noria: readyset_server::Handle,
     authority: Arc<Authority>,
     // We spin a whole runtime for the replication task because the tokio postgres
@@ -250,8 +251,15 @@ impl TestHandle {
         let telemetry_sender = builder.telemetry.clone();
         let noria = builder.start(Arc::clone(&authority)).await.unwrap();
 
+        let dialect = if url.starts_with("postgresql") {
+            Dialect::DEFAULT_POSTGRESQL
+        } else {
+            Dialect::DEFAULT_MYSQL
+        };
+
         let mut handle = TestHandle {
             url,
+            dialect,
             noria,
             authority,
             replication_rt: None,
@@ -347,12 +355,28 @@ impl TestHandle {
     }
 
     async fn check_results_inner(&mut self, view_name: &str) -> ReadySetResult<Vec<Vec<DfValue>>> {
+        let query_name = format!("q_{view_name}");
+        self.controller()
+            .await
+            .extend_recipe(ChangeList::from_change(
+                Change::CreateCache(
+                    parse_create_cache(
+                        nom_sql::Dialect::MySQL,
+                        format!(
+                            "CREATE CACHE public.{query_name} FROM SELECT * FROM public.{view_name}"
+                        ),
+                    )
+                    .unwrap(),
+                ),
+                self.dialect,
+            ))
+            .await?;
         let mut getter = self
             .controller()
             .await
             .view(Relation {
                 schema: Some("public".into()),
-                name: view_name.into(),
+                name: query_name.into(),
             })
             .await?;
         let results = getter.lookup(&[0.into()], true).await?;
@@ -385,6 +409,7 @@ impl TestHandle {
 }
 
 async fn replication_test_inner(url: &str) -> ReadySetResult<()> {
+    readyset_tracing::init_test_logging();
     let mut client = DbConnection::connect(url).await?;
     client.query(CREATE_SCHEMA).await?;
     client.query(POPULATE_SCHEMA).await?;
