@@ -123,9 +123,9 @@ pub(crate) fn json_quote(json: &str) -> String {
 
     // Find characters to escape.
     let mut prev_index = 0;
-    let mut search_iter = json.as_bytes().iter().enumerate();
+    let mut search_iter = json.bytes().enumerate();
 
-    while let Some((next_index, &ch)) = search_iter.find(|(_, &ch)| {
+    while let Some((next_index, ch)) = search_iter.find(|(_, ch)| {
         // https://github.com/mysql/mysql-server/blob/8.0/sql-common/json_dom.cc#L1144
         matches!(ch, 0..=0x1f | b'"' | b'\\')
     }) {
