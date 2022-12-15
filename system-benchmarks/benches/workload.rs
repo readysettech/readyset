@@ -584,6 +584,7 @@ fn start_adapter_with_options(fallback_cache_options: FallbackCacheOptions) {
         "--eviction-policy",
         "lru",
         "--noria-metrics",
+        "--database-type=mysql",
     ];
 
     if fallback_cache_options.enable {
