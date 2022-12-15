@@ -602,7 +602,6 @@ async fn proxy_mode_should_allow_commands() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
-#[ignore = "ENG-2141: flaky test"]
 async fn drop_then_recreate_table_with_query() {
     let (opts, _handle) = setup().await;
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
