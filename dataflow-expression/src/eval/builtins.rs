@@ -1894,6 +1894,28 @@ mod tests {
             test("dayofweek(null)", Some(false));
         }
 
+        // This is more thoroughly tested in `eval::json::tests::json_quote`.
+        #[test]
+        fn json_quote() {
+            #[track_caller]
+            fn test(json: &str, expected: &str) {
+                let expr = format!("json_quote('{json}')");
+
+                assert_eq!(
+                    eval_expr(&expr, MySQL),
+                    expected.into(),
+                    "incorrect result for `{expr}`"
+                );
+            }
+
+            test("hello", "\"hello\"");
+            test("straße", "\"straße\"");
+            test("\0\u{1f}", r#""\u0000\u001f""#);
+
+            // Parsed expr backslash must be escaped.
+            test(r#"wo"r\\ld"#, r#""wo\"r\\ld""#);
+        }
+
         #[test]
         fn json_array_length() {
             #[track_caller]
