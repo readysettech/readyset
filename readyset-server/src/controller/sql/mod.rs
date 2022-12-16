@@ -518,6 +518,7 @@ impl SqlIncorporator {
         query_name: &Relation,
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<MirRemovalResult> {
+        trace!(%query_name, "removing query");
         let mut mir_removal_result = self.mir_converter.remove_query(query_name)?;
         self.process_removal(&mut mir_removal_result, mig);
         Ok(mir_removal_result)
@@ -528,6 +529,7 @@ impl SqlIncorporator {
         table_name: &Relation,
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<MirRemovalResult> {
+        trace!(%table_name, "removing base table");
         let mut mir_removal_result = self.mir_converter.remove_base(table_name)?;
         self.process_removal(&mut mir_removal_result, mig);
         Ok(mir_removal_result)

@@ -581,10 +581,10 @@ impl Recipe {
                             %name,
                             "failed to remove base whose address could not be resolved",
                         );
-                        internal!(
-                            "failed to remove base {} whose address could not be resolved",
-                            name
-                        );
+
+                        return Err(e.context(format!(
+                            "failed to remove base {name} whose address could not be resolved"
+                        )));
                     }
                 }
             }

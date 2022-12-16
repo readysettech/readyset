@@ -4522,6 +4522,7 @@ dependencies = [
  "bincode",
  "deadpool-postgres",
  "derive_more",
+ "failpoint-macros",
  "launchpad",
  "mysql_async",
  "nom-sql",

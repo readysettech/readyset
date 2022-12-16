@@ -21,9 +21,9 @@ failpoint-macros = { path = "../failpoint-macros" }
 readyset-tracing = { path = "../readyset-tracing" }
 nom-sql = { path = "../nom-sql" }
 psql-srv = { path = "../psql-srv" }
-tokio = "1.15"
 anyhow = "1.0.42"
 fail = "0.5.0"
+tokio = { version = "1.15", features = ["full"] }
 tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", features = ["with-chrono-0_4", "with-eui48-1", "with-uuid-0_8", "with-serde_json-1", "with-bit-vec-0_6"] }
 postgres-types = { git = "https://github.com/readysettech/rust-postgres.git", features = ["derive"] }
 postgres-native-tls = { git = "https://github.com/readysettech/rust-postgres.git" }
@@ -47,7 +47,6 @@ readyset-server = { path = "../readyset-server/" }
 proptest = "1.0.0"
 serial_test = "0.5.1"
 test-strategy = "0.2.0"
-tokio = { version = "1.15", features = ["full"] }
 launchpad = { path = "../launchpad" }
 readyset-client-test-helpers = { path = "../readyset-client-test-helpers", features = ["postgres"] }
 criterion = { version = "0.3.5", features = ["async_tokio"] }

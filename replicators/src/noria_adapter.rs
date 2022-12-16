@@ -23,7 +23,7 @@ use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::replication::{ReplicationOffset, ReplicationOffsets};
 use readyset_client::{ReadySetError, ReadySetHandle, ReadySetResult, Table, TableOperation};
 use readyset_data::Dialect;
-use readyset_errors::{internal_err, invalid_err};
+use readyset_errors::{internal_err, invalid_err, set_failpoint_return_err};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 use readyset_tracing::{debug, error, info, trace, warn};
 use tokio::sync::Notify;
@@ -37,6 +37,8 @@ use crate::postgres_connector::{
 };
 use crate::table_filter::TableFilter;
 
+/// Time to wait for requests to coalesce between snapshotting. Useful for preventing a series of
+/// DDL changes from thrashing snapshotting
 const WAIT_BEFORE_RESNAPSHOT: Duration = Duration::from_secs(3);
 
 const RESNAPSHOT_SLOT: &str = "readyset_resnapshot";
@@ -735,6 +737,7 @@ impl NoriaAdapter {
         pos: ReplicationOffset,
         catchup: bool,
     ) -> ReadySetResult<()> {
+        set_failpoint_return_err!(failpoints::REPLICATION_ACTION);
         // First check if we should skip this action due to insufficient log position or lack of
         // interest
         match &action {
@@ -820,6 +823,47 @@ impl NoriaAdapter {
                     error!(error = %err, "Aborting replication task on error");
                     counter!(recorded::REPLICATOR_FAILURE, 1u64,);
                 }
+                // In some cases, we may fail to replicate because of unsupported operations, stop
+                // replicating a table if we encounter this type of error.
+                if let ReadySetError::TableError { table, source } = err {
+                    // This is an error log because we don't know of any operations that will cause
+                    // this currently--if we see this, we should investigate and fix the issue
+                    // causing a table to not be supported by our replication
+                    error!(%table, error=%source, "Will stop replicating a table due to table error");
+
+                    let schema = table
+                        .schema
+                        .clone()
+                        .ok_or_else(|| {
+                            // Tables should have a schema defined at this point, or something has gone wrong somewhere.
+                            // If we don't have a schema at this point, we don't know which table
+                            // encountered an error, so we fall back to resnapshotting.
+                            error!(%table, "Unable to deny replication for table without schema. Will Re-snapshot");
+                            ReadySetError::ResnapshotNeeded
+                        })?;
+                    let name = table.name.clone();
+
+                    // Remove the table and any domain state associated with it, so that it is
+                    // like we never replicated it in the first place
+                    // If this fails, fall back to resnapshotting to avoid getting in an
+                    // inconsistent state. Resnapshotting will end up in this block again since
+                    // there is an action we can't handle--but we cannot stop replicating without
+                    // successfully removing the table from readyset--that would lead to permanently
+                    // stale results.
+                    set_failpoint_return_err!("ignore-table-fail-dropping-table");
+                    self.remove_table_from_readyset(table.clone()).await.map_err(|error| {
+                        error!(%error, "failed to remove ignored table from readyset, will need to resnapshot it to continue");
+                        ReadySetError::ResnapshotNeeded
+                    })?;
+
+                    self.table_filter
+                        .deny_replication(schema.as_str(), name.as_str());
+
+                    continue;
+                }
+
+                error!(error = %err, "Aborting replication task on error");
+                counter!(recorded::REPLICATOR_FAILURE, 1u64,);
                 return Err(err);
             };
             counter!(recorded::REPLICATOR_SUCCESS, 1u64);
@@ -847,6 +891,29 @@ impl NoriaAdapter {
                 Err(e) => Err(e),
             },
         }
+    }
+
+    /// Remove the table referenced by the provided schema and table name from our base table and
+    /// dataflow state (if any).
+    async fn remove_table_from_readyset(&mut self, table: Relation) -> ReadySetResult<()> {
+        info!(%table, "Removing table state from readyset");
+        self.replication_offsets.tables.remove(&table);
+        self.mutator_map.remove(&table);
+        // Dropping the table cleans up any dataflow state that may have been made as well as
+        // cleaning up the base table on disk.
+        let changelist = ChangeList::from_changes(
+            vec![
+                Change::Drop {
+                    name: table.clone(),
+                    if_exists: true,
+                },
+                Change::AddNonReplicatedRelation(table),
+            ],
+            self.dialect,
+        );
+
+        self.noria.extend_recipe(changelist).await?;
+        Ok(())
     }
 }
 

@@ -12,3 +12,5 @@ pub const AUTHORITY: &str = "authority";
 pub const READ_QUERY: &str = "read-query";
 /// Imitates traffic being dropped from upstream
 pub const UPSTREAM: &str = "upstream";
+/// Imitates a failure during the `handle_action` in replication
+pub const REPLICATION_ACTION: &str = "replication-action";

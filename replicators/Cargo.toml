@@ -53,4 +53,4 @@ serial_test = "0.5"
 rand = "0.8.5"
 
 [features]
-failure_injection = ["fail/failpoints", "nom-sql/failure_injection"]
+failure_injection = ["fail/failpoints", "nom-sql/failure_injection", "readyset-client/failure_injection"]

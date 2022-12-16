@@ -729,3 +729,133 @@ async fn switch_database_with_use() {
     conn.query_drop("SELECT b FROM t").await.unwrap();
     conn.query_drop("SELECT c FROM t2").await.unwrap();
 }
+
+#[cfg(feature = "failure_injection")]
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn replication_failure_ignores_table() {
+    readyset_tracing::init_test_logging();
+    use mysql::serde_json;
+    use nom_sql::Relation;
+    use readyset_adapter::backend::MigrationMode;
+    use readyset_client::ReadySetError;
+    use readyset_client_test_helpers::Adapter;
+
+    let (config, mut handle) = TestBuilder::default()
+        .recreate_database(false)
+        .fallback_url(MySQLAdapter::url())
+        .migration_mode(MigrationMode::OutOfBand)
+        .build::<MySQLAdapter>()
+        .await;
+
+    // Tests that if a table fails replication due to a TableError, it is dropped and we stop
+    // replicating it going forward
+    let mut client = mysql_async::Conn::new(config).await.unwrap();
+
+    client
+        .query_drop("DROP TABLE IF EXISTS cats CASCADE")
+        .await
+        .unwrap();
+    client
+        .query_drop("DROP VIEW IF EXISTS cats_view")
+        .await
+        .unwrap();
+    client
+        .query_drop("CREATE TABLE cats (id int, PRIMARY KEY(id))")
+        .await
+        .unwrap();
+    client
+        .query_drop("CREATE VIEW cats_view AS SELECT id FROM cats ORDER BY id ASC")
+        .await
+        .unwrap();
+    sleep().await;
+
+    client
+        .query_drop("INSERT INTO cats (id) VALUES (1)")
+        .await
+        .unwrap();
+
+    sleep().await;
+    sleep().await;
+
+    assert!(last_statement_matches("readyset", "ok", &mut client).await);
+    client
+        .query_drop("CREATE CACHE FROM SELECT * FROM cats")
+        .await
+        .unwrap();
+    client
+        .query_drop("CREATE CACHE FROM SELECT * FROM cats_view")
+        .await
+        .unwrap();
+    sleep().await;
+
+    let result: i32 = client
+        .query_first("SELECT * FROM cats")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(result, 1);
+
+    let result: i32 = client
+        .query_first("SELECT * FROM cats_view")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(result, 1);
+
+    let err_to_inject = ReadySetError::TableError {
+        table: Relation {
+            schema: Some("noria".into()),
+            name: "cats".into(),
+        },
+        source: Box::new(ReadySetError::Internal("failpoint injected".to_string())),
+    };
+
+    handle
+        .set_failpoint(
+            readyset_client::failpoints::REPLICATION_ACTION,
+            &format!(
+                "1*return({})",
+                serde_json::ser::to_string(&err_to_inject).expect("failed to serialize error")
+            ),
+        )
+        .await;
+
+    client
+        .query_drop("INSERT INTO cats (id) VALUES (2)")
+        .await
+        .unwrap();
+
+    sleep().await;
+
+    let res: Vec<(String, String, String)> = client.query("SHOW CACHES").await.unwrap();
+    assert!(res.is_empty());
+
+    client
+        .query_drop("CREATE CACHE FROM SELECT * FROM cats")
+        .await
+        .expect_err("should fail to create cache now that table is ignored");
+
+    for source in ["cats", "cats_view"] {
+        let mut results: Vec<i32> = client
+            .query(&format!("SELECT * FROM {source}"))
+            .await
+            .unwrap();
+        results.sort();
+        assert_eq!(results, vec![1, 2]);
+        assert!(
+            last_statement_matches("readyset_then_upstream", "view destroyed", &mut client).await
+        );
+    }
+}
+
+#[allow(dead_code)]
+async fn last_statement_matches(dest: &str, status: &str, client: &mut mysql_async::Conn) -> bool {
+    let rows: Vec<(String, String)> = client
+        .query("EXPLAIN LAST STATEMENT")
+        .await
+        .expect("explain query failed");
+    let dest_col = rows[0].0.clone();
+    let status_col = rows[0].1.clone();
+    dest_col.contains(dest) && status_col.contains(status)
+}

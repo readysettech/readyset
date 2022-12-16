@@ -171,6 +171,7 @@ impl TableFilter {
 
     /// Stop replicating the provided table
     pub(crate) fn deny_replication(&mut self, schema: &str, table: &str) {
+        tracing::info!(%schema, %table, "denying replication");
         if let Some(tables) = self.explicitly_replicated.get_mut(schema) {
             tables.remove(table);
         }

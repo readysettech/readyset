@@ -233,6 +233,7 @@ async fn schema_resolution_with_unreplicated_tables() {
     let (config, mut handle) = setup().await;
     let client = connect(config).await;
 
+    // s2 will exist in readyset
     client
         .simple_query(
             "CREATE SCHEMA s1; CREATE SCHEMA s2;
@@ -243,8 +244,11 @@ async fn schema_resolution_with_unreplicated_tables() {
 
     sleep().await;
 
-    handle.set_failpoint("parse-sql-type", "return(fail)").await;
+    handle
+        .set_failpoint("parse-sql-type", "2*return(fail)")
+        .await;
 
+    // s1 and the insert into it will fail to parse, so it will only exist upstream
     client
         .simple_query("CREATE TABLE s1.t (x INT)")
         .await
@@ -265,6 +269,7 @@ async fn schema_resolution_with_unreplicated_tables() {
         .await
         .unwrap();
 
+    // we should be selecting from s1, which is upstream
     let result = client
         .query_one("SELECT x FROM t", &[])
         .await
@@ -279,6 +284,7 @@ async fn schema_resolution_with_unreplicated_tables() {
 
     sleep().await;
 
+    // we should be selecting from s2 now
     let result = client
         .query_one("SELECT x FROM t", &[])
         .await
@@ -398,4 +404,233 @@ async fn last_statement_matches(dest: &str, status: &str, client: &Client) -> bo
         }
         _ => panic!("should have 1 row"),
     }
+}
+
+#[cfg(feature = "failure_injection")]
+async fn setup_for_replication_failure(client: &Client) {
+    client
+        .simple_query("DROP TABLE IF EXISTS cats CASCADE")
+        .await
+        .unwrap();
+    client
+        .simple_query("CREATE TABLE cats (id int, PRIMARY KEY(id))")
+        .await
+        .unwrap();
+    client
+        .simple_query("CREATE VIEW cats_view AS SELECT id FROM cats ORDER BY id ASC")
+        .await
+        .unwrap();
+    sleep().await;
+
+    client
+        .simple_query("INSERT INTO cats (id) VALUES (1)")
+        .await
+        .unwrap();
+
+    sleep().await;
+    sleep().await;
+
+    assert!(last_statement_matches("readyset", "ok", &client).await);
+    client
+        .simple_query("CREATE CACHE FROM SELECT * FROM cats")
+        .await
+        .unwrap();
+    client
+        .simple_query("CREATE CACHE FROM SELECT * FROM cats_view")
+        .await
+        .unwrap();
+    sleep().await;
+
+    let result = client
+        .query_one("SELECT * FROM cats", &[])
+        .await
+        .unwrap()
+        .get::<_, i32>(0);
+    assert_eq!(result, 1);
+    let result = client
+        .query_one("SELECT * FROM cats_view", &[])
+        .await
+        .unwrap()
+        .get::<_, i32>(0);
+    assert_eq!(result, 1);
+}
+
+#[cfg(feature = "failure_injection")]
+async fn assert_table_ignored(client: &Client) {
+    let res = client.simple_query("SHOW CACHES").await.unwrap();
+    let res = res.first().unwrap();
+    assert!(matches!(res, SimpleQueryMessage::CommandComplete(0)));
+
+    client
+        .simple_query("CREATE CACHE FROM SELECT * FROM cats")
+        .await
+        .expect_err("should fail to create cache now that table is ignored");
+
+    for source in ["cats", "cats_view"] {
+        let result = client
+            .simple_query(&format!("SELECT * FROM {source}"))
+            .await
+            .unwrap();
+        let c1 = match result.get(0).expect("should have 2 rows") {
+            SimpleQueryMessage::Row(r) => r.get(0).expect("should have 1 col"),
+            _ => panic!("should be a row"),
+        };
+        let c2 = match result.get(1).expect("should have 2 rows") {
+            SimpleQueryMessage::Row(r) => r.get(0).expect("should have 1 col"),
+            _ => panic!("should be a row"),
+        };
+
+        let mut results = vec![c1, c2];
+        results.sort();
+        assert_eq!(results, vec!["1", "2"]);
+        assert!(last_statement_matches("readyset_then_upstream", "view destroyed", &client).await);
+    }
+}
+
+#[cfg(feature = "failure_injection")]
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn replication_failure_ignores_table() {
+    readyset_tracing::init_test_logging();
+    use nom_sql::Relation;
+    use readyset_client::ReadySetError;
+
+    let (config, mut handle) = TestBuilder::default()
+        .recreate_database(false)
+        .fallback_url(PostgreSQLAdapter::url())
+        .migration_mode(MigrationMode::OutOfBand)
+        .build::<PostgreSQLAdapter>()
+        .await;
+
+    // Tests that if a table fails replication due to a TableError, it is dropped and we stop
+    // replicating it going forward
+    let client = connect(config).await;
+
+    setup_for_replication_failure(&client).await;
+
+    let err_to_inject = ReadySetError::TableError {
+        table: Relation {
+            schema: Some("public".into()),
+            name: "cats".into(),
+        },
+        source: Box::new(ReadySetError::Internal("failpoint injected".to_string())),
+    };
+
+    handle
+        .set_failpoint(
+            readyset_client::failpoints::REPLICATION_ACTION,
+            &format!(
+                "1*return({})",
+                serde_json::ser::to_string(&err_to_inject).expect("failed to serialize error")
+            ),
+        )
+        .await;
+
+    client
+        .simple_query("INSERT INTO cats (id) VALUES (2)")
+        .await
+        .unwrap();
+
+    sleep().await;
+
+    assert_table_ignored(&client).await;
+}
+
+#[cfg(feature = "failure_injection")]
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn replication_failure_retries_if_failed_to_drop() {
+    readyset_tracing::init_test_logging();
+    use std::time::Duration;
+
+    use nom_sql::Relation;
+    use readyset_client::ReadySetError;
+    use readyset_tracing::info;
+
+    let (config, mut handle) = TestBuilder::default()
+        .recreate_database(false)
+        .fallback_url(PostgreSQLAdapter::url())
+        .migration_mode(MigrationMode::OutOfBand)
+        .build::<PostgreSQLAdapter>()
+        .await;
+
+    // Tests that if a table fails replication due to a TableError, and we fail to drop it as part
+    // of ignoring it, we resnapshot and succeed on a retry.
+    // replicating it going forward
+    let client = connect(config).await;
+
+    setup_for_replication_failure(&client).await;
+    info!("setup complete");
+
+    // Inject an error in replication
+    let err_to_inject = ReadySetError::TableError {
+        table: Relation {
+            schema: Some("public".into()),
+            name: "cats".into(),
+        },
+        source: Box::new(ReadySetError::Internal("failpoint injected".to_string())),
+    };
+
+    handle
+        .set_failpoint(
+            readyset_client::failpoints::REPLICATION_ACTION,
+            &format!(
+                "1*return({})",
+                serde_json::ser::to_string(&err_to_inject).expect("failed to serialize error")
+            ),
+        )
+        .await;
+
+    let err_to_inject = ReadySetError::ResnapshotNeeded;
+
+    // Inject an error in handling the previous error
+    handle
+        .set_failpoint(
+            "ignore-table-fail-dropping-table",
+            &format!(
+                "1*return({})",
+                serde_json::ser::to_string(&err_to_inject).expect("failed to serialize error")
+            ),
+        )
+        .await;
+
+    client
+        .simple_query("INSERT INTO cats (id) VALUES (2)")
+        .await
+        .unwrap();
+
+    // There isn't a great way to assert that we resnapshotted here, so confirmed we did via log
+    // inspection
+
+    // We have to sleep extra here since we have a sleep between resnapshots
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    sleep().await;
+
+    let expected = vec![1, 2];
+    let mut result: Vec<u32> = client
+        .simple_query("SELECT * FROM cats")
+        .await
+        .unwrap()
+        .iter()
+        .filter_map(|m| match m {
+            SimpleQueryMessage::Row(r) => Some(r.get(0).unwrap().parse().unwrap()),
+            _ => None,
+        })
+        .collect();
+    // sort because return order isn't guaranteed
+    result.sort();
+    assert_eq!(result, expected);
+
+    // dont sort because cats_view uses order by
+    let result: Vec<u32> = client
+        .simple_query("SELECT * FROM cats_view")
+        .await
+        .unwrap()
+        .iter()
+        .filter_map(|m| match m {
+            SimpleQueryMessage::Row(r) => Some(r.get(0).unwrap().parse().unwrap()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(result, expected);
 }

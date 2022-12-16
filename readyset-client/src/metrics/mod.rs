@@ -419,6 +419,9 @@ pub mod recorded {
     /// log.
     pub const REPLICATOR_FAILURE: &str = "replicator.update_failure";
 
+    /// Counter: Number of tables that failed to replicate and are ignored
+    pub const TABLE_FAILED_TO_REPLICATE: &str = "replicator.table_failed";
+
     /// Counter: Number of replication actions performed successfully.
     pub const REPLICATOR_SUCCESS: &str = "replicator.update_success";
 

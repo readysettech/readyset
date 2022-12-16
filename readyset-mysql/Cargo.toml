@@ -55,5 +55,5 @@ test-strategy = "0.2.0"
 vertical_tests = []
 # Redact the display of strings marked sensitive from logs and error messages
 redact_sensitive = ["launchpad/redact_sensitive"]
-failure_injection = ["fail/failpoints"]
+failure_injection = ["fail/failpoints", "readyset-client/failure_injection", "readyset-server/failure_injection"]
 fallback_cache = ["readyset-adapter/fallback_cache", "readyset-client-metrics/fallback_cache"]

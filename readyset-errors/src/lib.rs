@@ -1133,6 +1133,29 @@ impl From<tikv_jemalloc_ctl::Error> for ReadySetError {
     }
 }
 
+/// Sets a failpoint with the provided
+/// To trigger a generic ReadysetError::Internal error, enable the failpoint with "return".
+/// A custom error can be provided with "return(error)" where error is a ReadySetError that has been
+/// serialized using serde_json.
+/// The failpoint can also be used as a non-return ("pause", "panic", etc.) as well
+#[macro_export]
+macro_rules! set_failpoint_return_err {
+    ($name:expr) => {{
+        #[cfg(feature = "failure_injection")]
+        set_failpoint!($name, |r| r.map_or(
+            Err(ReadySetError::Internal(
+                "unspecified failpoint injected".to_string()
+            )),
+            |e| {
+                let err: ReadySetError =
+                    serde_json::from_str(&e).expect("failed to parse injected error");
+                tracing::info!(%err, "injecting error");
+                Err(err)
+            }
+        ));
+    }};
+}
+
 #[cfg(test)]
 mod test {
     use crate::{internal, ReadySetError, ReadySetResult};
