@@ -1258,12 +1258,14 @@ mod tests {
 
         table.insert(vec![1.into(), "abc".into()]).await.unwrap();
 
-        eventually! {
-            let key_counts = noria.node_sizes().await.unwrap();
-
-            key_counts[&table_idx].key_count == KeyCount::EstimatedRowCount(1) &&
-                key_counts[&view_idx].key_count == KeyCount::ExactKeyCount(1)
-        }
+        eventually!(run_test: {
+            noria.node_sizes().await
+        },
+        then_assert: |key_counts| {
+            let key_counts = key_counts.unwrap();
+            assert_eq!(key_counts[&table_idx].key_count, KeyCount::EstimatedRowCount(1));
+            assert_eq!(key_counts[&view_idx].key_count, KeyCount::ExactKeyCount(1));
+        });
     }
 
     #[tokio::test(flavor = "multi_thread")]
