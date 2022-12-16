@@ -6,7 +6,9 @@ use std::{iter, mem};
 
 use itertools::{Either, Itertools};
 use nom_sql::analysis::visit_mut::{self, VisitorMut};
-use nom_sql::{BinaryOperator, Expr, InValue, ItemPlaceholder, Literal, SelectStatement};
+use nom_sql::{
+    BinaryOperator, Expr, InValue, ItemPlaceholder, LimitClause, Literal, SelectStatement,
+};
 use readyset_data::{DfType, DfValue};
 use readyset_errors::{invalid_err, unsupported, ReadySetError, ReadySetResult};
 use readyset_tracing::trace;
@@ -29,24 +31,19 @@ pub struct ProcessedQueryParams {
 #[derive(Debug, Clone)]
 struct AdapterPaginationParams {
     /// The values of `LIMIT` and `OFFSET` in the original query
-    limit: Option<Literal>,
-    offset: Option<Literal>,
+    limit_clause: LimitClause,
     force_paginate_in_adapter: bool,
 }
 
 /// This method checks if readyset-server is configured to handle LIMIT/OFFSET queries at the
 /// dataflow level. If not then LIMIT and OFFSET will be stripped and executed in the
 /// post-processing path.
-fn use_fallback_pagination(
-    server_supports_pagination: bool,
-    limit: &Option<Literal>,
-    offset: &Option<Literal>,
-) -> bool {
+fn use_fallback_pagination(server_supports_pagination: bool, limit_clause: &LimitClause) -> bool {
     if server_supports_pagination &&
         // Can't handle parameterized LIMIT even if support is enabled
-        !matches!(limit, Some(Literal::Placeholder(_))) &&
+        !matches!(limit_clause.limit(), Some(Literal::Placeholder(_))) &&
         // Can't handle bare OFFSET
-        !(limit.is_none() && offset.is_some())
+        !(limit_clause.limit().is_none() && limit_clause.offset().is_some())
     {
         return false;
     }
@@ -69,14 +66,14 @@ pub fn process_query(
 ) -> ReadySetResult<ProcessedQueryParams> {
     let reordered_placeholders = reorder_numbered_placeholders(query);
 
-    let limit = query.limit.take();
-    let offset = query.offset.take();
+    let limit_clause = mem::take(&mut query.limit_clause);
+
     let force_paginate_in_adapter =
-        use_fallback_pagination(server_supports_pagination, &limit, &offset);
+        use_fallback_pagination(server_supports_pagination, &query.limit_clause);
+
     if !force_paginate_in_adapter {
-        // If adapter pagination shouldn't be used reinstate the limit and offset clauses
-        query.limit.clone_from(&limit);
-        query.offset.clone_from(&offset);
+        // If adapter pagination shouldn't be used reinstate the limit clause
+        query.limit_clause.clone_from(&limit_clause);
     }
 
     let auto_parameters = auto_parametrize_query(query);
@@ -87,8 +84,7 @@ pub fn process_query(
         rewritten_in_conditions,
         auto_parameters,
         pagination_parameters: AdapterPaginationParams {
-            limit,
-            offset,
+            limit_clause,
             force_paginate_in_adapter,
         },
     })
@@ -140,16 +136,23 @@ impl ProcessedQueryParams {
         };
 
         let AdapterPaginationParams {
-            limit,
-            offset,
+            limit_clause,
             force_paginate_in_adapter,
         } = &self.pagination_parameters;
 
-        // TODO(vlad): actually limit and offset can get in reverse order in MySQL if
-        // LIMIT $offset, $limit syntax is used, we need to propagate that info via
-        // [`SelectStatement`]
-        let offset = offset.as_ref().map(&mut get_param).transpose()?;
-        let limit = limit.as_ref().map(&mut get_param).transpose()?;
+        let (limit, offset) = match limit_clause {
+            LimitClause::LimitOffset { limit, offset } => {
+                let offset = offset.as_ref().map(&mut get_param).transpose()?;
+                let limit = limit.as_ref().map(&mut get_param).transpose()?;
+                (limit, offset)
+            }
+            LimitClause::OffsetCommaLimit { offset, limit } => {
+                // Get the limit first, since with this syntax, it's the last param.
+                let limit = get_param(limit)?;
+                let offset = get_param(offset)?;
+                (Some(limit), Some(offset))
+            }
+        };
 
         if *force_paginate_in_adapter || limit == Some(0) {
             Ok((limit, offset))
@@ -174,19 +177,18 @@ impl ProcessedQueryParams {
         let mut params = params.as_ref();
 
         let AdapterPaginationParams {
-            limit,
-            offset,
+            limit_clause,
             force_paginate_in_adapter,
         } = &self.pagination_parameters;
 
         if *force_paginate_in_adapter {
             // When fallback pagination is used, remove the parameters for offset and limit from the
             // list
-            if matches!(offset, Some(Literal::Placeholder(_))) {
+            if matches!(limit_clause.offset(), Some(Literal::Placeholder(_))) {
                 // Skip parameter for offset
                 params = &params[..params.len() - 1];
             }
-            if matches!(limit, Some(Literal::Placeholder(_))) {
+            if matches!(limit_clause.limit(), Some(Literal::Placeholder(_))) {
                 // Skip parameter for limit
                 params = &params[..params.len() - 1];
             }
@@ -644,18 +646,12 @@ impl<'ast> VisitorMut<'ast> for AutoParametrizeVisitor {
         Ok(())
     }
 
-    fn visit_offset_clause(
-        &mut self,
-        offset: &'ast mut Option<Literal>,
-    ) -> Result<(), Self::Error> {
-        match offset {
-            None | Some(Literal::Placeholder(_)) => {}
-            Some(lit) => {
-                self.replace_literal(lit);
-            }
+    fn visit_offset(&mut self, offset: &'ast mut Literal) -> Result<(), Self::Error> {
+        if !matches!(offset, Literal::Placeholder(_)) {
+            self.replace_literal(offset);
         }
 
-        visit_mut::walk_offset_clause(self, offset)
+        visit_mut::walk_offset(self, offset)
     }
 }
 
@@ -1473,6 +1469,14 @@ mod tests {
             );
 
             assert_eq!(
+                get_lim_off(
+                    "SELECT * FROM t WHERE x = ? LIMIT ?, ?",
+                    &[1.into(), 2.into(), 3.into()]
+                ),
+                (Some(3), Some(2))
+            );
+
+            assert_eq!(
                 get_lim_off("SELECT * FROM t WHERE x = ? LIMIT ?", &[1.into(), 2.into()]),
                 (Some(2), None)
             );
@@ -1495,7 +1499,23 @@ mod tests {
 
             assert_eq!(
                 get_lim_off(
+                    "SELECT * FROM t WHERE x = ? LIMIT 4, ?",
+                    &[1.into(), 2.into()]
+                ),
+                (Some(2), Some(4))
+            );
+
+            assert_eq!(
+                get_lim_off(
                     "SELECT * FROM t WHERE x = ? LIMIT 4 OFFSET ?",
+                    &[1.into(), 2.into()]
+                ),
+                (Some(4), Some(2))
+            );
+
+            assert_eq!(
+                get_lim_off(
+                    "SELECT * FROM t WHERE x = ? LIMIT ?, 4",
                     &[1.into(), 2.into()]
                 ),
                 (Some(4), Some(2))

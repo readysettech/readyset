@@ -10,9 +10,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::common::{opt_delimited, terminated_with_statement_terminator};
 use crate::order::{order_clause, OrderClause};
-use crate::select::{limit_offset_clause, nested_selection, SelectStatement};
+use crate::select::{limit_offset_clause, nested_selection, LimitClause, SelectStatement};
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, Literal, NomSqlResult};
+use crate::{Dialect, NomSqlResult};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]
 pub enum CompoundSelectOperator {
@@ -37,8 +37,7 @@ impl fmt::Display for CompoundSelectOperator {
 pub struct CompoundSelectStatement {
     pub selects: Vec<(Option<CompoundSelectOperator>, SelectStatement)>,
     pub order: Option<OrderClause>,
-    pub limit: Option<Literal>,
-    pub offset: Option<Literal>,
+    pub limit_clause: LimitClause,
 }
 
 impl fmt::Display for CompoundSelectStatement {
@@ -52,12 +51,10 @@ impl fmt::Display for CompoundSelectStatement {
         if let Some(ord) = &self.order {
             write!(f, " {}", ord)?;
         }
-        if let Some(limit) = &self.limit {
-            write!(f, " LIMIT {}", limit)?;
+        if self.limit_clause.is_empty() {
+            write!(f, " {}", self.limit_clause)?;
         }
-        if let Some(offset) = &self.offset {
-            write!(f, " OFFSET {}", offset)?;
-        }
+
         Ok(())
     }
 }
@@ -126,7 +123,7 @@ pub fn nested_compound_selection(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CompoundSelectStatement> {
     move |i| {
-        let (remaining_input, (first_select, other_selects, _, order, limit_offset)) =
+        let (remaining_input, (first_select, other_selects, _, order, limit_clause)) =
             tuple((
                 opt_delimited(tag("("), nested_selection(dialect), tag(")")),
                 many1(other_selects(dialect)),
@@ -138,15 +135,12 @@ pub fn nested_compound_selection(
         let mut selects = vec![(None, first_select)];
         selects.extend(other_selects);
 
-        let (limit, offset) = limit_offset.unwrap_or_default();
-
         Ok((
             remaining_input,
             CompoundSelectStatement {
                 selects,
                 order,
-                limit,
-                offset,
+                limit_clause: limit_clause.unwrap_or_default(),
             },
         ))
     }
@@ -191,8 +185,10 @@ mod tests {
                 (Some(CompoundSelectOperator::DistinctUnion), second_select),
             ],
             order: None,
-            limit: None,
-            offset: None,
+            limit_clause: LimitClause::LimitOffset {
+                limit: None,
+                offset: None,
+            },
         };
 
         assert_eq!(res.unwrap().1, expected);
@@ -279,8 +275,7 @@ mod tests {
                 (Some(CompoundSelectOperator::DistinctUnion), third_select),
             ],
             order: None,
-            limit: None,
-            offset: None,
+            limit_clause: LimitClause::default(),
         };
 
         assert_eq!(res.unwrap().1, expected);
@@ -313,8 +308,7 @@ mod tests {
                 (Some(CompoundSelectOperator::Union), second_select),
             ],
             order: None,
-            limit: None,
-            offset: None,
+            limit_clause: LimitClause::default(),
         };
 
         assert_eq!(res.unwrap().1, expected);

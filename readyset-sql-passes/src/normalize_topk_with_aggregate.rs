@@ -1,5 +1,5 @@
 use nom_sql::analysis::contains_aggregate;
-use nom_sql::{Expr, FieldDefinitionExpr, FieldReference, SelectStatement, SqlQuery};
+use nom_sql::{Expr, FieldDefinitionExpr, FieldReference, LimitClause, SelectStatement, SqlQuery};
 use readyset_errors::{ReadySetError, ReadySetResult};
 
 pub trait NormalizeTopKWithAggregate: Sized {
@@ -65,8 +65,16 @@ impl NormalizeTopKWithAggregate for SelectStatement {
                         }
                     }
                     None => {
+                        // Save the offset.
+                        let offset = match self.limit_clause {
+                            LimitClause::LimitOffset { offset, .. } => offset,
+                            LimitClause::OffsetCommaLimit { offset, .. } => Some(offset),
+                        };
                         // order taken above, just leave it as None
-                        self.limit = None;
+                        self.limit_clause = LimitClause::LimitOffset {
+                            limit: None,
+                            offset,
+                        };
                         return Ok(self);
                     }
                 }
@@ -99,7 +107,10 @@ mod tests {
         match actual {
             SqlQuery::Select(stmt) => {
                 assert!(stmt.order.is_none());
-                assert!(stmt.limit.is_none());
+                assert!(matches!(
+                    stmt.limit_clause,
+                    LimitClause::LimitOffset { limit: None, .. }
+                ));
             }
             _ => panic!("Invalid query returned: {:?}", actual),
         }
@@ -170,7 +181,13 @@ mod tests {
                     })
                 );
 
-                assert_eq!(stmt.limit, Some(4_u32.into()));
+                assert_eq!(
+                    stmt.limit_clause,
+                    LimitClause::LimitOffset {
+                        limit: Some(4_u32.into()),
+                        offset: None
+                    }
+                );
             }
             _ => panic!("Invalid query returned: {:?}", result),
         }

@@ -772,7 +772,7 @@ mod tests {
     use crate::column::Column;
     use crate::create_table_options::{CharsetName, CollationName};
     use crate::table::Relation;
-    use crate::{BinaryOperator, ColumnConstraint, Expr, Literal, SqlType, TableExpr};
+    use crate::{BinaryOperator, ColumnConstraint, Expr, LimitClause, Literal, SqlType, TableExpr};
 
     #[test]
     fn field_spec() {
@@ -969,8 +969,10 @@ mod tests {
                             ),
                         ],
                         order: None,
-                        limit: None,
-                        offset: None,
+                        limit_clause: LimitClause::LimitOffset {
+                            limit: None,
+                            offset: None
+                        },
                     }
                 ))),
             }

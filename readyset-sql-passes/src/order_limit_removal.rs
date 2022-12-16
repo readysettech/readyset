@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use nom_sql::{
-    BinaryOperator, Column, ColumnConstraint, CreateTableBody, Expr, Relation, SelectStatement,
-    SqlQuery, TableExpr, TableKey,
+    BinaryOperator, Column, ColumnConstraint, CreateTableBody, Expr, LimitClause, Relation,
+    SelectStatement, SqlQuery, TableExpr, TableKey,
 };
 use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
 
@@ -123,13 +123,16 @@ impl OrderLimitRemoval for SelectStatement {
         mut self,
         base_schemas: &HashMap<Relation, CreateTableBody>,
     ) -> ReadySetResult<Self> {
+        let has_limit = matches!(
+            self.limit_clause,
+            LimitClause::LimitOffset { limit: Some(_), .. } | LimitClause::OffsetCommaLimit { .. }
+        );
         // If the query uses an equality filter on a column that has a unique or primary key
         // index, remove order and limit
-        if self.limit.is_some() {
+        if has_limit {
             if let Some(ref expr) = self.where_clause {
                 if compares_unique_key_against_literal(expr, base_schemas, &self.tables)? {
-                    self.limit = None;
-                    self.offset = None;
+                    self.limit_clause = LimitClause::default();
                     self.order = None;
                 }
             }
@@ -222,8 +225,13 @@ mod tests {
         match revised_query {
             SqlQuery::Select(stmt) => {
                 assert!(stmt.order.is_none());
-                assert!(stmt.limit.is_none());
-                assert!(stmt.offset.is_none());
+                assert!(matches!(
+                    stmt.limit_clause,
+                    LimitClause::LimitOffset {
+                        limit: None,
+                        offset: None
+                    }
+                ));
             }
             _ => panic!("Invalid query returned: {:?}", revised_query),
         }
@@ -351,7 +359,10 @@ mod tests {
         match revised_query {
             SqlQuery::Select(stmt) => {
                 assert!(stmt.order.is_none());
-                assert!(stmt.limit.is_none());
+                assert!(matches!(
+                    stmt.limit_clause,
+                    LimitClause::LimitOffset { limit: None, .. }
+                ));
             }
             _ => panic!("Invalid query returned: {:?}", revised_query),
         }

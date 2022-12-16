@@ -15,8 +15,9 @@ use thiserror::Error;
 
 use crate::keywords::{sql_keyword, sql_keyword_or_builtin_function, POSTGRES_NOT_RESERVED};
 use crate::literal::{raw_string_literal, QuotingStyle};
+use crate::select::LimitClause;
 use crate::whitespace::whitespace0;
-use crate::{literal, Literal, NomSqlError, NomSqlResult, SqlIdentifier};
+use crate::{literal, NomSqlError, NomSqlResult, SqlIdentifier};
 
 #[inline]
 fn is_sql_identifier(chr: u8) -> bool {
@@ -207,10 +208,7 @@ impl Dialect {
     }
 
     /// Parses the MySQL specific `{offset}, {limit}` part in a `LIMIT` clause
-    pub fn offset_limit(
-        self,
-    ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], (Option<Literal>, Option<Literal>)>
-    {
+    pub fn offset_limit(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], LimitClause> {
         move |i| {
             if self == Dialect::PostgreSQL {
                 return Err(nom::Err::Error(NomSqlError {
@@ -226,7 +224,7 @@ impl Dialect {
             let (i, _) = whitespace0(i)?;
             let (i, limit) = literal(self)(i)?;
 
-            Ok((i, (Some(limit), Some(offset))))
+            Ok((i, LimitClause::OffsetCommaLimit { offset, limit }))
         }
     }
 }

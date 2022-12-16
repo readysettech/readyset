@@ -434,8 +434,7 @@ impl SqlIncorporator {
             subqueries,
             CompoundSelectOperator::Union,
             &query.order,
-            &query.limit,
-            &query.offset,
+            &query.limit_clause,
             is_leaf,
         )?;
 

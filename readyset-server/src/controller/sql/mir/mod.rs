@@ -18,8 +18,8 @@ pub use mir::{Column, NodeIndex};
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
     BinaryOperator, ColumnSpecification, CompoundSelectOperator, CreateTableBody, Expr,
-    FieldDefinitionExpr, FieldReference, FunctionExpr, Literal, OrderClause, OrderType, Relation,
-    SqlIdentifier, TableKey, UnaryOperator,
+    FieldDefinitionExpr, FieldReference, FunctionExpr, LimitClause, Literal, OrderClause,
+    OrderType, Relation, SqlIdentifier, TableKey, UnaryOperator,
 };
 use petgraph::visit::Reversed;
 use petgraph::Direction;
@@ -228,11 +228,14 @@ impl SqlToMirConverter {
         subquery_leaves: Vec<NodeIndex>,
         op: CompoundSelectOperator,
         order: &Option<OrderClause>,
-        limit: &Option<Literal>,
-        offset: &Option<Literal>,
+        limit_clause: &LimitClause,
         has_leaf: bool,
     ) -> ReadySetResult<NodeIndex> {
-        let name = if !has_leaf && limit.is_none() {
+        let has_limit = matches!(
+            limit_clause,
+            LimitClause::OffsetCommaLimit { .. } | LimitClause::LimitOffset { limit: Some(_), .. }
+        );
+        let name = if !has_leaf && !has_limit {
             query_name.clone()
         } else {
             format!("{}_union", query_name).into()
@@ -247,7 +250,7 @@ impl SqlToMirConverter {
             _ => internal!(),
         };
 
-        if let Some((limit, offset)) = extract_limit_offset(limit, offset)? {
+        if let Some((limit, offset)) = extract_limit_offset(limit_clause)? {
             let make_topk = offset.is_none();
             let paginate_name = if has_leaf {
                 if make_topk {

@@ -1,3 +1,4 @@
+use std::fmt::Formatter;
 use std::{fmt, str};
 
 use itertools::Itertools;
@@ -74,6 +75,83 @@ impl fmt::Display for CommonTableExpr {
     }
 }
 
+/// AST representation of the SQL limit and offset clauses.
+#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize)]
+pub enum LimitClause {
+    /// The standard limit and offset syntax: `LIMIT <limit> OFFSET <offset>`.
+    LimitOffset {
+        limit: Option<Literal>,
+        offset: Option<Literal>,
+    },
+    /// MySQL's alternative limit and offset syntax: `LIMIT <offset>, <limit>`.
+    OffsetCommaLimit { offset: Literal, limit: Literal },
+}
+
+impl LimitClause {
+    /// Returns an [`Option`] with the [`Literal`] value corresponding to the `limit` clause.
+    /// Returns [`None`] if there's no `limit`.  
+    pub fn limit(&self) -> Option<&Literal> {
+        match self {
+            LimitClause::LimitOffset { limit, .. } => limit.as_ref(),
+            LimitClause::OffsetCommaLimit { limit, .. } => Some(limit),
+        }
+    }
+
+    /// Returns an [`Option`] with the [`Literal`] value corresponding to the `offset` clause.
+    /// Returns [`None`] if there's no `offset`.
+    pub fn offset(&self) -> Option<&Literal> {
+        match self {
+            LimitClause::LimitOffset { offset, .. } => offset.as_ref(),
+            LimitClause::OffsetCommaLimit { offset, .. } => Some(offset),
+        }
+    }
+
+    /// Returns two [`Option`]s, both with mutable [`Literal`] values corresponding to the `limit`
+    /// and `offset` clauses respectively.
+    pub fn limit_and_offset_mut(&mut self) -> (Option<&mut Literal>, Option<&mut Literal>) {
+        match self {
+            LimitClause::LimitOffset { limit, offset } => (limit.as_mut(), offset.as_mut()),
+            LimitClause::OffsetCommaLimit { offset, limit } => (Some(limit), Some(offset)),
+        }
+    }
+
+    /// Whether this [`LimitClause`] is empty (has no `limit` and no `offset`) or not.
+    pub fn is_empty(&self) -> bool {
+        match self {
+            LimitClause::LimitOffset { limit, offset } => limit.is_none() && offset.is_none(),
+            LimitClause::OffsetCommaLimit { .. } => false,
+        }
+    }
+}
+
+impl Default for LimitClause {
+    fn default() -> Self {
+        Self::LimitOffset {
+            limit: None,
+            offset: None,
+        }
+    }
+}
+
+impl fmt::Display for LimitClause {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            LimitClause::LimitOffset { limit, offset } => {
+                if let Some(limit) = limit {
+                    write!(f, "LIMIT {}", limit)?;
+                }
+                if let Some(offset) = offset {
+                    write!(f, "OFFSET {}", offset)?;
+                }
+            }
+            LimitClause::OffsetCommaLimit { offset, limit } => {
+                write!(f, "LIMIT {}, {}", offset, limit)?;
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct SelectStatement {
     pub ctes: Vec<CommonTableExpr>,
@@ -85,8 +163,7 @@ pub struct SelectStatement {
     pub group_by: Option<GroupByClause>,
     pub having: Option<Expr>,
     pub order: Option<OrderClause>,
-    pub limit: Option<Literal>,
-    pub offset: Option<Literal>,
+    pub limit_clause: LimitClause,
 }
 
 impl SelectStatement {
@@ -159,12 +236,10 @@ impl fmt::Display for SelectStatement {
         if let Some(ref order) = self.order {
             write!(f, " {}", order)?;
         }
-        if let Some(ref limit) = self.limit {
-            write!(f, " LIMIT {}", limit)?;
+        if self.limit_clause.limit().is_some() || self.limit_clause.offset().is_some() {
+            write!(f, " {}", self.limit_clause)?;
         }
-        if let Some(ref offset) = self.offset {
-            write!(f, " OFFSET {}", offset)?;
-        }
+
         Ok(())
     }
 }
@@ -207,18 +282,24 @@ fn offset_clause(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResul
 // Parses a generic SQL `{limit} [OFFSET {offset}]`
 fn limit_offset_generic(
     dialect: Dialect,
-) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], (Option<Literal>, Option<Literal>)> {
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], LimitClause> {
     move |i| {
         let (i, limit) = literal(dialect)(i)?;
         let (i, offset) = opt(offset_clause(dialect))(i)?;
-        Ok((i, (Some(limit), offset)))
+        Ok((
+            i,
+            LimitClause::LimitOffset {
+                limit: Some(limit),
+                offset,
+            },
+        ))
     }
 }
 
 // Parse LIMIT [OFFSET] clause
 fn limit_offset(
     dialect: Dialect,
-) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], (Option<Literal>, Option<Literal>)> {
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], LimitClause> {
     move |i| {
         let (i, _) = whitespace0(i)?;
         let (i, _) = tag_no_case("limit")(i)?;
@@ -232,11 +313,14 @@ fn limit_offset(
 // Parse LIMIT [OFFSET] clause or a bare OFFSET clause
 pub(crate) fn limit_offset_clause(
     dialect: Dialect,
-) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], (Option<Literal>, Option<Literal>)> {
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], LimitClause> {
     move |i| {
         alt((
             limit_offset(dialect),
-            map(offset_clause(dialect), |offset| (None, Some(offset))),
+            map(offset_clause(dialect), |offset| LimitClause::LimitOffset {
+                limit: None,
+                offset: Some(offset),
+            }),
         ))(i)
     }
 }
@@ -471,9 +555,8 @@ pub fn nested_selection(
             let (i, group_by) = opt(group_by_clause(dialect))(i)?;
             let (i, having) = opt(having_clause(dialect))(i)?;
             let (i, order) = opt(order_clause(dialect))(i)?;
-            let (i, limit_offset) = opt(limit_offset_clause(dialect))(i)?;
+            let (i, limit_clause) = opt(limit_offset_clause(dialect))(i)?;
 
-            let (limit, offset) = limit_offset.unwrap_or_default();
             Ok((
                 i,
                 (
@@ -483,8 +566,7 @@ pub fn nested_selection(
                     having,
                     group_by,
                     order,
-                    limit,
-                    offset,
+                    limit_clause.unwrap_or_default(),
                 ),
             ))
         })(i)?;
@@ -496,7 +578,7 @@ pub fn nested_selection(
             ..Default::default()
         };
 
-        if let Some((from, extra_joins, where_clause, having, group_by, order, limit, offset)) =
+        if let Some((from, extra_joins, where_clause, having, group_by, order, limit_clause)) =
             from_clause
         {
             let (tables, mut join) = from.into_tables_and_joins().map_err(|_| {
@@ -514,8 +596,7 @@ pub fn nested_selection(
             result.group_by = group_by;
             result.having = having;
             result.order = order;
-            result.limit = limit;
-            result.offset = offset;
+            result.limit_clause = limit_clause;
         }
 
         Ok((i, result))
@@ -728,12 +809,27 @@ mod tests {
         let res3 = test_parse!(selection(Dialect::MySQL), qstring3.as_bytes());
         let res3_pgsql = selection(Dialect::PostgreSQL)(LocatedSpan::new(qstring3.as_bytes()));
 
-        assert_eq!(res1.limit, Some(10_u32.into()));
-        assert_eq!(res1.offset, None);
-        assert_eq!(res2.limit, Some(10_u32.into()));
-        assert_eq!(res2.offset, Some(10_u32.into()));
-        assert_eq!(res3.limit, Some(10_u32.into()));
-        assert_eq!(res3.offset, Some(5_u32.into()));
+        assert_eq!(
+            res1.limit_clause,
+            LimitClause::LimitOffset {
+                limit: Some(10_u32.into()),
+                offset: None
+            }
+        );
+        assert_eq!(
+            res2.limit_clause,
+            LimitClause::LimitOffset {
+                limit: Some(10_u32.into()),
+                offset: Some(10_u32.into())
+            }
+        );
+        assert_eq!(
+            res3.limit_clause,
+            LimitClause::OffsetCommaLimit {
+                limit: 10_u32.into(),
+                offset: 5_u32.into()
+            }
+        );
         res3_pgsql.unwrap_err();
     }
 
@@ -929,7 +1025,10 @@ mod tests {
                 tables: vec![TableExpr::from(Relation::from("users"))],
                 fields: vec![FieldDefinitionExpr::All],
                 where_clause: expected_where_cond,
-                limit: Some(10_u32.into()),
+                limit_clause: LimitClause::LimitOffset {
+                    limit: Some(10_u32.into()),
+                    offset: None
+                },
                 ..Default::default()
             }
         );
@@ -939,8 +1038,11 @@ mod tests {
     fn limit_placeholder() {
         let res = test_parse!(selection(Dialect::MySQL), b"select * from users limit ?");
         assert_eq!(
-            res.limit.unwrap(),
-            Literal::Placeholder(ItemPlaceholder::QuestionMark)
+            res.limit_clause,
+            LimitClause::LimitOffset {
+                limit: Some(Literal::Placeholder(ItemPlaceholder::QuestionMark)),
+                offset: None
+            }
         )
     }
 
@@ -1234,7 +1336,10 @@ mod tests {
                         None
                     )],
                 }),
-                limit: Some(50_u32.into()),
+                limit_clause: LimitClause::LimitOffset {
+                    limit: Some(50_u32.into()),
+                    offset: None
+                },
                 ..Default::default()
             }
         );

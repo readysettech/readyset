@@ -86,8 +86,8 @@ use nom_sql::analysis::{contains_aggregate, ReferredColumns};
 use nom_sql::{
     BinaryOperator, Column, ColumnConstraint, ColumnSpecification, CommonTableExpr,
     CreateTableBody, CreateTableStatement, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr,
-    InValue, ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, Literal,
-    OrderClause, OrderType, Relation, SelectStatement, SqlIdentifier, SqlType, TableExpr,
+    InValue, ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, LimitClause,
+    Literal, OrderClause, OrderType, Relation, SelectStatement, SqlIdentifier, SqlType, TableExpr,
     TableExprInner, TableKey,
 };
 use parking_lot::Mutex;
@@ -2476,7 +2476,10 @@ impl QueryOperation {
                     )],
                 });
 
-                query.limit = Some(Literal::Integer(*limit as _));
+                query.limit_clause = LimitClause::LimitOffset {
+                    limit: Some(Literal::Integer(*limit as _)),
+                    offset: None,
+                };
 
                 if query.distinct {
                     query.fields.push(FieldDefinitionExpr::Expr {
@@ -2510,8 +2513,19 @@ impl QueryOperation {
                     )],
                 });
 
-                query.limit = Some(Literal::Integer(*limit as _));
-                query.offset = Some(Literal::Integer((*limit * *page_number) as _));
+                // Since we are setting both fields, check first to see what kind of syntax
+                // we were using.
+                if matches!(query.limit_clause, LimitClause::OffsetCommaLimit { .. }) {
+                    query.limit_clause = LimitClause::OffsetCommaLimit {
+                        limit: Literal::Integer(*limit as _),
+                        offset: Literal::Integer((*limit * *page_number) as _),
+                    }
+                } else {
+                    query.limit_clause = LimitClause::LimitOffset {
+                        limit: Some(Literal::Integer(*limit as _)),
+                        offset: Some(Literal::Integer((*limit * *page_number) as _)),
+                    };
+                }
 
                 if query.distinct {
                     query.fields.push(FieldDefinitionExpr::Expr {

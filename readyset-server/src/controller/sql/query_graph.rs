@@ -11,8 +11,8 @@ use nom_sql::analysis::visit_mut::{walk_expr, VisitorMut};
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
     BinaryOperator, Column, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, InValue,
-    ItemPlaceholder, JoinConstraint, JoinOperator, JoinRightSide, Literal, OrderType, Relation,
-    SelectStatement, SqlIdentifier, TableExpr, TableExprInner, UnaryOperator,
+    ItemPlaceholder, JoinConstraint, JoinOperator, JoinRightSide, LimitClause, Literal, OrderType,
+    Relation, SelectStatement, SqlIdentifier, TableExpr, TableExprInner, UnaryOperator,
 };
 use readyset_client::{PlaceholderIdx, ViewPlaceholder};
 use readyset_errors::{
@@ -797,14 +797,13 @@ fn extract_having_aggregates(
 /// Convert limit and offset fields to an optional constant numeric limit and optional placeholder
 /// for the offset
 pub(crate) fn extract_limit_offset(
-    limit: &Option<Literal>,
-    offset: &Option<Literal>,
+    limit_clause: &LimitClause,
 ) -> ReadySetResult<Option<(usize, Option<ViewPlaceholder>)>> {
-    if limit.is_none() && offset.is_some() {
+    if limit_clause.limit().is_none() && limit_clause.offset().is_some() {
         unsupported!("ReadySet does not support OFFSET without LIMIT");
     }
 
-    let limit = if let Some(limit) = limit {
+    let limit = if let Some(limit) = limit_clause.limit() {
         limit
     } else {
         return Ok(None);
@@ -820,7 +819,8 @@ pub(crate) fn extract_limit_offset(
         _ => unsupported!("Invalid LIMIT statement"),
     };
 
-    let offset = offset
+    let offset = limit_clause
+        .offset()
         .as_ref()
         // For now, remove offset if it is a literal 0
         .filter(|offset| !matches!(offset, Literal::UnsignedInteger(0)))
@@ -1369,7 +1369,7 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
         .transpose()?;
 
     // Extract pagination parameters
-    let pagination = extract_limit_offset(&stmt.limit, &stmt.offset)?
+    let pagination = extract_limit_offset(&stmt.limit_clause)?
         .map(|(limit, offset)| -> ReadySetResult<Pagination> {
             Ok(Pagination {
                 order: stmt
