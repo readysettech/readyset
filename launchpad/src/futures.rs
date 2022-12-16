@@ -138,6 +138,20 @@ where
 /// })
 /// # })
 /// ```
+///
+/// As noted above, `then_assert` must be defined inline. The following will fail to compile:
+/// ```no_compile
+/// # use launchpad::eventually_assert;
+/// # let mut rt = tokio::runtime::Runtime::new().unwrap();
+/// # rt.block_on(async move {
+/// let x = 1;
+/// let assert_closure = |result| assert_eq!(result, 1);
+/// eventually_assert!(
+///     run_test: { futures::future::ready(x).await },
+///     then_assert: assert_closure
+/// );
+/// # })
+/// ```
 #[macro_export]
 macro_rules! eventually {
     (run_test: { $($test_body: tt)* },
@@ -190,6 +204,11 @@ macro_rules! eventually {
                 }
             }
         }
+    };
+    ($(attempts: $attempts: expr,)? $(sleep: $sleep: expr,)? run_test: { $($test_body: tt)* },
+            then_assert: $($assert_body: tt)+) => {
+        compile_error!(concat!("`then_assert` must be specified using closure syntax",
+                               "(see `eventually` docs for detail)"))
     };
     (attempts: $attempts: expr, { $($body: tt)* }) => {
         eventually!(
