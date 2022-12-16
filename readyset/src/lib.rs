@@ -148,7 +148,7 @@ where
     ArgGroup::new("metrics")
         .multiple(true)
         .args(&["prometheus-metrics", "noria-metrics"]),
-))]
+), version = VERSION_STR_PRETTY)]
 pub struct Options {
     /// IP:PORT to listen on
     #[clap(long, short = 'a', env = "LISTEN_ADDRESS", parse(try_from_str))]
