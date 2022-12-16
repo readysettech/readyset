@@ -38,8 +38,30 @@ where
         })
 }
 
-/// Assert that the given async expression eventually yields `true`, after a configurable number of
-/// tries and sleeping a configurable amount between tries.
+/// Assert that the given async expression eventually succeeds after a configurable number of
+/// tries and sleeping a configurable amount between tries. Useful for testing eventually
+/// consistent parts of the system.
+///
+/// In the basic form, we passing a single block of code and repeat it until it evaluates to
+/// `true`. However, this can be limiting for some tests since it doesn't catch panics, so test
+/// code that relies on unwraps and asserts will fail. To accomodate this, [eventually] can also be
+/// called in in `run_test`/`then_assert` form, which catches panics in the `then_assert` block and
+/// retries the entire test.
+///
+/// There are two reasons for specifying `run_test` and `then_assert` as separate blocks:
+///
+/// * Oftentimes we don't expect panics from the test code itself, and only want to retry if we get
+///   an incorrect result (i.e. if an unwrap or an assertion on the result of a test fails).
+///   Structuring this macro to take two separate blocks allows the macro to do just that.
+/// * Frequently our tests make use of values that are not unwind-safe, so the compiler will
+///   complain if we try to catch panics with `[futures::FutureExt::catch_unwind]` (which this macro
+///   does for the assertion code). Assertions, by contrast, usually just involve unwrapping or
+///   comparing values in ways that are easily written in an unwind-safe way.
+///
+/// NOTE: although this macro is written to make `then_assert` look like a closure, this is
+/// actually syntax sugar. Due to some quirks of async Rust, you cannot define a closure outside
+/// the macro invocation and pass it in; you must write the `then_assert` body inline as part of
+/// the macro invocation.
 ///
 /// Defaults to 40 attempts, sleeping 500 milliseconds between attempts
 ///
@@ -58,7 +80,38 @@ where
 /// # })
 /// ```
 ///
-/// Configuring the number of attempts:
+/// Using the `run_test`/`then_assert` form:
+/// ```
+/// # use launchpad::eventually;
+/// # let mut rt = tokio::runtime::Runtime::new().unwrap();
+/// # rt.block_on(async move {
+/// let x = 1;
+/// eventually!(
+///     run_test: { futures::future::ready(x).await },
+///     then_assert: |result| assert_eq!(result, 1)
+/// );
+/// # })
+/// ```
+///
+/// Incorporating a block containing multiple assertion steps:
+/// ```
+/// # use launchpad::eventually;
+/// # let mut rt = tokio::runtime::Runtime::new().unwrap();
+/// # rt.block_on(async move {
+/// let x = 1;
+/// eventually!(
+///     run_test: { Some(futures::future::ready(x).await) },
+///     then_assert: |result| {
+///         let result = result.unwrap();
+///         assert!(result > 0);
+///         assert_eq!(result, 1);
+///     }
+/// );
+/// # })
+/// ```
+///
+/// Configuring the number of attempts (these next two examples also work the same way for the
+/// `run_test`/`then_assert` form):
 /// ```
 /// # use launchpad::eventually;
 /// # let mut rt = tokio::runtime::Runtime::new().unwrap();
@@ -87,6 +140,57 @@ where
 /// ```
 #[macro_export]
 macro_rules! eventually {
+    (run_test: { $($test_body: tt)* },
+            then_assert: |$test_res: ident| $($assert_body: tt)+) => {
+        eventually!(
+            attempts: 40,
+            sleep: std::time::Duration::from_millis(500),
+            run_test: { $($test_body)* },
+            then_assert: |$test_res| $($assert_body)*
+        )
+    };
+    (attempts: $attempts: expr,
+            run_test: { $($test_body: tt)* },
+            then_assert: |$test_res: ident| $($assert_body: tt)+) => {
+        eventually!(
+            attempts: $attempts,
+            sleep: std::time::Duration::from_millis(500),
+            run_test: { $($test_body)* },
+            then_assert: |$test_res| $($assert_body)*
+        )
+    };
+    (sleep: $sleep: expr,
+            run_test: { $($test_body: tt)* },
+            then_assert: |$test_res: ident| $($assert_body: tt)+) => {
+        eventually!(
+            attempts: 40,
+            sleep: $sleep,
+            run_test: { $($test_body)* },
+            then_assert: |$test_res| $($assert_body)*
+        )
+    };
+    (attempts: $attempts: expr, sleep: $sleep: expr, run_test: { $($test_body: tt)* },
+            then_assert: |$test_res: ident| $($assert_body: tt)+) => {
+        use futures::FutureExt;
+
+        let attempts = $attempts;
+        let sleep = $sleep;
+        for attempt in 1..=attempts {
+            let $test_res = async { $($test_body)* }.await;
+            if attempt == attempts {
+                // Run the last attempt without the catch_unwind wrapper so that panics are visible
+                // in the test failure results if they occur:
+                async { $($assert_body)* }.await;
+            } else {
+                if async { $($assert_body)* }.catch_unwind().await.is_err() {
+                    println!("Assertion failed on attempt {attempt}, retrying after delay...");
+                    tokio::time::sleep(sleep).await;
+                } else {
+                    break;
+                }
+            }
+        }
+    };
     (attempts: $attempts: expr, { $($body: tt)* }) => {
         eventually!(
             attempts: $attempts,
@@ -131,5 +235,5 @@ macro_rules! eventually {
             sleep: std::time::Duration::from_millis(500),
             { $($body)* }
         )
-	};
+    };
 }
