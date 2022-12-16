@@ -626,11 +626,6 @@ impl<'df> Migration<'df> {
         Ok(())
     }
 
-    #[cfg(test)]
-    pub(crate) fn graph(&self) -> &Graph {
-        &self.dataflow_state.ingredients
-    }
-
     /// Ensure that a reader node exists as a child of `n`, optionally with the given name and set
     /// of post-lookup operations, returning the index of that reader.
     fn ensure_reader_for(
