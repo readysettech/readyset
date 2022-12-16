@@ -6,13 +6,13 @@ use ::mir::visualize::GraphViz;
 use ::mir::DfNodeIndex;
 use ::serde::{Deserialize, Serialize};
 use nom_sql::{
-    CompoundSelectOperator, CompoundSelectStatement, CreateTableBody, FieldDefinitionExpr,
+    CompoundSelectOperator, CompoundSelectStatement, CreateTableBody, Expr, FieldDefinitionExpr,
     Relation, SelectSpecification, SelectStatement, SqlIdentifier, TableExpr,
 };
 use petgraph::graph::NodeIndex;
 use readyset_client::recipe::changelist::AlterTypeChange;
 use readyset_data::{DfType, Dialect, PgEnumMetadata};
-use readyset_errors::{internal_err, invalid_err, ReadySetError, ReadySetResult};
+use readyset_errors::{internal, internal_err, invalid_err, ReadySetError, ReadySetResult};
 use readyset_sql_passes::alias_removal::TableAliasRewrite;
 use readyset_sql_passes::{AliasRemoval, Rewrite, RewriteContext};
 use readyset_tracing::{debug, trace};
@@ -62,6 +62,11 @@ pub(crate) struct SqlIncorporator {
     /// Stores VIEWs and CACHE queries.
     named_queries: HashMap<Relation, u64>,
     num_queries: usize,
+
+    /// Views which have been added to ReadySet, but which have not been compiled to dataflow yet
+    /// because no query has selected FROM them yet. Represented as a map from the
+    /// (schema-qualified!) name of the view to the *post-rewrite* SelectStatement for the view.
+    uncompiled_views: HashMap<Relation, SelectStatement>,
 
     base_schemas: HashMap<Relation, CreateTableBody>,
     view_schemas: HashMap<Relation, Vec<SqlIdentifier>>,
@@ -175,15 +180,37 @@ impl SqlIncorporator {
         definition: SelectSpecification,
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<()> {
-        let mir_leaf = match definition {
+        match definition {
             SelectSpecification::Compound(query) => {
-                self.add_compound_query(name.clone(), query, /* is_leaf = */ true, mig)?
+                let mir_leaf =
+                    self.add_compound_query(name.clone(), query, /* is_leaf = */ true, mig)?;
+                self.mir_to_dataflow(name.clone(), mir_leaf, mig)?;
             }
             SelectSpecification::Simple(query) => {
-                self.add_select_query(name.clone(), query, /* is_leaf = */ true, mig)?
+                self.view_schemas.insert(
+                    name.clone(),
+                    query
+                        .fields
+                        .iter()
+                        .map(|f| match f {
+                            FieldDefinitionExpr::Expr {
+                                alias: Some(alias), ..
+                            } => Ok(alias.clone()),
+                            FieldDefinitionExpr::Expr {
+                                expr: Expr::Column(c),
+                                ..
+                            } => Ok(c.name.clone()),
+                            FieldDefinitionExpr::Expr { expr, .. } => Ok(expr.to_string().into()),
+                            _ => {
+                                internal!("All expression should have been desugared at this point")
+                            }
+                        })
+                        .collect::<ReadySetResult<_>>()?,
+                );
+                self.uncompiled_views.insert(name.clone(), query);
             }
-        };
-        self.mir_to_dataflow(name.clone(), mir_leaf, mig)?;
+        }
+
         self.remove_non_replicated_relation(&name);
         Ok(())
     }
@@ -424,6 +451,7 @@ impl SqlIncorporator {
         is_leaf: bool,
         mig: &mut Migration<'_>,
     ) -> Result<MirNodeIndex, ReadySetError> {
+        trace!(%stmt, "Adding select query");
         let on_err = |e| ReadySetError::SelectQueryCreationFailed {
             qname: query_name.to_string(),
             source: Box::new(e),
@@ -478,12 +506,48 @@ impl SqlIncorporator {
         trace!(rewritten_query = %stmt);
 
         let query_graph = to_query_graph(stmt).map_err(on_err)?;
-        let mir_leaf = self
-            .mir_converter
-            .named_query_to_mir(&query_name, &query_graph, anon_queries, is_leaf)
-            .map_err(on_err)?;
 
-        Ok(mir_leaf)
+        // Keep attempting to compile the query to MIR, but every time we run into a TableNotFound
+        // error for a view we've yet to migrate, migrate that view then retry
+        //
+        // TODO(grfn): This is a janky and inefficient way of making this happen. Someday, when
+        // SqlIncorporator and SqlToMirConverter are merged into one, this ought to not be
+        // necesssary - instead, we can just migrate the view as part of the `get_relation` method
+        loop {
+            match self.mir_converter.named_query_to_mir(
+                &query_name,
+                &query_graph,
+                &anon_queries,
+                is_leaf,
+            ) {
+                Ok(mir_leaf) => return Ok(mir_leaf),
+                Err(e) => {
+                    if let Some((view, name)) = e
+                        .table_not_found_cause()
+                        .map(|(name, schema)| Relation {
+                            schema: schema.map(Into::into),
+                            name: name.into(),
+                        })
+                        .and_then(|rel| Some((self.uncompiled_views.remove(&rel)?, rel)))
+                    {
+                        trace!(%name, %view, "Query referenced uncompiled view; compiling");
+                        if let Err(e) = self
+                            .add_select_query(name.clone(), view.clone(), true, mig)
+                            .and_then(|mir_leaf| self.mir_to_dataflow(name.clone(), mir_leaf, mig))
+                        {
+                            trace!(%e, "Compiling uncompiled view failed");
+                            // The view *might* have failed to migrate for a transient reason - put
+                            // it back in the map of uncompiled views so we can try again later if
+                            // the user asks us to
+                            self.uncompiled_views.insert(name, view);
+                            return Err(on_err(e));
+                        }
+                    } else {
+                        return Err(on_err(e));
+                    }
+                }
+            }
+        }
     }
 
     fn mir_to_dataflow(
@@ -519,6 +583,10 @@ impl SqlIncorporator {
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<MirRemovalResult> {
         trace!(%query_name, "removing query");
+        if self.uncompiled_views.remove(query_name).is_some() {
+            trace!(%query_name, "Removed uncompiled view");
+            return Ok(Default::default());
+        }
         let mut mir_removal_result = self.mir_converter.remove_query(query_name)?;
         self.process_removal(&mut mir_removal_result, mig);
         Ok(mir_removal_result)

@@ -4278,13 +4278,13 @@ async fn join_column_projection() {
     g.extend_recipe(
             ChangeList::from_str("CREATE TABLE stories (s_id int, author_id int, s_name text, content text);
          CREATE TABLE users (u_id int, u_name text, email text);
-         CREATE VIEW stories_authors_explicit AS SELECT s_id, author_id, s_name, content, u_id, u_name, email
+         CREATE CACHE stories_authors_explicit FROM SELECT s_id, author_id, s_name, content, u_id, u_name, email
              FROM stories
              JOIN users ON (stories.author_id = users.u_id);
-         CREATE VIEW stories_authors_tables_star AS SELECT stories.*, users.*
+         CREATE CACHE stories_authors_tables_star FROM SELECT stories.*, users.*
              FROM stories
              JOIN users ON (stories.author_id = users.u_id);
-         CREATE VIEW stories_authors_star AS SELECT *
+         CREATE CACHE stories_authors_star FROM SELECT *
              FROM stories
              JOIN users ON (stories.author_id = users.u_id);", Dialect::DEFAULT_MYSQL)
         .unwrap(),
@@ -4345,7 +4345,7 @@ async fn test_join_across_shards() {
         ChangeList::from_str(
             "CREATE TABLE votes (story int, user int);
          CREATE TABLE recs (story int, other int);
-         CREATE VIEW all_user_recs AS SELECT votes.user as u, recs.other as s
+         CREATE CACHE all_user_recs FROM SELECT votes.user as u, recs.other as s
              FROM votes \
              JOIN recs ON (votes.story = recs.story);",
             Dialect::DEFAULT_MYSQL,
@@ -4405,7 +4405,7 @@ async fn test_join_across_shards_with_param() {
         ChangeList::from_str(
             "CREATE TABLE votes (story int, user int);
          CREATE TABLE recs (story int, other int);
-         CREATE VIEW user_recs AS SELECT votes.user as u, recs.other as s
+         CREATE CACHE user_recs FROM SELECT votes.user as u, recs.other as s
              FROM votes \
              JOIN recs ON (votes.story = recs.story) WHERE votes.user = ?;",
             Dialect::DEFAULT_MYSQL,

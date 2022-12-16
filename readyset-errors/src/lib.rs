@@ -662,6 +662,17 @@ impl ReadySetError {
                 .any(move |e| e.any_cause(f.clone()))
     }
 
+    fn find_map_cause<'a, F, R: 'a>(&'a self, f: F) -> Option<R>
+    where
+        F: Fn(&'a Self) -> Option<R>,
+    {
+        f(self).or_else(|| {
+            self.source()
+                .and_then(|e| e.downcast_ref::<Box<ReadySetError>>())
+                .and_then(|e| e.find_map_cause(f))
+        })
+    }
+
     /// Returns `true` if the error is an [`UnparseableQuery`].
     pub fn is_unparseable_query(&self) -> bool {
         matches!(self, Self::UnparseableQuery { .. })
@@ -702,6 +713,16 @@ impl ReadySetError {
     /// Returns `true` if self either *is* [`TableNotFound`], or was *caused by* [`TableNotFound`].
     pub fn caused_by_table_not_found(&self) -> bool {
         self.any_cause(|e| e.is_table_not_found())
+    }
+
+    /// If `self` either *is* [`TableNotFound`] or was *caused by* [`TableNotFound`], returns the
+    /// fields of the table not found error as a tuple of `(name, schema)`. Otherwise, returns
+    /// `None`
+    pub fn table_not_found_cause(&self) -> Option<(&str, Option<&str>)> {
+        self.find_map_cause(|e| match e {
+            Self::TableNotFound { name, schema } => Some((name.as_str(), schema.as_deref())),
+            _ => None,
+        })
     }
 
     /// Returns `true` if self is [`TableNotReplicated`].
@@ -1208,5 +1229,23 @@ mod test {
             }),
         };
         assert!(err.caused_by_table_not_found());
+    }
+
+    #[test]
+    fn table_not_found_cause_two_deep() {
+        let err = ReadySetError::RpcFailed {
+            during: "extend_recipe (in readyset-client/src/controller/rpc.rs:50:26)".into(),
+            source: Box::new(ReadySetError::SelectQueryCreationFailed {
+                qname: "`public`.`t2_view_q`".into(),
+                source: Box::new(ReadySetError::TableNotFound {
+                    name: "t2_view".into(),
+                    schema: Some("public".into()),
+                }),
+            }),
+        };
+        assert_eq!(
+            err.table_not_found_cause().unwrap(),
+            ("t2_view", Some("public"))
+        )
     }
 }

@@ -82,6 +82,7 @@ fn value_columns_needed_for_predicates(
 }
 
 /// The result of removing a relation from MIR.
+#[derive(Default)]
 pub struct MirRemovalResult {
     /// The dataflow nodes corresponding to the MIR nodes that
     /// need to be removed.
@@ -440,9 +441,10 @@ impl SqlToMirConverter {
         // Remove the MIR nodes and keep track of their Dataflow node counterparts.
         let mut df_to_remove = HashSet::new();
         for node_idx in removed {
-            let mir_node = self.mir_graph.remove_node(node_idx).unwrap();
-            if let Some(df_node) = mir_node.df_node_index() {
-                df_to_remove.insert(df_node);
+            if let Some(mir_node) = self.mir_graph.remove_node(node_idx) {
+                if let Some(df_node) = mir_node.df_node_index() {
+                    df_to_remove.insert(df_node);
+                }
             }
         }
 
@@ -1148,7 +1150,7 @@ impl SqlToMirConverter {
             Expr::Exists(subquery) => {
                 let query_graph = to_query_graph((**subquery).clone())?;
                 let subquery_leaf =
-                    self.named_query_to_mir(query_name, &query_graph, HashMap::new(), false)?;
+                    self.named_query_to_mir(query_name, &query_graph, &HashMap::new(), false)?;
 
                 // -> π[lit: 0, lit: 0]
                 let group_proj = self.make_project_node(
@@ -1323,7 +1325,7 @@ impl SqlToMirConverter {
         &mut self,
         query_name: &Relation,
         query_graph: &QueryGraph,
-        anon_queries: HashMap<Relation, NodeIndex>,
+        anon_queries: &HashMap<Relation, NodeIndex>,
         has_leaf: bool,
     ) -> Result<NodeIndex, ReadySetError> {
         // TODO(fran): We are not modifying the execution of this method with the implementation
@@ -1349,7 +1351,7 @@ impl SqlToMirConverter {
                 let base_for_rel = if let Some(subquery) = &query_graph.relations[*rel].subgraph {
                     let correlated = subquery.is_correlated;
                     let subquery_leaf =
-                        self.named_query_to_mir(query_name, subquery, HashMap::new(), false)?;
+                        self.named_query_to_mir(query_name, subquery, &HashMap::new(), false)?;
                     if correlated {
                         correlated_relations.insert(subquery_leaf);
                     }

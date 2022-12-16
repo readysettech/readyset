@@ -1463,11 +1463,19 @@ async fn postgresql_ddl_replicate_drop_view_internal(url: &str) {
         })
         .await
         .unwrap();
+
+    // Create a cache that reads from the view to test the view exists
     ctx.noria
-        .view(Relation {
-            schema: Some("public".into()),
-            name: "t2_view".into(),
-        })
+        .extend_recipe(ChangeList::from_change(
+            Change::CreateCache(
+                parse_create_cache(
+                    nom_sql::Dialect::PostgreSQL,
+                    "CREATE CACHE public.t2_view_q FROM SELECT * FROM public.t2_view;",
+                )
+                .unwrap(),
+            ),
+            Dialect::DEFAULT_POSTGRESQL,
+        ))
         .await
         .unwrap();
 
@@ -1475,11 +1483,25 @@ async fn postgresql_ddl_replicate_drop_view_internal(url: &str) {
     client.query("DROP VIEW t2_view;").await.unwrap();
 
     eventually! {
-        let res = ctx.noria.view("t2_view").await;
-        matches!(
-            res.err(),
-            Some(ReadySetError::ViewNotFound(view)) if view == "`t2_view`"
-        )
+        let res = ctx
+            .noria
+            .extend_recipe(ChangeList::from_change(
+                Change::CreateCache(
+                    parse_create_cache(
+                        nom_sql::Dialect::PostgreSQL,
+                        "CREATE CACHE public.t2_view_q FROM SELECT * FROM public.t2_view;",
+                    )
+                    .unwrap(),
+                ),
+                Dialect::DEFAULT_POSTGRESQL,
+            ))
+            .await;
+
+        res.err()
+            .as_ref()
+            .and_then(|e| e.table_not_found_cause())
+            .iter()
+            .any(|(table, _)| *table == "t2_view")
     };
 }
 
@@ -1511,12 +1533,19 @@ async fn postgresql_ddl_replicate_create_view_internal(url: &str) {
         .await
         .unwrap();
 
+    // Create a cache that reads from the view to test the view exists
     eventually!(ctx
         .noria
-        .view(Relation {
-            schema: Some("public".into()),
-            name: "t2_view".into(),
-        })
+        .extend_recipe(ChangeList::from_change(
+            Change::CreateCache(
+                parse_create_cache(
+                    nom_sql::Dialect::PostgreSQL,
+                    "CREATE CACHE public.t2_view_q FROM SELECT * FROM public.t2_view;"
+                )
+                .unwrap()
+            ),
+            Dialect::DEFAULT_POSTGRESQL
+        ))
         .await
         .is_ok());
 }
