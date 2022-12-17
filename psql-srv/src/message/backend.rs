@@ -1,6 +1,7 @@
 use std::convert::TryInto;
 use std::sync::Arc;
 
+use bytes::Bytes;
 pub use postgres::error::SqlState;
 use postgres::SimpleQueryRow;
 use postgres_types::Type;
@@ -33,6 +34,7 @@ pub enum BackendMessage<R> {
     CommandComplete {
         tag: CommandCompleteTag,
     },
+    PassThroughCommandComplete(Bytes),
     DataRow {
         values: R,
         explicit_transfer_formats: Option<Arc<Vec<TransferFormat>>>,

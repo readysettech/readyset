@@ -9,7 +9,7 @@ use serial_test::serial;
 mod common;
 use common::connect;
 use postgres_types::{FromSql, ToSql};
-use tokio_postgres::{Client, SimpleQueryMessage};
+use tokio_postgres::{Client, CommandCompleteContents, SimpleQueryMessage};
 
 async fn setup() -> (tokio_postgres::Config, Handle) {
     TestBuilder::default()
@@ -96,7 +96,10 @@ async fn delete_case_sensitive() {
                 .await
                 .unwrap();
             let deleted = res.first().unwrap();
-            assert!(matches!(deleted, SimpleQueryMessage::CommandComplete(1)));
+            assert!(matches!(
+                deleted,
+                SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 1, .. })
+            ));
             sleep().await;
         }
 
@@ -331,7 +334,10 @@ async fn generated_columns() {
         .await
         .expect("populate failed");
     let inserted = res.first().unwrap();
-    assert!(matches!(inserted, SimpleQueryMessage::CommandComplete(1)));
+    assert!(matches!(
+        inserted,
+        SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 1, .. })
+    ));
     sleep().await;
     let res = fallback_conn
         .simple_query("SELECT * from calc_columns")
@@ -369,7 +375,10 @@ async fn generated_columns() {
         .await
         .expect("show caches failed");
     let caches = res.first().unwrap();
-    assert!(matches!(caches, SimpleQueryMessage::CommandComplete(0)));
+    assert!(matches!(
+        caches,
+        SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 0, .. })
+    ));
 
     // Inserting will go to upstream
     let populate_gen_columns_readyset = "INSERT INTO calc_columns (col1, col2) VALUES(3, 4);";
@@ -379,15 +388,22 @@ async fn generated_columns() {
         .expect("populate failed");
     sleep().await;
     let inserted = &res[0];
-    assert!(matches!(inserted, SimpleQueryMessage::CommandComplete(1)));
+    assert!(matches!(
+        inserted,
+        SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 1, .. })
+    ));
 
     // We should see the inserted data
     let res = conn
         .simple_query("SELECT * from calc_columns")
         .await
         .expect("select failed");
+
     let selected = &res[2];
-    assert!(matches!(*selected, SimpleQueryMessage::CommandComplete(2)));
+    assert!(matches!(
+        *selected,
+        SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 2, .. })
+    ));
 }
 
 #[allow(dead_code)]

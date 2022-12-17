@@ -140,6 +140,14 @@ where
             );
         }
 
+        PassThroughCommandComplete(tag) => {
+            put_u8(ID_COMMAND_COMPLETE, dst);
+            let tag_str = std::str::from_utf8(&tag)?;
+            // Check is tag has null terminating character at end, and if not, add one.
+            put_i32(tag_str.len() as i32 + 4, dst);
+            put_str(tag_str, dst);
+        }
+
         DataRow {
             values,
             explicit_transfer_formats,
