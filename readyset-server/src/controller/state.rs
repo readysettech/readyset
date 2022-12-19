@@ -57,11 +57,12 @@ use tracing::instrument;
 
 use super::migrate::DomainSettings;
 use super::replication::ReplicationStrategy;
+use super::sql::Recipe;
 use crate::controller::domain_handle::DomainHandle;
 use crate::controller::migrate::materialization::Materializations;
 use crate::controller::migrate::scheduling::Scheduler;
 use crate::controller::migrate::{routing, DomainMigrationPlan, Migration};
-use crate::controller::recipe::{Recipe, Schema};
+use crate::controller::sql::Schema;
 use crate::controller::{
     schema, ControllerState, DomainPlacementRestriction, NodeRestrictionKey, Worker,
     WorkerIdentifier,

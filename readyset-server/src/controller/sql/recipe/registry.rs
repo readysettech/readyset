@@ -12,7 +12,7 @@ use readyset_errors::{unsupported_err, ReadySetError, ReadySetResult};
 use readyset_tracing::debug;
 use serde::{Deserialize, Serialize};
 
-use crate::controller::recipe::QueryID;
+use super::QueryID;
 
 /// A single SQL expression stored in a Recipe.
 #[allow(clippy::large_enum_variant)]

@@ -19,6 +19,7 @@ use readyset_tracing::{debug, trace};
 
 use self::mir::{LeafBehavior, NodeIndex as MirNodeIndex, SqlToMirConverter};
 use self::query_graph::to_query_graph;
+pub(crate) use self::recipe::{Recipe, Schema};
 use crate::controller::mir_to_flow::{mir_node_to_flow_parts, mir_query_to_flow_parts};
 use crate::controller::Migration;
 use crate::sql::mir::MirRemovalResult;
@@ -27,6 +28,7 @@ use crate::ReuseConfigType;
 pub(crate) mod mir;
 mod query_graph;
 mod query_signature;
+mod recipe;
 
 /// Configuration for converting SQL to dataflow
 #[derive(Clone, Debug, Serialize, Deserialize)]

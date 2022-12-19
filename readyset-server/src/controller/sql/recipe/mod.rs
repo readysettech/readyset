@@ -19,8 +19,7 @@ use readyset_errors::{
 use readyset_tracing::{debug, error, info, trace, warn};
 use serde::{Deserialize, Serialize};
 
-use super::sql;
-use crate::controller::recipe::registry::{ExprRegistry, RecipeExpr};
+use self::registry::{ExprRegistry, RecipeExpr};
 use crate::controller::sql::SqlIncorporator;
 use crate::controller::Migration;
 use crate::ReuseConfigType;
@@ -48,7 +47,7 @@ impl PartialEq for Recipe {
 }
 
 #[derive(Debug)]
-pub(super) enum Schema {
+pub(crate) enum Schema {
     Table(CreateTableBody),
     View(Vec<String>),
 }
@@ -97,8 +96,8 @@ impl Recipe {
 
     /// Creates a new blank recipe with the given SQL configuration and MIR configuration
     pub(crate) fn with_config(
-        sql_config: sql::Config,
-        mir_config: sql::mir::Config,
+        sql_config: super::Config,
+        mir_config: super::mir::Config,
         permissive_writes: bool,
     ) -> Self {
         let mut res = Recipe::blank();
@@ -110,17 +109,17 @@ impl Recipe {
 
     /// Set the MIR configuration for this recipe
     // crate viz for tests
-    pub(crate) fn set_mir_config(&mut self, mir_config: sql::mir::Config) {
+    pub(crate) fn set_mir_config(&mut self, mir_config: super::mir::Config) {
         self.inc.set_mir_config(mir_config)
     }
 
     /// Get a shared reference to this recipe's MIR configuration
-    pub(crate) fn mir_config(&self) -> &sql::mir::Config {
+    pub(crate) fn mir_config(&self) -> &super::mir::Config {
         self.inc.mir_config()
     }
 
     /// Set the SQL configuration for this recipe
-    pub(crate) fn set_sql_config(&mut self, sql_config: sql::Config) {
+    pub(crate) fn set_sql_config(&mut self, sql_config: super::Config) {
         self.inc.config = sql_config;
     }
 
@@ -131,7 +130,7 @@ impl Recipe {
     }
 
     /// Get a shared reference to this recipe's SQL configuration
-    pub(crate) fn sql_config(&self) -> &sql::Config {
+    pub(crate) fn sql_config(&self) -> &super::Config {
         &self.inc.config
     }
 
@@ -170,7 +169,7 @@ impl Recipe {
     }
 
     /// Get schema for a base table or view in the recipe.
-    pub(super) fn schema_for(&self, name: &Relation) -> Option<Schema> {
+    pub(crate) fn schema_for(&self, name: &Relation) -> Option<Schema> {
         match self.inc.get_base_schema(name) {
             None => {
                 let s = match self.resolve_alias(name) {
@@ -508,7 +507,7 @@ impl Recipe {
     }
 
     /// Helper method to reparent a recipe. This is needed for some of t
-    pub(super) fn sql_inc(&self) -> &SqlIncorporator {
+    pub(crate) fn sql_inc(&self) -> &SqlIncorporator {
         &self.inc
     }
 

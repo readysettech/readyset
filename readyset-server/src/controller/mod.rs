@@ -37,7 +37,7 @@ use url::Url;
 
 use crate::controller::inner::{ControllerRequestType, Leader};
 use crate::controller::migrate::Migration;
-use crate::controller::recipe::Recipe;
+use crate::controller::sql::Recipe;
 use crate::controller::state::DfState;
 use crate::materialization::Materializations;
 use crate::worker::{WorkerRequest, WorkerRequestKind};
@@ -48,7 +48,6 @@ mod inner;
 mod keys;
 pub(crate) mod migrate; // crate viz for tests
 mod mir_to_flow;
-pub(crate) mod recipe; // crate viz for tests
 pub(crate) mod replication;
 pub(crate) mod schema;
 pub(crate) mod sql;
