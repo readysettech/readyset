@@ -11,6 +11,7 @@ use nom::branch::alt;
 use nom::bytes::complete::{is_not, tag, tag_no_case, take};
 use nom::character::complete::{digit1, satisfy};
 use nom::combinator::{map, map_parser, map_res, not, opt, peek, recognize};
+use nom::error::ErrorKind;
 use nom::multi::fold_many0;
 use nom::sequence::{delimited, pair, preceded, terminated, tuple};
 use nom_locate::LocatedSpan;
@@ -502,7 +503,11 @@ pub fn literal(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<
                     tag("$"),
                     map_res(
                         map_res(digit1, |i: LocatedSpan<&[u8]>| str::from_utf8(&i)),
-                        u32::from_str,
+                        |s| match u32::from_str(s) {
+                            Ok(0) => Err(ErrorKind::Digit), // Disallow $0 as a placeholder
+                            Ok(i) => Ok(i),
+                            Err(_) => Err(ErrorKind::Digit),
+                        },
                     ),
                 ),
                 |num| Literal::Placeholder(ItemPlaceholder::DollarNumber(num)),
