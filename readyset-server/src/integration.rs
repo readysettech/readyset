@@ -27,6 +27,7 @@ use dataflow::{
 };
 use futures::StreamExt;
 use itertools::Itertools;
+use launchpad::eventually;
 use nom_sql::{parse_query, OrderType, Relation, SqlQuery};
 use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use readyset_client::consistency::Timestamp;
@@ -8179,10 +8180,13 @@ async fn simple_drop_tables_with_data() {
     table_1.insert(vec![12.into()]).await.unwrap();
 
     let mut view = g.view("t1").await.unwrap();
-    let results = view.lookup(&[0.into()], true).await.unwrap().into_vec();
-    assert!(!results.is_empty());
-    assert_eq!(results[0][0], 11.into());
-    assert_eq!(results[1][0], 12.into());
+    eventually!(run_test: {
+        view.lookup(&[0.into()], true).await.unwrap().into_vec()
+    }, then_assert: |results| {
+        assert!(!results.is_empty());
+        assert_eq!(results[0][0], 11.into());
+        assert_eq!(results[1][0], 12.into());
+    });
 
     let drop_table = "DROP TABLE table_1, table_2;";
     g.extend_recipe(ChangeList::from_str(drop_table, Dialect::DEFAULT_MYSQL).unwrap())
