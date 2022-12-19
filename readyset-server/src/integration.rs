@@ -45,10 +45,9 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use vec1::vec1;
 
-use crate::controller::recipe::Recipe;
-use crate::controller::sql::{mir, SqlIncorporator};
+use crate::controller::sql::SqlIncorporator;
 use crate::integration_utils::*;
-use crate::{get_col, Builder, ReadySetError, ReuseConfigType};
+use crate::{get_col, Builder, ReadySetError};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn it_completes() {
@@ -3422,24 +3421,6 @@ async fn state_replay_migration_query() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn recipe_activates() {
-    let mut g = start_simple_unsharded("recipe_activates").await;
-    g.migrate(|mig| {
-        let mut r = Recipe::blank();
-
-        let changelist = ChangeList::from_str(
-            "CREATE TABLE b (a text, c text, x text);\n",
-            Dialect::DEFAULT_MYSQL,
-        )
-        .unwrap();
-        r.activate(mig, changelist).unwrap();
-    })
-    .await;
-    // one base node
-    assert_eq!(g.tables().await.unwrap().len(), 1);
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn recipe_activates_and_migrates() {
     let r_txt = "CREATE TABLE b (a text, c text, x text);\n";
     let r1_txt = "CREATE CACHE qa FROM SELECT a FROM b;\n
@@ -3483,61 +3464,6 @@ async fn recipe_activates_and_migrates_with_join() {
     assert_eq!(g.tables().await.unwrap().len(), 2);
     // one leaf node
     assert_eq!(g.views().await.unwrap().len(), 1);
-}
-
-async fn test_queries(test: &str, file: &'static str, shard: bool, reuse: bool) {
-    readyset_tracing::init_test_logging();
-    use std::fs::File;
-    use std::io::Read;
-
-    // set up graph
-    let mut g = if shard {
-        start_simple(test).await
-    } else {
-        start_simple_unsharded(test).await
-    };
-
-    // move needed for some funny lifetime reason
-    g.migrate(move |mig| {
-        let mut r = Recipe::with_config(Default::default(), Default::default(), false);
-        if reuse {
-            r.enable_reuse(ReuseConfigType::Finkelstein);
-        }
-        r.set_mir_config(mir::Config {
-            allow_topk: true,
-            ..Default::default()
-        });
-
-        let mut f = File::open(&file).unwrap();
-        let mut s = String::new();
-
-        // Load queries
-        f.read_to_string(&mut s).unwrap();
-        let lines: Vec<String> = s
-            .lines()
-            .filter(|l| {
-                !l.is_empty()
-                    && !l.starts_with("--")
-                    && !l.starts_with('#')
-                    && !l.starts_with("DROP TABLE")
-            })
-            .map(|l| {
-                if !(l.ends_with('\n') || l.ends_with(';')) {
-                    String::from(l) + "\n"
-                } else {
-                    String::from(l)
-                }
-            })
-            .collect();
-
-        // Add them one by one
-        for (_i, q) in lines.iter().enumerate() {
-            let changelist = ChangeList::from_str(q, Dialect::DEFAULT_MYSQL).unwrap();
-            let res = r.activate(mig, changelist);
-            assert!(res.is_ok(), "{}", res.err().unwrap());
-        }
-    })
-    .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -3589,51 +3515,6 @@ async fn finkelstein1982_queries() {
             }
         }
     })
-    .await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-#[ignore = "Ignoring sharded tests"]
-async fn tpc_w() {
-    test_queries("tpc-w", "tests/tpc-w-queries.txt", true, true).await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-#[ignore] // Broken due to a reuse bug
-async fn lobsters() {
-    test_queries("lobsters", "tests/lobsters-schema.txt", false, false).await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn soupy_lobsters() {
-    test_queries(
-        "soupy_lobsters",
-        "tests/soupy-lobsters-schema.txt",
-        false,
-        false,
-    )
-    .await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn mergeable_lobsters() {
-    test_queries(
-        "mergeable_lobsters",
-        "tests/mergeable-lobsters-schema.sql",
-        false,
-        false,
-    )
-    .await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn filter_aggregate_lobsters() {
-    test_queries(
-        "filter_aggregate_lobsters",
-        "tests/filter-aggregate-lobsters-schema.sql",
-        false,
-        false,
-    )
     .await;
 }
 
