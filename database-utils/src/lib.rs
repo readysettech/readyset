@@ -179,13 +179,13 @@ impl FromStr for DatabaseType {
 /// ```
 /// use database_utils::DatabaseType;
 ///
-/// assert_eq!(DatabaseType::PostgreSQL.to_string(), "PostgreSQL");
+/// assert_eq!(DatabaseType::PostgreSQL.to_string(), "postgresql");
 /// ```
 impl Display for DatabaseType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            DatabaseType::MySQL => f.write_str("MySQL"),
-            DatabaseType::PostgreSQL => f.write_str("PostgreSQL"),
+            DatabaseType::MySQL => f.write_str("mysql"),
+            DatabaseType::PostgreSQL => f.write_str("postgresql"),
         }
     }
 }

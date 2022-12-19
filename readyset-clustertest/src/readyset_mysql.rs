@@ -19,8 +19,8 @@ pub const PROPAGATION_DELAY_TIMEOUT: Duration = Duration::from_secs(60);
 
 fn readyset_mysql(name: &str) -> DeploymentBuilder {
     DeploymentBuilder::new(name)
-        .deploy_mysql()
-        .deploy_mysql_adapter()
+        .deploy_upstream()
+        .deploy_adapter()
 }
 
 async fn last_statement_destination(conn: &mut mysql_async::Conn) -> QueryDestination {
@@ -1470,10 +1470,10 @@ async fn post_deployment_permissions_replication() {
 async fn views_synchronize_between_deployments() {
     let mut deployment = readyset_mysql("views_synchronize_between_deployments")
         .with_servers(1, ServerParams::default())
-        .with_mysql_adapters(2)
+        .with_adapters(2)
         .views_polling_interval(Duration::from_secs(1))
         .explicit_migrations(500)
-        .deploy_mysql()
+        .deploy_upstream()
         .start()
         .await
         .unwrap();

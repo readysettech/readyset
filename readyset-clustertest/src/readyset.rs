@@ -202,8 +202,8 @@ async fn ensure_startup_timestamp_metric() {
 
     let mut deployment = DeploymentBuilder::new("ct_ensure_startup_timestamp_metric")
         .with_servers(2, ServerParams::default())
-        .deploy_mysql()
-        .deploy_mysql_adapter()
+        .deploy_upstream()
+        .deploy_adapter()
         .start()
         .await
         .unwrap();
@@ -421,7 +421,7 @@ async fn no_readers_worker_doesnt_get_readers() {
 async fn server_and_adapter_auto_restart() {
     let mut deployment = DeploymentBuilder::new("ct_adapter_restart")
         .add_server(ServerParams::default())
-        .deploy_mysql_adapter()
+        .deploy_adapter()
         .auto_restart(true)
         .start()
         .await
@@ -527,7 +527,7 @@ async fn server_ready_before_adapter() {
         .expect("server failed to become healthy");
 
     deployment
-        .start_mysql_adapter(true)
+        .start_adapter(true)
         .await
         .expect("adapter failed to become healthy");
 
@@ -543,7 +543,7 @@ async fn adapter_ready_before_server() {
         .unwrap();
 
     deployment
-        .start_mysql_adapter(true)
+        .start_adapter(true)
         .await
         .expect("adapter failed to become healthy");
 
@@ -565,7 +565,7 @@ async fn adapter_reports_unhealthy_consul_down() {
         .unwrap();
 
     deployment
-        .start_mysql_adapter(false)
+        .start_adapter(false)
         .await
         .expect("adapter failed to become healthy");
 
@@ -707,7 +707,7 @@ impl ClusterComponent {
             }
             ClusterComponent::Adapter => {
                 deployment
-                    .start_mysql_adapter(false)
+                    .start_adapter(false)
                     .await
                     .expect("readyset failed to startup");
 

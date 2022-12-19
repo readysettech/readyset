@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
+use database_utils::DatabaseType;
 use tokio::select;
 use tokio::sync::Mutex;
 
@@ -203,12 +204,12 @@ pub struct AdapterBuilder {
 }
 
 impl AdapterBuilder {
-    pub fn new(binary: &Path) -> Self {
+    pub fn new(binary: &Path, database_type: DatabaseType) -> Self {
         Self {
             binary: binary.to_owned(),
             args: vec![
                 "--database-type".to_string(),
-                "mysql".to_string(),
+                database_type.to_string(),
                 "--allow-unauthenticated-connections".to_string(),
                 "--migration-request-timeout-ms".to_string(),
                 "1000".to_string(),

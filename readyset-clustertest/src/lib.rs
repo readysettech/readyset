@@ -10,17 +10,17 @@
 //!   * Testing behavior that is localized to specific workers. Each worker in a deployment can be
 //!     queried for metrics separately via [`MetricsClient`] which can be checked in clustertests.
 //!
-//! # Preparing to run clustertests Clustertests require external resources in order to run: a MySQL
-//! server, an authority (consul) and binaries for readyset-server and readyset. Clustertest
-//! defaults are set to match the developer docker-compose in `//readyset` and the default flags for
-//! readyset-server and readyset.
+//! # Preparing to run clustertests Clustertests require external resources in order to run: a
+//! MySQL and PostgreSQL server, an authority (consul) and binaries for readyset-server and
+//! readyset. Clustertest defaults are set to match the developer docker-compose in `//readyset`
+//! and the default flags for readyset-server and readyset.
 //!
 //! ```bash
 //! # Build the binaries with the failure injection feature for most clustertests. Binaries built
 //! to //target/debug are used by default.
 //! cargo build --bin readyset-server --bin readyset --features failure_injection
 //!
-//! # Spin up the developer docker stack to start MySQL and a consul authority.
+//! # Spin up the developer docker stack to start MySQL, PostgreSQL, and a consul authority.
 //! cd //readyset/public
 //! cp docker-compose.override.yml.example docker-compose.override.yml
 //! docker-compose up -d
@@ -37,7 +37,7 @@
 //! cargo test -p readyset-clustertest
 //!
 //! # Modifying clustertests via environment arguments.
-//! MYSQL_PORT=3310 cargo test -p readyset-clustertest
+//! PORT=3310 cargo test -p readyset-clustertest
 //!
 //! # Configuring readyset-server logging via logging environment variables.
 //! LOG_LEVEL=debug cargo test -p readyset-clustertest
@@ -56,13 +56,13 @@
 //! * `BINARY_PATH`: The path to a directory with the readyset-server and readyset binaries,
 //!   defaults to `$CARGO_MANIFEST_DIR/../../target/debug`, `readyset/target/debug`.
 //!
-//! * `MYSQL_PORT`: The host of the MySQL database to use as upstream, defaults to
+//! * `PORT`: The host of the upstream database to use as upstream, defaults to
 //! `127.0.0.1`.
 //!
-//! * `MYSQL_PORT`: The port of the MySQL database to use as upstream, defaults to
+//! * `PORT`: The port of the upstream database to use as upstream, defaults to
 //! `3306`.
 //!
-//! * `MYSQL_ROOT_PASSWORD`: The password to use for the upstream MySQL database,
+//! * `ROOT_PASSWORD`: The password to use for the upstream database,
 //! defaults to `noria`.
 //!
 //! * `RUN_SLOW_TESTS`: Enables running certain tests that are slow.
@@ -143,9 +143,8 @@
 //! for example:
 //!   * the number of readyset-server instances to create,
 //!     [`with_servers`](DeploymentBuilder::with_servers).
-//!   * whether to use an upstream database, [`deploy_mysql`](DeploymentBuilder::deploy_mysql).
-//!   * whether to deploy an adapter,
-//!     [`deploy_mysql_adapter`](DeploymentBuilder::deploy_mysql_adapter).
+//!   * whether to use an upstream database, [`deploy_adapter`](DeploymentBuilder::deploy_adapter).
+//!   * whether to deploy an adapter, [`deploy_adapter`](DeploymentBuilder::deploy_adapter).
 //!   * The parameters used to build a server, [`ServerParams`].
 //!
 //! Once all parameters are specified, creating the resources for the deployment
@@ -153,7 +152,7 @@
 //!
 //! ```rust
 //! use readyset_clustertest::*;
-//! // Deploy a three server deployment with different volume IDs for each server, a mysql adapter,
+//! // Deploy a three server deployment with different volume IDs for each server, a readyset adapter,
 //! // and upstream database.
 //! async fn build_deployment() {
 //!     let mut deployment = DeploymentBuilder::new("ct_example")
@@ -161,8 +160,8 @@
 //!         .add_server(ServerParams::default().with_volume("v2"))
 //!         .add_server(ServerParams::default().with_volume("v3"))
 //!         .quorum(3)
-//!         .deploy_mysql()
-//!         .deploy_mysql_adapter()
+//!         .deploy_upstream()
+//!         .deploy_adapter()
 //!         .start()
 //!         .await
 //!         .unwrap();
@@ -218,6 +217,7 @@ use ::readyset_client::consensus::AuthorityType;
 use ::readyset_client::metrics::client::MetricsClient;
 use ::readyset_client::{ReadySetHandle, ReadySetResult};
 use anyhow::{anyhow, Result};
+use database_utils::DatabaseType;
 use futures::executor;
 use hyper::Client;
 use mysql_async::prelude::Queryable;
@@ -243,10 +243,16 @@ struct Env {
     binary_path: PathBuf,
     #[serde(default = "default_mysql_host")]
     mysql_host: String,
+    #[serde(default = "default_postgresql_host")]
+    postgresql_host: String,
     #[serde(default = "default_mysql_port")]
     mysql_port: String,
+    #[serde(default = "default_postgresql_port")]
+    postgresql_port: String,
     #[serde(default = "default_root_password")]
-    mysql_root_password: String,
+    root_password: String,
+    #[serde(default = "default_database_type")]
+    database_type: String,
 }
 
 fn default_authority_address() -> String {
@@ -257,8 +263,20 @@ fn default_mysql_host() -> String {
     "127.0.0.1".to_string()
 }
 
+fn default_postgresql_host() -> String {
+    "127.0.0.1".to_string()
+}
+
+fn default_database_type() -> String {
+    "mysql".to_string()
+}
+
 fn default_mysql_port() -> String {
     "3306".to_string()
+}
+
+fn default_postgresql_port() -> String {
+    "5432".to_string()
 }
 
 fn default_authority() -> String {
@@ -282,7 +300,7 @@ pub(crate) struct ReadySetBinarySource {
     /// Path to a built readyset-server on the local machine.
     pub readyset_server: PathBuf,
     /// Optional path to readyset on the local machine. readyset may not be included in the build.
-    pub readyset_mysql: Option<PathBuf>,
+    pub readyset: Option<PathBuf>,
 }
 
 /// Parameters for a single readyset-server instance.
@@ -359,25 +377,25 @@ pub struct DeploymentBuilder {
     quorum: usize,
     /// Parameters for the set of readyset-server instances in the deployment.
     servers: Vec<ServerParams>,
-    /// How many MySQL ReadySet adapter instances to deploy
-    mysql_adapters: usize,
-    /// Deploy mysql and use binlog replication.
-    mysql: bool,
+    /// How many ReadySet adapter instances to deploy
+    adapters: usize,
+    /// Deploy an upstream database and use replication.
+    upstream: bool,
     /// The type of authority to use for cluster management.
     authority: AuthorityType,
     /// The address of the authority.
     authority_address: String,
-    /// The host of the mysql db.
-    mysql_host: String,
-    /// The port of the mysql db.
-    mysql_port: String,
-    /// The root password for the mysql db.
-    mysql_root_password: String,
+    /// The host of the upstream db.
+    host: String,
+    /// The port of the upstream db.
+    port: String,
+    /// The root password for the db.
+    root_password: String,
     /// Are async migrations enabled on the adapter.
     async_migration_interval: Option<u64>,
-    /// Enables explicit migrations, and passes in an interval for running dry run migrations that
-    /// determine whether queries that weren't explicitly migrated would be supported by ReadySet.
-    /// Exposed via the `SHOW PROXIED QUERIES` command.
+    /// Enables explicit migrations, and passes in an interval for running dry run migrations
+    /// that determine whether queries that weren't explicitly migrated would be
+    /// supported by ReadySet. Exposed via the `SHOW PROXIED QUERIES` command.
     dry_run_migration_interval: Option<u64>,
     /// The max time in seconds that a query may continuously fail until we enter a recovery
     /// period. None if not enabled.
@@ -390,10 +408,10 @@ pub struct DeploymentBuilder {
     ///
     /// Corresponds to [`readyset_client_adapter::Options::views_polling_interval`]
     views_polling_interval: Duration,
-    /// Optional username for the MySQL user.
-    mysql_user: Option<String>,
-    /// Optional password for the MySQL user.
-    mysql_pass: Option<String>,
+    /// Optional username for the user.
+    user: Option<String>,
+    /// Optional password for the user.
+    pass: Option<String>,
     /// Replicator restart timeout in seconds.
     replicator_restart_timeout_secs: Option<u64>,
     /// Number of times to replicate reader domains
@@ -403,6 +421,8 @@ pub struct DeploymentBuilder {
     /// Sets whether the adapter, server, both, or neither should wait to receive a failpoint
     /// request before proceeding with the rest of the startup process.
     wait_for_failpoint: FailpointDestination,
+    /// Type of the upstream database (mysql or postgresql)
+    database_type: DatabaseType,
 }
 
 pub enum FailpointDestination {
@@ -427,33 +447,46 @@ impl DeploymentBuilder {
         let mut rng = rand::thread_rng();
         let name = name.to_string() + &rng.gen::<u32>().to_string();
 
+        // Depending on what type of upstream we have, use the mysql or posgresql host/ports.
+        let database_type = env.database_type;
+        let (database_type, host, port) = match database_type {
+            d if d == *"mysql" => (DatabaseType::MySQL, env.mysql_host, env.mysql_port),
+            d if d == *"postgresql" => (
+                DatabaseType::PostgreSQL,
+                env.postgresql_host,
+                env.postgresql_port,
+            ),
+            _ => panic!("Invalid database type. must be one of mysql, postgresql"),
+        };
+
         Self {
             name,
             readyset_binaries: ReadySetBinarySource {
                 readyset_server: readyset_server_path,
-                readyset_mysql: Some(readyset_path),
+                readyset: Some(readyset_path),
             },
             shards: None,
             quorum: 1,
             servers: vec![],
-            mysql_adapters: 0,
-            mysql: false,
+            adapters: 0,
+            upstream: false,
             authority: AuthorityType::from_str(&env.authority).unwrap(),
             authority_address: env.authority_address,
-            mysql_host: env.mysql_host,
-            mysql_port: env.mysql_port,
-            mysql_root_password: env.mysql_root_password,
+            host,
+            port,
+            root_password: env.root_password,
             async_migration_interval: None,
             dry_run_migration_interval: None,
             query_max_failure_seconds: None,
             fallback_recovery_seconds: None,
             views_polling_interval: Duration::from_secs(300),
-            mysql_user: None,
-            mysql_pass: None,
+            user: None,
+            pass: None,
             replicator_restart_timeout_secs: None,
             reader_replicas: None,
             auto_restart: false,
             wait_for_failpoint: FailpointDestination::None,
+            database_type,
         }
     }
 
@@ -488,37 +521,37 @@ impl DeploymentBuilder {
 
     /// Deploys a single adapter server as part of this deployment.
     ///
-    /// This will overwrite any previous call to [`Self::set_mysql_adapters`]
-    pub fn deploy_mysql_adapter(mut self) -> Self {
-        self.mysql_adapters = 1;
+    /// This will overwrite any previous call to [`Self::set_adapters`]
+    pub fn deploy_adapter(mut self) -> Self {
+        self.adapters = 1;
         self
     }
 
-    /// Sets the number of mysql adapter servers to deploy as part of this deployment.
+    /// Sets the number of adapter servers to deploy as part of this deployment.
     ///
-    /// This will overwrite any previous call to [`Self::deploy_mysql_adapter`]
-    pub fn with_mysql_adapters(mut self, num_adapters: usize) -> Self {
-        self.mysql_adapters = num_adapters;
+    /// This will overwrite any previous call to [`Self::deploy_adapter`]
+    pub fn with_adapters(mut self, num_adapters: usize) -> Self {
+        self.adapters = num_adapters;
         self
     }
 
     /// Whether to use an upstream database as part of this deployment. This
     /// will populate [`DeploymentHandle::upstream_connection_str`] with the upstream
     /// databases's connection string.
-    pub fn deploy_mysql(mut self) -> Self {
-        self.mysql = true;
+    pub fn deploy_upstream(mut self) -> Self {
+        self.upstream = true;
         self
     }
 
     /// Whether to enable the async migrations feature in the adapter. Requires
-    /// [`Self::deploy_mysql_adapter`] to be set on this deployment.
+    /// [`Self::deploy_adapter`] to be set on this deployment.
     pub fn async_migrations(mut self, interval_ms: u64) -> Self {
         self.async_migration_interval = Some(interval_ms);
         self
     }
 
     /// Whether to enable the explicit migrations feature in the adapter. Requires
-    /// [`Self::deploy_mysql_adapter`] to be set on this deployment.
+    /// [`Self::deploy_adapter`] to be set on this deployment.
     /// Must supply an interval for the dry run loop.
     pub fn explicit_migrations(mut self, interval_ms: u64) -> Self {
         self.dry_run_migration_interval = Some(interval_ms);
@@ -526,7 +559,7 @@ impl DeploymentBuilder {
     }
 
     /// Overrides the maximum time a query may continuously fail in the adapter.
-    /// Requires [`Self::deploy_mysql_adapter`] to be set on this deployment.
+    /// Requires [`Self::deploy_adapter`] to be set on this deployment.
     pub fn query_max_failure_seconds(mut self, secs: u64) -> Self {
         self.query_max_failure_seconds = Some(secs);
         self
@@ -534,25 +567,30 @@ impl DeploymentBuilder {
 
     /// Overrides the fallback recovery period in the adapter that we enter when a query has
     /// repeatedly failed for query_max_failure_seconds.
-    /// Requires [`Self::deploy_mysql_adapter`] to be set on this deployment.
+    /// Requires [`Self::deploy_adapter`] to be set on this deployment.
     pub fn fallback_recovery_seconds(mut self, secs: u64) -> Self {
         self.fallback_recovery_seconds = Some(secs);
         self
     }
 
     /// Overrides the interval at which to poll for updated view status.
-    /// Requires [`Self::deploy_mysql_adapter`] to be set on this deployment.
+    /// Requires [`Self::deploy_adapter`] to be set on this deployment.
     pub fn views_polling_interval(mut self, interval: Duration) -> Self {
         self.views_polling_interval = interval;
         self
     }
 
-    /// Sets the value of the MySQL user and password to use for the upstream database in the
+    /// Sets the value of the user and password to use for the upstream database in the
     /// adapter and the server. The upstream connection returned will always be the root connection
     /// to allow making changes without worrying about permissions to the upstream database.
     pub fn with_user(mut self, user: &str, pass: &str) -> Self {
-        self.mysql_user = Some(user.to_string());
-        self.mysql_pass = Some(pass.to_string());
+        self.user = Some(user.to_string());
+        self.pass = Some(pass.to_string());
+        self
+    }
+
+    pub fn with_database_type(mut self, database_type: DatabaseType) -> Self {
+        self.database_type = database_type;
         self
     }
 
@@ -594,7 +632,7 @@ impl DeploymentBuilder {
         );
         AdapterStartParams {
             deployment_name: self.name.clone(),
-            readyset_path: self.readyset_binaries.readyset_mysql.clone().unwrap(),
+            readyset_path: self.readyset_binaries.readyset.clone().unwrap(),
             authority_address: self.authority_address.clone(),
             authority_type: self.authority.to_string(),
             async_migration_interval: self.async_migration_interval,
@@ -638,15 +676,16 @@ impl DeploymentBuilder {
     where
         Q: AsRef<str> + Send + Sync + 'a,
     {
+        readyset_tracing::init_test_logging();
         let mut port = get_next_good_port(None);
         // If this deployment includes binlog replication and a mysql instance.
-        let mut upstream_mysql_addr = None;
-        let server_upstream = if self.mysql {
+        let mut upstream_addr = None;
+        let server_upstream = if self.upstream {
             let root_addr = format!(
-                "mysql://root:{}@{}:{}",
-                &self.mysql_root_password, &self.mysql_host, &self.mysql_port
+                "{}://root:{}@{}:{}",
+                self.database_type, &self.root_password, &self.host, &self.port
             );
-            upstream_mysql_addr = Some(format!("{}/{}", &root_addr, &self.name));
+            upstream_addr = Some(format!("{}/{}", &root_addr, &self.name));
             let opts = mysql_async::Opts::from_url(&root_addr).unwrap();
             let mut conn = mysql_async::Conn::new(opts).await.unwrap();
             conn.query_drop(format!(
@@ -660,18 +699,15 @@ impl DeploymentBuilder {
                 conn.query_drop(&c).await?;
             }
 
-            let user = self
-                .mysql_user
-                .clone()
-                .unwrap_or_else(|| "root".to_string());
+            let user = self.user.clone().unwrap_or_else(|| "root".to_string());
             let pass = self
-                .mysql_pass
+                .pass
                 .clone()
-                .unwrap_or_else(|| self.mysql_root_password.clone());
+                .unwrap_or_else(|| self.root_password.clone());
 
             let user_addr = format!(
-                "mysql://{}:{}@{}:{}",
-                &user, &pass, &self.mysql_host, &self.mysql_port
+                "{}://{}:{}@{}:{}",
+                self.database_type, &user, &pass, &self.host, &self.port
             );
 
             Some(format!("{}/{}", &user_addr, &self.name))
@@ -709,29 +745,30 @@ impl DeploymentBuilder {
         let metrics_handle = ReadySetHandle::new(metrics_authority).await;
         let metrics = MetricsClient::new(metrics_handle).unwrap();
 
-        // Start `self.mysql_adapters` MySQL adapter instances.
-        let mut mysql_adapters = Vec::with_capacity(self.mysql_adapters);
-        for _ in 0..self.mysql_adapters {
+        // Start `self.adapters` adapter instances.
+        let mut adapters = Vec::with_capacity(self.adapters);
+        for _ in 0..self.adapters {
             port = get_next_good_port(Some(port));
             let metrics_port = get_next_good_port(Some(port));
-            let process = start_mysql_adapter(
+            let process = start_adapter(
                 server_upstream.clone(),
                 port,
                 metrics_port,
                 &self.adapter_start_params(),
+                self.database_type,
             )
             .await?;
 
             // Sleep to give the adapter time to startup.
             let handle = AdapterHandle {
                 metrics_port,
-                conn_str: format!("mysql://127.0.0.1:{}", port),
+                conn_str: format!("{}://127.0.0.1:{}", self.database_type, port),
                 process,
             };
 
             wait_for_adapter_startup(metrics_port, Duration::from_millis(2000)).await?;
 
-            mysql_adapters.push(handle);
+            adapters.push(handle);
         }
 
         let mut handle = DeploymentHandle {
@@ -740,11 +777,12 @@ impl DeploymentBuilder {
             name: self.name.clone(),
             adapter_start_params: self.adapter_start_params(),
             server_start_params: self.server_start_params(),
-            upstream_mysql_addr,
+            upstream_addr,
             readyset_server_handles: handles,
             shutdown: false,
             port,
-            mysql_adapters,
+            adapters,
+            database_type: self.database_type,
         };
 
         // Skip waiting for workers/backend if we don't have any servers as part of this deployment
@@ -927,11 +965,11 @@ impl ServerHandle {
     }
 }
 
-/// A handle to a mysql-adapter instance in the deployment.
+/// A handle to an adapter instance in the deployment.
 pub struct AdapterHandle {
     /// The adapter http server port
     pub metrics_port: u16,
-    /// The mysql connection string of the adapter.
+    /// The connection string of the adapter.
     pub conn_str: String,
     /// The local process the adapter is running in.
     pub process: ProcessHandle,
@@ -971,8 +1009,8 @@ pub struct DeploymentHandle {
     metrics: MetricsClient,
     /// Map from a readyset server's address to a handle to the server.
     readyset_server_handles: HashMap<Url, ServerHandle>,
-    /// Holds a list of handles to the mysql adapters for this deployment, if any
-    mysql_adapters: Vec<AdapterHandle>,
+    /// Holds a list of handles to the adapters for this deployment, if any
+    adapters: Vec<AdapterHandle>,
     /// The name of the deployment, cluster resources are prefixed
     /// by `name`.
     name: String,
@@ -980,13 +1018,15 @@ pub struct DeploymentHandle {
     adapter_start_params: AdapterStartParams,
     /// The configured parameters with which to start new servers in the deployment.
     server_start_params: ServerStartParams,
-    /// The connection string of the upstream mysql database for the deployment.
-    upstream_mysql_addr: Option<String>,
+    /// The connection string of the upstream database for the deployment.
+    upstream_addr: Option<String>,
     /// A handle to each readyset server in the deployment.
     /// True if this deployment has already been torn down.
     shutdown: bool,
     /// Next new server port.
     port: u16,
+    /// The type of the upstream (MySQL or PostgresSQL)
+    database_type: DatabaseType,
 }
 
 impl DeploymentHandle {
@@ -1028,7 +1068,7 @@ impl DeploymentHandle {
     ///
     /// Panics if the adapter does not exist or a connection can not be made.
     pub async fn adapter(&self, idx: usize) -> mysql_async::Conn {
-        let addr = &self.mysql_adapters[idx].conn_str;
+        let addr = &self.adapters[idx].conn_str;
         let opts = mysql_async::Opts::from_url(addr).unwrap();
         mysql_async::Conn::new(opts.clone()).await.unwrap()
     }
@@ -1037,7 +1077,7 @@ impl DeploymentHandle {
     /// Otherwise panics if the upstream database does not exist or a connection
     /// can not be made.
     pub async fn upstream(&self) -> mysql_async::Conn {
-        let addr = self.upstream_mysql_addr.as_ref().unwrap();
+        let addr = self.upstream_addr.as_ref().unwrap();
         let opts = mysql_async::Opts::from_url(addr).unwrap();
         mysql_async::Conn::new(opts.clone()).await.unwrap()
     }
@@ -1103,7 +1143,7 @@ impl DeploymentHandle {
         self.port = port;
         let handle = start_server(
             port,
-            self.upstream_mysql_addr.clone().as_ref(),
+            self.upstream_addr.clone().as_ref(),
             &params,
             self.server_start_params(),
         )
@@ -1120,15 +1160,17 @@ impl DeploymentHandle {
     }
 
     /// Start a new readyset adapter instance in the deployment
-    pub async fn start_mysql_adapter(&mut self, wait_for_startup: bool) -> anyhow::Result<()> {
+    pub async fn start_adapter(&mut self, wait_for_startup: bool) -> anyhow::Result<()> {
         let port = get_next_good_port(Some(self.port));
         let metrics_port = get_next_good_port(Some(port));
         self.port = port;
-        let process = start_mysql_adapter(
-            self.upstream_mysql_addr.clone(),
+        let database_type = self.database_type;
+        let process = start_adapter(
+            self.upstream_addr.clone(),
             port,
             metrics_port,
             self.adapter_start_params(),
+            database_type,
         )
         .await?;
 
@@ -1136,7 +1178,7 @@ impl DeploymentHandle {
             wait_for_adapter_startup(metrics_port, Duration::from_millis(2000)).await?;
         }
 
-        self.mysql_adapters.push(AdapterHandle {
+        self.adapters.push(AdapterHandle {
             metrics_port,
             conn_str: format!("mysql://127.0.0.1:{}", port),
             process,
@@ -1216,14 +1258,14 @@ impl DeploymentHandle {
             // resources below
             let _ = h.1.process.kill().await;
         }
-        for adapter_handle in &mut self.mysql_adapters {
+        for adapter_handle in &mut self.adapters {
             // Ignore the result: If the kill() errors, we still want to attempt cleaning up the
             // resources below
             let _ = adapter_handle.process.kill().await;
         }
 
         // Clean up the existing mysql state.
-        if let Some(upstream_mysql_addr) = &self.upstream_mysql_addr {
+        if let Some(upstream_mysql_addr) = &self.upstream_addr {
             let opts = mysql_async::Opts::from_url(upstream_mysql_addr).unwrap();
             let mut conn = mysql_async::Conn::new(opts).await.unwrap();
             conn.query_drop(format!("DROP DATABASE {};", &self.name))
@@ -1260,13 +1302,13 @@ impl DeploymentHandle {
     /// Returns a mutable reference to the list of [`AdapterHandle`]s for the deployment.
     /// index. May be empty if no adapters are running
     pub fn adapter_handles(&mut self) -> &mut Vec<AdapterHandle> {
-        self.mysql_adapters.as_mut()
+        self.adapters.as_mut()
     }
 
     /// Returns a mutable reference to the [`AdapterHandle`] for the readyset-adapter at the given
     /// index. Returns `None` if the index is out-of-bounds
     pub fn adapter_handle(&mut self, idx: usize) -> Option<&mut AdapterHandle> {
-        self.mysql_adapters.get_mut(idx)
+        self.adapters.get_mut(idx)
     }
 
     /// Returns a reference to the name of the deployment.
@@ -1371,13 +1413,14 @@ async fn start_server(
     })
 }
 
-async fn start_mysql_adapter(
+async fn start_adapter(
     server_upstream: Option<String>,
     port: u16,
     metrics_port: u16,
     params: &AdapterStartParams,
+    database_type: DatabaseType,
 ) -> Result<ProcessHandle> {
-    let mut builder = AdapterBuilder::new(params.readyset_path.as_ref())
+    let mut builder = AdapterBuilder::new(params.readyset_path.as_ref(), database_type)
         .deployment(&params.deployment_name)
         .port(port)
         .metrics_port(metrics_port)
@@ -1486,7 +1529,7 @@ mod tests {
     async fn clustertest_with_binlog() {
         let mut deployment = DeploymentBuilder::new("ct_with_binlog")
             .with_servers(2, ServerParams::default())
-            .deploy_mysql()
+            .deploy_adapter()
             .start()
             .await
             .unwrap();
@@ -1547,7 +1590,7 @@ mod tests {
         assert!(deployment.adapter_handles().is_empty());
 
         deployment
-            .start_mysql_adapter(false)
+            .start_adapter(false)
             .await
             .expect("failed to start adapter");
 

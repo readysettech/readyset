@@ -21,6 +21,7 @@ bincode = "1.3.3"
 tracing = { version = "0.1", features = ["release_max_level_debug"] }
 
 # local deps
+database-utils = { path = "../database-utils" }
 nom-sql = { path = "../nom-sql" }
 readyset-client = { path = "../readyset-client", features = ["failure_injection"] }
 readyset-data = { path = "../readyset-data" }
