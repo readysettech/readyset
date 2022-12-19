@@ -8648,9 +8648,6 @@ async fn cascade_drop_view() {
     let mut t1 = g.table("t1").await.unwrap();
     g.table("t2").await.unwrap();
     g.table("t3").await.unwrap();
-    g.view("v1").await.unwrap();
-    g.view("v2").await.unwrap();
-    g.view("v3").await.unwrap();
     g.view("q").await.unwrap();
 
     t1.insert_many(vec![
@@ -8673,17 +8670,5 @@ async fn cascade_drop_view() {
     g.table("t1").await.unwrap();
     g.table("t2").await.unwrap();
     g.table("t3").await.unwrap();
-    let mut v1 = g.view("v1").await.unwrap();
-    g.view("v2").await.unwrap_err();
-    g.view("v3").await.unwrap_err();
     g.view("q").await.unwrap_err();
-
-    let res = v1.lookup(&[0.into()], true).await.unwrap().into_vec();
-    assert_eq!(
-        res,
-        vec![
-            vec![DfValue::from(1), DfValue::from(2)],
-            vec![DfValue::from(3), DfValue::from(4)],
-        ]
-    );
 }

@@ -103,6 +103,34 @@ pub enum JoinKind {
     Dependent,
 }
 
+/// Specification for how to treat the leaf node of a query when converting it to MIR
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LeafBehavior {
+    /// This is an anonymous query - no leaf should be made for it, and the query should not be
+    /// registered in the map of relations
+    Anonymous,
+
+    /// This query should not have a leaf node, but should be registered in the map of relations.
+    /// This is currently the case for SQL VIEWs
+    NamedWithoutLeaf,
+
+    /// This query should have a leaf node and should be registered in the map of relations. This
+    /// is currently the case for CACHE statements
+    Leaf,
+}
+
+impl LeafBehavior {
+    /// Should we make a Leaf MIR node for this query?
+    fn should_make_leaf(self) -> bool {
+        self == Self::Leaf
+    }
+
+    /// Should we register this query in the map of relations?
+    fn should_register(self) -> bool {
+        matches!(self, Self::NamedWithoutLeaf | Self::Leaf)
+    }
+}
+
 /// Configuration for how SQL is converted to MIR
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize, Default)]
 pub(crate) struct Config {
@@ -1149,8 +1177,12 @@ impl SqlToMirConverter {
             Expr::Between { .. } => internal!("BETWEEN should have been removed earlier"),
             Expr::Exists(subquery) => {
                 let query_graph = to_query_graph((**subquery).clone())?;
-                let subquery_leaf =
-                    self.named_query_to_mir(query_name, &query_graph, &HashMap::new(), false)?;
+                let subquery_leaf = self.named_query_to_mir(
+                    query_name,
+                    &query_graph,
+                    &HashMap::new(),
+                    LeafBehavior::Anonymous,
+                )?;
 
                 // -> π[lit: 0, lit: 0]
                 let group_proj = self.make_project_node(
@@ -1326,7 +1358,7 @@ impl SqlToMirConverter {
         query_name: &Relation,
         query_graph: &QueryGraph,
         anon_queries: &HashMap<Relation, NodeIndex>,
-        has_leaf: bool,
+        leaf_behavior: LeafBehavior,
     ) -> Result<NodeIndex, ReadySetError> {
         // TODO(fran): We are not modifying the execution of this method with the implementation
         //  of petgraph, which causes us to create nodes that could now easily be reused:
@@ -1350,8 +1382,12 @@ impl SqlToMirConverter {
             for rel in &sorted_rels {
                 let base_for_rel = if let Some(subquery) = &query_graph.relations[*rel].subgraph {
                     let correlated = subquery.is_correlated;
-                    let subquery_leaf =
-                        self.named_query_to_mir(query_name, subquery, &HashMap::new(), false)?;
+                    let subquery_leaf = self.named_query_to_mir(
+                        query_name,
+                        subquery,
+                        &HashMap::new(),
+                        LeafBehavior::Anonymous,
+                    )?;
                     if correlated {
                         correlated_relations.insert(subquery_leaf);
                     }
@@ -1701,7 +1737,7 @@ impl SqlToMirConverter {
                 projected_columns.push(Column::named("bogokey"));
             }
 
-            if has_leaf {
+            if leaf_behavior.should_make_leaf() {
                 if query_graph.parameters().is_empty()
                     && !create_paginate
                     && !projected_columns.contains(&Column::named("bogokey"))
@@ -1717,7 +1753,7 @@ impl SqlToMirConverter {
             }
 
             if query_graph.distinct {
-                let name = if has_leaf {
+                let name = if leaf_behavior.should_make_leaf() {
                     format!(
                         "q_{:x}_n{}",
                         query_graph.signature().hash,
@@ -1738,7 +1774,7 @@ impl SqlToMirConverter {
 
             let leaf_project_node = self.make_project_node(
                 query_name,
-                if has_leaf {
+                if leaf_behavior.should_make_leaf() {
                     format!("q_{:x}_project", query_graph.signature().hash).into()
                 } else {
                     query_name.clone()
@@ -1749,7 +1785,7 @@ impl SqlToMirConverter {
                 projected_literals,
             );
 
-            if has_leaf {
+            if leaf_behavior.should_make_leaf() {
                 // We are supposed to add a `Leaf` node keyed on the query parameters. For purely
                 // internal views (e.g., subqueries), this is not set.
                 let mut returned_cols = query_graph
@@ -1796,7 +1832,7 @@ impl SqlToMirConverter {
                 // Add another project node that will return the required columns in the right order
                 let leaf_project_reorder_node = self.make_project_node(
                     query_name,
-                    if has_leaf {
+                    if leaf_behavior.should_make_leaf() {
                         format!("q_{:x}_project_reorder", query_graph.signature().hash).into()
                     } else {
                         query_name.clone()
@@ -1837,13 +1873,16 @@ impl SqlToMirConverter {
                     &[leaf_project_reorder_node],
                 );
 
-                self.relations.insert(query_name.clone(), leaf_node);
-
                 leaf_node
             } else {
                 leaf_project_node
             }
         };
+
+        if leaf_behavior.should_register() {
+            self.relations.insert(query_name.clone(), leaf);
+        }
+
         debug!(%query_name, "Added final MIR node for query");
 
         // finally, we output all the nodes we generated

@@ -17,7 +17,7 @@ use readyset_sql_passes::alias_removal::TableAliasRewrite;
 use readyset_sql_passes::{AliasRemoval, Rewrite, RewriteContext};
 use readyset_tracing::{debug, trace};
 
-use self::mir::{NodeIndex as MirNodeIndex, SqlToMirConverter};
+use self::mir::{LeafBehavior, NodeIndex as MirNodeIndex, SqlToMirConverter};
 use self::query_graph::to_query_graph;
 use crate::controller::mir_to_flow::{mir_node_to_flow_parts, mir_query_to_flow_parts};
 use crate::controller::Migration;
@@ -226,8 +226,7 @@ impl SqlIncorporator {
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<Relation> {
         let name = name.unwrap_or_else(|| format!("q_{}", self.num_queries).into());
-        let mir_query =
-            self.add_select_query(name.clone(), stmt, /* is_leaf = */ true, mig)?;
+        let mir_query = self.add_select_query(name.clone(), stmt, LeafBehavior::Leaf, mig)?;
 
         let leaf = self.mir_to_dataflow(name.clone(), mir_query, mig)?;
         self.leaf_addresses.insert(name.clone(), leaf);
@@ -425,7 +424,8 @@ impl SqlIncorporator {
     ) -> Result<MirNodeIndex, ReadySetError> {
         let mut subqueries = Vec::new();
         for (_, stmt) in query.selects.into_iter() {
-            let subquery_leaf = self.add_select_query(query_name.clone(), stmt, false, mig)?;
+            let subquery_leaf =
+                self.add_select_query(query_name.clone(), stmt, LeafBehavior::Anonymous, mig)?;
             subqueries.push(subquery_leaf);
         }
 
@@ -448,7 +448,7 @@ impl SqlIncorporator {
         &mut self,
         query_name: Relation,
         mut stmt: SelectStatement,
-        is_leaf: bool,
+        leaf_behavior: LeafBehavior,
         mig: &mut Migration<'_>,
     ) -> Result<MirNodeIndex, ReadySetError> {
         trace!(%stmt, "Adding select query");
@@ -484,7 +484,7 @@ impl SqlIncorporator {
                             None,
                         )
                         .map_err(on_err)?,
-                        false,
+                        LeafBehavior::Anonymous,
                         mig,
                     )?;
                     anon_queries.insert(to_view, subquery_leaf);
@@ -495,7 +495,12 @@ impl SqlIncorporator {
                     ..
                 } => {
                     let subquery_leaf = self
-                        .add_select_query(query_name.clone(), *for_statement, false, mig)
+                        .add_select_query(
+                            query_name.clone(),
+                            *for_statement,
+                            LeafBehavior::Anonymous,
+                            mig,
+                        )
                         .map_err(on_err)?;
                     anon_queries.insert(to_view, subquery_leaf);
                 }
@@ -518,7 +523,7 @@ impl SqlIncorporator {
                 &query_name,
                 &query_graph,
                 &anon_queries,
-                is_leaf,
+                leaf_behavior,
             ) {
                 Ok(mir_leaf) => return Ok(mir_leaf),
                 Err(e) => {
@@ -532,7 +537,12 @@ impl SqlIncorporator {
                     {
                         trace!(%name, %view, "Query referenced uncompiled view; compiling");
                         if let Err(e) = self
-                            .add_select_query(name.clone(), view.clone(), true, mig)
+                            .add_select_query(
+                                name.clone(),
+                                view.clone(),
+                                LeafBehavior::NamedWithoutLeaf,
+                                mig,
+                            )
                             .and_then(|mir_leaf| self.mir_to_dataflow(name.clone(), mir_leaf, mig))
                         {
                             trace!(%e, "Compiling uncompiled view failed");
