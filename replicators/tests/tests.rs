@@ -358,16 +358,25 @@ impl TestHandle {
         let query_name = format!("q_{view_name}");
         self.controller()
             .await
-            .extend_recipe(ChangeList::from_change(
-                Change::CreateCache(
-                    parse_create_cache(
-                        nom_sql::Dialect::MySQL,
-                        format!(
+            .extend_recipe(ChangeList::from_changes(
+                vec![
+                    Change::Drop {
+                        name: Relation {
+                            schema: Some("public".into()),
+                            name: query_name.clone().into(),
+                        },
+                        if_exists: true,
+                    },
+                    Change::CreateCache(
+                        parse_create_cache(
+                            nom_sql::Dialect::MySQL,
+                            format!(
                             "CREATE CACHE public.{query_name} FROM SELECT * FROM public.{view_name}"
                         ),
-                    )
-                    .unwrap(),
-                ),
+                        )
+                        .unwrap(),
+                    ),
+                ],
                 self.dialect,
             ))
             .await?;
