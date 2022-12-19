@@ -388,10 +388,6 @@ impl SqlIncorporator {
         }
     }
 
-    pub(super) fn is_leaf_address(&self, ni: NodeIndex) -> bool {
-        self.leaf_addresses.values().any(|nn| *nn == ni)
-    }
-
     pub(super) fn get_leaf_name(&self, ni: NodeIndex) -> Option<&Relation> {
         self.leaf_addresses
             .iter()

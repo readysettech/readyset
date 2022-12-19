@@ -9,20 +9,16 @@ use nom_sql::{
     Relation, SqlQuery, SqlType,
 };
 use petgraph::graph::NodeIndex;
-use petgraph::visit::Bfs;
 use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::ViewCreateRequest;
 use readyset_data::{DfType, Dialect};
-use readyset_errors::{
-    internal, invariant, invariant_eq, unsupported, ReadySetError, ReadySetResult,
-};
+use readyset_errors::{internal, invariant, unsupported, ReadySetError, ReadySetResult};
 use readyset_tracing::{debug, error, info, trace, warn};
 use serde::{Deserialize, Serialize};
 
 use super::registry::RecipeExpr;
 use crate::controller::sql::SqlIncorporator;
 use crate::controller::Migration;
-use crate::ReuseConfigType;
 
 pub(crate) type QueryID = u128;
 
@@ -47,7 +43,6 @@ pub(crate) enum Schema {
     View(Vec<String>),
 }
 
-#[allow(unused)]
 impl Recipe {
     /// Get the id associated with an alias
     pub(crate) fn expression_by_alias(&self, alias: &Relation) -> Option<SqlQuery> {
@@ -121,23 +116,6 @@ impl Recipe {
     /// If permissive writes is true, failed writes will be no-ops, else they will return errors
     pub(crate) fn set_permissive_writes(&mut self, permissive_writes: bool) {
         self.inc.set_permissive_writes(permissive_writes);
-    }
-
-    /// Get a shared reference to this recipe's SQL configuration
-    pub(crate) fn sql_config(&self) -> &super::Config {
-        &self.inc.config
-    }
-
-    /// Disable node reuse.
-    // crate viz for tests
-    pub(crate) fn disable_reuse(&mut self) {
-        self.inc.disable_reuse();
-    }
-
-    /// Enable node reuse.
-    // crate viz for tests
-    pub(crate) fn enable_reuse(&mut self, reuse_type: ReuseConfigType) {
-        self.inc.enable_reuse(reuse_type)
     }
 
     pub(in crate::controller) fn resolve_alias(&self, alias: &Relation) -> Option<&Relation> {
@@ -220,7 +198,7 @@ impl Recipe {
                                     table = %cts.table,
                                     "table exists and has changed. Dropping and recreating..."
                                 );
-                                self.drop_and_recreate_table(&cts.table.clone(), body, mig);
+                                self.drop_and_recreate_table(&cts.table.clone(), body, mig)?;
                                 continue;
                             }
                             trace!(
@@ -292,7 +270,7 @@ impl Recipe {
                     // add the query
                     self.inc.add_view(stmt.name, definition, mig)?;
                 }
-                Change::CreateCache(mut ccqs) => {
+                Change::CreateCache(ccqs) => {
                     let (statement, invalidating_tables) = match &ccqs.inner {
                         CacheInner::Statement(box stmt) => {
                             let mut invalidating_tables = vec![];
@@ -449,7 +427,7 @@ impl Recipe {
                     }
                 }
                 Change::AlterType { oid, name, change } => {
-                    let (ty, old_name) = self
+                    let (ty, _) = self
                         .inc
                         .alter_custom_type(oid, &name, change)
                         .map_err(|e| e.context(format!("while altering custom type {name}")))?;
@@ -616,118 +594,6 @@ impl Recipe {
         self.remove_leaf_aliases(&removed);
 
         removed
-    }
-
-    fn remove_leaf(
-        &mut self,
-        mut leaf: NodeIndex,
-        mig: &mut Migration<'_>,
-    ) -> ReadySetResult<Vec<NodeIndex>> {
-        let mut removals = vec![];
-        let start = leaf;
-        if mig.dataflow_state.ingredients.node_weight(leaf).is_none() {
-            return Err(ReadySetError::NodeNotFound {
-                index: leaf.index(),
-            });
-        }
-        #[allow(clippy::indexing_slicing)] // checked above
-        {
-            invariant!(!mig.dataflow_state.ingredients[leaf].is_source());
-        }
-
-        info!(
-            node = %leaf.index(),
-            "Computing removals for removing node",
-        );
-
-        let nchildren = mig
-            .dataflow_state
-            .ingredients
-            .neighbors_directed(leaf, petgraph::EdgeDirection::Outgoing)
-            .count();
-        if nchildren > 0 {
-            // This query leaf node has children -- typically, these are readers, but they can also
-            // include egress nodes or other, dependent queries. We need to find the actual reader,
-            // and remove that.
-            if nchildren != 1 {
-                internal!(
-                    "cannot remove node {}, as it still has multiple children",
-                    leaf.index()
-                );
-            }
-
-            let mut readers = Vec::new();
-            let mut bfs = Bfs::new(&mig.dataflow_state.ingredients, leaf);
-            while let Some(child) = bfs.next(&mig.dataflow_state.ingredients) {
-                #[allow(clippy::indexing_slicing)] // just came from self.ingredients
-                let n = &mig.dataflow_state.ingredients[child];
-                if n.is_reader_for(leaf) {
-                    readers.push(child);
-                }
-            }
-
-            // nodes can have only one reader attached
-            invariant_eq!(readers.len(), 1);
-            #[allow(clippy::indexing_slicing)]
-            let reader = readers[0];
-            #[allow(clippy::indexing_slicing)]
-            {
-                debug!(
-                    node = %leaf.index(),
-                    really = %reader.index(),
-                    "Removing query leaf \"{}\"", mig.dataflow_state.ingredients[leaf].name()
-                );
-            }
-            removals.push(reader);
-            mig.changes.drop_node(reader);
-            leaf = reader;
-        }
-
-        // `node` now does not have any children any more
-        assert_eq!(
-            mig.dataflow_state
-                .ingredients
-                .neighbors_directed(leaf, petgraph::EdgeDirection::Outgoing)
-                .count(),
-            0
-        );
-
-        let mut nodes = vec![leaf];
-        while let Some(node) = nodes.pop() {
-            let mut parents = mig
-                .dataflow_state
-                .ingredients
-                .neighbors_directed(node, petgraph::EdgeDirection::Incoming)
-                .detach();
-            while let Some(parent) = parents.next_node(&mig.dataflow_state.ingredients) {
-                #[allow(clippy::expect_used)]
-                let edge = mig
-                    .dataflow_state
-                    .ingredients
-                    .find_edge(parent, node)
-                    .expect(
-                    "unreachable: neighbors_directed returned something that wasn't a neighbour",
-                );
-                mig.dataflow_state.ingredients.remove_edge(edge);
-
-                #[allow(clippy::indexing_slicing)]
-                if !mig.dataflow_state.ingredients[parent].is_source()
-                    && !mig.dataflow_state.ingredients[parent].is_base()
-                    // ok to remove original start leaf
-                    && (parent == start || !mig.dataflow_state.recipe.sql_inc().is_leaf_address(parent))
-                    && mig.dataflow_state
-                    .ingredients
-                    .neighbors_directed(parent, petgraph::EdgeDirection::Outgoing)
-                    .count() == 0
-                {
-                    nodes.push(parent);
-                }
-            }
-
-            removals.push(node);
-            mig.changes.drop_node(node);
-        }
-        Ok(removals)
     }
 
     pub(crate) fn remove_leaf_aliases(&mut self, nodes: &[NodeIndex]) {
