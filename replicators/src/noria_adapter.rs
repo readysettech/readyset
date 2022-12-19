@@ -183,7 +183,10 @@ impl NoriaAdapter {
                     tokio::time::sleep(WAIT_BEFORE_RESNAPSHOT).await;
                     resnapshot = true;
                 }
-                err => return Err(err),
+                err => {
+                    warn!(error=%err, "Restarting adapter after error encountered");
+                    return Err(err);
+                }
             }
         }
         unreachable!("inner loop will never stop with an Ok status");
