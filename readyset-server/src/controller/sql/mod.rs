@@ -5,23 +5,30 @@ use std::vec::Vec;
 use ::mir::visualize::GraphViz;
 use ::mir::DfNodeIndex;
 use ::serde::{Deserialize, Serialize};
+use launchpad::redacted::Sensitive;
 use nom_sql::{
-    CompoundSelectOperator, CompoundSelectStatement, CreateTableBody, Expr, FieldDefinitionExpr,
-    Relation, SelectSpecification, SelectStatement, SqlIdentifier, TableExpr,
+    CacheInner, CompoundSelectOperator, CompoundSelectStatement, CreateTableBody, Expr,
+    FieldDefinitionExpr, Relation, SelectSpecification, SelectStatement, SqlIdentifier, SqlType,
+    TableExpr,
 };
 use petgraph::graph::NodeIndex;
-use readyset_client::recipe::changelist::AlterTypeChange;
+use readyset_client::recipe::changelist::{AlterTypeChange, Change};
+use readyset_client::recipe::ChangeList;
 use readyset_data::{DfType, Dialect, PgEnumMetadata};
-use readyset_errors::{internal, internal_err, invalid_err, ReadySetError, ReadySetResult};
+use readyset_errors::{
+    internal, internal_err, invalid_err, invariant, unsupported, ReadySetError, ReadySetResult,
+};
 use readyset_sql_passes::alias_removal::TableAliasRewrite;
 use readyset_sql_passes::{AliasRemoval, Rewrite, RewriteContext};
 use readyset_tracing::{debug, trace};
+use tracing::{error, info};
 
 use self::mir::{LeafBehavior, NodeIndex as MirNodeIndex, SqlToMirConverter};
 use self::query_graph::to_query_graph;
 pub(crate) use self::recipe::{QueryID, Recipe, Schema};
 use self::registry::ExprRegistry;
 use crate::controller::mir_to_flow::{mir_node_to_flow_parts, mir_query_to_flow_parts};
+use crate::controller::sql::registry::RecipeExpr;
 use crate::controller::Migration;
 use crate::sql::mir::MirRemovalResult;
 use crate::ReuseConfigType;
@@ -164,6 +171,326 @@ impl SqlIncorporator {
             dialect,
             invalidating_tables,
         })
+    }
+
+    pub(crate) fn apply_changelist(
+        &mut self,
+        changelist: ChangeList,
+        mig: &mut Migration<'_>,
+    ) -> ReadySetResult<()> {
+        debug!(
+            num_queries = self.registry.len(),
+            named_queries = self.registry.num_aliases(),
+        );
+
+        let ChangeList {
+            changes,
+            schema_search_path,
+            dialect,
+        } = changelist;
+
+        for change in changes {
+            match change {
+                Change::CreateTable(mut cts) => {
+                    cts = self.rewrite(cts, &schema_search_path, dialect, None)?;
+                    let body = match cts.body {
+                        Ok(body) => body,
+                        Err(unparsed) => unsupported!(
+                            "CREATE TABLE {} body failed to parse: {}",
+                            cts.table,
+                            Sensitive(&unparsed)
+                        ),
+                    };
+                    match self.registry.get(&cts.table) {
+                        Some(RecipeExpr::Table {
+                            body: current_body, ..
+                        }) => {
+                            // Table already exists, so check if it has been changed.
+                            if current_body != &body {
+                                // Table has changed. Drop and recreate.
+                                trace!(
+                                    table = %cts.table,
+                                    "table exists and has changed. Dropping and recreating..."
+                                );
+                                self.drop_and_recreate_table(&cts.table.clone(), body, mig)?;
+                                continue;
+                            }
+                            trace!(
+                                name = %cts.table.name,
+                                "table exists, but hasn't changed. Ignoring..."
+                            );
+                        }
+                        Some(RecipeExpr::View { .. }) => {
+                            return Err(ReadySetError::ViewAlreadyExists(
+                                cts.table.name.clone().into(),
+                            ))
+                        }
+                        _ => {
+                            let invalidate_queries = self
+                                .registry
+                                .queries_to_invalidate_for_table(&cts.table)
+                                .cloned()
+                                .collect::<Vec<_>>();
+
+                            for invalidate_query in invalidate_queries {
+                                info!(
+                                    table = %cts.table,
+                                    query = %invalidate_query,
+                                    "Created table invalidates previously-created query due to \
+                                     schema resolution; dropping query"
+                                );
+                                self.remove_expression(&invalidate_query, mig)?;
+                            }
+                            self.add_table(cts.table.clone(), body.clone(), mig)?;
+                            self.registry.add_query(RecipeExpr::Table {
+                                name: cts.table,
+                                body,
+                            })?;
+                        }
+                    }
+                }
+                Change::AddNonReplicatedRelation(name) => {
+                    debug!(%name, "Adding non-replicated relation");
+                    self.add_non_replicated_relation(name);
+                }
+                Change::CreateView(mut stmt) => {
+                    stmt = self.rewrite(
+                        stmt,
+                        &schema_search_path,
+                        dialect,
+                        None, /* Views in SQL resolve tables at creation time, so we don't
+                               * want to invalidate them if tables get created like we do
+                               * for queries */
+                    )?;
+                    let definition = match stmt.definition {
+                        Ok(definition) => *definition,
+                        Err(unparsed) => unsupported!(
+                            "CREATE VIEW {} body failed to parse: {}",
+                            stmt.name,
+                            Sensitive(&unparsed)
+                        ),
+                    };
+
+                    if !self.registry.add_query(RecipeExpr::View {
+                        name: stmt.name.clone(),
+                        definition: definition.clone(),
+                    })? {
+                        // The expression is already present, and we successfully added
+                        // a new alias for it.
+                        continue;
+                    }
+
+                    // add the query
+                    self.add_view(stmt.name, definition, mig)?;
+                }
+                Change::CreateCache(ccqs) => {
+                    let (statement, invalidating_tables) = match &ccqs.inner {
+                        CacheInner::Statement(box stmt) => {
+                            let mut invalidating_tables = vec![];
+                            let stmt = self.rewrite(
+                                stmt.clone(),
+                                &schema_search_path,
+                                dialect,
+                                Some(&mut invalidating_tables),
+                            )?;
+                            (stmt, invalidating_tables)
+                        }
+                        CacheInner::Id(id) => {
+                            error!("attempted to issue CREATE CACHE with an id: {}", id);
+                            internal!("CREATE CACHE should've had its ID resolved by the adapter");
+                        }
+                    };
+                    if let Some(name) = &ccqs.name {
+                        let expression = RecipeExpr::Cache {
+                            name: name.clone(),
+                            statement: statement.clone(),
+                            always: ccqs.always,
+                        };
+                        let aliased = self.registry.add_query(expression)?;
+                        debug!(
+                            query = %name,
+                            tables = ?invalidating_tables,
+                            "Recording list of tables that, if created, would invalidate query"
+                        );
+                        self.registry.insert_invalidating_tables(
+                            name.clone(),
+                            invalidating_tables.clone(),
+                        )?;
+                        if !aliased {
+                            // The expression is already present, and we successfully added
+                            // a new alias for it.
+                            continue;
+                        }
+                    }
+
+                    let name = self.add_query(ccqs.name, statement.clone(), mig)?;
+                    self.registry.add_query(RecipeExpr::Cache {
+                        name: name.clone(),
+                        statement,
+                        always: ccqs.always,
+                    })?;
+                    self.registry
+                        .insert_invalidating_tables(name.clone(), invalidating_tables)?;
+                }
+                Change::AlterTable(_) => {
+                    // This should not get hit because all ALTER TABLE definitions currently require
+                    // a resnapshot (and as a result, nothing ever actually *sends*
+                    // Change::AlterTable to extend_recipe, instead we just get the
+                    // Change::CreateTable for the table post-altering). This *might* change in the
+                    // future if there are `AlterTableDefinition` variants which *don't* require
+                    // resnapshotting. If this error gets hit, that's probably what happened!
+                    internal!("ALTER TABLE change encountered in recipe")
+                }
+                Change::CreateType { mut name, ty } => {
+                    if let Some(first_schema) = schema_search_path.first() {
+                        if name.schema.is_none() {
+                            name.schema = Some(first_schema.clone())
+                        }
+                    }
+                    let needs_resnapshot = if let Some(existing_ty) = self.get_custom_type(&name) {
+                        invariant!(self.registry.contains_custom_type(&name));
+                        // Type already exists, so check if it has been changed in a way that
+                        // requires dropping and recreating dependent tables
+                        match (existing_ty, &ty) {
+                            (
+                                DfType::Enum {
+                                    variants: original_variants,
+                                    ..
+                                },
+                                DfType::Enum {
+                                    variants: new_variants,
+                                    ..
+                                },
+                            ) => {
+                                new_variants.len() > original_variants.len()
+                                    && new_variants[..original_variants.len()]
+                                        != **original_variants
+                            }
+                            _ => true,
+                        }
+                    } else {
+                        false
+                    };
+
+                    self.registry.add_custom_type(name.clone());
+                    self.add_custom_type(name.clone(), ty);
+                    if needs_resnapshot {
+                        debug!(name = %name.clone(), "Replacing existing custom type");
+                        for expr in self
+                            .registry
+                            .expressions_referencing_custom_type(&name)
+                            .cloned()
+                            .collect::<Vec<_>>()
+                        {
+                            match expr {
+                                RecipeExpr::Table { name, body } => {
+                                    self.drop_and_recreate_table(&name, body, mig)?;
+                                }
+                                RecipeExpr::View { name, .. } | RecipeExpr::Cache { name, .. } => {
+                                    self.remove_expression(&name, mig)?;
+                                }
+                            }
+                        }
+                    }
+                }
+                Change::Drop {
+                    mut name,
+                    if_exists,
+                } => {
+                    if name.schema.is_none() {
+                        if let Some(first_schema) = schema_search_path.first() {
+                            name.schema = Some(first_schema.clone());
+                        }
+                    }
+
+                    let removed = if self.remove_non_replicated_relation(&name) {
+                        true
+                    } else if self.registry.remove_custom_type(&name) {
+                        for expr in self
+                            .registry
+                            .expressions_referencing_custom_type(&name)
+                            .cloned()
+                            .collect::<Vec<_>>()
+                        {
+                            match expr {
+                                // Technically postgres doesn't allow removing custom types
+                                // before removing tables and views referencing those custom types -
+                                // but we might as well be more
+                                // permissive here
+                                RecipeExpr::Table { name, .. }
+                                | RecipeExpr::View { name, .. }
+                                | RecipeExpr::Cache { name, .. } => {
+                                    self.remove_expression(&name, mig)?;
+                                }
+                            }
+                        }
+
+                        self.drop_custom_type(&name).is_some()
+                    } else {
+                        self.remove_expression(&name, mig)?.is_some()
+                    };
+
+                    if !removed && !if_exists {
+                        error!(%name, "attempted to drop relation, but relation does not exist");
+                        internal!("attempted to drop relation, but relation {name} does not exist",);
+                    }
+                }
+                Change::AlterType { oid, name, change } => {
+                    let (ty, _old_name) = self
+                        .alter_custom_type(oid, &name, change)
+                        .map_err(|e| e.context(format!("while altering custom type {name}")))?;
+                    let ty = ty.clone();
+
+                    let mut table_nodes = vec![];
+                    let mut queries_to_remove = vec![];
+                    for expr in self
+                        .registry
+                        .expressions_referencing_custom_type(&name)
+                        // TODO: this cloned+collect can go away once this happens inside
+                        // SqlIncorporator
+                        .cloned()
+                        .collect::<Vec<_>>()
+                    {
+                        match expr {
+                            RecipeExpr::Table {
+                                name: table_name,
+                                body,
+                            } => {
+                                for field in body.fields.iter() {
+                                    if matches!(&field.sql_type, SqlType::Other(t) if t == &name) {
+                                        self.set_base_column_type(
+                                            &table_name,
+                                            &field.column,
+                                            ty.clone(),
+                                            mig,
+                                        )?;
+                                    }
+                                }
+
+                                let ni = self
+                                    .get_query_address(&table_name)
+                                    .expect("Already validated above");
+                                table_nodes.push(ni);
+                            }
+
+                            RecipeExpr::View { name, .. } | RecipeExpr::Cache { name, .. } => {
+                                queries_to_remove.push(name.clone());
+                            }
+                        }
+                    }
+
+                    for ni in table_nodes {
+                        self.remove_downstream_of(ni, mig);
+                    }
+
+                    for name in queries_to_remove {
+                        self.remove_expression(&name, mig)?;
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// Add a new table, specified by the given `CREATE TABLE` statement, to the graph, using the
@@ -367,6 +694,115 @@ impl SqlIncorporator {
         Ok(())
     }
 
+    /// Remove the expression with the given name or alias, from the recipe.
+    /// Returns the node indices that were removed due to the removal of the expression.
+    /// Returns `Ok(None)` if the expression was not found.
+    ///
+    /// # Errors
+    /// This method will return an error whenever there's an inconsistence between the
+    /// [`ExprRegistry`] and the [`SqlIncorporator`], i.e, an expression exists in one but not
+    /// in the other.
+    pub(super) fn remove_expression(
+        &mut self,
+        name_or_alias: &Relation,
+        mig: &mut Migration<'_>,
+    ) -> ReadySetResult<Option<HashSet<DfNodeIndex>>> {
+        let expression = match self.registry.remove_expression(name_or_alias) {
+            Some(expression) => expression,
+            None => {
+                return Ok(None);
+            }
+        };
+        let name = expression.name();
+        let removal_result = match expression {
+            RecipeExpr::Table { .. } => {
+                // a base may have many dependent queries, including ones that also lost
+                // nodes; the code handling `removed_leaves` therefore needs to take care
+                // not to remove bases while they still have children, or to try removing
+                // them twice.
+                match self.remove_base(name, mig) {
+                    Ok(ni) => ni,
+                    Err(e) => {
+                        error!(
+                            err = %e,
+                            %name,
+                            "failed to remove base whose address could not be resolved",
+                        );
+
+                        return Err(e.context(format!(
+                            "failed to remove base {name} whose address could not be resolved"
+                        )));
+                    }
+                }
+            }
+            _ => self.remove_query(name, mig)?,
+        };
+
+        for query in removal_result.relations_removed {
+            self.registry.remove_expression(&query);
+        }
+        Ok(Some(removal_result.dataflow_nodes_to_remove))
+    }
+
+    // TODO(fran): Remove this in a follow-up commit
+    fn remove_downstream_of(&mut self, ni: NodeIndex, mig: &mut Migration<'_>) -> Vec<NodeIndex> {
+        let mut removed = vec![];
+        let next_for = |ni| {
+            mig.dataflow_state
+                .ingredients
+                .neighbors_directed(ni, petgraph::EdgeDirection::Outgoing)
+                .filter(|ni| !mig.dataflow_state.ingredients[*ni].is_dropped())
+        };
+        let mut stack = next_for(ni).collect::<Vec<_>>();
+        while let Some(node) = stack.pop() {
+            removed.push(node);
+            mig.changes.drop_node(node);
+            stack.extend(next_for(node));
+        }
+
+        self.remove_leaf_aliases(&removed);
+
+        removed
+    }
+
+    pub(crate) fn remove_leaf_aliases(&mut self, nodes: &[NodeIndex]) {
+        for node in nodes {
+            if let Some(name) = self
+                .leaf_addresses
+                .iter()
+                .find(|(_, idx)| *idx == node)
+                .map(|(name, _)| name)
+            {
+                self.registry.remove_expression(name);
+            }
+        }
+    }
+
+    fn drop_and_recreate_table(
+        &mut self,
+        table: &Relation,
+        body: CreateTableBody,
+        mig: &mut Migration,
+    ) -> ReadySetResult<()> {
+        let removed_node_indices = self.remove_expression(table, mig)?;
+        if removed_node_indices.is_none() {
+            error!(
+                table = %table,
+                "attempted to issue ALTER TABLE, but table does not exist"
+            );
+            return Err(ReadySetError::TableNotFound {
+                name: table.name.clone().into(),
+                schema: table.schema.clone().map(Into::into),
+            });
+        };
+        self.add_table(table.clone(), body.clone(), mig)?;
+        self.registry.add_query(RecipeExpr::Table {
+            name: table.clone(),
+            body,
+        })?;
+        Ok(())
+    }
+
     pub(super) fn get_base_schema(&self, table: &Relation) -> Option<CreateTableBody> {
         self.base_schemas.get(table).cloned()
     }
@@ -386,13 +822,6 @@ impl SqlIncorporator {
                 .map(|na| na.address()),
             Some(na) => Some(*na),
         }
-    }
-
-    pub(super) fn get_leaf_name(&self, ni: NodeIndex) -> Option<&Relation> {
-        self.leaf_addresses
-            .iter()
-            .find(|(_, idx)| **idx == ni)
-            .map(|(name, _)| name)
     }
 
     fn add_base_via_mir(
