@@ -154,41 +154,16 @@ where
 /// ```
 #[macro_export]
 macro_rules! eventually {
-    (run_test: { $($test_body: tt)* },
-            then_assert: |$test_res: ident| $($assert_body: tt)+) => {
-        eventually!(
-            attempts: 40,
-            sleep: std::time::Duration::from_millis(500),
-            run_test: { $($test_body)* },
-            then_assert: |$test_res| $($assert_body)*
-        )
-    };
-    (attempts: $attempts: expr,
-            run_test: { $($test_body: tt)* },
-            then_assert: |$test_res: ident| $($assert_body: tt)+) => {
-        eventually!(
-            attempts: $attempts,
-            sleep: std::time::Duration::from_millis(500),
-            run_test: { $($test_body)* },
-            then_assert: |$test_res| $($assert_body)*
-        )
-    };
-    (sleep: $sleep: expr,
-            run_test: { $($test_body: tt)* },
-            then_assert: |$test_res: ident| $($assert_body: tt)+) => {
-        eventually!(
-            attempts: 40,
-            sleep: $sleep,
-            run_test: { $($test_body)* },
-            then_assert: |$test_res| $($assert_body)*
-        )
-    };
-    (attempts: $attempts: expr, sleep: $sleep: expr, run_test: { $($test_body: tt)* },
+    ($(attempts: $attempts: expr,)? $(sleep: $sleep: expr,)? run_test: { $($test_body: tt)* },
             then_assert: |$test_res: ident| $($assert_body: tt)+) => {
         use futures::FutureExt;
 
-        let attempts = $attempts;
-        let sleep = $sleep;
+        let attempts = 40;
+        let sleep = std::time::Duration::from_millis(500);
+        // Shadow the above defaults if custom values were provided:
+        $(let attempts = $attempts;)?
+        $(let sleep = $sleep;)?
+
         for attempt in 1..=attempts {
             let $test_res = async { $($test_body)* }.await;
             if attempt == attempts {
@@ -210,30 +185,13 @@ macro_rules! eventually {
         compile_error!(concat!("`then_assert` must be specified using closure syntax",
                                "(see `eventually` docs for detail)"))
     };
-    (attempts: $attempts: expr, { $($body: tt)* }) => {
-        eventually!(
-            attempts: $attempts,
-            sleep: std::time::Duration::from_millis(500),
-            { $($body)* }
-        )
-    };
-    (sleep: $sleep: expr, { $($body: tt)* }) => {
-        eventually!(
-            attempts: 40,
-            sleep: $sleep,
-            { $($body)* }
-        )
-    };
-    (sleep: $sleep: expr, attempts: $attempts: expr, { $($body: tt)* }) => {
-        eventually!(
-            attempts: $attempts,
-            sleep: $sleep,
-            { $($body)* }
-        )
-    };
-    (attempts: $attempts: expr, sleep: $sleep: expr, { $($body: tt)* }) => {{
-        let attempts = $attempts;
-        let sleep = $sleep;
+    ($(attempts: $attempts: expr,)? $(sleep: $sleep: expr,)? { $($body: tt)* }) => {{
+        let attempts = 40;
+        let sleep = std::time::Duration::from_millis(500);
+        $(let attempts = $attempts;)?
+        // Shadow the above defaults if custom values were provided:
+        $(let sleep = $sleep;)?
+
         let mut attempt = 0;
         while !async { $($body)* }.await {
             if attempt > attempts {
