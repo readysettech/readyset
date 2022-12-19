@@ -96,6 +96,7 @@ pub enum ReadySetError {
         /// A textual description of the nature of the RPC call that failed.
         during: String,
         /// The error returned by the failed call.
+        #[source]
         source: Box<ReadySetError>,
     },
 
@@ -105,6 +106,7 @@ pub enum ReadySetError {
         /// The query name (identifier) of the query that couldn't be added.
         qname: String,
         /// The error encountered while adding the query.
+        #[source]
         source: Box<ReadySetError>,
     },
 
@@ -112,6 +114,7 @@ pub enum ReadySetError {
     #[error("Failed to plan migration: {source}")]
     MigrationPlanFailed {
         /// The error encountered while planning the migration.
+        #[source]
         source: Box<ReadySetError>,
     },
 
@@ -119,6 +122,7 @@ pub enum ReadySetError {
     #[error("Failed to apply migration: {source}")]
     MigrationApplyFailed {
         /// The error encountered while applying the migration.
+        #[source]
         source: Box<ReadySetError>,
     },
 
@@ -140,6 +144,7 @@ pub enum ReadySetError {
         /// The URI of the worker where the domain was to be placed.
         worker_uri: Url,
         /// The error encountered while trying to boot the domain.
+        #[source]
         source: Box<ReadySetError>,
     },
 
@@ -149,6 +154,7 @@ pub enum ReadySetError {
         /// be made.
         index: usize,
         /// The error encountered while adding the MIR node.
+        #[source]
         source: Box<ReadySetError>,
     },
 
@@ -331,6 +337,7 @@ pub enum ReadySetError {
         /// The base table being manipulated.
         table: Relation,
         /// The underlying error that occurred while manipulating the table.
+        #[source]
         source: Box<ReadySetError>,
     },
 
@@ -340,6 +347,7 @@ pub enum ReadySetError {
         /// The index of the view being manipulated.
         idx: NodeIndex,
         /// The underlying error that occurred while manipulating the view.
+        #[source]
         source: Box<ReadySetError>,
     },
 
@@ -1188,5 +1196,17 @@ mod test {
         }
         .context("some context");
         assert!(err.caused_by_table_not_replicated());
+    }
+
+    #[test]
+    fn select_query_caused_by_table_not_found() {
+        let err = ReadySetError::SelectQueryCreationFailed {
+            qname: "my_query".into(),
+            source: Box::new(ReadySetError::TableNotFound {
+                name: "t1".into(),
+                schema: None,
+            }),
+        };
+        assert!(err.caused_by_table_not_found());
     }
 }
