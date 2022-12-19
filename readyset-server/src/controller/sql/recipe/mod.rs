@@ -19,30 +19,25 @@ use readyset_errors::{
 use readyset_tracing::{debug, error, info, trace, warn};
 use serde::{Deserialize, Serialize};
 
-use self::registry::{ExprRegistry, RecipeExpr};
+use super::registry::RecipeExpr;
 use crate::controller::sql::SqlIncorporator;
 use crate::controller::Migration;
 use crate::ReuseConfigType;
 
-pub(super) mod registry;
-
-type QueryID = u128;
+pub(crate) type QueryID = u128;
 
 /// Represents a Soup recipe.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 // crate viz for tests
 pub(crate) struct Recipe {
-    /// A structure to keep track of all the [`RecipeExpr`]s in the recipe.
-    registry: ExprRegistry,
-
     /// Maintains lower-level state, but not the graph itself. Lazily initialized.
     inc: SqlIncorporator,
 }
 
 impl PartialEq for Recipe {
-    /// Equality for recipes is defined in terms of all members apart from `inc`.
+    /// Equality for recipes is defined in terms of the expr registry
     fn eq(&self, other: &Recipe) -> bool {
-        self.registry == other.registry
+        self.inc.registry == other.inc.registry
     }
 }
 
@@ -56,7 +51,7 @@ pub(crate) enum Schema {
 impl Recipe {
     /// Get the id associated with an alias
     pub(crate) fn expression_by_alias(&self, alias: &Relation) -> Option<SqlQuery> {
-        let expr = self.registry.get(alias).map(|e| match e {
+        let expr = self.inc.registry.get(alias).map(|e| match e {
             RecipeExpr::Table { name, body } => SqlQuery::CreateTable(CreateTableStatement {
                 if_not_exists: false,
                 table: name.clone(),
@@ -89,7 +84,6 @@ impl Recipe {
     /// settings, and for temporary recipes.
     pub(crate) fn blank() -> Recipe {
         Recipe {
-            registry: ExprRegistry::new(),
             inc: SqlIncorporator::new(),
         }
     }
@@ -147,12 +141,12 @@ impl Recipe {
     }
 
     pub(in crate::controller) fn resolve_alias(&self, alias: &Relation) -> Option<&Relation> {
-        self.registry.resolve_alias(alias)
+        self.inc.registry.resolve_alias(alias)
     }
 
     /// Returns a set of all *original names* for all caches in the recipe (not including aliases)
     pub(in crate::controller) fn cache_names(&self) -> impl Iterator<Item = &Relation> + '_ {
-        self.registry.cache_names()
+        self.inc.registry.cache_names()
     }
 
     /// Obtains the `NodeIndex` for the node corresponding to a named query or a write type.
@@ -161,7 +155,7 @@ impl Recipe {
         name: &Relation,
     ) -> Result<NodeIndex, String> {
         // `name` might be an alias for another identical query, so resolve if needed
-        let query_name = self.registry.resolve_alias(name).unwrap_or(name);
+        let query_name = self.inc.registry.resolve_alias(name).unwrap_or(name);
         match self.inc.get_query_address(query_name) {
             None => Err(format!("No query endpoint for \"{}\" exists .", name)),
             Some(na) => Ok(na),
@@ -193,8 +187,8 @@ impl Recipe {
         changelist: ChangeList,
     ) -> ReadySetResult<()> {
         debug!(
-            num_queries = self.registry.len(),
-            named_queries = self.registry.num_aliases(),
+            num_queries = self.inc.registry.len(),
+            named_queries = self.inc.registry.num_aliases(),
         );
 
         let ChangeList {
@@ -215,7 +209,7 @@ impl Recipe {
                             Sensitive(&unparsed)
                         ),
                     };
-                    match self.registry.get(&cts.table) {
+                    match self.inc.registry.get(&cts.table) {
                         Some(RecipeExpr::Table {
                             body: current_body, ..
                         }) => {
@@ -241,6 +235,7 @@ impl Recipe {
                         }
                         _ => {
                             let invalidate_queries = self
+                                .inc
                                 .registry
                                 .queries_to_invalidate_for_table(&cts.table)
                                 .cloned()
@@ -256,7 +251,7 @@ impl Recipe {
                                 self.remove_expression(&invalidate_query, mig)?;
                             }
                             self.inc.add_table(cts.table.clone(), body.clone(), mig)?;
-                            self.registry.add_query(RecipeExpr::Table {
+                            self.inc.registry.add_query(RecipeExpr::Table {
                                 name: cts.table,
                                 body,
                             })?;
@@ -285,7 +280,7 @@ impl Recipe {
                         ),
                     };
 
-                    if !self.registry.add_query(RecipeExpr::View {
+                    if !self.inc.registry.add_query(RecipeExpr::View {
                         name: stmt.name.clone(),
                         definition: definition.clone(),
                     })? {
@@ -320,13 +315,13 @@ impl Recipe {
                             statement: statement.clone(),
                             always: ccqs.always,
                         };
-                        let aliased = self.registry.add_query(expression)?;
+                        let aliased = self.inc.registry.add_query(expression)?;
                         debug!(
                             query = %name,
                             tables = ?invalidating_tables,
                             "Recording list of tables that, if created, would invalidate query"
                         );
-                        self.registry.insert_invalidating_tables(
+                        self.inc.registry.insert_invalidating_tables(
                             name.clone(),
                             invalidating_tables.clone(),
                         )?;
@@ -338,12 +333,13 @@ impl Recipe {
                     }
 
                     let name = self.inc.add_query(ccqs.name, statement.clone(), mig)?;
-                    self.registry.add_query(RecipeExpr::Cache {
+                    self.inc.registry.add_query(RecipeExpr::Cache {
                         name: name.clone(),
                         statement,
                         always: ccqs.always,
                     })?;
-                    self.registry
+                    self.inc
+                        .registry
                         .insert_invalidating_tables(name.clone(), invalidating_tables)?;
                 }
                 Change::AlterTable(_) => {
@@ -363,7 +359,7 @@ impl Recipe {
                     }
                     let needs_resnapshot =
                         if let Some(existing_ty) = self.inc.get_custom_type(&name) {
-                            invariant!(self.registry.contains_custom_type(&name));
+                            invariant!(self.inc.registry.contains_custom_type(&name));
                             // Type already exists, so check if it has been changed in a way that
                             // requires dropping and recreating dependent tables
                             match (existing_ty, &ty) {
@@ -387,11 +383,12 @@ impl Recipe {
                             false
                         };
 
-                    self.registry.add_custom_type(name.clone());
+                    self.inc.registry.add_custom_type(name.clone());
                     self.inc.add_custom_type(name.clone(), ty);
                     if needs_resnapshot {
                         debug!(name = %name.clone(), "Replacing existing custom type");
                         for expr in self
+                            .inc
                             .registry
                             .expressions_referencing_custom_type(&name)
                             .cloned()
@@ -420,8 +417,9 @@ impl Recipe {
 
                     let removed = if self.inc.remove_non_replicated_relation(&name) {
                         true
-                    } else if self.registry.remove_custom_type(&name) {
+                    } else if self.inc.registry.remove_custom_type(&name) {
                         for expr in self
+                            .inc
                             .registry
                             .expressions_referencing_custom_type(&name)
                             .cloned()
@@ -455,14 +453,19 @@ impl Recipe {
                         .inc
                         .alter_custom_type(oid, &name, change)
                         .map_err(|e| e.context(format!("while altering custom type {name}")))?;
-                    if let Some(old_name) = old_name {
-                        self.registry.rename_custom_type(&old_name, &name);
-                    }
                     let ty = ty.clone();
 
                     let mut table_nodes = vec![];
                     let mut queries_to_remove = vec![];
-                    for expr in self.registry.expressions_referencing_custom_type(&name) {
+                    for expr in self
+                        .inc
+                        .registry
+                        .expressions_referencing_custom_type(&name)
+                        // TODO: this cloned+collect can go away once this happens inside
+                        // SqlIncorporator
+                        .cloned()
+                        .collect::<Vec<_>>()
+                    {
                         match expr {
                             RecipeExpr::Table {
                                 name: table_name,
@@ -471,7 +474,7 @@ impl Recipe {
                                 for field in body.fields.iter() {
                                     if matches!(&field.sql_type, SqlType::Other(t) if t == &name) {
                                         self.inc.set_base_column_type(
-                                            table_name,
+                                            &table_name,
                                             &field.column,
                                             ty.clone(),
                                             mig,
@@ -481,7 +484,7 @@ impl Recipe {
 
                                 let ni = self
                                     .inc
-                                    .get_query_address(table_name)
+                                    .get_query_address(&table_name)
                                     .expect("Already validated above");
                                 table_nodes.push(ni);
                             }
@@ -529,7 +532,7 @@ impl Recipe {
             });
         };
         self.inc.add_table(table.clone(), body.clone(), mig)?;
-        self.registry.add_query(RecipeExpr::Table {
+        self.inc.registry.add_query(RecipeExpr::Table {
             name: table.clone(),
             body,
         })?;
@@ -557,7 +560,7 @@ impl Recipe {
         name_or_alias: &Relation,
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<Option<HashSet<DfNodeIndex>>> {
-        let expression = match self.registry.remove_expression(name_or_alias) {
+        let expression = match self.inc.registry.remove_expression(name_or_alias) {
             Some(expression) => expression,
             None => {
                 return Ok(None);
@@ -589,7 +592,7 @@ impl Recipe {
         };
 
         for query in removal_result.relations_removed {
-            self.registry.remove_expression(&query);
+            self.inc.registry.remove_expression(&query);
         }
         Ok(Some(removal_result.dataflow_nodes_to_remove))
     }
@@ -729,8 +732,8 @@ impl Recipe {
 
     pub(crate) fn remove_leaf_aliases(&mut self, nodes: &[NodeIndex]) {
         for node in nodes {
-            if let Some(name) = self.inc.get_leaf_name(*node) {
-                self.registry.remove_expression(name);
+            if let Some(name) = self.inc.get_leaf_name(*node).cloned() {
+                self.inc.registry.remove_expression(&name);
             }
         }
     }
@@ -747,6 +750,6 @@ impl Recipe {
         let statement =
             self.inc
                 .rewrite(query.statement, &query.schema_search_path, dialect, None)?;
-        Ok(self.registry.contains(&statement))
+        Ok(self.inc.registry.contains(&statement))
     }
 }

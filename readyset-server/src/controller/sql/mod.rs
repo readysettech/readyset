@@ -19,7 +19,8 @@ use readyset_tracing::{debug, trace};
 
 use self::mir::{LeafBehavior, NodeIndex as MirNodeIndex, SqlToMirConverter};
 use self::query_graph::to_query_graph;
-pub(crate) use self::recipe::{Recipe, Schema};
+pub(crate) use self::recipe::{QueryID, Recipe, Schema};
+use self::registry::ExprRegistry;
 use crate::controller::mir_to_flow::{mir_node_to_flow_parts, mir_query_to_flow_parts};
 use crate::controller::Migration;
 use crate::sql::mir::MirRemovalResult;
@@ -29,6 +30,7 @@ pub(crate) mod mir;
 mod query_graph;
 mod query_signature;
 mod recipe;
+mod registry;
 
 /// Configuration for converting SQL to dataflow
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -45,8 +47,8 @@ impl Default for Config {
     }
 }
 
-/// Long-lived struct that holds information about the SQL queries that have been incorporated into
-/// the dataflow graph `graph`.
+/// Long-lived struct that holds information about the SQL queries (tables, views, and caches) that
+/// have been incorporated into the dataflow graph.
 ///
 /// The incorporator shares the lifetime of the dataflow graph it is associated with.
 ///
@@ -86,6 +88,10 @@ pub(crate) struct SqlIncorporator {
     custom_types_by_oid: HashMap<u32, Relation>,
 
     pub(crate) config: Config,
+
+    /// A structure which keeps track of all the raw AST expressions in the schema, and their
+    /// dependencies on each other
+    registry: ExprRegistry,
 
     /// Whether or to treat failed writes to base tables as no-ops
     permissive_writes: bool,
@@ -269,6 +275,7 @@ impl SqlIncorporator {
                 .remove(&old_name)
                 .expect("custom_types_by_oid must point at types in custom_types");
             self.custom_types.insert(name.clone(), ty);
+            self.registry.rename_custom_type(&old_name, name);
             trace!(%old_name, new_name = %name, %oid, "Renaming custom type");
             Some(old_name)
         } else {

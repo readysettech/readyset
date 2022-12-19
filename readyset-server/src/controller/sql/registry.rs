@@ -17,7 +17,7 @@ use super::QueryID;
 /// A single SQL expression stored in a Recipe.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(super) enum RecipeExpr {
+pub(crate) enum RecipeExpr {
     /// Expression that represents a `CREATE TABLE` statement.
     Table {
         name: Relation,
@@ -189,11 +189,6 @@ pub(super) struct ExprRegistry {
 }
 
 impl ExprRegistry {
-    /// Creates a new, empty [`ExprRegistry`].
-    pub(super) fn new() -> Self {
-        Default::default()
-    }
-
     /// Adds a [`RecipeExpr`] to the registry.
     /// If the [`RecipeExpr`] was already present, returns `Ok(false)`; otherwise it returns
     /// `Ok(true)`.
@@ -526,7 +521,7 @@ mod tests {
         use super::*;
 
         fn setup() -> ExprRegistry {
-            let mut registry = ExprRegistry::new();
+            let mut registry = ExprRegistry::default();
 
             registry
                 .add_query(
