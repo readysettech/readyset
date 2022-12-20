@@ -402,6 +402,33 @@ impl SqlToMirConverter {
         Ok(mir_removal_result)
     }
 
+    /// Removes the views/cached queries associated with the given base table (without removing the
+    /// base table itself).
+    pub(super) fn remove_dependent_queries(
+        &mut self,
+        table_name: &Relation,
+    ) -> ReadySetResult<MirRemovalResult> {
+        debug!(%table_name, "Removing dependent queries");
+        let root =
+            self.relations
+                .get(table_name)
+                .ok_or_else(|| ReadySetError::RelationNotFound {
+                    relation: table_name.to_string(),
+                })?;
+        self.mir_graph
+            .node_weight(*root)
+            .ok_or_else(|| ReadySetError::MirNodeNotFound {
+                index: root.index(),
+            })
+            .and_then(|node| {
+                if !node.is_base() {
+                    internal!("Node should be a base node!");
+                }
+                Ok(node)
+            })?;
+        self.remove_dependent_nodes(*root)
+    }
+
     pub(super) fn make_mir_query(
         &mut self,
         query_name: Relation,

@@ -402,7 +402,7 @@ impl SqlIncorporator {
                         .map_err(|e| e.context(format!("while altering custom type {name}")))?;
                     let ty = ty.clone();
 
-                    let mut table_nodes = vec![];
+                    let mut table_names = vec![];
                     let mut queries_to_remove = vec![];
                     for expr in self
                         .registry
@@ -428,10 +428,7 @@ impl SqlIncorporator {
                                     }
                                 }
 
-                                let ni = self
-                                    .get_query_address(&table_name)
-                                    .expect("Already validated above");
-                                table_nodes.push(ni);
+                                table_names.push(table_name);
                             }
 
                             RecipeExpr::View { name, .. } | RecipeExpr::Cache { name, .. } => {
@@ -440,8 +437,8 @@ impl SqlIncorporator {
                         }
                     }
 
-                    for ni in table_nodes {
-                        self.remove_downstream_of(ni, mig);
+                    for table_name in table_names {
+                        self.remove_dependent_queries(&table_name, mig)?;
                     }
 
                     for name in queries_to_remove {
@@ -701,45 +698,7 @@ impl SqlIncorporator {
             }
             _ => self.remove_query(name, mig)?,
         };
-
-        for query in removal_result.relations_removed {
-            self.registry.remove_expression(&query);
-        }
         Ok(Some(removal_result.dataflow_nodes_to_remove))
-    }
-
-    // TODO(fran): Remove this in a follow-up commit
-    fn remove_downstream_of(&mut self, ni: NodeIndex, mig: &mut Migration<'_>) -> Vec<NodeIndex> {
-        let mut removed = vec![];
-        let next_for = |ni| {
-            mig.dataflow_state
-                .ingredients
-                .neighbors_directed(ni, petgraph::EdgeDirection::Outgoing)
-                .filter(|ni| !mig.dataflow_state.ingredients[*ni].is_dropped())
-        };
-        let mut stack = next_for(ni).collect::<Vec<_>>();
-        while let Some(node) = stack.pop() {
-            removed.push(node);
-            mig.changes.drop_node(node);
-            stack.extend(next_for(node));
-        }
-
-        self.remove_leaf_aliases(&removed);
-
-        removed
-    }
-
-    pub(crate) fn remove_leaf_aliases(&mut self, nodes: &[NodeIndex]) {
-        for node in nodes {
-            if let Some(name) = self
-                .leaf_addresses
-                .iter()
-                .find(|(_, idx)| *idx == node)
-                .map(|(name, _)| name)
-            {
-                self.registry.remove_expression(name);
-            }
-        }
     }
 
     fn drop_and_recreate_table(
@@ -1115,9 +1074,21 @@ impl SqlIncorporator {
         Ok(mir_removal_result)
     }
 
+    pub(super) fn remove_dependent_queries(
+        &mut self,
+        table_name: &Relation,
+        mig: &mut Migration<'_>,
+    ) -> ReadySetResult<MirRemovalResult> {
+        trace!(%table_name, "removing base table dependencies");
+        let mut mir_removal_result = self.mir_converter.remove_dependent_queries(table_name)?;
+        self.process_removal(&mut mir_removal_result, mig);
+        Ok(mir_removal_result)
+    }
+
     fn process_removal(&mut self, removal_result: &mut MirRemovalResult, mig: &mut Migration<'_>) {
         for query in removal_result.relations_removed.iter() {
             self.leaf_addresses.remove(query);
+            self.registry.remove_expression(query);
         }
         // Sadly, we don't use `DfNodeIndex` for migrations/df state, so we need to map them
         // to `NodeIndex`.
