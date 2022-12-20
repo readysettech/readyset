@@ -7,7 +7,7 @@ use ::mir::DfNodeIndex;
 use ::serde::{Deserialize, Serialize};
 use launchpad::redacted::Sensitive;
 use nom_sql::{
-    CacheInner, CompoundSelectOperator, CompoundSelectStatement, CreateTableBody, Expr,
+    CacheInner, CompoundSelectOperator, CompoundSelectStatement, CreateTableBody,
     FieldDefinitionExpr, Relation, SelectSpecification, SelectStatement, SqlIdentifier, SqlType,
     TableExpr,
 };
@@ -54,6 +54,18 @@ impl Default for Config {
     }
 }
 
+/// Information about a SQL `VIEW` that has been registered with ReadySet, but has yet to be
+/// compiled to Dataflow because no query has selected FROM them yet. Used as the value in
+/// [`SqlIncorporator::uncompiled_views`].
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct UncompiledView {
+    /// The definition of the view itself
+    definition: SelectSpecification,
+
+    /// The schema search path that the view was created with
+    schema_search_path: Vec<SqlIdentifier>,
+}
+
 /// Long-lived struct that holds information about the SQL queries (tables, views, and caches) that
 /// have been incorporated into the dataflow graph.
 ///
@@ -77,7 +89,7 @@ pub(crate) struct SqlIncorporator {
     /// Views which have been added to ReadySet, but which have not been compiled to dataflow yet
     /// because no query has selected FROM them yet. Represented as a map from the
     /// (schema-qualified!) name of the view to the *post-rewrite* SelectStatement for the view.
-    uncompiled_views: HashMap<Relation, SelectStatement>,
+    uncompiled_views: HashMap<Relation, UncompiledView>,
 
     base_schemas: HashMap<Relation, CreateTableBody>,
     view_schemas: HashMap<Relation, Vec<SqlIdentifier>>,
@@ -254,14 +266,12 @@ impl SqlIncorporator {
                     self.add_non_replicated_relation(name);
                 }
                 Change::CreateView(mut stmt) => {
-                    stmt = self.rewrite(
-                        stmt,
-                        &schema_search_path,
-                        dialect,
-                        None, /* Views in SQL resolve tables at creation time, so we don't
-                               * want to invalidate them if tables get created like we do
-                               * for queries */
-                    )?;
+                    if let Some(first_schema) = schema_search_path.first() {
+                        if stmt.name.schema.is_none() {
+                            stmt.name.schema = Some(first_schema.clone())
+                        }
+                    }
+
                     let definition = match stmt.definition {
                         Ok(definition) => *definition,
                         Err(unparsed) => unsupported!(
@@ -270,67 +280,18 @@ impl SqlIncorporator {
                             Sensitive(&unparsed)
                         ),
                     };
-
-                    if !self.registry.add_query(RecipeExpr::View {
-                        name: stmt.name.clone(),
-                        definition: definition.clone(),
-                    })? {
-                        // The expression is already present, and we successfully added
-                        // a new alias for it.
-                        continue;
-                    }
-
-                    // add the query
-                    self.add_view(stmt.name, definition, mig)?;
+                    self.add_view(stmt.name, definition, schema_search_path.clone())?;
                 }
                 Change::CreateCache(ccqs) => {
-                    let (statement, invalidating_tables) = match &ccqs.inner {
-                        CacheInner::Statement(box stmt) => {
-                            let mut invalidating_tables = vec![];
-                            let stmt = self.rewrite(
-                                stmt.clone(),
-                                &schema_search_path,
-                                dialect,
-                                Some(&mut invalidating_tables),
-                            )?;
-                            (stmt, invalidating_tables)
-                        }
+                    let statement = match ccqs.inner {
+                        CacheInner::Statement(stmt) => *stmt,
                         CacheInner::Id(id) => {
                             error!("attempted to issue CREATE CACHE with an id: {}", id);
                             internal!("CREATE CACHE should've had its ID resolved by the adapter");
                         }
                     };
-                    if let Some(name) = &ccqs.name {
-                        let expression = RecipeExpr::Cache {
-                            name: name.clone(),
-                            statement: statement.clone(),
-                            always: ccqs.always,
-                        };
-                        let aliased = self.registry.add_query(expression)?;
-                        debug!(
-                            query = %name,
-                            tables = ?invalidating_tables,
-                            "Recording list of tables that, if created, would invalidate query"
-                        );
-                        self.registry.insert_invalidating_tables(
-                            name.clone(),
-                            invalidating_tables.clone(),
-                        )?;
-                        if !aliased {
-                            // The expression is already present, and we successfully added
-                            // a new alias for it.
-                            continue;
-                        }
-                    }
 
-                    let name = self.add_query(ccqs.name, statement.clone(), mig)?;
-                    self.registry.add_query(RecipeExpr::Cache {
-                        name: name.clone(),
-                        statement,
-                        always: ccqs.always,
-                    })?;
-                    self.registry
-                        .insert_invalidating_tables(name.clone(), invalidating_tables)?;
+                    self.add_query(ccqs.name, statement, ccqs.always, &schema_search_path, mig)?;
                 }
                 Change::AlterTable(_) => {
                     // This should not get hit because all ALTER TABLE definitions currently require
@@ -507,50 +468,22 @@ impl SqlIncorporator {
         Ok(())
     }
 
-    /// Add a new SQL VIEW, specified by the given `CREATE VIEW` statement, to the graph, using the
-    /// given `mig` to track changes.
-    pub(crate) fn add_view(
+    /// Add a new SQL VIEW, specified by the given `CREATE VIEW` statement, to the db
+    fn add_view(
         &mut self,
         name: Relation,
         definition: SelectSpecification,
-        mig: &mut Migration<'_>,
+        schema_search_path: Vec<SqlIdentifier>,
     ) -> ReadySetResult<()> {
-        match definition {
-            SelectSpecification::Compound(query) => {
-                let mir_leaf = self.add_compound_query(
-                    name.clone(),
-                    query,
-                    LeafBehavior::NamedWithoutLeaf,
-                    mig,
-                )?;
-                self.mir_to_dataflow(name.clone(), mir_leaf, mig)?;
-            }
-            SelectSpecification::Simple(query) => {
-                self.view_schemas.insert(
-                    name.clone(),
-                    query
-                        .fields
-                        .iter()
-                        .map(|f| match f {
-                            FieldDefinitionExpr::Expr {
-                                alias: Some(alias), ..
-                            } => Ok(alias.clone()),
-                            FieldDefinitionExpr::Expr {
-                                expr: Expr::Column(c),
-                                ..
-                            } => Ok(c.name.clone()),
-                            FieldDefinitionExpr::Expr { expr, .. } => Ok(expr.to_string().into()),
-                            _ => {
-                                internal!("All expression should have been desugared at this point")
-                            }
-                        })
-                        .collect::<ReadySetResult<_>>()?,
-                );
-                self.uncompiled_views.insert(name.clone(), query);
-            }
-        }
-
+        trace!(%name, "Adding uncompiled view");
         self.remove_non_replicated_relation(&name);
+        self.uncompiled_views.insert(
+            name,
+            UncompiledView {
+                definition,
+                schema_search_path,
+            },
+        );
         Ok(())
     }
 
@@ -561,11 +494,34 @@ impl SqlIncorporator {
     pub(crate) fn add_query(
         &mut self,
         name: Option<Relation>,
-        stmt: SelectStatement,
+        mut stmt: SelectStatement,
+        always: bool,
+        schema_search_path: &[SqlIdentifier],
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<Relation> {
         let name = name.unwrap_or_else(|| format!("q_{}", self.num_queries).into());
-        let mir_query = self.add_select_query(name.clone(), stmt, LeafBehavior::Leaf, mig)?;
+
+        let mut invalidating_tables = vec![];
+        let mir_query = self.select_query_to_mir(
+            name.clone(),
+            &mut stmt,
+            schema_search_path,
+            Some(&mut invalidating_tables),
+            LeafBehavior::Leaf,
+            mig,
+        )?;
+
+        let aliased = !self.registry.add_query(RecipeExpr::Cache {
+            name: name.clone(),
+            statement: stmt,
+            always,
+        })?;
+        self.registry
+            .insert_invalidating_tables(name.clone(), invalidating_tables.clone())?;
+
+        if aliased {
+            return Ok(name);
+        }
 
         let leaf = self.mir_to_dataflow(name.clone(), mir_query, mig)?;
         self.leaf_addresses.insert(name.clone(), leaf);
@@ -714,6 +670,10 @@ impl SqlIncorporator {
         let expression = match self.registry.remove_expression(name_or_alias) {
             Some(expression) => expression,
             None => {
+                if self.uncompiled_views.remove(name_or_alias).is_some() {
+                    return Ok(Some(Default::default()));
+                }
+
                 return Ok(None);
             }
         };
@@ -856,98 +816,55 @@ impl SqlIncorporator {
     fn add_compound_query(
         &mut self,
         query_name: Relation,
-        query: CompoundSelectStatement,
+        query: &mut CompoundSelectStatement,
+        search_path: &[SqlIdentifier],
+        mut invalidating_tables: Option<&mut Vec<Relation>>,
         leaf_behavior: LeafBehavior,
         mig: &mut Migration<'_>,
-    ) -> Result<MirNodeIndex, ReadySetError> {
-        let mut subqueries = Vec::new();
-        for (_, stmt) in query.selects.into_iter() {
-            let subquery_leaf =
-                self.add_select_query(query_name.clone(), stmt, LeafBehavior::Anonymous, mig)?;
-            subqueries.push(subquery_leaf);
+    ) -> ReadySetResult<MirNodeIndex> {
+        let mut subqueries = Vec::with_capacity(query.selects.len());
+        for (_, stmt) in &mut query.selects {
+            let mut tables = invalidating_tables.is_some().then(Vec::new);
+            subqueries.push(self.select_query_to_mir(
+                query_name.clone(),
+                stmt,
+                search_path,
+                tables.as_mut(),
+                LeafBehavior::Anonymous,
+                mig,
+            )?);
+            if let Some(ts) = tables {
+                if let Some(its) = invalidating_tables.as_mut() {
+                    its.extend(ts);
+                }
+            }
         }
 
-        let mir_leaf = self.mir_converter.compound_query_to_mir(
+        self.mir_converter.compound_query_to_mir(
             &query_name,
             subqueries,
             CompoundSelectOperator::Union,
             &query.order,
             &query.limit_clause,
             leaf_behavior,
-        )?;
-
-        Ok(mir_leaf)
+        )
     }
 
     /// Add a new SelectStatement to the given migration, returning the index of the leaf MIR node
     /// that was added
-    fn add_select_query(
+    fn select_query_to_mir(
         &mut self,
         query_name: Relation,
-        mut stmt: SelectStatement,
+        stmt: &mut SelectStatement,
+        search_path: &[SqlIdentifier],
+        mut invalidating_tables: Option<&mut Vec<Relation>>,
         leaf_behavior: LeafBehavior,
         mig: &mut Migration<'_>,
-    ) -> Result<MirNodeIndex, ReadySetError> {
-        trace!(%stmt, "Adding select query");
+    ) -> ReadySetResult<MirNodeIndex> {
         let on_err = |e| ReadySetError::SelectQueryCreationFailed {
             qname: query_name.to_string(),
             source: Box::new(e),
         };
-
-        self.num_queries += 1;
-
-        // Remove all table aliases from the query. Create named views in cases where the alias must
-        // be replaced with a view rather than the table itself in order to prevent ambiguity. (This
-        // may occur when a single table is referenced using more than one alias).
-        let table_alias_rewrites = stmt.rewrite_table_aliases(&query_name.name);
-        let mut anon_queries = HashMap::new();
-        for r in table_alias_rewrites {
-            match r {
-                TableAliasRewrite::View {
-                    to_view, for_table, ..
-                } => {
-                    let query = SelectStatement {
-                        tables: vec![TableExpr::from(for_table)],
-                        fields: vec![FieldDefinitionExpr::All],
-                        ..Default::default()
-                    };
-                    let subquery_leaf = self.add_select_query(
-                        query_name.clone(),
-                        self.rewrite(
-                            query,
-                            &[], /* Don't need a schema search path since we're only resolving
-                                  * one (already qualified) table */
-                            mig.dialect,
-                            None,
-                        )
-                        .map_err(on_err)?,
-                        LeafBehavior::Anonymous,
-                        mig,
-                    )?;
-                    anon_queries.insert(to_view, subquery_leaf);
-                }
-                TableAliasRewrite::Cte {
-                    to_view,
-                    for_statement,
-                    ..
-                } => {
-                    let subquery_leaf = self
-                        .add_select_query(
-                            query_name.clone(),
-                            *for_statement,
-                            LeafBehavior::Anonymous,
-                            mig,
-                        )
-                        .map_err(on_err)?;
-                    anon_queries.insert(to_view, subquery_leaf);
-                }
-                TableAliasRewrite::Table { .. } => {}
-            }
-        }
-
-        trace!(rewritten_query = %stmt);
-
-        let query_graph = to_query_graph(stmt).map_err(on_err)?;
 
         // Keep attempting to compile the query to MIR, but every time we run into a TableNotFound
         // error for a view we've yet to migrate, migrate that view then retry
@@ -956,13 +873,23 @@ impl SqlIncorporator {
         // SqlIncorporator and SqlToMirConverter are merged into one, this ought to not be
         // necesssary - instead, we can just migrate the view as part of the `get_relation` method
         loop {
-            match self.mir_converter.named_query_to_mir(
+            let mut tables = invalidating_tables.is_some().then(Vec::new);
+            match self.select_query_to_mir_inner(
                 &query_name,
-                &query_graph,
-                &anon_queries,
+                stmt,
+                search_path,
+                tables.as_mut(),
                 leaf_behavior,
+                mig,
             ) {
-                Ok(mir_leaf) => return Ok(mir_leaf),
+                Ok(mir_leaf) => {
+                    if let Some(ts) = tables {
+                        if let Some(its) = invalidating_tables.as_mut() {
+                            its.extend(ts);
+                        }
+                    }
+                    return Ok(mir_leaf);
+                }
                 Err(e) => {
                     if let Some((view, name)) = e
                         .table_not_found_cause()
@@ -970,17 +897,11 @@ impl SqlIncorporator {
                             schema: schema.map(Into::into),
                             name: name.into(),
                         })
-                        .and_then(|rel| Some((self.uncompiled_views.remove(&rel)?, rel)))
+                        .and_then(|rel| Some((self.take_uncompiled_view(search_path, &rel)?, rel)))
                     {
-                        trace!(%name, %view, "Query referenced uncompiled view; compiling");
-                        if let Err(e) = self
-                            .add_select_query(
-                                name.clone(),
-                                view.clone(),
-                                LeafBehavior::NamedWithoutLeaf,
-                                mig,
-                            )
-                            .and_then(|mir_leaf| self.mir_to_dataflow(name.clone(), mir_leaf, mig))
+                        trace!(%name, "Query referenced uncompiled view; compiling");
+                        if let Err(e) =
+                            self.compile_uncompiled_view(name.clone(), view.clone(), mig)
                         {
                             trace!(%e, "Compiling uncompiled view failed");
                             // The view *might* have failed to migrate for a transient reason - put
@@ -995,6 +916,150 @@ impl SqlIncorporator {
                 }
             }
         }
+    }
+
+    /// Compile a select statement to MIR within the context of the given migration, but *not*
+    /// handling errors caused by referencing uncompiled views.
+    ///
+    /// Do not call this method directly - call `select_query_to_mir` instead.
+    fn select_query_to_mir_inner(
+        &mut self,
+        query_name: &Relation,
+        stmt: &mut SelectStatement,
+        search_path: &[SqlIdentifier],
+        invalidating_tables: Option<&mut Vec<Relation>>,
+        leaf_behavior: LeafBehavior,
+        mig: &mut Migration<'_>,
+    ) -> ReadySetResult<MirNodeIndex> {
+        trace!(%stmt, "Adding select query");
+        *stmt = self.rewrite(stmt.clone(), search_path, mig.dialect, invalidating_tables)?;
+
+        self.num_queries += 1;
+
+        // Remove all table aliases from the query. Create named views in cases where the alias must
+        // be replaced with a view rather than the table itself in order to prevent ambiguity. (This
+        // may occur when a single table is referenced using more than one alias).
+        let table_alias_rewrites = stmt.rewrite_table_aliases(&query_name.name);
+        let mut anon_queries = HashMap::new();
+        for r in table_alias_rewrites {
+            match r {
+                TableAliasRewrite::View {
+                    to_view, for_table, ..
+                } => {
+                    let mut query = SelectStatement {
+                        tables: vec![TableExpr::from(for_table)],
+                        fields: vec![FieldDefinitionExpr::All],
+                        ..Default::default()
+                    };
+                    let subquery_leaf = self.select_query_to_mir(
+                        query_name.clone(),
+                        &mut query,
+                        &[], /* Don't need a schema search path since we're only resolving
+                              * one (already qualified) table */
+                        None,
+                        LeafBehavior::Anonymous,
+                        mig,
+                    )?;
+                    anon_queries.insert(to_view, subquery_leaf);
+                }
+                TableAliasRewrite::Cte {
+                    to_view,
+                    mut for_statement,
+                    ..
+                } => {
+                    let subquery_leaf = self.select_query_to_mir(
+                        query_name.clone(),
+                        for_statement.as_mut(),
+                        search_path,
+                        None,
+                        LeafBehavior::Anonymous,
+                        mig,
+                    )?;
+                    anon_queries.insert(to_view, subquery_leaf);
+                }
+                TableAliasRewrite::Table { .. } => {}
+            }
+        }
+
+        trace!(rewritten_query = %stmt);
+
+        let query_graph = to_query_graph(stmt.clone())?;
+
+        self.mir_converter.named_query_to_mir(
+            query_name,
+            &query_graph,
+            &anon_queries,
+            leaf_behavior,
+        )
+    }
+
+    /// Remove a view with the given `name` from our set of views that have yet to be compiled,
+    /// using the given `schema_search_path` to resolve the schema of the view if `name` is not
+    /// schema-qualified
+    fn take_uncompiled_view(
+        &mut self,
+        schema_search_path: &[SqlIdentifier],
+        name: &Relation,
+    ) -> Option<UncompiledView> {
+        if name.schema.is_some() {
+            self.uncompiled_views.remove(name)
+        } else {
+            // Start out by trying to resolve the name without a schema anyway, to handle
+            // tests which don't have a schema at the moment
+            self.uncompiled_views.remove(name).or_else(|| {
+                schema_search_path.iter().find_map(|schema| {
+                    self.uncompiled_views.remove(&Relation {
+                        schema: Some(schema.clone()),
+                        name: name.name.clone(),
+                    })
+                })
+            })
+        }
+    }
+
+    /// Compile the given uncompiled view all the way to dataflow
+    fn compile_uncompiled_view(
+        &mut self,
+        name: Relation,
+        uncompiled_view: UncompiledView,
+        mig: &mut Migration<'_>,
+    ) -> ReadySetResult<()> {
+        let UncompiledView {
+            mut definition,
+            schema_search_path,
+        } = uncompiled_view;
+
+        let mir_leaf = match &mut definition {
+            SelectSpecification::Compound(stmt) => self.add_compound_query(
+                name.clone(),
+                stmt,
+                &schema_search_path,
+                None,
+                LeafBehavior::NamedWithoutLeaf,
+                mig,
+            )?,
+            SelectSpecification::Simple(stmt) => self.select_query_to_mir(
+                name.clone(),
+                stmt,
+                &schema_search_path,
+                None,
+                LeafBehavior::NamedWithoutLeaf,
+                mig,
+            )?,
+        };
+
+        if !self.registry.add_query(RecipeExpr::View {
+            name: name.clone(),
+            definition,
+        })? {
+            // The expression is already present, and we successfully added
+            // a new alias for it.
+            return Ok(());
+        }
+
+        self.mir_to_dataflow(name, mir_leaf, mig)?;
+
+        Ok(())
     }
 
     fn mir_to_dataflow(

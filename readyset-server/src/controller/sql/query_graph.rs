@@ -885,56 +885,52 @@ fn default_row_for_select(st: &SelectStatement) -> Option<Vec<DfValue>> {
 #[allow(clippy::cognitive_complexity)]
 pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
     // a handy closure for making new relation nodes
-    let new_node = |rel: Relation,
-                    preds: Vec<Expr>,
-                    st: &SelectStatement|
-     -> ReadySetResult<QueryGraphNode> {
-        Ok(QueryGraphNode {
-            relation: rel.clone(),
-            predicates: preds,
-            columns: st
-                .fields
-                .iter()
-                .map(|field| {
-                    Ok(match field {
-                        // unreachable because SQL rewrite passes will have expanded these already
-                        FieldDefinitionExpr::All => {
-                            internal!("* should have been expanded already")
-                        }
-                        FieldDefinitionExpr::AllInTable(_) => {
-                            internal!("<table>.* should have been expanded already")
-                        }
-                        FieldDefinitionExpr::Expr {
-                            expr: Expr::Column(c),
-                            ..
-                        } => match c.table.as_ref() {
-                            None => internal!("No table name set for column {} on {}", c.name, rel),
-                            Some(t) => {
+    let new_node =
+        |rel: Relation, preds: Vec<Expr>, st: &SelectStatement| -> ReadySetResult<QueryGraphNode> {
+            Ok(QueryGraphNode {
+                relation: rel.clone(),
+                predicates: preds,
+                columns: st
+                    .fields
+                    .iter()
+                    .map(|field| {
+                        Ok(match field {
+                            // unreachable because SQL rewrite passes will have expanded these
+                            // already
+                            FieldDefinitionExpr::All => {
+                                internal!("* should have been expanded already")
+                            }
+                            FieldDefinitionExpr::AllInTable(_) => {
+                                internal!("<table>.* should have been expanded already")
+                            }
+                            FieldDefinitionExpr::Expr {
+                                expr: Expr::Column(c),
+                                ..
+                            } => c.table.as_ref().and_then(|t| {
                                 if rel == *t {
                                     Some(c.clone())
                                 } else {
                                     None
                                 }
+                            }),
+                            FieldDefinitionExpr::Expr { .. } => {
+                                // No need to do anything for expressions here, since they aren't
+                                // associated with a relation (and thus have
+                                // no QGN) XXX(malte): don't drop
+                                // aggregation columns
+                                None
                             }
-                        },
-                        FieldDefinitionExpr::Expr { .. } => {
-                            // No need to do anything for expressions here, since they aren't
-                            // associated with a relation (and thus have
-                            // no QGN) XXX(malte): don't drop
-                            // aggregation columns
-                            None
-                        }
+                        })
                     })
-                })
-                // FIXME(eta): error handling overhead
-                .collect::<ReadySetResult<Vec<_>>>()?
-                .into_iter()
-                .flatten()
-                .collect(),
-            parameters: Vec::new(),
-            subgraph: None,
-        })
-    };
+                    // FIXME(eta): error handling overhead
+                    .collect::<ReadySetResult<Vec<_>>>()?
+                    .into_iter()
+                    .flatten()
+                    .collect(),
+                parameters: Vec::new(),
+                subgraph: None,
+            })
+        };
 
     // Used later on to determine whether to classify predicates as "join predicates" or not
     let mut inner_join_rels = HashSet::new();
@@ -1185,26 +1181,21 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
         //    implementing the query (unlike in a traditional query plan, where the predicates on
         //    parameters might be evaluated sooner).
         for param in query_parameters.into_iter() {
-            match param.col.table {
-                None => {
-                    unsupported!("each parameter's column must have an associated table! (no such column \"{}\")", param.col);
+            if let Some(table) = &param.col.table {
+                let rel = relations.get_mut(table).ok_or_else(|| {
+                    invalid_err!(
+                        "Column {} references non-existent table {}",
+                        param.col.name,
+                        table
+                    )
+                })?;
+                if !rel.columns.contains(&param.col) {
+                    rel.columns.push(param.col.clone());
                 }
-                Some(ref table) => {
-                    let rel = relations.get_mut(table).ok_or_else(|| {
-                        invalid_err!(
-                            "Column {} references non-existent table {}",
-                            param.col.name,
-                            table
-                        )
-                    })?;
-                    if !rel.columns.contains(&param.col) {
-                        rel.columns.push(param.col.clone());
-                    }
-                    // the parameter column is included in the projected columns of the output, but
-                    // we also separately register it as a parameter so that we can set keys
-                    // correctly on the leaf view
-                    rel.parameters.push(param.clone());
-                }
+                // the parameter column is included in the projected columns of the output, but
+                // we also separately register it as a parameter so that we can set keys
+                // correctly on the leaf view
+                rel.parameters.push(param.clone());
             }
         }
     }

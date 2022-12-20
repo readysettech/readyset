@@ -28,7 +28,7 @@ use dataflow::{
 use futures::StreamExt;
 use itertools::Itertools;
 use launchpad::eventually;
-use nom_sql::{parse_query, OrderType, Relation, SqlQuery};
+use nom_sql::{parse_create_cache, parse_create_view, parse_query, OrderType, Relation, SqlQuery};
 use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use readyset_client::consistency::Timestamp;
 use readyset_client::internal::LocalNodeIndex;
@@ -3503,13 +3503,7 @@ async fn finkelstein1982_queries() {
                     inc.add_table(stmt.table, stmt.body.unwrap(), mig).unwrap();
                 }
                 SqlQuery::Select(stmt) => {
-                    inc.add_query(
-                        None,
-                        inc.rewrite(stmt, &[], Dialect::DEFAULT_MYSQL, None)
-                            .unwrap(),
-                        mig,
-                    )
-                    .unwrap();
+                    inc.add_query(None, stmt, false, &[], mig).unwrap();
                 }
                 _ => panic!("unexpected query type"),
             }
@@ -8556,4 +8550,55 @@ async fn cascade_drop_view() {
     g.table("t2").await.unwrap();
     g.table("t3").await.unwrap();
     g.view("q").await.unwrap_err();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn views_out_of_order() {
+    let mut g = start_simple_unsharded("cascade_drop_view").await;
+    g.extend_recipe(
+        ChangeList::from_str("CREATE TABLE t1 (x int);", Dialect::DEFAULT_MYSQL).unwrap(),
+    )
+    .await
+    .unwrap();
+
+    // two views, one of which references the other, migrated out of order (with the referencing
+    // view added before the referenced view)
+    g.extend_recipe(ChangeList::from_change(
+        Change::CreateView(
+            parse_create_view(
+                nom_sql::Dialect::MySQL,
+                "CREATE VIEW v2 AS SELECT x FROM v1",
+            )
+            .unwrap(),
+        ),
+        Dialect::DEFAULT_MYSQL,
+    ))
+    .await
+    .unwrap();
+
+    g.extend_recipe(ChangeList::from_change(
+        Change::CreateView(
+            parse_create_view(
+                nom_sql::Dialect::MySQL,
+                "CREATE VIEW v1 AS SELECT x FROM t1",
+            )
+            .unwrap(),
+        ),
+        Dialect::DEFAULT_MYSQL,
+    ))
+    .await
+    .unwrap();
+
+    g.extend_recipe(ChangeList::from_change(
+        Change::CreateCache(
+            parse_create_cache(
+                nom_sql::Dialect::MySQL,
+                "CREATE CACHE q FROM SELECT x FROM v2",
+            )
+            .unwrap(),
+        ),
+        Dialect::DEFAULT_MYSQL,
+    ))
+    .await
+    .unwrap();
 }

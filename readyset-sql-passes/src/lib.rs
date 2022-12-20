@@ -166,6 +166,30 @@ impl Rewrite for SelectStatement {
     }
 }
 
+impl Rewrite for CompoundSelectStatement {
+    fn rewrite(self, context: &mut RewriteContext) -> ReadySetResult<Self> {
+        Ok(CompoundSelectStatement {
+            selects: self
+                .selects
+                .into_iter()
+                .map(|(op, sq)| Ok((op, sq.rewrite(context)?)))
+                .collect::<ReadySetResult<_>>()?,
+            ..self
+        })
+    }
+}
+
+impl Rewrite for SelectSpecification {
+    fn rewrite(self, context: &mut RewriteContext) -> ReadySetResult<Self> {
+        Ok(match self {
+            SelectSpecification::Compound(csq) => {
+                SelectSpecification::Compound(csq.rewrite(context)?)
+            }
+            SelectSpecification::Simple(sq) => SelectSpecification::Simple(sq.rewrite(context)?),
+        })
+    }
+}
+
 impl Rewrite for CreateViewStatement {
     fn rewrite(mut self, context: &mut RewriteContext) -> ReadySetResult<Self> {
         if self.name.schema.is_none() {
@@ -176,21 +200,7 @@ impl Rewrite for CreateViewStatement {
 
         Ok(Self {
             definition: match self.definition {
-                Ok(def) => Ok(Box::new(match *def {
-                    SelectSpecification::Compound(cqs) => {
-                        SelectSpecification::Compound(CompoundSelectStatement {
-                            selects: cqs
-                                .selects
-                                .into_iter()
-                                .map(|(op, sq)| Ok((op, sq.rewrite(context)?)))
-                                .collect::<ReadySetResult<_>>()?,
-                            ..cqs
-                        })
-                    }
-                    SelectSpecification::Simple(sq) => {
-                        SelectSpecification::Simple(sq.rewrite(context)?)
-                    }
-                })),
+                Ok(def) => Ok(Box::new(def.rewrite(context)?)),
                 Err(unparsed) => Err(unparsed),
             },
             ..self
