@@ -229,13 +229,13 @@ impl SqlToMirConverter {
         op: CompoundSelectOperator,
         order: &Option<OrderClause>,
         limit_clause: &LimitClause,
-        has_leaf: bool,
+        leaf_behavior: LeafBehavior,
     ) -> ReadySetResult<NodeIndex> {
         let has_limit = matches!(
             limit_clause,
             LimitClause::OffsetCommaLimit { .. } | LimitClause::LimitOffset { limit: Some(_), .. }
         );
-        let name = if !has_leaf && !has_limit {
+        let name = if !leaf_behavior.should_register() && !has_limit {
             query_name.clone()
         } else {
             format!("{}_union", query_name).into()
@@ -252,7 +252,7 @@ impl SqlToMirConverter {
 
         if let Some((limit, offset)) = extract_limit_offset(limit_clause)? {
             let make_topk = offset.is_none();
-            let paginate_name = if has_leaf {
+            let paginate_name = if leaf_behavior.should_register() {
                 if make_topk {
                     format!("{}_topk", query_name)
                 } else {
@@ -299,7 +299,7 @@ impl SqlToMirConverter {
         }
 
         let mut alias_table_node = MirNode::new(
-            if has_leaf {
+            if leaf_behavior.should_register() {
                 format!("{}_alias_table", query_name).into()
             } else {
                 query_name.clone()
@@ -313,7 +313,7 @@ impl SqlToMirConverter {
         self.mir_graph.add_edge(final_node, alias_table, 0);
 
         // TODO: Initialize leaf with ordering?
-        let leaf_node = if has_leaf {
+        let leaf_node = if leaf_behavior.should_make_leaf() {
             self.add_query_node(
                 query_name.clone(),
                 MirNode::new(
@@ -329,7 +329,9 @@ impl SqlToMirConverter {
         } else {
             alias_table
         };
-        self.relations.insert(query_name.clone(), leaf_node);
+        if leaf_behavior.should_register() {
+            self.relations.insert(query_name.clone(), leaf_node);
+        }
 
         Ok(leaf_node)
     }

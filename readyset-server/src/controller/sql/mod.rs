@@ -517,8 +517,12 @@ impl SqlIncorporator {
     ) -> ReadySetResult<()> {
         match definition {
             SelectSpecification::Compound(query) => {
-                let mir_leaf =
-                    self.add_compound_query(name.clone(), query, /* is_leaf = */ true, mig)?;
+                let mir_leaf = self.add_compound_query(
+                    name.clone(),
+                    query,
+                    LeafBehavior::NamedWithoutLeaf,
+                    mig,
+                )?;
                 self.mir_to_dataflow(name.clone(), mir_leaf, mig)?;
             }
             SelectSpecification::Simple(query) => {
@@ -853,7 +857,7 @@ impl SqlIncorporator {
         &mut self,
         query_name: Relation,
         query: CompoundSelectStatement,
-        is_leaf: bool,
+        leaf_behavior: LeafBehavior,
         mig: &mut Migration<'_>,
     ) -> Result<MirNodeIndex, ReadySetError> {
         let mut subqueries = Vec::new();
@@ -869,7 +873,7 @@ impl SqlIncorporator {
             CompoundSelectOperator::Union,
             &query.order,
             &query.limit_clause,
-            is_leaf,
+            leaf_behavior,
         )?;
 
         Ok(mir_leaf)
