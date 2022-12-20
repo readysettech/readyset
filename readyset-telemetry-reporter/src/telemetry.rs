@@ -69,6 +69,7 @@ pub enum DeploymentEnv {
     Helm,
     QuickstartDocker,
     QuickstartInstruqt,
+    TutorialDocker,
 }
 
 impl From<String> for DeploymentEnv {
