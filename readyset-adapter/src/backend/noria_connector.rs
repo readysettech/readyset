@@ -1740,7 +1740,26 @@ fn build_view_query(
                                     ),
                                 }
                             } else {
-                                if !k.is_empty() && binop_to_use != BinaryOperator::Equal {
+                                // We need to additionally filter post-lookup for certain compound
+                                // ranges, since we always sort keys lexicographically within the
+                                // reader map. This is the case for...
+                                if (
+                                    // All keys within open (exclusive) ranges (consider eg:
+                                    //     (1, 2) > (1, 1)
+                                    //     even though
+                                    //     NOT (1 > 1 && 2 > 1)
+                                    // )
+                                    matches!(
+                                        binop_to_use,
+                                        BinaryOperator::Less | BinaryOperator::Greater
+                                    )
+                                        // As long as the range is actually compound
+                                        && key_map.len() > 1
+                                ) || (
+                                    // Or all other range keys beyond the *first* key within a
+                                    // compound range
+                                    binop_to_use != BinaryOperator::Equal && !k.is_empty()
+                                ) {
                                     filters.push(make_op(DfBinaryOperator::from_sql_op(
                                         binop_to_use,
                                         dialect,
@@ -2203,9 +2222,62 @@ mod tests {
         }
 
         #[test]
-        fn compound_range() {
+        fn compound_range_open() {
             let query = make_build_query(
                 "SELECT t.x FROM t WHERE t.x > $1 AND t.y > $2",
+                &[
+                    (ViewPlaceholder::OneToOne(1), 0),
+                    (ViewPlaceholder::OneToOne(2), 1),
+                ],
+                &[DfValue::from(1), DfValue::from("a")],
+                Dialect::MySQL,
+            );
+
+            assert_eq!(
+                query.filter,
+                Some(DfExpr::Op {
+                    left: Box::new(DfExpr::Op {
+                        left: Box::new(DfExpr::Column {
+                            index: 0,
+                            ty: DfType::Int
+                        }),
+                        op: DfBinaryOperator::Greater,
+                        right: Box::new(DfExpr::Literal {
+                            val: 1.into(),
+                            ty: DfType::Int
+                        }),
+                        ty: DfType::Bool
+                    }),
+                    op: DfBinaryOperator::And,
+                    right: Box::new(DfExpr::Op {
+                        left: Box::new(DfExpr::Column {
+                            index: 1,
+                            ty: DfType::DEFAULT_TEXT
+                        }),
+                        op: DfBinaryOperator::Greater,
+                        right: Box::new(DfExpr::Literal {
+                            val: "a".into(),
+                            ty: DfType::DEFAULT_TEXT
+                        }),
+                        ty: DfType::Bool
+                    }),
+                    ty: DfType::Bool
+                })
+            );
+
+            assert_eq!(
+                query.key_comparisons,
+                vec![KeyComparison::Range((
+                    Bound::Excluded(vec1![DfValue::from(1), DfValue::from("a")]),
+                    Bound::Unbounded
+                ))]
+            );
+        }
+
+        #[test]
+        fn compound_range_closed() {
+            let query = make_build_query(
+                "SELECT t.x FROM t WHERE t.x >= $1 AND t.y >= $2",
                 &[
                     (ViewPlaceholder::OneToOne(1), 0),
                     (ViewPlaceholder::OneToOne(2), 1),
@@ -2221,7 +2293,7 @@ mod tests {
                         index: 1,
                         ty: DfType::DEFAULT_TEXT
                     }),
-                    op: DfBinaryOperator::Greater,
+                    op: DfBinaryOperator::GreaterOrEqual,
                     right: Box::new(DfExpr::Literal {
                         val: "a".into(),
                         ty: DfType::DEFAULT_TEXT
@@ -2233,7 +2305,7 @@ mod tests {
             assert_eq!(
                 query.key_comparisons,
                 vec![KeyComparison::Range((
-                    Bound::Excluded(vec1![DfValue::from(1), DfValue::from("a")]),
+                    Bound::Included(vec1![DfValue::from(1), DfValue::from("a")]),
                     Bound::Unbounded
                 ))]
             );

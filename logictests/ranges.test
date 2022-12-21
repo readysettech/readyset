@@ -26,3 +26,16 @@ select x from t1 where x >= ? and y >= ?;
 1
 3
 4
+
+query I valuesort
+select x from t1 where x > ? and y > ?
+? = 2
+? = 4
+----
+4
+
+query I valuesort
+select x from t1 where x > ? and y > ?
+? = 4
+? = 4
+----
