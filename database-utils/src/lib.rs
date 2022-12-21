@@ -253,8 +253,65 @@ impl DatabaseURL {
                 let connector = native_tls::TlsConnector::builder().build().unwrap(); // Never returns an error
                 let tls = postgres_native_tls::MakeTlsConnector::new(connector);
                 let (client, connection) = config.connect(tls).await?;
-                tokio::spawn(connection);
-                Ok(DatabaseConnection::PostgreSQL(client))
+                let connection_handle =
+                    tokio::spawn(async move { connection.await.map_err(Into::into) });
+                Ok(DatabaseConnection::PostgreSQL(client, connection_handle))
+            }
+        }
+    }
+
+    /// Does test initialization by dropping the schema/database and recreating it before connecting
+    #[cfg(test)]
+    pub async fn init_and_connect(&self) -> Result<DatabaseConnection, DatabaseError<!>> {
+        match self {
+            DatabaseURL::MySQL(opts) => {
+                {
+                    let test_db_name = opts.db_name().unwrap();
+                    let no_db_opts =
+                        mysql_async::OptsBuilder::from_opts(opts.clone()).db_name::<String>(None);
+                    // First, connect without a db to do setup
+                    let mut client = mysql_async::Conn::new(no_db_opts).await?;
+
+                    // Then drop and recreate the test db
+                    client
+                        .query_drop(format!("DROP SCHEMA IF EXISTS {test_db_name};"))
+                        .await?;
+                    client
+                        .query_drop(format!("CREATE SCHEMA {test_db_name};"))
+                        .await?;
+
+                    // Then switch to the test db
+                    client.query_drop(format!("USE {test_db_name};")).await?;
+                }
+
+                Ok(DatabaseConnection::MySQL(
+                    mysql::Conn::new(opts.clone()).await?,
+                ))
+            }
+            DatabaseURL::PostgreSQL(config) => {
+                let connector = native_tls::TlsConnector::builder().build().unwrap(); // Never returns an error
+                let tls = postgres_native_tls::MakeTlsConnector::new(connector);
+                // Drop and recreate the test db
+                {
+                    let test_db_name = config.get_dbname().unwrap();
+                    let mut no_db_config = config.clone();
+                    no_db_config.dbname("postgres");
+                    let (no_db_client, conn) = no_db_config.connect(tokio_postgres::NoTls).await?;
+                    let jh = tokio::spawn(conn);
+                    no_db_client
+                        .simple_query(&format!("DROP SCHEMA IF EXISTS {test_db_name} CASCADE"))
+                        .await?;
+                    no_db_client
+                        .simple_query(&format!("CREATE SCHEMA {test_db_name}"))
+                        .await?;
+                    jh.abort();
+                    let _ = jh.await;
+                }
+
+                let (client, connection) = config.connect(tls).await?;
+                let connection_handle =
+                    tokio::spawn(async move { connection.await.map_err(Into::into) });
+                Ok(DatabaseConnection::PostgreSQL(client, connection_handle))
             }
         }
     }
@@ -326,7 +383,10 @@ pub enum DatabaseConnection {
     /// A MySQL database connection.
     MySQL(mysql_async::Conn),
     /// A PostgreSQL database connection.
-    PostgreSQL(pgsql::Client),
+    PostgreSQL(
+        tokio_postgres::Client,
+        tokio::task::JoinHandle<Result<(), ReadySetError>>,
+    ),
 }
 
 async fn convert_mysql_results<'a, 't, P, V>(
@@ -377,7 +437,7 @@ impl DatabaseConnection {
     {
         match self {
             DatabaseConnection::MySQL(conn) => Ok(conn.query_drop(stmt).await?),
-            DatabaseConnection::PostgreSQL(client) => {
+            DatabaseConnection::PostgreSQL(client, _jh) => {
                 client.simple_query(stmt.as_ref()).await?;
                 Ok(())
             }
@@ -397,7 +457,7 @@ impl DatabaseConnection {
             DatabaseConnection::MySQL(conn) => {
                 convert_mysql_results(conn.query_iter(query).await?).await
             }
-            DatabaseConnection::PostgreSQL(client) => {
+            DatabaseConnection::PostgreSQL(client, _jh) => {
                 // TODO: We should use simple_query here instead, because query_raw will still
                 // prepare. simple_query returns a different result type, so may take some work to
                 // get it work properly here.
@@ -416,7 +476,7 @@ impl DatabaseConnection {
     {
         match self {
             DatabaseConnection::MySQL(conn) => Ok(conn.prep(query).await?.into()),
-            DatabaseConnection::PostgreSQL(client) => {
+            DatabaseConnection::PostgreSQL(client, _jh) => {
                 Ok(client.prepare(query.as_ref()).await?.into())
             }
         }
@@ -481,7 +541,7 @@ impl DatabaseConnection {
             DatabaseConnection::MySQL(conn) => {
                 convert_mysql_results(conn.exec_iter(stmt, params).await?).await
             }
-            DatabaseConnection::PostgreSQL(client) => {
+            DatabaseConnection::PostgreSQL(client, _jh) => {
                 convert_pgsql_results(client.query_raw(stmt, params).await?)
                     .await
                     .map_err(DatabaseError::PostgreSQL)
@@ -498,7 +558,7 @@ impl DatabaseConnection {
     }
 
     fn as_postgres_conn(&mut self) -> Option<&mut tokio_postgres::Client> {
-        if let DatabaseConnection::PostgreSQL(c) = self {
+        if let DatabaseConnection::PostgreSQL(c, _jh) = self {
             Some(c)
         } else {
             None
