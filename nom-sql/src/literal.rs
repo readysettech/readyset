@@ -13,16 +13,17 @@ use launchpad::arbitrary::{
 };
 use nom::branch::alt;
 use nom::bytes::complete::{is_not, tag, tag_no_case, take};
-use nom::character::complete::digit1;
-use nom::combinator::{map, map_parser, map_res, opt, peek, recognize};
+use nom::character::complete::{digit1, satisfy};
+use nom::combinator::{map, map_parser, map_res, not, opt, peek, recognize};
 use nom::multi::fold_many0;
-use nom::sequence::{delimited, pair, preceded, tuple};
+use nom::sequence::{delimited, pair, preceded, terminated, tuple};
 use nom_locate::LocatedSpan;
 use proptest::strategy::Strategy;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
+use crate::dialect::is_sql_identifier;
 use crate::{Dialect, NomSqlResult, SqlType};
 
 #[derive(Clone, Debug, PartialOrd, Serialize, Deserialize, Arbitrary)]
@@ -459,7 +460,15 @@ fn simple_literal(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResu
             map(dialect.bitvec_literal(), |bits| {
                 Literal::BitVector(bits.to_bytes())
             }),
-            map(tag_no_case("null"), |_| Literal::Null),
+            map(
+                terminated(
+                    tag_no_case("null"),
+                    // Don't parse `null` if it's a prefix of a larger identifier, to allow eg
+                    // columns starting with the word "null"
+                    not(peek(satisfy(|c| is_sql_identifier(c as _)))),
+                ),
+                |_| Literal::Null,
+            ),
         ))(i)
     }
 }

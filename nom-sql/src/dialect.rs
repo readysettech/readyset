@@ -20,7 +20,7 @@ use crate::whitespace::whitespace0;
 use crate::{literal, NomSqlError, NomSqlResult, SqlIdentifier};
 
 #[inline]
-fn is_sql_identifier(chr: u8) -> bool {
+pub(crate) fn is_sql_identifier(chr: u8) -> bool {
     is_alphanumeric(chr) || chr == b'_'
 }
 

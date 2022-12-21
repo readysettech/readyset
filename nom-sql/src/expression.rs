@@ -2046,6 +2046,18 @@ mod tests {
     mod mysql {
         use super::*;
 
+        #[test]
+        fn column_beginning_with_null() {
+            let res = test_parse!(expression(Dialect::MySQL), b"nullable");
+            assert_eq!(
+                res,
+                Expr::Column(Column {
+                    name: "nullable".into(),
+                    table: None
+                })
+            );
+        }
+
         mod precedence {
             use super::tests::precedence::parses_same;
             use crate::Dialect;
@@ -2197,6 +2209,18 @@ mod tests {
 
     mod postgres {
         use super::*;
+
+        #[test]
+        fn column_beginning_with_null() {
+            let res = test_parse!(expression(Dialect::PostgreSQL), b"nullable");
+            assert_eq!(
+                res,
+                Expr::Column(Column {
+                    name: "nullable".into(),
+                    table: None
+                })
+            );
+        }
 
         mod precedence {
             use super::tests::precedence::parses_same;
