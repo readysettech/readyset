@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use ::readyset_client::metrics::{recorded, DumpedMetricValue};
 use ::readyset_client::query::QueryId;
 use ::readyset_client::{get_metric, ViewCreateRequest};
@@ -1557,6 +1555,43 @@ async fn views_synchronize_between_deployments() {
         adapter_1.as_mysql_conn().unwrap().query_drop("SELECT * FROM t1;");
         last_statement_destination(adapter_1.as_mysql_conn().unwrap()).await == QueryDestination::Readyset
     }
+
+    deployment.teardown().await.unwrap();
+}
+
+#[clustertest]
+async fn standalone_create_table_insert_test() {
+    readyset_tracing::init_test_logging();
+    let mut deployment = readyset_mysql("ct_standalone_create_table_insert")
+        .standalone()
+        .start()
+        .await
+        .unwrap();
+
+    let mut adapter = deployment.first_adapter().await;
+    adapter
+        .query_drop(
+            r"CREATE TABLE t1 (
+        uid INT NOT NULL,
+        value INT NOT NULL
+    );",
+        )
+        .await
+        .unwrap();
+    adapter
+        .query_drop(r"INSERT INTO t1 VALUES (1, 4);")
+        .await
+        .unwrap();
+
+    assert!(
+        query_until_expected(
+            &mut adapter,
+            QueryExecution::PrepareExecute("SELECT * FROM t1", ()),
+            &EventuallyConsistentResults::empty_or(&[(1, 4)]),
+            PROPAGATION_DELAY_TIMEOUT,
+        )
+        .await
+    );
 
     deployment.teardown().await.unwrap();
 }

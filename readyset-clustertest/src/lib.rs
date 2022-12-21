@@ -423,6 +423,8 @@ pub struct DeploymentBuilder {
     wait_for_failpoint: FailpointDestination,
     /// Type of the upstream database (mysql or postgresql)
     database_type: DatabaseType,
+    /// If true, run the adapter in standalone mode, using the default [`ServerStartParams`]
+    standalone: bool,
 }
 
 pub enum FailpointDestination {
@@ -487,6 +489,7 @@ impl DeploymentBuilder {
             auto_restart: false,
             wait_for_failpoint: FailpointDestination::None,
             database_type,
+            standalone: false,
         }
     }
 
@@ -532,6 +535,12 @@ impl DeploymentBuilder {
     /// This will overwrite any previous call to [`Self::deploy_adapter`]
     pub fn with_adapters(mut self, num_adapters: usize) -> Self {
         self.adapters = num_adapters;
+        self
+    }
+
+    /// Run the adapter(s) in standalone mode with the default ServerStartParams
+    pub fn standalone(mut self) -> Self {
+        self.standalone = true;
         self
     }
 
@@ -678,6 +687,20 @@ impl DeploymentBuilder {
         Q: AsRef<str> + Send + Sync + 'a,
     {
         readyset_tracing::init_test_logging();
+        if self.standalone {
+            debug_assert!(
+                self.adapters == 1 && self.servers.is_empty(),
+                "Standalone mode should only have 1 adapter and no servers for any current use case.
+                 If this is no longer true, remove or adjust this assert."
+            );
+            // HACK: Since the clustertests spawn a process but also want a handle into the
+            // controller, we use Consul as the authority even for standalone mode.
+            debug_assert!(
+                self.authority == AuthorityType::Consul,
+                "Standalone mode is only supported with AuthorityType::Consul"
+            );
+        }
+
         let mut port = get_next_good_port(None);
         // If this deployment includes binlog replication and a mysql instance.
         let mut upstream_addr = None;
@@ -737,19 +760,20 @@ impl DeploymentBuilder {
             .await;
         let handle = ReadySetHandle::new(authority).await;
 
-        // Duplicate the authority and handle creation as the metrics client
-        // owns its own handle.
-        let metrics_authority = self
-            .authority
-            .to_authority(&self.authority_address, &self.name)
-            .await;
-        let metrics_handle = ReadySetHandle::new(metrics_authority).await;
-        let metrics = MetricsClient::new(metrics_handle).unwrap();
+        let metrics = MetricsClient::new(handle.clone()).unwrap();
 
         // Start `self.adapters` adapter instances.
         let mut adapters = Vec::with_capacity(self.adapters);
         for _ in 0..self.adapters {
-            port = get_next_good_port(Some(port));
+            // If we are running in standalone, we need to pass both adapter and server parameters.
+            let standalone_params = match self.standalone {
+                true => Some(StandaloneParams {
+                    server_start_params: self.server_start_params().clone(),
+                    server_params: ServerParams::default(),
+                }),
+                false => None,
+            };
+            let port = get_next_good_port(Some(port));
             let metrics_port = get_next_good_port(Some(port));
             let process = start_adapter(
                 server_upstream.clone(),
@@ -757,6 +781,7 @@ impl DeploymentBuilder {
                 metrics_port,
                 &self.adapter_start_params(),
                 self.database_type,
+                standalone_params,
             )
             .await?;
 
@@ -784,6 +809,7 @@ impl DeploymentBuilder {
             port,
             adapters,
             database_type: self.database_type,
+            standalone: self.standalone,
         };
 
         // Skip waiting for workers/backend if we don't have any servers as part of this deployment
@@ -1028,6 +1054,8 @@ pub struct DeploymentHandle {
     port: u16,
     /// The type of the upstream (MySQL or PostgresSQL)
     database_type: DatabaseType,
+    /// True if the adapter is running in standalone mode
+    standalone: bool,
 }
 
 impl DeploymentHandle {
@@ -1173,12 +1201,21 @@ impl DeploymentHandle {
         let metrics_port = get_next_good_port(Some(port));
         self.port = port;
         let database_type = self.database_type;
+        // If we are running in standalone, we need to pass both adapter and server parameters.
+        let standalone_params = match self.standalone {
+            true => Some(StandaloneParams {
+                server_start_params: self.server_start_params().clone(),
+                server_params: ServerParams::default(),
+            }),
+            false => None,
+        };
         let process = start_adapter(
             self.upstream_addr.clone(),
             port,
             metrics_port,
             self.adapter_start_params(),
             database_type,
+            standalone_params,
         )
         .await?;
 
@@ -1376,7 +1413,7 @@ pub struct AdapterStartParams {
 
 async fn start_server(
     port: u16,
-    mysql: Option<&String>,
+    upstream_addr: Option<&String>,
     server_params: &ServerParams,
     server_start_params: &ServerStartParams,
 ) -> Result<ServerHandle> {
@@ -1401,8 +1438,8 @@ async fn start_server(
     if server_params.no_readers {
         builder = builder.no_readers();
     }
-    if let Some(mysql) = mysql {
-        builder = builder.mysql(mysql);
+    if let Some(upstream_addr) = upstream_addr {
+        builder = builder.upstream_addr(upstream_addr);
     }
     if let Some(t) = server_start_params.replicator_restart_timeout_secs {
         builder = builder.replicator_restart_timeout(t);
@@ -1421,12 +1458,18 @@ async fn start_server(
     })
 }
 
+struct StandaloneParams {
+    server_start_params: ServerStartParams,
+    server_params: ServerParams,
+}
+
 async fn start_adapter(
-    server_upstream: Option<String>,
+    server_upstream_addr: Option<String>,
     port: u16,
     metrics_port: u16,
     params: &AdapterStartParams,
     database_type: DatabaseType,
+    standalone_params: Option<StandaloneParams>,
 ) -> Result<ProcessHandle> {
     let mut builder = AdapterBuilder::new(params.readyset_path.as_ref(), database_type)
         .deployment(&params.deployment_name)
@@ -1436,6 +1479,37 @@ async fn start_adapter(
         .authority(params.authority_type.as_str())
         .auto_restart(params.auto_restart)
         .views_polling_interval(params.views_polling_interval);
+
+    // Standalone mode passes in server params as well
+    if let Some(standalone_params) = standalone_params {
+        let StandaloneParams {
+            server_start_params,
+            server_params,
+        } = standalone_params;
+        builder = builder.quorum(server_start_params.quorum);
+
+        builder = builder.standalone();
+
+        if let Some(shard) = server_start_params.shards {
+            builder = builder.shards(shard);
+        }
+
+        if let Some(volume) = server_params.volume_id.as_ref() {
+            builder = builder.volume_id(volume);
+        }
+        if server_params.reader_only {
+            builder = builder.reader_only();
+        }
+        if server_params.no_readers {
+            builder = builder.no_readers();
+        }
+        if let Some(t) = server_start_params.replicator_restart_timeout_secs {
+            builder = builder.replicator_restart_timeout(t);
+        }
+        if let Some(rs) = server_start_params.reader_replicas {
+            builder = builder.reader_replicas(rs);
+        }
+    }
 
     if let Some(interval) = params.async_migration_interval {
         builder = builder.async_migrations(interval);
@@ -1453,8 +1527,8 @@ async fn start_adapter(
         builder = builder.fallback_recovery_seconds(secs);
     }
 
-    if let Some(ref mysql) = server_upstream {
-        builder = builder.mysql(mysql);
+    if let Some(upstream_addr) = server_upstream_addr {
+        builder = builder.upstream_addr(&upstream_addr);
     }
 
     if params.wait_for_failpoint {

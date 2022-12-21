@@ -234,7 +234,7 @@ pub enum Authority {
 }
 
 /// Enum that mirrors Authority that parses command line arguments.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AuthorityType {
     Zookeeper,
     Consul,

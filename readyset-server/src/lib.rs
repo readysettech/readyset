@@ -427,6 +427,7 @@ mod integration;
 mod integration_serial;
 #[cfg(test)]
 mod integration_utils;
+
 pub mod metrics;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

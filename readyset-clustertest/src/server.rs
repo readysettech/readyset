@@ -169,7 +169,7 @@ impl ReadysetServerBuilder {
         self.push_arg_kv("--external-port", &external_port.to_string())
     }
 
-    pub fn mysql(self, addr: &str) -> Self {
+    pub fn upstream_addr(self, addr: &str) -> Self {
         self.push_arg_kv("--upstream-db-url", addr)
     }
 
@@ -228,71 +228,105 @@ impl AdapterBuilder {
         .await
     }
 
-    fn push_arg(mut self, arg_name: &str, arg_value: &str) -> Self {
+    fn push_arg(mut self, arg: &str) -> Self {
+        self.args.push(arg.to_string());
+        self
+    }
+
+    fn push_arg_kv(mut self, arg_name: &str, arg_value: &str) -> Self {
         self.args.push(arg_name.to_string());
         self.args.push(arg_value.to_string());
         self
     }
 
     pub fn authority_addr(self, authority_addr: &str) -> Self {
-        self.push_arg("--authority-address", authority_addr)
+        self.push_arg_kv("--authority-address", authority_addr)
     }
 
     pub fn authority(self, authority: &str) -> Self {
-        self.push_arg("--authority", authority)
+        self.push_arg_kv("--authority", authority)
     }
 
     pub fn deployment(self, deployment: &str) -> Self {
-        self.push_arg("--deployment", deployment)
+        self.push_arg_kv("--deployment", deployment)
     }
 
     pub fn port(self, port: u16) -> Self {
-        self.push_arg("-a", &format!("127.0.0.1:{}", port))
+        self.push_arg_kv("-a", &format!("127.0.0.1:{}", port))
     }
 
     pub fn metrics_port(self, port: u16) -> Self {
-        self.push_arg("--metrics-address", &format!("0.0.0.0:{}", port))
+        self.push_arg_kv("--metrics-address", &format!("0.0.0.0:{}", port))
     }
 
-    pub fn mysql(self, addr: &str) -> Self {
-        self.push_arg("--upstream-db-url", addr)
+    pub fn quorum(self, quorum: usize) -> Self {
+        self.push_arg_kv("--quorum", &quorum.to_string())
     }
 
-    pub fn async_migrations(mut self, migration_task_interval: u64) -> Self {
-        self.args.push("--query-caching=async".to_string());
-        self.push_arg(
+    pub fn standalone(self) -> Self {
+        self.push_arg("--standalone")
+    }
+
+    pub fn async_migrations(self, migration_task_interval: u64) -> Self {
+        self.push_arg("--query-caching=async").push_arg_kv(
             "--migration-task-interval",
             &migration_task_interval.to_string(),
         )
     }
 
-    pub fn explicit_migrations(mut self, dry_run_task_interval: u64) -> Self {
-        self.args.push("--query-caching=explicit".to_string());
-        self.push_arg(
+    pub fn explicit_migrations(self, dry_run_task_interval: u64) -> Self {
+        self.push_arg("--query-caching=explicit").push_arg_kv(
             "--migration-task-interval",
             &dry_run_task_interval.to_string(),
         )
     }
 
-    pub fn wait_for_failpoint(mut self) -> Self {
-        self.args.push("--wait-for-failpoint".to_string());
-        self
+    pub fn wait_for_failpoint(self) -> Self {
+        self.push_arg("--wait-for-failpoint")
     }
 
     pub fn query_max_failure_seconds(self, secs: u64) -> Self {
-        self.push_arg("--query-max-failure-seconds", &secs.to_string())
+        self.push_arg_kv("--query-max-failure-seconds", &secs.to_string())
     }
 
     pub fn fallback_recovery_seconds(self, secs: u64) -> Self {
-        self.push_arg("--fallback-recovery-seconds", &secs.to_string())
+        self.push_arg_kv("--fallback-recovery-seconds", &secs.to_string())
     }
 
     pub fn views_polling_interval(self, duration: Duration) -> Self {
-        self.push_arg("--views-polling-interval", &duration.as_secs().to_string())
+        self.push_arg_kv("--views-polling-interval", &duration.as_secs().to_string())
     }
 
     pub fn auto_restart(mut self, auto_restart: bool) -> Self {
         self.auto_restart = auto_restart;
         self
+    }
+
+    pub fn volume_id(self, id: &str) -> Self {
+        self.push_arg_kv("--volume-id", id)
+    }
+
+    pub fn reader_only(self) -> Self {
+        self.push_arg("--reader-only")
+    }
+
+    pub fn no_readers(self) -> Self {
+        self.push_arg("--no-readers")
+    }
+
+    pub fn shards(self, shards: usize) -> Self {
+        self.push_arg_kv("--shards", &shards.to_string())
+    }
+
+    pub fn upstream_addr(self, addr: &str) -> Self {
+        self.push_arg_kv("--upstream-db-url", addr)
+    }
+
+    pub fn replicator_restart_timeout(self, timeout: u64) -> Self {
+        self.push_arg_kv("--replicator-restart-timeout", &timeout.to_string())
+    }
+
+    pub fn reader_replicas(self, num_replicas: usize) -> Self {
+        self.push_arg_kv("--reader-replicas", &num_replicas.to_string())
     }
 }
