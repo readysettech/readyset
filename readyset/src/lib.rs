@@ -1188,7 +1188,7 @@ async fn reconcile_endpoint_registration(
         match authority.register_adapter(http_endpoint).await {
             Ok(id) => {
                 if initializing {
-                    info!("Extablished authority connection, reducing polling interval");
+                    info!("Established authority connection, reducing polling interval");
                     // Switch to a longer polling interval after the first registration is made
                     interval = tokio::time::interval(REGISTER_HTTP_INTERVAL);
                     initializing = false;
