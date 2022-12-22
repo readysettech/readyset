@@ -302,7 +302,10 @@ impl ReadySetHandle {
             .await
             .map_err(rpc_err!(format_args!("ReadySetHandle::{}", path)))?;
 
-        Ok(bincode::deserialize(&body)?)
+        bincode::deserialize(&body)
+            .map_err(ReadySetError::from)
+            .map_err(Box::new)
+            .map_err(rpc_err!(format_args!("ReadySetHandle::{}", path)))
     }
 
     /// Enumerate all known base tables.
