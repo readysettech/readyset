@@ -245,6 +245,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "904dfeac50f3cdaba28fc6f57fdcddb75f49ed61346676a78c4ffe55877802fd"
 
 [[package]]
+name = "base64"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ea22880d78093b0cbe17c89f64a7d457941e65759157ec6cb31a31d652b05e5"
+
+[[package]]
 name = "benchmarks"
 version = "0.1.0"
 dependencies = [
@@ -734,7 +740,7 @@ version = "0.1.0"
 source = "git+https://github.com/readysettech/consulrs.git?branch=allow-disabling-rustls-tls-2#177d1a5b86584e4ac76e54c26778a87f078c1a61"
 dependencies = [
  "async-trait",
- "base64",
+ "base64 0.13.0",
  "consulrs_derive",
  "derive_builder 0.10.2",
  "http",
@@ -941,16 +947,6 @@ checksum = "57952ca27b5e3606ff4dd79b0020231aaf9d6aa76dc05fd30137538c50bd3ce8"
 dependencies = [
  "generic-array",
  "typenum",
-]
-
-[[package]]
-name = "crypto-mac"
-version = "0.11.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1d1a86f49236c215f271d40892d5fc950490551400b02ef360692c29815c714"
-dependencies = [
- "generic-array",
- "subtle",
 ]
 
 [[package]]
@@ -1942,7 +1938,7 @@ version = "7.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f19b9f54f7c7f55e31401bb647626ce0cf0f67b0004982ce815b3ee72a02aa8"
 dependencies = [
- "base64",
+ "base64 0.13.0",
  "byteorder",
  "crossbeam-channel",
  "flate2",
@@ -1990,12 +1986,11 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "hmac"
-version = "0.11.0"
+version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a2a2320eb7ec0ebe8da8f744d7812d9fc4cb4d09344ac01898dbcb6a20ae69b"
+checksum = "6c49c37c09c17a53d937dfbb742eb3a961d65a994e6bcdcf37e7399d0cc8ab5e"
 dependencies = [
- "crypto-mac",
- "digest 0.9.0",
+ "digest 0.10.3",
 ]
 
 [[package]]
@@ -2535,13 +2530,11 @@ dependencies = [
 
 [[package]]
 name = "md-5"
-version = "0.9.1"
+version = "0.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b5a279bb9607f9f53c22d496eade00d138d1bdcccd07d74650387cf94942a15"
+checksum = "66b48670c893079d3c2ed79114e3644b7004df1c361a4e0ad52e2e6940d07c3d"
 dependencies = [
- "block-buffer 0.9.0",
- "digest 0.9.0",
- "opaque-debug",
+ "digest 0.10.3",
 ]
 
 [[package]]
@@ -2876,7 +2869,7 @@ version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "24164fdbb4e4da19a37ad39f92faac0b09b3c8d8eca4104b0ec81807f39a893d"
 dependencies = [
- "base64",
+ "base64 0.13.0",
  "bigdecimal",
  "bindgen 0.58.1",
  "bitflags",
@@ -2900,7 +2893,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha1 0.6.0",
- "sha2",
+ "sha2 0.9.8",
  "smallvec",
  "subprocess",
  "thiserror",
@@ -3445,7 +3438,7 @@ version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06673860db84d02a63942fa69cd9543f2624a5df3aea7f33173048fa7ad5cf1a"
 dependencies = [
- "base64",
+ "base64 0.13.0",
  "once_cell",
  "regex",
 ]
@@ -3481,18 +3474,18 @@ dependencies = [
 
 [[package]]
 name = "phf"
-version = "0.10.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b9fc3db1018c4b59d7d582a739436478b6035138b6aecbce989fc91c3e98409f"
+checksum = "928c6535de93548188ef63bb7c4036bd415cd8f36ad25af44b9789b2ee72a48c"
 dependencies = [
  "phf_shared",
 ]
 
 [[package]]
 name = "phf_shared"
-version = "0.10.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6796ad771acdc0123d2a88dc428b5e38ef24456743ddb1744ed628f9815c096"
+checksum = "e1fb5f6f826b772a8d4c0394209441e7d37cbbb967ae9c7e0e8134365c9ee676"
 dependencies = [
  "siphasher",
 ]
@@ -3591,12 +3584,12 @@ dependencies = [
 
 [[package]]
 name = "postgres"
-version = "0.19.2"
-source = "git+https://github.com/readysettech/rust-postgres.git#79669aa5e4b54bed5dc54f3c275dbadd921be563"
+version = "0.19.4"
+source = "git+https://github.com/readysettech/rust-postgres.git?branch=new-main#42760b8a5a0dcb1bd73cfa7053d443d838ef97e5"
 dependencies = [
  "bytes 1.1.0",
  "fallible-iterator",
- "futures",
+ "futures-util",
  "log",
  "tokio",
  "tokio-postgres",
@@ -3604,8 +3597,8 @@ dependencies = [
 
 [[package]]
 name = "postgres-derive"
-version = "0.4.0"
-source = "git+https://github.com/readysettech/rust-postgres.git#79669aa5e4b54bed5dc54f3c275dbadd921be563"
+version = "0.4.3"
+source = "git+https://github.com/readysettech/rust-postgres.git?branch=new-main#42760b8a5a0dcb1bd73cfa7053d443d838ef97e5"
 dependencies = [
  "proc-macro2 1.0.47",
  "quote 1.0.21",
@@ -3615,9 +3608,8 @@ dependencies = [
 [[package]]
 name = "postgres-native-tls"
 version = "0.5.0"
-source = "git+https://github.com/readysettech/rust-postgres.git#79669aa5e4b54bed5dc54f3c275dbadd921be563"
+source = "git+https://github.com/readysettech/rust-postgres.git?branch=new-main#42760b8a5a0dcb1bd73cfa7053d443d838ef97e5"
 dependencies = [
- "futures",
  "native-tls",
  "tokio",
  "tokio-native-tls",
@@ -3626,10 +3618,10 @@ dependencies = [
 
 [[package]]
 name = "postgres-protocol"
-version = "0.6.2"
-source = "git+https://github.com/readysettech/rust-postgres.git#79669aa5e4b54bed5dc54f3c275dbadd921be563"
+version = "0.6.4"
+source = "git+https://github.com/readysettech/rust-postgres.git?branch=new-main#42760b8a5a0dcb1bd73cfa7053d443d838ef97e5"
 dependencies = [
- "base64",
+ "base64 0.20.0",
  "byteorder",
  "bytes 1.1.0",
  "fallible-iterator",
@@ -3637,14 +3629,14 @@ dependencies = [
  "md-5",
  "memchr",
  "rand 0.8.5",
- "sha2",
+ "sha2 0.10.5",
  "stringprep",
 ]
 
 [[package]]
 name = "postgres-types"
-version = "0.2.2"
-source = "git+https://github.com/readysettech/rust-postgres.git#79669aa5e4b54bed5dc54f3c275dbadd921be563"
+version = "0.2.4"
+source = "git+https://github.com/readysettech/rust-postgres.git?branch=new-main#42760b8a5a0dcb1bd73cfa7053d443d838ef97e5"
 dependencies = [
  "bit-vec",
  "bytes 1.1.0",
@@ -3816,7 +3808,7 @@ dependencies = [
  "futures",
  "hex",
  "nom-sql",
- "postgres 0.19.2 (git+https://github.com/readysettech/rust-postgres.git)",
+ "postgres 0.19.4",
  "postgres-protocol",
  "postgres-types",
  "readyset-data",
@@ -4232,7 +4224,7 @@ dependencies = [
  "async-bincode",
  "async-trait",
  "backoff",
- "base64",
+ "base64 0.13.0",
  "bincode",
  "bit-vec",
  "bufstream",
@@ -4801,7 +4793,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "backoff",
- "base64",
+ "base64 0.13.0",
  "blake2",
  "derive_builder 0.11.2",
  "hex",
@@ -5016,7 +5008,7 @@ version = "0.11.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "46a1f7aa4f35e5e8b4160449f51afc758f0ce6454315a9fa7d0d113e958c41eb"
 dependencies = [
- "base64",
+ "base64 0.13.0",
  "bytes 1.1.0",
  "encoding_rs",
  "futures-core",
@@ -5099,7 +5091,7 @@ version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4b18820d944b33caa75a71378964ac46f58517c92b6ae5f762636247c09e78fb"
 dependencies = [
- "base64",
+ "base64 0.13.0",
  "blake2b_simd",
  "constant_time_eq",
  "crossbeam-utils",
@@ -5115,7 +5107,7 @@ dependencies = [
  "byteorder",
  "bytes 1.1.0",
  "num-traits",
- "postgres 0.19.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "postgres 0.19.2",
  "serde",
  "tokio-postgres",
 ]
@@ -5500,6 +5492,17 @@ dependencies = [
  "cpufeatures",
  "digest 0.9.0",
  "opaque-debug",
+]
+
+[[package]]
+name = "sha2"
+version = "0.10.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf9db03534dff993187064c4e0c05a5708d2a9728ace9a8959b77bedf415dac5"
+dependencies = [
+ "cfg-if 1.0.0",
+ "cpufeatures",
+ "digest 0.10.3",
 ]
 
 [[package]]
@@ -6137,16 +6140,17 @@ dependencies = [
 
 [[package]]
 name = "tokio-postgres"
-version = "0.7.3"
-source = "git+https://github.com/readysettech/rust-postgres.git#79669aa5e4b54bed5dc54f3c275dbadd921be563"
+version = "0.7.7"
+source = "git+https://github.com/readysettech/rust-postgres.git?branch=new-main#42760b8a5a0dcb1bd73cfa7053d443d838ef97e5"
 dependencies = [
  "async-trait",
  "byteorder",
  "bytes 1.1.0",
  "fallible-iterator",
- "futures",
+ "futures-channel",
+ "futures-util",
  "log",
- "parking_lot 0.11.2",
+ "parking_lot 0.12.0",
  "percent-encoding",
  "phf",
  "pin-project-lite",
@@ -6154,7 +6158,7 @@ dependencies = [
  "postgres-types",
  "socket2",
  "tokio",
- "tokio-util 0.6.9",
+ "tokio-util 0.7.2",
 ]
 
 [[package]]
