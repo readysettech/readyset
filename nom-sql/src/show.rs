@@ -21,6 +21,7 @@ pub enum ShowStatement {
     ProxiedQueries(Option<QueryID>),
     ReadySetStatus,
     ReadySetVersion,
+    ReadySetTables,
 }
 
 impl fmt::Display for ShowStatement {
@@ -45,6 +46,7 @@ impl fmt::Display for ShowStatement {
             }
             Self::ReadySetStatus => write!(f, "READYSET STATUS"),
             Self::ReadySetVersion => write!(f, "READYSET VERSION"),
+            Self::ReadySetTables => write!(f, "READYSET TABLES"),
         }
     }
 }
@@ -99,6 +101,10 @@ pub fn show(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u
             value(
                 ShowStatement::ReadySetVersion,
                 tuple((tag_no_case("readyset"), whitespace1, tag_no_case("version"))),
+            ),
+            value(
+                ShowStatement::ReadySetTables,
+                tuple((tag_no_case("readyset"), whitespace1, tag_no_case("tables"))),
             ),
             map(show_tables(dialect), ShowStatement::Tables),
             value(ShowStatement::Events, tag_no_case("events")),
@@ -355,5 +361,11 @@ mod tests {
             assert_eq!(res1, ShowStatement::ReadySetVersion);
             assert_eq!(res2, ShowStatement::ReadySetVersion);
         }
+    }
+
+    #[test]
+    fn show_readyset_tables() {
+        let res = test_parse!(show(Dialect::MySQL), b"SHOW READYSET TABLES");
+        assert_eq!(res, ShowStatement::ReadySetTables);
     }
 }
