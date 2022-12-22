@@ -2,8 +2,8 @@ use std::fmt;
 
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
-use nom::combinator::{map, opt};
-use nom::sequence::tuple;
+use nom::combinator::{map, map_res, opt, value};
+use nom::sequence::{preceded, tuple};
 use nom_locate::LocatedSpan;
 use serde::{Deserialize, Serialize};
 
@@ -49,72 +49,59 @@ impl fmt::Display for ShowStatement {
     }
 }
 
+fn where_query_id(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], String> {
+    move |i| {
+        let (i, _) = tag_no_case("where")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("query_id")(i)?;
+        let (i, _) = whitespace0(i)?;
+        let (i, _) = tag_no_case("=")(i)?;
+        let (i, _) = whitespace0(i)?;
+        map_res(dialect.string_literal(), String::from_utf8)(i)
+    }
+}
+
+fn cached_queries(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ShowStatement> {
+    move |i| {
+        let (i, _) = tag_no_case("caches")(i)?;
+        let (i, q_id) = opt(preceded(whitespace1, where_query_id(dialect)))(i)?;
+
+        Ok((i, ShowStatement::CachedQueries(q_id)))
+    }
+}
+
+fn proxied_queries(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ShowStatement> {
+    move |i| {
+        let (i, _) = tag_no_case("proxied")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("queries")(i)?;
+        let (i, q_id) = opt(preceded(whitespace1, where_query_id(dialect)))(i)?;
+
+        Ok((i, ShowStatement::ProxiedQueries(q_id)))
+    }
+}
+
 pub fn show(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ShowStatement> {
     move |i| {
         let (i, _) = tag_no_case("show")(i)?;
         let (i, _) = whitespace1(i)?;
         let (i, statement) = alt((
-            //ReadySet specific show statement
-            map(
-                tuple((
-                    tag_no_case("caches"),
-                    opt(tuple((
-                        whitespace1,
-                        tag_no_case("where"),
-                        whitespace1,
-                        tag_no_case("query_id"),
-                        whitespace0,
-                        tag_no_case("="),
-                        whitespace0,
-                        dialect.string_literal(),
-                    ))),
-                )),
-                |(_, query_id)| {
-                    let q_id = if let Some((_, _, _, _, _, _, _, q_id)) = query_id {
-                        String::from_utf8(q_id).ok()
-                    } else {
-                        None
-                    };
-                    ShowStatement::CachedQueries(q_id)
-                },
+            cached_queries(dialect),
+            proxied_queries(dialect),
+            value(
+                ShowStatement::ReadySetStatus,
+                tuple((tag_no_case("readyset"), whitespace1, tag_no_case("status"))),
             ),
-            map(
-                tuple((
-                    tag_no_case("proxied"),
-                    whitespace1,
-                    tag_no_case("queries"),
-                    opt(tuple((
-                        whitespace1,
-                        tag_no_case("where"),
-                        whitespace1,
-                        tag_no_case("query_id"),
-                        whitespace0,
-                        tag_no_case("="),
-                        whitespace0,
-                        dialect.string_literal(),
-                    ))),
-                )),
-                |(_, _, _, query_id)| {
-                    let q_id = if let Some((_, _, _, _, _, _, _, q_id)) = query_id {
-                        String::from_utf8(q_id).ok()
-                    } else {
-                        None
-                    };
-                    ShowStatement::ProxiedQueries(q_id)
-                },
+            value(
+                ShowStatement::ReadySetVersion,
+                tuple((tag_no_case("readyset"), whitespace1, tag_no_case("version"))),
             ),
-            alt((
-                map(
-                    tuple((tag_no_case("readyset"), whitespace1, tag_no_case("status"))),
-                    |_| ShowStatement::ReadySetStatus,
-                ),
-                map(
-                    tuple((tag_no_case("readyset"), whitespace1, tag_no_case("version"))),
-                    |_| ShowStatement::ReadySetVersion,
-                ),
-            )),
             map(show_tables(dialect), ShowStatement::Tables),
-            map(tag_no_case("events"), |_| ShowStatement::Events),
+            value(ShowStatement::Events, tag_no_case("events")),
         ))(i)?;
         Ok((i, statement))
     }
