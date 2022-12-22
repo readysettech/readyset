@@ -44,7 +44,8 @@ use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::recipe::ExtendRecipeSpec;
 use readyset_client::replication::{ReplicationOffset, ReplicationOffsets};
 use readyset_client::{
-    NodeSize, ReadySetError, ReadySetResult, ViewCreateRequest, ViewFilter, ViewRequest, ViewSchema,
+    NodeSize, ReadySetError, ReadySetResult, TableReplicationStatus, TableStatus,
+    ViewCreateRequest, ViewFilter, ViewRequest, ViewSchema,
 };
 use readyset_data::Dialect;
 use readyset_errors::{internal, internal_err, invariant_eq, NodeType};
@@ -765,6 +766,34 @@ impl DfState {
         }
 
         Ok(domains)
+    }
+
+    /// Query the status of all known tables, including those not replicated by ReadySet
+    pub(super) async fn table_statuses(&self) -> ReadySetResult<BTreeMap<Relation, TableStatus>> {
+        let known_tables = self.tables();
+        let snapshotting_tables = self.snapshotting_tables().await?;
+        let non_replicated_relations = self.non_replicated_relations();
+        Ok(known_tables
+            .into_keys()
+            .map(|tbl| {
+                let status = TableStatus {
+                    replication_status: if snapshotting_tables.contains(&tbl) {
+                        TableReplicationStatus::Snapshotting
+                    } else {
+                        TableReplicationStatus::Snapshotted
+                    },
+                };
+                (tbl, status)
+            })
+            .chain(non_replicated_relations.iter().cloned().map(|tbl| {
+                (
+                    tbl,
+                    TableStatus {
+                        replication_status: TableReplicationStatus::NotReplicated,
+                    },
+                )
+            }))
+            .collect())
     }
 
     /// Returns a list of all table names that are currently involved in snapshotting.

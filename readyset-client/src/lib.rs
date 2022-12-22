@@ -359,7 +359,10 @@ use url::Url;
 
 pub use crate::consensus::WorkerDescriptor;
 pub use crate::controller::{ControllerDescriptor, ReadySetHandle};
-pub use crate::table::{Modification, Operation, Table, TableOperation, TableRequest};
+pub use crate::table::{
+    Modification, Operation, Table, TableOperation, TableReplicationStatus, TableRequest,
+    TableStatus,
+};
 #[doc(hidden)]
 pub use crate::table::{PacketData, PacketPayload, PacketTrace};
 pub use crate::view::View;

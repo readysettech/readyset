@@ -32,7 +32,7 @@ use crate::replication::ReplicationOffsets;
 use crate::status::ReadySetStatus;
 use crate::table::{Table, TableBuilder, TableRpc};
 use crate::view::{View, ViewBuilder, ViewRpc};
-use crate::{NodeSize, ReplicationOffset, ViewCreateRequest, ViewFilter, ViewRequest};
+use crate::{NodeSize, ReplicationOffset, TableStatus, ViewCreateRequest, ViewFilter, ViewRequest};
 
 mod rpc;
 
@@ -310,6 +310,11 @@ impl ReadySetHandle {
     /// These have all been created in response to a `CREATE TABLE` statement in a recipe.
     pub async fn tables(&mut self) -> ReadySetResult<BTreeMap<Relation, NodeIndex>> {
         self.simple_get_request("tables").await
+    }
+
+    /// Query the status of all known tables, including those not replicated by ReadySet
+    pub async fn table_statuses(&mut self) -> ReadySetResult<BTreeMap<Relation, TableStatus>> {
+        self.simple_get_request("table_statuses").await?
     }
 
     /// Return a list of all relations (tables or views) which are known to exist in the upstream

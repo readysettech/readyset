@@ -271,6 +271,24 @@ impl fmt::Debug for PacketData {
     }
 }
 
+/// The status of a single table with respect to replication
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum TableReplicationStatus {
+    /// The table is not being replicated by ReadySet
+    NotReplicated,
+    /// The table is currently being snapshotted by ReadySet
+    Snapshotting,
+    /// The table has been successfully snapshotted by ReadySet
+    Snapshotted,
+}
+
+/// Information about the current status of a table in ReadySet
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TableStatus {
+    /// The status of the table's replication
+    pub replication_status: TableReplicationStatus,
+}
+
 #[doc(hidden)]
 #[derive(Clone, Serialize, Deserialize)]
 pub struct TableBuilder {

@@ -1114,12 +1114,12 @@ async fn handle_controller_request(
 #[cfg(test)]
 mod tests {
 
-    use std::collections::HashSet;
+    use std::collections::{BTreeMap, HashSet};
 
-    use nom_sql::{parse_select_statement, Dialect, Relation};
+    use nom_sql::{parse_create_table, parse_select_statement, Dialect, Relation};
     use readyset_client::recipe::changelist::{Change, ChangeList};
     use readyset_client::replication::ReplicationOffset;
-    use readyset_client::{KeyCount, ViewCreateRequest};
+    use readyset_client::{KeyCount, TableReplicationStatus, TableStatus, ViewCreateRequest};
     use readyset_data::Dialect as DataDialect;
     use readyset_util::eventually;
 
@@ -1395,6 +1395,98 @@ mod tests {
                     schema: Some("s2".into()),
                     name: "t".into(),
                 },
+            ])
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn table_statuses() {
+        let mut noria = start_simple("table_status").await;
+        noria
+            .extend_recipe(ChangeList::from_changes(
+                vec![
+                    Change::AddNonReplicatedRelation(Relation {
+                        schema: Some("s1".into()),
+                        name: "t".into(),
+                    }),
+                    Change::CreateTable(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE s2.snapshotting_t (x int);",
+                        )
+                        .unwrap(),
+                    ),
+                    Change::CreateTable(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE s2.snapshotted_t (x int);",
+                        )
+                        .unwrap(),
+                    ),
+                ],
+                DataDialect::DEFAULT_MYSQL,
+            ))
+            .await
+            .unwrap();
+
+        noria
+            .table(Relation {
+                schema: Some("s2".into()),
+                name: "snapshotting_t".into(),
+            })
+            .await
+            .unwrap()
+            .set_snapshot_mode(true)
+            .await
+            .unwrap();
+
+        let mut snapshotted = noria
+            .table(Relation {
+                schema: Some("s2".into()),
+                name: "snapshotted_t".into(),
+            })
+            .await
+            .unwrap();
+        snapshotted.set_snapshot_mode(false).await.unwrap();
+        snapshotted
+            .set_replication_offset(ReplicationOffset {
+                offset: 1,
+                replication_log_name: "log".into(),
+            })
+            .await
+            .unwrap();
+
+        let res = noria.table_statuses().await.unwrap();
+        assert_eq!(
+            res,
+            BTreeMap::from([
+                (
+                    Relation {
+                        schema: Some("s1".into()),
+                        name: "t".into(),
+                    },
+                    TableStatus {
+                        replication_status: TableReplicationStatus::NotReplicated
+                    }
+                ),
+                (
+                    Relation {
+                        schema: Some("s2".into()),
+                        name: "snapshotting_t".into(),
+                    },
+                    TableStatus {
+                        replication_status: TableReplicationStatus::Snapshotting
+                    }
+                ),
+                (
+                    Relation {
+                        schema: Some("s2".into()),
+                        name: "snapshotted_t".into(),
+                    },
+                    TableStatus {
+                        replication_status: TableReplicationStatus::Snapshotted
+                    }
+                ),
             ])
         );
     }
