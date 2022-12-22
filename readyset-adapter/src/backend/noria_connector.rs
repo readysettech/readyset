@@ -953,6 +953,43 @@ impl NoriaConnector {
         ))
     }
 
+    pub(crate) async fn table_statuses(&mut self) -> ReadySetResult<QueryResult<'static>> {
+        let statuses = noria_await!(
+            self.inner.get_mut()?,
+            self.inner.get_mut()?.noria.table_statuses()
+        )?;
+
+        let schema = SelectSchema {
+            use_bogo: false,
+            schema: Cow::Owned(
+                ["table", "status"]
+                    .iter()
+                    .map(|name| ColumnSchema {
+                        column: nom_sql::Column {
+                            name: name.into(),
+                            table: None,
+                        },
+                        column_type: DfType::DEFAULT_TEXT,
+                        base: None,
+                    })
+                    .collect(),
+            ),
+            columns: Cow::Owned(vec!["table".into(), "replication status".into()]),
+        };
+
+        let data = statuses
+            .into_iter()
+            .map(|(tbl, status)| {
+                vec![
+                    tbl.to_string().into(),
+                    status.replication_status.to_string().into(),
+                ]
+            })
+            .collect::<Vec<_>>();
+
+        Ok(QueryResult::from_owned(schema, vec![Results::new(data)]))
+    }
+
     /// Set the schema search path
     pub fn set_schema_search_path(&mut self, search_path: Vec<SqlIdentifier>) {
         self.schema_search_path = search_path;

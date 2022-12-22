@@ -92,7 +92,7 @@ pub use readyset_client_metrics::QueryDestination;
 use readyset_client_metrics::{recorded, EventType, QueryExecutionEvent, SqlQueryType};
 use readyset_data::{DfType, DfValue};
 use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
-use readyset_errors::{internal, internal_err, unsupported, unsupported_err, ReadySetResult};
+use readyset_errors::{internal, internal_err, unsupported, ReadySetResult};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 use readyset_tracing::{error, instrument_root, trace, warn};
 use readyset_util::redacted::Sensitive;
@@ -1710,9 +1710,7 @@ where
             }
             SqlQuery::Show(ShowStatement::ReadySetStatus) => self.noria.readyset_status().await,
             SqlQuery::Show(ShowStatement::ReadySetVersion) => readyset_version(),
-            SqlQuery::Show(ShowStatement::ReadySetTables) => {
-                Err(unsupported_err!("SHOW READYSET TABLES not yet implemented"))
-            }
+            SqlQuery::Show(ShowStatement::ReadySetTables) => self.noria.table_statuses().await,
             SqlQuery::Show(ShowStatement::ProxiedQueries(q_id)) => {
                 // Log a telemetry event
                 if let Some(ref telemetry_sender) = self.telemetry_sender {

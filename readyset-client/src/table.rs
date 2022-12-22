@@ -1,5 +1,6 @@
 use core::convert::TryInto;
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -280,6 +281,16 @@ pub enum TableReplicationStatus {
     Snapshotting,
     /// The table has been successfully snapshotted by ReadySet
     Snapshotted,
+}
+
+impl Display for TableReplicationStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TableReplicationStatus::NotReplicated => f.write_str("Not Replicated"),
+            TableReplicationStatus::Snapshotting => f.write_str("Snapshotting"),
+            TableReplicationStatus::Snapshotted => f.write_str("Snapshotted"),
+        }
+    }
 }
 
 /// Information about the current status of a table in ReadySet
