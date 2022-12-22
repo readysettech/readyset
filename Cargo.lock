@@ -1127,7 +1127,6 @@ dependencies = [
  "itertools",
  "launchpad",
  "lazy_static",
- "maths",
  "mysql-time",
  "nom-sql",
  "partial-map",
@@ -2544,10 +2543,6 @@ name = "matches"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a3e378b66a060d48947b590737b30a1be76706c8dd7b8ba0f2fe3989c68a853f"
-
-[[package]]
-name = "maths"
-version = "0.0.1"
 
 [[package]]
 name = "matrixmultiply"
@@ -4556,7 +4551,6 @@ dependencies = [
  "itertools",
  "lazy_static",
  "maplit",
- "maths",
  "md5",
  "mysql-srv",
  "mysql-time",
@@ -4748,7 +4742,6 @@ dependencies = [
  "launchpad",
  "lazy_static",
  "maplit",
- "maths",
  "metrics",
  "metrics-exporter-prometheus",
  "metrics-util",

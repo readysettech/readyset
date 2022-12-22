@@ -1,4 +1,4 @@
-/// Int holds utility functions that are re-used for various integer related math needs.
+//! Utility functions for math
 
 /// Round the given integer provided negative precision. No-op if precision is positive (decimal
 /// rounding)

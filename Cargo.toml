@@ -14,7 +14,6 @@ members = [
     "failpoint-macros",
     "failpoint-macros/proc-macros",
     "launchpad",
-    "maths",
     "merging-interval-tree",
     "metrics-aggregator",
     "mysql-srv",

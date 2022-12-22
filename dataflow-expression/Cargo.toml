@@ -18,7 +18,6 @@ vec1 = "1.6"
 
 # Local deps
 launchpad = { path = "../launchpad" }
-maths = { path = "../maths" }
 mysql-time = { path = "../mysql-time" }
 nom-sql = { path = "../nom-sql" }
 readyset-data = { path = "../readyset-data" }

@@ -5,7 +5,7 @@ use std::ops::{Add, Div, Mul, Sub};
 
 use chrono::{Datelike, LocalResult, Month, NaiveDate, NaiveDateTime, TimeZone, Timelike, Weekday};
 use chrono_tz::Tz;
-use maths::int::integer_rnd;
+use launchpad::math::integer_rnd;
 use mysql_time::MySqlTime;
 use readyset_data::{DfType, DfValue};
 use readyset_errors::{invalid_err, ReadySetError, ReadySetResult};

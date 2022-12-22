@@ -47,7 +47,6 @@ mysql-srv = { path = "../mysql-srv" }
 psql-srv = { path = "../psql-srv" }
 readyset-mysql = { path = "../readyset-mysql" }
 readyset-psql = { path = "../readyset-psql" }
-maths = { path = "../maths" }
 query-generator = { path = "../query-generator" }
 mysql-time = { path = "../mysql-time" }
 readyset-tracing = { path = "../readyset-tracing" }

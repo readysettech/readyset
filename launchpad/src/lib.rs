@@ -12,6 +12,7 @@ pub mod display;
 pub mod futures;
 pub mod hash;
 pub mod intervals;
+pub mod math;
 pub mod nonmaxusize;
 pub mod properties;
 pub mod redacted;
