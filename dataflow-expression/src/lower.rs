@@ -352,6 +352,10 @@ impl BuiltinFunction {
                     ty,
                 )
             }
+            "array_to_string" => (
+                Self::ArrayToString(next_arg()?, next_arg()?, next_arg().ok()),
+                DfType::DEFAULT_TEXT,
+            ),
             _ => return Err(ReadySetError::NoSuchFunction(name.to_owned())),
         };
 
@@ -1238,6 +1242,40 @@ pub(crate) mod tests {
                     ty: DfType::Unknown
                 }),
                 ty: DfType::Bool
+            }
+        );
+    }
+
+    #[test]
+    fn array_to_string() {
+        let expr = parse_expr(
+            ParserDialect::PostgreSQL,
+            "array_to_string(ARRAY[1], ',', '*')",
+        )
+        .unwrap();
+        let result = Expr::lower(expr, Dialect::DEFAULT_POSTGRESQL, no_op_lower_context()).unwrap();
+        assert_eq!(
+            result,
+            Expr::Call {
+                func: Box::new(BuiltinFunction::ArrayToString(
+                    Expr::Array {
+                        elements: vec![Expr::Literal {
+                            val: 1u64.into(),
+                            ty: DfType::UnsignedBigInt,
+                        }],
+                        shape: vec![1],
+                        ty: DfType::Array(Box::new(DfType::UnsignedBigInt))
+                    },
+                    Expr::Literal {
+                        val: ",".into(),
+                        ty: DfType::Unknown
+                    },
+                    Some(Expr::Literal {
+                        val: "*".into(),
+                        ty: DfType::Unknown
+                    })
+                )),
+                ty: DfType::DEFAULT_TEXT
             }
         );
     }

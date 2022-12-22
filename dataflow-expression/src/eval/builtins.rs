@@ -5,6 +5,7 @@ use std::ops::{Add, Div, Mul, Sub};
 
 use chrono::{Datelike, LocalResult, Month, NaiveDate, NaiveDateTime, TimeZone, Timelike, Weekday};
 use chrono_tz::Tz;
+use itertools::Either;
 use mysql_time::MySqlTime;
 use readyset_data::{DfType, DfValue};
 use readyset_errors::{invalid_err, ReadySetError, ReadySetResult};
@@ -815,6 +816,47 @@ impl BuiltinFunction {
             }
             BuiltinFunction::Least { args, compare_as } => {
                 greatest_or_least(args, record, compare_as, ty, |v1, v2| v1 < v2)
+            }
+            BuiltinFunction::ArrayToString(array, delimiter, null_string) => {
+                let elem_type = match array.ty() {
+                    DfType::Array(t) => t.as_ref(),
+                    _ => &DfType::Unknown,
+                };
+                let array = non_null!(array.eval(record)?)
+                    .coerce_to(&DfType::Array(Box::new(elem_type.clone())), array.ty())?;
+                let array = array.as_array()?;
+                let delimiter: String = delimiter.eval(record)?.try_into()?;
+                let null_string = null_string
+                    .as_ref()
+                    .map(|ns| ns.eval(record))
+                    .transpose()?
+                    .filter(|ns| !ns.is_none())
+                    .map(String::try_from)
+                    .transpose()?;
+                let mut res = String::new();
+                let values = array.values();
+                let filtered_values = if null_string.is_none() {
+                    Either::Left(values.filter(|v| !v.is_none()))
+                } else {
+                    Either::Right(values)
+                };
+                for (i, val) in filtered_values.enumerate() {
+                    if i != 0 {
+                        res.push_str(&delimiter);
+                    }
+
+                    if val.is_none() {
+                        if let Some(null_string) = &null_string {
+                            res.push_str(null_string);
+                        }
+                    } else {
+                        res.push_str(
+                            (&val.coerce_to(&DfType::DEFAULT_TEXT, elem_type)?).try_into()?,
+                        );
+                    }
+                }
+
+                Ok(res.into())
             }
         }
     }
@@ -2801,5 +2843,48 @@ mod tests {
                 test_error(object, &["a"], None, true, "raise_exception");
             }
         }
+    }
+
+    #[test]
+    fn array_to_string() {
+        #[track_caller]
+        fn test(array: &str, expected: &str) {
+            let expr = format!("array_to_string('{array}', ',')");
+
+            assert_eq!(
+                eval_expr(&expr, PostgreSQL),
+                expected.into(),
+                "incorrect result for for `{expr}`"
+            );
+
+            let null_expr = format!("array_to_string('{array}', ',', null)");
+
+            assert_eq!(
+                eval_expr(&null_expr, PostgreSQL),
+                expected.into(),
+                "incorrect result for for `{null_expr}`"
+            );
+        }
+
+        test("{}", "");
+        test("{1,2,3,null,5}", "1,2,3,5");
+        test("{null,1,2,3,null,5}", "1,2,3,5");
+        test("{{1,2},{3,4}}", "1,2,3,4");
+
+        #[track_caller]
+        fn test_with_null_string(array: &str, expected: &str) {
+            let expr = format!("array_to_string('{array}', ',', '*')");
+
+            assert_eq!(
+                eval_expr(&expr, PostgreSQL),
+                expected.into(),
+                "incorrect result for for `{expr}`"
+            );
+        }
+
+        test_with_null_string("{}", "");
+        test_with_null_string("{1,2,3,null,5}", "1,2,3,*,5");
+        test_with_null_string("{null,1,2,3,null,5}", "*,1,2,3,*,5");
+        test_with_null_string("{{1,2},{3,4},{null,5}}", "1,2,3,4,*,5");
     }
 }

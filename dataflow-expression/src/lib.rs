@@ -103,6 +103,9 @@ pub enum BuiltinFunction {
         /// actual return type of the function call.
         compare_as: DfType,
     },
+
+    /// [`array_to_string`](https://www.postgresql.org/docs/current/functions-array.html)
+    ArrayToString(Expr, Expr, Option<Expr>),
 }
 
 impl BuiltinFunction {
@@ -134,6 +137,7 @@ impl BuiltinFunction {
             SplitPart { .. } => "split_part",
             Greatest { .. } => "greatest",
             Least { .. } => "least",
+            ArrayToString { .. } => "array_to_string",
         }
     }
 }
@@ -217,6 +221,13 @@ impl Display for BuiltinFunction {
             SplitPart(string, delimiter, field) => write!(f, "({string}, {delimiter}, {field})"),
             Greatest { args, .. } | Least { args, .. } => {
                 write!(f, "({})", args.iter().join(", "))
+            }
+            ArrayToString(array, delimiter, null_string) => {
+                write!(f, "({array}, {delimiter}")?;
+                if let Some(null_string) = null_string {
+                    write!(f, ", {null_string}")?;
+                }
+                write!(f, ")")
             }
         }
     }
