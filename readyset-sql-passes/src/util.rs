@@ -107,7 +107,10 @@ pub fn map_aggregates(expr: &mut Expr) -> Vec<(FunctionExpr, SqlIdentifier)> {
             }
         }
         Expr::Call(_) | Expr::Literal(_) | Expr::Column(_) | Expr::Variable(_) => {}
-        Expr::BinaryOp { lhs, rhs, .. } => {
+        Expr::BinaryOp { lhs, rhs, .. }
+        | Expr::OpAny { lhs, rhs, .. }
+        | Expr::OpSome { lhs, rhs, .. }
+        | Expr::OpAll { lhs, rhs, .. } => {
             ret.append(&mut map_aggregates(lhs));
             ret.append(&mut map_aggregates(rhs));
         }

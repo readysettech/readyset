@@ -7,7 +7,7 @@ use itertools::Itertools;
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::character::complete::char;
-use nom::combinator::{complete, map, opt};
+use nom::combinator::{complete, map, opt, value};
 use nom::multi::{many0, many1, separated_list0};
 use nom::sequence::{delimited, pair, preceded, terminated, tuple};
 use nom::Parser;
@@ -374,6 +374,36 @@ pub enum Expr {
         rhs: Box<Expr>,
     },
 
+    /// `<expr> <op> ANY (<expr>)` ([PostgreSQL docs][pg-docs])
+    ///
+    /// [pg-docs]: https://www.postgresql.org/docs/current/functions-comparisons.html#id-1.5.8.30.16
+    #[from(ignore)]
+    OpAny {
+        lhs: Box<Expr>,
+        op: BinaryOperator,
+        rhs: Box<Expr>,
+    },
+
+    /// `<expr> <op> SOME (<expr>)` ([PostgreSQL docs][pg-docs])
+    ///
+    /// [pg-docs]: https://www.postgresql.org/docs/current/functions-comparisons.html#id-1.5.8.30.16
+    #[from(ignore)]
+    OpSome {
+        lhs: Box<Expr>,
+        op: BinaryOperator,
+        rhs: Box<Expr>,
+    },
+
+    /// `<expr> <op> ALL (<expr>)` ([PostgreSQL docs][pg-docs])
+    ///
+    /// [pg-docs]: https://www.postgresql.org/docs/current/functions-comparisons.html#id-1.5.8.30.16
+    #[from(ignore)]
+    OpAll {
+        lhs: Box<Expr>,
+        op: BinaryOperator,
+        rhs: Box<Expr>,
+    },
+
     /// Unary operator
     UnaryOp { op: UnaryOperator, rhs: Box<Expr> },
 
@@ -445,6 +475,9 @@ impl Display for Expr {
                 write!(f, "END")
             }
             Expr::BinaryOp { lhs, op, rhs } => write!(f, "({} {} {})", lhs, op, rhs),
+            Expr::OpAny { lhs, op, rhs } => write!(f, "{lhs} {op} ANY ({rhs})"),
+            Expr::OpSome { lhs, op, rhs } => write!(f, "{lhs} {op} SOME ({rhs})"),
+            Expr::OpAll { lhs, op, rhs } => write!(f, "{lhs} {op} ALL ({rhs})"),
             Expr::UnaryOp {
                 op: UnaryOperator::Neg,
                 rhs,
@@ -541,6 +574,25 @@ impl Expr {
     }
 }
 
+/// Suffixes which can be supplied to operators to convert them into predicates on arrays or
+/// subqueries.
+///
+/// Used for support of `<expr> <op> ANY ...`, `<expr> <op> SOME ...`, and `<expr> <op> ALL ...`
+#[derive(Debug, Clone, Copy)]
+enum OperatorSuffix {
+    Any,
+    Some,
+    All,
+}
+
+fn operator_suffix(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], OperatorSuffix> {
+    alt((
+        value(OperatorSuffix::Any, tag_no_case("any")),
+        value(OperatorSuffix::Some, tag_no_case("some")),
+        value(OperatorSuffix::All, tag_no_case("all")),
+    ))(i)
+}
+
 /// A lexed sequence of tokens containing expressions and operators, pre-interpretation of operator
 /// precedence but post-interpretation of parentheses
 #[derive(Debug, Clone)]
@@ -550,10 +602,16 @@ enum TokenTree {
     Primary(Expr),
     Group(Vec<TokenTree>),
     PgsqlCast(Box<TokenTree>, SqlType),
+    OpSuffix(
+        Box<TokenTree>,
+        BinaryOperator,
+        OperatorSuffix,
+        Box<TokenTree>,
+    ),
 }
 
-// no_and_or variants of `infix`, `rest`, and `token_tree` allow parsing (binary op) expressions in
-// the right-hand side of a BETWEEN, eg:
+// no_and_or variants of  `binary_operator`, `infix`, `rest`, and `token_tree` allow parsing (binary
+// op) expressions in the right-hand side of a BETWEEN, eg:
 //     foo between (1 + 2) and 3 + 5
 // should parse the same as:
 //     foo between (1 + 2) and (3 + 5)
@@ -562,8 +620,8 @@ enum TokenTree {
 // should parse the same as:
 //     (foo between (1 + 2) and 8) and bar
 
-fn infix_no_and_or(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], TokenTree> {
-    let (i, operator) = alt((
+fn binary_operator_no_and_or(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], BinaryOperator> {
+    alt((
         map(terminated(tag_no_case("like"), whitespace1), |_| {
             BinaryOperator::Like
         }),
@@ -626,21 +684,27 @@ fn infix_no_and_or(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], TokenTree> {
             map(tag("#>"), |_| BinaryOperator::HashArrow1),
         )),
         map(tag("#-"), |_| BinaryOperator::HashSubtract),
-    ))(i)?;
+    ))(i)
+}
 
-    Ok((i, TokenTree::Infix(operator)))
+fn infix_no_and_or(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], TokenTree> {
+    map(binary_operator_no_and_or, TokenTree::Infix)(i)
+}
+
+fn binary_operator(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], BinaryOperator> {
+    complete(alt((
+        map(terminated(tag_no_case("and"), whitespace1), |_| {
+            BinaryOperator::And
+        }),
+        map(terminated(tag_no_case("or"), whitespace1), |_| {
+            BinaryOperator::Or
+        }),
+        binary_operator_no_and_or,
+    )))(i)
 }
 
 fn infix(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], TokenTree> {
-    complete(alt((
-        map(terminated(tag_no_case("and"), whitespace1), |_| {
-            TokenTree::Infix(BinaryOperator::And)
-        }),
-        map(terminated(tag_no_case("or"), whitespace1), |_| {
-            TokenTree::Infix(BinaryOperator::Or)
-        }),
-        infix_no_and_or,
-    )))(i)
+    map(binary_operator, TokenTree::Infix)(i)
 }
 
 fn prefix(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], TokenTree> {
@@ -679,19 +743,48 @@ fn primary_inner(
 }
 
 fn primary(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], TokenTree> {
+    enum PrimarySuffix {
+        Cast(SqlType),
+        OpSuffix(BinaryOperator, OperatorSuffix, Box<TokenTree>),
+    }
+
     move |i| {
-        let (i, expr) = primary_inner(dialect)(i)?;
-        let (i, t) = opt(move |i| {
-            let (i, _) = whitespace0(i)?;
-            let (i, _) = tag("::")(i)?;
-            let (i, _) = whitespace0(i)?;
-            type_identifier(dialect)(i)
-        })(i)?;
+        let (i, lhs) = primary_inner(dialect)(i)?;
+        let (i, suffix) = opt(alt((
+            move |i| {
+                let (i, _) = whitespace0(i)?;
+                let (i, _) = tag("::")(i)?;
+                let (i, _) = whitespace0(i)?;
+                map(type_identifier(dialect), PrimarySuffix::Cast)(i)
+            },
+            move |i| {
+                let (i, _) = whitespace0(i)?;
+                let (i, op) = binary_operator(i)?;
+                let (i, _) = whitespace0(i)?;
+                let (i, suffix) = operator_suffix(i)?;
+                let (i, _) = whitespace0(i)?;
+                let (i, _) = tag("(")(i)?;
+                let (i, _) = whitespace0(i)?;
+                let (i, rhs) = token_tree(dialect)(i)?;
+                let (i, _) = whitespace0(i)?;
+                let (i, _) = tag(")")(i)?;
+
+                Ok((
+                    i,
+                    PrimarySuffix::OpSuffix(op, suffix, Box::new(TokenTree::Group(rhs))),
+                ))
+            },
+        )))(i)?;
 
         Ok((
             i,
-            t.map(|n| TokenTree::PgsqlCast(Box::new(expr.clone()), n))
-                .unwrap_or(expr),
+            match suffix {
+                None => lhs,
+                Some(PrimarySuffix::Cast(ty)) => TokenTree::PgsqlCast(Box::new(lhs), ty),
+                Some(PrimarySuffix::OpSuffix(op, suffix, rhs)) => {
+                    TokenTree::OpSuffix(Box::new(lhs), op, suffix, rhs)
+                }
+            },
         ))
     }
 }
@@ -812,7 +905,8 @@ where
             Prefix(Neg) => Affix::Prefix(Precedence(5)),
             Primary(_) => Affix::Nilfix,
             Group(_) => Affix::Nilfix,
-            PgsqlCast(_, _) => Affix::Nilfix,
+            PgsqlCast(..) => Affix::Nilfix,
+            OpSuffix(..) => Affix::Nilfix,
 
             // All JSON operators have the same precedence.
             //
@@ -840,11 +934,20 @@ where
             // unwrap: ok because there are no errors possible
             Group(group) => self.parse(&mut group.into_iter()).unwrap(),
             PgsqlCast(box expr, ty) => {
-                let tt = self.parse(&mut vec![expr].into_iter()).unwrap();
+                let tt = self.parse(&mut iter::once(expr)).unwrap();
                 Expr::Cast {
                     expr: tt.into(),
                     ty,
                     postgres_style: true,
+                }
+            }
+            OpSuffix(box lhs, op, suffix, box rhs) => {
+                let lhs = Box::new(self.parse(&mut iter::once(lhs)).unwrap());
+                let rhs = Box::new(self.parse(&mut iter::once(rhs)).unwrap());
+                match suffix {
+                    OperatorSuffix::Any => Expr::OpAny { lhs, op, rhs },
+                    OperatorSuffix::Some => Expr::OpSome { lhs, op, rhs },
+                    OperatorSuffix::All => Expr::OpAll { lhs, op, rhs },
                 }
             }
             _ => unreachable!("Invalid fixity for non-primary token"),
@@ -2219,6 +2322,93 @@ mod tests {
                     name: "nullable".into(),
                     table: None
                 })
+            );
+        }
+
+        #[test]
+        fn equals_any() {
+            assert_eq!(
+                test_parse!(expression(Dialect::PostgreSQL), b"x = ANY('foo')"),
+                Expr::OpAny {
+                    lhs: Box::new(Expr::Column("x".into())),
+                    op: BinaryOperator::Equal,
+                    rhs: Box::new(Expr::Literal("foo".into()))
+                }
+            );
+        }
+
+        #[test]
+        fn equals_some() {
+            assert_eq!(
+                test_parse!(expression(Dialect::PostgreSQL), b"x = SOME ('foo')"),
+                Expr::OpSome {
+                    lhs: Box::new(Expr::Column("x".into())),
+                    op: BinaryOperator::Equal,
+                    rhs: Box::new(Expr::Literal("foo".into()))
+                }
+            );
+        }
+
+        #[test]
+        fn equals_all() {
+            assert_eq!(
+                test_parse!(expression(Dialect::PostgreSQL), b"x = aLL ('foo')"),
+                Expr::OpAll {
+                    lhs: Box::new(Expr::Column("x".into())),
+                    op: BinaryOperator::Equal,
+                    rhs: Box::new(Expr::Literal("foo".into()))
+                }
+            );
+        }
+
+        #[test]
+        fn lte_any() {
+            assert_eq!(
+                test_parse!(expression(Dialect::PostgreSQL), b"x <= ANY('foo')"),
+                Expr::OpAny {
+                    lhs: Box::new(Expr::Column("x".into())),
+                    op: BinaryOperator::LessOrEqual,
+                    rhs: Box::new(Expr::Literal("foo".into()))
+                }
+            );
+        }
+
+        #[test]
+        fn op_any_mixed_with_op() {
+            assert_eq!(
+                test_parse!(expression(Dialect::PostgreSQL), b"1 = ANY('{1,2}') = true"),
+                Expr::BinaryOp {
+                    lhs: Box::new(Expr::OpAny {
+                        lhs: Box::new(Expr::Literal(1u64.into())),
+                        op: BinaryOperator::Equal,
+                        rhs: Box::new(Expr::Literal("{1,2}".into()))
+                    }),
+                    op: BinaryOperator::Equal,
+                    rhs: Box::new(Expr::Literal(Literal::Boolean(true)))
+                }
+            );
+        }
+
+        #[test]
+        fn op_any_mixed_with_and() {
+            assert_eq!(
+                test_parse!(
+                    expression(Dialect::PostgreSQL),
+                    b"1 = ANY('{1,2}') and y = 4"
+                ),
+                Expr::BinaryOp {
+                    lhs: Box::new(Expr::OpAny {
+                        lhs: Box::new(Expr::Literal(1u64.into())),
+                        op: BinaryOperator::Equal,
+                        rhs: Box::new(Expr::Literal("{1,2}".into()))
+                    }),
+                    op: BinaryOperator::And,
+                    rhs: Box::new(Expr::BinaryOp {
+                        lhs: Box::new(Expr::Column("y".into())),
+                        op: BinaryOperator::Equal,
+                        rhs: Box::new(Expr::Literal(4u64.into()))
+                    })
+                }
             );
         }
 

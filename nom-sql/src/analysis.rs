@@ -47,7 +47,10 @@ impl<'a> ReferredColumnsIter<'a> {
                     None
                 }
             }
-            Expr::BinaryOp { lhs, rhs, .. } => {
+            Expr::BinaryOp { lhs, rhs, .. }
+            | Expr::OpAny { lhs, rhs, .. }
+            | Expr::OpSome { lhs, rhs, .. }
+            | Expr::OpAll { lhs, rhs, .. } => {
                 self.exprs_to_visit.push(lhs);
                 self.visit_expr(rhs)
             }
@@ -157,7 +160,10 @@ impl<'a> ReferredColumnsMut<'a> {
                     None
                 }
             }
-            Expr::BinaryOp { lhs, rhs, .. } => {
+            Expr::BinaryOp { lhs, rhs, .. }
+            | Expr::OpAny { lhs, rhs, .. }
+            | Expr::OpSome { lhs, rhs, .. }
+            | Expr::OpAll { lhs, rhs, .. } => {
                 self.exprs_to_visit.push(lhs);
                 self.visit_expr(rhs)
             }
@@ -357,7 +363,10 @@ pub fn contains_aggregate(expr: &Expr) -> bool {
                     .iter()
                     .any(|expr| contains_aggregate(expr.as_ref()))
         }
-        Expr::BinaryOp { lhs, rhs, .. } => contains_aggregate(lhs) || contains_aggregate(rhs),
+        Expr::BinaryOp { lhs, rhs, .. }
+        | Expr::OpAny { lhs, rhs, .. }
+        | Expr::OpSome { lhs, rhs, .. }
+        | Expr::OpAll { lhs, rhs, .. } => contains_aggregate(lhs) || contains_aggregate(rhs),
         Expr::UnaryOp { rhs: expr, .. } | Expr::Cast { expr, .. } => contains_aggregate(expr),
         Expr::Exists(_) => false,
         Expr::Between {
@@ -426,7 +435,10 @@ impl Expr {
             | Expr::NestedSelect(_)
             | Expr::Variable(_) => Box::new(iter::empty()) as _,
             Expr::Call(fexpr) => Box::new(fexpr.arguments()) as _,
-            Expr::BinaryOp { lhs, rhs, .. } => {
+            Expr::BinaryOp { lhs, rhs, .. }
+            | Expr::OpAny { lhs, rhs, .. }
+            | Expr::OpSome { lhs, rhs, .. }
+            | Expr::OpAll { lhs, rhs, .. } => {
                 Box::new(vec![lhs, rhs].into_iter().map(AsRef::as_ref)) as _
             }
             Expr::UnaryOp { rhs: expr, .. } | Expr::Cast { expr, .. } => {

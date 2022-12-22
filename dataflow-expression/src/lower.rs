@@ -616,6 +616,9 @@ impl Expr {
             AstExpr::Between { .. } | AstExpr::NestedSelect(_) | AstExpr::In { .. } => {
                 internal!("Expression should have been desugared earlier: {expr}")
             }
+            AstExpr::OpAny { .. } | AstExpr::OpSome { .. } | AstExpr::OpAll { .. } => {
+                unsupported!("<operator> (ANY|SOME|ALL) <expr> not yet supported")
+            }
         }
     }
 }

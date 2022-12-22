@@ -423,7 +423,10 @@ pub fn walk_expr<'ast, V: VisitorMut<'ast>>(
     match expr {
         Expr::Call(fexpr) => visitor.visit_function_expr(fexpr),
         Expr::Literal(lit) => visitor.visit_literal(lit),
-        Expr::BinaryOp { lhs, rhs, .. } => {
+        Expr::BinaryOp { lhs, rhs, .. }
+        | Expr::OpAny { lhs, rhs, .. }
+        | Expr::OpSome { lhs, rhs, .. }
+        | Expr::OpAll { lhs, rhs, .. } => {
             visitor.visit_expr(lhs.as_mut())?;
             visitor.visit_expr(rhs.as_mut())
         }

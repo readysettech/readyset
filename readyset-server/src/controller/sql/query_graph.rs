@@ -641,6 +641,9 @@ fn classify_conditionals(
                     }
                     Expr::Call(_)
                     | Expr::BinaryOp { .. }
+                    | Expr::OpAny { .. }
+                    | Expr::OpSome { .. }
+                    | Expr::OpAll { .. }
                     | Expr::UnaryOp { .. }
                     | Expr::CaseWhen { .. }
                     | Expr::Exists(_)
