@@ -475,7 +475,10 @@ async fn setup_for_replication_failure(client: &Client) {
 async fn assert_table_ignored(client: &Client) {
     let res = client.simple_query("SHOW CACHES").await.unwrap();
     let res = res.first().unwrap();
-    assert!(matches!(res, SimpleQueryMessage::CommandComplete(0)));
+    assert!(matches!(
+        res,
+        SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 0, .. })
+    ));
 
     client
         .simple_query("CREATE CACHE FROM SELECT * FROM cats")
