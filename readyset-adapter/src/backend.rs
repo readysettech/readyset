@@ -78,7 +78,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use futures::future::{self, OptionFuture};
-use launchpad::redacted::Sensitive;
 use mysql_common::row::convert::{FromRow, FromRowError};
 use nom_sql::{
     CacheInner, CreateCacheStatement, DeleteStatement, Dialect, DropCacheStatement,
@@ -96,6 +95,7 @@ use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
 use readyset_errors::{internal, internal_err, unsupported, ReadySetResult};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 use readyset_tracing::{error, instrument_root, trace, warn};
+use readyset_util::redacted::Sensitive;
 use readyset_version::READYSET_VERSION;
 use timestamp_service::client::{TimestampClient, WriteId, WriteKey};
 use tokio::sync::mpsc::UnboundedSender;

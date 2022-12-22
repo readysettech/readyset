@@ -18,5 +18,5 @@ tokio-postgres = { workspace = true, features = ["with-chrono-0_4"] }
 postgres-native-tls = { workspace = true }
 clap = { version = "3.0", features = ["derive","env"] }
 serde = { version = "1.0", features = ["derive"] }
-launchpad = { path = "../launchpad" }
+readyset-util = { path = "../readyset-util" }
 readyset-client = { path = "../readyset-client" }

@@ -18,7 +18,7 @@ profiling = ["timekeeper/default"]
 bench = ["dataflow/bench"]
 failure_injection = ["fail/failpoints", "readyset-client/failure_injection", "dataflow/failure_injection", "replicators/failure_injection"]
 # Redact the display of strings marked sensitive from logs and error messages
-redact_sensitive = ["launchpad/redact_sensitive"]
+redact_sensitive = ["readyset-util/redact_sensitive"]
 
 [target.'cfg(not(target_env="msvc"))'.dependencies]
 tikv-jemallocator = "0.4"
@@ -85,7 +85,7 @@ readyset-client = { path = "../readyset-client" }
 failpoint-macros = { path = "../failpoint-macros" }
 readyset-errors = { path = "../readyset-errors" }
 readyset-data = { path = "../readyset-data" }
-launchpad = { path = "../launchpad" }
+readyset-util = { path = "../readyset-util" }
 replicators = { path = "../replicators" }
 readyset-tracing = { path = "../readyset-tracing" }
 readyset-sql-passes = { path = "../readyset-sql-passes" }

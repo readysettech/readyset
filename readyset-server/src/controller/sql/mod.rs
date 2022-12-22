@@ -5,7 +5,6 @@ use std::vec::Vec;
 use ::mir::visualize::GraphViz;
 use ::mir::DfNodeIndex;
 use ::serde::{Deserialize, Serialize};
-use launchpad::redacted::Sensitive;
 use nom_sql::{
     CacheInner, CompoundSelectOperator, CompoundSelectStatement, CreateTableBody,
     FieldDefinitionExpr, Relation, SelectSpecification, SelectStatement, SqlIdentifier, SqlType,
@@ -21,6 +20,7 @@ use readyset_errors::{
 use readyset_sql_passes::alias_removal::TableAliasRewrite;
 use readyset_sql_passes::{AliasRemoval, Rewrite, RewriteContext};
 use readyset_tracing::{debug, trace};
+use readyset_util::redacted::Sensitive;
 use tracing::{error, info};
 
 use self::mir::{LeafBehavior, NodeIndex as MirNodeIndex, SqlToMirConverter};

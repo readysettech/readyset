@@ -2,7 +2,6 @@ use std::collections::{HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
 use std::iter;
 
-use launchpad::hash::hash;
 use nom_sql::analysis::visit::{self, Visitor};
 use nom_sql::{
     BinaryOperator, Column, ColumnConstraint, CreateTableBody, DeleteStatement, Expr,
@@ -13,6 +12,7 @@ use readyset_data::{DfType, DfValue, Dialect};
 use readyset_errors::{
     bad_request_err, invariant, invariant_eq, unsupported, unsupported_err, ReadySetResult,
 };
+use readyset_util::hash::hash;
 
 // Helper for flatten_conditional - returns true if the
 // expression is "valid" (i.e. not something like `a = 1 AND a = 2`.

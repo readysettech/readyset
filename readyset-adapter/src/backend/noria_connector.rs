@@ -7,7 +7,6 @@ use std::sync::{atomic, Arc, RwLock};
 
 use dataflow_expression::{BinaryOperator as DfBinaryOperator, Expr as DfExpr};
 use itertools::Itertools;
-use launchpad::redacted::Sensitive;
 use nom_sql::analysis::visit_mut::VisitorMut;
 use nom_sql::{
     self, BinaryOperator, ColumnConstraint, DeleteStatement, Expr, InsertStatement, Literal,
@@ -30,6 +29,7 @@ use readyset_errors::{
 use readyset_server::worker::readers::{CallResult, ReadRequestHandler};
 use readyset_sql_passes::anonymize::anonymize_literals;
 use readyset_tracing::{error, info, trace, warn};
+use readyset_util::redacted::Sensitive;
 use tracing::instrument;
 use vec1::vec1;
 

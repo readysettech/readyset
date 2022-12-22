@@ -52,7 +52,7 @@ timekeeper = { version = "0.3.2", default-features = false }
 common = { path = "../readyset-common", package = "readyset-common" }
 readyset-client = { path = "../readyset-client" }
 merging-interval-tree = { path = "../merging-interval-tree" }
-launchpad = { path = "../launchpad" }
+readyset-util = { path = "../readyset-util" }
 readyset-errors = { path = "../readyset-errors" }
 readyset-data = { path = "../readyset-data" }
 readyset-tracing = { path = "../readyset-tracing" }

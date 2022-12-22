@@ -6,7 +6,6 @@ use std::ops::{Deref, DerefMut};
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use itertools::izip;
-use launchpad::redacted::Sensitive;
 use mysql_async::consts::StatusFlags;
 use mysql_common::bigdecimal03::ToPrimitive;
 use mysql_srv::{
@@ -20,6 +19,7 @@ use readyset_adapter::backend::{
 use readyset_data::{DfType, DfValue, DfValueKind};
 use readyset_errors::{internal, ReadySetError};
 use readyset_tracing::{error, trace};
+use readyset_util::redacted::Sensitive;
 use streaming_iterator::StreamingIterator;
 use tokio::io::{self, AsyncWrite};
 use upstream::StatementMeta;

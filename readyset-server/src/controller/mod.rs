@@ -12,7 +12,6 @@ use futures::future::join_all;
 use futures::stream::FuturesUnordered;
 use futures_util::StreamExt;
 use hyper::http::{Method, StatusCode};
-use launchpad::select;
 use metrics::{counter, gauge, histogram};
 use nom_sql::Relation;
 use readyset_client::consensus::{
@@ -27,6 +26,7 @@ use readyset_data::Dialect;
 use readyset_errors::{internal, internal_err, ReadySetError};
 use readyset_telemetry_reporter::TelemetrySender;
 use readyset_tracing::{debug, error, info, warn};
+use readyset_util::select;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use stream_cancel::Valve;
@@ -1116,12 +1116,12 @@ mod tests {
 
     use std::collections::HashSet;
 
-    use launchpad::eventually;
     use nom_sql::{parse_select_statement, Dialect, Relation};
     use readyset_client::recipe::changelist::{Change, ChangeList};
     use readyset_client::replication::ReplicationOffset;
     use readyset_client::{KeyCount, ViewCreateRequest};
     use readyset_data::Dialect as DataDialect;
+    use readyset_util::eventually;
 
     use crate::integration_utils::start_simple;
 

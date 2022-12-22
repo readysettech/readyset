@@ -10,7 +10,7 @@ pub trait EnglishList: Sized {
     /// # Examples
     ///
     /// ```rust
-    /// use launchpad::display::EnglishList;
+    /// use readyset_util::display::EnglishList;
     ///
     /// let mut one_element = String::new();
     /// vec!["one"]
@@ -40,7 +40,7 @@ pub trait EnglishList: Sized {
     /// # Examples
     ///
     /// ```rust
-    /// use launchpad::display::EnglishList;
+    /// use readyset_util::display::EnglishList;
     ///
     /// let mut one_element = String::new();
     /// vec!["one"].write_and_list(&mut one_element).unwrap();
@@ -71,7 +71,7 @@ pub trait EnglishList: Sized {
     /// # Examples
     ///
     /// ```rust
-    /// use launchpad::display::EnglishList;
+    /// use readyset_util::display::EnglishList;
     ///
     /// let mut one_element = String::new();
     /// vec!["one"].write_or_list(&mut one_element).unwrap();
@@ -100,7 +100,7 @@ pub trait EnglishList: Sized {
     /// # Examples
     ///
     /// ```rust
-    /// use launchpad::display::EnglishList;
+    /// use readyset_util::display::EnglishList;
     ///
     /// let one_element = vec!["one"].into_and_list();
     /// assert_eq!(one_element, "one");
@@ -123,7 +123,7 @@ pub trait EnglishList: Sized {
     /// # Examples
     ///
     /// ```rust
-    /// use launchpad::display::EnglishList;
+    /// use readyset_util::display::EnglishList;
     ///
     /// let one_element = vec!["one"].into_or_list();
     /// assert_eq!(one_element, "one");

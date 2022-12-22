@@ -22,7 +22,7 @@ vec1 = "1.6.0"
 itertools = "0.10"
 derive_more = "0.99.11"
 thiserror = "1.0.26"
-launchpad = { path = "../launchpad" }
+readyset-util = { path = "../readyset-util" }
 metrics = "0.19"
 futures = "0.3"
 maplit = "1.0.2"

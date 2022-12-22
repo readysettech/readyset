@@ -27,7 +27,6 @@ use dataflow::{
 };
 use futures::StreamExt;
 use itertools::Itertools;
-use launchpad::eventually;
 use nom_sql::{parse_create_cache, parse_create_view, parse_query, OrderType, Relation, SqlQuery};
 use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use readyset_client::consistency::Timestamp;
@@ -36,6 +35,7 @@ use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::{KeyComparison, Modification, SchemaType, ViewPlaceholder, ViewQuery};
 use readyset_data::{DfType, DfValue, Dialect};
 use readyset_errors::ReadySetError::{MigrationPlanFailed, RpcFailed, SelectQueryCreationFailed};
+use readyset_util::eventually;
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 use rusty_fork::rusty_fork_test;

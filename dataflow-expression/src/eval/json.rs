@@ -757,7 +757,7 @@ mod tests {
             }
         }
 
-        launchpad::eq_laws!(OwnedJsonScalar);
-        launchpad::hash_laws!(OwnedJsonScalar);
+        readyset_util::eq_laws!(OwnedJsonScalar);
+        readyset_util::hash_laws!(OwnedJsonScalar);
     }
 }

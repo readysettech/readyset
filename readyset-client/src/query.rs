@@ -451,8 +451,8 @@ impl Serialize for QueryList {
 
 #[cfg(test)]
 mod tests {
-    use launchpad::hash_laws;
     use proptest::arbitrary::Arbitrary;
+    use readyset_util::hash_laws;
 
     use super::*;
 

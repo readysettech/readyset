@@ -7,10 +7,6 @@ use std::str::FromStr;
 use bit_vec::BitVec;
 use eui48::{MacAddress, MacAddressFormat};
 use itertools::Itertools;
-use launchpad::arbitrary::{
-    arbitrary_bitvec, arbitrary_date_time, arbitrary_decimal, arbitrary_json, arbitrary_naive_time,
-    arbitrary_positive_naive_date, arbitrary_timestamp_naive_date_time, arbitrary_uuid,
-};
 use nom::branch::alt;
 use nom::bytes::complete::{is_not, tag, tag_no_case, take};
 use nom::character::complete::{digit1, satisfy};
@@ -19,6 +15,10 @@ use nom::multi::fold_many0;
 use nom::sequence::{delimited, pair, preceded, terminated, tuple};
 use nom_locate::LocatedSpan;
 use proptest::strategy::Strategy;
+use readyset_util::arbitrary::{
+    arbitrary_bitvec, arbitrary_date_time, arbitrary_decimal, arbitrary_json, arbitrary_naive_time,
+    arbitrary_positive_naive_date, arbitrary_timestamp_naive_date_time, arbitrary_uuid,
+};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
@@ -536,8 +536,8 @@ pub fn embedded_literal(
 #[cfg(test)]
 mod tests {
     use assert_approx_eq::assert_approx_eq;
-    use launchpad::hash::hash;
     use proptest::prop_assume;
+    use readyset_util::hash::hash;
     use test_strategy::proptest;
 
     use super::*;

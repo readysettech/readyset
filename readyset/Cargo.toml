@@ -29,7 +29,7 @@ chrono = "0.4"
 
 # Local dependencies
 health-reporter = { path = "../health-reporter" }
-launchpad = { path = "../launchpad" }
+readyset-util = { path = "../readyset-util" }
 nom-sql = { path = "../nom-sql" }
 mysql-srv = { path = "../mysql-srv" }
 psql-srv = { path = "../psql-srv" }

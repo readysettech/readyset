@@ -19,17 +19,17 @@ mod types {
     use std::time::Duration;
 
     use eui48::MacAddress;
-    use launchpad::arbitrary::{
-        arbitrary_bitvec, arbitrary_date_time, arbitrary_decimal, arbitrary_json,
-        arbitrary_json_without_f64, arbitrary_mac_address, arbitrary_naive_date,
-        arbitrary_naive_time, arbitrary_systemtime, arbitrary_uuid,
-    };
     use proptest::prelude::ProptestConfig;
     use proptest::string::string_regex;
     use readyset_adapter::backend::QueryDestination;
     use readyset_client_test_helpers::psql_helpers::{last_query_info, upstream_config};
     use readyset_client_test_helpers::sleep;
     use readyset_data::DfValue;
+    use readyset_util::arbitrary::{
+        arbitrary_bitvec, arbitrary_date_time, arbitrary_decimal, arbitrary_json,
+        arbitrary_json_without_f64, arbitrary_mac_address, arbitrary_naive_date,
+        arbitrary_naive_time, arbitrary_systemtime, arbitrary_uuid,
+    };
     use rust_decimal::Decimal;
     use tokio_postgres::types::{FromSql, ToSql};
     use tokio_postgres::NoTls;

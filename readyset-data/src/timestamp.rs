@@ -447,12 +447,12 @@ impl Arbitrary for TimestampTz {
     type Strategy = proptest::strategy::BoxedStrategy<TimestampTz>;
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        use launchpad::arbitrary::{
+        use proptest::prop_oneof;
+        use proptest::strategy::Strategy;
+        use readyset_util::arbitrary::{
             arbitrary_date, arbitrary_date_time, arbitrary_naive_date_time,
             arbitrary_timestamp_naive_date_time,
         };
-        use proptest::prop_oneof;
-        use proptest::strategy::Strategy;
 
         prop_oneof![
             arbitrary_naive_date_time().prop_map(|n| n.into()),

@@ -29,7 +29,7 @@ parking_lot = "0.12"
 
 # local deps
 common = { path = "../readyset-common", package = "readyset-common" }
-launchpad = { path = "../launchpad" }
+readyset-util = { path = "../readyset-util" }
 readyset-client = { path = "../readyset-client" }
 readyset-data = { path = "../readyset-data" }
 readyset-errors = { path = "../readyset-errors" }

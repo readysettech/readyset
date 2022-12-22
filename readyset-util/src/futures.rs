@@ -69,7 +69,7 @@ where
 ///
 /// Using the default configuration:
 /// ```
-/// # use launchpad::eventually;
+/// # use readyset_util::eventually;
 /// # let mut rt = tokio::runtime::Runtime::new().unwrap();
 /// # rt.block_on(async move {
 /// let x = 1;
@@ -82,7 +82,7 @@ where
 ///
 /// Using the `run_test`/`then_assert` form:
 /// ```
-/// # use launchpad::eventually;
+/// # use readyset_util::eventually;
 /// # let mut rt = tokio::runtime::Runtime::new().unwrap();
 /// # rt.block_on(async move {
 /// let x = 1;
@@ -95,7 +95,7 @@ where
 ///
 /// Incorporating a block containing multiple assertion steps:
 /// ```
-/// # use launchpad::eventually;
+/// # use readyset_util::eventually;
 /// # let mut rt = tokio::runtime::Runtime::new().unwrap();
 /// # rt.block_on(async move {
 /// let x = 1;
@@ -113,7 +113,7 @@ where
 /// Configuring the number of attempts (these next two examples also work the same way for the
 /// `run_test`/`then_assert` form):
 /// ```
-/// # use launchpad::eventually;
+/// # use readyset_util::eventually;
 /// # let mut rt = tokio::runtime::Runtime::new().unwrap();
 /// # rt.block_on(async move {
 /// let x = 1;
@@ -128,7 +128,7 @@ where
 /// ```
 /// use std::time::Duration;
 ///
-/// # use launchpad::eventually;
+/// # use readyset_util::eventually;
 /// # let mut rt = tokio::runtime::Runtime::new().unwrap();
 /// # rt.block_on(async move {
 /// let x = 1;
@@ -141,7 +141,7 @@ where
 ///
 /// As noted above, `then_assert` must be defined inline. The following will fail to compile:
 /// ```no_compile
-/// # use launchpad::eventually_assert;
+/// # use readyset_util::eventually_assert;
 /// # let mut rt = tokio::runtime::Runtime::new().unwrap();
 /// # rt.block_on(async move {
 /// let x = 1;

@@ -16,7 +16,7 @@
 ///
 /// #[cfg(test)]
 /// mod tests {
-///     use launchpad::eq_laws;
+///     use readyset_util::eq_laws;
 ///
 ///     eq_laws!(MyType);
 /// }
@@ -64,7 +64,7 @@ macro_rules! eq_laws {
 ///
 /// #[cfg(test)]
 /// mod tests {
-///     use launchpad::ord_laws;
+///     use readyset_util::ord_laws;
 ///
 ///     ord_laws!(MyType);
 /// }
@@ -145,7 +145,7 @@ macro_rules! ord_laws {
 ///
 /// #[cfg(test)]
 /// mod tests {
-///     use launchpad::hash_laws;
+///     use readyset_util::hash_laws;
 ///
 ///     hash_laws!(MyType);
 /// }

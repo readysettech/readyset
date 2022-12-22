@@ -6,8 +6,8 @@ use std::mem;
 
 use dataflow_state::PointKey;
 use itertools::Itertools;
-use launchpad::Indices;
 use nom_sql::OrderType;
+use readyset_util::Indices;
 use serde::{Deserialize, Serialize};
 
 use crate::ops::utils::Order;

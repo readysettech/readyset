@@ -13,7 +13,7 @@ members = [
     "dataflow-state",
     "failpoint-macros",
     "failpoint-macros/proc-macros",
-    "launchpad",
+    "health-reporter",
     "merging-interval-tree",
     "metrics-aggregator",
     "mysql-srv",
@@ -29,8 +29,8 @@ members = [
     "readyset-client-metrics",
     "readyset-client-test-helpers",
     "readyset-clustertest",
-    "readyset-common",
     "readyset-clustertest",
+    "readyset-common",
     "readyset-data",
     "readyset-dataflow",
     "readyset-errors",
@@ -45,13 +45,13 @@ members = [
     "readyset-tools",
     "readyset-tracing",
     "readyset-tracing/proc-macros",
+    "readyset-util",
     "readyset-version",
     "replicators",
     "system-benchmarks",
     "test-utils",
     "timestamp-service",
-    "tournament-kway",
-    "health-reporter"
+    "tournament-kway"
 ]
 resolver = "2"
 

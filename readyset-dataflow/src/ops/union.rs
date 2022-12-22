@@ -4,12 +4,12 @@ use std::convert::{TryFrom, TryInto};
 use std::ops::Bound;
 
 use itertools::Itertools;
-use launchpad::hash::hash;
-use launchpad::intervals::{cmp_endbound, cmp_startbound};
-use launchpad::Indices;
 use readyset_client::KeyComparison;
 use readyset_errors::{invariant, ReadySetResult};
 use readyset_tracing::{debug, error, trace};
+use readyset_util::hash::hash;
+use readyset_util::intervals::{cmp_endbound, cmp_startbound};
+use readyset_util::Indices;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 use vec1::Vec1;
@@ -1153,7 +1153,7 @@ mod tests {
     }
 
     mod buffered_replay_key {
-        use launchpad::ord_laws;
+        use readyset_util::ord_laws;
 
         use super::*;
 

@@ -1,9 +1,9 @@
 use std::{fmt, str};
 
-use launchpad::redacted::Sensitive;
 use nom::branch::alt;
 use nom::combinator::map;
 use nom_locate::LocatedSpan;
+use readyset_util::redacted::Sensitive;
 use serde::{Deserialize, Serialize};
 
 use crate::alter::{alter_table_statement, AlterTableStatement};

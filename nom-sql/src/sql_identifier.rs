@@ -414,7 +414,7 @@ impl Arbitrary for SqlIdentifier {
 
 #[cfg(test)]
 mod tests {
-    use launchpad::{eq_laws, hash_laws, ord_laws};
+    use readyset_util::{eq_laws, hash_laws, ord_laws};
     use test_strategy::proptest;
 
     use super::SqlIdentifier;

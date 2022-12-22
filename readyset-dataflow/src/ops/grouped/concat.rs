@@ -6,9 +6,9 @@ use std::convert::{TryFrom, TryInto};
 use std::fmt::Write;
 
 use common::DfValue;
-use launchpad::Indices;
 use readyset_data::{Collation, DfType};
 use readyset_errors::invariant_eq;
+use readyset_util::Indices;
 use serde::{Deserialize, Serialize};
 
 use crate::node::Node;

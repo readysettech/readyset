@@ -4,9 +4,9 @@ use std::error::Error;
 use std::io;
 
 use derive_more::Display;
-use launchpad::redacted::Sensitive;
 use nom_sql::Relation;
 use petgraph::graph::NodeIndex;
+use readyset_util::redacted::Sensitive;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use url::Url;

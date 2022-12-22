@@ -9,7 +9,7 @@ edition = "2021"
 nom = "7.1"
 regex = "1.4.3"
 serde = { version = "1.0.8", features = ["rc"] }
-launchpad = { path = "../launchpad" }
+readyset-util = { path = "../readyset-util" }
 proptest = "1.0.0"
 thiserror = "1.0.26"
 chrono = "0.4"

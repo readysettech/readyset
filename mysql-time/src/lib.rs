@@ -7,11 +7,11 @@ use std::ops::{Add, Sub};
 use std::str::FromStr;
 
 use chrono::{Duration, NaiveDateTime, NaiveTime, Timelike};
-use launchpad::arbitrary::arbitrary_duration;
 use mysql_common::value::convert::{ConvIr, FromValue, FromValueError};
 use mysql_common::value::Value;
 use proptest::arbitrary::Arbitrary;
 use proptest::strategy::Strategy;
+use readyset_util::arbitrary::arbitrary_duration;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -696,7 +696,7 @@ impl Arbitrary for MySqlTime {
 mod tests {
     use std::collections::hash_map::DefaultHasher;
 
-    use launchpad::arbitrary::{
+    use readyset_util::arbitrary::{
         arbitrary_duration, arbitrary_naive_date_time, arbitrary_naive_time,
     };
     use test_strategy::proptest;

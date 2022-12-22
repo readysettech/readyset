@@ -7,12 +7,12 @@ use std::num::NonZeroUsize;
 
 use dataflow_state::PointKey;
 use itertools::Itertools;
-use launchpad::Indices;
 use maplit::hashmap;
 use nom_sql::OrderType;
 use readyset_client::internal;
 use readyset_errors::{internal, internal_err, invariant, ReadySetResult};
 use readyset_tracing::trace;
+use readyset_util::Indices;
 use serde::{Deserialize, Serialize};
 
 use crate::ops::utils::Order;

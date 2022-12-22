@@ -80,7 +80,6 @@ use derive_more::{Display, From, Into};
 pub use distribution_annotation::DistributionAnnotation;
 use eui48::{MacAddress, MacAddressFormat};
 use itertools::{Either, Itertools};
-use launchpad::intervals::{BoundPair, IterBoundPair};
 use lazy_static::lazy_static;
 use nom_sql::analysis::{contains_aggregate, ReferredColumns};
 use nom_sql::{
@@ -98,6 +97,7 @@ use rand::seq::SliceRandom;
 use rand::Rng;
 use readyset_data::{DfType, DfValue, Dialect};
 use readyset_sql_passes::outermost_table_exprs;
+use readyset_util::intervals::{BoundPair, IterBoundPair};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator;

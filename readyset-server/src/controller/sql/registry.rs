@@ -1,8 +1,6 @@
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 
-use launchpad::hash::hash;
-use launchpad::redacted::Sensitive;
 use nom_sql::analysis::visit::{self, Visitor};
 use nom_sql::{
     CreateTableBody, CreateTableStatement, CreateViewStatement, Relation, SelectSpecification,
@@ -10,6 +8,8 @@ use nom_sql::{
 };
 use readyset_errors::{unsupported_err, ReadySetError, ReadySetResult};
 use readyset_tracing::debug;
+use readyset_util::hash::hash;
+use readyset_util::redacted::Sensitive;
 use serde::{Deserialize, Serialize};
 
 use super::QueryID;

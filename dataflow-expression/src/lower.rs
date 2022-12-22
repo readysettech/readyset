@@ -1,12 +1,12 @@
 use std::iter;
 
-use launchpad::redacted::Sensitive;
 use nom_sql::{Column, Expr as AstExpr, FunctionExpr, InValue, Relation, UnaryOperator};
 use readyset_data::dialect::SqlEngine;
 use readyset_data::{DfType, DfValue};
 use readyset_errors::{
     internal, internal_err, invalid_err, unsupported, ReadySetError, ReadySetResult,
 };
+use readyset_util::redacted::Sensitive;
 use vec1::Vec1;
 
 use crate::{

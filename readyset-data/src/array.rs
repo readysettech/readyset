@@ -569,9 +569,9 @@ mod parse {
 
 #[cfg(test)]
 mod tests {
-    use launchpad::ord_laws;
     use proptest::arbitrary::any;
     use proptest::strategy::Strategy;
+    use readyset_util::ord_laws;
     use test_strategy::proptest;
 
     use super::*;

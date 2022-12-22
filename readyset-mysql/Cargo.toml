@@ -35,7 +35,7 @@ derive_more = "0.99.16"
 thiserror = "1.0.26"
 mysql_common = "0.28.0"
 itertools = "0.10"
-launchpad = { path = "../launchpad" }
+readyset-util = { path = "../readyset-util" }
 
 [dev-dependencies]
 readyset-client-test-helpers = { path = "../readyset-client-test-helpers", features = ["mysql"] }
@@ -54,6 +54,6 @@ test-strategy = "0.2.0"
 [features]
 vertical_tests = []
 # Redact the display of strings marked sensitive from logs and error messages
-redact_sensitive = ["launchpad/redact_sensitive"]
+redact_sensitive = ["readyset-util/redact_sensitive"]
 failure_injection = ["fail/failpoints", "readyset-client/failure_injection", "readyset-server/failure_injection"]
 fallback_cache = ["readyset-adapter/fallback_cache", "readyset-client-metrics/fallback_cache"]

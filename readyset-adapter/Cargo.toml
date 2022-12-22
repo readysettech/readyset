@@ -25,7 +25,7 @@ itertools = "0.10"
 derive_more = "0.99.11"
 async-trait = "0.1.58"
 thiserror = "1.0.26"
-launchpad = { path = "../launchpad" }
+readyset-util = { path = "../readyset-util" }
 metrics = "0.19"
 metrics-exporter-prometheus = "0.10"
 futures = "0.3"

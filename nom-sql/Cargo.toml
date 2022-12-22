@@ -19,7 +19,7 @@ pratt = "0.3.0"
 maplit = "1.0.2"
 proptest = "1.0.0"
 test-strategy = "0.2.0"
-launchpad = { path = "../launchpad" }
+readyset-util = { path = "../readyset-util" }
 thiserror = "1.0.26"
 hex = "0.4.3"
 rust_decimal = { version = "1.26", features = ["db-tokio-postgres"] }

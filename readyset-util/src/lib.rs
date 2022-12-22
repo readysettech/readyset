@@ -36,7 +36,7 @@ pub trait Indices<'idx, Idx: 'idx> {
     /// # Examples
     ///
     /// ```rust
-    /// use launchpad::Indices;
+    /// use readyset_util::Indices;
     ///
     /// let v = vec![0, 1, 2, 3, 4];
     /// let res = v.indices(vec![1, 2, 3]).unwrap();
@@ -53,7 +53,7 @@ pub trait Indices<'idx, Idx: 'idx> {
     /// # Examples
     ///
     /// ```rust
-    /// use launchpad::Indices;
+    /// use readyset_util::Indices;
     ///
     /// let v = vec![0, 1, 2, 3, 4];
     /// let res = v.cloned_indices(vec![1, 2, 3]).unwrap();

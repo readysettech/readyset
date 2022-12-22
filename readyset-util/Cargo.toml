@@ -1,12 +1,10 @@
 [package]
-name = "launchpad"
+name = "readyset-util"
 version = "0.1.0"
 publish = false
 authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 description = "Extensions to the Rust standard library"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 anyhow = "1.0"

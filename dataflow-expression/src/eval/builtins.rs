@@ -5,10 +5,10 @@ use std::ops::{Add, Div, Mul, Sub};
 
 use chrono::{Datelike, LocalResult, Month, NaiveDate, NaiveDateTime, TimeZone, Timelike, Weekday};
 use chrono_tz::Tz;
-use launchpad::math::integer_rnd;
 use mysql_time::MySqlTime;
 use readyset_data::{DfType, DfValue};
 use readyset_errors::{invalid_err, ReadySetError, ReadySetResult};
+use readyset_util::math::integer_rnd;
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 use rust_decimal::Decimal;
 use serde_json::Value as JsonValue;
@@ -823,11 +823,11 @@ impl BuiltinFunction {
 #[cfg(test)]
 mod tests {
     use chrono::{NaiveTime, Timelike};
-    use launchpad::arbitrary::arbitrary_timestamp_naive_date_time;
     use lazy_static::lazy_static;
     use nom_sql::parse_expr;
     use nom_sql::Dialect::*;
     use readyset_errors::internal;
+    use readyset_util::arbitrary::arbitrary_timestamp_naive_date_time;
     use test_strategy::proptest;
 
     use super::*;

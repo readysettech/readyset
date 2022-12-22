@@ -9,13 +9,13 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use dataflow_expression::Dialect;
-use launchpad::redacted::Sensitive;
 use metrics::{counter, register_counter};
 use readyset_client::query::{MigrationState, Query};
 use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::{ReadySetHandle, ReadySetResult, ViewCreateRequest};
 use readyset_client_metrics::recorded;
 use readyset_tracing::{error, info, warn};
+use readyset_util::redacted::Sensitive;
 use tokio::select;
 use tracing::instrument;
 

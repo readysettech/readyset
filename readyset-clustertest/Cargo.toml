@@ -24,7 +24,7 @@ tracing = { version = "0.1", features = ["release_max_level_debug"] }
 nom-sql = { path = "../nom-sql" }
 readyset-client = { path = "../readyset-client", features = ["failure_injection"] }
 readyset-data = { path = "../readyset-data" }
-launchpad = { path = "../launchpad" }
+readyset-util = { path = "../readyset-util" }
 readyset-tracing = { path = "../readyset-tracing" }
 
 [dev-dependencies]

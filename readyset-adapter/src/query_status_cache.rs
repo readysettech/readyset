@@ -8,9 +8,9 @@ use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
 use dashmap::DashMap;
-use launchpad::hash::hash;
 use readyset_client::query::*;
 use readyset_tracing::error;
+use readyset_util::hash::hash;
 
 /// A metadata cache for all queries that have been processed by this
 /// adapter. Thread-safe.

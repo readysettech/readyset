@@ -29,7 +29,7 @@ pub fn into_bound_endpoint<A>(bound: Bound<A>) -> Option<A> {
 /// ```rust
 /// use std::ops::Bound::*;
 ///
-/// use launchpad::intervals::covers;
+/// use readyset_util::intervals::covers;
 ///
 /// assert!(covers(&(1..10), &(2..3)));
 /// assert!(covers(&(1..=10), &(8..=10)));
@@ -90,7 +90,7 @@ where
 /// # Examples:
 ///
 /// ```rust
-/// use launchpad::intervals::overlaps;
+/// use readyset_util::intervals::overlaps;
 ///
 /// assert!(overlaps(&(0..=0), &(0..)));
 /// assert!(overlaps(&(..=0), &(0..10)));
@@ -127,7 +127,7 @@ where
 /// ```rust
 /// use std::ops::Bound::*;
 ///
-/// use launchpad::intervals;
+/// use readyset_util::intervals;
 ///
 /// assert!(intervals::is_empty(&(1..1)));
 /// assert!(intervals::is_empty(&(Excluded(1), Included(1))));
@@ -154,7 +154,7 @@ where
 /// use std::cmp::Ordering;
 /// use std::ops::Bound::*;
 ///
-/// use launchpad::intervals::cmp_startbound;
+/// use readyset_util::intervals::cmp_startbound;
 ///
 /// assert_eq!(
 ///     cmp_startbound(Excluded(&10), Included(&10)),
@@ -195,7 +195,7 @@ where
 /// use std::cmp::Ordering;
 /// use std::ops::Bound::*;
 ///
-/// use launchpad::intervals::cmp_endbound;
+/// use readyset_util::intervals::cmp_endbound;
 ///
 /// assert_eq!(cmp_endbound(Excluded(&10), Included(&10)), Ordering::Less);
 /// ```
@@ -235,7 +235,7 @@ where
 /// use std::cmp::Ordering;
 /// use std::ops::Bound::*;
 ///
-/// use launchpad::intervals::cmp_start_end;
+/// use readyset_util::intervals::cmp_start_end;
 ///
 /// assert_eq!(cmp_start_end::<i32>(Unbounded, Unbounded), Ordering::Less);
 /// ```
@@ -272,7 +272,7 @@ where
 /// use std::cmp::Ordering;
 /// use std::ops::Bound::*;
 ///
-/// use launchpad::intervals::cmp_end_start;
+/// use readyset_util::intervals::cmp_end_start;
 ///
 /// assert_eq!(
 ///     cmp_end_start::<i32>(Unbounded, Unbounded),
@@ -351,7 +351,7 @@ where
     /// ```
     /// use std::ops::Bound::*;
     ///
-    /// use launchpad::intervals::IterBoundPair;
+    /// use readyset_util::intervals::IterBoundPair;
     ///
     /// assert_eq!(
     ///     (Excluded(4_u32), Included(6_u32))
@@ -438,7 +438,7 @@ impl<'a, Q, R> ExactSizeIterator for DifferenceIterator<'a, Q, R> where R: Range
 /// ```rust
 /// use std::ops::Bound::*;
 ///
-/// use launchpad::intervals::difference;
+/// use readyset_util::intervals::difference;
 ///
 /// // When the intervals don't overlap at all, the first interval is returned unchanged
 /// assert_eq!(
@@ -508,7 +508,7 @@ where
 /// ```rust
 /// use std::ops::Bound::*;
 ///
-/// use launchpad::intervals::intersection;
+/// use readyset_util::intervals::intersection;
 ///
 /// // If the intervals don't intersect, returns None
 /// assert_eq!(intersection(&(1..3), &(4..8)), None);

@@ -33,7 +33,7 @@ postgres-protocol = { workspace = true }
 
 # Local dependencies
 nom-sql = { path = "../nom-sql" }
-launchpad = { path = "../launchpad" }
+readyset-util = { path = "../readyset-util" }
 readyset-errors = { path = "../readyset-errors" }
 mysql-time = { path = "../mysql-time" }
 smallvec = { version = "1.9.0", features = ["union", "const_generics", "serde"] }

@@ -3,9 +3,9 @@ use std::ops::{Bound, RangeBounds};
 
 use common::{Index, IndexType};
 use indexmap::IndexMap;
-use launchpad::intervals::into_bound_endpoint;
 use partial_map::PartialMap;
 use readyset_data::DfValue;
+use readyset_util::intervals::into_bound_endpoint;
 use tuple::TupleElements;
 use vec1::Vec1;
 

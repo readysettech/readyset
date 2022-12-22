@@ -1,4 +1,3 @@
-use launchpad::hash::hash;
 use mysql_async::prelude::*;
 use readyset_adapter::backend::UnsupportedSetMode;
 use readyset_adapter::BackendBuilder;
@@ -7,6 +6,7 @@ use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::mysql_helpers::{last_query_info, MySQLAdapter};
 use readyset_client_test_helpers::{self, sleep, TestBuilder};
 use readyset_server::Handle;
+use readyset_util::hash::hash;
 use serial_test::serial;
 use test_utils::skip_flaky_finder;
 

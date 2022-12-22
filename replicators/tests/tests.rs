@@ -6,7 +6,6 @@ use std::time::Duration;
 
 use database_utils::UpstreamConfig as Config;
 use itertools::Itertools;
-use launchpad::eventually;
 use mysql_async::prelude::Queryable;
 use mysql_time::MySqlTime;
 use nom_sql::{parse_create_cache, Relation};
@@ -19,6 +18,7 @@ use readyset_data::{Collation, DfValue, Dialect, TinyText};
 use readyset_server::Builder;
 use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer, TelemetrySender};
 use readyset_tracing::{error, trace};
+use readyset_util::eventually;
 use replicators::db_util::error_is_slot_not_found;
 use replicators::NoriaAdapter;
 use test_utils::slow;

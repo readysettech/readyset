@@ -73,7 +73,6 @@ use std::{fmt, fs};
 
 use bincode::Options;
 use common::{IndexType, Record, Records, SizeOf, Tag};
-use launchpad::intervals::BoundPair;
 use parking_lot::{
     MappedRwLockReadGuard, MappedRwLockWriteGuard, RwLock, RwLockReadGuard, RwLockWriteGuard,
 };
@@ -83,6 +82,7 @@ use readyset_client::{KeyComparison, KeyCount, SqlIdentifier};
 use readyset_data::DfValue;
 use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_tracing::{debug, error, info, warn};
+use readyset_util::intervals::BoundPair;
 use rocksdb::{self, IteratorMode, PlainTableFactoryOptions, SliceTransform, WriteBatch, DB};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};

@@ -17,8 +17,6 @@ use futures_util::future::TryFutureExt;
 use futures_util::stream::futures_unordered::FuturesUnordered;
 use futures_util::stream::{StreamExt, TryStreamExt};
 use futures_util::{future, ready};
-use launchpad::intervals::{cmp_start_end, BoundPair};
-use launchpad::redacted::Sensitive;
 use nom_sql::{
     BinaryOperator, Column, ColumnConstraint, ColumnSpecification, Relation, SelectStatement,
     SqlIdentifier,
@@ -35,6 +33,8 @@ use readyset_sql_passes::anonymize::{Anonymize, Anonymizer};
 use readyset_tracing::presampled::instrument_if_enabled;
 use readyset_tracing::propagation::Instrumented;
 use readyset_tracing::{error, trace};
+use readyset_util::intervals::{cmp_start_end, BoundPair};
+use readyset_util::redacted::Sensitive;
 use serde::{Deserialize, Serialize};
 use tokio_tower::multiplex;
 use tower::balance::p2c::Balance;
@@ -1524,7 +1524,7 @@ mod tests {
 
     #[allow(clippy::eq_op)]
     mod key_comparison {
-        use launchpad::eq_laws;
+        use readyset_util::eq_laws;
 
         use super::*;
 

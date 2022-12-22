@@ -7,7 +7,7 @@ use std::hash::{Hash, Hasher};
 ///
 /// ```rust
 /// let x: i32 = 123;
-/// assert_eq!(launchpad::hash::hash(&x), 14370432302296844161);
+/// assert_eq!(readyset_util::hash::hash(&x), 14370432302296844161);
 /// ```
 pub fn hash<T: Hash>(x: &T) -> u64 {
     let mut hasher = DefaultHasher::new();

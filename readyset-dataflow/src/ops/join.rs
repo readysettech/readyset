@@ -3,11 +3,11 @@ use std::convert::{TryFrom, TryInto};
 
 use dataflow_state::PointKey;
 use itertools::Itertools;
-use launchpad::intervals::into_bound_endpoint;
-use launchpad::Indices;
 use maplit::hashmap;
 use readyset_client::KeyComparison;
 use readyset_errors::{internal_err, ReadySetResult};
+use readyset_util::intervals::into_bound_endpoint;
+use readyset_util::Indices;
 use serde::{Deserialize, Serialize};
 use vec1::{vec1, Vec1};
 

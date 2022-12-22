@@ -12,10 +12,10 @@ use clap::Parser;
 use derive_more::From;
 use error::{ConnectionType, DatabaseTypeParseError};
 use futures::{StreamExt, TryStreamExt};
-use launchpad::redacted::RedactedString;
 use mysql_async::prelude::Queryable;
 use mysql_async::OptsBuilder;
 use readyset_client::{ReadySetError, ReadySetResult};
+use readyset_util::redacted::RedactedString;
 use serde::{Deserialize, Serialize};
 use {mysql_async as mysql, tokio_postgres as pgsql};
 

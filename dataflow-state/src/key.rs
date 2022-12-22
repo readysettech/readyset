@@ -2,7 +2,7 @@ use std::ops::{Bound, RangeBounds};
 
 use common::DfValue;
 use derive_more::From;
-use launchpad::intervals::BoundPair;
+use readyset_util::intervals::BoundPair;
 use serde::ser::{SerializeSeq, SerializeTuple};
 use serde::Serialize;
 use tuple::TupleElements;

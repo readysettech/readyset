@@ -16,12 +16,12 @@ use chrono::{self, DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, T
 use enum_kinds::EnumKind;
 use eui48::{MacAddress, MacAddressFormat};
 use itertools::Itertools;
-use launchpad::arbitrary::{arbitrary_decimal, arbitrary_duration};
-use launchpad::redacted::Sensitive;
 use mysql_time::MySqlTime;
 use nom_sql::{Double, Float, Literal, SqlType};
 use proptest::prelude::{prop_oneof, Arbitrary};
 use readyset_errors::{internal, invalid_err, unsupported, ReadySetError, ReadySetResult};
+use readyset_util::arbitrary::{arbitrary_decimal, arbitrary_duration};
+use readyset_util::redacted::Sensitive;
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 use rust_decimal::Decimal;
 use serde_json::Value as JsonValue;
@@ -2075,8 +2075,8 @@ impl Arbitrary for DfValue {
 #[cfg(test)]
 mod tests {
     use derive_more::{From, Into};
-    use launchpad::{eq_laws, hash_laws, ord_laws};
     use proptest::prelude::*;
+    use readyset_util::{eq_laws, hash_laws, ord_laws};
     use test_strategy::proptest;
 
     use super::*;
@@ -3190,7 +3190,7 @@ mod tests {
     }
 
     mod coerce_to {
-        use launchpad::arbitrary::{
+        use readyset_util::arbitrary::{
             arbitrary_naive_date, arbitrary_naive_date_time, arbitrary_naive_time,
         };
         use rust_decimal::Decimal;

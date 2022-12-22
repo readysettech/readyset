@@ -1,9 +1,9 @@
 use ::readyset_client::metrics::{recorded, DumpedMetricValue};
 use ::readyset_client::recipe::changelist::ChangeList;
 use ::readyset_client::{failpoints, get_metric};
-use launchpad::eventually;
 use readyset_data::{DfValue, Dialect};
 use readyset_tracing::info;
+use readyset_util::eventually;
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
 use serial_test::serial;

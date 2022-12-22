@@ -1,13 +1,13 @@
 use async_trait::async_trait;
 use database_utils::UpstreamConfig;
 use futures::FutureExt;
-use launchpad::select;
 use nom_sql::Relation;
 use postgres_native_tls::MakeTlsConnector;
 use readyset_client::replication::ReplicationOffset;
 use readyset_client::{ReadySetError, ReadySetResult, TableOperation};
 use readyset_errors::invariant;
 use readyset_tracing::{debug, error, info, trace, warn};
+use readyset_util::select;
 use tokio_postgres as pgsql;
 
 use super::ddl_replication::setup_ddl_replication;

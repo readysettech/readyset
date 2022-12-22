@@ -7,7 +7,6 @@ use ::serde::{Deserialize, Serialize};
 use common::{DfValue, IndexType};
 use dataflow::ops::grouped::aggregate::Aggregation;
 use dataflow::ops::union;
-use launchpad::redacted::Sensitive;
 use lazy_static::lazy_static;
 use mir::graph::MirGraph;
 use mir::node::node_inner::MirNodeInner;
@@ -28,6 +27,7 @@ use readyset_errors::{
 };
 use readyset_sql_passes::is_correlated;
 use readyset_tracing::{debug, trace};
+use readyset_util::redacted::Sensitive;
 
 use super::query_graph::{extract_limit_offset, JoinPredicate};
 use crate::controller::sql::mir::grouped::{

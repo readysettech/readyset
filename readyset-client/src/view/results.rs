@@ -2,9 +2,9 @@ use std::cmp::Ordering;
 use std::sync::Arc;
 
 use dataflow_expression::{Expr, PostLookup, PostLookupAggregates};
-use launchpad::nonmaxusize::NonMaxUsize;
 use nom_sql::OrderType;
 use readyset_data::DfValue;
+use readyset_util::nonmaxusize::NonMaxUsize;
 use smallvec::SmallVec;
 use streaming_iterator::StreamingIterator;
 use tournament_kway::{Comparator, StreamingTournament};
