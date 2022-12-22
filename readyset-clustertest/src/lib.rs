@@ -217,7 +217,7 @@ use ::readyset_client::consensus::AuthorityType;
 use ::readyset_client::metrics::client::MetricsClient;
 use ::readyset_client::{ReadySetHandle, ReadySetResult};
 use anyhow::{anyhow, Result};
-use database_utils::DatabaseType;
+use database_utils::{DatabaseConnection, DatabaseType, DatabaseURL};
 use futures::executor;
 use hyper::Client;
 use mysql_async::prelude::Queryable;
@@ -630,6 +630,7 @@ impl DeploymentBuilder {
             self.wait_for_failpoint,
             FailpointDestination::Adapter | FailpointDestination::Both
         );
+
         AdapterStartParams {
             deployment_name: self.name.clone(),
             readyset_path: self.readyset_binaries.readyset.clone().unwrap(),
@@ -1053,33 +1054,40 @@ impl DeploymentHandle {
         &mut self.metrics
     }
 
-    /// Creates a [`mysql_async::Conn`] to the first MySQL adapter in the deployment.
+    /// Creates a [`DatabaseConnection`] to the first adapter in the deployment.
     ///
     /// # Panics
     ///
     /// Panics if the adapter does not exist or a connection can not be made.
-    pub async fn first_adapter(&self) -> mysql_async::Conn {
+    pub async fn first_adapter(&self) -> DatabaseConnection {
         self.adapter(0).await
     }
 
-    /// Creates a [`mysql_async::Conn`] to the MySQL adapter at the given index in the deployment.
+    /// Creates a [`DatabaseConnection`] to the adapter at the given index in the deployment.
     ///
     /// # Panics
     ///
     /// Panics if the adapter does not exist or a connection can not be made.
-    pub async fn adapter(&self, idx: usize) -> mysql_async::Conn {
+    pub async fn adapter(&self, idx: usize) -> DatabaseConnection {
         let addr = &self.adapters[idx].conn_str;
-        let opts = mysql_async::Opts::from_url(addr).unwrap();
-        mysql_async::Conn::new(opts.clone()).await.unwrap()
+
+        DatabaseURL::from_str(addr)
+            .unwrap()
+            .connect()
+            .await
+            .unwrap()
     }
 
-    /// Creates a [`mysql_async::Conn`] to the upstream database in the deployment.
+    /// Creates a [`DatabaseConnection`] to the upstream database in the deployment.
     /// Otherwise panics if the upstream database does not exist or a connection
     /// can not be made.
-    pub async fn upstream(&self) -> mysql_async::Conn {
+    pub async fn upstream(&self) -> DatabaseConnection {
         let addr = self.upstream_addr.as_ref().unwrap();
-        let opts = mysql_async::Opts::from_url(addr).unwrap();
-        mysql_async::Conn::new(opts.clone()).await.unwrap()
+        DatabaseURL::from_str(addr)
+            .unwrap()
+            .connect()
+            .await
+            .unwrap()
     }
 
     /// Returns the expected number of workers alive within the deployment based

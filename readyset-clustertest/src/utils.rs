@@ -1,7 +1,8 @@
 use std::time::{Duration, Instant};
 
+use database_utils::DatabaseConnection;
 use mysql_async::prelude::{FromRow, Queryable, StatementLike};
-use mysql_async::{Conn, Params};
+use mysql_async::Params;
 use readyset_client::get_metric;
 use readyset_client::metrics::client::MetricsClient;
 use readyset_client::metrics::{recorded, DumpedMetricValue};
@@ -108,7 +109,7 @@ pub enum ResultSource<'a> {
 }
 
 pub async fn query_until_expected<S, T, P>(
-    conn: &mut Conn,
+    conn: &mut DatabaseConnection,
     query: QueryExecution<S, P>,
     results: &EventuallyConsistentResults<T>,
     timeout: Duration,
@@ -125,7 +126,7 @@ where
 /// queried from ReadySet. The intermediate results, and the expected result may be
 /// returned via fallback without failing.
 pub async fn query_until_expected_from_noria<S, T, P>(
-    conn: &mut Conn,
+    conn: &mut DatabaseConnection,
     metrics: &mut MetricsClient,
     query: QueryExecution<S, P>,
     results: &EventuallyConsistentResults<T>,
@@ -147,7 +148,7 @@ where
 }
 
 pub async fn query_until_expected_inner<S, T, P>(
-    conn: &mut Conn,
+    conn: &mut DatabaseConnection,
     query: QueryExecution<S, P>,
     mut source: ResultSource<'_>,
     results: &EventuallyConsistentResults<T>,
@@ -178,9 +179,24 @@ where
 
         let result = match &query {
             QueryExecution::PrepareExecute(query, params) => {
-                tokio::time::timeout(remaining, conn.exec(query.clone(), params.clone())).await
+                match conn {
+                    DatabaseConnection::MySQL(conn) => {
+                        tokio::time::timeout(remaining, conn.exec(query.clone(), params.clone()))
+                    }
+                    DatabaseConnection::PostgreSQL(_, _) => {
+                        todo!("TODO(luke): support postgres query_until_expected_inner")
+                    }
+                }
+                .await
             }
-            QueryExecution::Query(q) => tokio::time::timeout(remaining, conn.query(q)).await,
+            QueryExecution::Query(q) => match conn {
+                DatabaseConnection::MySQL(conn) => {
+                    tokio::time::timeout(remaining, conn.query(q)).await
+                }
+                DatabaseConnection::PostgreSQL(_, _) => {
+                    todo!("TODO(luke): support postgres query_until_expected_inner")
+                }
+            },
         };
 
         match result {

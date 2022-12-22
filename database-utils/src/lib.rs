@@ -524,7 +524,7 @@ impl DatabaseConnection {
     /// That might be an underlying mysql or postgres error, depending on the underlying connection
     /// type, or it may be a value conversion error in the case that the caller is using a custom
     /// value type to convert results into.
-    async fn execute_str<P, V>(
+    pub async fn execute_str<P, V>(
         &mut self,
         stmt: &str,
         params: P,
@@ -549,7 +549,7 @@ impl DatabaseConnection {
         }
     }
 
-    fn as_mysql_conn(&mut self) -> Option<&mut mysql_async::Conn> {
+    pub fn as_mysql_conn(&mut self) -> Option<&mut mysql_async::Conn> {
         if let DatabaseConnection::MySQL(c) = self {
             Some(c)
         } else {
@@ -557,7 +557,7 @@ impl DatabaseConnection {
         }
     }
 
-    fn as_postgres_conn(&mut self) -> Option<&mut tokio_postgres::Client> {
+    pub fn as_postgres_conn(&mut self) -> Option<&mut tokio_postgres::Client> {
         if let DatabaseConnection::PostgreSQL(c, _jh) = self {
             Some(c)
         } else {

@@ -114,6 +114,8 @@ async fn mirror_prepare_exec_test() {
         .await
         .unwrap();
     let result: Vec<(i32, i32)> = adapter
+        .as_mysql_conn()
+        .unwrap()
         .exec(r"SELECT * FROM t1 WHERE uid = ?;", (2,))
         .await
         .unwrap();
@@ -210,6 +212,8 @@ async fn failure_during_query() {
 
     // Should return the correct results from fallback.
     let result: Vec<(i32, i32)> = adapter
+        .as_mysql_conn()
+        .unwrap()
         .exec(r"SELECT * FROM t1 WHERE uid = ?;", (2,))
         .await
         .unwrap();
@@ -352,11 +356,19 @@ async fn test_fallback_recovery_period() {
         .unwrap();
 
     // Prep/exec path
-    let res: (i32, i32) = adapter.exec_first(query, (1,)).await.unwrap().unwrap();
+    let res: (i32, i32) = adapter
+        .as_mysql_conn()
+        .unwrap()
+        .exec_first(query, (1,))
+        .await
+        .unwrap()
+        .unwrap();
 
     assert_eq!(res, (1, 4));
 
     let res: QueryInfo = adapter
+        .as_mysql_conn()
+        .unwrap()
         .query_first(r"EXPLAIN LAST STATEMENT")
         .await
         .unwrap()
@@ -366,11 +378,19 @@ async fn test_fallback_recovery_period() {
 
     // Standard query path (not prep/exec)
     let flattened_query = "SELECT * FROM t1 WHERE uid = 1";
-    let res: (i32, i32) = adapter.query_first(flattened_query).await.unwrap().unwrap();
+    let res: (i32, i32) = adapter
+        .as_mysql_conn()
+        .unwrap()
+        .query_first(flattened_query)
+        .await
+        .unwrap()
+        .unwrap();
 
     assert_eq!(res, (1, 4));
 
     let res: QueryInfo = adapter
+        .as_mysql_conn()
+        .unwrap()
         .query_first(r"EXPLAIN LAST STATEMENT")
         .await
         .unwrap()
@@ -384,11 +404,19 @@ async fn test_fallback_recovery_period() {
 
     // Should hit fallback exclusively now because we should now be in the recovery period.
     // Regular query path.
-    let res: (i32, i32) = adapter.query_first(flattened_query).await.unwrap().unwrap();
+    let res: (i32, i32) = adapter
+        .as_mysql_conn()
+        .unwrap()
+        .query_first(flattened_query)
+        .await
+        .unwrap()
+        .unwrap();
 
     assert_eq!(res, (1, 4));
 
     let res: QueryInfo = adapter
+        .as_mysql_conn()
+        .unwrap()
         .query_first(r"EXPLAIN LAST STATEMENT")
         .await
         .unwrap()
@@ -397,11 +425,19 @@ async fn test_fallback_recovery_period() {
     assert_eq!(res.destination, QueryDestination::Upstream);
 
     // prep/exec path.
-    let res: (i32, i32) = adapter.exec_first(query, (1,)).await.unwrap().unwrap();
+    let res: (i32, i32) = adapter
+        .as_mysql_conn()
+        .unwrap()
+        .exec_first(query, (1,))
+        .await
+        .unwrap()
+        .unwrap();
 
     assert_eq!(res, (1, 4));
 
     let res: QueryInfo = adapter
+        .as_mysql_conn()
+        .unwrap()
         .query_first(r"EXPLAIN LAST STATEMENT")
         .await
         .unwrap()
@@ -569,6 +605,8 @@ async fn proxied_queries_filtering() {
 
     let query = format!("SHOW PROXIED QUERIES WHERE query_id = '{}';", &query_id);
     let proxied_queries = adapter
+        .as_mysql_conn()
+        .unwrap()
         .query::<(String, String, String), _>(query)
         .await
         .unwrap();
@@ -619,6 +657,8 @@ async fn cached_queries_filtering() {
     );
 
     let cached_queries = adapter
+        .as_mysql_conn()
+        .unwrap()
         .query::<(String, String, String), _>("SHOW CACHES WHERE query_id = 'q';")
         .await
         .unwrap();
@@ -905,7 +945,10 @@ async fn upquery_to_failed_reader_domain() {
     // Should return the correct results from fallback.
     let result: Result<mysql_async::Result<Vec<(i32, i32)>>, _> = timeout(
         Duration::from_secs(5),
-        adapter.exec(r"SELECT * FROM t1 WHERE uid = ?;", (2,)),
+        adapter
+            .as_mysql_conn()
+            .unwrap()
+            .exec(r"SELECT * FROM t1 WHERE uid = ?;", (2,)),
     )
     .await;
     assert!(result.is_ok());
@@ -952,7 +995,10 @@ async fn upquery_through_failed_domain() {
     // Should return the correct results from fallback.
     let result: Result<mysql_async::Result<Vec<(i32, i32)>>, _> = timeout(
         Duration::from_secs(5),
-        adapter.exec(r"SELECT * FROM t1 WHERE uid = ?;", (2,)),
+        adapter
+            .as_mysql_conn()
+            .unwrap()
+            .exec(r"SELECT * FROM t1 WHERE uid = ?;", (2,)),
     )
     .await;
     assert!(result.is_ok());
@@ -1247,8 +1293,8 @@ async fn writes_survive_restarts() {
         deployment.kill_server(&addr, false).await.unwrap();
         let t1_write = format!("UPDATE t1 SET value = {} WHERE uid = 1;", counter);
         let t2_write = format!("UPDATE t2 SET value = {} WHERE uid = 1;", counter);
-        upstream.query_drop(t1_write).await.unwrap();
-        upstream.query_drop(t2_write).await.unwrap();
+        upstream.query_drop(&t1_write).await.unwrap();
+        upstream.query_drop(&t2_write).await.unwrap();
         results.write(&[(1, counter)]);
 
         println!("Starting new server");
@@ -1489,7 +1535,7 @@ async fn views_synchronize_between_deployments() {
     // Get a query in the status cache for adapter 1
     adapter_1.query_drop("SELECT * FROM t1;").await.unwrap();
     assert_eq!(
-        last_statement_destination(&mut adapter_1).await,
+        last_statement_destination(adapter_1.as_mysql_conn().unwrap()).await,
         QueryDestination::Upstream
     );
 
@@ -1502,14 +1548,14 @@ async fn views_synchronize_between_deployments() {
     // Ensure it's been successfully created in adapter 0
     adapter_0.query_drop("SELECT * FROM t1;").await.unwrap();
     assert_eq!(
-        last_statement_destination(&mut adapter_0).await,
+        last_statement_destination(adapter_0.as_mysql_conn().unwrap()).await,
         QueryDestination::Readyset
     );
 
     // Eventually it should show up in adapter 1 too
     eventually! {
-        adapter_1.query_drop("SELECT * FROM t1;");
-        last_statement_destination(&mut adapter_1).await == QueryDestination::Readyset
+        adapter_1.as_mysql_conn().unwrap().query_drop("SELECT * FROM t1;");
+        last_statement_destination(adapter_1.as_mysql_conn().unwrap()).await == QueryDestination::Readyset
     }
 
     deployment.teardown().await.unwrap();
