@@ -37,6 +37,7 @@
 //! [rewrite passes]: crate::rewrite
 //! [`TableAlias`]: crate::node::MirNodeInner::TableAlias
 //! [`Distinct`]: crate::node::MirNodeInner::Distinct
+//! [`DependentJoin`]: crate::node::MirNodeInner::DependentJoin
 //! [decorrelate]: crate::rewrite::decorrelate::eliminate_dependent_joins
 
 #![warn(clippy::panic)]
