@@ -1,10 +1,13 @@
 use std::iter;
 
-use nom_sql::{Column, Expr as AstExpr, FunctionExpr, InValue, Relation, UnaryOperator};
+use nom_sql::{
+    BinaryOperator as SqlBinaryOperator, Column, Expr as AstExpr, FunctionExpr, InValue, Relation,
+    UnaryOperator,
+};
 use readyset_data::dialect::SqlEngine;
 use readyset_data::{DfType, DfValue};
 use readyset_errors::{
-    internal, internal_err, invalid_err, unsupported, ReadySetError, ReadySetResult,
+    internal, internal_err, invalid, invalid_err, unsupported, ReadySetError, ReadySetResult,
 };
 use readyset_util::redacted::Sensitive;
 use vec1::Vec1;
@@ -447,6 +450,12 @@ impl Expr {
                     ty,
                 })
             }
+            AstExpr::OpAny { lhs, op, rhs } | AstExpr::OpSome { lhs, op, rhs } => {
+                Self::lower_op_any_or_all(*lhs, op, *rhs, dialect, context, false)
+            }
+            AstExpr::OpAll { lhs, op, rhs } => {
+                Self::lower_op_any_or_all(*lhs, op, *rhs, dialect, context, true)
+            }
             AstExpr::UnaryOp {
                 op: UnaryOperator::Neg,
                 rhs,
@@ -616,10 +625,64 @@ impl Expr {
             AstExpr::Between { .. } | AstExpr::NestedSelect(_) | AstExpr::In { .. } => {
                 internal!("Expression should have been desugared earlier: {expr}")
             }
-            AstExpr::OpAny { .. } | AstExpr::OpSome { .. } | AstExpr::OpAll { .. } => {
-                unsupported!("<operator> (ANY|SOME|ALL) <expr> not yet supported")
-            }
         }
+    }
+
+    fn lower_op_any_or_all<C>(
+        lhs: AstExpr,
+        op: SqlBinaryOperator,
+        rhs: AstExpr,
+        dialect: Dialect,
+        context: C,
+        is_all: bool,
+    ) -> ReadySetResult<Expr>
+    where
+        C: LowerContext,
+    {
+        let left = Box::new(Self::lower(lhs, dialect, context.clone())?);
+        let right = Box::new(Self::lower(rhs, dialect, context)?);
+        let op = BinaryOperator::from_sql_op(op, dialect, left.ty(), right.ty())?;
+
+        let right_member_ty = if right.ty().is_array() {
+            right.ty().innermost_array_type()
+        } else if right.ty().is_unknown() {
+            &DfType::Unknown
+        } else {
+            // localhost/postgres=# select 1 = any(1);
+            // ERROR:  42809: op ANY/ALL (array) requires array on right side
+            // LINE 1: select 1 = any(1);
+            //                  ^
+            // LOCATION:  make_scalar_array_op, parse_oper.c:814
+            // Time: 0.396 ms
+            invalid!("op ANY/ALL (array) requires an array on the right-hand side")
+        };
+
+        let ty = op.output_type(left.ty(), right_member_ty)?;
+        if !ty.is_bool() {
+            // localhost/noria=# select 1 + any('{1,2}');
+            // ERROR:  42809: op ANY/ALL (array) requires operator to yield boolean
+            // LINE 1: select 1 + any('{1,2}');
+            //                  ^
+            // LOCATION:  make_scalar_array_op, parse_oper.c:856
+            // Time: 0.330 ms
+            invalid!("op ANY/ALL (array) requires the operator to yield a boolean")
+        }
+
+        Ok(if is_all {
+            Self::OpAll {
+                op,
+                left,
+                right,
+                ty,
+            }
+        } else {
+            Self::OpAny {
+                op,
+                left,
+                right,
+                ty,
+            }
+        })
     }
 }
 
@@ -1135,5 +1198,47 @@ pub(crate) mod tests {
                 ty: DfType::Array(Box::new(DfType::Array(Box::new(DfType::UnsignedBigInt))))
             }
         )
+    }
+
+    #[test]
+    fn op_some_to_any() {
+        let expr = parse_expr(ParserDialect::PostgreSQL, "1 = ANY ('{1,2}')").unwrap();
+        let result = Expr::lower(expr, Dialect::DEFAULT_POSTGRESQL, no_op_lower_context()).unwrap();
+        assert_eq!(
+            result,
+            Expr::OpAny {
+                op: BinaryOperator::Equal,
+                left: Box::new(Expr::Literal {
+                    val: 1u64.into(),
+                    ty: DfType::UnsignedBigInt
+                }),
+                right: Box::new(Expr::Literal {
+                    val: "{1,2}".into(),
+                    ty: DfType::Unknown
+                }),
+                ty: DfType::Bool
+            }
+        );
+    }
+
+    #[test]
+    fn op_all() {
+        let expr = parse_expr(ParserDialect::PostgreSQL, "1 = ALL ('{1,1}')").unwrap();
+        let result = Expr::lower(expr, Dialect::DEFAULT_POSTGRESQL, no_op_lower_context()).unwrap();
+        assert_eq!(
+            result,
+            Expr::OpAll {
+                op: BinaryOperator::Equal,
+                left: Box::new(Expr::Literal {
+                    val: 1u64.into(),
+                    ty: DfType::UnsignedBigInt
+                }),
+                right: Box::new(Expr::Literal {
+                    val: "{1,1}".into(),
+                    ty: DfType::Unknown
+                }),
+                ty: DfType::Bool
+            }
+        );
     }
 }

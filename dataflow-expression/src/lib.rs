@@ -284,6 +284,28 @@ pub enum Expr {
         ty: DfType,
     },
 
+    /// Test if the LHS satisfies OP for any element in the RHS, which must evaluate to some kind
+    /// of array.
+    ///
+    /// The OP must return a boolean
+    OpAny {
+        op: BinaryOperator,
+        left: Box<Expr>,
+        right: Box<Expr>,
+        ty: DfType,
+    },
+
+    /// Test if the LHS satisfies OP for every element in the RHS, which must evaluate to some kind
+    /// of array
+    ///
+    /// The OP must return a boolean
+    OpAll {
+        op: BinaryOperator,
+        left: Box<Expr>,
+        right: Box<Expr>,
+        ty: DfType,
+    },
+
     /// CAST(expr AS type)
     Cast {
         /// The `Expr` to cast
@@ -325,6 +347,16 @@ impl Display for Expr {
             Op {
                 op, left, right, ..
             } => write!(f, "({} {} {})", left, op, right),
+            OpAny {
+                op, left, right, ..
+            } => {
+                write!(f, "({left} {op} ANY ({right}))")
+            }
+            OpAll {
+                op, left, right, ..
+            } => {
+                write!(f, "({left} {op} ALL ({right}))")
+            }
             Cast { expr, to_type, .. } => write!(f, "cast({} as {})", expr, to_type),
             Call { func, .. } => write!(f, "{}", func),
             CaseWhen {
@@ -351,6 +383,8 @@ impl Expr {
             Expr::Column { ty, .. }
             | Expr::Literal { ty, .. }
             | Expr::Op { ty, .. }
+            | Expr::OpAny { ty, .. }
+            | Expr::OpAll { ty, .. }
             | Expr::Call { ty, .. }
             | Expr::CaseWhen { ty, .. }
             | Expr::Cast { ty, .. }

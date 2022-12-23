@@ -19,6 +19,235 @@ macro_rules! non_null {
 mod builtins;
 mod json;
 
+fn eval_binary_op(
+    op: BinaryOperator,
+    (left, left_ty): (&DfValue, &DfType),
+    (right, right_ty): (&DfValue, &DfType),
+) -> ReadySetResult<DfValue> {
+    use BinaryOperator::*;
+
+    let like = |case_sensitivity, negated| -> DfValue {
+        match (
+            left.coerce_to(&DfType::DEFAULT_TEXT, left_ty),
+            right.coerce_to(&DfType::DEFAULT_TEXT, right_ty),
+        ) {
+            (Ok(left), Ok(right)) => {
+                let (Some(left), Some(right)) = (left.as_str(), right.as_str()) else {
+                               return DfValue::None;
+                            };
+
+                // NOTE(grfn): At some point, we may want to optimize this to pre-cache
+                // the LikePattern if the value is constant, since constructing a new
+                // LikePattern can be kinda slow.
+                let pat = LikePattern::new(right, case_sensitivity);
+
+                let matches = pat.matches(left);
+
+                if negated {
+                    !matches
+                } else {
+                    matches
+                }
+            }
+            // Anything that isn't Text or text-coercible can never be LIKE anything, so
+            // we return true if not negated or false otherwise.
+            _ => !negated,
+        }
+        .into()
+    };
+
+    match op {
+        Add => Ok((non_null!(left) + non_null!(right))?),
+        Subtract => Ok((non_null!(left) - non_null!(right))?),
+        Multiply => Ok((non_null!(left) * non_null!(right))?),
+        Divide => Ok((non_null!(left) / non_null!(right))?),
+        And => Ok((non_null!(left).is_truthy() && non_null!(right).is_truthy()).into()),
+        Or => Ok((non_null!(left).is_truthy() || non_null!(right).is_truthy()).into()),
+        Equal => Ok((non_null!(left) == &non_null!(right).coerce_to(left_ty, right_ty)?).into()),
+        NotEqual => Ok((non_null!(left) != &non_null!(right).coerce_to(left_ty, right_ty)?).into()),
+        Greater => Ok((non_null!(left) > non_null!(right)).into()),
+        GreaterOrEqual => Ok((non_null!(left) >= non_null!(right)).into()),
+        Less => Ok((non_null!(left) < non_null!(right)).into()),
+        LessOrEqual => Ok((non_null!(left) <= non_null!(right)).into()),
+        Is => Ok((left == right).into()),
+        IsNot => Ok((left != right).into()),
+        Like => Ok(like(CaseSensitive, false)),
+        NotLike => Ok(like(CaseSensitive, true)),
+        ILike => Ok(like(CaseInsensitive, false)),
+        NotILike => Ok(like(CaseInsensitive, true)),
+
+        // JSON operators:
+        JsonExists => {
+            let json_value = left.to_json()?;
+            let key = <&str>::try_from(right)?;
+
+            let result = match json_value {
+                JsonValue::Object(map) => map.contains_key(key),
+                JsonValue::Array(vec) => vec.iter().any(|v| v.as_str() == Some(key)),
+                _ => false,
+            };
+            Ok(result.into())
+        }
+        json_op @ (JsonAnyExists | JsonAllExists) => {
+            let json_value = left.to_json()?;
+            let keys = right.as_array().and_then(Array::to_str_vec)?;
+
+            let result = match (json_op, json_value) {
+                (JsonAnyExists, JsonValue::Object(map)) => {
+                    keys.into_iter().any(|k| map.contains_key(k))
+                }
+                (JsonAnyExists, JsonValue::Array(vec)) => keys
+                    .into_iter()
+                    .any(|k| vec.iter().any(|v| v.as_str() == Some(k))),
+                (JsonAllExists, JsonValue::Object(map)) => {
+                    keys.into_iter().all(|k| map.contains_key(k))
+                }
+                (JsonAllExists, JsonValue::Array(vec)) => keys
+                    .into_iter()
+                    .all(|k| vec.iter().any(|v| v.as_str() == Some(k))),
+                _ => false,
+            };
+            Ok(result.into())
+        }
+        // TODO(ENG-1517)
+        // TODO(ENG-1518)
+        JsonPathExtract | JsonPathExtractUnquote => {
+            // TODO: Perform `JSON_EXTRACT` conditionally followed by `JSON_UNQUOTE` for
+            // `->>`.
+            unsupported!("'{op}' operator not implemented yet for MySQL")
+        }
+
+        JsonKeyExtract | JsonKeyExtractText => {
+            // Both extraction operations behave the same in PostgreSQL except for the
+            // return type, which is handled during expression lowering.
+
+            let json = left.to_json()?;
+
+            let json_inner: Option<&JsonValue> = match &json {
+                JsonValue::Array(array) => isize::try_from(right)
+                    .ok()
+                    .and_then(|index| utils::index_bidirectional(array, index)),
+                JsonValue::Object(object) => right.as_str().and_then(|key| object.get(key)),
+                // Operator type errors are handled during expression lowering.
+                _ => None,
+            };
+
+            Ok(json_inner
+                .map(|inner| inner.to_string().into())
+                .unwrap_or_default())
+        }
+
+        JsonKeyPathExtract | JsonKeyPathExtractText => {
+            // Both extraction operations behave the same in PostgreSQL except for the
+            // return type, which is handled during expression lowering.
+            //
+            // Type errors are also handled during expression lowering.
+            json::json_extract_key_path(
+                &left.to_json()?,
+                // PostgreSQL docs state `text[]` but in practice it allows using
+                // multi-dimensional arrays here.
+                right.as_array()?.values(),
+            )
+        }
+
+        JsonContains => Ok(json::json_contains(&left.to_json()?, &right.to_json()?).into()),
+        JsonContainedIn => {
+            // Evaluate `left` first for consistency.
+            let child = left.to_json()?;
+            Ok(json::json_contains(&right.to_json()?, &child).into())
+        }
+        JsonConcat => {
+            let mut left_json = left.to_json()?;
+            let mut right_json = right.to_json()?;
+
+            if let (Some(left_obj), Some(right_obj)) =
+                (left_json.as_object_mut(), right_json.as_object_mut())
+            {
+                // When both the left and the right side are JSON objects, merge them:
+                left_obj.append(right_obj);
+
+                Ok((&*left_obj).into())
+            } else {
+                // If both sides aren't JSON objects, concatenate arrays (after turning
+                // non-array JSON values into single-element arrays):
+                let mut res = match left_json {
+                    JsonValue::Array(v) => v,
+                    _ => vec![left_json],
+                };
+                match right_json {
+                    JsonValue::Array(mut v) => res.append(&mut v),
+                    _ => res.push(right_json),
+                };
+
+                Ok(res.into())
+            }
+        }
+        JsonSubtract => {
+            let mut json = left.to_json()?;
+
+            fn remove_str(s: &str, vec: &mut Vec<JsonValue>) {
+                vec.retain(|v| v.as_str() != Some(s));
+            }
+
+            if let Ok(key_array) = right.as_array() {
+                let keys = key_array.to_str_vec()?;
+                if let Some(vec) = json.as_array_mut() {
+                    // TODO maybe optimize this to perform better with many keys:
+                    for k in keys {
+                        remove_str(k, vec);
+                    }
+                } else if let Some(obj) = json.as_object_mut() {
+                    for k in keys {
+                        obj.remove(k);
+                    }
+                } else {
+                    return Err(invalid_err!(
+                        "Can't subtract array from non-object, non-array JSON value"
+                    ));
+                }
+            } else if let Some(str) = right.as_str() {
+                if let Some(vec) = json.as_array_mut() {
+                    remove_str(str, vec);
+                } else if let Some(map) = json.as_object_mut() {
+                    map.remove(str);
+                } else {
+                    return Err(invalid_err!(
+                        "Can't subtract string from non-object, non-array JSON value"
+                    ));
+                }
+            } else if let Some(index) = right.as_int() {
+                if let Some(vec) = json.as_array_mut() {
+                    if let Ok(index) = isize::try_from(index) {
+                        utils::remove_bidirectional(vec, index);
+                    }
+                } else {
+                    return Err(invalid_err!(
+                        "Can't subtract integer value from non-array JSON value"
+                    ));
+                }
+            } else {
+                return Err(invalid_err!(
+                    "Invalid type {} on right-hand side of JSONB subtract operator",
+                    right.infer_dataflow_type()
+                ));
+            }
+            Ok(json.into())
+        }
+        JsonSubtractPath => {
+            // Type errors are handled during expression lowering, unless the type is
+            // unknown.
+            let keys = right.as_array()?;
+            let mut json = left.to_json()?;
+
+            // PostgreSQL docs state `text[]` but in practice it allows using
+            // multi-dimensional arrays here.
+            json::json_remove_path(&mut json, keys.values())?;
+
+            Ok(serde_json::to_string(&json)?.into())
+        }
+    }
+}
+
 impl Expr {
     /// Evaluate this expression, given a source record to pull columns from
     pub fn eval<D>(&self, record: &[D]) -> ReadySetResult<DfValue>
@@ -35,242 +264,51 @@ impl Expr {
             Expr::Op {
                 op, left, right, ..
             } => {
-                use BinaryOperator::*;
-
-                let left_ty = left.ty();
-                let right_ty = right.ty();
-
-                let left = left.eval(record)?;
-                let right = right.eval(record)?;
-
-                let like = |case_sensitivity, negated| -> DfValue {
-                    match (
-                        left.coerce_to(&DfType::DEFAULT_TEXT, left_ty),
-                        right.coerce_to(&DfType::DEFAULT_TEXT, right_ty),
-                    ) {
-                        (Ok(left), Ok(right)) => {
-                            let (Some(left), Some(right)) = (left.as_str(), right.as_str()) else {
-                               return DfValue::None;
-                            };
-
-                            // NOTE(grfn): At some point, we may want to optimize this to pre-cache
-                            // the LikePattern if the value is constant, since constructing a new
-                            // LikePattern can be kinda slow.
-                            let pat = LikePattern::new(right, case_sensitivity);
-
-                            let matches = pat.matches(left);
-
-                            if negated {
-                                !matches
-                            } else {
-                                matches
-                            }
-                        }
-                        // Anything that isn't Text or text-coercible can never be LIKE anything, so
-                        // we return true if not negated or false otherwise.
-                        _ => !negated,
-                    }
-                    .into()
-                };
-
-                match op {
-                    Add => Ok((non_null!(&left) + non_null!(&right))?),
-                    Subtract => Ok((non_null!(&left) - non_null!(&right))?),
-                    Multiply => Ok((non_null!(&left) * non_null!(&right))?),
-                    Divide => Ok((non_null!(&left) / non_null!(&right))?),
-                    And => Ok((non_null!(left).is_truthy() && non_null!(right).is_truthy()).into()),
-                    Or => Ok((non_null!(left).is_truthy() || non_null!(right).is_truthy()).into()),
-                    Equal => Ok((non_null!(left)
-                        == non_null!(right).coerce_to(left_ty, right_ty)?)
-                    .into()),
-                    NotEqual => Ok((non_null!(left)
-                        != non_null!(right).coerce_to(left_ty, right_ty)?)
-                    .into()),
-                    Greater => Ok((non_null!(left) > non_null!(right)).into()),
-                    GreaterOrEqual => Ok((non_null!(left) >= non_null!(right)).into()),
-                    Less => Ok((non_null!(left) < non_null!(right)).into()),
-                    LessOrEqual => Ok((non_null!(left) <= non_null!(right)).into()),
-                    Is => Ok((left == right).into()),
-                    IsNot => Ok((left != right).into()),
-                    Like => Ok(like(CaseSensitive, false)),
-                    NotLike => Ok(like(CaseSensitive, true)),
-                    ILike => Ok(like(CaseInsensitive, false)),
-                    NotILike => Ok(like(CaseInsensitive, true)),
-
-                    // JSON operators:
-                    JsonExists => {
-                        let json_value = left.to_json()?;
-                        let key = <&str>::try_from(&right)?;
-
-                        let result = match json_value {
-                            JsonValue::Object(map) => map.contains_key(key),
-                            JsonValue::Array(vec) => vec.iter().any(|v| v.as_str() == Some(key)),
-                            _ => false,
-                        };
-                        Ok(result.into())
-                    }
-                    json_op @ (JsonAnyExists | JsonAllExists) => {
-                        let json_value = left.to_json()?;
-                        let keys = right.as_array().and_then(Array::to_str_vec)?;
-
-                        let result = match (json_op, json_value) {
-                            (JsonAnyExists, JsonValue::Object(map)) => {
-                                keys.into_iter().any(|k| map.contains_key(k))
-                            }
-                            (JsonAnyExists, JsonValue::Array(vec)) => keys
-                                .into_iter()
-                                .any(|k| vec.iter().any(|v| v.as_str() == Some(k))),
-                            (JsonAllExists, JsonValue::Object(map)) => {
-                                keys.into_iter().all(|k| map.contains_key(k))
-                            }
-                            (JsonAllExists, JsonValue::Array(vec)) => keys
-                                .into_iter()
-                                .all(|k| vec.iter().any(|v| v.as_str() == Some(k))),
-                            _ => false,
-                        };
-                        Ok(result.into())
-                    }
-                    // TODO(ENG-1517)
-                    // TODO(ENG-1518)
-                    JsonPathExtract | JsonPathExtractUnquote => {
-                        // TODO: Perform `JSON_EXTRACT` conditionally followed by `JSON_UNQUOTE` for
-                        // `->>`.
-                        unsupported!("'{op}' operator not implemented yet for MySQL")
-                    }
-
-                    JsonKeyExtract | JsonKeyExtractText => {
-                        // Both extraction operations behave the same in PostgreSQL except for the
-                        // return type, which is handled during expression lowering.
-
-                        let json = left.to_json()?;
-
-                        let json_inner: Option<&JsonValue> = match &json {
-                            JsonValue::Array(array) => isize::try_from(&right)
-                                .ok()
-                                .and_then(|index| utils::index_bidirectional(array, index)),
-                            JsonValue::Object(object) => {
-                                right.as_str().and_then(|key| object.get(key))
-                            }
-                            // Operator type errors are handled during expression lowering.
-                            _ => None,
-                        };
-
-                        Ok(json_inner
-                            .map(|inner| inner.to_string().into())
-                            .unwrap_or_default())
-                    }
-
-                    JsonKeyPathExtract | JsonKeyPathExtractText => {
-                        // Both extraction operations behave the same in PostgreSQL except for the
-                        // return type, which is handled during expression lowering.
-                        //
-                        // Type errors are also handled during expression lowering.
-                        json::json_extract_key_path(
-                            &left.to_json()?,
-                            // PostgreSQL docs state `text[]` but in practice it allows using
-                            // multi-dimensional arrays here.
-                            right.as_array()?.values(),
-                        )
-                    }
-
-                    JsonContains => {
-                        Ok(json::json_contains(&left.to_json()?, &right.to_json()?).into())
-                    }
-                    JsonContainedIn => {
-                        // Evaluate `left` first for consistency.
-                        let child = left.to_json()?;
-                        Ok(json::json_contains(&right.to_json()?, &child).into())
-                    }
-                    JsonConcat => {
-                        let mut left_json = left.to_json()?;
-                        let mut right_json = right.to_json()?;
-
-                        if let (Some(left_obj), Some(right_obj)) =
-                            (left_json.as_object_mut(), right_json.as_object_mut())
-                        {
-                            // When both the left and the right side are JSON objects, merge them:
-                            left_obj.append(right_obj);
-
-                            Ok((&*left_obj).into())
-                        } else {
-                            // If both sides aren't JSON objects, concatenate arrays (after turning
-                            // non-array JSON values into single-element arrays):
-                            let mut res = match left_json {
-                                JsonValue::Array(v) => v,
-                                _ => vec![left_json],
-                            };
-                            match right_json {
-                                JsonValue::Array(mut v) => res.append(&mut v),
-                                _ => res.push(right_json),
-                            };
-
-                            Ok(res.into())
-                        }
-                    }
-                    JsonSubtract => {
-                        let mut json = left.to_json()?;
-
-                        fn remove_str(s: &str, vec: &mut Vec<JsonValue>) {
-                            vec.retain(|v| v.as_str() != Some(s));
-                        }
-
-                        if let Ok(key_array) = right.as_array() {
-                            let keys = key_array.to_str_vec()?;
-                            if let Some(vec) = json.as_array_mut() {
-                                // TODO maybe optimize this to perform better with many keys:
-                                for k in keys {
-                                    remove_str(k, vec);
-                                }
-                            } else if let Some(obj) = json.as_object_mut() {
-                                for k in keys {
-                                    obj.remove(k);
-                                }
-                            } else {
-                                return Err(invalid_err!(
-                                    "Can't subtract array from non-object, non-array JSON value"
-                                ));
-                            }
-                        } else if let Some(str) = right.as_str() {
-                            if let Some(vec) = json.as_array_mut() {
-                                remove_str(str, vec);
-                            } else if let Some(map) = json.as_object_mut() {
-                                map.remove(str);
-                            } else {
-                                return Err(invalid_err!(
-                                    "Can't subtract string from non-object, non-array JSON value"
-                                ));
-                            }
-                        } else if let Some(index) = right.as_int() {
-                            if let Some(vec) = json.as_array_mut() {
-                                if let Ok(index) = isize::try_from(index) {
-                                    utils::remove_bidirectional(vec, index);
-                                }
-                            } else {
-                                return Err(invalid_err!(
-                                    "Can't subtract integer value from non-array JSON value"
-                                ));
-                            }
-                        } else {
-                            return Err(invalid_err!(
-                                "Invalid type {} on right-hand side of JSONB subtract operator",
-                                right.infer_dataflow_type()
-                            ));
-                        }
-                        Ok(json.into())
-                    }
-                    JsonSubtractPath => {
-                        // Type errors are handled during expression lowering, unless the type is
-                        // unknown.
-                        let keys = right.as_array()?;
-                        let mut json = left.to_json()?;
-
-                        // PostgreSQL docs state `text[]` but in practice it allows using
-                        // multi-dimensional arrays here.
-                        json::json_remove_path(&mut json, keys.values())?;
-
-                        Ok(serde_json::to_string(&json)?.into())
+                let left_val = left.eval(record)?;
+                let right_val = right.eval(record)?;
+                eval_binary_op(*op, (&left_val, left.ty()), (&right_val, right.ty()))
+            }
+            Expr::OpAny {
+                op, left, right, ..
+            } => {
+                let left_val = left.eval(record)?;
+                let right_member_ty = right.ty().innermost_array_type();
+                let mut right_val = non_null!(right.eval(record)?);
+                if right.ty().is_unknown() {
+                    right_val = right_val
+                        .coerce_to(&DfType::Array(Box::new(left.ty().clone())), right.ty())?;
+                }
+                let mut res = DfValue::from(false);
+                for member in right_val.as_array()?.values() {
+                    if eval_binary_op(*op, (&left_val, left.ty()), (member, right_member_ty))?
+                        .is_truthy()
+                    {
+                        res = true.into();
+                        break;
                     }
                 }
+                Ok(res)
+            }
+            Expr::OpAll {
+                op, left, right, ..
+            } => {
+                let left_val = left.eval(record)?;
+                let right_member_ty = right.ty().innermost_array_type();
+                let mut right_val = non_null!(right.eval(record)?);
+                if right.ty().is_unknown() {
+                    right_val = right_val
+                        .coerce_to(&DfType::Array(Box::new(left.ty().clone())), right.ty())?;
+                }
+                let mut res = DfValue::from(true);
+                for member in right_val.as_array()?.values() {
+                    if !eval_binary_op(*op, (&left_val, left.ty()), (member, right_member_ty))?
+                        .is_truthy()
+                    {
+                        res = false.into();
+                        break;
+                    }
+                }
+                Ok(res)
             }
             Expr::Cast { expr, ty, .. } => {
                 let res = expr.eval(record)?;
@@ -814,6 +852,78 @@ mod tests {
         assert_op!(BinaryOperator::GreaterOrEqual, text_dt.clone(), 1u8);
         assert_op!(BinaryOperator::Equal, text_less_dt, 0u8);
         assert_op!(BinaryOperator::Equal, text_dt, 1u8);
+    }
+
+    #[test]
+    fn eval_op_any() {
+        assert_eq!(
+            eval_expr("1 = any('{1,2,3}')", nom_sql::Dialect::PostgreSQL),
+            true.into()
+        );
+        assert_eq!(
+            eval_expr("1 = any('{1,2,3}'::int[])", nom_sql::Dialect::PostgreSQL),
+            true.into()
+        );
+        assert_eq!(
+            eval_expr("4 = any('{1,2,3}')", nom_sql::Dialect::PostgreSQL),
+            false.into()
+        );
+        assert_eq!(
+            eval_expr("1 = any('{{1,2},{3,4}}')", nom_sql::Dialect::PostgreSQL),
+            true.into()
+        );
+        assert_eq!(
+            eval_expr("7 > any('{{1,2},{3,4}}')", nom_sql::Dialect::PostgreSQL),
+            true.into()
+        );
+        assert_eq!(
+            eval_expr(
+                r#"'abc' ILIKE any('{"aBC","def"}')"#,
+                nom_sql::Dialect::PostgreSQL
+            ),
+            true.into()
+        );
+        assert_eq!(
+            eval_expr("1 = any(null)", nom_sql::Dialect::PostgreSQL),
+            DfValue::None
+        );
+    }
+
+    #[test]
+    fn eval_op_all() {
+        assert_eq!(
+            eval_expr("1 = all('{1,2,3}'::int[])", nom_sql::Dialect::PostgreSQL),
+            false.into()
+        );
+        assert_eq!(
+            eval_expr("4 = all('{4,4}'::int[])", nom_sql::Dialect::PostgreSQL),
+            true.into()
+        );
+        assert_eq!(
+            eval_expr(
+                "1 = all('{{1,1},{1,1}}'::int[])",
+                nom_sql::Dialect::PostgreSQL
+            ),
+            true.into()
+        );
+        assert_eq!(
+            eval_expr(
+                "7 > all('{{1,2},{3,4}}'::int[])",
+                nom_sql::Dialect::PostgreSQL
+            ),
+            true.into()
+        );
+        assert_eq!(
+            eval_expr(
+                r#"'abc' ILIKE all('{"aBC"}')"#,
+                nom_sql::Dialect::PostgreSQL
+            ),
+            true.into()
+        );
+        assert_eq!(
+            eval_expr("1 = all(null)", nom_sql::Dialect::PostgreSQL),
+            DfValue::None
+        );
     }
 
     #[test]

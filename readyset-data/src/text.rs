@@ -366,6 +366,7 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
         let str = self.try_str()?;
 
         match *to_ty {
+            DfType::Unknown => Ok(DfValue::from(str)),
             DfType::Bool => Ok(DfValue::from(!str.is_empty())),
 
             DfType::Text(collation) => {
@@ -549,9 +550,7 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
                 }
             }
 
-            DfType::Unknown | DfType::Bit(_) | DfType::VarBit(_) => {
-                Err(Self::coerce_err(to_ty, "Not allowed"))
-            }
+            DfType::Bit(_) | DfType::VarBit(_) => Err(Self::coerce_err(to_ty, "Not allowed")),
         }
     }
 }
