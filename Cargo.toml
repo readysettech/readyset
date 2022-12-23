@@ -65,6 +65,7 @@ postgres-native-tls = { git = "https://github.com/readysettech/rust-postgres.git
 postgres-protocol = { git = "https://github.com/readysettech/rust-postgres.git", branch = "new-main"}
 postgres-types = { git = "https://github.com/readysettech/rust-postgres.git", branch = "new-main"}
 tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", branch = "new-main"}
+tokio = { version = "1.23",  features = ["full"] }
 
 [profile.release]
 debug=true

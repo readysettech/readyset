@@ -16,7 +16,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_with_macros = "2.0.0"
 thiserror = "1.0"
-tokio = { version = "1.18", features = ["macros", "time"] }
+tokio = { workspace = true, features = ["full"] }
 tracing = { version = "0.1", features = ["release_max_level_debug"] }
 readyset-tracing = { path = "../readyset-tracing" }
 uuid = { version = "0.8", features = [ "v4" ] }
@@ -26,7 +26,7 @@ blake2= "0.10"
 readyset-version = { path = "../readyset-version" }
 
 [dev_dependencies]
-tokio = { version = "1.18", features = ["macros", "time", "test-util"] }
+tokio = { workspace = true, features = ["full"] }
 
 [features]
 test-util = []

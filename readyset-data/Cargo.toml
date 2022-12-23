@@ -46,7 +46,7 @@ features = ["with-chrono-0_4", "with-eui48-1", "with-uuid-0_8", "with-serde_json
 derive_more = "0.99.11"
 bincode = "1.3.3"
 criterion = { version = "0.3", features=['real_blackbox', 'async_tokio']}
-tokio = { version = "1.19.2", features = ["rt", "macros"] }
+tokio = { workspace = true, features = ["full"] }
 serial_test = "0.5.1"
 
 [[bench]]

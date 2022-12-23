@@ -6,7 +6,7 @@ authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 [dependencies]
-tokio = { version = "1.15", features = ["macros", "rt-multi-thread", "signal"] }
+tokio = { workspace = true, features = ["full"] }
 anyhow = "1.0.38"
 nom = "7.1"
 nom_locate = "4.0.0"

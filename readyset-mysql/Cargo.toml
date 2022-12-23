@@ -28,7 +28,7 @@ readyset-version = { path = "../readyset-version" }
 failpoint-macros = { path = "../failpoint-macros" }
 readyset-tracing = { path = "../readyset-tracing" }
 nom-sql = { path = "../nom-sql" }
-tokio = "1.15"
+tokio = { workspace = true, features = ["full"] }
 tracing = { version = "0.1", features = ["release_max_level_debug"] }
 anyhow = "1.0.42"
 derive_more = "0.99.16"

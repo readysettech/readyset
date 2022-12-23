@@ -9,7 +9,7 @@ edition = "2021"
 
 [dependencies]
 async-trait = "0.1.49"
-tokio = { version = "1.15", features = ["signal", "rt-multi-thread", "time"] }
+tokio = { workspace = true, features = ["full"] }
 chrono = "0.4"
 mysql_async = { workspace = true, optional = true }
 tokio-postgres = { workspace = true, features = ["with-chrono-0_4", "with-eui48-1", "with-uuid-0_8", "with-serde_json-1", "with-bit-vec-0_6"], optional = true }

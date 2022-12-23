@@ -14,7 +14,7 @@ parking_lot = "0.12.0"
 rand = "0.8.5"
 serde = { version = "1.0.136", features = ["derive"] }
 thiserror = "1.0.30"
-tokio = "1.17.0"
+tokio = { workspace = true, features = ["full"] }
 tracing = "0.1.35"
 tracing-opentelemetry = "0.17.2"
 tracing-subscriber = { version = "0.3.9", features = ["env-filter", "json"] }
@@ -22,5 +22,5 @@ readyset-tracing-proc-macros = { path = "proc-macros" }
 
 [dev-dependencies]
 anyhow = "1.0.53"
-tokio = { version = "1.16.1", features = ["rt-multi-thread", "macros"] }
+tokio = { workspace = true, features = ["full"] }
 tracing-attributes = "0.1.20"

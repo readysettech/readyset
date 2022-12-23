@@ -20,7 +20,7 @@ chrono = "0.4"
 time = "0.3"
 getrandom = "0.2.2"
 async-trait = "0.1"
-tokio = { version = "1.15", features = ["io-util", "net", "macros", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["full"] }
 thiserror = "1.0.26"
 sha-1 = "0.10.0"
 mysql-time = { path = "../mysql-time" }

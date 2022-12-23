@@ -13,7 +13,7 @@ futures = "0.3.21"
 mysql_async = { workspace = true }
 native-tls = "0.2.8"
 thiserror = "1.0.30"
-tokio = "1.17.0"
+tokio = { workspace = true, features = ["full"] }
 tokio-postgres = { workspace = true, features = ["with-chrono-0_4"] }
 postgres-native-tls = { workspace = true }
 clap = { version = "3.0", features = ["derive","env"] }

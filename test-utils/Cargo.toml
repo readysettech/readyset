@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 test-utils-proc-macros = { path = "./proc-macros" }
-tokio = { version = "1.15", features = ["sync", "parking_lot", "macros"] }
+tokio = { workspace = true, features = ["full"] }
 # Avoid adding dependencies as this is included in tests.
 
 [dev-dependencies]

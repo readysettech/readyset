@@ -19,7 +19,7 @@ postgres = { workspace = true }
 postgres-types = { workspace = true, features = ["with-chrono-0_4"] }
 postgres-protocol = { workspace = true }
 thiserror = "1.0.26"
-tokio = { version = "1.15", features = ["rt-multi-thread"] }
+tokio = { workspace = true, features = ["full"] }
 tokio-util = { version = "0.6.6", features = ["codec"] }
 tokio-postgres = { workspace = true, features = ["with-chrono-0_4", "with-eui48-1", "with-uuid-0_8", "with-serde_json-1", "with-bit-vec-0_6"] }
 smallvec = "1.6"
@@ -32,5 +32,5 @@ bit-vec = { version = "0.6", features = ["serde"] }
 tracing = "0.1.29"
 
 [dev-dependencies]
-tokio = { version = "1.15", features = ["macros", "net"] }
+tokio = { workspace = true, features = ["full"] }
 tokio-test = "0.4.1"
