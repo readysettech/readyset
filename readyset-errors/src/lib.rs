@@ -641,6 +641,14 @@ pub enum ReadySetError {
     /// where it should had one.
     #[error("MIR node should have a dataflow node assigned: {mir_node_index}")]
     MirNodeMustHaveDfNodeAssigned { mir_node_index: usize },
+
+    /// Error that the upstream database is using an unsupported server version.
+    #[error("Upstream server version {major}-{minor} is too low. Minimum supported major version is {min}")]
+    UnsupportedServerVersion { major: u16, minor: String, min: u16 },
+
+    /// Error that the upstream database reports a server version the ReadySet could not parse.
+    #[error("Upstream server version could not be parsed")]
+    UnparseableServerVersion,
 }
 
 impl ReadySetError {

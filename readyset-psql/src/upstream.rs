@@ -25,6 +25,10 @@ use tracing_futures::Instrument;
 use crate::schema::type_to_pgsql;
 use crate::Error;
 
+/// Indicates the minimum upstream server version that we currently support. Used to error out
+/// during connection phase if the version for the upstream server is too low.
+const MIN_UPSTREAM_VERSION: u16 = 13;
+
 /// A connector to an underlying PostgreSQL database
 pub struct PostgreSqlUpstream {
     /// This is the underlying (regular) PostgreSQL client
@@ -147,6 +151,19 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         let version = connection.parameter("server_version").ok_or_else(|| {
             ReadySetError::Internal("Upstream database failed to send server version".to_string())
         })?;
+        let (major, minor) = version
+            .split_once('.')
+            .ok_or(Error::ReadySet(ReadySetError::UnparseableServerVersion))?;
+        let major = major
+            .parse()
+            .map_err(|_| Error::ReadySet(ReadySetError::UnparseableServerVersion))?;
+        if major < MIN_UPSTREAM_VERSION {
+            return Err(Error::ReadySet(ReadySetError::UnsupportedServerVersion {
+                major,
+                minor: minor.to_owned(),
+                min: MIN_UPSTREAM_VERSION,
+            }));
+        }
         let version = format!("{version} ReadySet");
         let _connection_handle = tokio::spawn(connection);
         span.in_scope(|| info!("Established connection to upstream"));

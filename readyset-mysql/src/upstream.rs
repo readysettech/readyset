@@ -34,6 +34,10 @@ use crate::Error;
 
 type StatementID = u32;
 
+/// Indicates the minimum upstream server version that we currently support. Used to error out
+/// during connection phase if the version for the upstream server is too low.
+const MIN_UPSTREAM_VERSION: u16 = 8;
+
 fn dt_to_value_params(
     dt: &[DfValue],
 ) -> Result<Vec<mysql_async::Value>, readyset_client::ReadySetError> {
@@ -309,6 +313,17 @@ impl MySqlUpstream {
                 .instrument(span.clone())
                 .await?
         };
+
+        // Check that the server version is supported.
+        let (major, minor, _) = conn.server_version();
+        if major < MIN_UPSTREAM_VERSION {
+            return Err(Error::ReadySet(ReadySetError::UnsupportedServerVersion {
+                major,
+                minor: minor.to_string(),
+                min: MIN_UPSTREAM_VERSION,
+            }));
+        }
+
         span.in_scope(|| info!("Established connection to upstream"));
         let prepared_statements = HashMap::new();
         Ok((conn, prepared_statements, upstream_config))

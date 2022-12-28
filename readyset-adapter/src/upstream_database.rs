@@ -90,6 +90,8 @@ pub trait UpstreamDatabase: Sized + Send {
     const DEFAULT_DB_VERSION: &'static str;
 
     /// Create a new connection to this upstream database
+    ///
+    /// Connect will return an error if the upstream database is running an unsupported version.
     async fn connect(
         upstream_config: UpstreamConfig,
         fallback_cache: Option<FallbackCache<Self::CachedReadResult>>,
