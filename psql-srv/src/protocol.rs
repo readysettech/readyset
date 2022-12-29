@@ -7,6 +7,7 @@ use postgres_protocol::Oid;
 use postgres_types::{Kind, Type};
 use smallvec::smallvec;
 use tokio::io::{AsyncRead, AsyncWrite};
+use tokio_postgres::CommandCompleteContents;
 
 use crate::bytes::BytesStr;
 use crate::channel::Channel;
@@ -440,18 +441,17 @@ impl Protocol {
                                     // Create a message for each row
                                     messages.push(BackendMessage::PassThroughDataRow(row))
                                 }
-                                SimpleQueryMessage::CommandComplete(val) => {
-                                    // TODO: client.simple_query() should pass the command tag text
-                                    // back to the user
-                                    if processing_select {
-                                        messages.push(BackendMessage::CommandComplete {
-                                            tag: CommandCompleteTag::Select(val),
-                                        });
-                                    } else {
-                                        messages.push(BackendMessage::CommandComplete {
-                                            tag: CommandCompleteTag::Insert(val),
-                                        });
+                                SimpleQueryMessage::CommandComplete(CommandCompleteContents {
+                                    fields,
+                                    tag,
+                                    ..
+                                }) => {
+                                    if let Some(f) = fields {
+                                        messages.push(BackendMessage::PassThroughRowDescription(
+                                            f.to_vec(),
+                                        ));
                                     }
+                                    messages.push(BackendMessage::PassThroughCommandComplete(tag));
                                     processing_select = false;
                                 }
                                 _ => {

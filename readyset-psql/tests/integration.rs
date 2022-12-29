@@ -2,7 +2,7 @@ use chrono::{NaiveDate, NaiveDateTime};
 use readyset_client_test_helpers::psql_helpers::PostgreSQLAdapter;
 use readyset_client_test_helpers::{self, sleep, TestBuilder};
 use readyset_server::Handle;
-use tokio_postgres::SimpleQueryMessage;
+use tokio_postgres::{CommandCompleteContents, SimpleQueryMessage};
 
 mod common;
 use common::connect;
@@ -79,7 +79,10 @@ async fn delete_basic() {
             .await
             .unwrap();
         let deleted = res.first().unwrap();
-        assert!(matches!(deleted, SimpleQueryMessage::CommandComplete(1)));
+        assert!(matches!(
+            deleted,
+            SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 1, .. })
+        ));
         sleep().await;
     }
 
@@ -111,7 +114,10 @@ async fn delete_only_constraint() {
             .await
             .unwrap();
         let deleted = res.first().unwrap();
-        assert!(matches!(deleted, SimpleQueryMessage::CommandComplete(1)));
+        assert!(matches!(
+            deleted,
+            SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 1, .. })
+        ));
         sleep().await;
     }
 
@@ -144,7 +150,10 @@ async fn delete_multiple() {
             .await
             .unwrap();
         let deleted = res.first().unwrap();
-        assert!(matches!(deleted, SimpleQueryMessage::CommandComplete(2)));
+        assert!(matches!(
+            deleted,
+            SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 2, .. })
+        ));
         sleep().await;
     }
 
@@ -183,7 +192,10 @@ async fn delete_bogus() {
             .await
             .unwrap();
         let deleted = res.first().unwrap();
-        assert!(matches!(deleted, SimpleQueryMessage::CommandComplete(0)));
+        assert!(matches!(
+            deleted,
+            SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 0, .. })
+        ));
         sleep().await;
     }
 }
@@ -215,7 +227,10 @@ async fn delete_bogus_valid_and() {
             .await
             .unwrap();
         let deleted = res.first().unwrap();
-        assert!(matches!(deleted, SimpleQueryMessage::CommandComplete(1)));
+        assert!(matches!(
+            deleted,
+            SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 1, .. })
+        ));
         sleep().await;
     }
 
@@ -253,7 +268,10 @@ async fn delete_bogus_valid_or() {
             .await
             .unwrap();
         let deleted = res.first().unwrap();
-        assert!(matches!(deleted, SimpleQueryMessage::CommandComplete(1)));
+        assert!(matches!(
+            deleted,
+            SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 1, .. })
+        ));
         sleep().await;
     }
 
@@ -320,7 +338,10 @@ async fn delete_compound_primary_key() {
             .await
             .unwrap();
         let deleted = res.first().unwrap();
-        assert!(matches!(deleted, SimpleQueryMessage::CommandComplete(1)));
+        assert!(matches!(
+            deleted,
+            SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 1, .. })
+        ));
         sleep().await;
     }
 
@@ -1105,7 +1126,10 @@ async fn delete_case_insensitive() {
             .await
             .unwrap();
         let deleted = res.first().unwrap();
-        assert!(matches!(deleted, SimpleQueryMessage::CommandComplete(1)));
+        assert!(matches!(
+            deleted,
+            SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 1, .. })
+        ));
         sleep().await;
     }
 
