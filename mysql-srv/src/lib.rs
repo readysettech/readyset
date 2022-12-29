@@ -362,13 +362,26 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
             writer: w,
             schema_cache: HashMap::new(),
         };
-        if mi.init().await? {
+        if let (true, database) = mi.init().await? {
+            if let Some(database) = database {
+                mi.shim.on_init(&database, None).await?;
+            }
             mi.run().await?;
         }
         Ok(())
     }
 
-    async fn init(&mut self) -> Result<bool, io::Error> {
+    /// Handle the client handshake messages for establishing capabilities and handling
+    /// authentication.
+    ///
+    /// First build a HandshakeV10 packet to send to the client, then attempt to receieve and parse
+    /// the HandshakeResponse packet that the client should send back to us. More packets may be
+    /// sent and received as needed to complete authentication.
+    ///
+    /// If no errors are encountered, the return value contains a tuple of a boolean to indicate
+    /// whether authentication was successful, and a database name if one was specified by the
+    /// client in the handshake response.
+    async fn init(&mut self) -> Result<(bool, Option<String>), io::Error> {
         let auth_data =
             generate_auth_data().map_err(|_| other_error(OtherErrorKind::AuthDataErr))?;
 
@@ -427,6 +440,7 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
 
         let username = handshake.username.to_owned();
         let password = handshake.password.to_vec();
+        let database = handshake.database.map(String::from);
         let client_auth_plugin = handshake.auth_plugin_name.map(|s| s.to_owned());
 
         let handshake_password = if client_auth_plugin.iter().all(|apn| apn != AUTH_PLUGIN_NAME)
@@ -449,7 +463,7 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
                     &mut self.writer,
                 )
                 .await?;
-                return Ok(false);
+                return Ok((false, database));
             }
 
             debug!(
@@ -507,7 +521,7 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
         }
         self.writer.flush().await?;
 
-        Ok(auth_success)
+        Ok((auth_success, database))
     }
 
     async fn run(mut self) -> Result<(), io::Error> {
