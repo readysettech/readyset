@@ -39,7 +39,7 @@ pub enum WalError {
     TimestampTzParseError,
     DateParseError,
     TimeParseError(mysql_time::ConvertError),
-    NumericParseError,
+    NumericParseError(rust_decimal::Error),
     BitVectorParseError(String),
     InvalidMapping(String),
     UnexpectedUnchangedEntry {

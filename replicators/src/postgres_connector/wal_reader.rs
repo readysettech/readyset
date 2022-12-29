@@ -529,9 +529,9 @@ impl wal::TupleData {
                                 PGType::OID => DfValue::UnsignedInt(str.parse()?),
                                 PGType::FLOAT4 => str.parse::<f32>()?.try_into()?,
                                 PGType::FLOAT8 => str.parse::<f64>()?.try_into()?,
-                                PGType::NUMERIC => Decimal::from_str(str.as_ref())
-                                    .map_err(|_| WalError::NumericParseError)
-                                    .map(|d| DfValue::Numeric(Arc::new(d)))?,
+                                PGType::NUMERIC => Decimal::from_str_exact(str.as_ref())
+                                    .map_err(WalError::NumericParseError)
+                                    .map(DfValue::from)?,
                                 PGType::CHAR => match text.as_ref() {
                                     [] => DfValue::None,
                                     [c] => DfValue::Int(i8::from_ne_bytes([*c]).into()),
