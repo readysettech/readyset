@@ -1,5 +1,5 @@
 [patch.crates-io]
-tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git" }
+tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", rev = "f399eda6e91dd47b0e21b6f640515a5e8bd0a1cc" }
 mysql_async = { git = "https://github.com/readysettech/mysql_async", branch = "lru-fix" }
 eui48 = { git = "https://github.com/readysettech/eui48.git", branch = "master" }
 
@@ -60,11 +60,11 @@ consulrs = { git = "https://github.com/readysettech/consulrs.git", branch = "all
 eui48 = { git = "https://github.com/readysettech/eui48.git", branch = "master", default-features = false }
 mysql_async = { git = "https://github.com/readysettech/mysql_async", branch = "lru-fix" }
 nperf-core = { git = "https://github.com/readysettech/not-perf.git" }
-postgres = { git = "https://github.com/readysettech/rust-postgres.git" }
-postgres-native-tls = { git = "https://github.com/readysettech/rust-postgres.git" }
-postgres-protocol = { git = "https://github.com/readysettech/rust-postgres.git" }
-postgres-types = { git = "https://github.com/readysettech/rust-postgres.git" }
-tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git" }
+postgres = { git = "https://github.com/readysettech/rust-postgres.git", rev = "f399eda6e91dd47b0e21b6f640515a5e8bd0a1cc" }
+postgres-native-tls = { git = "https://github.com/readysettech/rust-postgres.git", rev = "f399eda6e91dd47b0e21b6f640515a5e8bd0a1cc" }
+postgres-protocol = { git = "https://github.com/readysettech/rust-postgres.git", rev = "f399eda6e91dd47b0e21b6f640515a5e8bd0a1cc" }
+postgres-types = { git = "https://github.com/readysettech/rust-postgres.git", rev = "f399eda6e91dd47b0e21b6f640515a5e8bd0a1cc" }
+tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", rev = "f399eda6e91dd47b0e21b6f640515a5e8bd0a1cc" }
 tokio = { version = "1.23",  features = ["full"] }
 
 [profile.release]
