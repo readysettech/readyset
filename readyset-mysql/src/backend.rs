@@ -657,15 +657,25 @@ where
         }
     }
 
-    async fn on_init(&mut self, database: &str, w: InitWriter<'_, W>) -> io::Result<()> {
+    async fn on_init(&mut self, database: &str, w: Option<InitWriter<'_, W>>) -> io::Result<()> {
         match self.set_database(database).await {
-            Ok(()) => w.ok().await,
+            Ok(()) => {
+                if let Some(w) = w {
+                    w.ok().await
+                } else {
+                    Ok(())
+                }
+            }
             Err(e) => {
-                w.error(
-                    mysql_srv::ErrorKind::ER_UNKNOWN_ERROR,
-                    e.to_string().as_bytes(),
-                )
-                .await
+                if let Some(w) = w {
+                    w.error(
+                        mysql_srv::ErrorKind::ER_UNKNOWN_ERROR,
+                        e.to_string().as_bytes(),
+                    )
+                    .await
+                } else {
+                    Ok(())
+                }
             }
         }
     }

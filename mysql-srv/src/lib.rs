@@ -49,8 +49,8 @@
 //!     }
 //!     async fn on_close(&mut self, _: u32) {}
 //!
-//!     async fn on_init(&mut self, _: &str, w: InitWriter<'_, W>) -> io::Result<()> {
-//!         w.ok().await
+//!     async fn on_init(&mut self, _: &str, w: Option<InitWriter<'_, W>>) -> io::Result<()> {
+//!         w.unwrap().ok().await
 //!     }
 //!
 //!     async fn on_query(
@@ -273,7 +273,7 @@ pub trait MySqlShim<W: AsyncWrite + Unpin + Send> {
     async fn on_query(&mut self, query: &str, results: QueryResultWriter<'_, W>) -> io::Result<()>;
 
     /// Called when client switches database.
-    async fn on_init(&mut self, _: &str, _: InitWriter<'_, W>) -> io::Result<()>;
+    async fn on_init(&mut self, _: &str, _: Option<InitWriter<'_, W>>) -> io::Result<()>;
 
     /// Retrieve the password for the user with the given username, if any.
     ///
@@ -616,7 +616,7 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
                         .on_init(
                             ::std::str::from_utf8(schema)
                                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
-                            w,
+                            Some(w),
                         )
                         .await?;
                 }
