@@ -1,11 +1,13 @@
+use core::fmt;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::fmt::Formatter;
 use std::ops::{Deref, DerefMut};
 
 use async_trait::async_trait;
 use futures_util::StreamExt;
-use itertools::izip;
+use itertools::{izip, Itertools};
 use mysql_async::consts::StatusFlags;
 use mysql_common::bigdecimal03::ToPrimitive;
 use mysql_srv::{
@@ -31,6 +33,24 @@ use crate::schema::convert_column;
 use crate::upstream::{self, CachedReadResult, MySqlUpstream};
 use crate::value::mysql_value_to_dataflow_value;
 use crate::{Error, MySqlQueryHandler};
+
+/// Helper struct to correctly transform a binary type value into its correct [`String`]
+/// representation.
+// TODO(fran): We can't keep using the `Display` impl of `DfValue`, since types such as binary or
+//  byte array have different display formats depending on the database (Postgres even has two
+//  possible display formats based on configuration).
+//  This is a temporary workaround, since the actual fix might involve a bigger effort.
+struct BinaryDisplay<'a>(&'a [u8]);
+
+impl<'a> fmt::Display for BinaryDisplay<'a> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "0x{}",
+            self.0.iter().map(|byte| format!("{:02x}", byte)).join("")
+        )
+    }
+}
 
 async fn write_column<W: AsyncWrite + Unpin>(
     rw: &mut RowWriter<'_, W>,
@@ -67,8 +87,20 @@ async fn write_column<W: AsyncWrite + Unpin>(
                 rw.write_col(i as isize)
             }
         }
-        DfValue::Text(ref t) => rw.write_col(t.as_str()),
-        DfValue::TinyText(ref t) => rw.write_col(t.as_str()),
+        DfValue::Text(ref t) => {
+            if ty.is_binary() {
+                rw.write_col(BinaryDisplay(c.as_bytes()?).to_string())
+            } else {
+                rw.write_col(t.as_str())
+            }
+        }
+        DfValue::TinyText(ref t) => {
+            if ty.is_binary() {
+                rw.write_col(BinaryDisplay(c.as_bytes()?).to_string())
+            } else {
+                rw.write_col(t.as_str())
+            }
+        }
         ref dt @ (DfValue::Float(..) | DfValue::Double(..)) => match cs.coltype {
             mysql_srv::ColumnType::MYSQL_TYPE_DECIMAL
             | mysql_srv::ColumnType::MYSQL_TYPE_NEWDECIMAL => {
@@ -113,7 +145,7 @@ async fn write_column<W: AsyncWrite + Unpin>(
             _ => return Err(conv_error())?,
         },
         DfValue::Time(ref t) => rw.write_col(t),
-        DfValue::ByteArray(ref bytes) => rw.write_col(bytes.as_ref()),
+        DfValue::ByteArray(ref bytes) => rw.write_col(BinaryDisplay(bytes.as_ref()).to_string()),
         // These types are PostgreSQL specific
         DfValue::Array(_) => {
             internal!("Cannot write MySQL column: MySQL does not support arrays")

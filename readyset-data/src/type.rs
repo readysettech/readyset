@@ -477,6 +477,12 @@ impl DfType {
         matches!(self, Self::Array { .. })
     }
 
+    /// Returns `true` if this is any MySQL binary type.
+    #[inline]
+    pub fn is_binary(&self) -> bool {
+        matches!(self, Self::Binary(_) | Self::VarBinary(_))
+    }
+
     /// Returns the deepest nested type in [`DfType::Array`], otherwise returns `self`.
     #[inline]
     pub fn innermost_array_type(&self) -> &Self {

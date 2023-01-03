@@ -615,6 +615,25 @@ impl DfValue {
         }
     }
 
+    /// If `self` is [`DfValue::Text`], [`DfValue::TinyText`] or [`DfValue::ByteArray`], return a
+    /// reference to the underlying [`Array`], otherwise return a
+    /// [`ReadySetError::DfValueConversionError`] for all other [`DfValue`] variants.
+    pub fn as_bytes(&self) -> ReadySetResult<&[u8]> {
+        match self {
+            DfValue::Text(text) => Ok(text.as_bytes()),
+            DfValue::TinyText(text) => Ok(text.as_bytes()),
+            DfValue::ByteArray(bytes) => Ok(bytes.as_ref()),
+            _ => Err(ReadySetError::DfValueConversionError {
+                src_type: match self.sql_type() {
+                    Some(ty) => ty.to_string(),
+                    None => "Null".to_string(),
+                },
+                target_type: "ByteArray".to_string(),
+                details: "".to_string(),
+            }),
+        }
+    }
+
     /// Transform this [`DfValue`] in preparation for being serialized to disk as part of an index.
     ///
     /// This function has the property that if `d1 == d2`, then
