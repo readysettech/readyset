@@ -3585,7 +3585,7 @@ dependencies = [
 [[package]]
 name = "postgres"
 version = "0.19.4"
-source = "git+https://github.com/readysettech/rust-postgres.git?branch=peter/fix-row-descript#78b64a289eb275c44e0ee643301bee543b82fc61"
+source = "git+https://github.com/readysettech/rust-postgres.git#7fe50ff41822cf087a0c06d65add99f4454d0702"
 dependencies = [
  "bytes 1.1.0",
  "fallible-iterator",
@@ -3598,7 +3598,7 @@ dependencies = [
 [[package]]
 name = "postgres-derive"
 version = "0.4.3"
-source = "git+https://github.com/readysettech/rust-postgres.git?branch=peter/fix-row-descript#78b64a289eb275c44e0ee643301bee543b82fc61"
+source = "git+https://github.com/readysettech/rust-postgres.git#7fe50ff41822cf087a0c06d65add99f4454d0702"
 dependencies = [
  "proc-macro2 1.0.47",
  "quote 1.0.21",
@@ -3608,7 +3608,7 @@ dependencies = [
 [[package]]
 name = "postgres-native-tls"
 version = "0.5.0"
-source = "git+https://github.com/readysettech/rust-postgres.git?branch=peter/fix-row-descript#78b64a289eb275c44e0ee643301bee543b82fc61"
+source = "git+https://github.com/readysettech/rust-postgres.git#7fe50ff41822cf087a0c06d65add99f4454d0702"
 dependencies = [
  "native-tls",
  "tokio",
@@ -3619,7 +3619,7 @@ dependencies = [
 [[package]]
 name = "postgres-protocol"
 version = "0.6.4"
-source = "git+https://github.com/readysettech/rust-postgres.git?branch=peter/fix-row-descript#78b64a289eb275c44e0ee643301bee543b82fc61"
+source = "git+https://github.com/readysettech/rust-postgres.git#7fe50ff41822cf087a0c06d65add99f4454d0702"
 dependencies = [
  "base64 0.20.0",
  "byteorder",
@@ -3636,7 +3636,7 @@ dependencies = [
 [[package]]
 name = "postgres-types"
 version = "0.2.4"
-source = "git+https://github.com/readysettech/rust-postgres.git?branch=peter/fix-row-descript#78b64a289eb275c44e0ee643301bee543b82fc61"
+source = "git+https://github.com/readysettech/rust-postgres.git#7fe50ff41822cf087a0c06d65add99f4454d0702"
 dependencies = [
  "bit-vec",
  "bytes 1.1.0",
@@ -6143,7 +6143,7 @@ dependencies = [
 [[package]]
 name = "tokio-postgres"
 version = "0.7.7"
-source = "git+https://github.com/readysettech/rust-postgres.git?branch=peter/fix-row-descript#78b64a289eb275c44e0ee643301bee543b82fc61"
+source = "git+https://github.com/readysettech/rust-postgres.git#7fe50ff41822cf087a0c06d65add99f4454d0702"
 dependencies = [
  "async-trait",
  "byteorder",
