@@ -98,7 +98,7 @@ fn expand_concrete_iter(item: &mut ItemFn) {
                 let variant_path: Path =
                     parse_quote_spanned!(mac_span => ConcreteIter::#variant_name);
 
-                *i = parse_quote_spanned!(i.span() => #variant_path(#arg));
+                *i = parse_quote_spanned!(i.span() => #variant_path(IntoIterator::into_iter(#arg)));
 
                 self.idx += 1;
             }

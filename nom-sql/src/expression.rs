@@ -84,7 +84,7 @@ impl FunctionExpr {
                 concrete_iter!(iter::once(arg.as_ref()))
             }
             FunctionExpr::CountStar => concrete_iter!(iter::empty()),
-            FunctionExpr::Call { arguments, .. } => concrete_iter!(arguments.iter()),
+            FunctionExpr::Call { arguments, .. } => concrete_iter!(arguments),
             FunctionExpr::Substring { string, pos, len } => {
                 concrete_iter!(iter::once(string.as_ref())
                     .chain(pos.iter().map(|p| p.as_ref()))
