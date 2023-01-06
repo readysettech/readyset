@@ -1701,9 +1701,9 @@ where
                                 view_request.statement.clone(),
                                 Some(view_request.schema_search_path.clone()),
                             ),
-                            Query::ParseFailed(_) => {
-                                return Some(Err(ReadySetError::NoQueryForId {
-                                    id: id.to_string(),
+                            Query::ParseFailed(q) => {
+                                return Some(Err(ReadySetError::UnparseableQuery {
+                                    query: (*q).clone(),
                                 }))
                             }
                         },
