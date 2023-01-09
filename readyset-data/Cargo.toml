@@ -17,7 +17,8 @@ proptest = "1.0.0"
 rust_decimal = { version = "1.26", features = ["db-tokio-postgres", "serde-str"] }
 serde = { version = "1.0.8", features = ["rc", "derive"] }
 serde_bytes = "0.11"
-serde_json = { version = "1.0.2", features = ["arbitrary_precision"] }
+serde_json = { version = "1.0.2", features = ["arbitrary_precision", "unbounded_depth"] }
+serde_stacker = "0.1.7"
 strum = "0.23"
 strum_macros = "0.23"
 test-strategy = "0.2.0"

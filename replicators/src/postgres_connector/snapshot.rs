@@ -495,7 +495,12 @@ impl TableDescription {
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|err| {
                     progress_percentage_metric.set(0.0);
-                    err
+                    ReadySetError::ReplicationFailed(format!(
+                        "Failed converting to DfValue, table: {}, row: {}, err: {}",
+                        noria_table.table_name(),
+                        cnt,
+                        err
+                    ))
                 })?;
 
             noria_rows.push(noria_row);

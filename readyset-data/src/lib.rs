@@ -8,8 +8,9 @@ use std::hash::{Hash, Hasher};
 use std::net::IpAddr;
 use std::ops::{Add, Div, Mul, Sub};
 use std::sync::Arc;
-use std::{fmt, str};
+use std::{fmt, io, str};
 
+use ::serde::{Deserialize, Serialize};
 use bit_vec::BitVec;
 use bytes::BytesMut;
 use chrono::{self, DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, TimeZone};
@@ -1829,9 +1830,57 @@ impl<'a> FromSql<'a> for DfValue {
                 )),
                 Type::INET => Ok(DfValue::from(IpAddr::from_sql(ty, raw)?.to_string())),
                 Type::UUID => Ok(DfValue::from(Uuid::from_sql(ty, raw)?.to_string())),
-                Type::JSON | Type::JSONB => Ok(DfValue::from(
-                    serde_json::Value::from_sql(ty, raw)?.to_string(),
-                )),
+                Type::JSON | Type::JSONB => {
+                    let raw = match (ty, raw) {
+                        (&Type::JSONB, []) => {
+                            return Err(io::Error::new(
+                                io::ErrorKind::UnexpectedEof,
+                                "Missing JSONB encoding version",
+                            )
+                            .into())
+                        }
+                        (&Type::JSONB, [1, ..]) => &raw[1..],
+                        (&Type::JSONB, [..]) => {
+                            return Err("Unsupported JSONB encoding version".into())
+                        }
+                        _ => raw,
+                    };
+
+                    // Deserializing/serializing deeply nested JSON data can hit serde_json's
+                    // recursion limit, to protect against stack overflows. To circumvent this,
+                    // serde_stacker is used instead of the recursion limit, to dynamically grow
+                    // the stack as the limit is approached.
+                    let value = {
+                        let mut deserializer = serde_json::Deserializer::from_slice(raw);
+                        deserializer.disable_recursion_limit();
+                        let deserializer = serde_stacker::Deserializer::new(&mut deserializer);
+                        serde_json::Value::deserialize(deserializer)?
+                    };
+
+                    let out = {
+                        let mut out = Vec::new();
+                        let mut serializer = serde_json::Serializer::new(&mut out);
+                        let serializer = serde_stacker::Serializer::new(&mut serializer);
+                        value.serialize(serializer)?;
+                        String::from_utf8(out).unwrap()
+                    };
+
+                    // Iteratively drop the serde_json::Value's contents, to avoid stack
+                    // overflows from recursion.
+                    {
+                        let mut stack = vec![value];
+                        while let Some(value) = stack.pop() {
+                            match value {
+                                serde_json::Value::Array(array) => stack.extend(array),
+                                serde_json::Value::Object(obj) => {
+                                    stack.extend(obj.into_iter().map(|(_, value)| value))
+                                }
+                                _ => {}
+                            };
+                        }
+                    }
+                    Ok(DfValue::from(out))
+                }
                 Type::BIT | Type::VARBIT => mk_from_sql!(BitVec),
                 ref ty if ty.name() == "citext" => Ok(DfValue::from_str_and_collation(
                     <&str>::from_sql(ty, raw)?,
@@ -2917,6 +2966,23 @@ mod tests {
         assert_eq!(
             original_data, received_data,
             "Failed to round-trip when supplying different type to to_sql"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn deeply_nested_json_roundtrip() -> Result<(), Box<dyn Error + Sync + Send>> {
+        let nesting_level = 1_000_000;
+        let original_value: String = (0..nesting_level)
+            .map(|_| "[")
+            .chain(["5"])
+            .chain((0..nesting_level).map(|_| "]"))
+            .collect();
+        let value = DfValue::from_sql(&Type::JSON, original_value.as_bytes())?;
+        assert_eq!(
+            original_value,
+            value.to_string(),
+            "JSON data malformed during roundtrip"
         );
         Ok(())
     }
