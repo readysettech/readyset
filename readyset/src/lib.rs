@@ -439,25 +439,6 @@ where
         ));
         info!(version = %VERSION_STR_ONELINE);
 
-        let telemetry_sender = rt.block_on(async {
-            TelemetryInitializer::init(
-                options.disable_telemetry,
-                std::env::var("RS_API_KEY").ok(),
-                vec![],
-            )
-            .await
-        });
-
-        let _ = telemetry_sender
-            .send_event_with_payload(
-                TelemetryEvent::AdapterStart,
-                TelemetryBuilder::new()
-                    .adapter_version(option_env!("CARGO_PKG_VERSION").unwrap_or_default())
-                    .db_backend(format!("{:?}", &self.database_type).to_lowercase())
-                    .build(),
-            )
-            .map_err(|error| warn!(%error, "Failed to initialize telemetry sender"));
-
         if options.allow_unsupported_set {
             warn!(
                 "Running with --allow-unsupported-set can cause certain queries to return \
@@ -640,16 +621,14 @@ where
             .await
         });
 
-        let _ = rt
-            .block_on(async {
-                telemetry_sender.send_event_with_payload(
-                    TelemetryEvent::AdapterStart,
-                    TelemetryBuilder::new()
-                        .adapter_version(option_env!("CARGO_PKG_VERSION").unwrap_or_default())
-                        .db_backend(format!("{:?}", &self.database_type).to_lowercase())
-                        .build(),
-                )
-            })
+        let _ = telemetry_sender
+            .send_event_with_payload(
+                TelemetryEvent::AdapterStart,
+                TelemetryBuilder::new()
+                    .adapter_version(option_env!("CARGO_PKG_VERSION").unwrap_or_default())
+                    .db_backend(format!("{:?}", &self.database_type).to_lowercase())
+                    .build(),
+            )
             .map_err(|error| warn!(%error, "Failed to initialize telemetry sender"));
 
         let migration_mode = match migration_style {
