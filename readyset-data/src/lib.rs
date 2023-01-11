@@ -507,6 +507,10 @@ impl DfValue {
             };
         }
 
+        if to_ty.is_unknown() && from_ty.is_unknown() {
+            return Ok(self.clone());
+        }
+
         match self {
             DfValue::None => Ok(DfValue::None),
             DfValue::Array(arr) => match to_ty {
@@ -3228,6 +3232,14 @@ mod tests {
                 dt.coerce_to(&ty, &DfType::Unknown),
                 Ok(dt),
                 "coerce to {ty:?}"
+            );
+        }
+
+        #[proptest]
+        fn unknown_to_unknown(value: DfValue) {
+            assert_eq!(
+                value.coerce_to(&DfType::Unknown, &DfType::Unknown),
+                Ok(value)
             );
         }
 
