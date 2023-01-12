@@ -11,7 +11,7 @@
 ReadySet is a SQL caching engine designed to help developers enhance the performance and scalability of their existing database-backed applications.
 
 - [What is ReadySet?](#what-is-readyset)
-- [Getting Started](#getting-started)
+- [Quickstart](#quickstart)
 - [Documentation](#documentation)
 - [Join the Community](#join-the-community)
 - [Development](#development)
@@ -19,7 +19,7 @@ ReadySet is a SQL caching engine designed to help developers enhance the perform
 
 ## What is ReadySet?
 
-ReadySet is a lightweight SQL caching engine that precomputes frequently-accessed query results and automatically keeps these results up-to-date over time as the underlying data in your database changes. ReadySet is wire-compatible with MySQL and Postgres and can be adopted without code changes.
+ReadySet is a lightweight SQL caching engine that sits between your application and database and turns even the most complex SQL reads into lightning-fast lookups. Unlike other caching solutions, ReadySet keeps the cache up-to-date automatically and requires no changes to your application code.
 
 <br>
 <p align="center">
@@ -27,24 +27,181 @@ ReadySet is a lightweight SQL caching engine that precomputes frequently-accesse
 </p>
 <br>
 
-ReadySet acts as both a SQL cache and a proxy. When you first connect ReadySet to your application, it defaults to proxying all of your queries to your backing database, so it doesn't change the behavior of your application.
+Based on years of dataflow research at MIT[^1], ReadySet stores the results of queries in-memory and automatically keeps these results up-to-date as the underlying database changes. ReadySet can do this automatically because it listens to your database's replication stream.
 
-From there, you can monitor the performance of your queries using the ReadySet dashboard, and cache a subset of them in ReadySet. ReadySet automatically keeps cached results up-to-date over time as the underlying data in your database changes, so there's no need to write cache maintenance logic.
+This means:
 
-## Getting Started
+- No extra code to keep your cache and database in sync
+- No extra code to evict stale records
+- No TTLs to set - your cache is as up-to-date as your replication lag
 
-Integrating with ReadySet is straight-forward:
+ReadySet is wire-compatible with MySQL and Postgres.
 
-1. Deploy ReadySet and connect it to your MySQL or Postgres database.
-2. Change your application's connection string to point at ReadySet.
-3. Profile queries in the ReadySet Dashboard.
-4. Cache queries using ReadySet's custom SQL commands.
+[^1]: See the [Noria](https://pdos.csail.mit.edu/papers/noria:osdi18.pdf) paper.
 
-To run through this process on your local machine, see the [Quickstart](https://docs.readyset.io/guides/quickstart/).
+## Quickstart
 
-To run through this process in a cloud environment, see [Deploy with Kubernetes](https://docs.readyset.io/guides/deploy-readyset-kubernetes/) or [Deploy with ReadySet Cloud](https://docs.readyset.io/guides/deploy-readyset-cloud/).
+These instruction show you how to run ReadySet against a new Postgres or MySQL database in Docker. To use an existing database, see the [Quickstart page](https://docs.readyset.io/guides/quickstart/#use-an-existing-database) in our docs. For a full walk-through of ReadySet's capabilities and features, see the [ReadySet Tutorial](https://docs.readyset.io/guides/tutorial.md).
+
+### Before you begin
+
+- Install and start [Docker](https://docs.docker.com/engine/install/) for your OS.
+- Install the [`psql` shell](https://www.postgresql.org/docs/current/app-psql.html) or the [`mysql` shell](https://dev.mysql.com/doc/refman/8.0/en/mysql.html).
+
+### Step 1. Start the database
+
+Create a Docker container and start the database inside it.
+
+For Postgres:
+
+```
+docker run -d \
+--name=postgres \
+--publish=5432:5432 \
+-e POSTGRES_PASSWORD=readyset \
+-e POSTGRES_DB=testdb \
+postgres:14 \
+-c wal_level=logical
+```
+
+For MySQL:
+
+```
+docker run -d \
+--name=mysql \
+--publish=3306:3306 \
+-e MYSQL_ROOT_PASSWORD=readyset \
+-e MYSQL_DATABASE=testdb \
+mysql
+```
+
+### Step 2. Load sample data
+
+Download a sample data file and load it into the database via the SQL shell.
+
+For Postgres:
+
+```
+curl -O https://raw.githubusercontent.com/readysettech/docs/main/docs/assets/quickstart-data-postgres.sql
+```
+
+```
+PGPASSWORD=readyset psql \
+--host=127.0.0.1 \
+--port=5432 \
+--username=postgres \
+--dbname=testdb
+```
+
+``` sh
+\i quickstart-data-postgres.sql
+```
+
+```
+\q
+```
+
+For MySQL:
+
+```
+curl -O https://raw.githubusercontent.com/readysettech/docs/main/docs/assets/quickstart-data-mysql.sql
+```
+
+```
+mysql \
+--host=127.0.0.1 \
+--port=3306 \
+--user=root \
+--password=readyset \
+--database=testdb
+```
+
+```
+source quickstart-data-mysql.sql;
+```
+
+```
+\q
+```
+
+### Step 3. Start ReadySet
+
+Create a Docker container and start ReadySet inside it, connecting ReadySet to the database via the connection string in `--upstream-db-url`:
+
+For Postgres:
+
+```
+docker run -d \
+--name=readyset \
+--publish=5433:5433 \
+--platform=linux/amd64 \
+--volume='readyset:/state' \
+--pull=always \
+-e DEPLOYMENT_ENV=quickstart_github \
+public.ecr.aws/readyset/readyset:beta-2022-12-15 \
+--standalone \
+--deployment='github-postgres' \
+--database-type=postgresql \
+--upstream-db-url=postgresql://postgres:readyset@172.17.0.1:5432/testdb \
+--address=0.0.0.0:5433 \
+--username='postgres' \
+--password='readyset' \
+--query-caching='explicit' \
+--db-dir='/state'
+```
+
+For MySQL:
+
+```
+docker run -d \
+--name=readyset \
+--publish=3307:3307 \
+--platform=linux/amd64 \
+--volume='readyset:/state' \
+--pull=always \
+-e DEPLOYMENT_ENV=quickstart_github \
+public.ecr.aws/readyset/readyset:beta-2022-12-15 \
+--standalone \
+--deployment='github-mysql' \
+--database-type=mysql \
+--upstream-db-url=mysql://root:readyset@172.17.0.1:3306/testdb \
+--address=0.0.0.0:5433 \
+--username='root' \
+--password='readyset' \
+--query-caching='explicit' \
+--db-dir='/state'
+```
+
+### Next steps
+
+- Connect an app
+
+    Once you have a ReadySet instance up and running, the next step is to connect your application by swapping out your database connection string to point to ReadySet instead. The specifics of how to do this vary by database client library, ORM, and programming language. See [Connect an App](https://docs.readyset.io/guides/connect-an-app/) for examples.
+
+    **Note:** By default, ReadySet will proxy all queries to the database, so changing your app to connect to ReadySet should not impact performance. You will explicitly tell ReadySet which queries to cache.   
+
+- Cache queries
+
+    Once you are running queries against ReadySet, connect a database SQL shell to ReadySet and use the custom [`SHOW PROXIED QUERIES`](https://docs.readyset.io/guides/cache-queries.md#identify-queries-to-cache) SQL command to view the queries that ReadySet has proxied to your upstream database and identify which queries are supported by ReadySet. Then use the custom [`CREATE CACHE`](https://docs.readyset.io/guides/cache-queries.md#cache-queries_1) SQL command to cache supported queries.
+
+    **Note:** To successfully cache the results of a query, ReadySet must support the SQL features and syntax in the query. For more details, see [SQL Support](https://docs.readyset.io/reference/sql-support.md).
+
+- Tear down
+
+    When you are done testing, stop and remove the Docker resources:
+
+    ```
+    docker rm -f readyset postgres mysql \
+    && docker volume rm readyset
+    ```
+
+- Deploy to production
+
+    To run ReadySet in a cloud environment, see the [Deploy with ReadySet Cloud](https://docs.readyset.io/guides/deploy-readyset-cloud/) and [Deploy with Kubernetes](https://docs.readyset.io/guides/deploy-readyset-kubernetes/) pages in our docs. You can also run ReadySet yourself using [binaries](https://docs.readyset.io/releases/readyset-core/).
+
 
 ## FAQs
+
 **Q: How does ReadySet work under the hood?**
 
 A: The heart of ReadySet is a query engine based on partially-stateful, streaming data flow. To learn more about how it works, see [our docs](https://docs.readyset.io/concepts/overview).
