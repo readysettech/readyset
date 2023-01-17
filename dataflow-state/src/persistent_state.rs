@@ -1489,7 +1489,7 @@ impl PersistentState {
                 // When we get notified about changes to LOG, we read its latest contents
                 log_file.read_to_string(&mut buf)?;
                 for line in buf.lines() {
-                    if line.contains("Manual compaction starting") {
+                    if line.contains("compaction_started") && line.contains("ManualCompaction") {
                         compaction_started = true;
                     }
                     if !compaction_started {
@@ -1525,8 +1525,11 @@ impl PersistentState {
                         let mut fields = line.split(' ').peekable();
                         while let Some(f) = fields.next() {
                             if f == "Count:" {
-                                second_stage_keys +=
-                                    fields.peek().and_then(|f| f.parse().ok()).unwrap_or(0);
+                                let count_per_hist =
+                                    fields.next().and_then(|f| f.parse().ok()).unwrap_or(0);
+                                let avg_per_hist =
+                                    fields.nth(1).and_then(|f| f.parse().ok()).unwrap_or(0f64);
+                                second_stage_keys += (count_per_hist as f64 * avg_per_hist) as u64;
                                 break;
                             }
                         }
