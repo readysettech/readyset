@@ -80,7 +80,7 @@ use readyset_client::internal::Index;
 use readyset_client::replication::ReplicationOffset;
 use readyset_client::{KeyComparison, KeyCount, SqlIdentifier};
 use readyset_data::DfValue;
-use readyset_errors::{ReadySetError, ReadySetResult};
+use readyset_errors::{internal_err, invariant, ReadySetError, ReadySetResult};
 use readyset_tracing::{debug, error, info, warn};
 use readyset_util::intervals::BoundPair;
 use rocksdb::{self, IteratorMode, PlainTableFactoryOptions, SliceTransform, WriteBatch, DB};
@@ -539,7 +539,7 @@ impl State for PersistentState {
         partial_tag: Option<Tag>,
         replication_offset: Option<ReplicationOffset>,
     ) -> ReadySetResult<()> {
-        assert!(partial_tag.is_none(), "PersistentState can't be partial");
+        invariant!(partial_tag.is_none(), "PersistentState can't be partial");
         if records.len() == 0 && replication_offset.is_none() {
             return Ok(());
         }
@@ -556,10 +556,10 @@ impl State for PersistentState {
         for r in records.iter() {
             match *r {
                 Record::Positive(ref r) => {
-                    self.insert(&mut batch, r);
+                    self.insert(&mut batch, r)?;
                 }
                 Record::Negative(ref r) => {
-                    self.remove(&mut batch, r);
+                    self.remove(&mut batch, r)?;
                 }
             }
         }
@@ -586,10 +586,11 @@ impl State for PersistentState {
                 // lost, if they are not flushed to SST files.
                 for index in self.db.inner().indices.iter() {
                     db.flush_cf(db.cf_handle(&index.column_family).unwrap())
-                        .expect("Flush to disk failed");
+                        .map_err(|e| internal_err!("Flush to disk failed: {e}"))?;
                 }
 
-                db.flush().expect("Flush to disk failed");
+                db.flush()
+                    .map_err(|e| internal_err!("Flush to disk failed: {e}"))?;
             }
             opts.set_sync(true);
         }
@@ -598,7 +599,10 @@ impl State for PersistentState {
             self.set_replication_offset(&mut batch, offset);
         }
 
-        self.db.handle().write_opt(batch, &opts).unwrap();
+        self.db
+            .handle()
+            .write_opt(batch, &opts)
+            .map_err(|e| internal_err!("Write failed: {e}"))?;
 
         Ok(())
     }
@@ -1605,10 +1609,13 @@ impl PersistentState {
     /// Inserts the row into the database by replicating it across all of the column
     /// families. The insert is performed in a context of a [`rocksdb::WriteBatch`]
     /// operation and is therefore guaranteed to be atomic.
-    fn insert(&mut self, batch: &mut WriteBatch, r: &[DfValue]) {
+    fn insert(&mut self, batch: &mut WriteBatch, r: &[DfValue]) -> ReadySetResult<()> {
         let inner = self.db.inner();
         let db = &inner.db;
-        let primary_index = inner.indices.first().expect("Insert on un-indexed state");
+        let primary_index = inner
+            .indices
+            .first()
+            .ok_or_else(|| internal_err!("Insert on un-indexed state"))?;
         let primary_key = build_key(r, &primary_index.index.columns);
         let primary_cf = db.cf_handle(&primary_index.column_family).unwrap();
 
@@ -1623,7 +1630,7 @@ impl PersistentState {
             serialize_key(&primary_key, (self.epoch, self.seq))
         };
 
-        let serialized_row = bincode::options().serialize(r).unwrap();
+        let serialized_row = bincode::options().serialize(r)?;
 
         // First store the row for the primary index:
         batch.put_cf(primary_cf, &serialized_pk, &serialized_row);
@@ -1644,13 +1651,18 @@ impl PersistentState {
                 batch.put_cf(cf, &serialized_key, &serialized_pk);
             };
         }
+
+        Ok(())
     }
 
-    fn remove(&self, batch: &mut WriteBatch, r: &[DfValue]) {
+    fn remove(&self, batch: &mut WriteBatch, r: &[DfValue]) -> ReadySetResult<()> {
         let inner = self.db.inner();
         let db = &inner.db;
 
-        let primary_index = inner.indices.first().expect("Delete on un-indexed state");
+        let primary_index = inner
+            .indices
+            .first()
+            .ok_or_else(|| internal_err!("Delete on un-indexed state"))?;
         let primary_key = build_key(r, &primary_index.index.columns);
         let primary_cf = db.cf_handle(&primary_index.column_family).unwrap();
 
@@ -1670,7 +1682,7 @@ impl PersistentState {
                 let key = iter
                     .key()
                     .filter(|k| k.starts_with(&prefix))
-                    .expect("tried removing non-existent row");
+                    .ok_or_else(|| internal_err!("tried removing non-existent row"))?;
                 let val = deserialize_row(iter.value().unwrap());
                 if val == r {
                     break key.to_vec();
@@ -1696,6 +1708,8 @@ impl PersistentState {
             let cf = db.cf_handle(&index.column_family).unwrap();
             batch.delete_cf(cf, &serialized_key);
         }
+
+        Ok(())
     }
 
     pub fn is_snapshotting(&self) -> bool {
