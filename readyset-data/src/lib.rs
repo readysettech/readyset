@@ -1822,7 +1822,17 @@ impl<'a> FromSql<'a> for DfValue {
                 Type::DATE => mk_from_sql!(NaiveDate),
                 Type::TIME => mk_from_sql!(NaiveTime),
                 Type::BYTEA => mk_from_sql!(Vec<u8>),
-                Type::NUMERIC => mk_from_sql!(Decimal),
+                Type::NUMERIC => {
+                    // rust-decimal has a bug whereby it will successfully deserialize from the
+                    // Postgres binary format NUMERIC values with scales in [0, 255], but it will
+                    // panic when serializing them to bincode if they are outside [0, 28].
+                    let d = Decimal::from_sql(ty, raw)?;
+                    if d.scale() > 28 {
+                        Err(format!("Could not convert Postgres type {ty} into a DfValue. Error: scale > 28").into())
+                    } else {
+                        Ok(DfValue::from(d))
+                    }
+                }
                 Type::TIMESTAMP => mk_from_sql!(NaiveDateTime),
                 Type::TIMESTAMPTZ => mk_from_sql!(chrono::DateTime<chrono::FixedOffset>),
                 Type::MACADDR => Ok(DfValue::from(

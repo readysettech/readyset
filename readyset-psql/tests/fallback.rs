@@ -312,9 +312,8 @@ async fn generated_columns() {
         .simple_query("DROP TABLE IF EXISTS calc_columns CASCADE")
         .await
         .expect("create failed");
-    let dropped = res.first().unwrap();
-    assert!(matches!(dropped, SimpleQueryMessage::CommandComplete(_)));
-    sleep().await;
+    assert!(matches!(res[0], SimpleQueryMessage::CommandComplete(_)));
+
     let res = fallback_conn
         .simple_query(
             "CREATE TABLE calc_columns(
@@ -326,19 +325,17 @@ async fn generated_columns() {
         )
         .await
         .expect("create failed");
-    let created = res.first().unwrap();
-    assert!(matches!(created, SimpleQueryMessage::CommandComplete(_)));
-    sleep().await;
+    assert!(matches!(res[0], SimpleQueryMessage::CommandComplete(_)));
+
     let res = fallback_conn
         .simple_query("INSERT INTO calc_columns (col1, col2) VALUES(1, 2)")
         .await
         .expect("populate failed");
-    let inserted = res.first().unwrap();
     assert!(matches!(
-        inserted,
+        res[0],
         SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 1, .. })
     ));
-    sleep().await;
+
     let res = fallback_conn
         .simple_query("SELECT * from calc_columns")
         .await
@@ -346,7 +343,6 @@ async fn generated_columns() {
 
     // CommandComplete and 1 row should be returned
     assert_eq!(res.len(), 2);
-    sleep().await;
 
     let (opts, _handle) = TestBuilder::default()
         .recreate_database(false)
@@ -374,9 +370,8 @@ async fn generated_columns() {
         .simple_query("SHOW CACHES")
         .await
         .expect("show caches failed");
-    let caches = res.first().unwrap();
     assert!(matches!(
-        caches,
+        res[0],
         SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 0, .. })
     ));
 
@@ -386,22 +381,110 @@ async fn generated_columns() {
         .simple_query(populate_gen_columns_readyset)
         .await
         .expect("populate failed");
-    sleep().await;
-    let inserted = &res[0];
     assert!(matches!(
-        inserted,
+        res[0],
         SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 1, .. })
     ));
 
-    // We should see the inserted data
-    let res = conn
+    // We should immediately see the inserted data via the upstream connection
+    // because the write synchronously falls back to upstream
+    let res = fallback_conn
         .simple_query("SELECT * from calc_columns")
         .await
         .expect("select failed");
-
-    let selected = &res[2];
     assert!(matches!(
-        *selected,
+        res[2],
+        SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 2, .. })
+    ))
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn unsuported_numeric_scale() {
+    // Tests that we handle tables that have NUMERIC values with scales > 28
+    // by not snapshotting them and falling back to upstream
+    readyset_tracing::init_test_logging();
+
+    let mut upstream_config = upstream_config();
+    upstream_config.dbname("noria");
+    let fallback_conn = connect(upstream_config).await;
+    let res = fallback_conn
+        .simple_query("DROP TABLE IF EXISTS t CASCADE")
+        .await
+        .expect("create failed");
+    assert!(matches!(res[0], SimpleQueryMessage::CommandComplete(_)));
+
+    let res = fallback_conn
+        .simple_query("CREATE TABLE t (c NUMERIC)")
+        .await
+        .expect("create failed");
+    assert!(matches!(res[0], SimpleQueryMessage::CommandComplete(_)));
+
+    let res = fallback_conn
+        .simple_query("INSERT INTO t VALUES(0.00000000000000000000000000001)") // scale=29
+        .await
+        .expect("populate failed");
+    assert!(matches!(
+        res[0],
+        SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 1, .. })
+    ));
+
+    let res = fallback_conn
+        .simple_query("SELECT * FROM t")
+        .await
+        .expect("select failed");
+    // CommandComplete and 1 row should be returned
+    assert_eq!(res.len(), 2);
+
+    let (opts, _handle) = TestBuilder::default()
+        .recreate_database(false)
+        .fallback_url(PostgreSQLAdapter::url())
+        .migration_mode(MigrationMode::OutOfBand)
+        .build::<PostgreSQLAdapter>()
+        .await;
+    let conn = connect(opts).await;
+    // Check that we see the existing insert
+    let res = conn
+        .simple_query("SELECT * FROM t")
+        .await
+        .expect("select failed");
+    // CommandComplete and the 1 inserted rows
+    assert_eq!(res.len(), 2);
+
+    // This should fail, since we don't have a base table, as it was ignored in the
+    // initial snapshot
+    conn.simple_query("CREATE CACHE FROM SELECT * from t")
+        .await
+        .expect_err("create cache should have failed");
+
+    // There shouldnt be any caches
+    let res = conn
+        .simple_query("SHOW CACHES")
+        .await
+        .expect("show caches failed");
+    assert!(matches!(
+        res[0],
+        SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 0, .. })
+    ));
+
+    // Inserting will go to upstream
+    let res = conn
+        .simple_query("INSERT INTO t VALUES(0)")
+        .await
+        .expect("populate failed");
+    assert!(matches!(
+        res[0],
+        SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 1, .. })
+    ));
+
+    // We should immediately see the inserted data via the upstream connection
+    // because the write synchronously falls back to upstream
+    let res = fallback_conn
+        .simple_query("SELECT * FROM t")
+        .await
+        .expect("select failed");
+    assert!(matches!(
+        res[2],
         SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 2, .. })
     ));
 }
