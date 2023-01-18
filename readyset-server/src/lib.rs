@@ -579,7 +579,7 @@ pub struct WorkerOptions {
     pub eviction_kind: dataflow::EvictionKind,
 
     /// Disable partial
-    #[clap(long = "nopartial")]
+    #[clap(long = "nopartial", hide = true)]
     pub no_partial: bool,
 
     /// Forbid the creation of fully materialized nodes
@@ -587,7 +587,7 @@ pub struct WorkerOptions {
     pub forbid_full_materialization: bool,
 
     /// Enable packet filters in egresses before readers
-    #[clap(long)]
+    #[clap(long, hide = true)]
     pub enable_packet_filters: bool,
 
     /// Number of workers to wait for before starting (including this one)
@@ -595,7 +595,7 @@ pub struct WorkerOptions {
     pub quorum: usize,
 
     /// Shard the graph this many ways (<= 1 : disable sharding)
-    #[clap(long, default_value = "0", env = "NORIA_SHARDS")]
+    #[clap(long, default_value = "0", env = "NORIA_SHARDS", hide = true)]
     pub shards: usize,
 
     /// Volume associated with the server.

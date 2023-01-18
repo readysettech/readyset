@@ -185,7 +185,7 @@ pub struct Options {
     authority_address: String,
 
     /// Log slow queries (> 5ms)
-    #[clap(long)]
+    #[clap(long, hide = true)]
     log_slow: bool,
 
     /// Don't require authentication for any client connections
@@ -219,7 +219,12 @@ pub struct Options {
     migration_task_interval: u64,
 
     /// Validate queries executing against noria with the upstream db.
-    #[clap(long, env = "VALIDATE_QUERIES", requires("upstream-db-url"))]
+    #[clap(
+        long,
+        env = "VALIDATE_QUERIES",
+        requires("upstream-db-url"),
+        hide = true
+    )]
     validate_queries: bool,
 
     /// IP:PORT to host endpoint for scraping metrics from the adapter.
