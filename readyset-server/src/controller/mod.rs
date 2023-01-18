@@ -76,9 +76,21 @@ pub struct NodeRestrictionKey {
     shard: usize,
 }
 
+/// The full (metadata) state of a running ReadySet cluster.
+///
+/// This struct is the root data structure that is serialized atomically and written to the
+/// [`Authority`] upon changes to the state of the cluster. It includes:
+/// - All configuration for the cluster
+/// - The full schema of the database (both `CREATE TABLE` statements taken from the upstream
+///   database and ReadySet-specific configuration including `CREATE CACHE` statements)
+/// - The full state of the graph, including both [`MIR`][] and the dataflow graph itself
+///
+/// [`MIR`]: readyset_mir
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct ControllerState {
+    /// The user-provided configuration for the cluster
     pub(crate) config: Config,
+    /// The full state of the dataflow engine
     pub(crate) dataflow_state: DfState,
 }
 
