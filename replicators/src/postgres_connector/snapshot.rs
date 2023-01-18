@@ -597,6 +597,10 @@ impl<'a> PostgresReplicator<'a> {
             .dump(&transaction, noria_table, snapshot_report_interval_secs)
             .instrument(span.clone())
             .await
+            .map_err(|e| ReadySetError::TableError {
+                table: table.name.clone(),
+                source: Box::new(e),
+            })
     }
 
     /// Begin the replication process, starting with the recipe for the database, followed
@@ -804,10 +808,32 @@ impl<'a> PostgresReplicator<'a> {
             ))
         }
 
-        join_all(futs)
-            .await
-            .into_iter()
-            .collect::<Result<Vec<_>, ReadySetError>>()?;
+        // Remove from the set of tables any that failed to snapshot,
+        // and add them as non-replicated relations.
+        // Propagate any non-TableErrors.
+        for res in join_all(futs).await {
+            if let Err(e) = res {
+                match e {
+                    ReadySetError::TableError { ref table, .. } => {
+                        warn!(%e, table=%table.to_string(), "Error snapshotting, table will not be used");
+                        tables.retain(|t| t.name != *table);
+                        self.noria
+                            .extend_recipe_no_leader_ready(ChangeList::from_changes(
+                                vec![
+                                    Change::Drop {
+                                        name: table.clone(),
+                                        if_exists: false,
+                                    },
+                                    Change::AddNonReplicatedRelation(table.clone()),
+                                ],
+                                DataDialect::DEFAULT_POSTGRESQL,
+                            ))
+                            .await?;
+                    }
+                    _ => Err(e)?,
+                }
+            }
+        }
 
         let mut compacting = FuturesUnordered::new();
         for table in tables {
