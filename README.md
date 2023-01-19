@@ -41,7 +41,7 @@ ReadySet is wire-compatible with MySQL and Postgres.
 
 ## Quickstart
 
-These instruction show you how to run ReadySet against a new Postgres or MySQL database in Docker. To use an existing database, see the [Quickstart page](https://docs.readyset.io/guides/quickstart/#use-an-existing-database) in our docs. For a full walk-through of ReadySet's capabilities and features, see the [ReadySet Tutorial](https://docs.readyset.io/guides/tutorial.md).
+These instruction show you how to run ReadySet against a new Postgres or MySQL database in Docker. To use an existing database, see the [Quickstart page](https://docs.readyset.io/guides/quickstart/#use-an-existing-database) in our docs. For a full walk-through of ReadySet's capabilities and features, see the [ReadySet Tutorial](https://docs.readyset.io/guides/tutorial/).
 
 ### Before you begin
 
@@ -182,9 +182,9 @@ public.ecr.aws/readyset/readyset:beta-2022-12-15 \
 
 - Cache queries
 
-    Once you are running queries against ReadySet, connect a database SQL shell to ReadySet and use the custom [`SHOW PROXIED QUERIES`](https://docs.readyset.io/guides/cache-queries.md#identify-queries-to-cache) SQL command to view the queries that ReadySet has proxied to your upstream database and identify which queries are supported by ReadySet. Then use the custom [`CREATE CACHE`](https://docs.readyset.io/guides/cache-queries.md#cache-queries_1) SQL command to cache supported queries.
+    Once you are running queries against ReadySet, connect a database SQL shell to ReadySet and use the custom [`SHOW PROXIED QUERIES`](https://docs.readyset.io/guides/cache-queries/#identify-queries-to-cache) SQL command to view the queries that ReadySet has proxied to your upstream database and identify which queries are supported by ReadySet. Then use the custom [`CREATE CACHE`](https://docs.readyset.io/guides/cache-queries/#cache-queries_1) SQL command to cache supported queries.
 
-    **Note:** To successfully cache the results of a query, ReadySet must support the SQL features and syntax in the query. For more details, see [SQL Support](https://docs.readyset.io/reference/sql-support.md).
+    **Note:** To successfully cache the results of a query, ReadySet must support the SQL features and syntax in the query. For more details, see [SQL Support](https://docs.readyset.io/reference/sql-support/).
 
 - Tear down
 
