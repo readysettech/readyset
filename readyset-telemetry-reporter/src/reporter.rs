@@ -137,7 +137,7 @@ impl TelemetryReporter {
             deployment_env: std::env::var("DEPLOYMENT_ENV")
                 .unwrap_or_default()
                 .chars()
-                .filter(|c| c.is_ascii_alphabetic() || *c == '_')
+                .filter(|c| c.is_ascii_alphanumeric() || ['_', '.'].contains(c))
                 .take(DEPLOYMENT_ENV_LEN_MAX)
                 .collect(),
             periodic_reporters: Arc::new(Mutex::new(vec![])),
@@ -446,18 +446,10 @@ mod tests {
 
     #[test]
     fn validate_deployment_env() {
-        std::env::set_var("DEPLOYMENT_ENV", "!@#$test_deployment!@#$_env1234!@#$");
-        let mut s = "test_deployment_env".to_owned();
+        std::env::set_var("DEPLOYMENT_ENV", "!@#$deployment!@#$_env!@_0.1#$");
+        let mut s = "deployment_env_0.1".to_owned();
         s.truncate(DEPLOYMENT_ENV_LEN_MAX);
         let (_, reporter) = TelemetryInitializer::test_init();
-        assert!(
-            reporter.deployment_env == s
-                && reporter
-                    .deployment_env
-                    .chars()
-                    .filter(|c| !(c.is_ascii_alphabetic() || *c == '_'))
-                    .count()
-                    == 0
-        );
+        assert_eq!(reporter.deployment_env, s);
     }
 }
