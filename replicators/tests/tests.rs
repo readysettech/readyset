@@ -266,7 +266,7 @@ impl TestHandle {
             ready_notify: Some(Default::default()),
         };
 
-        handle.start_repl(config, telemetry_sender).await?;
+        handle.start_repl(config, telemetry_sender, true).await?;
 
         Ok(handle)
     }
@@ -291,6 +291,7 @@ impl TestHandle {
         &mut self,
         config: Option<Config>,
         telemetry_sender: TelemetrySender,
+        server_startup: bool,
     ) -> ReadySetResult<()> {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let controller = ReadySetHandle::new(Arc::clone(&self.authority)).await;
@@ -306,6 +307,7 @@ impl TestHandle {
                 },
                 ready_notify.clone(),
                 telemetry_sender,
+                server_startup,
             )
             .await
             {
@@ -446,7 +448,8 @@ async fn replication_test_inner(url: &str) -> ReadySetResult<()> {
         .await?;
 
     // Resume replication
-    ctx.start_repl(None, TelemetrySender::new_no_op()).await?;
+    ctx.start_repl(None, TelemetrySender::new_no_op(), false)
+        .await?;
     ctx.check_results("noria_view", "Reconnect", RECONNECT_RESULT)
         .await?;
 
@@ -1604,6 +1607,85 @@ async fn snapshot_telemetry_inner(url: &String) -> ReadySetResult<()> {
     assert!(schema_str.contains("CREATE VIEW"));
 
     Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn replication_tables_updates_mysql() {
+    applies_replication_table_updates_on_restart(&mysql_url()).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn replication_tables_updates_postgresql() {
+    applies_replication_table_updates_on_restart(&pgsql_url()).await;
+}
+
+async fn applies_replication_table_updates_on_restart(url: &str) {
+    readyset_tracing::init_test_logging();
+    let mut client = DbConnection::connect(url).await.unwrap();
+
+    // NOTE: We'll need to change this when we support domains; unfortunately failpoints don't work
+    // before a controller starts
+    client
+        .query(
+            "DROP TABLE IF EXISTS t1 CASCADE; CREATE TABLE t1(a INT);
+            DROP TABLE IF EXISTS t2 CASCADE; CREATE TABLE t2 (a INT);",
+        )
+        .await
+        .unwrap();
+
+    let config = Config {
+        replication_tables: Some(String::from("public.t1").into()),
+        ..Default::default()
+    };
+
+    let mut ctx = TestHandle::start_noria(url.to_string(), Some(config))
+        .await
+        .unwrap();
+    ctx.ready_notify.as_ref().unwrap().notified().await;
+
+    let non_replicated_rels = ctx.noria.non_replicated_relations().await.unwrap();
+    assert!(
+        non_replicated_rels.contains(&Relation {
+            schema: Some("public".into()),
+            name: "t2".into()
+        }),
+        "non_replicated_rels = {non_replicated_rels:?}"
+    );
+
+    ctx.stop_repl().await;
+
+    // Create a new test handle with different replication_tables config
+    let config = Config {
+        replication_tables: Some(String::from("public.t1, public.t2").into()),
+        ..Default::default()
+    };
+
+    let mut ctx = TestHandle::start_noria(url.to_string(), Some(config))
+        .await
+        .unwrap();
+    ctx.ready_notify.as_ref().unwrap().notified().await;
+
+    let non_replicated_rels = ctx.noria.non_replicated_relations().await.unwrap();
+    assert!(
+        !non_replicated_rels.contains(&Relation {
+            schema: Some("public".into()),
+            name: "t2".into()
+        }),
+        "non_replicated_rels = {non_replicated_rels:?}"
+    );
+
+    client
+        .query(
+            "DROP TABLE IF EXISTS t1 CASCADE;
+            DROP TABLE IF EXISTS t2 CASCADE;",
+        )
+        .await
+        .unwrap();
+
+    client.stop().await;
+    ctx.stop().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

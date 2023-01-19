@@ -115,6 +115,9 @@ impl Leader {
         // the upstream will be filling up disk
         // So, we abort on any panic of the replicator task.
         self.replicator_task = Some(tokio::spawn(abort_on_panic(async move {
+            // The replicator wants to know if we're restarting the server so that it can resnapshot
+            // to capture changes made to replication-tables.
+            let mut server_startup = true;
             loop {
                 let noria: readyset_client::ReadySetHandle =
                     readyset_client::ReadySetHandle::new(Arc::clone(&authority)).await;
@@ -124,6 +127,7 @@ impl Leader {
                     config.clone(),
                     Some(ready_notification.clone()),
                     telemetry_sender.clone(),
+                    server_startup,
                 )
                 .await
                 {
@@ -146,6 +150,7 @@ impl Leader {
                         tokio::time::sleep(replicator_restart_timeout).await;
                     }
                 }
+                server_startup = false;
             }
         })));
     }

@@ -429,7 +429,7 @@ impl Connector for PostgresWalConnector {
     async fn next_action(
         &mut self,
         last_pos: &ReplicationOffset,
-        _until: Option<&ReplicationOffset>,
+        until: Option<&ReplicationOffset>,
     ) -> ReadySetResult<(ReplicationAction, ReplicationOffset)> {
         set_failpoint_return_err!(failpoints::POSTGRES_REPLICATION_NEXT_ACTION);
 
@@ -479,6 +479,9 @@ impl Connector for PostgresWalConnector {
             // Try not to accumulate too many actions between calls, but if we're collecting a
             // series of events that reuse the same LSN we have to make sure they all end up in the
             // same batch:
+            //
+            // If we have no actions but our offset exceeds the given 'until', report our
+            // position in the logs.
             if actions.len() >= MAX_QUEUED_INDEPENDENT_ACTIONS && lsn != cur_lsn.lsn {
                 self.peek = Some((event, lsn));
                 return Ok((
@@ -489,6 +492,8 @@ impl Connector for PostgresWalConnector {
                     },
                     cur_lsn.into(),
                 ));
+            } else if let Some(until) = until && actions.is_empty() && ReplicationOffset::from(cur_lsn) >= *until {
+                return Ok((ReplicationAction::LogPosition, cur_lsn.into()));
             }
 
             trace!(?event);
@@ -622,6 +627,8 @@ impl Connector for PostgresWalConnector {
                             },
                             cur_lsn.into(),
                         ));
+                    } else {
+                        return Ok((ReplicationAction::LogPosition, cur_lsn.into()));
                     }
                 }
                 WalEvent::Insert { tuple, .. } => actions.push(TableOperation::Insert(tuple)),

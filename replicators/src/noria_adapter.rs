@@ -13,7 +13,6 @@ use mysql::prelude::Queryable;
 use mysql::{OptsBuilder, PoolConstraints, PoolOpts, SslOpts};
 use nom_sql::Relation;
 use postgres_native_tls::MakeTlsConnector;
-use readyset_client::consensus::Authority;
 use readyset_client::consistency::Timestamp;
 #[cfg(feature = "failure_injection")]
 use readyset_client::failpoints;
@@ -107,22 +106,16 @@ pub struct NoriaAdapter {
 }
 
 impl NoriaAdapter {
-    pub async fn start_with_authority(
-        authority: Authority,
-        telemetry_sender: TelemetrySender,
-        config: UpstreamConfig,
-    ) -> ReadySetResult<!> {
-        let noria = readyset_client::ReadySetHandle::new(authority).await;
-        NoriaAdapter::start(noria, config, None, telemetry_sender).await
-    }
-
     pub async fn start(
         noria: ReadySetHandle,
         mut config: UpstreamConfig,
         mut notify: Option<Arc<Notify>>,
         telemetry_sender: TelemetrySender,
+        server_startup: bool,
     ) -> ReadySetResult<!> {
-        let mut resnapshot = false;
+        // Resnapshot when restarting the server to apply changes that may have been made to the
+        // replication-tables config parameter.
+        let mut resnapshot = server_startup;
         let url: DatabaseURL = config
             .upstream_db_url
             .take()
