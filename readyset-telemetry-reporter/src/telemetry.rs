@@ -1,5 +1,5 @@
 use derive_builder::Builder;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_with_macros::skip_serializing_none;
 
 /// Segment Track event types
@@ -58,30 +58,6 @@ pub enum TelemetryEvent {
     ProxiedQuery,
 }
 
-#[derive(Clone, Copy, Default, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DeploymentEnv {
-    #[default]
-    Unknown,
-
-    InstallerCompose,
-    Eks,
-    Helm,
-    QuickstartDocker,
-    QuickstartInstruqt,
-    TutorialDocker,
-}
-
-impl From<String> for DeploymentEnv {
-    fn from(s: String) -> Self {
-        // Quote the string so its valid JSON, then deserialize it as such
-        match serde_json::from_str::<DeploymentEnv>(&format!("\"{s}\"")) {
-            Ok(val) => val,
-            Err(_) => DeploymentEnv::Unknown,
-        }
-    }
-}
-
 /// ReadySet-specific telemetry. Provide only the fields you need.
 ///
 /// We need to keep publicly documented exactly what telemetry ReadySet gathers from its users.
@@ -130,7 +106,7 @@ pub struct Properties<'a> {
 
     // Properties auto-populated by the reporter
     pub commit_id: &'a str,
-    pub deployment_env: DeploymentEnv,
+    pub deployment_env: &'a str,
 }
 
 /// Top-level wrapper for ReadySet-specifc Segment Track message

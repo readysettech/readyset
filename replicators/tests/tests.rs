@@ -1570,7 +1570,7 @@ async fn snapshot_telemetry_inner(url: &String) -> ReadySetResult<()> {
     client.query(CREATE_SCHEMA).await?;
     client.query(POPULATE_SCHEMA).await?;
 
-    let (sender, mut reporter) = TelemetryInitializer::test_init().await;
+    let (sender, mut reporter) = TelemetryInitializer::test_init();
     let mut builder = Builder::for_tests();
     builder.set_telemetry_sender(sender);
     let mut ctx = TestHandle::start_noria_with_builder(url.to_string(), None, builder).await?;

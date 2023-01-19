@@ -24,7 +24,7 @@ async fn setup() -> (mysql_async::Opts, Handle) {
 }
 
 async fn setup_telemetry() -> (TelemetryReporter, mysql_async::Opts, Handle) {
-    let (sender, reporter) = TelemetryInitializer::test_init().await;
+    let (sender, reporter) = TelemetryInitializer::test_init();
 
     let backend = BackendBuilder::new()
         .require_authentication(false)
@@ -1798,7 +1798,7 @@ async fn test_proxied_queries_telemetry() {
             MigrationStyle::Explicit,
         )));
         let proxied_queries_reporter = Arc::new(ProxiedQueriesReporter::new(query_status_cache));
-        let (telemetry_sender, mut reporter) = TelemetryInitializer::test_init().await;
+        let (telemetry_sender, mut reporter) = TelemetryInitializer::test_init();
         reporter
             .register_periodic_reporter(proxied_queries_reporter)
             .await;

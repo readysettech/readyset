@@ -36,6 +36,9 @@ const APP_USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PK
 /// URL to report telemetry to
 const TELEMETRY_BASE_URL: &str = "https://api.segment.io/v1/";
 
+/// Length to which DEPLOYMENT_ENV will be truncated
+const DEPLOYMENT_ENV_LEN_MAX: usize = 20;
+
 /// Silently succeed if the client is None.
 macro_rules! client {
     ($self: expr) => {
@@ -96,7 +99,7 @@ pub struct TelemetryReporter {
     shutdown_ack_tx: Option<oneshot::Sender<()>>,
 
     /// Deployment environment, e.g. container orchestrator framework, if any
-    deployment_env: DeploymentEnv,
+    deployment_env: String,
 
     /// Zero or many periodic reporters that can collect and send metrics periodically
     periodic_reporters: Arc<Mutex<Vec<PeriodicReporter>>>,
@@ -131,7 +134,12 @@ impl TelemetryReporter {
             anonymous_id: Uuid::new_v4().to_string(),
             shutdown_rx,
             shutdown_ack_tx: Some(shutdown_ack_tx),
-            deployment_env: std::env::var("DEPLOYMENT_ENV").unwrap_or_default().into(),
+            deployment_env: std::env::var("DEPLOYMENT_ENV")
+                .unwrap_or_default()
+                .chars()
+                .filter(|c| c.is_ascii_alphabetic() || *c == '_')
+                .take(DEPLOYMENT_ENV_LEN_MAX)
+                .collect(),
             periodic_reporters: Arc::new(Mutex::new(vec![])),
             #[cfg(any(test, feature = "test-util"))]
             received_events: Arc::new(Mutex::new(HashMap::new())),
@@ -151,7 +159,7 @@ impl TelemetryReporter {
             properties: Properties {
                 telemetry,
                 commit_id: COMMIT_ID,
-                deployment_env: self.deployment_env,
+                deployment_env: &self.deployment_env,
             },
         })
     }
@@ -368,7 +376,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn validate_request() {
         std::env::set_var("RS_SEGMENT_WRITE_KEY", "write_key");
-        let (telemetry_sender, mut telemetry_reporter) = TelemetryInitializer::test_init().await;
+        let (telemetry_sender, mut telemetry_reporter) = TelemetryInitializer::test_init();
 
         let (event, telemetry): (TelemetryEvent, Telemetry) =
             (TelemetryEvent::InstallerRun, Default::default());
@@ -395,7 +403,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn test_periodic_reporter() {
         let test_periodic_reporter: PeriodicReporter = Arc::new(TestPeriodicReporter {});
-        let (_sender, mut reporter) = TelemetryInitializer::test_init().await;
+        let (_sender, mut reporter) = TelemetryInitializer::test_init();
         reporter
             .register_periodic_reporter(test_periodic_reporter)
             .await;
@@ -415,7 +423,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn test_shutdown_drain() {
         // Tests that the TelemetryReporter will drain any incoming requests
-        let (sender, mut reporter) = TelemetryInitializer::test_init().await;
+        let (sender, mut reporter) = TelemetryInitializer::test_init();
 
         // The biased select! will always process the shutdown first, even if we send an event ahead
         // of a shutdown.
@@ -433,6 +441,23 @@ mod tests {
                 .check_event(TelemetryEvent::InstallerRun)
                 .await
                 .len()
+        );
+    }
+
+    #[test]
+    fn validate_deployment_env() {
+        std::env::set_var("DEPLOYMENT_ENV", "!@#$test_deployment!@#$_env1234!@#$");
+        let mut s = "test_deployment_env".to_owned();
+        s.truncate(DEPLOYMENT_ENV_LEN_MAX);
+        let (_, reporter) = TelemetryInitializer::test_init();
+        assert!(
+            reporter.deployment_env == s
+                && reporter
+                    .deployment_env
+                    .chars()
+                    .filter(|c| !(c.is_ascii_alphabetic() || *c == '_'))
+                    .count()
+                    == 0
         );
     }
 }

@@ -52,7 +52,7 @@ impl TelemetryInitializer {
     }
 
     #[cfg(any(test, feature = "test-util"))]
-    pub async fn test_init() -> (TelemetrySender, TelemetryReporter) {
+    pub fn test_init() -> (TelemetrySender, TelemetryReporter) {
         readyset_tracing::init_test_logging();
         let (tx, rx) = channel(TELMETRY_CHANNEL_LEN); // Arbitrary number of metrics to allow in queue before dropping them
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
