@@ -101,6 +101,10 @@ pub struct TelemetryReporter {
     /// Deployment environment, e.g. container orchestrator framework, if any
     deployment_env: String,
 
+    /// Deployment ID, to help differentiate between deployments with the same user ID.
+    /// (user_id, deployment_id) is not guaranteed to be unique, as they are both user-provided.
+    deployment_id: String,
+
     /// Zero or many periodic reporters that can collect and send metrics periodically
     periodic_reporters: Arc<Mutex<Vec<PeriodicReporter>>>,
 
@@ -116,6 +120,7 @@ impl TelemetryReporter {
         api_key: Option<String>,
         shutdown_rx: oneshot::Receiver<()>,
         shutdown_ack_tx: oneshot::Sender<()>,
+        deployment_id: String,
     ) -> Self {
         // If the api_key is set, use that as the user_id.
         // If not, try to get a machine uid. If that works, anonymize it by hashing it with blake2b,
@@ -140,6 +145,7 @@ impl TelemetryReporter {
                 .filter(|c| c.is_ascii_alphanumeric() || ['_', '.'].contains(c))
                 .take(DEPLOYMENT_ENV_LEN_MAX)
                 .collect(),
+            deployment_id,
             periodic_reporters: Arc::new(Mutex::new(vec![])),
             #[cfg(any(test, feature = "test-util"))]
             received_events: Arc::new(Mutex::new(HashMap::new())),
@@ -160,6 +166,7 @@ impl TelemetryReporter {
                 telemetry,
                 commit_id: COMMIT_ID,
                 deployment_env: &self.deployment_env,
+                deployment_id: &self.deployment_id,
             },
         })
     }

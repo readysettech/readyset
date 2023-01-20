@@ -622,6 +622,7 @@ where
                 options.disable_telemetry,
                 std::env::var("RS_API_KEY").ok(),
                 vec![proxied_queries_reporter],
+                options.deployment.clone(),
             )
             .await
         });

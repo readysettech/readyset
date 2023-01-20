@@ -28,6 +28,7 @@ impl TelemetryInitializer {
         disable_telemetry: bool,
         api_key: Option<String>,
         periodic_reporters: Vec<PeriodicReporter>,
+        deployment_id: String,
     ) -> TelemetrySender {
         if disable_telemetry {
             return TelemetrySender::new_no_op();
@@ -39,7 +40,7 @@ impl TelemetryInitializer {
 
         tokio::spawn(async move {
             let mut telemetry_reporter =
-                TelemetryReporter::new(rx, api_key, shutdown_rx, shutdown_ack_tx);
+                TelemetryReporter::new(rx, api_key, shutdown_rx, shutdown_ack_tx, deployment_id);
             for reporter in periodic_reporters {
                 telemetry_reporter
                     .register_periodic_reporter(reporter)
@@ -59,8 +60,13 @@ impl TelemetryInitializer {
         let (shutdown_ack_tx, shutdown_ack_rx) = oneshot::channel();
         let sender = TelemetrySender::new(tx, shutdown_tx, shutdown_ack_rx);
 
-        let reporter =
-            TelemetryReporter::new(rx, Some("api-key".into()), shutdown_rx, shutdown_ack_tx);
+        let reporter = TelemetryReporter::new(
+            rx,
+            Some("api-key".into()),
+            shutdown_rx,
+            shutdown_ack_tx,
+            "deployment_id".into(),
+        );
 
         (sender, reporter)
     }
