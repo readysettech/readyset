@@ -279,7 +279,7 @@ impl DfState {
                     match query {
                         // CacheInner::ID should have been expanded to CacheInner::Statement
                         SqlQuery::CreateCache(CreateCacheStatement {
-                            inner: CacheInner::Statement(stmt),
+                            inner: Ok(CacheInner::Statement(stmt)),
                             always,
                             ..
                         }) => Some((name.clone(), ((*stmt).clone(), always))),

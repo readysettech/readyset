@@ -1063,8 +1063,9 @@ pub fn walk_create_cache_statement<'a, V: Visitor<'a>>(
     create_cache_statement: &'a CreateCacheStatement,
 ) -> Result<(), V::Error> {
     match &create_cache_statement.inner {
-        CacheInner::Statement(stmt) => visitor.visit_select_statement(stmt)?,
-        CacheInner::Id(_) => {}
+        Ok(CacheInner::Statement(stmt)) => visitor.visit_select_statement(stmt)?,
+        Ok(CacheInner::Id(_)) => {}
+        Err(_) => {}
     }
 
     Ok(())

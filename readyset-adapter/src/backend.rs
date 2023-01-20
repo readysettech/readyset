@@ -1694,23 +1694,32 @@ where
                 always,
             }) => {
                 let (stmt, search_path) = match inner {
-                    CacheInner::Statement(st) => (*st.clone(), None),
-                    CacheInner::Id(id) => match self.state.query_status_cache.query(id.as_str()) {
-                        Some(q) => match q {
-                            Query::Parsed(view_request) => (
-                                view_request.statement.clone(),
-                                Some(view_request.schema_search_path.clone()),
-                            ),
-                            Query::ParseFailed(q) => {
-                                return Some(Err(ReadySetError::UnparseableQuery {
-                                    query: (*q).clone(),
+                    Ok(CacheInner::Statement(st)) => (*st.clone(), None),
+                    Ok(CacheInner::Id(id)) => {
+                        match self.state.query_status_cache.query(id.as_str()) {
+                            Some(q) => match q {
+                                Query::Parsed(view_request) => (
+                                    view_request.statement.clone(),
+                                    Some(view_request.schema_search_path.clone()),
+                                ),
+                                Query::ParseFailed(q) => {
+                                    return Some(Err(ReadySetError::UnparseableQuery {
+                                        query: (*q).clone(),
+                                    }))
+                                }
+                            },
+                            None => {
+                                return Some(Err(ReadySetError::NoQueryForId {
+                                    id: id.to_string(),
                                 }))
                             }
-                        },
-                        None => {
-                            return Some(Err(ReadySetError::NoQueryForId { id: id.to_string() }))
                         }
-                    },
+                    }
+                    Err(query) => {
+                        return Some(Err(ReadySetError::UnparseableQuery {
+                            query: query.clone(),
+                        }))
+                    }
                 };
 
                 // Log a telemetry event

@@ -285,11 +285,12 @@ impl SqlIncorporator {
                 }
                 Change::CreateCache(ccqs) => {
                     let statement = match ccqs.inner {
-                        CacheInner::Statement(stmt) => *stmt,
-                        CacheInner::Id(id) => {
+                        Ok(CacheInner::Statement(stmt)) => *stmt,
+                        Ok(CacheInner::Id(id)) => {
                             error!("attempted to issue CREATE CACHE with an id: {}", id);
                             internal!("CREATE CACHE should've had its ID resolved by the adapter");
                         }
+                        Err(query) => return Err(ReadySetError::UnparseableQuery { query }),
                     };
 
                     self.add_query(ccqs.name, statement, ccqs.always, &schema_search_path, mig)?;

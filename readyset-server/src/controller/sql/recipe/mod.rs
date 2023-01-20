@@ -63,7 +63,7 @@ impl Recipe {
                 always,
             } => SqlQuery::CreateCache(CreateCacheStatement {
                 name: Some(name.clone()),
-                inner: CacheInner::Statement(Box::new(statement.clone())),
+                inner: Ok(CacheInner::Statement(Box::new(statement.clone()))),
                 always: *always,
             }),
         });

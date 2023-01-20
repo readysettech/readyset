@@ -343,7 +343,7 @@ impl Change {
     {
         Self::CreateCache(CreateCacheStatement {
             name: Some(name.into()),
-            inner: CacheInner::Statement(Box::new(statement)),
+            inner: Ok(CacheInner::Statement(Box::new(statement))),
             always,
         })
     }

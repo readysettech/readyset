@@ -270,7 +270,7 @@ impl WorkloadSpec {
 
                 let create_cache_query = nom_sql::CreateCacheStatement {
                     name: None,
-                    inner: nom_sql::CacheInner::Statement(Box::new(stmt)),
+                    inner: Ok(nom_sql::CacheInner::Statement(Box::new(stmt))),
                     always: false,
                 };
 

@@ -193,7 +193,12 @@ pub enum CacheInner {
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct CreateCacheStatement {
     pub name: Option<Relation>,
-    pub inner: CacheInner,
+    /// The result of parsing the inner statement or query ID for the `CREATE CACHE` statement.
+    ///
+    /// If parsing succeeded, then this will be an `Ok` result with the definition of the
+    /// statement. If it failed to parse, this will be an `Err` with the remainder [`String`]
+    /// that could not be parsed.
+    pub inner: Result<CacheInner, String>,
     pub always: bool,
 }
 
@@ -206,7 +211,11 @@ impl Display for CreateCacheStatement {
         if let Some(name) = &self.name {
             write!(f, "{} ", name)?;
         }
-        write!(f, "FROM {}", self.inner)
+        write!(f, "FROM ")?;
+        match &self.inner {
+            Ok(inner) => write!(f, "{inner}"),
+            Err(unparsed) => write!(f, "{unparsed}"),
+        }
     }
 }
 
@@ -754,7 +763,8 @@ pub fn create_cached_query(
         let (i, name) = opt(terminated(relation(dialect), whitespace1))(i)?;
         let (i, _) = tag_no_case("from")(i)?;
         let (i, _) = whitespace1(i)?;
-        let (i, inner) = cached_query_inner(dialect)(i)?;
+        let (i, inner) =
+            parse_fallible(cached_query_inner(dialect), until_statement_terminator)(i)?;
         Ok((
             i,
             CreateCacheStatement {
@@ -1472,7 +1482,7 @@ mod tests {
             );
             assert_eq!(res.name, Some("foo".into()));
             let statement = match res.inner {
-                CacheInner::Statement(s) => s,
+                Ok(CacheInner::Statement(s)) => s,
                 _ => panic!(),
             };
             assert_eq!(
@@ -1489,7 +1499,7 @@ mod tests {
             );
             assert_eq!(res.name, None);
             let statement = match res.inner {
-                CacheInner::Statement(s) => s,
+                Ok(CacheInner::Statement(s)) => s,
                 _ => panic!(),
             };
             assert_eq!(
@@ -1506,7 +1516,7 @@ mod tests {
             );
             assert_eq!(res.name.unwrap(), Relation::from("foo"));
             let id = match res.inner {
-                CacheInner::Id(s) => s,
+                Ok(CacheInner::Id(s)) => s,
                 _ => panic!(),
             };
             assert_eq!(id.as_str(), "q_0123456789ABCDEF")
@@ -1520,7 +1530,7 @@ mod tests {
             );
             assert!(res.name.is_none());
             let id = match res.inner {
-                CacheInner::Id(s) => s,
+                Ok(CacheInner::Id(s)) => s,
                 _ => panic!(),
             };
             assert_eq!(id.as_str(), "q_0123456789ABCDEF")
@@ -1534,7 +1544,7 @@ mod tests {
             );
             assert!(res.name.is_none());
             let statement = match res.inner {
-                CacheInner::Statement(s) => s,
+                Ok(CacheInner::Statement(s)) => s,
                 _ => panic!(),
             };
             assert_eq!(
