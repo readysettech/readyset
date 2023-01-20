@@ -786,7 +786,7 @@ mod tests {
 
     #[test]
     fn json_type() {
-        for dialect in [Dialect::MySQL, Dialect::PostgreSQL] {
+        for &dialect in Dialect::ALL {
             let res = type_identifier(dialect)(LocatedSpan::new(b"json"));
             assert!(res.is_ok());
             assert_eq!(res.unwrap().1, SqlType::Json);

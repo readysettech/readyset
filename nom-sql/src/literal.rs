@@ -617,7 +617,7 @@ mod tests {
                 )
             }
             _ => {
-                for dialect in [Dialect::MySQL, Dialect::PostgreSQL] {
+                for &dialect in Dialect::ALL {
                     let s = lit.to_string();
                     assert_eq!(
                         literal(dialect)(LocatedSpan::new(s.as_bytes())).unwrap().1,
@@ -630,7 +630,7 @@ mod tests {
 
     #[test]
     fn boolean_literals() {
-        for dialect in [Dialect::MySQL, Dialect::PostgreSQL] {
+        for &dialect in Dialect::ALL {
             assert_eq!(
                 test_parse!(literal(dialect), b"true"),
                 Literal::Boolean(true)

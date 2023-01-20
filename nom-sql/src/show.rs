@@ -349,7 +349,7 @@ mod tests {
 
     #[test]
     fn show_readyset_version() {
-        for dialect in [Dialect::MySQL, Dialect::PostgreSQL] {
+        for &dialect in Dialect::ALL {
             let qstring1 = "SHOW READYSET VERSION";
             let res1 = show(dialect)(LocatedSpan::new(qstring1.as_bytes()))
                 .unwrap()
