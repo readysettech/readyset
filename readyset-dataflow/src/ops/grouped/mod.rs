@@ -101,12 +101,10 @@ pub struct GroupedOperator<T: GroupedOperation> {
 
     // some cache state
     us: Option<IndexPair>,
-    cols: usize,
 
     // precomputed datastructures
     group_by: Vec<usize>,
     out_key: Vec<usize>,
-    colfix: Vec<usize>,
 }
 
 impl<T: GroupedOperation> GroupedOperator<T> {
@@ -116,10 +114,8 @@ impl<T: GroupedOperation> GroupedOperator<T> {
             inner: op,
 
             us: None,
-            cols: 0,
             group_by: Vec::new(),
             out_key: Vec::new(),
-            colfix: Vec::new(),
         }
     }
 
@@ -168,7 +164,6 @@ where
         self.inner.setup(srcn).unwrap();
 
         // group by all columns
-        self.cols = srcn.columns().len();
         self.group_by.extend(self.inner.group_by().iter().cloned());
         // cache the range of our output keys
         self.out_key = (0..self.group_by.len()).collect();
