@@ -950,6 +950,27 @@ async fn absurdly_simple_select() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn select_one() {
+    let (opts, _handle) = setup().await;
+    let conn = connect(opts).await;
+    conn.simple_query("CREATE TABLE t (x int)").await.unwrap();
+    conn.simple_query("INSERT INTO t (x) VALUES (1)")
+        .await
+        .unwrap();
+
+    sleep().await;
+
+    let res = conn
+        .query("SELECT 1 FROM t", &[])
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| r.get(0))
+        .collect::<Vec<i64>>();
+    assert_eq!(res, vec![1]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn order_by_basic() {
     let (opts, _handle) = setup().await;
     let conn = connect(opts).await;
