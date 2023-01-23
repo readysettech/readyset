@@ -78,6 +78,9 @@ impl Builder {
         builder.set_allow_topk(opts.enable_experimental_topk_support);
         builder.set_allow_paginate(opts.enable_experimental_paginate_support);
         builder.set_allow_mixed_comparisons(opts.enable_experimental_mixed_comparisons);
+        builder.set_worker_timeout(std::time::Duration::from_secs(
+            opts.worker_request_timeout_seconds,
+        ));
 
         builder.set_replication_strategy(opts.domain_replication_options.into());
 
@@ -186,6 +189,11 @@ impl Builder {
     /// Set the value of [`controller::sql::Config::allow_mixed_comparisons`]
     pub fn set_allow_mixed_comparisons(&mut self, allow_mixed_comparisons: bool) {
         self.config.mir_config.allow_mixed_comparisons = allow_mixed_comparisons;
+    }
+
+    /// Set the value of [`controller::sql::Config::worker_request_timeout`]
+    pub fn set_worker_timeout(&mut self, worker_request_timeout: Duration) {
+        self.config.worker_request_timeout = worker_request_timeout;
     }
 
     /// Set the value of [`DomainConfig::aggressively_update_state_sizes`][0]. See the documentation

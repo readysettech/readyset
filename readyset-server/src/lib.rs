@@ -631,6 +631,10 @@ pub struct WorkerOptions {
     #[allow(missing_docs)]
     #[clap(flatten)]
     pub replicator_config: UpstreamConfig,
+
+    /// Timeout in seconds for all requests made from the controller to workers
+    #[clap(long, env = "WORKER_REQUEST_TIMEOUT_SECONDS", default_value = "1800")]
+    pub worker_request_timeout_seconds: u64,
 }
 
 use std::pin::Pin;
