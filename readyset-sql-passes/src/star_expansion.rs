@@ -127,122 +127,113 @@ impl StarExpansion for SqlQuery {
 
 #[cfg(test)]
 mod tests {
-    use maplit::hashmap;
     use nom_sql::{parse_query, Dialect};
 
-    use super::StarExpansion;
+    use super::*;
 
-    macro_rules! expands_stars {
-	    ($source: expr, $expected: expr, schema: {$($schema:tt)*}) => {{
-            let q = parse_query(Dialect::MySQL, $source).unwrap();
-            let expected = parse_query(Dialect::MySQL, $expected).unwrap();
-            let schema = hashmap!($($schema)*);
-            let res = q.expand_stars(&schema, &Default::default()).unwrap();
-            assert_eq!(res, expected, "{} != {}", res, expected);
-        }};
+    #[track_caller]
+    fn expands_stars(source: &str, expected: &str, schema: HashMap<Relation, Vec<SqlIdentifier>>) {
+        let q = parse_query(Dialect::MySQL, source).unwrap();
+        let expected = parse_query(Dialect::MySQL, expected).unwrap();
+        let res = q.expand_stars(&schema, &Default::default()).unwrap();
+        assert_eq!(res, expected, "{} != {}", res, expected);
     }
 
     #[test]
     fn single_table() {
-        expands_stars!(
+        expands_stars(
             "SELECT * FROM PaperTag",
             "SELECT PaperTag.paper_id, PaperTag.tag_id FROM PaperTag",
-            schema: {
-                "PaperTag".into() => vec!["paper_id".into(), "tag_id".into()]
-            }
+            HashMap::from([("PaperTag".into(), vec!["paper_id".into(), "tag_id".into()])]),
         );
     }
 
     #[test]
     fn multiple_tables() {
-        expands_stars!(
+        expands_stars(
             "SELECT * FROM PaperTag, Users",
             "SELECT PaperTag.paper_id, PaperTag.tag_id, Users.uid, Users.name FROM PaperTag, Users",
-            schema: {
-                "PaperTag".into() => vec!["paper_id".into(), "tag_id".into()],
-                "Users".into() => vec!["uid".into(), "name".into()],
-            }
+            HashMap::from([
+                ("PaperTag".into(), vec!["paper_id".into(), "tag_id".into()]),
+                ("Users".into(), vec!["uid".into(), "name".into()]),
+            ]),
         );
     }
 
     #[test]
     fn table_stars() {
-        expands_stars!(
+        expands_stars(
             "SELECT Users.*, PaperTag.* FROM PaperTag, Users",
             "SELECT Users.uid, Users.name, PaperTag.paper_id, PaperTag.tag_id FROM PaperTag, Users",
-            schema: {
-                "PaperTag".into() => vec!["paper_id".into(), "tag_id".into()],
-                "Users".into() => vec!["uid".into(), "name".into()],
-            }
+            HashMap::from([
+                ("PaperTag".into(), vec!["paper_id".into(), "tag_id".into()]),
+                ("Users".into(), vec!["uid".into(), "name".into()]),
+            ]),
         );
     }
 
     #[test]
     fn in_cte() {
-        expands_stars!(
+        expands_stars(
             "WITH users AS (SELECT Users.* FROM Users) SELECT uid FROM users",
             "WITH users AS (SELECT Users.uid, Users.name FROM Users) SELECT uid FROM users",
-            schema: {
-                "Users".into() => vec!["uid".into(), "name".into()]
-            }
+            HashMap::from([("Users".into(), vec!["uid".into(), "name".into()])]),
         );
     }
 
     #[test]
     fn referencing_cte() {
-        expands_stars!(
+        expands_stars(
             "WITH users AS (SELECT Users.* FROM Users) SELECT * FROM users",
             "WITH users AS (SELECT Users.uid, Users.name FROM Users) SELECT users.uid, users.name FROM users",
-            schema: {
-                "Users".into() => vec!["uid".into(), "name".into()]
-            }
+            HashMap::from([("Users".into(), vec!["uid".into(), "name".into()])])
         );
     }
 
     #[test]
     fn referencing_cte_shadowing_table() {
-        expands_stars!(
+        expands_stars(
             "WITH t2 AS (SELECT * FROM t1) SELECT * FROM t2",
             "WITH t2 AS (SELECT t1.a, t1.b FROM t1) SELECT t2.a, t2.b FROM t2",
-            schema: {
-                "t1".into() => vec!["a".into(), "b".into()],
-                "t2".into() => vec!["c".into(), "d".into()],
-            }
+            HashMap::from([
+                ("t1".into(), vec!["a".into(), "b".into()]),
+                ("t2".into(), vec!["c".into(), "d".into()]),
+            ]),
         )
     }
 
     #[test]
     fn in_subquery() {
-        expands_stars!(
+        expands_stars(
             "SELECT uid FROM PaperTag JOIN (SELECT Users.* FROM Users) users On paper_id = uid",
             "SELECT uid FROM PaperTag JOIN (SELECT Users.uid, Users.name FROM Users) users On paper_id = uid",
-            schema: {
-                "PaperTag".into() => vec!["paper_id".into(), "tag_id".into()],
-                "Users".into() => vec!["uid".into(), "name".into()]
-            }
+            HashMap::from([
+                ("PaperTag".into(), vec!["paper_id".into(), "tag_id".into()]),
+                ("Users".into(), vec!["uid".into(), "name".into()]),
+            ])
         );
     }
 
     #[test]
     fn referencing_subquery() {
-        expands_stars!(
+        expands_stars(
             "SELECT users.* FROM PaperTag JOIN (SELECT Users.* FROM Users) users On paper_id = uid",
             "SELECT users.uid, users.name FROM PaperTag JOIN (SELECT Users.uid, Users.name FROM Users) users On paper_id = uid",
-            schema: {
-                "Users".into() => vec!["uid".into(), "name".into()]
-            }
+            HashMap::from([
+                ( "Users".into(), vec!["uid".into(), "name".into()] ),
+                    ])
         );
     }
 
     #[test]
     fn simple_join() {
-        expands_stars!(
+        expands_stars(
             "SELECT * FROM t1 JOIN t2 on t1.a = t2.b",
             "SELECT t1.a, t2.b FROM t1 JOIN t2 on t1.a = t2.b",
-            schema: {
-                "t1".into() => vec!["a".into()],
-                "t2".into() => vec!["b".into()],
-            }
+            HashMap::from([
+                ("t1".into(), vec!["a".into()]),
+                ("t2".into(), vec!["b".into()]),
+            ]),
         );
     }
 }

@@ -238,7 +238,6 @@ mod test {
         use std::ops::Bound;
 
         use common::Record;
-        use maplit::hashset;
 
         use super::*;
 
@@ -292,7 +291,7 @@ mod test {
                 tag: Tag::new(1),
                 data,
                 context: ReplayPieceContext::Partial {
-                    for_keys: hashset! { key },
+                    for_keys: HashSet::from([key]),
                     requesting_shard: 0,
                     requesting_replica: 0,
                     unishard: false,

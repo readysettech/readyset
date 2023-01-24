@@ -2499,12 +2499,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "maplit"
-version = "1.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e2e65a1a2e43cfcb47a895c4c8b10d1f4a61097f9f254f183aee60cad9c651d"
-
-[[package]]
 name = "matchers"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2611,7 +2605,6 @@ dependencies = [
  "hyper",
  "itertools",
  "lazy_static",
- "maplit",
  "metrics",
  "nom 7.1.1",
  "nom-sql",
@@ -3017,7 +3010,6 @@ dependencies = [
  "hex",
  "itertools",
  "lazy_static",
- "maplit",
  "nom 7.1.1",
  "nom_locate",
  "pratt",
@@ -4136,7 +4128,6 @@ dependencies = [
  "failpoint-macros",
  "futures-util",
  "health-reporter",
- "maplit",
  "metrics",
  "metrics-exporter-prometheus",
  "mysql-srv",
@@ -4187,7 +4178,6 @@ dependencies = [
  "hyper",
  "itertools",
  "lazy_static",
- "maplit",
  "metrics",
  "metrics-exporter-prometheus",
  "mysql_common",
@@ -4457,7 +4447,6 @@ dependencies = [
  "indexmap",
  "itertools",
  "lazy_static",
- "maplit",
  "merging-interval-tree",
  "metrics",
  "nom-sql",
@@ -4533,7 +4522,6 @@ dependencies = [
  "indicatif",
  "itertools",
  "lazy_static",
- "maplit",
  "md5",
  "mysql-srv",
  "mysql-time",
@@ -4599,7 +4587,6 @@ dependencies = [
  "futures-util",
  "itertools",
  "lazy_static",
- "maplit",
  "mysql",
  "mysql-srv",
  "mysql_async",
@@ -4723,7 +4710,6 @@ dependencies = [
  "include_dir",
  "itertools",
  "lazy_static",
- "maplit",
  "metrics",
  "metrics-exporter-prometheus",
  "metrics-util",
@@ -4790,7 +4776,6 @@ version = "0.0.1"
 dependencies = [
  "dataflow-expression",
  "itertools",
- "maplit",
  "nom-sql",
  "readyset-data",
  "readyset-errors",

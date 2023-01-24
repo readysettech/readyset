@@ -7,7 +7,6 @@ edition = "2021"
 
 [dependencies]
 itertools = "0.10"
-maplit = "1.0.2"
 tracing = { version = "0.1" }
 serde = "1.0.8"
 

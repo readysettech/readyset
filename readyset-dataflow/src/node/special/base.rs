@@ -5,7 +5,6 @@ use std::convert::TryFrom;
 
 use dataflow_state::{PointKey, SnapshotMode};
 use itertools::Itertools;
-use maplit::hashmap;
 use nom_sql::Relation;
 use readyset_client::replication::ReplicationOffset;
 use readyset_client::{Modification, Operation, TableOperation};
@@ -431,9 +430,10 @@ impl Base {
 
     pub(in crate::node) fn suggest_indexes(&self, n: NodeIndex) -> HashMap<NodeIndex, LookupIndex> {
         if let Some(pk) = &self.primary_key {
-            hashmap! {
-                n => LookupIndex::Strict(Index::hash_map(pk.as_ref().to_vec()))
-            }
+            HashMap::from([(
+                n,
+                LookupIndex::Strict(Index::hash_map(pk.as_ref().to_vec())),
+            )])
         } else {
             HashMap::new()
         }

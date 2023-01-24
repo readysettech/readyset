@@ -1161,7 +1161,6 @@ mod tests {
     }
 
     mod replay_capturing {
-        use maplit::hashset;
         use vec1::vec1;
 
         use super::*;
@@ -1171,7 +1170,7 @@ mod tests {
             let (mut g, left, right) = setup(DuplicateMode::UnionAll);
             let tag = Tag::new(0);
             let key: KeyComparison = vec1![1.into()].into();
-            let keys = hashset![key.clone()];
+            let keys = HashSet::from([key.clone()]);
             let replay_ctx = || ReplayContext::Partial {
                 key_cols: &[0],
                 keys: &keys,
@@ -1192,7 +1191,7 @@ mod tests {
                 RawProcessingResult::ReplayPiece { rows, captured, .. } => {
                     // We should capture the replay and emit no records
                     assert_eq!(rows, Records::default());
-                    assert_eq!(captured, hashset![key.clone()]);
+                    assert_eq!(captured, HashSet::from([key.clone()]));
                 }
                 _ => unreachable!("expected replay piece, got: {:?}", res),
             }
@@ -1226,7 +1225,7 @@ mod tests {
                     );
 
                     assert!(captured.is_empty());
-                    assert_eq!(keys, hashset![key]);
+                    assert_eq!(keys, HashSet::from([key]));
                 }
                 _ => unreachable!("Expected replay piece, got: {:?}", res),
             }
@@ -1237,7 +1236,7 @@ mod tests {
             let (mut g, left, right) = setup(DuplicateMode::UnionAll);
             let tag = Tag::new(0);
             let key: KeyComparison = vec1![1.into()].into();
-            let keys = hashset![key.clone()];
+            let keys = HashSet::from([key.clone()]);
             let replay_ctx = || ReplayContext::Partial {
                 key_cols: &[0],
                 keys: &keys,
@@ -1261,7 +1260,7 @@ mod tests {
                 RawProcessingResult::ReplayPiece { rows, captured, .. } => {
                     // We should capture the replay and emit no records
                     assert_eq!(rows, Records::default());
-                    assert_eq!(captured, hashset![key.clone()]);
+                    assert_eq!(captured, HashSet::from([key.clone()]));
                 }
                 _ => unreachable!("expected replay piece, got: {:?}", res),
             }
@@ -1312,7 +1311,7 @@ mod tests {
                     );
 
                     assert!(captured.is_empty());
-                    assert_eq!(keys, hashset![key]);
+                    assert_eq!(keys, HashSet::from([key]));
                 }
                 _ => unreachable!("Expected replay piece, got: {:?}", res),
             }

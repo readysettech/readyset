@@ -16,7 +16,6 @@ nom = "7.1"
 itertools = "0.10"
 derive_more = "0.99.13"
 pratt = "0.3.0"
-maplit = "1.0.2"
 proptest = "1.0.0"
 test-strategy = "0.2.0"
 readyset-util = { path = "../readyset-util" }

@@ -25,7 +25,6 @@ thiserror = "1.0.26"
 readyset-util = { path = "../readyset-util" }
 metrics = "0.19"
 futures = "0.3"
-maplit = "1.0.2"
 readyset-tracing = { path = "../readyset-tracing" }
 readyset-version = { path = "../readyset-version" }
 serde = "1.0.130"
@@ -47,5 +46,3 @@ prometheus-http-query = "0.3.3"
 
 [lib]
 path = "src/lib.rs"
-
-

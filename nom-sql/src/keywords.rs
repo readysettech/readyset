@@ -1,7 +1,6 @@
 use std::collections::HashSet;
 
 use lazy_static::lazy_static;
-use maplit::hashset;
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::{map, peek};
@@ -245,7 +244,7 @@ lazy_static! {
     /// A list of POSGTRES keywords that are not reserved and can be used as
     /// identifiers. For example `CREATE TABLE VARCHAR (id int)` is fine
     /// https://www.postgresql.org/docs/14/sql-keywords-appendix.html
-    pub static ref POSTGRES_NOT_RESERVED: HashSet<&'static [u8]> = hashset![
+    pub static ref POSTGRES_NOT_RESERVED: HashSet<&'static [u8]> = HashSet::from([
         &b"ABORT"[..],
         b"ABSOLUTE",
         b"ACCESS",
@@ -603,5 +602,5 @@ lazy_static! {
         b"WITHIN",
         b"WITHOUT",
         b"YEAR",
-    ];
+    ]);
 }

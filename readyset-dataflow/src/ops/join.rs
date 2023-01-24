@@ -3,7 +3,6 @@ use std::convert::{TryFrom, TryInto};
 
 use dataflow_state::PointKey;
 use itertools::Itertools;
-use maplit::hashmap;
 use readyset_client::KeyComparison;
 use readyset_errors::{internal_err, ReadySetResult};
 use readyset_util::intervals::into_bound_endpoint;
@@ -518,10 +517,16 @@ impl Ingredient for Join {
         // we need to find those rows when looking up values to perform the join as part of forward
         // processing of normal writes - so we use a weak index here to avoid dropping writes in
         // that case.
-        hashmap! {
-            self.left.as_global() => LookupIndex::Weak(Index::hash_map(self.on_left())),
-            self.right.as_global() => LookupIndex::Weak(Index::hash_map(self.on_right())),
-        }
+        HashMap::from([
+            (
+                self.left.as_global(),
+                LookupIndex::Weak(Index::hash_map(self.on_left())),
+            ),
+            (
+                self.right.as_global(),
+                LookupIndex::Weak(Index::hash_map(self.on_right())),
+            ),
+        ])
     }
 
     fn description(&self, detailed: bool) -> String {
@@ -948,10 +953,10 @@ mod tests {
     fn it_suggests_indices() {
         let me = 2.into();
         let (g, l, r) = setup();
-        let expected = hashmap! {
-            l.as_global() => LookupIndex::Weak(Index::hash_map(vec![0])), // join column for left
-            r.as_global() => LookupIndex::Weak(Index::hash_map(vec![0])), // join column for right
-        };
+        let expected = HashMap::from([
+            (l.as_global(), LookupIndex::Weak(Index::hash_map(vec![0]))), // join column for left
+            (r.as_global(), LookupIndex::Weak(Index::hash_map(vec![0]))), // join column for right
+        ]);
         assert_eq!(g.node().suggest_indexes(me), expected);
     }
 

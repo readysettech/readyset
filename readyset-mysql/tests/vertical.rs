@@ -31,7 +31,6 @@ use std::ops::Range;
 use std::{cmp, env, iter, mem};
 
 use itertools::Itertools;
-use maplit::hashmap;
 use mysql_async::prelude::Queryable;
 use mysql_common::value::Value;
 use paste::paste;
@@ -680,14 +679,14 @@ macro_rules! vertical_tests {
         key_columns: [$($kc: expr),* $(,)?]
         $(,)?
     )),* $(,)?) => {
-        hashmap! {
-            $($table_name => Table {
+        HashMap::from([
+            $(($table_name, Table {
                 name: $table_name,
                 create_statement: $create_table,
                 primary_key: $pk_index,
                 columns: vec![$(stringify!($col_name),)*],
-            },)*
-        }
+            }),)*
+        ])
     };
 
     // Build up the hashmap of row_strategies
@@ -698,9 +697,9 @@ macro_rules! vertical_tests {
         key_columns: [$($kc: expr),* $(,)?]
         $(,)?
     )),* $(,)?) => {
-        hashmap! {
-            $($table_name => vertical_tests!(@row_strategy $($schema)*),)*
-        }
+        HashMap::from([
+            $(($table_name, vertical_tests!(@row_strategy $($schema)*)),)*
+        ])
     };
 
     (@row_strategy $($col_name: ident : $col_type: tt $(($($type_args: tt)*))?),* $(,)?) => {{

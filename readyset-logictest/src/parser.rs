@@ -402,7 +402,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use maplit::hashmap;
+    use std::collections::HashMap;
+
     use nom::combinator::complete;
     use pretty_assertions::assert_eq;
 
@@ -717,7 +718,7 @@ $1 = 1
                 conditionals: vec![],
                 query: "SELECT * FROM t1 WHERE id = $1".to_owned(),
                 results: QueryResults::Results(vec![131.into(), 1.into()]),
-                params: QueryParams::NumberedParams(hashmap! {1 => 1.into()}),
+                params: QueryParams::NumberedParams(HashMap::from([(1, 1.into())])),
             }
         )
     }

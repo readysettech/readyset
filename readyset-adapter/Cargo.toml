@@ -29,7 +29,6 @@ readyset-util = { path = "../readyset-util" }
 metrics = "0.19"
 metrics-exporter-prometheus = "0.10"
 futures = "0.3"
-maplit = "1.0.2"
 serde = "1.0.130"
 serde_json = "1.0.67"
 rust_decimal = { version = "1.26" }

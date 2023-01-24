@@ -253,7 +253,6 @@ impl ImpliedTableExpansion for SqlQuery {
 mod tests {
     use std::collections::HashMap;
 
-    use maplit::hashmap;
     use nom_sql::{parse_query, Column, Dialect, Expr, FieldDefinitionExpr, SqlQuery, TableExpr};
 
     use super::*;
@@ -329,12 +328,7 @@ mod tests {
         )
         .unwrap();
 
-        let schema = hashmap! {
-            "t1".into() => vec![
-                "id".into(),
-                "value".into(),
-            ]
-        };
+        let schema = HashMap::from([("t1".into(), vec!["id".into(), "value".into()])]);
 
         let res = orig.expand_implied_tables(&schema).unwrap();
         assert_eq!(res, expected);
@@ -348,12 +342,7 @@ mod tests {
             "SELECT users.name FROM users WHERE users.id = ?",
         )
         .unwrap();
-        let schema = hashmap! {
-            "users".into() => vec![
-                "id".into(),
-                "name".into(),
-            ]
-        };
+        let schema = HashMap::from([("users".into(), vec!["id".into(), "name".into()])]);
 
         let res = orig.expand_implied_tables(&schema).unwrap();
         assert_eq!(res, expected);
@@ -373,12 +362,7 @@ mod tests {
              FROM votes GROUP BY votes.userid",
         )
         .unwrap();
-        let schema = hashmap! {
-            "votes".into() => vec![
-                "aid".into(),
-                "userid".into(),
-            ]
-        };
+        let schema = HashMap::from([("votes".into(), vec!["aid".into(), "userid".into()])]);
 
         let res = orig.expand_implied_tables(&schema).unwrap();
         assert_eq!(res, expected);
@@ -399,16 +383,10 @@ Dialect::MySQL,
              SELECT stories.title FROM stories JOIN votes ON stories.id = votes.story_id",
         )
         .unwrap();
-        let schema = hashmap! {
-            "votes".into() => vec![
-                "story_id".into(),
-                "id".into(),
-            ],
-            "stories".into() => vec![
-                "id".into(),
-                "title".into(),
-            ]
-        };
+        let schema = HashMap::from([
+            ("votes".into(), vec!["story_id".into(), "id".into()]),
+            ("stories".into(), vec!["id".into(), "title".into()]),
+        ]);
 
         let res = orig.expand_implied_tables(&schema).unwrap();
         assert_eq!(res, expected);
@@ -428,16 +406,10 @@ Dialect::MySQL,
              SELECT votes.count, stories.title FROM stories JOIN votes ON stories.id = votes.story_id",
         )
         .unwrap();
-        let schema = hashmap! {
-            "votes".into() => vec![
-                "story_id".into(),
-                "id".into(),
-            ],
-            "stories".into() => vec![
-                "id".into(),
-                "title".into(),
-            ]
-        };
+        let schema = HashMap::from([
+            ("votes".into(), vec!["story_id".into(), "id".into()]),
+            ("stories".into(), vec!["id".into(), "title".into()]),
+        ]);
 
         let res = orig.expand_implied_tables(&schema).unwrap();
         assert_eq!(res, expected, "{} != {}", res, expected);

@@ -7,7 +7,6 @@ use std::num::NonZeroUsize;
 
 use dataflow_state::PointKey;
 use itertools::Itertools;
-use maplit::hashmap;
 use nom_sql::OrderType;
 use readyset_client::internal;
 use readyset_errors::{internal, internal_err, invariant, ReadySetResult};
@@ -433,11 +432,16 @@ impl Ingredient for TopK {
     }
 
     fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, LookupIndex> {
-        hashmap! {
-            this => LookupIndex::Strict(internal::Index::hash_map(self.group_by.clone())),
-            self.src.as_global() =>
-            LookupIndex::Strict(internal::Index::hash_map(self.group_by.clone())),
-        }
+        HashMap::from([
+            (
+                this,
+                LookupIndex::Strict(internal::Index::hash_map(self.group_by.clone())),
+            ),
+            (
+                self.src.as_global(),
+                LookupIndex::Strict(internal::Index::hash_map(self.group_by.clone())),
+            ),
+        ])
     }
 
     fn column_source(&self, cols: &[usize]) -> ColumnSource {

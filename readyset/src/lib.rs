@@ -21,7 +21,6 @@ use failpoint_macros::set_failpoint;
 use futures_util::future::FutureExt;
 use futures_util::stream::StreamExt;
 use health_reporter::{HealthReporter as AdapterHealthReporter, State as AdapterState};
-use maplit::hashmap;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use nom_sql::Relation;
 use readyset_adapter::backend::noria_connector::{NoriaConnector, ReadBehavior};
@@ -429,19 +428,25 @@ where
         let rt = tokio::runtime::Runtime::new()?;
         rt.block_on(async { options.tracing.init("adapter", options.deployment.as_ref()) })?;
         info!(?options, "Starting ReadySet adapter");
-        let users: &'static HashMap<String, String> = Box::leak(Box::new(
-            if !options.allow_unauthenticated_connections {
-                hashmap! {
+        let users: &'static HashMap<String, String> =
+            Box::leak(Box::new(if !options.allow_unauthenticated_connections {
+                HashMap::from([(
                     options.username.ok_or_else(|| {
-                        anyhow!("Must specify --username/-u unless --allow-unauthenticated-connections is passed")
-                    })? => options.password.map(|x| x.0).ok_or_else(|| {
-                        anyhow!("Must specify --password/-p unless --allow-unauthenticated-connections is passed")
-                    })?
-                }
+                        anyhow!(
+                            "Must specify --username/-u unless \
+                             --allow-unauthenticated-connections is passed"
+                        )
+                    })?,
+                    options.password.map(|x| x.0).ok_or_else(|| {
+                        anyhow!(
+                            "Must specify --password/-p unless \
+                             --allow-unauthenticated-connections is passed"
+                        )
+                    })?,
+                )])
             } else {
                 HashMap::new()
-            },
-        ));
+            }));
         info!(version = %VERSION_STR_ONELINE);
 
         if options.allow_unsupported_set {

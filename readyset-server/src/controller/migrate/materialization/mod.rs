@@ -10,7 +10,6 @@ use std::convert::TryFrom;
 
 use dataflow::prelude::*;
 use dataflow::{DomainRequest, LookupIndex};
-use maplit::hashmap;
 use petgraph::graph::NodeIndex;
 use readyset_errors::{internal, internal_err, invariant, ReadySetError, ReadySetResult};
 use readyset_tracing::{debug, error, trace};
@@ -267,9 +266,7 @@ impl Materializations {
                     // for a reader that will get lookups, we'd like to have an index above us
                     // somewhere on our key so that we can make the reader partial
                     self.new_readers.insert(ni);
-                    hashmap! {
-                        ni => IndexObligation::Replay(index.clone())
-                    }
+                    HashMap::from([(ni, IndexObligation::Replay(index.clone()))])
                 } else {
                     // only streaming, no indexing needed
                     continue;

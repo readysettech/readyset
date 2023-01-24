@@ -22,7 +22,6 @@ nom = "7.1"
 nom_locate = "4.0.0"
 tokio = { workspace = true, features = ["full"] }
 itertools = "0.10.0"
-maplit = "1.0.2"
 chrono = "0.4.19"
 pretty_assertions = "0.7.2"
 walkdir = "2.3.2"

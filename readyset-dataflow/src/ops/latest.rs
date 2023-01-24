@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 
 use dataflow_state::PointKey;
-use maplit::hashmap;
 use readyset_errors::{internal_err, ReadySetResult};
 use serde::{Deserialize, Serialize};
 use vec1::vec1;
@@ -135,9 +134,7 @@ impl Ingredient for Latest {
 
     fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, LookupIndex> {
         // index all key columns
-        hashmap! {
-            this => LookupIndex::Strict(Index::hash_map(vec![self.key]))
-        }
+        HashMap::from([(this, LookupIndex::Strict(Index::hash_map(vec![self.key])))])
     }
 
     fn column_source(&self, cols: &[usize]) -> ColumnSource {

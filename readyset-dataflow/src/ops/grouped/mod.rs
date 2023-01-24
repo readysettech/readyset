@@ -4,7 +4,6 @@ use std::convert::TryInto;
 use std::fmt;
 
 use dataflow_state::PointKey;
-use maplit::hashmap;
 use readyset_data::DfType;
 use readyset_errors::{internal_err, ReadySetResult};
 use serde::{Deserialize, Serialize};
@@ -404,12 +403,18 @@ where
     }
 
     fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, LookupIndex> {
-        hashmap! {
+        HashMap::from([
             // index the parent for state repopulation purposes
-            self.src.as_global() => LookupIndex::Strict(Index::hash_map(self.group_by.clone())),
+            (
+                self.src.as_global(),
+                LookupIndex::Strict(Index::hash_map(self.group_by.clone())),
+            ),
             // index by our primary key
-            this => LookupIndex::Strict(Index::hash_map(self.out_key.clone()))
-        }
+            (
+                this,
+                LookupIndex::Strict(Index::hash_map(self.out_key.clone())),
+            ),
+        ])
     }
 
     fn column_source(&self, cols: &[usize]) -> ColumnSource {
