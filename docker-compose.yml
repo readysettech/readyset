@@ -1,21 +1,19 @@
 version: "3.8"
 services:
-  consul-server:
-    image: consul
-    restart: always
-    volumes:
-      - ./docker/consul/server.json:/consul/config/server.json:ro
-    command: 'agent -bootstrap-expect=1'
   mysql:
     image: mysql
     environment:
-      - MYSQL_ROOT_PASSWORD=noria
-      - MYSQL_DATABASE=noria
+      - MYSQL_ROOT_PASSWORD=readyset
+      - MYSQL_DATABASE=testbdb
+    ports:
+      - '3306:3306'
   postgres:
     image: postgres:14
     environment:
-      - POSTGRES_PASSWORD=noria
-      - POSTGRES_DB=noria
+      - POSTGRES_PASSWORD=readyset
+      - POSTGRES_DB=testdb
+    ports:
+      - '5432:5432'
     command:
       - "postgres"
       - "-c"

@@ -54,7 +54,7 @@ Create a Docker container and start the database inside it.
 
 For Postgres:
 
-```
+```bash
 docker run -d \
 --name=postgres \
 --publish=5432:5432 \
@@ -66,7 +66,7 @@ postgres:14 \
 
 For MySQL:
 
-```
+```bash
 docker run -d \
 --name=mysql \
 --publish=3306:3306 \
@@ -81,11 +81,11 @@ Download a sample data file and load it into the database via the SQL shell.
 
 For Postgres:
 
-```
+```bash
 curl -O https://raw.githubusercontent.com/readysettech/docs/main/docs/assets/quickstart-data-postgres.sql
 ```
 
-```
+```bash
 PGPASSWORD=readyset psql \
 --host=127.0.0.1 \
 --port=5432 \
@@ -93,7 +93,7 @@ PGPASSWORD=readyset psql \
 --dbname=testdb
 ```
 
-``` sh
+```
 \i quickstart-data-postgres.sql
 ```
 
@@ -103,11 +103,11 @@ PGPASSWORD=readyset psql \
 
 For MySQL:
 
-```
+```bash
 curl -O https://raw.githubusercontent.com/readysettech/docs/main/docs/assets/quickstart-data-mysql.sql
 ```
 
-```
+```bash
 mysql \
 --host=127.0.0.1 \
 --port=3306 \
@@ -130,7 +130,7 @@ Create a Docker container and start ReadySet inside it, connecting ReadySet to t
 
 For Postgres:
 
-```
+```bash
 docker run -d \
 --name=readyset \
 --publish=5433:5433 \
@@ -152,7 +152,7 @@ public.ecr.aws/readyset/readyset:beta-2022-12-15 \
 
 For MySQL:
 
-```
+```bash
 docker run -d \
 --name=readyset \
 --publish=3307:3307 \
@@ -190,7 +190,7 @@ public.ecr.aws/readyset/readyset:beta-2022-12-15 \
 
     When you are done testing, stop and remove the Docker resources:
 
-    ```
+    ```bash
     docker rm -f readyset postgres mysql \
     && docker volume rm readyset
     ```
@@ -215,6 +215,7 @@ A: ReadySet receives updates about data changes from your backing database via b
 A: You can if you want to, but it’s not required. You can manually route a subset of your traffic to ReadySet (as you would with a traditional database read replica), or you can send all of it to ReadySet. It's important to note that not all of the queries sent to ReadySet need to be cached– you have fine-grained control over what is cached vs. what is proxied.
 
 ## Documentation
+
 For more information, check out our full docs site [here](http://docs.readyset.io).
 
 ## Join the Community
@@ -225,96 +226,132 @@ Everyone is welcome!
 
 ## Development
 
-### Prerequisites
+This section is for developers who want to build ReadySet from source as they work on the ReadySet codebase.
 
-#### Install Dependencies
+### Install prerequisites
 
-Prior to running ReadySet, you may need to install the following dependencies:
-clang
-libclang-dev
-libssl-dev
-liblz4-dev
-build-essential
+1. Install ReadySet dependencies.
 
-**macOS:**
-```
-brew install lz4
-brew install openssl@1.1
-```
+   **macOS with [homebrew](https://brew.sh/):**
 
-**Ubuntu:**
-```
-sudo apt update && sudo apt install -y build-essential libssl-dev pkg-config llvm clang liblz4-dev cmake
-```
-#### Install Rust
-ReadySet is written entirely in Rust. If you don’t already have Rust installed, you can install it via rustup (select the version of ‘nightly’ specified in the `rust-toolchain` file):
+   ```bash
+   brew install lz4 openssl@1.1 rocksdb
+   ```
 
-```curl https://sh.rustup.rs -sSf | sh```
-#### Runtime Dependencies: Upstream Database and Consul
-##### Local Development
-To streamline local development, all runtime dependencies (Consul, MySQL, Postgres) can be run with:
+   Add the following to your [cargo config](https://doc.rust-lang.org/cargo/reference/config.html)
+   to make it discover `lz4`:
 
-```
-cp docker-compose.override.yml.example docker-compose.override.yml
-docker-compose up -d
-```
+   ```toml
+   [env]
+   LIBRARY_PATH = "/opt/homebrew/lib"
+   ROCKSDB_LIB_DIR = "/opt/homebrew/lib"
+   ```
 
-##### Full Deployment
-ReadySet runs alongside a backing MySQL or Postgres database and uses Consul for leader election. You’ll need to pass in your database’s connection string when running the ReadySet server and adapter, and have a Consul instance running.
+   **Ubuntu:**
 
-*Note:* Consul persists data per deployment. Using the same deployment name will carry over any previously installed queries into a new deployment.
+   ```bash
+   sudo apt update && sudo apt install -y build-essential libssl-dev pkg-config llvm clang liblz4-dev librocksdb-dev
+   sudo apt-get -y install cmake
+   ```
 
+   **Arch:**
 
-### Run ReadySet
-#### ReadySet Server
+   ```bash
+   sudo pacman -S base-devel clang lz4 rocksdb-static
+   ```
 
-First, compile and run ReadySet server.
+   **CentOS/Amazon Linux:**
 
-```
-cargo run --bin readyset-server --release -- --upstream-db-url <upstream-url>  --deployment <deployment name>
-```
+   ```bash
+   sudo yum -y update
+   sudo yum -y groupinstall "Development Tools"
+   sudo yum -y install clang lz4-devel openssl-devel
+   ```
 
-If using the databases supplied by the docker-compose environment in this repository, replace <upstream-url> with the URL of the database corresponding to your database engine:
+   **Nix:**
+   ```bash
+   nix-shell
+   ```
 
-* MySQL: `mysql://root:readyset@127.1/readyset`
-* PostgreSQL: `postgresql://root:readyset@127.1/readyset`
+1. Install Rust via [rustup.rs](https://rustup.rs/).
 
-If running with an existing external database, replace <upstream-url> with the connection string for that database.
+    ReadySet is written entirely in Rust.
 
-#### ReadySet Adapter
+1. Install Docker via [Get Docker](https://docs.docker.com/get-docker/) and Docker Compose via [Install Docker Compose](https://docs.docker.com/compose/install/).
 
-Then, run the adapter binary. The adapter will communicate with servers that have the same deployment name.
+    ReadySet runs alongside a backing Postgres or MySQL database and, when run in distributed fashion, uses Consul for leader election, failure detection, and internal cluster state management. You'll use Docker Compose to create and manage these resources for local development.
 
-**MySQL**
-```
-cargo run --bin readyset --release -- --database-type mysql --upstream-db-url mysql://root:readyset@127.1/readyset  --allow-unauthenticated-connections
-  --address 0.0.0.0:3307 --deployment <deployment name>  --prometheus-metrics --query-log --query-log-ad-hoc
- ```
+### Build and run ReadySet
 
-**Postgres**
-```
-cargo run --bin readyset --release -- --database-type postgresql --upstream-db-url postgresql://postgres:readyset@127.1/readyset  --allow-unauthenticated-connections
-  --address 0.0.0.0:5433 --deployment <deployment name> --prometheus-metrics --query-log --query-log-ad-hoc
-```
+1. Clone the repo using `git` and navigate into it:
 
-The adapter listens for connections at the address specified in the `address` flag.
+    ```bash
+    git clone https://github.com/readysettech/readyset.git
+    cd readyset
+    ```
 
-The `query-log` and `query-log-ad-hoc` flags ensure that queries are sent to the Prometheus client running in the adapter.
+1. Start a backing database:
 
-The `prometheus-metrics` flag exposes an HTTP endpoint in the adapter to allow querying of metrics. This can be reached with an HTTP GET request to <adapter-address>:6034/metrics, `curl -X GET 127.0.0.1:6034/metrics`).
+    ```bash
+    docker-compose up -d
+    ```
+
+    This starts both Postgres and MySQL in containers, although you will run ReadySet against only one at a time. If you don't want to run both databases, edit `docker-compose.yml` and comment out the `mysql` or `postgres` fields.
+
+1. Compile and run ReadySet, replacing `<deployment name>` with a unique identifier for the deployment.
+
+    **Run against Postgres:**
+
+    ```bash
+    cargo run --bin readyset --release -- --standalone --database-type=postgresql --upstream-db-url=postgresql://postgres:readyset@127.0.0.1:5432/testdb --username=postgres --password=readyset --address=0.0.0.0:5433 --deployment=<deployment name> --prometheus-metrics --query-log --query-log-ad-hoc
+    ```
+
+    **Run against MySQL:**
+
+    ```bash
+    cargo run --bin readyset --release -- --standalone --database-type=mysql --upstream-db-url=mysql://root:readyset@127.0.0.1:3306/testdb --username=root --password=readyset --address=0.0.0.0:3307 --deployment=<deployment name> --prometheus-metrics --query-log --query-log-ad-hoc
+    ```
+
+    This runs the ReadySet Server and Adapter as a single process, a simple, standard way to run ReadySet that is also the easiest approach when developing. For production deployments, however, it is possible to run the Server and Adapter as separate processes. See the [scale out deployment pattern](https://docs.readyset.io/guides/production-notes/#scale-out) in the docs.
+
+    For details about ReadySet options, see the CLI docs (coming soon).
+
+1. With ReadySet up and running, you can now connect the Postgres or MySQL shell:
+
+    **Postgres:**
+
+    ```bash
+    PGPASSWORD=readyset psql
+    --host=127.0.0.1 \
+    --port=5433 \
+    --username=postgres \
+    --dbname=testdb
+    ```
+
+    **MySQL:**
+
+    ```bash
+    mysql \
+    --host=127.0.0.1 \
+    --port=3307 \
+    --user=root \
+    --password=readyset \
+    --database=testdb
+    ```
 
 ### Testing
 
 To run tests for the project, run the following command:
 
-```
+```bash
 cargo test --skip integration_serial
 ```
-##### Testing Notes
 
-Certain tests cannot be run in parallel with others, and these tests are typically in files postfixed with _serial. Running the entire set of tests for a package, i.e. `cargo test -p readyset-server` may fail if serial tests are included.
+**Note:**
 
-Running tests may require increasing file descriptor limits. You can do so by running `ulimit -Sn 65535`.
+- Certain tests cannot be run in parallel with others, and these tests are typically in files postfixed with _serial. Running the entire set of tests for a package (e.g., `cargo test -p readyset-server`) may fail if serial tests are included.
+
+- Running tests may require increasing file descriptor limits. You can do so by running `ulimit -Sn 65535`.
 
 ### Performance
 
