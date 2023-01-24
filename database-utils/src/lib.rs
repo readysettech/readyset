@@ -5,7 +5,7 @@ use std::fmt::{self, Display};
 use std::marker::{Send, Sync};
 use std::num::ParseIntError;
 use std::path::PathBuf;
-use std::str::FromStr;
+use std::str::{self, FromStr};
 use std::time::Duration;
 
 use clap::Parser;
@@ -330,6 +330,20 @@ impl DatabaseURL {
         match self {
             DatabaseURL::MySQL(opts) => opts.user(),
             DatabaseURL::PostgreSQL(config) => config.get_user(),
+        }
+    }
+
+    /// Returns the password for this database URL
+    ///
+    /// # Panics
+    ///
+    /// * Panics if a postgresql URL is configured with a non-utf8 password
+    pub fn password(&self) -> Option<&str> {
+        match self {
+            DatabaseURL::MySQL(opts) => opts.pass(),
+            DatabaseURL::PostgreSQL(opts) => opts.get_password().map(|p| -> &str {
+                str::from_utf8(p).expect("PostgreSQL URL configured with non-utf8 password")
+            }),
         }
     }
 

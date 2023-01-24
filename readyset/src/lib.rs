@@ -16,7 +16,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::{anyhow, bail, ensure};
 use async_trait::async_trait;
 use clap::{ArgGroup, Parser};
-use database_utils::DatabaseType;
+use database_utils::{DatabaseType, DatabaseURL};
 use failpoint_macros::set_failpoint;
 use futures_util::future::FutureExt;
 use futures_util::stream::StreamExt;
@@ -235,13 +235,13 @@ pub struct Options {
     )]
     metrics_address: SocketAddr,
 
-    /// Allow database connections authenticated as this user. Ignored if
-    /// --allow-unauthenticated-connections is passed
+    /// Allow database connections authenticated as this user. Defaults to the username in
+    /// --upstream-db-url if not set. Ignored if --allow-unauthenticated-connections is passed
     #[clap(long, env = "ALLOWED_USERNAME", short = 'u')]
     username: Option<String>,
 
-    /// Password to authenticate database connections with. Ignored if
-    /// --allow-unauthenticated-connections is passed
+    /// Password to authenticate database connections with. Defaults to the password in
+    /// --upstream-db-url if not set. Ignored if --allow-unauthenticated-connections is passed
     #[clap(long, env = "ALLOWED_PASSWORD", short = 'p')]
     password: Option<RedactedString>,
 
@@ -428,21 +428,62 @@ where
         let rt = tokio::runtime::Runtime::new()?;
         rt.block_on(async { options.tracing.init("adapter", options.deployment.as_ref()) })?;
         info!(?options, "Starting ReadySet adapter");
+
+        let upstream_config = options.server_worker_options.replicator_config.clone();
+        let mut parsed_upstream_url = None;
+
         let users: &'static HashMap<String, String> =
             Box::leak(Box::new(if !options.allow_unauthenticated_connections {
                 HashMap::from([(
-                    options.username.ok_or_else(|| {
-                        anyhow!(
-                            "Must specify --username/-u unless \
-                             --allow-unauthenticated-connections is passed"
-                        )
-                    })?,
-                    options.password.map(|x| x.0).ok_or_else(|| {
-                        anyhow!(
-                            "Must specify --password/-p unless \
-                             --allow-unauthenticated-connections is passed"
-                        )
-                    })?,
+                    options
+                        .username
+                        .or_else(|| {
+                            // Default to the username in the upstream_db_url, if it's set and
+                            // parseable
+                            parsed_upstream_url
+                                .get_or_insert_with(|| {
+                                    upstream_config
+                                        .upstream_db_url
+                                        .as_ref()?
+                                        .parse::<DatabaseURL>()
+                                        .ok()
+                                })
+                                .as_ref()?
+                                .user()
+                                .map(ToOwned::to_owned)
+                        })
+                        .ok_or_else(|| {
+                            anyhow!(
+                                "Must specify --username/-u if one of \
+                                 --allow-unauthenticated-connections or --upstream-db-url is not \
+                                 passed"
+                            )
+                        })?,
+                    options
+                        .password
+                        .map(|x| x.0)
+                        .or_else(|| {
+                            // Default to the password in the upstream_db_url, if it's set and
+                            // parseable
+                            parsed_upstream_url
+                                .get_or_insert_with(|| {
+                                    upstream_config
+                                        .upstream_db_url
+                                        .as_ref()?
+                                        .parse::<DatabaseURL>()
+                                        .ok()
+                                })
+                                .as_ref()?
+                                .password()
+                                .map(ToOwned::to_owned)
+                        })
+                        .ok_or_else(|| {
+                            anyhow!(
+                                "Must specify --password/-p if one of \
+                                 --allow-unauthenticated-connections or --upstream-db-url is not \
+                                 passed"
+                            )
+                        })?,
                 )])
             } else {
                 HashMap::new()
@@ -840,8 +881,6 @@ where
         // Create a set of readers on this adapter. This will allow servicing queries directly
         // from readers on the adapter rather than across a network hop.
         let readers: Readers = Arc::new(Mutex::new(Default::default()));
-
-        let upstream_config = options.server_worker_options.replicator_config.clone();
 
         // Run a readyset-server instance within this adapter.
         let internal_server_handle = if options.standalone || options.embedded_readers {
