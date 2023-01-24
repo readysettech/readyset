@@ -575,7 +575,7 @@ pub struct WorkerOptions {
     pub memory_check_freq: u64,
 
     /// The strategy to use when memory is freed from reader nodes
-    #[clap(long = "eviction-policy", arg_enum, default_value_t = dataflow::EvictionKind::Random)]
+    #[clap(long = "eviction-policy", arg_enum, default_value_t = dataflow::EvictionKind::LRU)]
     pub eviction_kind: dataflow::EvictionKind,
 
     /// Disable partial
