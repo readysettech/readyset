@@ -130,8 +130,6 @@ impl TestBuilder {
         // Run with VERBOSE=1 for log output.
         if env::var("VERBOSE").is_ok() {
             readyset_tracing::init_test_logging();
-        } else {
-            readyset_tracing::init_test_presampler();
         }
 
         let query_status_cache = self

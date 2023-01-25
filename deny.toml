@@ -50,7 +50,8 @@ notice = "warn"
 ignore = [
     # Mitigated by disallowed-methods in clippy.toml
     "RUSTSEC-2020-0071",
-    "RUSTSEC-2020-0159"
+    # Mitigated by only using grpc as clients
+    "RUSTSEC-2022-0055"
 ]
 # Threshold for security vulnerabilities, any vulnerability with a CVSS score
 # lower than the range specified will be ignored. Note that ignored advisories
@@ -180,6 +181,9 @@ deny = [
 # Certain crates/versions that will be skipped when doing duplicate detection.
 skip = [
     { name = "heck", version = "0.3.3" },
+    { name = "dashmap", version = "4.0.2" },
+    { name = "fixedbitset", version = "0.2.0" },
+    { name = "petgraph", version = "0.5.1" },
 ]
 # Similarly to `skip` allows you to skip certain crates during duplicate
 # detection. Unlike skip, it also includes the entire tree of transitive
@@ -193,7 +197,6 @@ skip-tree = [
     { name = "prometheus-http-query", version = "0.3.0" },
     { name = "mysql_common", version = "0.28.0" },
     { name = "consulrs", version = "0.1.0" },
-    { name = "ordered-float", version = "1.1.1" },
     { name = "redox_users", version = "0.3.5" },
     # https://github.com/crossbeam-rs/crossbeam/pull/926
     { name = "memoffset", version = "0.6.4" },

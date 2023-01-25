@@ -14,87 +14,16 @@
 //! compared to a call to [Span::none()](tracing::Span::none), there are savings to be had by
 //! [presampling](presampled) - sampling spans at creation time rather than when a subscriber would
 //! send them to a collector.
-//!
-//! In addition to choosing whether or not to create a detailed span at all, only entering spans
-//! and instrumenting futures when we _have_ an enabled span speeds things up.
-//!
-//! The following example highlights both:
-//! ```
-//! use clap::Parser;
-//! use readyset_tracing::presampled::instrument_if_enabled;
-//! use readyset_tracing::{child_span, root_span};
-//! use tracing::{Instrument, Span};
-//!
-//! #[derive(Parser, Debug)]
-//! struct Options {
-//!     #[clap(flatten)]
-//!     tracing: readyset_tracing::Options,
-//! }
-//!
-//! #[tokio::main]
-//! async fn main() {
-//!     let options = Options::parse();
-//!     options
-//!         .tracing
-//!         .init("propagation-example", "example-deployment-id")
-//!         .unwrap();
-//!
-//!     for id in 0..100 {
-//!         process_id(id).await;
-//!     }
-//! }
-//!
-//! async fn process_id(id: u32) {
-//!     // root_span!() performs sampling; if the request is not chosen by the sampler, the
-//!     // returned span will be disabled
-//!     let span = root_span!(INFO, "process_id", id);
-//!     instrument_if_enabled(do_a_thing(id), span).await
-//! }
-//!
-//! async fn do_a_thing(id: u32) {
-//!     // child_span!() checks whether or not the current execution context is instrumented with
-//!     // an enabled span; if so, it returns an enabled span, otherwise is returns the existing
-//!     // disabled span.
-//!     let span = child_span!(INFO, "do_a_thing", id);
-//!     if span.is_disabled() {
-//!         smaller_slice_of_work();
-//!     } else {
-//!         // For synchronous calls, Span::in_scope() can be used
-//!         span.in_scope(|| smaller_slice_of_work());
-//!     }
-//! }
-//!
-//! fn smaller_slice_of_work() {
-//!     let span = child_span!(INFO, "smaller_slice_of_work");
-//!     // _Inside_ synchronous functions, we can simplify to Span::enter()
-//!     let _guard = span.enter();
-//!     // do something!
-//! }
-//! ```
-//!
-//! # Potential footgun
-//! If you find that you're getting panics from `presampled.rs` in your tests, such as this:
-//! ```text
-//! thread 'tokio-runtime-worker' panicked at 'called `Option::unwrap()` on a `None` value', readyset-tracing/src/presampled.rs:47:64
-//! ```
-//! The most likely cause is that you're exercising code that makes use of presampling, but the
-//! presampler has not been initialized.  [init_test_logging()](init_test_logging) does take care
-//! of this, but if that isn't being called - for example, because you don't want your test to
-//! perform any logging - you can call [init_test_presampler()](init_test_presampler) instead.
-//!
-//! We do have another option - default to either a 100% or 0% presampler and avoid these panics.
-//! However, having an easily-discoverable panic seems to be a less painful alternative to having
-//! presampling be silently misconfigured.
 
 #![feature(core_intrinsics)]
-use std::str::FromStr;
-
 use clap::Parser;
-use opentelemetry::runtime;
-use opentelemetry::sdk::trace::Tracer;
+use opentelemetry::sdk::trace::{Sampler, Tracer};
+use opentelemetry::sdk::Resource;
+use opentelemetry::KeyValue;
+use opentelemetry_otlp::WithExportConfig;
 use tracing::Subscriber;
 use tracing_opentelemetry::OpenTelemetryLayer;
-use tracing_subscriber::filter::{Filtered, ParseError, Targets};
+use tracing_subscriber::filter::ParseError;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::{fmt, EnvFilter, Layer};
 
@@ -148,11 +77,11 @@ pub struct Options {
     #[clap(long, env = "LOG_LEVEL", default_value = "info")]
     log_level: String,
 
-    /// Host and port to send traces/spans to
+    /// Host and port to send OTLP traces/spans data, via GRPC OLTP
     #[clap(long, env = "TRACING_HOST")]
     tracing_host: Option<String>,
 
-    /// Portion of traces that will be sent to the tracing endpoint; [0.0~100.0]
+    /// Portion of traces that will be sent to the tracing endpoint; [0.0~1.0]
     #[clap(long, env = "TRACING_SAMPLE_PERCENT", default_value_t = Percent(0.01))]
     tracing_sample_percent: Percent,
 }
@@ -169,15 +98,41 @@ impl Default for Options {
 }
 
 impl Options {
-    fn tracing_layer<S>(&self, service_name: &str) -> Result<OpenTelemetryLayer<S, Tracer>, Error>
+    fn tracing_layer<S>(
+        &self,
+        service_name: &str,
+        deployment: &str,
+    ) -> Result<OpenTelemetryLayer<S, Tracer>, Error>
     where
         S: Subscriber + for<'span> LookupSpan<'span>,
     {
-        let tracer = opentelemetry_jaeger::new_pipeline()
-            .with_agent_endpoint(self.tracing_host.as_ref().unwrap())
-            .with_service_name(service_name)
-            .with_auto_split_batch(true)
-            .install_batch(runtime::Tokio)?;
+        let resources = vec![
+            KeyValue::new(
+                opentelemetry_semantic_conventions::resource::SERVICE_NAME,
+                service_name.to_owned(),
+            ),
+            KeyValue::new(
+                opentelemetry_semantic_conventions::resource::SERVICE_NAMESPACE,
+                deployment.to_owned(),
+            ),
+        ];
+
+        let tracer = opentelemetry_otlp::new_pipeline()
+            .tracing()
+            .with_exporter(
+                opentelemetry_otlp::new_exporter()
+                    .tonic()
+                    .with_endpoint(self.tracing_host.as_ref().unwrap()),
+            )
+            .with_trace_config(
+                opentelemetry::sdk::trace::config()
+                    .with_sampler(Sampler::TraceIdRatioBased(self.tracing_sample_percent.0))
+                    .with_max_events_per_span(64)
+                    .with_max_attributes_per_span(16)
+                    .with_resource(Resource::new(resources)),
+            )
+            .install_batch(opentelemetry::runtime::Tokio)
+            .unwrap();
 
         Ok(tracing_opentelemetry::layer().with_tracer(tracer))
     }
@@ -185,34 +140,30 @@ impl Options {
     // Anything we do with a templated type alias or a custom trait is just going to make this more
     // difficult to read/follow
     #[allow(clippy::type_complexity)]
-    fn logging_layer<S>(
-        &self,
-    ) -> Result<Filtered<Box<dyn Layer<S> + Send + Sync>, Targets, S>, ParseError>
+    fn logging_layer<S>(&self) -> Result<Box<dyn Layer<S> + Send + Sync>, ParseError>
     where
         S: Subscriber + Send + Sync + for<'span> LookupSpan<'span>,
     {
-        let filter = Targets::from_str(&self.log_level)?;
         let layer: Box<dyn Layer<S> + Send + Sync> = match self.log_format {
             LogFormat::Compact => Box::new(fmt::layer().compact()),
             LogFormat::Full => Box::new(fmt::layer()),
             LogFormat::Pretty => Box::new(fmt::layer().pretty()),
             LogFormat::Json => Box::new(fmt::layer().json().with_current_span(true)),
         };
-        Ok(layer.with_filter(filter))
+        Ok(layer)
     }
 
-    fn init_logging_and_tracing(&self, service_name: &str) -> Result<(), Error> {
+    fn init_logging_and_tracing(&self, service_name: &str, deployment: &str) -> Result<(), Error> {
         use tracing_subscriber::prelude::*;
-        presampled::install_sample_generator(self.tracing_sample_percent.clone());
         tracing_subscriber::registry()
-            .with(self.tracing_layer(service_name)?)
+            .with(tracing_subscriber::EnvFilter::new(&self.log_level))
+            .with(self.tracing_layer(service_name, deployment)?)
             .with(self.logging_layer()?)
             .init();
         Ok(())
     }
 
     fn init_logging_only(&self) -> Result<(), ParseError> {
-        presampled::install_sample_generator(Percent(0.0));
         let filter = EnvFilter::try_new(&self.log_level)?;
         let s = tracing_subscriber::fmt().with_env_filter(filter);
 
@@ -264,7 +215,7 @@ impl Options {
     pub fn init(&self, service_name: &str, deployment: &str) -> Result<(), Error> {
         set_log_field("deployment".into(), deployment.into());
         if self.tracing_host.is_some() {
-            self.init_logging_and_tracing(service_name)
+            self.init_logging_and_tracing(service_name, deployment)
         } else {
             self.init_logging_only().map_err(|e| e.into())
         }
@@ -281,16 +232,10 @@ impl Drop for Options {
 
 /// Configure the global tracing subscriber for logging inside of tests
 pub fn init_test_logging() {
-    init_test_presampler();
     // This errors out if it's already been called within the scope of a process, which we don't
     // care about, so we just discard the result
     let _ = tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_env("LOG_LEVEL"))
         .with_test_writer()
         .try_init();
-}
-
-/// Configure the presampler only
-pub fn init_test_presampler() {
-    presampled::install_sample_generator(Percent(0.0));
 }

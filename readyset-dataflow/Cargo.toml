@@ -17,7 +17,7 @@ lazy_static = "1.0.0"
 itertools = "0.10"
 metrics = "0.19"
 nom-sql = { path = "../nom-sql" }
-indexmap = "1.1.0"
+indexmap = "1.9.2"
 rand = "0.7"
 regex = "1"
 serde_derive = "1.0.8"
