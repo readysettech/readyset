@@ -94,7 +94,7 @@ use readyset_data::{DfType, DfValue};
 use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
 use readyset_errors::{internal, internal_err, unsupported, ReadySetResult};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
-use readyset_tracing::{error, instrument_root, trace, warn};
+use readyset_tracing::{error, trace, warn};
 use readyset_util::redacted::Sensitive;
 use readyset_version::READYSET_VERSION;
 use timestamp_service::client::{TimestampClient, WriteId, WriteKey};
@@ -760,7 +760,7 @@ where
 
     /// Executes query on the upstream database, for when it cannot be parsed or executed by noria.
     /// Returns the query result, or an error if fallback is not configured
-    #[instrument_root(level = "info")]
+    #[instrument(skip_all)]
     pub async fn query_fallback<'a>(
         upstream: Option<&'a mut DB>,
         query: &'a str,
@@ -1093,7 +1093,7 @@ where
     /// Prepares `query` to be executed later using the reader/writer belonging
     /// to the calling `Backend` struct and adds the prepared query
     /// to the calling struct's map of prepared queries with a unique id.
-    #[instrument_root(level = "info")]
+    #[instrument(skip_all)]
     pub async fn prepare(&mut self, query: &str) -> Result<&PrepareResult<DB>, DB::Error> {
         self.last_query = None;
         let mut query_event = QueryExecutionEvent::new(EventType::Prepare);
@@ -1153,6 +1153,7 @@ where
     }
 
     /// Executes a prepared statement on ReadySet
+    #[instrument(skip_all)]
     async fn execute_noria<'a>(
         noria: &'a mut NoriaConnector,
         prep: &noria_connector::PrepareResult,
@@ -1195,6 +1196,7 @@ where
     }
 
     /// Execute a prepared statement on ReadySet
+    #[instrument(skip_all)]
     async fn execute_upstream<'a>(
         upstream: &'a mut Option<DB>,
         prep: &UpstreamPrepare<DB>,
@@ -1349,7 +1351,7 @@ where
     /// A [`QueryExecutionEvent`], is used to track metrics and behavior scoped to the
     /// execute operation.
     // TODO(andrew, justin): add RYW support for executing prepared queries
-    #[instrument_root(level = "info", fields(id))]
+    #[instrument(skip_all)]
     #[inline]
     pub async fn execute(
         &mut self,
@@ -1520,6 +1522,7 @@ where
     }
 
     /// Generates response to the `EXPLAIN LAST STATEMENT` query
+    #[instrument(skip_all)]
     fn explain_last_statement(&self) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         let (destination, error) = self
             .last_query
@@ -1542,6 +1545,7 @@ where
     }
 
     /// Forwards a `CREATE CACHE` request to noria
+    #[instrument(skip(self))]
     async fn create_cached_query(
         &mut self,
         name: Option<&Relation>,
@@ -1577,6 +1581,7 @@ where
     }
 
     /// Forwards a `DROP CACHE` request to noria
+    #[instrument(skip(self))]
     async fn drop_cached_query(
         &mut self,
         name: &Relation,
@@ -1596,6 +1601,7 @@ where
     }
 
     /// Forwards a `DROP ALL CACHES` request to noria
+    #[instrument(skip(self))]
     async fn drop_all_caches(&mut self) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         self.noria.drop_all_caches().await?;
         self.state.query_status_cache.clear();
@@ -1615,6 +1621,7 @@ where
     }
 
     /// Responds to a `SHOW PROXIED QUERIES` query
+    #[instrument(skip(self))]
     async fn show_proxied_queries(
         &mut self,
         query_id: &Option<String>,
@@ -1991,7 +1998,7 @@ where
         Ok(())
     }
 
-    #[instrument(level = "trace", name = "query", skip_all)]
+    #[instrument(level = "trace", skip_all)]
     async fn query_adhoc_non_select<'a>(
         noria: &'a mut NoriaConnector,
         mut upstream: Option<&'a mut DB>,
@@ -2140,7 +2147,7 @@ where
     }
 
     /// Executes `query` using the reader/writer belonging to the calling `Backend` struct.
-    #[instrument_root(level = "info")]
+    #[instrument(skip_all)]
     #[inline]
     pub async fn query<'a>(&'a mut self, query: &'a str) -> Result<QueryResult<'a, DB>, DB::Error> {
         let mut event = QueryExecutionEvent::new(EventType::Query);

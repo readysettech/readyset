@@ -116,28 +116,3 @@ macro_rules! child_span {
         $crate::child_span!(target: module_path!(), $lvl, $name,)
     };
 }
-
-/// Unpacks an [Instrumented](crate::propagation::Instrumented) message.  If it has an active span,
-/// the span and unpacked message are returned; if not, an empty span and the unpacked message are
-/// returned.
-#[macro_export]
-macro_rules! remote_span {
-    ($instrumented:ident, target: $target:expr, $lvl:ident, $name:expr, $($fields:tt)*) => {
-        if $instrumented.is_enabled() {
-            let span = ::tracing::span!(target: $target, parent: None, ::tracing::Level::$lvl, $name, $($fields)*);
-            let inner = span.in_scope(|| $instrumented.unpack());
-            (span, inner)
-        } else {
-            (::tracing::Span::none(), $instrumented.unpack())
-        }
-    };
-    ($instrumented:ident, target: $target:expr, $lvl:ident, $name:expr) => {
-        $crate::remote_span!($instrumented, target: $target, $lvl, $name,)
-    };
-    ($instrumented:ident, $lvl:ident, $name:expr, $($fields:tt)*) => {
-        $crate::remote_span!($instrumented, target: module_path!(), $lvl, $name, $($fields)*)
-    };
-    ($instrumented:ident, $lvl:ident, $name:expr) => {
-        $crate::remote_span!($instrumented, target: module_path!(), $lvl, $name,)
-    };
-}

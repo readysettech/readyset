@@ -5,44 +5,8 @@
 //! crates, such as the [`#[instrument]`](tracing-attributes::instrument) macro, and simply allow
 //! this crate to deal with configuration.
 //!
-//! Other than configuration, the functionality provided by this crate is primarily useful for two
-//! specific cases:
-//! * Traces that need to cross a network or thread boundary, such as the adapter making a query to
-//! ReadySet
-//! * Performance-critical codepaths, such as the hotpath for queries in ReadySet and the adapter
-//!
-//! # Context propagation
-//! For traces that cross a network/thread boundary, [propagation] provides a set of primitives to
-//! easily serialize/deserialize tracing context, attach it to a request, and unpack it on the
-//! other side.
-//!
-//! In the following example, imagine that `send_request()` lives in Process A, while
-//! `remote_function()` and `process_request()` live in Process B, and under the hood, the
-//! `remote_function` call is an RPC made using `tower`, `reqwest`, or your other favorite crate.
-//! ```
-//! use readyset_tracing::propagation::Instrumented;
-//! use readyset_tracing::remote_span;
-//! use tracing::instrument;
-//!
-//! #[instrument]
-//! fn send_request(id: u32) {
-//!     let request = Instrumented::from(id);
-//!     remote_function(request)
-//! }
-//!
-//! fn remote_function(request: Instrumented<u32>) {
-//!     // remote_span!() will unpack the Instrumented request, returning both the span and the
-//!     // inner request.  Presampling (see below) is respected - if the span with which the
-//!     // request was instrumented is disabled, the returned span will also be disabled.
-//!     let (span, id) = remote_span!(request, INFO, "handle_request");
-//!     span.in_scope(|| process_request(id))
-//! }
-//!
-//! #[instrument]
-//! fn process_request(id: u32) {
-//!     // do something!
-//! }
-//! ```
+//! Other than configuration, the functionality provided by this crate is primarily useful for
+//! Performance-critical codepaths, such as the hotpath for queries in ReadySet and the adapter.
 //!
 //! # Performance-critical codepaths
 //! For performance-critical pieces, the story is a bit more complex.  Because there is a
@@ -128,7 +92,6 @@ use std::str::FromStr;
 use clap::Parser;
 use opentelemetry::runtime;
 use opentelemetry::sdk::trace::Tracer;
-pub use readyset_tracing_proc_macros::{instrument_child, instrument_remote, instrument_root};
 use tracing::Subscriber;
 use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::filter::{Filtered, ParseError, Targets};
