@@ -22,7 +22,7 @@ use readyset_client::status::{ReadySetStatus, SnapshotStatus};
 use readyset_client::WorkerDescriptor;
 use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_telemetry_reporter::TelemetrySender;
-use readyset_tracing::{error, info, warn};
+use readyset_tracing::{debug, error, info, warn};
 use readyset_util::futures::abort_on_panic;
 use readyset_version::RELEASE_VERSION;
 use reqwest::Url;
@@ -163,9 +163,12 @@ impl Leader {
     ) -> ReadySetResult<Vec<u8>> {
         macro_rules! return_serialized {
             ($expr:expr) => {{
+                debug!(%method, %path, "successfully handled HTTP request");
                 return Ok(::bincode::serialize(&$expr)?);
             }};
         }
+
+        debug!(%method, %path, "received external HTTP request");
 
         let require_leader_ready = || -> ReadySetResult<()> {
             if !leader_ready {
@@ -466,8 +469,8 @@ impl Leader {
 
         // *** Write methods (all of them require quorum) ***
 
-        match (method, path) {
-            (Method::GET, "/flush_partial") => {
+        match (&method, path) {
+            (&Method::GET, "/flush_partial") => {
                 let ret = futures::executor::block_on(async move {
                     let mut writer = self.dataflow_state_handle.write().await;
                     check_quorum!(writer.as_ref());
@@ -477,7 +480,7 @@ impl Leader {
                 })?;
                 return_serialized!(ret);
             }
-            (Method::POST, "/extend_recipe") => {
+            (&Method::POST, "/extend_recipe") => {
                 let body: ExtendRecipeSpec = bincode::deserialize(&body)?;
                 if body.require_leader_ready {
                     require_leader_ready()?;
@@ -491,7 +494,7 @@ impl Leader {
                 })?;
                 return_serialized!(ret);
             }
-            (Method::POST, "/remove_query") => {
+            (&Method::POST, "/remove_query") => {
                 require_leader_ready()?;
                 let query_name = bincode::deserialize(&body)?;
                 let ret = futures::executor::block_on(async move {
@@ -503,7 +506,7 @@ impl Leader {
                 })?;
                 return_serialized!(ret);
             }
-            (Method::POST, "/remove_all_queries") => {
+            (&Method::POST, "/remove_all_queries") => {
                 require_leader_ready()?;
                 let ret = futures::executor::block_on(async move {
                     let mut writer = self.dataflow_state_handle.write().await;
@@ -514,7 +517,7 @@ impl Leader {
                 })?;
                 return_serialized!(ret);
             }
-            (Method::POST, "/set_schema_replication_offset") => {
+            (&Method::POST, "/set_schema_replication_offset") => {
                 let body: Option<ReplicationOffset> = bincode::deserialize(&body)?;
                 let ret = futures::executor::block_on(async move {
                     let mut writer = self.dataflow_state_handle.write().await;
@@ -524,7 +527,7 @@ impl Leader {
                 })?;
                 return_serialized!(ret);
             }
-            (Method::POST, "/remove_node") => {
+            (&Method::POST, "/remove_node") => {
                 require_leader_ready()?;
                 let body = bincode::deserialize(&body)?;
                 let ret = futures::executor::block_on(async move {
