@@ -49,8 +49,12 @@ deadpool-postgres = "0.10.3"
 [dev-dependencies]
 readyset-server = { path = "../readyset-server" }
 readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter", features = ["test-util"] }
+readyset-client-test-helpers = { path = "../readyset-client-test-helpers", features = ["postgres"] }
 serial_test = "0.5"
 rand = "0.8.5"
+proptest = "1.0.0"
+test-strategy = "0.2.0"
 
 [features]
+ddl_vertical_tests = []
 failure_injection = ["fail/failpoints", "nom-sql/failure_injection", "readyset-client/failure_injection"]
