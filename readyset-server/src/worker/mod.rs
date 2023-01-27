@@ -253,7 +253,7 @@ impl Worker {
             WorkerRequestKind::RunDomain(builder) => {
                 let replica_addr = builder.address();
                 let span = info_span!("domain", address = %replica_addr);
-                span.in_scope(|| info!("received domain to run"));
+                span.in_scope(|| debug!("received domain to run"));
 
                 let bind_on = self.domain_bind;
                 let listener = tokio::net::TcpListener::bind(&SocketAddr::new(bind_on, 0))
