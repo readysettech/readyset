@@ -813,7 +813,7 @@ async fn replication_failure_ignores_table() {
 
     handle
         .set_failpoint(
-            readyset_client::failpoints::REPLICATION_ACTION,
+            readyset_client::failpoints::REPLICATION_HANDLE_ACTION,
             &format!(
                 "1*return({})",
                 serde_json::ser::to_string(&err_to_inject).expect("failed to serialize error")

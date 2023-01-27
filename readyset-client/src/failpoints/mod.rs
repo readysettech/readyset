@@ -13,4 +13,6 @@ pub const READ_QUERY: &str = "read-query";
 /// Imitates traffic being dropped from upstream
 pub const UPSTREAM: &str = "upstream";
 /// Imitates a failure during the `handle_action` in replication
-pub const REPLICATION_ACTION: &str = "replication-action";
+pub const REPLICATION_HANDLE_ACTION: &str = "replication-handle-action";
+/// Imitates a failure during `PostgresWalConnector::next_action` in replication
+pub const POSTGRES_REPLICATION_NEXT_ACTION: &str = "postgres-replication-next-action";

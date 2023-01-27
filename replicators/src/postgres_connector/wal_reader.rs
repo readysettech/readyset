@@ -16,7 +16,7 @@ use tokio_postgres as pgsql;
 use super::ddl_replication::DdlEvent;
 use super::lsn::Lsn;
 use super::wal::{self, RelationMapping, WalData, WalError, WalRecord};
-use crate::postgres_connector::wal::TupleEntry;
+use crate::postgres_connector::wal::{TableErrorKind, TupleEntry};
 
 /// The names of the schema table that DDL replication logs will be written to
 pub(crate) const DDL_REPLICATION_LOG_SCHEMA: &str = "readyset";
@@ -165,8 +165,10 @@ impl WalReader {
                                     .into_iter()
                                     .collect::<Option<Vec<_>>>()
                                     // Insert records should never have "unchanged" fields... unchanged from what?
-                                    .ok_or_else(|| WalError::UnexpectedUnchangedEntry {
-                                        reason: "WalRecord::Insert::new_tuple should never contain TupleEntry::Unchanged",
+                                    .ok_or_else(|| WalError::TableError {
+                                        kind: TableErrorKind::UnexpectedUnchangedEntry {
+                                            reason: "WalRecord::Insert::new_tuple should never contain TupleEntry::Unchanged",
+                                        },
                                         schema: schema.clone(),
                                         table: table.clone(),
                                     })?,
@@ -244,8 +246,10 @@ impl WalReader {
                                     .into_iter()
                                     .collect::<Option<Vec<_>>>()
                                     // The old row must always be complete, or we won't be able to delete (a copy of) it
-                                    .ok_or_else(|| WalError::UnexpectedUnchangedEntry {
-                                        reason: "WalRecord::Update::old_tuple should never contain TupleEntry::Unchanged",
+                                    .ok_or_else(|| WalError::TableError {
+                                        kind: TableErrorKind::UnexpectedUnchangedEntry {
+                                            reason: "WalRecord::Update::old_tuple should never contain TupleEntry::Unchanged"
+                                        },
                                         schema: schema.clone(),
                                         table: table.clone(),
                                     })?,
@@ -254,8 +258,10 @@ impl WalReader {
                                     .into_iter()
                                     .collect::<Option<Vec<_>>>()
                                     // We should have filled in any "unchanged" entries in the new row above
-                                    .ok_or_else(|| WalError::UnexpectedUnchangedEntry {
-                                        reason: "All instances of TupleEntry::Unchanged in WalRecord::Update::new_tuple should have been replaced",
+                                    .ok_or_else(|| WalError::TableError {
+                                        kind: TableErrorKind::UnexpectedUnchangedEntry {
+                                            reason: "All instances of TupleEntry::Unchanged in WalRecord::Update::new_tuple should have been replaced"
+                                        },
                                         schema: schema.clone(),
                                         table: table.clone(),
                                     })?,
@@ -273,8 +279,10 @@ impl WalReader {
                                     .into_iter()
                                     .collect::<Option<Vec<_>>>()
                                     // The key must always be complete, or we won't be able to look up the row
-                                    .ok_or_else(|| WalError::UnexpectedUnchangedEntry {
-                                        reason: "WalRecord::Update::key_tuple should never contain TupleEntry::Unchanged",
+                                    .ok_or_else(|| WalError::TableError {
+                                        kind: TableErrorKind::UnexpectedUnchangedEntry {
+                                            reason: "WalRecord::Update::key_tuple should never contain TupleEntry::Unchanged",
+                                        },
                                         schema: schema.clone(),
                                         table: table.clone(),
                                     })?,
@@ -300,8 +308,10 @@ impl WalReader {
                                     .into_iter()
                                     .collect::<Option<Vec<_>>>()
                                     // The key must always be complete, or we won't be able to look up the row
-                                    .ok_or_else(|| WalError::UnexpectedUnchangedEntry {
-                                        reason: "When key_tuple is not present, the key columns in WalRecord::Update::new_tuple should never contain TupleEntry::Unchanged",
+                                    .ok_or_else(|| WalError::TableError {
+                                        kind: TableErrorKind::UnexpectedUnchangedEntry {
+                                            reason: "When key_tuple is not present, the key columns in WalRecord::Update::new_tuple should never contain TupleEntry::Unchanged",
+                                        },
                                         schema: schema.clone(),
                                         table: table.clone(),
                                     })?,
@@ -339,8 +349,10 @@ impl WalReader {
                                         .into_iter()
                                         .collect::<Option<Vec<_>>>()
                                         // The old row must always be complete, or we won't be able to delete (a copy of) it
-                                        .ok_or_else(|| WalError::UnexpectedUnchangedEntry {
-                                            reason: "WalRecord::Delete::old_tuple should never contain TupleEntry::Unchanged",
+                                        .ok_or_else(|| WalError::TableError {
+                                            kind: TableErrorKind::UnexpectedUnchangedEntry {
+                                                reason: "WalRecord::Delete::old_tuple should never contain TupleEntry::Unchanged",
+                                            },
                                             schema: schema.clone(),
                                             table: table.clone(),
                                         })?,
@@ -357,8 +369,10 @@ impl WalReader {
                                         .into_iter()
                                         .collect::<Option<Vec<_>>>()
                                         // The key must always be complete, or we won't be able to look up the row to delete it
-                                        .ok_or_else(|| WalError::UnexpectedUnchangedEntry {
-                                            reason: "WalRecord::Delete::key_tuple should never contain TupleEntry::Unchanged",
+                                        .ok_or_else(|| WalError::TableError {
+                                            kind: TableErrorKind::UnexpectedUnchangedEntry {
+                                                reason: "WalRecord::Delete::key_tuple should never contain TupleEntry::Unchanged",
+                                            },
                                             schema: schema.clone(),
                                             table: table.clone(),
                                         })?,
@@ -433,10 +447,14 @@ impl wal::TupleData {
         use postgres_types::Type as PGType;
 
         if self.n_cols != relation.n_cols {
-            return Err(WalError::InvalidMapping(format!(
-                "Relation and tuple must have 1:1 mapping; {:?}; {:?}",
-                self, relation
-            )));
+            return Err(WalError::TableError {
+                kind: TableErrorKind::InvalidMapping(format!(
+                    "Relation and tuple must have 1:1 mapping; {:?}; {:?}",
+                    self, relation
+                )),
+                table: relation.relation_name_lossy(),
+                schema: relation.schema_name_lossy(),
+            });
         }
 
         let mut ret = Vec::with_capacity(self.n_cols as usize);
@@ -458,10 +476,12 @@ impl wal::TupleData {
                     // ReadySet type
                     let str = String::from_utf8_lossy(&text);
 
-                    let unsupported_type_err = || WalError::UnsupportedTypeConversion {
-                        type_oid: spec.type_oid,
-                        schema: relation.schema.clone(),
-                        table: relation.name.clone(),
+                    let unsupported_type_err = || WalError::TableError {
+                        kind: TableErrorKind::UnsupportedTypeConversion {
+                            type_oid: spec.type_oid,
+                        },
+                        schema: relation.schema_name_lossy(),
+                        table: relation.relation_name_lossy(),
                     };
 
                     let val = if custom_types.contains(&spec.type_oid) {
@@ -511,7 +531,11 @@ impl wal::TupleData {
                                 variants
                                     .iter()
                                     .position(|v| v.as_bytes() == text)
-                                    .ok_or(WalError::UnknownEnumVariant(text))?
+                                    .ok_or(WalError::TableError {
+                                        kind: TableErrorKind::UnknownEnumVariant(text),
+                                        schema: relation.schema_name_lossy(),
+                                        table: relation.relation_name_lossy(),
+                                    })?
                                     // To be compatible with mysql enums, we always represent enum
                                     // values as *1-indexed* (since mysql needs 0 to represent
                                     // invalid values)
@@ -521,16 +545,54 @@ impl wal::TupleData {
                                 PGType::BOOL => DfValue::UnsignedInt(match str.as_ref() {
                                     "t" => true as _,
                                     "f" => false as _,
-                                    _ => return Err(WalError::BoolParseError),
+                                    _ => {
+                                        return Err(WalError::TableError {
+                                            kind: TableErrorKind::BoolParseError,
+                                            table: relation.relation_name_lossy(),
+                                            schema: relation.schema_name_lossy(),
+                                        })
+                                    }
                                 }),
                                 PGType::INT2 | PGType::INT4 | PGType::INT8 => {
-                                    DfValue::Int(str.parse()?)
+                                    let result = str.parse().map_err(|_| WalError::TableError {
+                                        kind: TableErrorKind::IntParseError,
+                                        table: relation.relation_name_lossy(),
+                                        schema: relation.schema_name_lossy(),
+                                    });
+
+                                    DfValue::Int(result?)
                                 }
-                                PGType::OID => DfValue::UnsignedInt(str.parse()?),
-                                PGType::FLOAT4 => str.parse::<f32>()?.try_into()?,
-                                PGType::FLOAT8 => str.parse::<f64>()?.try_into()?,
+                                PGType::OID => {
+                                    let result = str.parse().map_err(|_| WalError::TableError {
+                                        kind: TableErrorKind::IntParseError,
+                                        table: relation.relation_name_lossy(),
+                                        schema: relation.schema_name_lossy(),
+                                    });
+
+                                    DfValue::UnsignedInt(result?)
+                                }
+                                PGType::FLOAT4 => str
+                                    .parse::<f32>()
+                                    .map_err(|_| WalError::TableError {
+                                        kind: TableErrorKind::FloatParseError,
+                                        table: relation.relation_name_lossy(),
+                                        schema: relation.schema_name_lossy(),
+                                    })?
+                                    .try_into()?,
+                                PGType::FLOAT8 => str
+                                    .parse::<f64>()
+                                    .map_err(|_| WalError::TableError {
+                                        kind: TableErrorKind::FloatParseError,
+                                        table: relation.relation_name_lossy(),
+                                        schema: relation.schema_name_lossy(),
+                                    })?
+                                    .try_into()?,
                                 PGType::NUMERIC => Decimal::from_str_exact(str.as_ref())
-                                    .map_err(WalError::NumericParseError)
+                                    .map_err(|e| WalError::TableError {
+                                        kind: TableErrorKind::NumericParseError(e),
+                                        table: relation.relation_name_lossy(),
+                                        schema: relation.schema_name_lossy(),
+                                    })
                                     .map(DfValue::from)?,
                                 PGType::CHAR => match text.as_ref() {
                                     [] => DfValue::None,
@@ -541,12 +603,25 @@ impl wal::TupleData {
                                         // for details
 
                                         // Decode the octet string representation of the byte
-                                        let byte = u8::from_str_radix(&str[1..], 8)?;
+                                        let byte =
+                                            u8::from_str_radix(&str[1..], 8).map_err(|_| {
+                                                WalError::TableError {
+                                                    kind: TableErrorKind::IntParseError,
+                                                    table: relation.relation_name_lossy(),
+                                                    schema: relation.schema_name_lossy(),
+                                                }
+                                            })?;
                                         // Create the i8 from the byte
                                         let ch = i8::from_ne_bytes([byte]);
                                         DfValue::Int(ch.into())
                                     }
-                                    _ => return Err(WalError::IntParseError),
+                                    _ => {
+                                        return Err(WalError::TableError {
+                                            kind: TableErrorKind::IntParseError,
+                                            table: relation.relation_name_lossy(),
+                                            schema: relation.schema_name_lossy(),
+                                        })
+                                    }
                                 },
                                 PGType::TEXT
                                 | PGType::JSON
@@ -565,24 +640,60 @@ impl wal::TupleData {
                                 // back to String. ♪ ┏(・o･)┛ ♪
                                 PGType::JSONB => {
                                     serde_json::from_str::<serde_json::Value>(str.as_ref())
-                                        .map_err(|e| WalError::JsonParseError(e.to_string()))
+                                        .map_err(|e| WalError::TableError {
+                                            kind: TableErrorKind::JsonParseError(e.to_string()),
+                                            schema: relation.schema_name_lossy(),
+                                            table: relation.relation_name_lossy(),
+                                        })
                                         .map(|v| DfValue::from(v.to_string()))?
                                 }
-                                PGType::TIMESTAMP => DfValue::TimestampTz(
-                                    str.parse().map_err(|_| WalError::TimestampParseError)?,
-                                ),
-                                PGType::TIMESTAMPTZ => DfValue::TimestampTz(
-                                    str.parse().map_err(|_| WalError::TimestampTzParseError)?,
-                                ),
+                                PGType::TIMESTAMP => {
+                                    DfValue::TimestampTz(str.parse().map_err(|_| {
+                                        WalError::TableError {
+                                            kind: TableErrorKind::TimestampParseError,
+                                            schema: relation.schema_name_lossy(),
+                                            table: relation.relation_name_lossy(),
+                                        }
+                                    })?)
+                                }
+                                PGType::TIMESTAMPTZ => {
+                                    DfValue::TimestampTz(str.parse().map_err(|_| {
+                                        WalError::TableError {
+                                            kind: TableErrorKind::TimestampTzParseError,
+                                            schema: relation.schema_name_lossy(),
+                                            table: relation.relation_name_lossy(),
+                                        }
+                                    })?)
+                                }
                                 PGType::BYTEA => {
                                     hex::decode(str.strip_prefix("\\x").unwrap_or(&str))
-                                        .map_err(|_| WalError::ByteArrayHexParseError)
+                                        .map_err(|_| WalError::TableError {
+                                            kind: TableErrorKind::ByteArrayHexParseError,
+                                            schema: relation.schema_name_lossy(),
+                                            table: relation.relation_name_lossy(),
+                                        })
                                         .map(|bytes| DfValue::ByteArray(Arc::new(bytes)))?
                                 }
-                                PGType::DATE => DfValue::TimestampTz(
-                                    str.parse().map_err(|_| WalError::DateParseError)?,
-                                ),
-                                PGType::TIME => DfValue::Time(MySqlTime::from_str(&str)?),
+                                PGType::DATE => {
+                                    DfValue::TimestampTz(str.parse().map_err(|_| {
+                                        WalError::TableError {
+                                            kind: TableErrorKind::DateParseError,
+                                            schema: relation.schema_name_lossy(),
+                                            table: relation.relation_name_lossy(),
+                                        }
+                                    })?)
+                                }
+                                PGType::TIME => {
+                                    let result = MySqlTime::from_str(&str).map_err(|e| {
+                                        WalError::TableError {
+                                            kind: TableErrorKind::TimeParseError(e),
+                                            table: relation.relation_name_lossy(),
+                                            schema: relation.schema_name_lossy(),
+                                        }
+                                    });
+
+                                    DfValue::Time(result?)
+                                }
                                 PGType::BIT | PGType::VARBIT => {
                                     let mut bits = BitVec::with_capacity(str.len());
                                     for c in str.chars() {
@@ -590,10 +701,16 @@ impl wal::TupleData {
                                             '0' => bits.push(false),
                                             '1' => bits.push(true),
                                             _ => {
-                                                return Err(WalError::BitVectorParseError(format!(
-                                                    "\"{}\" is not a valid binary digit",
-                                                    c
-                                                )))
+                                                return Err(WalError::TableError {
+                                                    kind: TableErrorKind::BitVectorParseError(
+                                                        format!(
+                                                            "\"{}\" is not a valid binary digit",
+                                                            c
+                                                        ),
+                                                    ),
+                                                    schema: relation.schema_name_lossy(),
+                                                    table: relation.relation_name_lossy(),
+                                                })
                                             }
                                         }
                                     }

@@ -1,11 +1,15 @@
 use async_trait::async_trait;
 use database_utils::UpstreamConfig;
+#[cfg(feature = "failure_injection")]
+use failpoint_macros::set_failpoint;
 use futures::FutureExt;
 use nom_sql::Relation;
 use postgres_native_tls::MakeTlsConnector;
+#[cfg(feature = "failure_injection")]
+use readyset_client::failpoints;
 use readyset_client::replication::ReplicationOffset;
 use readyset_client::{ReadySetError, ReadySetResult, TableOperation};
-use readyset_errors::invariant;
+use readyset_errors::{invariant, set_failpoint_return_err};
 use readyset_tracing::{debug, error, info, trace, warn};
 use readyset_util::select;
 use tokio_postgres as pgsql;
@@ -16,7 +20,7 @@ use super::wal_reader::{WalEvent, WalReader};
 use super::{PostgresPosition, PUBLICATION_NAME, REPLICATION_SLOT};
 use crate::db_util::error_is_slot_not_found;
 use crate::noria_adapter::{Connector, ReplicationAction};
-use crate::postgres_connector::wal::WalError;
+use crate::postgres_connector::wal::{TableErrorKind, WalError};
 
 /// A connector that connects to a PostgreSQL server and starts reading WAL from the "noria"
 /// replication slot with the "noria" publication.
@@ -427,6 +431,8 @@ impl Connector for PostgresWalConnector {
         last_pos: &ReplicationOffset,
         _until: Option<&ReplicationOffset>,
     ) -> ReadySetResult<(ReplicationAction, ReplicationOffset)> {
+        set_failpoint_return_err!(failpoints::POSTGRES_REPLICATION_NEXT_ACTION);
+
         // Calling the ReadySet API is a bit expensive, therefore we try to queue as many actions
         // as possible before calling into the API. We therefore try to stop batching actions when
         // we hit this limit, BUT note that we may substantially exceed this limit in cases where
@@ -449,22 +455,24 @@ impl Connector for PostgresWalConnector {
                 Some(event) => event,
                 None => match self.next_event().await {
                     Ok(ev) => ev,
-                    Err(WalError::UnsupportedTypeConversion {
-                        type_oid,
+                    Err(WalError::TableError {
+                        kind: TableErrorKind::UnsupportedTypeConversion { type_oid },
                         schema,
                         table,
                     }) => {
                         warn!(
                             type_oid,
-                            schema = %String::from_utf8_lossy(&schema),
-                            table = %String::from_utf8_lossy(&table),
+                            schema = schema,
+                            table = table,
                             "Ignoring write with value of unsupported type"
                         );
                         // ReadySet will skip replicate tables with unsupported types (e.g.
                         // Postgres's user defined types). RS will leverage the fallback instead.
                         continue;
                     }
-                    Err(err) => return Err(err.into()),
+                    Err(err) => {
+                        return Err(err.into());
+                    }
                 },
             };
 

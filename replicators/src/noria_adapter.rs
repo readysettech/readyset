@@ -740,7 +740,7 @@ impl NoriaAdapter {
         pos: ReplicationOffset,
         catchup: bool,
     ) -> ReadySetResult<()> {
-        set_failpoint_return_err!(failpoints::REPLICATION_ACTION);
+        set_failpoint_return_err!(failpoints::REPLICATION_HANDLE_ACTION);
         // First check if we should skip this action due to insufficient log position or lack of
         // interest
         match &action {
@@ -813,7 +813,16 @@ impl NoriaAdapter {
                 return Ok(());
             }
 
-            let (action, pos) = self.connector.next_action(position, until.as_ref()).await?;
+            let (action, pos) = match self.connector.next_action(position, until.as_ref()).await {
+                Ok(next_action) => next_action,
+                // In some cases, we may fail to replicate because of unsupported operations, stop
+                // replicating a table if we encounter this type of error.
+                Err(ReadySetError::TableError { table, source }) => {
+                    self.deny_replication_for_table(table, source).await?;
+                    continue;
+                }
+                Err(e) => return Err(e),
+            };
             *position = pos.clone();
             debug!(%position, "Received replication action");
 
@@ -829,39 +838,7 @@ impl NoriaAdapter {
                 // In some cases, we may fail to replicate because of unsupported operations, stop
                 // replicating a table if we encounter this type of error.
                 if let ReadySetError::TableError { table, source } = err {
-                    // This is an error log because we don't know of any operations that will cause
-                    // this currently--if we see this, we should investigate and fix the issue
-                    // causing a table to not be supported by our replication
-                    error!(%table, error=%source, "Will stop replicating a table due to table error");
-
-                    let schema = table
-                        .schema
-                        .clone()
-                        .ok_or_else(|| {
-                            // Tables should have a schema defined at this point, or something has gone wrong somewhere.
-                            // If we don't have a schema at this point, we don't know which table
-                            // encountered an error, so we fall back to resnapshotting.
-                            error!(%table, "Unable to deny replication for table without schema. Will Re-snapshot");
-                            ReadySetError::ResnapshotNeeded
-                        })?;
-                    let name = table.name.clone();
-
-                    // Remove the table and any domain state associated with it, so that it is
-                    // like we never replicated it in the first place
-                    // If this fails, fall back to resnapshotting to avoid getting in an
-                    // inconsistent state. Resnapshotting will end up in this block again since
-                    // there is an action we can't handle--but we cannot stop replicating without
-                    // successfully removing the table from readyset--that would lead to permanently
-                    // stale results.
-                    set_failpoint_return_err!("ignore-table-fail-dropping-table");
-                    self.remove_table_from_readyset(table.clone()).await.map_err(|error| {
-                        error!(%error, "failed to remove ignored table from readyset, will need to resnapshot it to continue");
-                        ReadySetError::ResnapshotNeeded
-                    })?;
-
-                    self.table_filter
-                        .deny_replication(schema.as_str(), name.as_str());
-
+                    self.deny_replication_for_table(table, source).await?;
                     continue;
                 }
 
@@ -916,6 +893,46 @@ impl NoriaAdapter {
         );
 
         self.noria.extend_recipe(changelist).await?;
+        Ok(())
+    }
+
+    /// Stops replicating the given table. This is used to abandon replication for a single table
+    /// in the event of an error that won't prevent other tables from successfully replicating.
+    async fn deny_replication_for_table(
+        &mut self,
+        table: Relation,
+        source: Box<ReadySetError>,
+    ) -> ReadySetResult<()> {
+        // This is an error log because we don't know of any operations that will cause
+        // this currently--if we see this, we should investigate and fix the issue
+        // causing a table to not be supported by our replication
+        error!(%table, error=%source, "Will stop replicating a table due to table error");
+
+        let schema = table.schema.clone().ok_or_else(|| {
+            // Tables should have a schema defined at this point, or something has gone wrong
+            // somewhere. If we don't have a schema at this point, we don't know which
+            // table encountered an error, so we fall back to resnapshotting.
+            error!(%table, "Unable to deny replication for table without schema. Will Re-snapshot");
+            ReadySetError::ResnapshotNeeded
+        })?;
+        let name = table.name.clone();
+
+        // Remove the table and any domain state associated with it, so that it is
+        // like we never replicated it in the first place
+        // If this fails, fall back to resnapshotting to avoid getting in an
+        // inconsistent state. Resnapshotting will end up in this block again since
+        // there is an action we can't handle--but we cannot stop replicating without
+        // successfully removing the table from readyset--that would lead to permanently
+        // stale results.
+        set_failpoint_return_err!("ignore-table-fail-dropping-table");
+        self.remove_table_from_readyset(table.clone()).await.map_err(|error| {
+            error!(%error, "failed to remove ignored table from readyset, will need to resnapshot it to continue");
+            ReadySetError::ResnapshotNeeded
+        })?;
+
+        self.table_filter
+            .deny_replication(schema.as_str(), name.as_str());
+
         Ok(())
     }
 }

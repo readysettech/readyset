@@ -7,6 +7,7 @@
 use std::convert::{TryFrom, TryInto};
 
 use bytes::Bytes;
+use nom_sql::Relation;
 
 use crate::postgres_connector::lsn::Lsn;
 
@@ -28,6 +29,19 @@ pub enum WalError {
     CorruptTruncate,
     CorruptMessage,
     TryFromSliceError,
+    ReadySetError(readyset_client::ReadySetError),
+
+    /// An error specific to one of the tables
+    TableError {
+        kind: TableErrorKind,
+        table: String,
+        schema: String,
+    },
+}
+
+/// The kinds of table-specific errors that can arise during replication
+#[derive(Debug)]
+pub enum TableErrorKind {
     FloatParseError,
     IntParseError,
     BoolParseError,
@@ -42,18 +56,9 @@ pub enum WalError {
     NumericParseError(rust_decimal::Error),
     BitVectorParseError(String),
     InvalidMapping(String),
-    UnexpectedUnchangedEntry {
-        reason: &'static str,
-        schema: String,
-        table: String,
-    },
+    UnsupportedTypeConversion { type_oid: u32 },
     UnknownEnumVariant(Bytes),
-    ReadySetError(readyset_client::ReadySetError),
-    UnsupportedTypeConversion {
-        type_oid: u32,
-        schema: Bytes,
-        table: Bytes,
-    },
+    UnexpectedUnchangedEntry { reason: &'static str },
 }
 
 impl From<std::array::TryFromSliceError> for WalError {
@@ -62,51 +67,35 @@ impl From<std::array::TryFromSliceError> for WalError {
     }
 }
 
-impl From<std::num::ParseFloatError> for WalError {
-    fn from(_: std::num::ParseFloatError) -> Self {
-        WalError::FloatParseError
-    }
-}
-
-impl From<std::num::ParseIntError> for WalError {
-    fn from(_: std::num::ParseIntError) -> Self {
-        WalError::IntParseError
-    }
-}
-
-impl From<std::str::ParseBoolError> for WalError {
-    fn from(_: std::str::ParseBoolError) -> Self {
-        WalError::BoolParseError
-    }
-}
-
-impl From<std::ffi::FromBytesWithNulError> for WalError {
-    fn from(_: std::ffi::FromBytesWithNulError) -> Self {
-        WalError::CStrParseError
-    }
-}
-
-impl From<chrono::ParseError> for WalError {
-    fn from(_: chrono::ParseError) -> Self {
-        WalError::TimestampParseError
-    }
-}
-
 impl From<WalError> for readyset_client::ReadySetError {
     fn from(err: WalError) -> Self {
-        readyset_client::ReadySetError::ReplicationFailed(format!("WAL error: {:?}", err))
+        match err {
+            WalError::TableError {
+                kind,
+                table,
+                schema,
+            } => {
+                let table = Relation {
+                    schema: Some(schema.into()),
+                    name: table.into(),
+                };
+
+                readyset_client::ReadySetError::TableError {
+                    table,
+                    source: Box::new(readyset_client::ReadySetError::ReplicationFailed(format!(
+                        "WAL error: {:?}",
+                        kind
+                    ))),
+                }
+            }
+            _ => readyset_client::ReadySetError::ReplicationFailed(format!("WAL error: {:?}", err)),
+        }
     }
 }
 
 impl From<readyset_client::ReadySetError> for WalError {
     fn from(err: readyset_client::ReadySetError) -> Self {
         WalError::ReadySetError(err)
-    }
-}
-
-impl From<mysql_time::ConvertError> for WalError {
-    fn from(err: mysql_time::ConvertError) -> Self {
-        WalError::TimeParseError(err)
     }
 }
 
@@ -194,6 +183,18 @@ pub struct RelationMapping {
     pub(crate) n_cols: i16,
     /// Next, the following message part appears for each column (except generated columns):
     pub(crate) cols: Vec<ColumnSpec>,
+}
+
+impl RelationMapping {
+    /// Gets the name of the schema through a lossy UTF-8 interpretation of the raw `Bytes`.
+    pub(crate) fn schema_name_lossy(&self) -> String {
+        String::from_utf8_lossy(&self.schema).to_string()
+    }
+
+    /// Gets the name of the relation through a lossy UTF-8 interpretation of the raw `Bytes`.
+    pub(crate) fn relation_name_lossy(&self) -> String {
+        String::from_utf8_lossy(&self.name).to_string()
+    }
 }
 
 /// `WalRecord` represents a [record](https://www.postgresql.org/docs/current/protocol-logicalrep-message-formats.html)

@@ -592,7 +592,22 @@ async fn assert_table_ignored(client: &Client) {
 #[cfg(feature = "failure_injection")]
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
-async fn replication_failure_ignores_table() {
+async fn handle_action_replication_failure_ignores_table() {
+    replication_failure_ignores_table(readyset_client::failpoints::REPLICATION_HANDLE_ACTION).await;
+}
+
+#[cfg(feature = "failure_injection")]
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn next_action_replication_failure_ignores_table() {
+    replication_failure_ignores_table(
+        readyset_client::failpoints::POSTGRES_REPLICATION_NEXT_ACTION,
+    )
+    .await;
+}
+
+#[cfg(feature = "failure_injection")]
+async fn replication_failure_ignores_table(failpoint: &str) {
     readyset_tracing::init_test_logging();
     use nom_sql::Relation;
     use readyset_client::ReadySetError;
@@ -620,7 +635,7 @@ async fn replication_failure_ignores_table() {
 
     handle
         .set_failpoint(
-            readyset_client::failpoints::REPLICATION_ACTION,
+            failpoint,
             &format!(
                 "1*return({})",
                 serde_json::ser::to_string(&err_to_inject).expect("failed to serialize error")
@@ -641,7 +656,25 @@ async fn replication_failure_ignores_table() {
 #[cfg(feature = "failure_injection")]
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
-async fn replication_failure_retries_if_failed_to_drop() {
+async fn handle_action_replication_failure_retries_if_failed_to_drop() {
+    replication_failure_retries_if_failed_to_drop(
+        readyset_client::failpoints::REPLICATION_HANDLE_ACTION,
+    )
+    .await;
+}
+
+#[cfg(feature = "failure_injection")]
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn next_action_replication_failure_retries_if_failed_to_drop() {
+    replication_failure_retries_if_failed_to_drop(
+        readyset_client::failpoints::POSTGRES_REPLICATION_NEXT_ACTION,
+    )
+    .await;
+}
+
+#[cfg(feature = "failure_injection")]
+async fn replication_failure_retries_if_failed_to_drop(failpoint: &str) {
     readyset_tracing::init_test_logging();
     use std::time::Duration;
 
@@ -675,7 +708,7 @@ async fn replication_failure_retries_if_failed_to_drop() {
 
     handle
         .set_failpoint(
-            readyset_client::failpoints::REPLICATION_ACTION,
+            failpoint,
             &format!(
                 "1*return({})",
                 serde_json::ser::to_string(&err_to_inject).expect("failed to serialize error")
