@@ -106,7 +106,7 @@ struct Options {
     prometheus_metrics: bool,
 
     /// Output noria metrics
-    #[clap(long)]
+    #[clap(long, hide = true)]
     pub noria_metrics: bool,
 
     #[clap(flatten)]
