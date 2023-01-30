@@ -1094,7 +1094,6 @@ impl NoriaConnector {
                             self.inner.get_mut()?.views.insert(qname.clone(), view);
                         }
                         Err(e) => {
-                            error!(error = %e, "getting view from noria failed");
                             return Err(e);
                         }
                     }
