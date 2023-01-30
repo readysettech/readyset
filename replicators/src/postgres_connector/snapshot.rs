@@ -179,8 +179,8 @@ impl Display for ColumnEntry {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "`{}` {}{}",
-            self.name,
+            "{} {}{}",
+            Dialect::PostgreSQL.quote_identifier(&self.name),
             self.sql_type,
             if self.not_null { " NOT NULL" } else { "" },
         )
@@ -208,8 +208,7 @@ impl TryFrom<pgsql::Row> for ConstraintEntry {
 
 impl Display for ConstraintEntry {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // FIXME: Use PostgreSQL dialect.
-        write!(f, "{}", self.definition.display(nom_sql::Dialect::MySQL))
+        write!(f, "{}", self.definition.display(Dialect::PostgreSQL))
     }
 }
 
@@ -396,8 +395,7 @@ impl Display for TableDescription {
         writeln!(
             f,
             "CREATE TABLE {} (",
-            // FIXME: Use PostgreSQL dialect.
-            self.name.display(Dialect::MySQL)
+            self.name.display(Dialect::PostgreSQL)
         )?;
         write!(
             f,
@@ -1118,7 +1116,7 @@ mod tests {
                 kind: Some(ConstraintKind::PrimaryKey),
             }],
         };
-        let res = parse_query(Dialect::MySQL, desc.to_string());
+        let res = parse_query(Dialect::PostgreSQL, desc.to_string());
         assert!(res.is_ok(), "{}", res.err().unwrap());
         let create_table = match res.unwrap() {
             SqlQuery::CreateTable(ct) => ct,
