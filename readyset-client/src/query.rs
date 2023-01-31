@@ -45,9 +45,21 @@ pub enum Query {
     ParseFailed(Arc<String>),
 }
 
+impl From<Arc<ViewCreateRequest>> for Query {
+    fn from(vcr: Arc<ViewCreateRequest>) -> Self {
+        Self::Parsed(vcr)
+    }
+}
+
 impl From<ViewCreateRequest> for Query {
     fn from(stmt: ViewCreateRequest) -> Self {
         Self::Parsed(Arc::new(stmt))
+    }
+}
+
+impl From<Arc<String>> for Query {
+    fn from(s: Arc<String>) -> Self {
+        Self::ParseFailed(s)
     }
 }
 
@@ -60,17 +72,6 @@ impl From<String> for Query {
 impl From<&str> for Query {
     fn from(s: &str) -> Self {
         Self::from(s.to_owned())
-    }
-}
-
-impl Borrow<ViewCreateRequest> for Query {
-    fn borrow(&self) -> &ViewCreateRequest {
-        match self {
-            Query::ParseFailed(_) => {
-                panic!("cannot borrow a query that failed parsing as a select statement")
-            }
-            Query::Parsed(stmt) => stmt,
-        }
     }
 }
 
