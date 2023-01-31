@@ -8,6 +8,7 @@ use nom::combinator::{map, opt};
 use nom::multi::separated_list1;
 use nom::sequence::terminated;
 use nom_locate::LocatedSpan;
+use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
@@ -78,6 +79,20 @@ impl From<String> for Relation {
 impl<'a> From<&'a String> for Relation {
     fn from(s: &'a String) -> Self {
         Self::from(s.as_str())
+    }
+}
+
+impl Relation {
+    /// Like [`display()`](Self::display) except the schema and table name will not be quoted.
+    ///
+    /// This should not be used to emit SQL code and instead should mostly be for error messages.
+    pub fn display_unquoted(&self) -> impl Display + '_ {
+        fmt_with(move |f| {
+            if let Some(schema) = &self.schema {
+                write!(f, "{schema}.")?;
+            }
+            write!(f, "{}", self.name)
+        })
     }
 }
 

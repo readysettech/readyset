@@ -7,6 +7,7 @@ use nom::combinator::{map, opt};
 use nom::multi::many0;
 use nom::sequence::{delimited, preceded, tuple};
 use nom_locate::LocatedSpan;
+use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 
 use crate::common::{column_identifier_no_alias, parse_comment};
@@ -57,6 +58,21 @@ impl Ord for Column {
 impl PartialOrd for Column {
     fn partial_cmp(&self, other: &Column) -> Option<Ordering> {
         Some(self.cmp(other))
+    }
+}
+
+impl Column {
+    /// Like [`display()`](Self::display) except the schema, table, and column name will not be
+    /// quoted.
+    ///
+    /// This should not be used to emit SQL code and instead should mostly be for error messages.
+    pub fn display_unquoted(&self) -> impl fmt::Display + '_ {
+        fmt_with(move |f| {
+            if let Some(ref table) = self.table {
+                write!(f, "{}.", table.display_unquoted())?;
+            }
+            write!(f, "{}", self.name)
+        })
     }
 }
 
