@@ -96,6 +96,7 @@ health-reporter = { path = "../health-reporter" }
 database-utils = { path = "../database-utils" }
 
 [dev-dependencies]
+dataflow = { path = "../readyset-dataflow", package = "readyset-dataflow", features = ["bench"] }
 test-utils = { path = "../test-utils" }
 backtrace = { version = "0.3.2", features = ["serialize-serde"] }
 toml = "0.5"
