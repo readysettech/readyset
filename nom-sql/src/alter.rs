@@ -109,7 +109,7 @@ pub enum AlterTableDefinition {
 }
 
 impl AlterTableDefinition {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| match self {
             Self::AddColumn(col) => {
                 write!(f, "ADD COLUMN {}", col.display(dialect))
@@ -175,7 +175,7 @@ pub struct AlterTableStatement {
 }
 
 impl AlterTableStatement {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             // FIXME(ENG-2483): Use full table name including its schema.
             write!(

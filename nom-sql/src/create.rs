@@ -34,7 +34,7 @@ pub struct CreateTableBody {
 }
 
 impl CreateTableBody {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             for (i, field) in self.fields.iter().enumerate() {
                 if i != 0 {
@@ -73,7 +73,7 @@ pub struct CreateTableStatement {
 }
 
 impl CreateTableStatement {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             write!(f, "CREATE TABLE ")?;
             if self.if_not_exists {
@@ -142,7 +142,7 @@ pub enum SelectSpecification {
 }
 
 impl SelectSpecification {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| match self {
             Self::Compound(csq) => write!(f, "{}", csq.display(dialect)),
             Self::Simple(sq) => write!(f, "{}", sq.display(dialect)),
@@ -164,7 +164,7 @@ pub struct CreateViewStatement {
 }
 
 impl CreateViewStatement {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             write!(f, "CREATE VIEW {} ", self.name.display(dialect))?;
 
@@ -195,7 +195,7 @@ pub enum CacheInner {
 }
 
 impl CacheInner {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| match self {
             Self::Statement(stmt) => write!(f, "{}", stmt.display(dialect)),
             Self::Id(id) => write!(f, "{id}"),
@@ -219,7 +219,7 @@ pub struct CreateCacheStatement {
 }
 
 impl CreateCacheStatement {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             write!(f, "CREATE CACHE ")?;
             if self.always {

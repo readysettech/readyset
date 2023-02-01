@@ -33,7 +33,7 @@ pub struct GroupByClause {
 }
 
 impl GroupByClause {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             write!(
                 f,
@@ -55,7 +55,7 @@ pub struct JoinClause {
 }
 
 impl JoinClause {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             write!(
                 f,
@@ -75,7 +75,7 @@ pub struct CommonTableExpr {
 }
 
 impl CommonTableExpr {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             write!(
                 f,
@@ -201,7 +201,7 @@ impl SelectStatement {
 }
 
 impl SelectStatement {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             if !self.ctes.is_empty() {
                 write!(

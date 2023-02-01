@@ -53,7 +53,7 @@ impl PartialOrd for Column {
 }
 
 impl Column {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             if let Some(ref table) = self.table {
                 write!(f, "{}.", table.display(dialect))?;
@@ -92,7 +92,7 @@ pub enum ColumnConstraint {
 }
 
 impl ColumnConstraint {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| match self {
             Self::Null => write!(f, "NULL"),
             Self::NotNull => write!(f, "NOT NULL"),
@@ -145,7 +145,7 @@ impl ColumnSpecification {
         })
     }
 
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             write!(
                 f,

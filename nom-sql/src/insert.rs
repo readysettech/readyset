@@ -27,7 +27,7 @@ pub struct InsertStatement {
 }
 
 impl InsertStatement {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             // FIXME(ENG-2483): Use full table name including its schema.
             write!(

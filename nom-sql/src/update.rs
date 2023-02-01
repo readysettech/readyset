@@ -23,7 +23,7 @@ pub struct UpdateStatement {
 }
 
 impl UpdateStatement {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             // FIXME(ENG-2483): Use full table name including its schema.
             write!(f, "UPDATE {} ", dialect.quote_identifier(&self.table.name))?;

@@ -73,7 +73,7 @@ impl<'a> From<&'a String> for Relation {
 }
 
 impl Relation {
-    pub fn display(&self, dialect: Dialect) -> impl Display + '_ {
+    pub fn display(&self, dialect: Dialect) -> impl Display + Copy + '_ {
         fmt_with(move |f| {
             if let Some(schema) = &self.schema {
                 write!(f, "{}.", dialect.quote_identifier(schema))?;
@@ -119,7 +119,7 @@ impl TableExprInner {
         }
     }
 
-    pub fn display(&self, dialect: Dialect) -> impl Display + '_ {
+    pub fn display(&self, dialect: Dialect) -> impl Display + Copy + '_ {
         fmt_with(move |f| match self {
             TableExprInner::Table(t) => write!(f, "{}", t.display(dialect)),
             TableExprInner::Subquery(sq) => write!(f, "({})", sq.display(dialect)),
@@ -145,7 +145,7 @@ impl From<Relation> for TableExpr {
 }
 
 impl TableExpr {
-    pub fn display(&self, dialect: Dialect) -> impl Display + '_ {
+    pub fn display(&self, dialect: Dialect) -> impl Display + Copy + '_ {
         fmt_with(move |f| {
             write!(f, "{}", self.inner.display(dialect))?;
 

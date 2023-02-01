@@ -148,7 +148,7 @@ impl SqlType {
         self
     }
 
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             let write_with_len = |f: &mut fmt::Formatter, name, len| {
                 write!(f, "{}", name)?;

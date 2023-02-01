@@ -26,7 +26,7 @@ pub enum SetStatement {
 }
 
 impl SetStatement {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             write!(f, "SET ")?;
             match self {
@@ -258,7 +258,7 @@ impl Display for Variable {
 }
 
 impl SetVariables {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             write!(
                 f,

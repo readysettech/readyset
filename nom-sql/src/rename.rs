@@ -19,7 +19,7 @@ pub struct RenameTableStatement {
 }
 
 impl RenameTableStatement {
-    pub fn display(&self, dialect: Dialect) -> impl Display + '_ {
+    pub fn display(&self, dialect: Dialect) -> impl Display + Copy + '_ {
         fmt_with(move |f| {
             write!(
                 f,
@@ -50,7 +50,7 @@ pub struct RenameTableOperation {
 }
 
 impl RenameTableOperation {
-    pub fn display(&self, dialect: Dialect) -> impl Display + '_ {
+    pub fn display(&self, dialect: Dialect) -> impl Display + Copy + '_ {
         fmt_with(move |f| {
             write!(
                 f,

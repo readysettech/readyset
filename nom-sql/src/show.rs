@@ -26,7 +26,7 @@ pub enum ShowStatement {
 }
 
 impl ShowStatement {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             write!(f, "SHOW ")?;
             match self {
@@ -124,7 +124,7 @@ pub struct Tables {
 }
 
 impl Tables {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             if self.full {
                 write!(f, "FULL ")?;
@@ -175,7 +175,7 @@ pub enum FilterPredicate {
 }
 
 impl FilterPredicate {
-    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| match self {
             Self::Like(like) => write!(f, "LIKE '{}'", like),
             Self::Where(expr) => write!(f, "WHERE {}", expr.display(dialect)),
