@@ -1,3 +1,4 @@
+use std::fmt;
 use std::str::{self, FromStr};
 
 use bit_vec::BitVec;
@@ -166,6 +167,20 @@ impl Dialect {
             Dialect::PostgreSQL => QuotingStyle::Single,
             Dialect::MySQL => QuotingStyle::SingleOrDouble,
         }
+    }
+
+    /// Returns the table/column identifier quoting character for this dialect.
+    pub fn quote_identifier_char(self) -> char {
+        match self {
+            Self::PostgreSQL => '"',
+            Self::MySQL => '`',
+        }
+    }
+
+    /// Quotes the table/column identifier appropriately for this dialect.
+    pub fn quote_identifier(self, ident: impl fmt::Display) -> impl fmt::Display {
+        let quote = self.quote_identifier_char();
+        fmty::fmt_args!("{quote}{ident}{quote}")
     }
 
     /// Parse the raw (byte) content of a string literal using this Dialect

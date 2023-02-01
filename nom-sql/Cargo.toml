@@ -30,6 +30,7 @@ triomphe = "0.1"
 lazy_static = "1.4"
 nom_locate = "4.0.0"
 fail = "0.5.0"
+fmty = "0.1.0"
 
 concrete-iter = { path = "../concrete-iter" }
 failpoint-macros = { path = "../failpoint-macros" }
