@@ -66,7 +66,7 @@ impl Column {
     /// quoted.
     ///
     /// This should not be used to emit SQL code and instead should mostly be for error messages.
-    pub fn display_unquoted(&self) -> impl fmt::Display + '_ {
+    pub fn display_unquoted(&self) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             if let Some(ref table) = self.table {
                 write!(f, "{}.", table.display_unquoted())?;

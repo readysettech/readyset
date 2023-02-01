@@ -86,7 +86,7 @@ impl Relation {
     /// Like [`display()`](Self::display) except the schema and table name will not be quoted.
     ///
     /// This should not be used to emit SQL code and instead should mostly be for error messages.
-    pub fn display_unquoted(&self) -> impl Display + '_ {
+    pub fn display_unquoted(&self) -> impl Display + Copy + '_ {
         fmt_with(move |f| {
             if let Some(schema) = &self.schema {
                 write!(f, "{schema}.")?;
