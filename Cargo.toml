@@ -2,6 +2,9 @@
 tokio-postgres = {  git = "https://github.com/readysettech/rust-postgres.git"}
 mysql_async = { git = "https://github.com/readysettech/mysql_async", branch = "lru-fix" }
 eui48 = { git = "https://github.com/readysettech/eui48.git", branch = "master" }
+opentelemetry = { git = "https://github.com/open-telemetry/opentelemetry-rust" }
+opentelemetry-otlp = { git = "https://github.com/open-telemetry/opentelemetry-rust" }
+opentelemetry-semantic-conventions = { git = "https://github.com/open-telemetry/opentelemetry-rust" }
 
 [workspace]
 members = [
