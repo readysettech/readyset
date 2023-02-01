@@ -55,7 +55,7 @@ impl DomainMetrics {
         let index: SharedString = replica_address.domain_index.index().to_string().into();
         let shard: SharedString = replica_address.shard.to_string().into();
 
-        let labels = vec![
+        let labels_with_domain_and_shard = vec![
             Label::new("domain", index.clone()),
             Label::new("shard", shard.clone()),
         ];
@@ -74,27 +74,18 @@ impl DomainMetrics {
         DomainMetrics {
             partial_state_size: register_gauge!(
                 recorded::DOMAIN_PARTIAL_STATE_SIZE_BYTES,
-                labels.clone()
+                labels_with_domain_and_shard.clone()
             ),
-            reader_state_size: register_gauge!(
-                recorded::DOMAIN_READER_STATE_SIZE_BYTES,
-                labels.clone()
-            ),
-            base_table_size: register_gauge!(
-                recorded::DOMAIN_ESTIMATED_BASE_TABLE_SIZE_BYTES,
-                labels.clone()
-            ),
+            reader_state_size: register_gauge!(recorded::READER_STATE_SIZE_BYTES, vec![]),
+            base_table_size: register_gauge!(recorded::ESTIMATED_BASE_TABLE_SIZE_BYTES, vec![]),
             total_node_state_size: register_gauge!(
                 recorded::DOMAIN_TOTAL_NODE_STATE_SIZE_BYTES,
-                labels.clone()
+                labels_with_domain_and_shard
             ),
 
-            eviction_requests: register_counter!(
-                recorded::DOMAIN_EVICTION_REQUESTS,
-                labels.clone()
-            ),
-            eviction_time: register_histogram!(recorded::DOMAIN_EVICTION_TIME, labels.clone()),
-            eviction_size: register_histogram!(recorded::DOMAIN_EVICTION_FREED_MEMORY, labels),
+            eviction_requests: register_counter!(recorded::EVICTION_REQUESTS, vec![],),
+            eviction_time: register_histogram!(recorded::EVICTION_TIME, vec![]),
+            eviction_size: register_histogram!(recorded::EVICTION_FREED_MEMORY, vec![],),
             chuncked_replay_start_time: Default::default(),
             chuncked_replay_time: Default::default(),
             total_replay_time: Default::default(),
@@ -264,16 +255,12 @@ impl DomainMetrics {
         } else {
             let ctr = register_counter!(
                 recorded::DOMAIN_TOTAL_FORWARD_TIME,
-                "domain" => self.index.clone(),
-                "shard" => self.shard.clone(),
                 "from_node" => src.to_string(),
                 "to_node" => dst.to_string(),
             );
 
             let histo = register_histogram!(
                 recorded::DOMAIN_FORWARD_TIME,
-                "domain" => self.index.clone(),
-                "shard" => self.shard.clone(),
                 "from_node" => src.to_string(),
                 "to_node" => dst.to_string(),
             );
@@ -360,9 +347,7 @@ impl DomainMetrics {
             gauge.set(size as f64);
         } else {
             let gauge = register_gauge!(
-                recorded::DOMAIN_NODE_STATE_SIZE_BYTES,
-                "domain" => self.index.clone(),
-                "shard" => self.shard.clone(),
+                recorded::NODE_STATE_SIZE_BYTES,
                 "node" => node.to_string(),
             );
             gauge.set(size as f64);

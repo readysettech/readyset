@@ -39,11 +39,9 @@ pub mod recorded {
     ///
     /// | Tag | Description |
     /// | --- | ----------- |
-    /// | domain | The index of the domain handling the packet. |
-    /// | shard | The shard handling the packet. |
     /// | from_node | The src node of the packet. |
     /// | to_node |The dst node of the packet. |
-    pub const DOMAIN_FORWARD_TIME: &str = "domain.forward_time_us";
+    pub const DOMAIN_FORWARD_TIME: &str = "forward_time_us";
 
     /// Counter: The total time the domain spends handling and forwarding
     /// a Message or Input packet. Recorded at the domain following handling
@@ -51,11 +49,9 @@ pub mod recorded {
     ///
     /// | Tag | Description |
     /// | --- | ----------- |
-    /// | domain | The index of the domain handling the packet. |
-    /// | shard | The shard handling the packet. |
     /// | from_node | The src node of the packet. |
     /// | to_node |The dst node of the packet. |
-    pub const DOMAIN_TOTAL_FORWARD_TIME: &str = "domain.total_forward_time_us";
+    pub const DOMAIN_TOTAL_FORWARD_TIME: &str = "total_forward_time_us";
 
     /// Histogram: The time in microseconds that a domain spends
     /// handling a ReplayPiece packet. Recorded at the domain following
@@ -219,15 +215,9 @@ pub mod recorded {
     /// | tag | The client tag of the request that the Finish packet is required for. |
     pub const DOMAIN_TOTAL_SEED_ALL_TIME: &str = "domain.total_seed_all_time_us";
 
-    /// Histogram: The amount of time the domain spends handling an eviction
+    /// Histogram: The amount of time spent handling an eviction
     /// request.
-    ///
-    /// | Tag | Description |
-    /// | --- | ----------- |
-    ///
-    /// | domain | The domain that the eviction is performed in. |
-    /// | shard | The shard that the eviction is performed in. |
-    pub const DOMAIN_EVICTION_TIME: &str = "domain.eviction_time_us";
+    pub const EVICTION_TIME: &str = "eviction_time_us";
 
     /// Histogram: The time in microseconds that the controller spent committing
     /// a migration to the soup graph. Recorded at the controller at the end of
@@ -257,10 +247,9 @@ pub mod recorded {
     ///
     /// | Tag | Description |
     /// | --- | ----------- |
-    /// | domain | The index of the domain. |
-    /// | shard | The shard identifier of the domain. |
     /// | node | The LocalNodeIndex of the dataflow node. |
-    pub const DOMAIN_NODE_STATE_SIZE_BYTES: &str = "domain.node_state_size_bytes";
+    pub const NODE_STATE_SIZE_BYTES: &str = "node_state_size_bytes";
+
     /// Gauge: The sum of the amount of bytes used to store the dataflow node's
     /// partial state within a domain.
     ///
@@ -272,22 +261,11 @@ pub mod recorded {
 
     /// Gauge: The sum of the amount of bytes used to store a node's reader state
     /// within a domain.
-    ///
-    /// | Tag | Description |
-    /// | --- | ----------- |
-    /// | domain | The index of the domain. |
-    /// | shard | The shard identifier of the domain. |
-    pub const DOMAIN_READER_STATE_SIZE_BYTES: &str = "domain.reader_state_size_bytes";
+    pub const READER_STATE_SIZE_BYTES: &str = "reader_state_size_bytes";
 
     /// Gauge: The sum of the amount of bytes used to store a node's base tables
     /// on disk.
-    ///
-    /// | Tag | Description |
-    /// | --- | ----------- |
-    /// | domain | The index of the domain. |
-    /// | shard | The shard identifier of the domain. |
-    pub const DOMAIN_ESTIMATED_BASE_TABLE_SIZE_BYTES: &str =
-        "domain.base_tables_estimated_size_bytes";
+    pub const ESTIMATED_BASE_TABLE_SIZE_BYTES: &str = "base_tables_estimated_size_bytes";
 
     /// Gauge: The sum of a domain's total node state and reader state bytes.
     ///
@@ -333,21 +311,11 @@ pub mod recorded {
     /// | node | The NodeIndex of the ingress node were the packet was sent. |
     pub const EGRESS_NODE_SENT_PACKETS: &str = "egress.sent_packets";
 
-    /// Counter: The number of eviction packets that a domain has received.
-    ///
-    /// | Tag | Description |
-    /// | --- | ----------- |
-    /// | domain | The index of the domain. |
-    /// | shard | The shard identifier of the domain. |
-    pub const DOMAIN_EVICTION_REQUESTS: &str = "domain.eviction_requests";
+    /// Counter: The number of eviction packets received.
+    pub const EVICTION_REQUESTS: &str = "eviction_requests";
 
-    /// Histogram: The total number of bytes that a domain has evicted.
-    ///
-    /// | Tag | Description |
-    /// | --- | ----------- |
-    /// | domain | The index of the domain. |
-    /// | shard | The shard identifier of the domain. |
-    pub const DOMAIN_EVICTION_FREED_MEMORY: &str = "domain.eviction_freed_memory";
+    /// Histogram: The total number of bytes evicted.
+    pub const EVICTION_FREED_MEMORY: &str = "eviction_freed_memory";
 
     /// Counter: The number of times a query was served entirely from reader cache.
     pub const SERVER_VIEW_QUERY_HIT: &str = "server.view_query_result_hit";
@@ -364,10 +332,9 @@ pub mod recorded {
     ///
     /// | Tag | Description |
     /// | --- | ----------- |
-    /// | domain | The index of the domain. |
     /// | ntype | The dataflow node type. |
     /// | node  | The index of the dataflow node. |
-    pub const DOMAIN_NODE_ADDED: &str = "domain.node_added";
+    pub const NODE_ADDED: &str = "node_added";
 
     /// Counter: The number of times a dataflow packet has been propagated
     /// for each domain.

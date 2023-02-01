@@ -180,14 +180,6 @@ async fn it_works_basic_impl() {
         Some(DumpedMetricValue::Counter(1.0))
     );*/
 
-    assert!(matches!(
-        get_metric!(
-            metrics_dump,
-            recorded::DOMAIN_ESTIMATED_BASE_TABLE_SIZE_BYTES,
-            "domain" => "0"
-        )
-        .unwrap(), DumpedMetricValue::Gauge(v) if v > 16.0));
-
     // Delete first record
     muta.delete(vec![id.clone()]).await.unwrap();
 

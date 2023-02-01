@@ -291,7 +291,7 @@ async fn metrics_task(
     interval.tick().await; // First tick is immediate
 
     let initial = scrape_metrics(&metrics_url, &metrics_client).await?;
-    let mut last_evicted = get_total_for_metric(&initial, recorded::DOMAIN_EVICTION_FREED_MEMORY);
+    let mut last_evicted = get_total_for_metric(&initial, recorded::EVICTION_FREED_MEMORY);
     let mut last_hits = get_metric(&initial, recorded::SERVER_VIEW_QUERY_HIT);
     let mut last_misses = get_metric(&initial, recorded::SERVER_VIEW_QUERY_MISS);
     let mut scale = 1.0;
@@ -304,7 +304,7 @@ async fn metrics_task(
 
         let metrics = scrape_metrics(&metrics_url, &metrics_client).await?;
 
-        let evicted = get_total_for_metric(&metrics, recorded::DOMAIN_EVICTION_FREED_MEMORY);
+        let evicted = get_total_for_metric(&metrics, recorded::EVICTION_FREED_MEMORY);
         let hit = get_metric(&metrics, recorded::SERVER_VIEW_QUERY_HIT);
         let miss = get_metric(&metrics, recorded::SERVER_VIEW_QUERY_MISS);
 

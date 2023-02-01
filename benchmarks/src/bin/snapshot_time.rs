@@ -83,7 +83,7 @@ fn tables_size_metric_mib() -> f64 {
     let metrics: MetricsDump =
         serde_json::from_str(&metrics_handle.render(RecorderType::Noria).unwrap()).unwrap();
 
-    let base_sizes = &metrics.metrics[recorded::DOMAIN_ESTIMATED_BASE_TABLE_SIZE_BYTES];
+    let base_sizes = &metrics.metrics[recorded::ESTIMATED_BASE_TABLE_SIZE_BYTES];
 
     let byte_size: f64 = base_sizes.iter().map(|s| s.value.value().unwrap()).sum();
 
