@@ -456,6 +456,14 @@ pub mod recorded {
     /// get written to the authority (due to a failure). It is only recorded when the Consul
     /// authority is in use
     pub const DATAFLOW_STATE_SERIALIZED: &str = "dataflow_state.serialized_size";
+
+    /// Gauge: A stub gague used to report the version information for the adapter.
+    /// Labels are used to convey the version information.
+    pub const READYSET_ADAPTER_VERSION: &str = "readyset.adapter_version";
+
+    /// Gauge: A stub gague used to report the version information for the server.
+    /// Labels are used to convey the version information.
+    pub const READYSET_SERVER_VERSION: &str = "readyset.server_version";
 }
 
 /// A dumped metric's kind.

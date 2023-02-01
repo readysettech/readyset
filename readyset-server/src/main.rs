@@ -168,6 +168,19 @@ fn main() -> anyhow::Result<()> {
     }
     install_global_recorder(CompositeMetricsRecorder::with_recorders(recs)).unwrap();
 
+    metrics::gauge!(
+        recorded::READYSET_SERVER_VERSION,
+        1.0,
+        &[
+            ("release_version", READYSET_VERSION.release_version),
+            ("commit_id", READYSET_VERSION.commit_id),
+            ("platform", READYSET_VERSION.platform),
+            ("rustc_version", READYSET_VERSION.rustc_version),
+            ("profile", READYSET_VERSION.profile),
+            ("profile", READYSET_VERSION.profile),
+            ("opt_level", READYSET_VERSION.opt_level),
+        ]
+    );
     metrics::counter!(
         recorded::NORIA_STARTUP_TIMESTAMP,
         SystemTime::now()
