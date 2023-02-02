@@ -115,11 +115,30 @@ mod tests {
         );
     }
 
-    #[test]
-    fn format_delete() {
-        let qstring = "DELETE FROM users WHERE id = 1";
-        let expected = "DELETE FROM `users` WHERE (`id` = 1)";
-        let res = deletion(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
-        assert_eq!(res.unwrap().1.display(Dialect::MySQL).to_string(), expected);
+    mod mysql {
+        use super::*;
+
+        #[test]
+        fn format_delete() {
+            let qstring = "DELETE FROM users WHERE id = 1";
+            let expected = "DELETE FROM `users` WHERE (`id` = 1)";
+            let res = deletion(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
+            assert_eq!(res.unwrap().1.display(Dialect::MySQL).to_string(), expected);
+        }
+    }
+
+    mod postgres {
+        use super::*;
+
+        #[test]
+        fn format_delete() {
+            let qstring = "DELETE FROM users WHERE id = 1";
+            let expected = "DELETE FROM \"users\" WHERE (\"id\" = 1)";
+            let res = deletion(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
+            assert_eq!(
+                res.unwrap().1.display(Dialect::PostgreSQL).to_string(),
+                expected
+            );
+        }
     }
 }

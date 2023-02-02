@@ -614,7 +614,7 @@ mod tests {
                 set(Dialect::PostgreSQL),
                 b"SET client_min_messages TO 'warning'"
             );
-            let roundtripped = res.display(Dialect::MySQL).to_string();
+            let roundtripped = res.display(Dialect::PostgreSQL).to_string();
             assert_eq!(roundtripped, "SET client_min_messages = 'warning'");
 
             assert_eq!(
@@ -632,7 +632,7 @@ mod tests {
         #[test]
         fn set_session_timezone() {
             let res = test_parse!(set(Dialect::PostgreSQL), b"SET SESSION timezone TO 'UTC'");
-            let roundtripped = res.display(Dialect::MySQL).to_string();
+            let roundtripped = res.display(Dialect::PostgreSQL).to_string();
             assert_eq!(roundtripped, "SET SESSION timezone = 'UTC'");
 
             assert_eq!(
@@ -650,7 +650,7 @@ mod tests {
         #[test]
         fn set_names() {
             let res = test_parse!(set(Dialect::PostgreSQL), b"SET NAMES 'UTF8'");
-            let roundtripped = res.display(Dialect::MySQL).to_string();
+            let roundtripped = res.display(Dialect::PostgreSQL).to_string();
             assert_eq!(roundtripped, "SET NAMES 'UTF8'");
 
             assert_eq!(
@@ -666,7 +666,7 @@ mod tests {
         fn set_default() {
             let res1 = test_parse!(set(Dialect::PostgreSQL), b"SET SESSION timezone TO DEFAULT");
             let res2 = test_parse!(set(Dialect::PostgreSQL), b"SET SESSION timezone = DEFAULT");
-            let roundtripped = res1.display(Dialect::MySQL).to_string();
+            let roundtripped = res1.display(Dialect::PostgreSQL).to_string();
             assert_eq!(roundtripped, "SET SESSION timezone = DEFAULT");
 
             assert_eq!(
@@ -683,7 +683,7 @@ mod tests {
         #[test]
         fn set_list() {
             let res = test_parse!(set(Dialect::PostgreSQL), b"SET LOCAL whatever = 'x', 1, hi");
-            let roundtripped = res.display(Dialect::MySQL).to_string();
+            let roundtripped = res.display(Dialect::PostgreSQL).to_string();
             assert_eq!(roundtripped, "SET LOCAL whatever = 'x', 1, hi");
 
             assert_eq!(

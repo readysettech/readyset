@@ -180,14 +180,6 @@ mod tests {
     }
 
     #[test]
-    fn format_drop_table() {
-        let qstring = "DROP TABLE IF EXISTS users,posts;";
-        let expected = "DROP TABLE IF EXISTS `users`, `posts`";
-        let res = drop_table(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
-        assert_eq!(res.unwrap().1.display(Dialect::MySQL).to_string(), expected);
-    }
-
-    #[test]
     fn drop_table_qualified() {
         let res = test_parse!(
             drop_table(Dialect::PostgreSQL),
@@ -252,16 +244,54 @@ mod tests {
         assert!(!res.if_exists);
     }
 
-    #[test]
-    fn format_drop_view() {
-        let stmt = DropViewStatement {
-            views: vec!["v1".into(), "v2".into()],
-            if_exists: true,
-        };
+    mod mysql {
+        use super::*;
 
-        assert_eq!(
-            stmt.display(Dialect::MySQL).to_string(),
-            "DROP VIEW IF EXISTS `v1`, `v2`"
-        );
+        #[test]
+        fn format_drop_table() {
+            let qstring = "DROP TABLE IF EXISTS users,posts;";
+            let expected = "DROP TABLE IF EXISTS `users`, `posts`";
+            let res = drop_table(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
+            assert_eq!(res.unwrap().1.display(Dialect::MySQL).to_string(), expected);
+        }
+
+        #[test]
+        fn format_drop_view() {
+            let stmt = DropViewStatement {
+                views: vec!["v1".into(), "v2".into()],
+                if_exists: true,
+            };
+            assert_eq!(
+                stmt.display(Dialect::MySQL).to_string(),
+                "DROP VIEW IF EXISTS `v1`, `v2`"
+            );
+        }
+    }
+
+    mod postgres {
+        use super::*;
+
+        #[test]
+        fn format_drop_table() {
+            let qstring = "DROP TABLE IF EXISTS users,posts;";
+            let expected = "DROP TABLE IF EXISTS \"users\", \"posts\"";
+            let res = drop_table(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
+            assert_eq!(
+                res.unwrap().1.display(Dialect::PostgreSQL).to_string(),
+                expected
+            );
+        }
+
+        #[test]
+        fn format_drop_view() {
+            let stmt = DropViewStatement {
+                views: vec!["v1".into(), "v2".into()],
+                if_exists: true,
+            };
+            assert_eq!(
+                stmt.display(Dialect::PostgreSQL).to_string(),
+                "DROP VIEW IF EXISTS \"v1\", \"v2\""
+            );
+        }
     }
 }

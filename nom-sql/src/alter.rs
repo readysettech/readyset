@@ -473,38 +473,6 @@ mod tests {
     use crate::{Column, Dialect, SqlType};
 
     #[test]
-    fn display_add_column() {
-        let stmt = AlterTableStatement {
-            table: "t".into(),
-            definitions: Ok(vec![AlterTableDefinition::AddColumn(ColumnSpecification {
-                column: Column {
-                    name: "c".into(),
-                    table: None,
-                },
-                sql_type: SqlType::Int(Some(32)),
-                comment: None,
-                constraints: vec![],
-            })]),
-            only: false,
-        };
-
-        let result = stmt.display(Dialect::MySQL).to_string();
-        assert_eq!(result, "ALTER TABLE `t` ADD COLUMN `c` INT(32)");
-    }
-
-    #[test]
-    fn display_unsupported() {
-        let stmt = AlterTableStatement {
-            table: "t".into(),
-            definitions: Err("unsupported rest of the query".to_string()),
-            only: false,
-        };
-
-        let result = stmt.display(Dialect::MySQL).to_string();
-        assert_eq!(result, "ALTER TABLE `t` unsupported rest of the query");
-    }
-
-    #[test]
     fn parse_add_column_no_column_tag() {
         let qstring = b"ALTER TABLE employees ADD Email varchar(255), ADD snailmail TEXT";
         let expected = AlterTableStatement {
@@ -542,6 +510,38 @@ mod tests {
         use super::*;
         use crate::common::ReferentialAction;
         use crate::{Column, ColumnConstraint, SqlType};
+
+        #[test]
+        fn display_add_column() {
+            let stmt = AlterTableStatement {
+                table: "t".into(),
+                definitions: Ok(vec![AlterTableDefinition::AddColumn(ColumnSpecification {
+                    column: Column {
+                        name: "c".into(),
+                        table: None,
+                    },
+                    sql_type: SqlType::Int(Some(32)),
+                    comment: None,
+                    constraints: vec![],
+                })]),
+                only: false,
+            };
+
+            let result = stmt.display(Dialect::MySQL).to_string();
+            assert_eq!(result, "ALTER TABLE `t` ADD COLUMN `c` INT(32)");
+        }
+
+        #[test]
+        fn display_unsupported() {
+            let stmt = AlterTableStatement {
+                table: "t".into(),
+                definitions: Err("unsupported rest of the query".to_string()),
+                only: false,
+            };
+
+            let result = stmt.display(Dialect::MySQL).to_string();
+            assert_eq!(result, "ALTER TABLE `t` unsupported rest of the query");
+        }
 
         #[test]
         fn parse_unsupported() {
@@ -872,6 +872,38 @@ mod tests {
     mod postgres {
         use super::*;
         use crate::{Column, IndexType, SqlType};
+
+        #[test]
+        fn display_add_column() {
+            let stmt = AlterTableStatement {
+                table: "t".into(),
+                definitions: Ok(vec![AlterTableDefinition::AddColumn(ColumnSpecification {
+                    column: Column {
+                        name: "c".into(),
+                        table: None,
+                    },
+                    sql_type: SqlType::Int(Some(32)),
+                    comment: None,
+                    constraints: vec![],
+                })]),
+                only: false,
+            };
+
+            let result = stmt.display(Dialect::PostgreSQL).to_string();
+            assert_eq!(result, "ALTER TABLE \"t\" ADD COLUMN \"c\" INT(32)");
+        }
+
+        #[test]
+        fn display_unsupported() {
+            let stmt = AlterTableStatement {
+                table: "t".into(),
+                definitions: Err("unsupported rest of the query".to_string()),
+                only: false,
+            };
+
+            let result = stmt.display(Dialect::PostgreSQL).to_string();
+            assert_eq!(result, "ALTER TABLE \"t\" unsupported rest of the query");
+        }
 
         #[test]
         fn parse_unsupported() {

@@ -1920,26 +1920,6 @@ mod tests {
         }
 
         #[test]
-        fn not_in_comparison() {
-            let qs1 = b"id not in (1,2)";
-            let res1 = expression(Dialect::MySQL)(LocatedSpan::new(qs1));
-
-            let c1 = res1.unwrap().1;
-            let expected1 = Expr::In {
-                lhs: Box::new(Expr::Column("id".into())),
-                rhs: InValue::List(vec![
-                    Expr::Literal(1_u32.into()),
-                    Expr::Literal(2_u32.into()),
-                ]),
-                negated: true,
-            };
-            assert_eq!(c1, expected1);
-
-            let expected1 = "`id` NOT IN (1, 2)";
-            assert_eq!(c1.display(Dialect::MySQL).to_string(), expected1);
-        }
-
-        #[test]
         fn between_simple() {
             let qs = b"foo between 1 and 2";
             let expected = Expr::Between {
@@ -2131,75 +2111,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn case_display() {
-        let c1 = Column {
-            name: "foo".into(),
-            table: None,
-        };
-
-        let exp = Expr::CaseWhen {
-            branches: vec![CaseWhenBranch {
-                condition: Expr::BinaryOp {
-                    op: BinaryOperator::Equal,
-                    lhs: Box::new(Expr::Column(c1.clone())),
-                    rhs: Box::new(Expr::Literal(Literal::Integer(0))),
-                },
-                body: Expr::Column(c1.clone()),
-            }],
-            else_expr: Some(Box::new(Expr::Literal(Literal::Integer(1)))),
-        };
-
-        assert_eq!(
-            exp.display(Dialect::MySQL).to_string(),
-            "CASE WHEN (`foo` = 0) THEN `foo` ELSE 1 END"
-        );
-
-        let exp_no_else = Expr::CaseWhen {
-            branches: vec![CaseWhenBranch {
-                condition: Expr::BinaryOp {
-                    op: BinaryOperator::Equal,
-                    lhs: Box::new(Expr::Column(c1.clone())),
-                    rhs: Box::new(Expr::Literal(Literal::Integer(0))),
-                },
-                body: Expr::Column(c1.clone()),
-            }],
-            else_expr: None,
-        };
-
-        assert_eq!(
-            exp_no_else.display(Dialect::MySQL).to_string(),
-            "CASE WHEN (`foo` = 0) THEN `foo` END"
-        );
-
-        let exp_multiple_branches = Expr::CaseWhen {
-            branches: vec![
-                CaseWhenBranch {
-                    condition: Expr::BinaryOp {
-                        op: BinaryOperator::Equal,
-                        lhs: Box::new(Expr::Column(c1.clone())),
-                        rhs: Box::new(Expr::Literal(Literal::Integer(0))),
-                    },
-                    body: Expr::Column(c1.clone()),
-                },
-                CaseWhenBranch {
-                    condition: Expr::BinaryOp {
-                        op: BinaryOperator::Equal,
-                        lhs: Box::new(Expr::Column(c1.clone())),
-                        rhs: Box::new(Expr::Literal(Literal::Integer(7))),
-                    },
-                    body: Expr::Column(c1),
-                },
-            ],
-            else_expr: None,
-        };
-
-        assert_eq!(
-            exp_multiple_branches.display(Dialect::MySQL).to_string(),
-            "CASE WHEN (`foo` = 0) THEN `foo` WHEN (`foo` = 7) THEN `foo` END"
-        );
-    }
-
     mod mysql {
         use super::*;
 
@@ -2212,6 +2123,95 @@ mod tests {
                     name: "nullable".into(),
                     table: None
                 })
+            );
+        }
+
+        #[test]
+        fn not_in_comparison() {
+            let qs1 = b"id not in (1,2)";
+            let res1 = expression(Dialect::MySQL)(LocatedSpan::new(qs1));
+
+            let c1 = res1.unwrap().1;
+            let expected1 = Expr::In {
+                lhs: Box::new(Expr::Column("id".into())),
+                rhs: InValue::List(vec![
+                    Expr::Literal(1_u32.into()),
+                    Expr::Literal(2_u32.into()),
+                ]),
+                negated: true,
+            };
+            assert_eq!(c1, expected1);
+
+            let expected1 = "`id` NOT IN (1, 2)";
+            assert_eq!(c1.display(Dialect::MySQL).to_string(), expected1);
+        }
+
+        #[test]
+        fn case_display() {
+            let c1 = Column {
+                name: "foo".into(),
+                table: None,
+            };
+
+            let exp = Expr::CaseWhen {
+                branches: vec![CaseWhenBranch {
+                    condition: Expr::BinaryOp {
+                        op: BinaryOperator::Equal,
+                        lhs: Box::new(Expr::Column(c1.clone())),
+                        rhs: Box::new(Expr::Literal(Literal::Integer(0))),
+                    },
+                    body: Expr::Column(c1.clone()),
+                }],
+                else_expr: Some(Box::new(Expr::Literal(Literal::Integer(1)))),
+            };
+
+            assert_eq!(
+                exp.display(Dialect::MySQL).to_string(),
+                "CASE WHEN (`foo` = 0) THEN `foo` ELSE 1 END"
+            );
+
+            let exp_no_else = Expr::CaseWhen {
+                branches: vec![CaseWhenBranch {
+                    condition: Expr::BinaryOp {
+                        op: BinaryOperator::Equal,
+                        lhs: Box::new(Expr::Column(c1.clone())),
+                        rhs: Box::new(Expr::Literal(Literal::Integer(0))),
+                    },
+                    body: Expr::Column(c1.clone()),
+                }],
+                else_expr: None,
+            };
+
+            assert_eq!(
+                exp_no_else.display(Dialect::MySQL).to_string(),
+                "CASE WHEN (`foo` = 0) THEN `foo` END"
+            );
+
+            let exp_multiple_branches = Expr::CaseWhen {
+                branches: vec![
+                    CaseWhenBranch {
+                        condition: Expr::BinaryOp {
+                            op: BinaryOperator::Equal,
+                            lhs: Box::new(Expr::Column(c1.clone())),
+                            rhs: Box::new(Expr::Literal(Literal::Integer(0))),
+                        },
+                        body: Expr::Column(c1.clone()),
+                    },
+                    CaseWhenBranch {
+                        condition: Expr::BinaryOp {
+                            op: BinaryOperator::Equal,
+                            lhs: Box::new(Expr::Column(c1.clone())),
+                            rhs: Box::new(Expr::Literal(Literal::Integer(7))),
+                        },
+                        body: Expr::Column(c1),
+                    },
+                ],
+                else_expr: None,
+            };
+
+            assert_eq!(
+                exp_multiple_branches.display(Dialect::MySQL).to_string(),
+                "CASE WHEN (`foo` = 0) THEN `foo` WHEN (`foo` = 7) THEN `foo` END"
             );
         }
 
@@ -2376,6 +2376,97 @@ mod tests {
                     name: "nullable".into(),
                     table: None
                 })
+            );
+        }
+
+        #[test]
+        fn not_in_comparison() {
+            let qs1 = b"id not in (1,2)";
+            let res1 = expression(Dialect::PostgreSQL)(LocatedSpan::new(qs1));
+
+            let c1 = res1.unwrap().1;
+            let expected1 = Expr::In {
+                lhs: Box::new(Expr::Column("id".into())),
+                rhs: InValue::List(vec![
+                    Expr::Literal(1_u32.into()),
+                    Expr::Literal(2_u32.into()),
+                ]),
+                negated: true,
+            };
+            assert_eq!(c1, expected1);
+
+            let expected1 = "\"id\" NOT IN (1, 2)";
+            assert_eq!(c1.display(Dialect::PostgreSQL).to_string(), expected1);
+        }
+
+        #[test]
+        fn case_display() {
+            let c1 = Column {
+                name: "foo".into(),
+                table: None,
+            };
+
+            let exp = Expr::CaseWhen {
+                branches: vec![CaseWhenBranch {
+                    condition: Expr::BinaryOp {
+                        op: BinaryOperator::Equal,
+                        lhs: Box::new(Expr::Column(c1.clone())),
+                        rhs: Box::new(Expr::Literal(Literal::Integer(0))),
+                    },
+                    body: Expr::Column(c1.clone()),
+                }],
+                else_expr: Some(Box::new(Expr::Literal(Literal::Integer(1)))),
+            };
+
+            assert_eq!(
+                exp.display(Dialect::PostgreSQL).to_string(),
+                "CASE WHEN (\"foo\" = 0) THEN \"foo\" ELSE 1 END"
+            );
+
+            let exp_no_else = Expr::CaseWhen {
+                branches: vec![CaseWhenBranch {
+                    condition: Expr::BinaryOp {
+                        op: BinaryOperator::Equal,
+                        lhs: Box::new(Expr::Column(c1.clone())),
+                        rhs: Box::new(Expr::Literal(Literal::Integer(0))),
+                    },
+                    body: Expr::Column(c1.clone()),
+                }],
+                else_expr: None,
+            };
+
+            assert_eq!(
+                exp_no_else.display(Dialect::PostgreSQL).to_string(),
+                "CASE WHEN (\"foo\" = 0) THEN \"foo\" END"
+            );
+
+            let exp_multiple_branches = Expr::CaseWhen {
+                branches: vec![
+                    CaseWhenBranch {
+                        condition: Expr::BinaryOp {
+                            op: BinaryOperator::Equal,
+                            lhs: Box::new(Expr::Column(c1.clone())),
+                            rhs: Box::new(Expr::Literal(Literal::Integer(0))),
+                        },
+                        body: Expr::Column(c1.clone()),
+                    },
+                    CaseWhenBranch {
+                        condition: Expr::BinaryOp {
+                            op: BinaryOperator::Equal,
+                            lhs: Box::new(Expr::Column(c1.clone())),
+                            rhs: Box::new(Expr::Literal(Literal::Integer(7))),
+                        },
+                        body: Expr::Column(c1),
+                    },
+                ],
+                else_expr: None,
+            };
+
+            assert_eq!(
+                exp_multiple_branches
+                    .display(Dialect::PostgreSQL)
+                    .to_string(),
+                "CASE WHEN (\"foo\" = 0) THEN \"foo\" WHEN (\"foo\" = 7) THEN \"foo\" END"
             );
         }
 
@@ -2874,7 +2965,7 @@ mod tests {
                     postgres_style: true,
                 },
             ])]);
-            let res = expr.display(Dialect::MySQL).to_string();
+            let res = expr.display(Dialect::PostgreSQL).to_string();
 
             assert_eq!(res, "ARRAY[[1,('2'::INT)]]");
         }

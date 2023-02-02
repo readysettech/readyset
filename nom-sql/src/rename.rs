@@ -80,89 +80,183 @@ mod tests {
     use super::*;
     use crate::table::Relation;
 
-    #[test]
-    fn simple_rename_table() {
-        let qstring = b"RENAME TABLE t1 TO t2";
-        let res = test_parse!(rename_table(Dialect::MySQL), qstring);
-        assert_eq!(
-            res,
-            RenameTableStatement {
-                ops: vec![RenameTableOperation {
-                    from: Relation::from("t1"),
-                    to: Relation::from("t2")
-                }]
-            }
-        );
-        assert_eq!(
-            res.display(Dialect::MySQL).to_string(),
-            "RENAME TABLE `t1` TO `t2`"
-        );
-    }
+    mod mysql {
+        use super::*;
 
-    #[test]
-    fn escaped_rename_table() {
-        let qstring = b"RENAME TABLE `from` TO `to`";
-        let res = test_parse!(rename_table(Dialect::MySQL), qstring);
-        assert_eq!(
-            res,
-            RenameTableStatement {
-                ops: vec![RenameTableOperation {
-                    from: Relation::from("from"),
-                    to: Relation::from("to")
-                }]
-            }
-        );
-        assert_eq!(
-            res.display(Dialect::MySQL).to_string(),
-            "RENAME TABLE `from` TO `to`"
-        );
-    }
-
-    #[test]
-    fn compound_rename_table() {
-        let qstring = b"RENAME TABLE t1 TO t2, `change` to t3, t4 to `select`";
-        let res = test_parse!(rename_table(Dialect::MySQL), qstring);
-        assert_eq!(
-            res,
-            RenameTableStatement {
-                ops: vec![
-                    RenameTableOperation {
+        #[test]
+        fn simple_rename_table() {
+            let qstring = b"RENAME TABLE t1 TO t2";
+            let res = test_parse!(rename_table(Dialect::MySQL), qstring);
+            assert_eq!(
+                res,
+                RenameTableStatement {
+                    ops: vec![RenameTableOperation {
                         from: Relation::from("t1"),
-                        to: Relation::from("t2"),
-                    },
-                    RenameTableOperation {
-                        from: Relation::from("change"),
-                        to: Relation::from("t3"),
-                    },
-                    RenameTableOperation {
-                        from: Relation::from("t4"),
-                        to: Relation::from("select")
-                    }
-                ]
-            }
-        );
-        assert_eq!(
-            res.display(Dialect::MySQL).to_string(),
-            "RENAME TABLE `t1` TO `t2`, `change` TO `t3`, `t4` TO `select`"
-        );
+                        to: Relation::from("t2")
+                    }]
+                }
+            );
+            assert_eq!(
+                res.display(Dialect::MySQL).to_string(),
+                "RENAME TABLE `t1` TO `t2`"
+            );
+        }
+
+        #[test]
+        fn escaped_rename_table() {
+            let qstring = b"RENAME TABLE `from` TO `to`";
+            let res = test_parse!(rename_table(Dialect::MySQL), qstring);
+            assert_eq!(
+                res,
+                RenameTableStatement {
+                    ops: vec![RenameTableOperation {
+                        from: Relation::from("from"),
+                        to: Relation::from("to")
+                    }]
+                }
+            );
+            assert_eq!(
+                res.display(Dialect::MySQL).to_string(),
+                "RENAME TABLE `from` TO `to`"
+            );
+        }
+
+        #[test]
+        fn compound_rename_table() {
+            let qstring = b"RENAME TABLE t1 TO t2, `change` to t3, t4 to `select`";
+            let res = test_parse!(rename_table(Dialect::MySQL), qstring);
+            assert_eq!(
+                res,
+                RenameTableStatement {
+                    ops: vec![
+                        RenameTableOperation {
+                            from: Relation::from("t1"),
+                            to: Relation::from("t2"),
+                        },
+                        RenameTableOperation {
+                            from: Relation::from("change"),
+                            to: Relation::from("t3"),
+                        },
+                        RenameTableOperation {
+                            from: Relation::from("t4"),
+                            to: Relation::from("select")
+                        }
+                    ]
+                }
+            );
+            assert_eq!(
+                res.display(Dialect::MySQL).to_string(),
+                "RENAME TABLE `t1` TO `t2`, `change` TO `t3`, `t4` TO `select`"
+            );
+        }
+
+        #[test]
+        fn flarum_rename_1() {
+            let qstring = b"rename table `posts_likes` to `post_likes`";
+            let res = test_parse!(rename_table(Dialect::MySQL), qstring);
+            assert_eq!(
+                res,
+                RenameTableStatement {
+                    ops: vec![RenameTableOperation {
+                        from: Relation::from("posts_likes"),
+                        to: Relation::from("post_likes"),
+                    }]
+                }
+            );
+            assert_eq!(
+                res.display(Dialect::MySQL).to_string(),
+                "RENAME TABLE `posts_likes` TO `post_likes`"
+            );
+        }
     }
 
-    #[test]
-    fn flarum_rename_1() {
-        let qstring = b"rename table `posts_likes` to `post_likes`";
-        let res = test_parse!(rename_table(Dialect::MySQL), qstring);
-        assert_eq!(
-            res,
-            RenameTableStatement {
-                ops: vec![RenameTableOperation {
-                    from: Relation::from("posts_likes"),
-                    to: Relation::from("post_likes"),
-                }]
-            }
-        );
-        assert_eq!(
-            res.display(Dialect::MySQL).to_string(),
-            "RENAME TABLE `posts_likes` TO `post_likes`"
-        );
+    mod postgres {
+        use super::*;
+
+        #[test]
+        fn simple_rename_table() {
+            let qstring = b"RENAME TABLE t1 TO t2";
+            let res = test_parse!(rename_table(Dialect::PostgreSQL), qstring);
+            assert_eq!(
+                res,
+                RenameTableStatement {
+                    ops: vec![RenameTableOperation {
+                        from: Relation::from("t1"),
+                        to: Relation::from("t2")
+                    }]
+                }
+            );
+            assert_eq!(
+                res.display(Dialect::PostgreSQL).to_string(),
+                "RENAME TABLE \"t1\" TO \"t2\""
+            );
+        }
+
+        #[test]
+        fn escaped_rename_table() {
+            let qstring = b"RENAME TABLE \"from\" TO \"to\"";
+            let res = test_parse!(rename_table(Dialect::PostgreSQL), qstring);
+            assert_eq!(
+                res,
+                RenameTableStatement {
+                    ops: vec![RenameTableOperation {
+                        from: Relation::from("from"),
+                        to: Relation::from("to")
+                    }]
+                }
+            );
+            assert_eq!(
+                res.display(Dialect::PostgreSQL).to_string(),
+                "RENAME TABLE \"from\" TO \"to\""
+            );
+        }
+
+        #[test]
+        fn compound_rename_table() {
+            let qstring = b"RENAME TABLE t1 TO t2, \"change\" to t3, t4 to \"select\"";
+            let res = test_parse!(rename_table(Dialect::PostgreSQL), qstring);
+            assert_eq!(
+                res,
+                RenameTableStatement {
+                    ops: vec![
+                        RenameTableOperation {
+                            from: Relation::from("t1"),
+                            to: Relation::from("t2"),
+                        },
+                        RenameTableOperation {
+                            from: Relation::from("change"),
+                            to: Relation::from("t3"),
+                        },
+                        RenameTableOperation {
+                            from: Relation::from("t4"),
+                            to: Relation::from("select")
+                        }
+                    ]
+                }
+            );
+            assert_eq!(
+                res.display(Dialect::PostgreSQL).to_string(),
+                "RENAME TABLE \"t1\" TO \"t2\", \"change\" TO \"t3\", \"t4\" TO \"select\""
+            );
+        }
+
+        #[test]
+        fn flarum_rename_1() {
+            let qstring = b"rename table \"posts_likes\" to \"post_likes\"";
+            let res = test_parse!(rename_table(Dialect::PostgreSQL), qstring);
+            assert_eq!(
+                res,
+                RenameTableStatement {
+                    ops: vec![RenameTableOperation {
+                        from: Relation::from("posts_likes"),
+                        to: Relation::from("post_likes"),
+                    }]
+                }
+            );
+            assert_eq!(
+                res.display(Dialect::PostgreSQL).to_string(),
+                "RENAME TABLE \"posts_likes\" TO \"post_likes\""
+            );
+        }
     }
 }

@@ -1768,55 +1768,6 @@ mod tests {
         assert_eq!(query.ctes[1].name, "min_val");
     }
 
-    #[test]
-    fn format_ctes() {
-        let query = SelectStatement {
-            ctes: vec![CommonTableExpr {
-                name: "foo".into(),
-                statement: SelectStatement {
-                    fields: vec![FieldDefinitionExpr::Expr {
-                        expr: Expr::Column("x".into()),
-                        alias: None,
-                    }],
-                    tables: vec![TableExpr::from(Relation::from("t"))],
-                    ..Default::default()
-                },
-            }],
-            fields: vec![FieldDefinitionExpr::Expr {
-                expr: Expr::Column("x".into()),
-                alias: None,
-            }],
-            tables: vec![TableExpr::from(Relation::from("foo"))],
-            ..Default::default()
-        };
-        let res = query.display(Dialect::MySQL).to_string();
-        assert_eq!(
-            res,
-            "WITH `foo` AS (SELECT `x` FROM `t`) SELECT `x` FROM `foo`"
-        );
-    }
-
-    #[test]
-    fn bare_having() {
-        let res = test_parse!(
-            selection(Dialect::MySQL),
-            b"select x, count(*) from t having count(*) > 1"
-        );
-        assert_eq!(
-            res.having,
-            Some(Expr::BinaryOp {
-                lhs: Box::new(Expr::Call(FunctionExpr::CountStar)),
-                op: BinaryOperator::Greater,
-                rhs: Box::new(Expr::Literal(1_u32.into()))
-            })
-        );
-        let stringified = res.display(Dialect::MySQL).to_string();
-        assert_eq!(
-            stringified,
-            "SELECT `x`, count(*) FROM `t` HAVING (count(*) > 1)"
-        );
-    }
-
     mod mysql {
         use super::*;
         use crate::column::Column;
@@ -1947,6 +1898,55 @@ mod tests {
                 })
             )
         }
+
+        #[test]
+        fn format_ctes() {
+            let query = SelectStatement {
+                ctes: vec![CommonTableExpr {
+                    name: "foo".into(),
+                    statement: SelectStatement {
+                        fields: vec![FieldDefinitionExpr::Expr {
+                            expr: Expr::Column("x".into()),
+                            alias: None,
+                        }],
+                        tables: vec![TableExpr::from(Relation::from("t"))],
+                        ..Default::default()
+                    },
+                }],
+                fields: vec![FieldDefinitionExpr::Expr {
+                    expr: Expr::Column("x".into()),
+                    alias: None,
+                }],
+                tables: vec![TableExpr::from(Relation::from("foo"))],
+                ..Default::default()
+            };
+            let res = query.display(Dialect::MySQL).to_string();
+            assert_eq!(
+                res,
+                "WITH `foo` AS (SELECT `x` FROM `t`) SELECT `x` FROM `foo`"
+            );
+        }
+
+        #[test]
+        fn bare_having() {
+            let res = test_parse!(
+                selection(Dialect::MySQL),
+                b"select x, count(*) from t having count(*) > 1"
+            );
+            assert_eq!(
+                res.having,
+                Some(Expr::BinaryOp {
+                    lhs: Box::new(Expr::Call(FunctionExpr::CountStar)),
+                    op: BinaryOperator::Greater,
+                    rhs: Box::new(Expr::Literal(1_u32.into()))
+                })
+            );
+            let stringified = res.display(Dialect::MySQL).to_string();
+            assert_eq!(
+                stringified,
+                "SELECT `x`, count(*) FROM `t` HAVING (count(*) > 1)"
+            );
+        }
     }
 
     mod postgres {
@@ -2056,14 +2056,63 @@ mod tests {
         }
 
         #[test]
+        fn format_ctes() {
+            let query = SelectStatement {
+                ctes: vec![CommonTableExpr {
+                    name: "foo".into(),
+                    statement: SelectStatement {
+                        fields: vec![FieldDefinitionExpr::Expr {
+                            expr: Expr::Column("x".into()),
+                            alias: None,
+                        }],
+                        tables: vec![TableExpr::from(Relation::from("t"))],
+                        ..Default::default()
+                    },
+                }],
+                fields: vec![FieldDefinitionExpr::Expr {
+                    expr: Expr::Column("x".into()),
+                    alias: None,
+                }],
+                tables: vec![TableExpr::from(Relation::from("foo"))],
+                ..Default::default()
+            };
+            let res = query.display(Dialect::PostgreSQL).to_string();
+            assert_eq!(
+                res,
+                "WITH \"foo\" AS (SELECT \"x\" FROM \"t\") SELECT \"x\" FROM \"foo\""
+            );
+        }
+
+        #[test]
+        fn bare_having() {
+            let res = test_parse!(
+                selection(Dialect::PostgreSQL),
+                b"select x, count(*) from t having count(*) > 1"
+            );
+            assert_eq!(
+                res.having,
+                Some(Expr::BinaryOp {
+                    lhs: Box::new(Expr::Call(FunctionExpr::CountStar)),
+                    op: BinaryOperator::Greater,
+                    rhs: Box::new(Expr::Literal(1_u32.into()))
+                })
+            );
+            let stringified = res.display(Dialect::PostgreSQL).to_string();
+            assert_eq!(
+                stringified,
+                "SELECT \"x\", count(*) FROM \"t\" HAVING (count(*) > 1)"
+            );
+        }
+
+        #[test]
         fn flarum_select_roundtrip_1() {
-            let qstr = "select exists(select * from `groups` where `id` = ?) as `exists`";
-            let res = test_parse!(selection(Dialect::MySQL), qstr.as_bytes());
-            let qstr = res.display(Dialect::MySQL).to_string();
+            let qstr = "select exists(select * from \"groups\" where \"id\" = ?) as \"exists\"";
+            let res = test_parse!(selection(Dialect::PostgreSQL), qstr.as_bytes());
+            let qstr = res.display(Dialect::PostgreSQL).to_string();
             println!("{}", qstr);
             assert_eq!(
                 qstr,
-                "SELECT EXISTS (SELECT * FROM `groups` WHERE (`id` = ?)) AS `exists`"
+                "SELECT EXISTS (SELECT * FROM \"groups\" WHERE (\"id\" = ?)) AS \"exists\""
             );
         }
 

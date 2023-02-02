@@ -130,14 +130,6 @@ mod tests {
     }
 
     #[test]
-    fn format_update_with_where_clause() {
-        let qstring = "UPDATE users SET id = 42, name = 'test' WHERE id = 1";
-        let expected = "UPDATE `users` SET `id` = 42, `name` = 'test' WHERE (`id` = 1)";
-        let res = updating(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
-        assert_eq!(res.unwrap().1.display(Dialect::MySQL).to_string(), expected);
-    }
-
-    #[test]
     fn update_with_arithmetic_and_where() {
         let qstring = "UPDATE users SET karma = karma + 1 WHERE users.id = ?;";
 
@@ -229,6 +221,14 @@ mod tests {
         }
 
         #[test]
+        fn format_update_with_where_clause() {
+            let qstring = "UPDATE users SET id = 42, name = 'test' WHERE id = 1";
+            let expected = "UPDATE `users` SET `id` = 42, `name` = 'test' WHERE (`id` = 1)";
+            let res = updating(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
+            assert_eq!(res.unwrap().1.display(Dialect::MySQL).to_string(), expected);
+        }
+
+        #[test]
         fn flarum_update_1() {
             let qstring = b"update `group_permission` set `permission` = REPLACE(permission,  'viewDiscussions', 'viewForum') where `permission` LIKE '%viewDiscussions'";
             let res = test_parse!(updating(Dialect::MySQL), qstring);
@@ -316,6 +316,17 @@ mod tests {
                     ),],
                     where_clause: None
                 }
+            );
+        }
+
+        #[test]
+        fn format_update_with_where_clause() {
+            let qstring = "UPDATE users SET id = 42, name = 'test' WHERE id = 1";
+            let expected = "UPDATE \"users\" SET \"id\" = 42, \"name\" = 'test' WHERE (\"id\" = 1)";
+            let res = updating(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
+            assert_eq!(
+                res.unwrap().1.display(Dialect::PostgreSQL).to_string(),
+                expected
             );
         }
     }

@@ -148,17 +148,39 @@ mod tests {
         assert_eq!(res3.unwrap().1.order, Some(expected_ord3));
     }
 
-    #[test]
-    fn order_prints_column_table() {
-        let clause = OrderClause {
-            order_by: vec![(
-                FieldReference::Expr(Expr::Column("t.n".into())),
-                Some(OrderType::OrderDescending),
-            )],
-        };
-        assert_eq!(
-            clause.display(Dialect::MySQL).to_string(),
-            "ORDER BY `t`.`n` DESC"
-        );
+    mod mysql {
+        use super::*;
+
+        #[test]
+        fn order_prints_column_table() {
+            let clause = OrderClause {
+                order_by: vec![(
+                    FieldReference::Expr(Expr::Column("t.n".into())),
+                    Some(OrderType::OrderDescending),
+                )],
+            };
+            assert_eq!(
+                clause.display(Dialect::MySQL).to_string(),
+                "ORDER BY `t`.`n` DESC"
+            );
+        }
+    }
+
+    mod postgres {
+        use super::*;
+
+        #[test]
+        fn order_prints_column_table() {
+            let clause = OrderClause {
+                order_by: vec![(
+                    FieldReference::Expr(Expr::Column("t.n".into())),
+                    Some(OrderType::OrderDescending),
+                )],
+            };
+            assert_eq!(
+                clause.display(Dialect::PostgreSQL).to_string(),
+                "ORDER BY \"t\".\"n\" DESC"
+            );
+        }
     }
 }

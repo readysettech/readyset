@@ -890,17 +890,6 @@ mod tests {
     }
 
     #[test]
-    fn if_not_exists() {
-        let res = test_parse!(
-            create_table(Dialect::MySQL),
-            b"CREATE TABLE IF NOT EXISTS t (x int)"
-        );
-        assert!(res.if_not_exists);
-        let rt = res.display(Dialect::MySQL).to_string();
-        assert_eq!(rt, "CREATE TABLE IF NOT EXISTS `t` (`x` INT)");
-    }
-
-    #[test]
     fn keys() {
         // simple primary key
         let qstring = "CREATE TABLE users (id bigint(20), name varchar(255), email varchar(255), \
@@ -1311,6 +1300,17 @@ mod tests {
         use crate::column::Column;
         use crate::table::Relation;
         use crate::{to_nom_result, ColumnConstraint, Literal, SqlType, TableExpr};
+
+        #[test]
+        fn if_not_exists() {
+            let res = test_parse!(
+                create_table(Dialect::MySQL),
+                b"CREATE TABLE IF NOT EXISTS t (x int)"
+            );
+            assert!(res.if_not_exists);
+            let rt = res.display(Dialect::MySQL).to_string();
+            assert_eq!(rt, "CREATE TABLE IF NOT EXISTS `t` (`x` INT)");
+        }
 
         #[test]
         fn create_view_with_security_params() {
@@ -1815,6 +1815,17 @@ mod tests {
         use crate::{to_nom_result, ColumnConstraint, Literal, SqlType};
 
         #[test]
+        fn if_not_exists() {
+            let res = test_parse!(
+                create_table(Dialect::PostgreSQL),
+                b"CREATE TABLE IF NOT EXISTS t (x int)"
+            );
+            assert!(res.if_not_exists);
+            let rt = res.display(Dialect::PostgreSQL).to_string();
+            assert_eq!(rt, "CREATE TABLE IF NOT EXISTS \"t\" (\"x\" INT)");
+        }
+
+        #[test]
         fn double_precision_column() {
             let (rem, res) = to_nom_result(create_table(Dialect::PostgreSQL)(LocatedSpan::new(
                 b"create table t(x double precision)",
@@ -1972,11 +1983,14 @@ mod tests {
                        \"id\" integer AUTO_INCREMENT NOT NULL PRIMARY KEY,
                        \"name\" varchar(80) NOT NULL UNIQUE)";
             // TODO(malte): INTEGER isn't quite reflected right here, perhaps
-            let expected = "CREATE TABLE `auth_group` (\
-                        `id` INT AUTO_INCREMENT NOT NULL PRIMARY KEY, \
-                        `name` VARCHAR(80) NOT NULL UNIQUE)";
+            let expected = "CREATE TABLE \"auth_group\" (\
+                        \"id\" INT AUTO_INCREMENT NOT NULL PRIMARY KEY, \
+                        \"name\" VARCHAR(80) NOT NULL UNIQUE)";
             let res = create_table(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
-            assert_eq!(res.unwrap().1.display(Dialect::MySQL).to_string(), expected);
+            assert_eq!(
+                res.unwrap().1.display(Dialect::PostgreSQL).to_string(),
+                expected
+            );
         }
 
         #[test]
@@ -2010,9 +2024,25 @@ mod tests {
         #[test]
         fn format_create_view() {
             let qstring = "CREATE VIEW \"v\" AS SELECT * FROM \"t\";";
-            let expected = "CREATE VIEW `v` AS SELECT * FROM `t`";
+            let expected = "CREATE VIEW \"v\" AS SELECT * FROM \"t\"";
             let res = view_creation(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
-            assert_eq!(res.unwrap().1.display(Dialect::MySQL).to_string(), expected);
+            assert_eq!(
+                res.unwrap().1.display(Dialect::PostgreSQL).to_string(),
+                expected
+            );
+        }
+
+        #[test]
+        fn display_create_query_cache() {
+            let stmt = test_parse!(
+                create_cached_query(Dialect::PostgreSQL),
+                b"CREATE CACHE foo FROM SELECT id FROM users WHERE name = ?"
+            );
+            let res = stmt.display(Dialect::PostgreSQL).to_string();
+            assert_eq!(
+                res,
+                "CREATE CACHE \"foo\" FROM SELECT \"id\" FROM \"users\" WHERE (\"name\" = ?)"
+            );
         }
 
         #[test]

@@ -120,33 +120,71 @@ mod tests {
     use crate::select::{selection, JoinClause, SelectStatement};
     use crate::{BinaryOperator, Dialect, Relation};
 
-    #[test]
-    fn inner_join() {
-        let qstring = "SELECT tags.* FROM tags \
-                       INNER JOIN taggings ON (tags.id = taggings.tag_id)";
-        let expected = "SELECT `tags`.* FROM `tags` \
-                       INNER JOIN `taggings` ON (`tags`.`id` = `taggings`.`tag_id`)";
+    mod mysql {
+        use super::*;
 
-        let res = selection(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
+        #[test]
+        fn inner_join() {
+            let qstring = "SELECT tags.* FROM tags \
+                        INNER JOIN taggings ON (tags.id = taggings.tag_id)";
+            let expected = "SELECT `tags`.* FROM `tags` \
+                        INNER JOIN `taggings` ON (`tags`.`id` = `taggings`.`tag_id`)";
 
-        let join_cond = Expr::BinaryOp {
-            lhs: Box::new(Expr::Column(Column::from("tags.id"))),
-            op: BinaryOperator::Equal,
-            rhs: Box::new(Expr::Column(Column::from("taggings.tag_id"))),
-        };
-        let expected_stmt = SelectStatement {
-            tables: vec![TableExpr::from(Relation::from("tags"))],
-            fields: vec![FieldDefinitionExpr::AllInTable("tags".into())],
-            join: vec![JoinClause {
-                operator: JoinOperator::InnerJoin,
-                right: JoinRightSide::Table(TableExpr::from(Relation::from("taggings"))),
-                constraint: JoinConstraint::On(join_cond),
-            }],
-            ..Default::default()
-        };
+            let res = selection(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
 
-        let q = res.unwrap().1;
-        assert_eq!(q, expected_stmt);
-        assert_eq!(expected, q.display(Dialect::MySQL).to_string());
+            let join_cond = Expr::BinaryOp {
+                lhs: Box::new(Expr::Column(Column::from("tags.id"))),
+                op: BinaryOperator::Equal,
+                rhs: Box::new(Expr::Column(Column::from("taggings.tag_id"))),
+            };
+            let expected_stmt = SelectStatement {
+                tables: vec![TableExpr::from(Relation::from("tags"))],
+                fields: vec![FieldDefinitionExpr::AllInTable("tags".into())],
+                join: vec![JoinClause {
+                    operator: JoinOperator::InnerJoin,
+                    right: JoinRightSide::Table(TableExpr::from(Relation::from("taggings"))),
+                    constraint: JoinConstraint::On(join_cond),
+                }],
+                ..Default::default()
+            };
+
+            let q = res.unwrap().1;
+            assert_eq!(q, expected_stmt);
+            assert_eq!(expected, q.display(Dialect::MySQL).to_string());
+        }
+    }
+
+    mod postgres {
+        use super::*;
+
+        #[test]
+        fn inner_join() {
+            let qstring = "SELECT tags.* FROM tags \
+                        INNER JOIN taggings ON (tags.id = taggings.tag_id)";
+            let expected = "SELECT \"tags\".* FROM \"tags\" \
+                        INNER JOIN \"taggings\" ON (\"tags\".\"id\" = \"taggings\".\"tag_id\")";
+
+            let res = selection(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
+
+            let join_cond = Expr::BinaryOp {
+                lhs: Box::new(Expr::Column(Column::from("tags.id"))),
+                op: BinaryOperator::Equal,
+                rhs: Box::new(Expr::Column(Column::from("taggings.tag_id"))),
+            };
+            let expected_stmt = SelectStatement {
+                tables: vec![TableExpr::from(Relation::from("tags"))],
+                fields: vec![FieldDefinitionExpr::AllInTable("tags".into())],
+                join: vec![JoinClause {
+                    operator: JoinOperator::InnerJoin,
+                    right: JoinRightSide::Table(TableExpr::from(Relation::from("taggings"))),
+                    constraint: JoinConstraint::On(join_cond),
+                }],
+                ..Default::default()
+            };
+
+            let q = res.unwrap().1;
+            assert_eq!(q, expected_stmt);
+            assert_eq!(expected, q.display(Dialect::PostgreSQL).to_string());
+        }
     }
 }
