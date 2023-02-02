@@ -1063,12 +1063,14 @@ impl NoriaConnector {
         q: &nom_sql::SelectStatement,
         prepared: bool,
         create_if_not_exist: bool,
+        override_schema_search_path: Option<Vec<SqlIdentifier>>,
     ) -> ReadySetResult<Relation> {
-        let view_request = ViewCreateRequest::new(q.clone(), self.schema_search_path.clone());
+        let search_path =
+            override_schema_search_path.unwrap_or_else(|| self.schema_search_path().to_vec());
+        let view_request = ViewCreateRequest::new(q.clone(), search_path.clone());
         match self.view_cache.statement_name(&view_request) {
             None => {
-                let qname: Relation =
-                    utils::generate_query_name(q, self.schema_search_path()).into();
+                let qname: Relation = utils::generate_query_name(q, &search_path).into();
 
                 // add the query to ReadySet
                 if create_if_not_exist {
@@ -1091,7 +1093,7 @@ impl NoriaConnector {
                         Change::create_cache(qname.clone(), q.clone(), false),
                         self.dialect,
                     )
-                    .with_schema_search_path(self.schema_search_path.clone());
+                    .with_schema_search_path(search_path);
 
                     if let Err(error) = noria_await!(
                         self.inner.get_mut()?,
@@ -1439,7 +1441,14 @@ impl NoriaConnector {
 
         // check if we already have this query prepared
         trace!("select::access view");
-        let qname = self.get_view(&statement, true, create_if_not_exist).await?;
+        let qname = self
+            .get_view(
+                &statement,
+                true,
+                create_if_not_exist,
+                override_schema_search_path,
+            )
+            .await?;
 
         let view_failed = self.failed_views.take(&qname).is_some();
         let getter = self
@@ -1529,7 +1538,9 @@ impl NoriaConnector {
                 verify_no_placeholders(&statement)?;
                 let processed_query_params =
                     rewrite::process_query(&mut statement, self.server_supports_pagination())?;
-                let name = self.get_view(&statement, false, create_if_missing).await?;
+                let name = self
+                    .get_view(&statement, false, create_if_missing, None)
+                    .await?;
                 (
                     Cow::Owned(name),
                     Cow::Owned(statement),
