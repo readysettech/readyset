@@ -27,7 +27,31 @@ LANGUAGE plpgsql
 AS $$
 DECLARE
     create_message text;
+    needs_replica_identity bool;
 BEGIN
+    SELECT count(*) = 0
+    INTO needs_replica_identity
+    FROM pg_index i
+    JOIN pg_event_trigger_ddl_commands() o ON i.indrelid = o.objid
+    JOIN pg_class c ON o.objid = c.oid
+    WHERE i.indisprimary
+    AND c.relreplident = 'd'
+    AND o.object_type = 'table'
+    AND o.schema_name != 'pg_temp';
+
+    IF needs_replica_identity THEN
+        -- Prevent our ALTER TABLE trigger from running on this command
+        SET LOCAL readyset.current_command_is_replica_identity TO true;
+        EXECUTE format(
+            'ALTER TABLE "%s"."%s" REPLICA IDENTITY FULL',
+            (SELECT schema_name FROM pg_event_trigger_ddl_commands()),
+            (SELECT relname
+             FROM pg_class, pg_event_trigger_ddl_commands() object
+             WHERE oid = object.objid)
+        );
+        SET LOCAL readyset.current_command_is_replica_identity TO false;
+    END IF;
+
     SELECT
     json_build_object(
         'schema', object.schema_name,
@@ -93,7 +117,21 @@ DECLARE
     alter_message text;
     query text;
 BEGIN
+    IF coalesce(
+        nullif(
+            current_setting(
+                'readyset.current_command_is_replica_identity',
+                true
+            ),
+            ''
+        )::boolean,
+        false
+    ) THEN
+        RETURN;
+    END IF;
+
     SELECT current_query() INTO query;
+
     SELECT
     json_build_object(
         'schema', object.schema_name,

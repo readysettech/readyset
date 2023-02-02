@@ -2385,4 +2385,32 @@ async fn pgsql_delete_from_table_without_pk() {
     )
     .await
     .unwrap();
+
+    // Also check newly replicated tables
+
+    client
+        .query(
+            "CREATE TABLE t2 (y int);
+             INSERT INTO t2 (y) VALUES (1), (2);",
+        )
+        .await
+        .unwrap();
+
+    ctx.check_results(
+        "t2",
+        "pgsql_delete_from_table_without_pk",
+        &[&[DfValue::from(1)], &[DfValue::from(2)]],
+    )
+    .await
+    .unwrap();
+
+    client.query("DELETE FROM t2 WHERE y = 1").await.unwrap();
+
+    ctx.check_results(
+        "t2",
+        "pgsql_delete_from_table_without_pk",
+        &[&[DfValue::from(2)]],
+    )
+    .await
+    .unwrap();
 }
