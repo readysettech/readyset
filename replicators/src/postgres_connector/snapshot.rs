@@ -7,6 +7,7 @@ use std::time::Instant;
 use futures::future::join_all;
 use futures::stream::FuturesUnordered;
 use futures::{pin_mut, StreamExt, TryFutureExt};
+use itertools::Itertools;
 use metrics::register_gauge;
 use nom_sql::{
     parse_key_specification_string, parse_sql_type, Column, ColumnConstraint, ColumnSpecification,
@@ -29,9 +30,18 @@ use crate::table_filter::TableFilter;
 
 const BATCH_SIZE: usize = 1024; // How many queries to buffer before pushing to ReadySet
 
+macro_rules! get_transaction {
+    ($self:expr) => {
+        $self
+            .transaction
+            .as_ref()
+            .expect("Using snapshot transaction after commit")
+    };
+}
+
 pub struct PostgresReplicator<'a> {
     /// This is the underlying (regular) PostgreSQL transaction used for most queries.
-    pub(crate) transaction: pgsql::Transaction<'a>,
+    pub(crate) transaction: Option<pgsql::Transaction<'a>>,
     /// A pool to be used for parallelizing snapshot tasks.
     pub(crate) pool: deadpool_postgres::Pool,
     pub(crate) noria: &'a mut readyset_client::ReadySetHandle,
@@ -555,13 +565,14 @@ impl<'a> PostgresReplicator<'a> {
         noria: &'a mut readyset_client::ReadySetHandle,
         table_filter: TableFilter,
     ) -> ReadySetResult<PostgresReplicator<'a>> {
-        let transaction = client
-            .build_transaction()
-            .deferrable(true)
-            .isolation_level(pgsql::IsolationLevel::RepeatableRead)
-            .read_only(true)
-            .start()
-            .await?;
+        let transaction = Some(
+            client
+                .build_transaction()
+                .deferrable(true)
+                .isolation_level(pgsql::IsolationLevel::RepeatableRead)
+                .start()
+                .await?,
+        );
 
         Ok(PostgresReplicator {
             transaction,
@@ -633,6 +644,8 @@ impl<'a> PostgresReplicator<'a> {
         trace!(?view_list, "Loaded view list");
         trace!(?custom_types, "Loaded custom types");
 
+        self.set_replica_identity_for_tables(&table_list).await?;
+
         self.noria
             .extend_recipe_no_leader_ready(ChangeList::from_changes(
                 non_replicated
@@ -649,7 +662,7 @@ impl<'a> PostgresReplicator<'a> {
             .await?;
 
         for ty in custom_types {
-            let variants = match ty.get_variants(&self.transaction).await {
+            let variants = match ty.get_variants(get_transaction!(self)).await {
                 Ok(v) => v,
                 Err(error) => {
                     warn!(%error, custom_type=?ty, "Error looking up variants for custom type, type will not be used");
@@ -685,7 +698,7 @@ impl<'a> PostgresReplicator<'a> {
         for table in table_list {
             let table_name = &table.name.clone().to_string();
             match table
-                .get_table(&self.transaction)
+                .get_table(get_transaction!(self))
                 .and_then(|create_table| {
                     future::ready(
                         create_table
@@ -730,7 +743,7 @@ impl<'a> PostgresReplicator<'a> {
             let view_schema = view.schema.clone();
 
             match view
-                .get_create_view(&self.transaction)
+                .get_create_view(get_transaction!(self))
                 .map_err(|e| e.into())
                 .and_then(|create_view| {
                     create_schema.add_view_create(view_name.clone(), create_view.clone());
@@ -783,6 +796,10 @@ impl<'a> PostgresReplicator<'a> {
             info!(table = %t.name, "Replication offset already exists for table, skipping snapshot")
         );
 
+        // Commit the transaction we were using to snapshot the schema. This is important since that
+        // transaction holds onto locks for tables which we now need to load data from.
+        self.transaction.take().unwrap().commit().await?;
+
         // Finally copy each table into noria
         let mut futs = Vec::with_capacity(tables.len());
         for table in &tables {
@@ -793,7 +810,9 @@ impl<'a> PostgresReplicator<'a> {
                 .table(table.name.clone())
                 .instrument(span.clone())
                 .await?;
+            span.in_scope(|| trace!("Setting snapshot mode"));
             noria_table.set_snapshot_mode(true).await?;
+            span.in_scope(|| trace!("Set snapshot mode"));
 
             let pool = self.pool.clone();
 
@@ -893,7 +912,7 @@ impl<'a> PostgresReplicator<'a> {
         )
         ";
 
-        let tables = self.transaction.query(query, &[&kind_code]).await?;
+        let tables = get_transaction!(self).query(query, &[&kind_code]).await?;
         tables.into_iter().map(TryInto::try_into).collect()
     }
 
@@ -908,14 +927,14 @@ impl<'a> PostgresReplicator<'a> {
             JOIN pg_catalog.pg_namespace tn ON t.typnamespace = tn.oid
             WHERE typtype = 'e'
         ";
-        let res = self.transaction.query(query, &[]).await?;
+        let res = get_transaction!(self).query(query, &[]).await?;
         res.into_iter().map(TryInto::try_into).collect()
     }
 
     /// Assign the specific snapshot to the underlying transaction
     async fn set_snapshot(&mut self, name: &str) -> Result<(), pgsql::Error> {
         let query = format!("SET TRANSACTION SNAPSHOT '{}'", name);
-        self.transaction.query(query.as_str(), &[]).await?;
+        get_transaction!(self).query(query.as_str(), &[]).await?;
         Ok(())
     }
 
@@ -954,11 +973,7 @@ impl<'a> PostgresReplicator<'a> {
         if !leftover_tables.is_empty() {
             warn!(
                 "Removing existing ReadySet cache tables with no upstream table/view: {}",
-                leftover_tables
-                    .keys()
-                    .map(Relation::to_string)
-                    .intersperse(", ".to_string())
-                    .collect::<String>()
+                leftover_tables.keys().map(Relation::to_string).join(", ")
             );
             for rel in leftover_tables.keys() {
                 if let Err(error) = self
@@ -976,6 +991,39 @@ impl<'a> PostgresReplicator<'a> {
                 }
             }
         }
+        Ok(())
+    }
+
+    async fn set_replica_identity_for_tables(
+        &self,
+        table_list: &[TableEntry],
+    ) -> ReadySetResult<()> {
+        let tables_needing_replica_identity = get_transaction!(self)
+            .query(
+                // Find all tables that are in the table list, and don't already have a primary key
+                // or a non-default replica identity set
+                "select n.nspname as schema, c.relname as name from pg_class c
+                 join pg_namespace n
+                 on n.oid = c.relnamespace
+                 where c.oid not in (select indrelid from pg_index where indisprimary)
+                 and c.relreplident = 'd'
+                 and c.oid = any ($1::oid[])",
+                &[&table_list.iter().map(|t| t.oid).collect::<Vec<_>>()],
+            )
+            .await?;
+
+        for table_row in tables_needing_replica_identity {
+            let schema: String = table_row.get("schema");
+            let name: String = table_row.get("name");
+            trace!(%schema, %name, "Setting REPLICA IDENTITY FULL for table");
+            get_transaction!(self)
+                .execute(
+                    &format!(r#"ALTER TABLE "{schema}"."{name}" REPLICA IDENTITY FULL"#),
+                    &[],
+                )
+                .await?;
+        }
+
         Ok(())
     }
 }

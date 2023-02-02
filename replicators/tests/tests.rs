@@ -2346,3 +2346,43 @@ async fn pgsql_unsupported() {
         })
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn pgsql_delete_from_table_without_pk() {
+    readyset_tracing::init_test_logging();
+    let url = pgsql_url();
+    let mut client = DbConnection::connect(&url).await.unwrap();
+
+    client
+        .query(
+            "DROP TABLE IF EXISTS t2 CASCADE;
+             DROP TABLE IF EXISTS t CASCADE; CREATE TABLE t (x int);
+             INSERT INTO t (x) VALUES (1), (2);",
+        )
+        .await
+        .unwrap();
+
+    let mut ctx = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
+    ctx.ready_notify.as_ref().unwrap().notified().await;
+
+    ctx.check_results(
+        "t",
+        "pgsql_delete_from_table_without_pk",
+        &[&[DfValue::from(1)], &[DfValue::from(2)]],
+    )
+    .await
+    .unwrap();
+
+    client.query("DELETE FROM t WHERE x = 1").await.unwrap();
+
+    ctx.check_results(
+        "t",
+        "pgsql_delete_from_table_without_pk",
+        &[&[DfValue::from(2)]],
+    )
+    .await
+    .unwrap();
+}
