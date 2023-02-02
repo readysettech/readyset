@@ -94,9 +94,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_migration_state() {
-        let query_status_cache = Box::leak(Box::new(QueryStatusCache::with_style(
-            MigrationStyle::Explicit,
-        )));
+        let query_status_cache = Box::leak(Box::new(
+            QueryStatusCache::new().style(MigrationStyle::Explicit),
+        ));
         let proxied_queries_reporter = Arc::new(ProxiedQueriesReporter::new(query_status_cache));
 
         let query_id = QueryId::new(42);

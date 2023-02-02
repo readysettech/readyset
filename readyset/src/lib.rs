@@ -367,6 +367,14 @@ pub struct Options {
     // now.
     #[clap(flatten)]
     fallback_cache_options: FallbackCacheOptions,
+
+    /// Whether to allow ReadySet to automatically create inlined caches when we receive a CREATE
+    /// CACHE command for a query with unsupported placeholders.
+    ///
+    /// If set, we will create a cache with literals inlined in the unsupported placeholder
+    /// positions every time the statement is executed with a new set of parameters.
+    #[clap(long, env = "AUTOMATIC_PLACEHOLDER_INLINING", hide = true)]
+    automatic_placeholder_inlining: bool,
 }
 
 // Command-line options for running the experimental fallback_cache.
@@ -673,8 +681,11 @@ where
 
         rs_connect.in_scope(|| info!(?migration_style));
 
-        let query_status_cache: &'static _ =
-            Box::leak(Box::new(QueryStatusCache::with_style(migration_style)));
+        let query_status_cache: &'static _ = Box::leak(Box::new(
+            QueryStatusCache::new()
+                .style(migration_style)
+                .automatic_placeholder_inlining(options.automatic_placeholder_inlining),
+        ));
 
         let telemetry_sender = rt.block_on(async {
             let proxied_queries_reporter =

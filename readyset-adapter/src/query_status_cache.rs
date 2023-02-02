@@ -32,6 +32,12 @@ pub struct QueryStatusCache {
     /// Holds the current style of migration, whether async or explicit, which may change the
     /// behavior of some internal methods.
     style: MigrationStyle,
+
+    /// Whether to store a list of pending inlined migrations. Inlined migrations are those with
+    /// literal values inlined into certain placeholder positions in the query.
+    ///
+    /// Currently unused.
+    automatic_placeholder_inlining: bool,
 }
 
 /// Keys into the queries stored in `QueryStatusCache`
@@ -111,21 +117,27 @@ impl Default for QueryStatusCache {
 }
 
 impl QueryStatusCache {
-    /// Constructs a new QueryStatusCache with the migration style set to Async.
+    /// Constructs a new QueryStatusCache with the migration style set to InRequestPath.
     pub fn new() -> QueryStatusCache {
         QueryStatusCache {
             statuses: DashMap::default(),
             failed_parses: DashMap::default(),
             ids: DashMap::default(),
             style: MigrationStyle::InRequestPath,
+            automatic_placeholder_inlining: false,
         }
     }
 
-    pub fn with_style(style: MigrationStyle) -> QueryStatusCache {
-        Self {
-            style,
-            ..Self::new()
-        }
+    /// Sets [`Self::style`]
+    pub fn style(mut self, style: MigrationStyle) -> Self {
+        self.style = style;
+        self
+    }
+
+    /// Sets [`Self::automatic_placeholder_inlining`]
+    pub fn automatic_placeholder_inlining(mut self, automatic_placeholder_inlining: bool) -> Self {
+        self.automatic_placeholder_inlining = automatic_placeholder_inlining;
+        self
     }
 
     /// Insert a query into the status cache with an initial status determined by the type of query
@@ -622,7 +634,7 @@ mod tests {
 
     #[test]
     fn query_is_inferred_denied_explicit() {
-        let cache = QueryStatusCache::with_style(MigrationStyle::Explicit);
+        let cache = QueryStatusCache::new().style(MigrationStyle::Explicit);
         let query = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
 
         assert_eq!(
@@ -641,7 +653,7 @@ mod tests {
 
     #[test]
     fn clear() {
-        let cache = QueryStatusCache::with_style(MigrationStyle::Explicit);
+        let cache = QueryStatusCache::new().style(MigrationStyle::Explicit);
 
         cache.update_query_migration_state(
             &ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]),

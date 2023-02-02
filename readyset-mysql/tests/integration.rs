@@ -1916,9 +1916,9 @@ async fn test_proxied_queries_telemetry() {
     readyset_tracing::init_test_logging();
     // This variation on setup_telemetry sets up a periodic reporter for proxied queries.
     let (mut reporter, opts, _handle, shutdown_tx) = {
-        let query_status_cache = Box::leak(Box::new(QueryStatusCache::with_style(
-            MigrationStyle::Explicit,
-        )));
+        let query_status_cache = Box::leak(Box::new(
+            QueryStatusCache::new().style(MigrationStyle::Explicit),
+        ));
         let proxied_queries_reporter = Arc::new(ProxiedQueriesReporter::new(query_status_cache));
         let (telemetry_sender, mut reporter) = TelemetryInitializer::test_init();
         reporter
