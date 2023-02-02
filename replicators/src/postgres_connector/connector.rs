@@ -17,7 +17,7 @@ use tokio_postgres as pgsql;
 use super::ddl_replication::setup_ddl_replication;
 use super::lsn::Lsn;
 use super::wal_reader::{WalEvent, WalReader};
-use super::{PostgresPosition, PUBLICATION_NAME, REPLICATION_SLOT};
+use super::{PostgresPosition, PUBLICATION_NAME};
 use crate::db_util::error_is_slot_not_found;
 use crate::noria_adapter::{Connector, ReplicationAction};
 use crate::postgres_connector::wal::{TableErrorKind, WalError};
@@ -92,6 +92,7 @@ impl PostgresWalConnector {
         config: UpstreamConfig,
         next_position: Option<PostgresPosition>,
         tls_connector: MakeTlsConnector,
+        repl_slot_name: &str,
     ) -> ReadySetResult<Self> {
         if !config.disable_setup_ddl_replication {
             setup_ddl_replication(pg_config.clone(), tls_connector.clone()).await?;
@@ -111,13 +112,15 @@ impl PostgresWalConnector {
         };
 
         if next_position.is_none() {
-            connector.create_publication_and_slot().await?;
+            connector
+                .create_publication_and_slot(repl_slot_name)
+                .await?;
         }
 
         Ok(connector)
     }
 
-    async fn create_publication_and_slot(&mut self) -> ReadySetResult<()> {
+    async fn create_publication_and_slot(&mut self, repl_slot_name: &str) -> ReadySetResult<()> {
         let system = self.identify_system().await?;
         debug!(?system);
 
@@ -138,9 +141,9 @@ impl PostgresWalConnector {
         }
 
         // Drop the existing slot if any
-        self.drop_replication_slot(REPLICATION_SLOT).await?;
+        self.drop_replication_slot(repl_slot_name).await?;
 
-        match self.create_replication_slot(REPLICATION_SLOT, false).await {
+        match self.create_replication_slot(repl_slot_name, false).await {
             Ok(slot) => self.replication_slot = Some(slot), /* Created a new slot, */
             // everything is good
             Err(err)

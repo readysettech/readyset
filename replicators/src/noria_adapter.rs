@@ -158,6 +158,18 @@ impl NoriaAdapter {
                 )
                 .await?;
 
+                let repl_slot_name = match (&config.deployment_name, &config.replication_server_id)
+                {
+                    (Some(deployment), Some(server_id)) => {
+                        format!("{}_{}", deployment, server_id)
+                    }
+                    (Some(deployment), None) => deployment.to_string(),
+                    (None, Some(server_id)) => {
+                        format!("{}_{}", REPLICATION_SLOT, server_id)
+                    }
+                    (None, None) => REPLICATION_SLOT.to_string(),
+                };
+
                 NoriaAdapter::start_inner_postgres(
                     options,
                     noria,
@@ -167,6 +179,7 @@ impl NoriaAdapter {
                     &telemetry_sender,
                     tls_connector,
                     pool,
+                    repl_slot_name,
                 )
                 .await
             }
@@ -392,6 +405,7 @@ impl NoriaAdapter {
         telemetry_sender: &TelemetrySender,
         tls_connector: MakeTlsConnector,
         pool: deadpool_postgres::Pool,
+        repl_slot_name: String,
     ) -> ReadySetResult<!> {
         let dbname = pgsql_opts.get_dbname().ok_or_else(|| {
             ReadySetError::ReplicationFailed("No database specified for replication".to_string())
@@ -436,12 +450,14 @@ impl NoriaAdapter {
                 config,
                 pos,
                 tls_connector.clone(),
+                &repl_slot_name,
             )
             .await?,
         );
 
         info!("Connected to PostgreSQL");
 
+        let resnapshot_slot_name = format!("{}_{}", RESNAPSHOT_SLOT, repl_slot_name);
         let replication_slot = if let Some(slot) = &connector.replication_slot {
             Some(slot.clone())
         } else if resnapshot || pos.is_none() {
@@ -450,13 +466,15 @@ impl NoriaAdapter {
             // with a WAL position attached. This is more robust than locking and allows us to reuse
             // the existing snapshotting code.
             info!(
-                slot = RESNAPSHOT_SLOT,
+                slot = resnapshot_slot_name,
                 "Recreating replication slot to resnapshot with the latest schema"
             );
-            connector.drop_replication_slot(RESNAPSHOT_SLOT).await?;
+            connector
+                .drop_replication_slot(&resnapshot_slot_name)
+                .await?;
             Some(
                 connector
-                    .create_replication_slot(RESNAPSHOT_SLOT, true)
+                    .create_replication_slot(&resnapshot_slot_name, true)
                     .await?,
             )
         } else {
@@ -507,8 +525,10 @@ impl NoriaAdapter {
                 snapshot_start.elapsed().as_micros() as f64
             );
 
-            if replication_slot.slot_name == RESNAPSHOT_SLOT {
-                connector.drop_replication_slot(RESNAPSHOT_SLOT).await?;
+            if replication_slot.slot_name == resnapshot_slot_name {
+                connector
+                    .drop_replication_slot(&resnapshot_slot_name)
+                    .await?;
             }
 
             let _ = telemetry_sender.send_event_with_payload(
@@ -522,7 +542,7 @@ impl NoriaAdapter {
         }
 
         connector
-            .start_replication(REPLICATION_SLOT, PUBLICATION_NAME, version_num)
+            .start_replication(&repl_slot_name, PUBLICATION_NAME, version_num)
             .await?;
 
         let replication_offsets = noria.replication_offsets().await?;

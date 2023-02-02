@@ -427,6 +427,42 @@ impl TestHandle {
     }
 }
 
+/// Tests that we can have multiple ReadySet instances connected to the same postgres upstream
+/// without replication slot issues.
+async fn replication_test_multiple(url: &str) -> ReadySetResult<()> {
+    readyset_tracing::init_test_logging();
+    let mut client = DbConnection::connect(url).await?;
+    client.query(CREATE_SCHEMA).await?;
+    client.query(POPULATE_SCHEMA).await?;
+
+    let config_one = Config {
+        deployment_name: Some("deployment_one".to_string()),
+        replication_server_id: Some(1),
+        ..Default::default()
+    };
+    let config_two = Config {
+        deployment_name: Some("deployment_two".to_string()),
+        replication_server_id: Some(2),
+        ..Default::default()
+    };
+    let mut ctx_one = TestHandle::start_noria(url.to_string(), Some(config_one)).await?;
+    let mut ctx_two = TestHandle::start_noria(url.to_string(), Some(config_two)).await?;
+
+    for ctx in [&mut ctx_one, &mut ctx_two] {
+        ctx.ready_notify.as_ref().unwrap().notified().await;
+
+        ctx.check_results("noria_view", "Snapshot", SNAPSHOT_RESULT)
+            .await?;
+    }
+
+    client.stop().await;
+    for ctx in [ctx_one, ctx_two] {
+        ctx.stop().await;
+    }
+
+    Ok(())
+}
+
 async fn replication_test_inner(url: &str) -> ReadySetResult<()> {
     readyset_tracing::init_test_logging();
     let mut client = DbConnection::connect(url).await?;
@@ -493,6 +529,20 @@ fn mysql_url() -> String {
 #[serial_test::serial]
 async fn pgsql_replication() -> ReadySetResult<()> {
     replication_test_inner(&pgsql_url()).await
+}
+
+/// Tests multiple readyset instances pointed at the same postgres upstream to verify that multiple
+/// readyset instances can replicate off the same upstream.
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn pgsql_replication_multiple() -> ReadySetResult<()> {
+    replication_test_multiple(&pgsql_url()).await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn mysql_replication_multiple() -> ReadySetResult<()> {
+    replication_test_multiple(&mysql_url()).await
 }
 
 #[tokio::test(flavor = "multi_thread")]
