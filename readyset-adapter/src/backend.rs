@@ -87,7 +87,7 @@ use nom_sql::{
 use readyset_client::consistency::Timestamp;
 use readyset_client::query::*;
 use readyset_client::results::Results;
-use readyset_client::{ColumnSchema, ViewCreateRequest};
+use readyset_client::{ColumnSchema, PlaceholderIdx, ViewCreateRequest};
 pub use readyset_client_metrics::QueryDestination;
 use readyset_client_metrics::{recorded, EventType, QueryExecutionEvent, SqlQueryType};
 use readyset_data::{DfType, DfValue};
@@ -99,6 +99,7 @@ use readyset_version::READYSET_VERSION;
 use timestamp_service::client::{TimestampClient, WriteId, WriteKey};
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::{error, instrument, trace, warn};
+use vec1::Vec1;
 
 use crate::backend::noria_connector::ExecuteSelectContext;
 use crate::query_handler::SetBehavior;
@@ -265,6 +266,7 @@ pub struct BackendBuilder {
     query_max_failure_seconds: u64,
     fallback_recovery_seconds: u64,
     telemetry_sender: Option<TelemetrySender>,
+    enable_experimental_placeholder_inlining: bool,
 }
 
 impl Default for BackendBuilder {
@@ -285,6 +287,7 @@ impl Default for BackendBuilder {
             query_max_failure_seconds: (i64::MAX / 1000) as u64,
             fallback_recovery_seconds: 0,
             telemetry_sender: None,
+            enable_experimental_placeholder_inlining: false,
         }
     }
 }
@@ -333,6 +336,8 @@ impl BackendBuilder {
                 query_max_failure_duration: Duration::new(self.query_max_failure_seconds, 0),
                 query_log_ad_hoc_queries: self.query_log_ad_hoc_queries,
                 fallback_recovery_duration: Duration::new(self.fallback_recovery_seconds, 0),
+                enable_experimental_placeholder_inlining: self
+                    .enable_experimental_placeholder_inlining,
             },
             telemetry_sender: self.telemetry_sender,
             _query_handler: PhantomData,
@@ -414,6 +419,14 @@ impl BackendBuilder {
         self.telemetry_sender = Some(telemetry_sender);
         self
     }
+
+    pub fn enable_experimental_placeholder_inlining(
+        mut self,
+        enable_experimental_placeholder_inlining: bool,
+    ) -> Self {
+        self.enable_experimental_placeholder_inlining = enable_experimental_placeholder_inlining;
+        self
+    }
 }
 
 /// A [`CachedPreparedStatement`] stores the data needed for an immediate
@@ -471,6 +484,13 @@ where
         } else {
             false
         }
+    }
+
+    /// Get a reference to the `ViewRequest` or return an error
+    fn as_view_request(&self) -> ReadySetResult<&ViewCreateRequest> {
+        self.view_request
+            .as_ref()
+            .ok_or_else(|| internal_err!("Expected ViewRequest for CachedPreparedStatement"))
     }
 }
 
@@ -546,6 +566,9 @@ struct BackendSettings {
     /// repeatedly failed for query_max_failure_duration.
     fallback_recovery_duration: Duration,
     fail_invalidated_queries: bool,
+    /// Whether to automatically create inlined migrations for queries with unsupported
+    /// placeholders.
+    enable_experimental_placeholder_inlining: bool,
 }
 
 /// QueryInfo holds information regarding the last query that was sent along this connection
@@ -890,12 +913,11 @@ where
             Some(Err(e)) => {
                 if e.caused_by_view_not_found() {
                     warn!(error = %e, "View not found during mirror_prepare()");
-                    self.state.query_status_cache.update_query_migration_state(
+                    self.state.query_status_cache.view_not_found_for_query(
                         &ViewCreateRequest::new(
                             select_meta.rewritten.clone(),
                             self.noria.schema_search_path().to_owned(),
                         ),
-                        MigrationState::Pending,
                     );
                 } else if e.caused_by_unsupported() {
                     self.state.query_status_cache.update_query_migration_state(
@@ -1286,20 +1308,28 @@ where
         }
     }
 
-    /// Attempts to migrate a query on noria, after it was marked as Successful in the cache. If the
-    /// migration is successful, the cached entry is marked as such and will attempt to resolve
-    /// noria first in the future
+    /// Attempts to migrate a query on noria, after
+    /// - the query was marked as `MigrationState::Successful` in the cache -or-
+    /// - the epoch stored in `MigrationState::Inlined` advanced but the query is not yet prepared
+    ///   on noria.
+    ///
+    /// If the migration is successful, the prepare result is updated with the noria result. If the
+    /// state was previously `MigrationState::Pending`, it is updated to
+    /// `MigrationState::Successful`.
+    ///
+    /// Returns an error if the statement is already prepared on noria.
     ///
     /// # Panics
     ///
-    /// If the cached entry is not of kind `PrepareResult::Upstream` or is not in the
-    /// `MigrationState::Pending` state
+    /// If the query is not in the `MigrationState::Pending` or `MigrationState::Inlined` state
     async fn update_noria_prepare(
         noria: &mut NoriaConnector,
         cached_entry: &mut CachedPreparedStatement<DB>,
         id: u32,
     ) -> ReadySetResult<()> {
-        debug_assert!(cached_entry.migration_state.is_pending());
+        debug_assert!(
+            cached_entry.migration_state.is_pending() || cached_entry.migration_state.is_inlined()
+        );
 
         let upstream_prep: UpstreamPrepare<DB> = match &cached_entry.prep {
             PrepareResult::Upstream(UpstreamPrepare { statement_id, meta }) => UpstreamPrepare {
@@ -1334,7 +1364,11 @@ where
         // At this point we got a successful noria prepare, so we want to replace the Upstream
         // result with a Both result
         cached_entry.prep = PrepareResult::Both(noria_prep, upstream_prep);
-        cached_entry.migration_state = MigrationState::Successful;
+        // If the query was previously `Pending`, update to `Successful`. If it was inlined, we do
+        // not update the migration state.
+        if cached_entry.migration_state == MigrationState::Pending {
+            cached_entry.migration_state = MigrationState::Successful;
+        }
 
         Ok(())
     }
@@ -1393,23 +1427,60 @@ where
         let noria = &mut self.noria;
         let ticket = self.state.ticket.clone();
 
-        if cached_statement.migration_state.is_pending() {
+        // If the query is pending, check the query status cache to see if it is now successful.
+        //
+        // If the query is inlined, we have to check the epoch of the current state in the query
+        // status cache to see if we should prepare the statement again.
+        if cached_statement.migration_state.is_pending()
+            || cached_statement.migration_state.is_inlined()
+        {
             // We got a statement with a pending migration, we want to check if migration is
             // finished by now
             let new_migration_state = self
                 .state
                 .query_status_cache
-                .query_migration_state(
-                    cached_statement
-                        .view_request
-                        .as_ref()
-                        .expect("Pending must have view_request set"),
-                )
+                .query_migration_state(cached_statement.as_view_request()?)
                 .1;
 
             if new_migration_state == MigrationState::Successful {
                 // Attempt to prepare on ReadySet
                 let _ = Self::update_noria_prepare(noria, cached_statement, id).await;
+            } else if let MigrationState::Inlined(new_state) = new_migration_state {
+                if let MigrationState::Inlined(ref old_state) = cached_statement.migration_state {
+                    // if the epoch has advanced, then we've made changes to the inlined caches so
+                    // we should refresh the view cache and prepare if necessary.
+                    if new_state.epoch > old_state.epoch {
+                        let view_request = cached_statement.as_view_request()?;
+                        // Request a new view from ReadySet.
+                        let updated_view_cache = noria
+                            .update_view_cache(
+                                &view_request.statement,
+                                Some(view_request.schema_search_path.clone()),
+                                false, // create_if_not_exists
+                                true,  // is_prepared
+                            )
+                            .await
+                            .is_ok();
+                        // If we got a new view from ReadySet and we have only prepared against
+                        // upstream, prepare the statement against ReadySet.
+                        //
+                        // Update the migration state if we updated the view_cache and, if
+                        // necessary, the PrepareResult.
+                        if updated_view_cache
+                            && matches!(cached_statement.prep, PrepareResult::Upstream(_))
+                        {
+                            if Self::update_noria_prepare(noria, cached_statement, id)
+                                .await
+                                .is_ok()
+                            {
+                                cached_statement.migration_state =
+                                    MigrationState::Inlined(new_state);
+                            }
+                        } else if updated_view_cache {
+                            cached_statement.migration_state = MigrationState::Inlined(new_state);
+                        }
+                    }
+                }
             }
         }
 
@@ -1445,6 +1516,12 @@ where
                     .map_err(Into::into)
             }
             PrepareResult::Upstream(prep) => {
+                // No inlined caches for this query exist if we are only prepared on upstream.
+                if cached_statement.migration_state.is_inlined() {
+                    self.state
+                        .query_status_cache
+                        .inlined_cache_miss(cached_statement.as_view_request()?, params.to_vec())
+                }
                 Self::execute_upstream(upstream, prep, params, &mut event, false).await
             }
             PrepareResult::Both(.., uprep) if should_fallback => {
@@ -1478,15 +1555,16 @@ where
                 cached_statement.prep.make_upstream_only();
             } else if e.caused_by_unsupported() {
                 // On an unsupported execute we update the query migration state to be unsupported.
-                //
-                // Must exist or we would not have executed the query against ReadySet.
-                #[allow(clippy::unwrap_used)]
                 self.state.query_status_cache.update_query_migration_state(
-                    cached_statement.view_request.as_ref().unwrap(),
+                    cached_statement.as_view_request()?,
                     MigrationState::Unsupported,
                 );
+            } else if matches!(e, ReadySetError::NoCacheForQuery) {
+                self.state
+                    .query_status_cache
+                    .inlined_cache_miss(cached_statement.as_view_request()?, params.to_vec())
             }
-        }
+        };
 
         self.last_query = event.destination.map(|d| QueryInfo {
             destination: d,
@@ -1587,12 +1665,30 @@ where
         }
         // Now migrate the new query
         rewrite::process_query(&mut stmt, self.noria.server_supports_pagination())?;
-        self.noria
+        let migration_state = match self
+            .noria
             .handle_create_cached_query(name, &stmt, override_schema_search_path, always)
-            .await?;
+            .await
+        {
+            Ok(()) => MigrationState::Successful,
+            // If the query fails because it contains unsupported placeholders, then mark it as an
+            // inlined query in the query status cache.
+            Err(e) if let Some(placeholders) = e.unsupported_placeholders_cause() => {
+                #[allow(clippy::unwrap_used)] // converting from Vec1 back to Vec1
+                let placeholders = Vec1::try_from(placeholders.into_iter().map(|p| p as PlaceholderIdx).collect::<Vec<_>>()).unwrap();
+                if self.settings.enable_experimental_placeholder_inlining {
+                    MigrationState::Inlined(InlinedState::from_placeholders(placeholders))
+                } else {
+                    return Err(e);
+                }
+            }
+            Err(e) => {
+                return Err(e);
+            }
+        };
         self.state.query_status_cache.update_query_migration_state(
             &ViewCreateRequest::new(stmt.clone(), self.noria.schema_search_path().to_owned()),
-            MigrationState::Successful,
+            migration_state,
         );
         self.state.query_status_cache.always_attempt_readyset(
             &ViewCreateRequest::new(stmt.clone(), self.noria.schema_search_path().to_owned()),
@@ -1680,7 +1776,7 @@ where
             .map(|DeniedQuery { id, query, status }| {
                 let s = match status.migration_state {
                     MigrationState::DryRunSucceeded | MigrationState::Successful => "yes",
-                    MigrationState::Pending => "pending",
+                    MigrationState::Pending | MigrationState::Inlined(_) => "pending",
                     MigrationState::Unsupported => "unsupported",
                 }
                 .to_string();

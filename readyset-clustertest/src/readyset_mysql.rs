@@ -1634,3 +1634,109 @@ async fn standalone_create_table_insert_test() {
 
     deployment.teardown().await.unwrap();
 }
+
+#[clustertest]
+async fn enable_experimental_placeholder_inlining() {
+    let mut deployment = readyset_mysql("ct_enable_experimental_placeholder_inlining")
+        .with_servers(1, ServerParams::default())
+        .explicit_migrations(500)
+        .enable_experimental_placeholder_inlining()
+        .start()
+        .await
+        .unwrap();
+
+    let mut adapter = deployment.first_adapter().await;
+
+    adapter
+        .query_drop(
+            r"CREATE TABLE t1 (
+        uid INT NOT NULL,
+        value INT NOT NULL
+    );",
+        )
+        .await
+        .unwrap();
+    adapter
+        .query_drop(r"INSERT INTO t1 VALUES (1, 4);")
+        .await
+        .unwrap();
+    adapter
+        .query_drop(r"INSERT INTO t1 VALUES (2, 4);")
+        .await
+        .unwrap();
+    adapter
+        .query_drop(r"INSERT INTO t1 VALUES (2, 4);")
+        .await
+        .unwrap();
+
+    // CREATE CACHE should fail
+    let _ = adapter.query_drop(r"CREATE CACHE FROM SELECT sum(value) FROM t1 WHERE value = ? GROUP BY uid HAVING count(uid) = ?").await;
+
+    // Run the query for the first time
+    let result: Vec<i32> = adapter
+        .as_mysql_conn()
+        .unwrap()
+        .exec(
+            r"SELECT sum(value) FROM t1 WHERE value = ? GROUP BY uid HAVING count(uid) = ?",
+            (4, 1),
+        )
+        .await
+        .unwrap();
+    assert_eq!(&result, &[4]);
+
+    // Query should go straight to upstream since we don't have any caches for the query.
+    assert_eq!(
+        last_statement_destination(adapter.as_mysql_conn().unwrap()).await,
+        QueryDestination::Upstream
+    );
+
+    // We should asynchronously inline this query and eventually see the results against noria.
+    assert!(
+        query_until_expected_from_noria(
+            &mut adapter,
+            deployment.metrics(),
+            QueryExecution::PrepareExecute(
+                "SELECT sum(value) FROM t1 WHERE value = ? GROUP BY uid HAVING count(uid) = ?",
+                (4, 1,)
+            ),
+            &EventuallyConsistentResults::empty_or(&[4]),
+            PROPAGATION_DELAY_TIMEOUT,
+        )
+        .await
+    );
+
+    // Run the query again with a new set of parameters
+    let result: Vec<i32> = adapter
+        .as_mysql_conn()
+        .unwrap()
+        .exec(
+            r"SELECT sum(value) FROM t1 WHERE value = ? GROUP BY uid HAVING count(uid) = ?",
+            (4, 2),
+        )
+        .await
+        .unwrap();
+    assert_eq!(&result, &[8]);
+
+    // These parameters are not migrated - expect to fall back
+    assert_eq!(
+        last_statement_destination(adapter.as_mysql_conn().unwrap()).await,
+        QueryDestination::ReadysetThenUpstream
+    );
+
+    // Again, we asynchronously migrate these params and eventually see the result against noria.
+    assert!(
+        query_until_expected_from_noria(
+            &mut adapter,
+            deployment.metrics(),
+            QueryExecution::PrepareExecute(
+                "SELECT sum(value) FROM t1 WHERE value = ? GROUP BY uid HAVING count(uid) = ?",
+                (4, 2,)
+            ),
+            &EventuallyConsistentResults::empty_or(&[8]),
+            PROPAGATION_DELAY_TIMEOUT,
+        )
+        .await
+    );
+
+    deployment.teardown().await.unwrap();
+}

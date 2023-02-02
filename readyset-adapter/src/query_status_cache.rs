@@ -1,6 +1,7 @@
 //! The query status cache provides a thread-safe window into an adapter's
 //! knowledge about queries, currently the migration status of a query in
 //! ReadySet.
+use std::collections::HashSet;
 use std::hash::Hash;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -8,9 +9,11 @@ use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
 use clap::ValueEnum;
+use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
 use readyset_client::query::*;
 use readyset_client::ViewCreateRequest;
+use readyset_data::DfValue;
 use readyset_util::hash::hash;
 use tracing::error;
 
@@ -30,6 +33,10 @@ pub struct QueryStatusCache {
     /// different id formats in the future.
     ids: DashMap<QueryId, Query, ahash::RandomState>,
 
+    /// List of pending inlined migrations. Contains the query to be inlined, and the sets of
+    /// parameters to use for inlining.
+    pending_inlined_migrations: DashMap<ViewCreateRequest, HashSet<Vec<DfValue>>>,
+
     /// Holds the current style of migration, whether async or explicit, which may change the
     /// behavior of some internal methods.
     style: MigrationStyle,
@@ -38,7 +45,7 @@ pub struct QueryStatusCache {
     /// literal values inlined into certain placeholder positions in the query.
     ///
     /// Currently unused.
-    automatic_placeholder_inlining: bool,
+    enable_experimental_placeholder_inlining: bool,
 }
 
 /// Keys into the queries stored in `QueryStatusCache`
@@ -124,8 +131,9 @@ impl QueryStatusCache {
             statuses: DashMap::default(),
             failed_parses: DashMap::default(),
             ids: DashMap::default(),
+            pending_inlined_migrations: DashMap::default(),
             style: MigrationStyle::InRequestPath,
-            automatic_placeholder_inlining: false,
+            enable_experimental_placeholder_inlining: false,
         }
     }
 
@@ -135,9 +143,12 @@ impl QueryStatusCache {
         self
     }
 
-    /// Sets [`Self::automatic_placeholder_inlining`]
-    pub fn automatic_placeholder_inlining(mut self, automatic_placeholder_inlining: bool) -> Self {
-        self.automatic_placeholder_inlining = automatic_placeholder_inlining;
+    /// Sets [`Self::enable_experimental_placeholder_inlining`]
+    pub fn enable_experimental_placeholder_inlining(
+        mut self,
+        enable_experimental_placeholder_inlining: bool,
+    ) -> Self {
+        self.enable_experimental_placeholder_inlining = enable_experimental_placeholder_inlining;
         self
     }
 
@@ -154,7 +165,7 @@ impl QueryStatusCache {
     {
         let q = q.into();
         let status = QueryStatus::default_for_query(&q);
-        let migration_state = status.migration_state;
+        let migration_state = status.migration_state.clone();
         let id = self.insert_with_status(q, status);
         (id, migration_state)
     }
@@ -193,7 +204,7 @@ impl QueryStatusCache {
     where
         Q: QueryStatusKey,
     {
-        let query_state = q.with_status(self, |m| m.map(|m| m.migration_state));
+        let query_state = q.with_status(self, |m| m.map(|m| m.migration_state.clone()));
         let id = QueryId::new(hash(&q));
 
         match query_state {
@@ -322,34 +333,100 @@ impl QueryStatusCache {
         })
     }
 
-    /// Updates a queries migration state to `m` unless the queries migration state was
-    /// `MigrationState::Unsupported`. An unsupported query cannot currently become supported once
-    /// again.
+    /// The server does not have a view for this query, so set the query to pending.
+    pub fn view_not_found_for_query<Q>(&self, q: &Q)
+    where
+        Q: QueryStatusKey,
+    {
+        q.with_mut_status(self, |s| {
+            match s {
+                Some(mut s) => {
+                    // We do not support transitions from the `Unsupported` state, as we assume
+                    // any `Unsupported` query will remain `Unsupported` for the duration of
+                    // this process.
+                    //
+                    // `Inlined` queries may only be changed from `Inlined` to `Unsupported`.
+                    if !matches!(
+                        s.migration_state,
+                        MigrationState::Unsupported | MigrationState::Inlined(_)
+                    ) {
+                        s.migration_state = MigrationState::Pending
+                    }
+                }
+                // If the query was not in the cache, make a new entry
+                None => {
+                    self.insert_with_status(
+                        q.clone(),
+                        QueryStatus {
+                            migration_state: MigrationState::Pending,
+                            execution_info: None,
+                            always: false,
+                        },
+                    );
+                }
+            }
+        });
+    }
+
+    /// Updates a query's migration state to `m` unless the query's migration state was
+    /// `MigrationState::Unsupported` or `MigrationState::Inlined`. An unsupported query cannot
+    /// currently become supported once again. An Inlined query can only transition to the
+    /// Unsupported state.
     pub fn update_query_migration_state<Q>(&self, q: &Q, m: MigrationState)
     where
         Q: QueryStatusKey,
     {
         q.with_mut_status(self, |s| {
             match s {
-                Some(mut s) if s.migration_state != MigrationState::Unsupported => {
-                    // Once a query is determined to be unsupported, there is currently no going
-                    // back. In the future when we can support this in the query
-                    // path this check should change.
-                    s.migration_state = m;
+                Some(mut s) => {
+                    match s.migration_state {
+                        // We do not support transitions from the `Unsupported` state, as we assume
+                        // any `Unsupported` query will remain `Unsupported` for the duration of
+                        // this process.
+                        MigrationState::Unsupported => {}
+                        // A query with an Inlined state can only transition to Unsupported.
+                        MigrationState::Inlined(_) => {
+                            if matches!(m, MigrationState::Unsupported) {
+                                s.migration_state = MigrationState::Unsupported;
+                            }
+                        }
+                        // All other state transitions are allowed.
+                        _ => s.migration_state = m.clone(),
+                    }
                 }
                 None => {
                     self.insert_with_status(
                         q.clone(),
                         QueryStatus {
-                            migration_state: m,
+                            migration_state: m.clone(),
                             execution_info: None,
                             always: false,
                         },
                     );
                 }
-                _ => {}
             }
         })
+    }
+
+    /// This function is called if we attempted to create an inlined migration but received an
+    /// unsupported error. Updates the query status and removes pending inlined migrations.
+    pub fn unsupported_inlined_migration(&self, q: &ViewCreateRequest) {
+        q.with_mut_status(self, |s| match s {
+            Some(mut s) => {
+                s.migration_state = MigrationState::Unsupported;
+            }
+            None => {
+                self.insert_with_status(
+                    q.clone(),
+                    QueryStatus {
+                        migration_state: MigrationState::Unsupported,
+                        execution_info: None,
+                        always: false,
+                    },
+                );
+            }
+        });
+        self.pending_inlined_migrations.remove(q);
     }
 
     /// Updates the query's always flag, indicating whether the query should be served from
@@ -400,8 +477,81 @@ impl QueryStatusCache {
             });
     }
 
+    /// This method is called when a query is executed with the given params, but no inlined cache
+    /// exists for the params. Adding the query to `Self::pending_inlined_migrations` indicates that
+    /// it should be migrated by the MigrationHandler.
+    pub fn inlined_cache_miss(&self, query: &ViewCreateRequest, params: Vec<DfValue>) {
+        if self.enable_experimental_placeholder_inlining {
+            self.pending_inlined_migrations
+                .entry(query.clone())
+                .or_default()
+                .insert(params);
+        }
+    }
+
+    /// Indicates that a migration has been completed for some set of literals for a query in
+    /// `Self::pending_inlined_migrations`
+    pub fn created_inlined_query(
+        &self,
+        query: &ViewCreateRequest,
+        migrated_literals: Vec<&Vec<DfValue>>,
+    ) {
+        if let Entry::Occupied(mut entry) = self.pending_inlined_migrations.entry(query.clone()) {
+            let pending_literals = entry.get_mut();
+            for literals in migrated_literals {
+                pending_literals.remove(literals);
+            }
+            // If we removed all the pending literals from the entry, we should remove the entry.
+            if pending_literals.is_empty() {
+                entry.remove();
+            }
+        }
+
+        // Then update the inlined state epoch for the query
+        query.with_mut_status(self, |s| {
+            if let Some(QueryStatus {
+                migration_state: MigrationState::Inlined(ref mut state),
+                ..
+            }) = s
+            {
+                state.epoch += 1;
+            }
+        })
+    }
+
+    /// Returns a list of queries that are pending an inlined migration, and a set of all literals
+    /// to be used for inlining.
+    pub fn pending_inlined_migration(&self) -> Vec<QueryInliningInstructions> {
+        self.pending_inlined_migrations
+            .iter()
+            .filter_map(|q| {
+                // Get the placeholders that require inlining
+                let placeholders =
+                    q.key()
+                        .with_status(self, |s| match s.map(|s| &s.migration_state) {
+                            Some(MigrationState::Inlined(InlinedState {
+                                inlined_placeholders,
+                                ..
+                            })) => Some(inlined_placeholders.clone()),
+                            _ => None,
+                        });
+
+                // Generate QueryInliningInstructions
+                placeholders.map(|p| {
+                    QueryInliningInstructions::new(
+                        q.key().clone(),
+                        p,
+                        q.value().iter().cloned().collect::<Vec<_>>(),
+                    )
+                })
+            })
+            .collect::<Vec<_>>()
+    }
+
     /// Returns a list of queries that currently need the be processed to determine
     /// if they should be allowed (are supported by ReadySet).
+    ///
+    /// Does not include any queries that require inlining.
     pub fn pending_migration(&self) -> QueryList {
         self.statuses
             .iter()
@@ -514,6 +664,7 @@ impl FromStr for MigrationStyle {
 mod tests {
     use nom_sql::{SelectStatement, SqlQuery};
     use readyset_client::ViewCreateRequest;
+    use vec1::Vec1;
 
     use super::*;
 
@@ -671,5 +822,201 @@ mod tests {
 
         cache.clear();
         assert_eq!(cache.allow_list().len(), 0);
+    }
+
+    #[test]
+    fn view_not_found_for_query() {
+        let cache = QueryStatusCache::new().style(MigrationStyle::Explicit);
+        let q1 = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
+        let q2 = ViewCreateRequest::new(select_statement("SELECT * FROM t2").unwrap(), vec![]);
+
+        cache.update_query_migration_state(&q1, MigrationState::Successful);
+        cache.update_query_migration_state(
+            &q2,
+            MigrationState::Inlined(InlinedState {
+                inlined_placeholders: Vec1::try_from(vec![1]).unwrap(),
+                epoch: 0,
+            }),
+        );
+        // q1: supported -> pending
+        cache.view_not_found_for_query(&q1);
+        assert_eq!(cache.pending_migration().len(), 1);
+        // q1: pending -> unsupported
+        cache.update_query_migration_state(&q1, MigrationState::Unsupported);
+        assert_eq!(cache.pending_migration().len(), 0);
+        // q2: inlined -> inlined
+        cache.view_not_found_for_query(&q2);
+        assert_eq!(cache.pending_migration().len(), 0);
+    }
+
+    #[test]
+    fn transition_form_unsupported() {
+        let cache = QueryStatusCache::new().style(MigrationStyle::Explicit);
+        let q = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
+
+        cache.update_query_migration_state(&q, MigrationState::Unsupported);
+        assert_eq!(
+            cache.query_migration_state(&q).1,
+            MigrationState::Unsupported
+        );
+        cache.update_query_migration_state(&q, MigrationState::Pending);
+        assert_eq!(
+            cache.query_migration_state(&q).1,
+            MigrationState::Unsupported
+        );
+        cache.update_query_migration_state(
+            &q,
+            MigrationState::Inlined(InlinedState {
+                inlined_placeholders: Vec1::try_from(vec![1]).unwrap(),
+                epoch: 0,
+            }),
+        );
+        assert_eq!(
+            cache.query_migration_state(&q).1,
+            MigrationState::Unsupported
+        );
+        cache.update_query_migration_state(&q, MigrationState::Successful);
+        assert_eq!(
+            cache.query_migration_state(&q).1,
+            MigrationState::Unsupported
+        );
+    }
+
+    #[test]
+    fn transition_from_inlined() {
+        let cache = QueryStatusCache::new()
+            .style(MigrationStyle::Explicit)
+            .enable_experimental_placeholder_inlining(true);
+        let q = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
+        let inlined_state = MigrationState::Inlined(InlinedState {
+            inlined_placeholders: Vec1::try_from(vec![1]).unwrap(),
+            epoch: 0,
+        });
+
+        cache.update_query_migration_state(&q, inlined_state.clone());
+        assert_eq!(cache.query_migration_state(&q).1, inlined_state);
+        cache.update_query_migration_state(&q, MigrationState::Pending);
+        assert_eq!(cache.query_migration_state(&q).1, inlined_state);
+        cache.update_query_migration_state(&q, MigrationState::Successful);
+        assert_eq!(cache.query_migration_state(&q).1, inlined_state);
+        cache.update_query_migration_state(&q, MigrationState::Unsupported);
+        assert_eq!(
+            cache.query_migration_state(&q).1,
+            MigrationState::Unsupported
+        );
+    }
+
+    #[test]
+    fn inlined_cache_miss() {
+        let cache = QueryStatusCache::new()
+            .style(MigrationStyle::Explicit)
+            .enable_experimental_placeholder_inlining(true);
+        let q = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
+        let inlined_state = MigrationState::Inlined(InlinedState {
+            inlined_placeholders: Vec1::try_from(vec![1]).unwrap(),
+            epoch: 0,
+        });
+        cache.update_query_migration_state(&q, inlined_state);
+
+        cache.inlined_cache_miss(&q, vec![DfValue::None]);
+        cache.inlined_cache_miss(&q, vec![DfValue::None]);
+        cache.inlined_cache_miss(&q, vec![DfValue::Max]);
+
+        assert_eq!(
+            cache
+                .pending_inlined_migrations
+                .get(&q)
+                .unwrap()
+                .value()
+                .len(),
+            2
+        );
+    }
+
+    #[test]
+    fn unsupported_inlined_migration() {
+        let cache = QueryStatusCache::new()
+            .style(MigrationStyle::Explicit)
+            .enable_experimental_placeholder_inlining(true);
+        let q = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
+        let inlined_state = MigrationState::Inlined(InlinedState {
+            inlined_placeholders: Vec1::try_from(vec![1]).unwrap(),
+            epoch: 0,
+        });
+        cache.update_query_migration_state(&q, inlined_state);
+
+        cache.inlined_cache_miss(&q, vec![DfValue::None]);
+
+        cache.unsupported_inlined_migration(&q);
+
+        assert!(cache.pending_inlined_migrations.is_empty());
+        assert_eq!(
+            cache.query_migration_state(&q).1,
+            MigrationState::Unsupported
+        );
+    }
+
+    #[test]
+    fn created_inlined_query() {
+        let cache = QueryStatusCache::new()
+            .style(MigrationStyle::Explicit)
+            .enable_experimental_placeholder_inlining(true);
+        let q = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
+        let inlined_state = MigrationState::Inlined(InlinedState {
+            inlined_placeholders: Vec1::try_from(vec![1]).unwrap(),
+            epoch: 0,
+        });
+        cache.update_query_migration_state(&q, inlined_state.clone());
+
+        cache.inlined_cache_miss(&q, vec![DfValue::None]);
+        cache.inlined_cache_miss(&q, vec![DfValue::Max]);
+        cache.inlined_cache_miss(&q, vec![DfValue::Int(1)]);
+
+        assert_eq!(cache.query_migration_state(&q).1, inlined_state);
+        cache.created_inlined_query(&q, vec![&vec![DfValue::Int(1)], &vec![DfValue::None]]);
+        let inlined_state = MigrationState::Inlined(InlinedState {
+            inlined_placeholders: Vec1::try_from(vec![1]).unwrap(),
+            epoch: 1,
+        });
+        assert_eq!(cache.query_migration_state(&q).1, inlined_state);
+        assert_eq!(
+            cache
+                .pending_inlined_migrations
+                .get(&q)
+                .unwrap()
+                .value()
+                .len(),
+            1
+        );
+        assert!(cache
+            .pending_inlined_migrations
+            .get(&q)
+            .unwrap()
+            .value()
+            .contains(&vec![DfValue::Max]))
+    }
+
+    #[test]
+    fn pending_inlined_migration() {
+        let cache = QueryStatusCache::new()
+            .style(MigrationStyle::Explicit)
+            .enable_experimental_placeholder_inlining(true);
+        let q = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
+        let inlined_state = MigrationState::Inlined(InlinedState {
+            inlined_placeholders: Vec1::try_from(vec![1]).unwrap(),
+            epoch: 0,
+        });
+        cache.update_query_migration_state(&q, inlined_state);
+
+        cache.inlined_cache_miss(&q, vec![DfValue::None]);
+        cache.inlined_cache_miss(&q, vec![DfValue::Max]);
+
+        assert!(cache.pending_migration().is_empty());
+        let pending = cache.pending_inlined_migration();
+        assert_eq!(pending[0].query(), &q);
+        assert_eq!(pending[0].placeholders(), &[1]);
+        assert_eq!(pending[0].literals().len(), 2);
+        assert!(pending[0].literals().contains(&vec![DfValue::Max]));
+        assert!(pending[0].literals().contains(&vec![DfValue::None]));
     }
 }

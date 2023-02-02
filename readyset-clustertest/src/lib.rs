@@ -441,6 +441,9 @@ pub struct DeploymentBuilder {
     /// If true, runs the adapter in cleanup mode, which cleans up deployment related assets for
     /// the given deployment name.
     cleanup: bool,
+    /// Whether to automatically create inlined migrations for a query with unsupported
+    /// placeholders.
+    enable_experimental_placeholder_inlining: bool,
 }
 
 pub enum FailpointDestination {
@@ -516,9 +519,9 @@ impl DeploymentBuilder {
             database_type,
             standalone: false,
             cleanup: false,
+            enable_experimental_placeholder_inlining: false,
         }
     }
-
     /// The number of shards in the graph, `shards` <= 1 disables sharding.
     pub fn shards(mut self, shards: usize) -> Self {
         self.shards = Some(shards);
@@ -667,6 +670,13 @@ impl DeploymentBuilder {
         self
     }
 
+    /// Sets whether or not to automatically create inlined caches for queries with unsupported
+    /// placeholders
+    pub fn enable_experimental_placeholder_inlining(mut self) -> Self {
+        self.enable_experimental_placeholder_inlining = true;
+        self
+    }
+
     pub fn adapter_start_params(&self) -> AdapterStartParams {
         let wait_for_failpoint = matches!(
             self.wait_for_failpoint,
@@ -686,6 +696,7 @@ impl DeploymentBuilder {
             views_polling_interval: self.views_polling_interval,
             wait_for_failpoint,
             cleanup: self.cleanup,
+            enable_experimental_placeholder_inlining: self.enable_experimental_placeholder_inlining,
         }
     }
 
@@ -1492,6 +1503,9 @@ pub struct AdapterStartParams {
     /// If true, runs the adapter in cleanup mode, which cleans up deployment related assets for
     /// the given deployment name.
     cleanup: bool,
+    /// Whether to automatically create inlined migrations for a query with unsupported
+    /// placeholders.
+    enable_experimental_placeholder_inlining: bool,
 }
 
 async fn start_server(
@@ -1620,6 +1634,10 @@ async fn start_adapter(
 
     if params.wait_for_failpoint {
         builder = builder.wait_for_failpoint();
+    }
+
+    if params.enable_experimental_placeholder_inlining {
+        builder = builder.enable_experimental_placeholder_inlining();
     }
 
     builder.start().await

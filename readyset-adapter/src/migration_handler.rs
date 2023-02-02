@@ -9,12 +9,15 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use dataflow_expression::Dialect;
-use metrics::{counter, register_counter};
+use metrics::{counter, register_counter, Counter};
+use nom_sql::Literal;
 use readyset_client::query::{MigrationState, Query};
 use readyset_client::recipe::changelist::{Change, ChangeList};
-use readyset_client::{ReadySetHandle, ViewCreateRequest};
+use readyset_client::{PlaceholderIdx, ReadySetHandle, ViewCreateRequest};
 use readyset_client_metrics::recorded;
-use readyset_errors::ReadySetResult;
+use readyset_data::DfValue;
+use readyset_errors::{internal_err, ReadySetResult};
+use readyset_sql_passes::InlineLiterals;
 use readyset_util::redacted::Sensitive;
 use readyset_util::shutdown::ShutdownReceiver;
 use tokio::select;
@@ -95,6 +98,108 @@ where
         }
     }
 
+    /// Migrate (or attempt a dry run migration) for each query marked as pending in the
+    /// `QueryStatusCache`.
+    async fn process_pending_migrations(
+        &mut self,
+        success_counter: &Counter,
+        failure_counter: &Counter,
+    ) {
+        // First process pending queries
+        let to_process = self.query_status_cache.pending_migration();
+        let has_controller = self.controller.is_some();
+        let mut successes = 0;
+        let mut failures = 0;
+        for q in to_process {
+            match &q.0 {
+                Query::Parsed(req) => {
+                    if has_controller {
+                        self.perform_dry_run_migration(req).await
+                    } else {
+                        self.perform_migration(req).await
+                    }
+                    successes += 1;
+                }
+                Query::ParseFailed(_) => {
+                    error!("Should not be migrating query that failed to parse. Ignoring");
+                    failures += 1;
+                }
+            }
+        }
+
+        success_counter.increment(successes);
+        failure_counter.increment(failures);
+    }
+
+    /// Migrate queries pending an inlined migration in the `QueryStatusCache`. A single query may
+    /// have multiple sets of literals for which we attempt to run an inlined migration. After each
+    /// inlined migration is completed, we migrate the original query. This allows the server to
+    /// associate the original query with the inlined migrations that we ran.
+    async fn process_inlined_migrations(&mut self) {
+        let inlined_queries = self.query_status_cache.pending_inlined_migration();
+        for query in inlined_queries {
+            let mut successful_migrations = vec![];
+            for literals in query.literals() {
+                match self
+                    .perform_inlined_migration(query.query(), query.placeholders(), literals)
+                    .await
+                {
+                    Ok(()) => {
+                        successful_migrations.push(literals);
+                        // Remove the start time since we've successfully completed the migration.
+                        self.start_time.remove(query.query());
+                    }
+                    Err(e) if e.caused_by_unsupported() => {
+                        debug!(
+                            error = %e,
+                            // FIXME(ENG-2500): Use correct dialect.
+                            query = %Sensitive(&query.query().statement.display(nom_sql::Dialect::MySQL)),
+                            "Select query is unsupported in ReadySet"
+                        );
+                        self.query_status_cache
+                            .unsupported_inlined_migration(query.query());
+                        self.start_time.remove(query.query());
+                    }
+                    // Errors that were not caused by unsupported may be transient, do nothing
+                    // so we may retry the migration on this query.
+                    Err(e) => {
+                        debug!(
+                            error = %e,
+                            // FIXME(ENG-2500): Use correct dialect.
+                            query = %Sensitive(&query.query().statement.display(nom_sql::Dialect::MySQL)),
+                            "Select query may have transiently failed"
+                        );
+                        if Instant::now() - *self.start_time.get(query.query()).unwrap()
+                            > self.max_retry
+                        {
+                            // Query failed for long enough, it is unsupported.
+                            self.query_status_cache
+                                .unsupported_inlined_migration(query.query());
+                            self.start_time.remove(query.query());
+                        }
+                    }
+                }
+            }
+
+            // Perform a migration on the original query to update the cache
+            // TODO(ENG-2820): Implement retry
+            if !successful_migrations.is_empty() {
+                let _ = self
+                    .noria
+                    .handle_create_cached_query(
+                        None,
+                        &query.query().statement,
+                        Some(query.query().schema_search_path.clone()),
+                        false,
+                    )
+                    .await;
+                // Inform the query status cache of completed migrations
+                self.query_status_cache
+                    .created_inlined_query(query.query(), successful_migrations);
+            }
+        }
+    }
+
     #[instrument(level = "warn", name = "migration_handler", skip(self))]
     pub async fn run(&mut self) -> ReadySetResult<()> {
         let mut interval = tokio::time::interval(self.min_poll_interval);
@@ -114,29 +219,8 @@ where
                     break;
                 }
                 _ = interval.tick() => {
-                    let to_process = self.query_status_cache.pending_migration();
-                    let has_controller = self.controller.is_some();
-                    let mut successes = 0;
-                    let mut failures = 0;
-                    for q in to_process {
-                        match &q.0 {
-                            Query::Parsed(req) => {
-                                if has_controller {
-                                    self.perform_dry_run_migration(req).await
-                                } else {
-                                    self.perform_migration(req).await
-                                }
-                                successes += 1;
-                            }
-                            Query::ParseFailed(_) => {
-                                error!("Should not be migrating query that failed to parse. Ignoring");
-                                failures += 1;
-                            },
-                        }
-                    }
-
-                    success_counter.increment(successes);
-                    failure_counter.increment(failures);
+                    self.process_pending_migrations(&success_counter, &failure_counter).await;
+                    self.process_inlined_migrations().await;
                 }
             }
         }
@@ -292,6 +376,42 @@ where
                 }
             }
         }
+    }
+
+    /// Inline the literals over the placeholders for the view_request.
+    async fn perform_inlined_migration(
+        &mut self,
+        view_request: &ViewCreateRequest,
+        placeholders: &[PlaceholderIdx],
+        literals: &[DfValue],
+    ) -> ReadySetResult<()> {
+        // We maintain one entry for all inlined migrations for the same query. It's unlikely that a
+        // query will be unsupported for only a subset of `DfValue` literals.
+        if !self.start_time.contains_key(view_request) {
+            self.start_time.insert(view_request.clone(), Instant::now());
+        }
+
+        let mapping = placeholders
+            .iter()
+            .map(|p| {
+                literals
+                    .get(*p - 1) // placeholders are 1-indexed
+                    .and_then(|v| Literal::try_from(v.clone()).ok())
+                    .map(|lit| (*p, lit))
+                    .ok_or_else(|| internal_err!("Expected value for placeholder ${p}"))
+            })
+            .collect::<ReadySetResult<HashMap<_, _>>>()?;
+
+        let inlined_query = view_request.statement.clone().inline_literals(&mapping);
+
+        self.noria
+            .handle_create_cached_query(
+                None,
+                &inlined_query,
+                Some(view_request.schema_search_path.clone()),
+                false,
+            )
+            .await
     }
 
     async fn perform_dry_run_migration(&mut self, view_request: &ViewCreateRequest) {

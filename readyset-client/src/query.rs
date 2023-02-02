@@ -11,13 +11,15 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use readyset_data::DfValue;
 use readyset_sql_passes::anonymize::{Anonymize, Anonymizer};
 use readyset_util::fmt::fmt_with;
 use readyset_util::hash::hash;
 use serde::ser::{SerializeSeq, SerializeTuple};
 use serde::{Deserialize, Serialize, Serializer};
+use vec1::Vec1;
 
-use crate::ViewCreateRequest;
+use crate::{PlaceholderIdx, ViewCreateRequest};
 
 /// A QueryId is a string with the prefix `q_` and the suffix of the hash of the query
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -242,16 +244,82 @@ impl QueryStatus {
     }
 }
 
+/// All the information required to cache a query with inlined placeholders. May contain
+/// multiple sets of parameters to use for inlining.
+#[derive(Debug)]
+pub struct QueryInliningInstructions {
+    /// The query to cache.
+    query: ViewCreateRequest,
+    /// The placeholders that require inlining.
+    placeholders: Vec1<PlaceholderIdx>,
+    /// The sets of literals to use for inlining.
+    literals: Vec<Vec<DfValue>>,
+}
+
+impl QueryInliningInstructions {
+    /// Creates a new set of instructions to create an inlined cache for a query.
+    pub fn new(
+        query: ViewCreateRequest,
+        placeholders: Vec1<PlaceholderIdx>,
+        literals: Vec<Vec<DfValue>>,
+    ) -> Self {
+        Self {
+            query,
+            placeholders,
+            literals,
+        }
+    }
+
+    /// Returns the [`ViewCreateRequest`] for this query.
+    pub fn query(&self) -> &ViewCreateRequest {
+        &self.query
+    }
+
+    /// Returns the placeholder numbers that require inlining.
+    pub fn placeholders(&self) -> &[PlaceholderIdx] {
+        &self.placeholders
+    }
+
+    /// Returns the literals to be used for inlining.
+    pub fn literals(&self) -> &[Vec<DfValue>] {
+        &self.literals
+    }
+}
+
+/// Contains information on which parameters in a query are inlined and the number of times the
+/// query state has changed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InlinedState {
+    /// The placeholder numbers that require inlining to support this query in ReadySet.
+    pub inlined_placeholders: Vec1<PlaceholderIdx>,
+    /// Incremented every time a set of inlined migrations are created for this query by the
+    /// `MigrationHandler` to convey that the query state has changed.
+    pub epoch: u64,
+}
+
+impl InlinedState {
+    /// Create a new `InlinedState` from the set of placeholders that require inlining.
+    pub fn from_placeholders(inlined_placeholders: Vec1<PlaceholderIdx>) -> Self {
+        Self {
+            inlined_placeholders,
+            epoch: 0,
+        }
+    }
+}
+
 /// Represents the current migration state of a given query. This state should be updated any time
 /// a migration is performed, or we learn that the migration state has changed, i.e. we receive a
 /// ViewNotFound error indicating a query is not migrated.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MigrationState {
     /// A migration has not been completed for this query. There may be one in progress depending
     /// on the adapters MigrationMode.
     Pending,
     /// This query has been migrated and a view exists.
     Successful,
+    /// This query cannot be cached by ReadySet, but we may be able to reuse an existing cache for
+    /// some set of parameters passed on execution.
+    Inlined(InlinedState),
     /// This query is not supported and should not be tried against ReadySet.
     Unsupported,
     /// Indicates that a dry run of the query has succeeded. It's very likely but not guaranteed
@@ -271,6 +339,11 @@ impl MigrationState {
         }
     }
 
+    /// Returns true if the query is inlined
+    pub fn is_inlined(&self) -> bool {
+        matches!(self, MigrationState::Inlined(_))
+    }
+
     /// Returns true if the migration state of the query indicates that we are still processing it
     pub fn is_pending(&self) -> bool {
         matches!(
@@ -287,6 +360,10 @@ impl Display for MigrationState {
             MigrationState::Successful => write!(f, "successful"),
             MigrationState::Unsupported => write!(f, "unsupported"),
             MigrationState::DryRunSucceeded => write!(f, "dry run succeeded"),
+            MigrationState::Inlined(InlinedState { epoch, .. }) => match epoch {
+                0u64 => write!(f, "pending inlining"),
+                _ => write!(f, "successfully inlined"),
+            },
         }
     }
 }

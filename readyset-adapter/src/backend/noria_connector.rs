@@ -1062,7 +1062,7 @@ impl NoriaConnector {
     async fn get_view(
         &mut self,
         q: &nom_sql::SelectStatement,
-        prepared: bool,
+        is_prepared: bool,
         create_if_not_exist: bool,
         override_schema_search_path: Option<Vec<SqlIdentifier>>,
     ) -> ReadySetResult<Relation> {
@@ -1075,7 +1075,7 @@ impl NoriaConnector {
 
                 // add the query to ReadySet
                 if create_if_not_exist {
-                    if prepared {
+                    if is_prepared {
                         info!(
                             query = %Sensitive(&q.display(self.parse_dialect)),
                             name = %qname.display_unquoted(),
@@ -1589,6 +1589,31 @@ impl NoriaConnector {
             self.inner.get_mut()?.noria.extend_recipe(changelist)
         )?;
         Ok(QueryResult::Empty)
+    }
+
+    /// Requests a view for the query from the controller. Invalidates the current entry in the view
+    /// cache, regardless of whether the view is marked as failed. Optionally creates a new
+    /// cache for the query.
+    pub async fn update_view_cache(
+        &mut self,
+        statement: &nom_sql::SelectStatement,
+        override_schema_search_path: Option<Vec<SqlIdentifier>>,
+        create_if_not_exists: bool,
+        is_prepared: bool,
+    ) -> ReadySetResult<()> {
+        let qname = self
+            .get_view(
+                statement,
+                is_prepared,
+                create_if_not_exists,
+                override_schema_search_path,
+            )
+            .await?;
+
+        // Remove the view from failed_views if present, and request the view from the controller.
+        self.failed_views.remove(&qname);
+        self.inner.get_mut()?.get_noria_view(&qname, true).await?;
+        Ok(())
     }
 }
 

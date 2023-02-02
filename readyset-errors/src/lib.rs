@@ -814,6 +814,16 @@ impl ReadySetError {
     pub fn is_invalid_query(&self) -> bool {
         matches!(self, Self::InvalidQuery(..))
     }
+
+    /// If `self` either *is* [`UnsupportedPlaceholders`] or was *caused by*
+    /// [`UnsupportedPlaceholders`], returns the placeholders that were not supported in the query.
+    /// Otherwise, returns `None`
+    pub fn unsupported_placeholders_cause(&self) -> Option<Vec1<u32>> {
+        self.find_map_cause(|e| match e {
+            Self::UnsupportedPlaceholders { placeholders } => Some(placeholders.clone()),
+            _ => None,
+        })
+    }
 }
 
 /// Make a new [`ReadySetError::Internal`] with the provided format arguments.

@@ -4,18 +4,18 @@ use nom_sql::analysis::visit_mut::VisitorMut;
 use nom_sql::{ItemPlaceholder, Literal, SelectStatement};
 
 struct InlineLiteralsVisitor<'a> {
-    placeholder_literal_map: &'a HashMap<u32, Literal>,
+    placeholder_literal_map: &'a HashMap<usize, Literal>,
 }
 
 pub trait InlineLiterals {
-    fn inline_literals(self, placeholder_literal_map: &HashMap<u32, Literal>) -> Self;
+    fn inline_literals(self, placeholder_literal_map: &HashMap<usize, Literal>) -> Self;
 }
 
 impl<'ast, 'a> VisitorMut<'ast> for InlineLiteralsVisitor<'a> {
     type Error = !;
     fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
         if let Literal::Placeholder(ItemPlaceholder::DollarNumber(p)) = literal {
-            if let Some(inlined_literal) = self.placeholder_literal_map.get(p) {
+            if let Some(inlined_literal) = self.placeholder_literal_map.get(&(*p as usize)) {
                 *literal = inlined_literal.clone();
             }
         }
@@ -24,7 +24,7 @@ impl<'ast, 'a> VisitorMut<'ast> for InlineLiteralsVisitor<'a> {
 }
 
 impl InlineLiterals for SelectStatement {
-    fn inline_literals(mut self, placeholder_literal_map: &HashMap<u32, Literal>) -> Self {
+    fn inline_literals(mut self, placeholder_literal_map: &HashMap<usize, Literal>) -> Self {
         let mut visitor = InlineLiteralsVisitor {
             placeholder_literal_map,
         };

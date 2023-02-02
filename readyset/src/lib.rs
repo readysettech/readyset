@@ -371,8 +371,8 @@ pub struct Options {
     ///
     /// If set, we will create a cache with literals inlined in the unsupported placeholder
     /// positions every time the statement is executed with a new set of parameters.
-    #[clap(long, env = "AUTOMATIC_PLACEHOLDER_INLINING", hide = true)]
-    automatic_placeholder_inlining: bool,
+    #[clap(long, env = "EXPERIMENTAL_PLACEHOLDER_INLINING")]
+    experimental_placeholder_inlining: bool,
 
     /// Don't make connections to the upstream database for new client connections.
     ///
@@ -730,7 +730,9 @@ where
         let query_status_cache: &'static _ = Box::leak(Box::new(
             QueryStatusCache::new()
                 .style(migration_style)
-                .automatic_placeholder_inlining(options.automatic_placeholder_inlining),
+                .enable_experimental_placeholder_inlining(
+                    options.experimental_placeholder_inlining,
+                ),
         ));
 
         let telemetry_sender = rt.block_on(async {
@@ -875,7 +877,6 @@ where
                     Default::default()
                 };
 
-                //TODO(DAN): allow compatibility with async and explicit migrations
                 let noria =
                     NoriaConnector::new(
                         rh.clone(),
@@ -1034,7 +1035,10 @@ where
                 .migration_mode(migration_mode)
                 .query_max_failure_seconds(options.query_max_failure_seconds)
                 .telemetry_sender(telemetry_sender.clone())
-                .fallback_recovery_seconds(options.fallback_recovery_seconds);
+                .fallback_recovery_seconds(options.fallback_recovery_seconds)
+                .enable_experimental_placeholder_inlining(
+                    options.experimental_placeholder_inlining,
+                );
             let telemetry_sender = telemetry_sender.clone();
 
             // Initialize the reader layer for the adapter.

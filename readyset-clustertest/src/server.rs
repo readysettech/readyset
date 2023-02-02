@@ -333,4 +333,8 @@ impl AdapterBuilder {
     pub fn reader_replicas(self, num_replicas: usize) -> Self {
         self.push_arg_kv("--reader-replicas", &num_replicas.to_string())
     }
+
+    pub fn enable_experimental_placeholder_inlining(self) -> Self {
+        self.push_arg("--experimental-placeholder-inlining")
+    }
 }

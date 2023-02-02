@@ -46,7 +46,7 @@ impl ProxiedQueriesReporter {
             ))
         };
 
-        match reported_queries.insert(query.id, query.status.migration_state) {
+        match reported_queries.insert(query.id, query.status.migration_state.clone()) {
             Some(old_migration_state) => {
                 // Check whether we know of a new migration state for this query. Send an event if
                 // so
@@ -114,7 +114,10 @@ mod tests {
         proxied_queries_reporter.report_query(&mut init_q).await;
         let status = {
             let queries = proxied_queries_reporter.reported_queries.lock().await;
-            *queries.get(&query_id).expect("query should be mapped")
+            queries
+                .get(&query_id)
+                .expect("query should be mapped")
+                .clone()
         };
         assert_eq!(MigrationState::Pending, status);
 
@@ -132,7 +135,10 @@ mod tests {
         proxied_queries_reporter.report_query(&mut updated_q).await;
         let status = {
             let queries = proxied_queries_reporter.reported_queries.lock().await;
-            *queries.get(&query_id).expect("query should be mapped")
+            queries
+                .get(&query_id)
+                .expect("query should be mapped")
+                .clone()
         };
         assert_eq!(MigrationState::Successful, status);
     }
