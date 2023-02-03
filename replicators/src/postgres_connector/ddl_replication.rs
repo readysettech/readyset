@@ -135,7 +135,7 @@ macro_rules! make_fallible_parse_deserialize_with {
 
 make_fallible_parse_deserialize_with!(parse_sql_type -> SqlType);
 make_fallible_parse_deserialize_with!(parse_table_key -> TableKey, parse_key_specification_string);
-make_parse_deserialize_with!(parse_alter_table_statement -> AlterTableStatement, parse_alter_table);
+make_fallible_parse_deserialize_with!(parse_alter_table_statement -> AlterTableStatement, parse_alter_table);
 make_parse_deserialize_with!(parse_create_view_statement -> CreateViewStatement, parse_create_view);
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -145,7 +145,11 @@ pub(crate) enum DdlEventData {
         columns: Vec<DdlCreateTableColumn>,
         constraints: Vec<DdlCreateTableConstraint>,
     },
-    AlterTable(#[serde(deserialize_with = "parse_alter_table_statement")] AlterTableStatement),
+    AlterTable {
+        name: String,
+        #[serde(deserialize_with = "parse_alter_table_statement")]
+        statement: Result<AlterTableStatement, String>,
+    },
     CreateView(#[serde(deserialize_with = "parse_create_view_statement")] CreateViewStatement),
     Drop(String),
     CreateType {
@@ -239,7 +243,26 @@ impl DdlEvent {
                     Err(_) => Change::AddNonReplicatedRelation(table),
                 }
             }
-            DdlEventData::AlterTable(stmt) => Change::AlterTable(stmt),
+            DdlEventData::AlterTable { name, statement } => {
+                let stmt = match statement {
+                    Ok(stmt) => stmt,
+                    Err(unparseable) => {
+                        // If the *whole* alter table statement failed parsing, just use the name in
+                        // the event data to construct a fake AlterTableStatement with the parse
+                        // failure in place of the definitions
+                        AlterTableStatement {
+                            table: Relation {
+                                schema: Some(self.schema.into()),
+                                name: name.into(),
+                            },
+                            definitions: Err(unparseable),
+                            only: false,
+                        }
+                    }
+                };
+
+                Change::AlterTable(stmt)
+            }
             DdlEventData::CreateView(stmt) => Change::CreateView(stmt),
             DdlEventData::Drop(name) => Change::Drop {
                 name: name.into(),
@@ -340,7 +363,6 @@ mod tests {
             &self.client
         }
     }
-
     impl DerefMut for Context {
         fn deref_mut(&mut self) -> &mut Self::Target {
             &mut self.client
@@ -553,7 +575,9 @@ mod tests {
         assert_eq!(ddl.schema, "public");
 
         match ddl.data {
-            DdlEventData::AlterTable(stmt) => {
+            DdlEventData::AlterTable { name, statement } => {
+                assert_eq!(name, "t");
+                let stmt = statement.unwrap();
                 assert_eq!(stmt.table.name, "t");
                 assert_eq!(
                     stmt.definitions.unwrap(),

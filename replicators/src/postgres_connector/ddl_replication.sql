@@ -97,10 +97,17 @@ BEGIN
     SELECT
     json_build_object(
         'schema', object.schema_name,
-        'data', json_build_object('AlterTable', query)
+        'data', json_build_object(
+            'AlterTable',
+            json_build_object(
+                'name', cls.relname,
+                'statement', query
+            )
+        )
     )
     INTO alter_message
     FROM pg_event_trigger_ddl_commands() object
+    JOIN pg_class cls ON object.objid = cls.oid
     WHERE object.object_type = 'table';
 
     IF readyset.is_pre14() THEN
