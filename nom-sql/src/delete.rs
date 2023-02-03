@@ -22,12 +22,7 @@ pub struct DeleteStatement {
 impl DeleteStatement {
     pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
-            // FIXME(ENG-2483): Use full table name including its schema.
-            write!(
-                f,
-                "DELETE FROM {}",
-                dialect.quote_identifier(&self.table.name)
-            )?;
+            write!(f, "DELETE FROM {}", self.table.display(dialect))?;
 
             if let Some(ref where_clause) = self.where_clause {
                 write!(f, " WHERE {}", where_clause.display(dialect))?;
