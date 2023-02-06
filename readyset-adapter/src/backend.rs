@@ -1685,8 +1685,7 @@ where
 
                 vec![
                     DfValue::from(id.to_string()),
-                    // FIXME(ENG-2501): Use correct dialect
-                    DfValue::from(query.to_string()),
+                    DfValue::from(query.display(DB::sql_dialect()).to_string()),
                     DfValue::from(s),
                 ]
             })

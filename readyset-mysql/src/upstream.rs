@@ -366,7 +366,7 @@ impl UpstreamDatabase for MySqlUpstream {
     }
 
     fn sql_dialect() -> nom_sql::Dialect {
-        nom_sql::Dialect::PostgreSQL
+        nom_sql::Dialect::MySQL
     }
 
     fn url(&self) -> &str {

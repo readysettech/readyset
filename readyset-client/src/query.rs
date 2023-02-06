@@ -12,6 +12,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use readyset_sql_passes::anonymize::{Anonymize, Anonymizer};
+use readyset_util::fmt::fmt_with;
 use readyset_util::hash::hash;
 use serde::ser::{SerializeSeq, SerializeTuple};
 use serde::{Deserialize, Serialize, Serializer};
@@ -111,17 +112,15 @@ impl Hash for Query {
     }
 }
 
-impl Display for Query {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            // FIXME(ENG-2501): Use correct dialect.
-            Query::Parsed(q) => write!(f, "{}", q.statement.display(nom_sql::Dialect::MySQL)),
-            Query::ParseFailed(s) => write!(f, "{s}"),
-        }
-    }
-}
-
 impl Query {
+    /// Displays the query using appropriate formatting for the given dialect.
+    pub fn display(&self, dialect: nom_sql::Dialect) -> impl Display + Copy + '_ {
+        fmt_with(move |f| match self {
+            Query::Parsed(q) => write!(f, "{}", q.statement.display(dialect)),
+            Query::ParseFailed(s) => write!(f, "{s}"),
+        })
+    }
+
     /// Clones the inner query into a String and anonymizes the literals in it if it is a parsed
     /// SelectStatement. If the query failed to parse, the query is fully anonymized
     pub fn to_anonymized_string(&self, anonymizer: &mut Anonymizer) -> String {
