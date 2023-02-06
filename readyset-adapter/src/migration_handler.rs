@@ -14,7 +14,7 @@ use readyset_client::query::{MigrationState, Query};
 use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::{ReadySetHandle, ReadySetResult, ViewCreateRequest};
 use readyset_client_metrics::recorded;
-use readyset_tracing::{error, info, warn};
+use readyset_tracing::{debug, error, info};
 use readyset_util::redacted::Sensitive;
 use tokio::select;
 use tracing::instrument;
@@ -169,7 +169,7 @@ where
                 };
 
                 if let Err(e) = upstream_result {
-                    error!(
+                    debug!(
                         error = %e,
                         query = %Sensitive(&view_request.statement),
                         "Query failed to be prepared against upstream",
@@ -210,7 +210,7 @@ where
                                 .meta
                                 .compare(schema, params)
                             {
-                                warn!(
+                                debug!(
                                     error = %e,
                                     query = %Sensitive(&view_request.statement),
                                     "Query compare failed"
@@ -226,7 +226,7 @@ where
                         noria_connector::PrepareResult::Select(SelectPrepareResult::NoSchema(
                             _,
                         )) => {
-                            warn!("Cannot compare schema for borrowed query");
+                            debug!("Cannot compare schema for borrowed query");
                         }
                         _ => {
                             return;
@@ -239,7 +239,7 @@ where
                     .update_query_migration_state(view_request, MigrationState::Successful);
             }
             Err(e) if e.caused_by_unsupported() => {
-                error!(
+                debug!(
                     error = %e,
                     query = %Sensitive(&view_request.statement),
                     "Select query is unsupported in ReadySet"
@@ -252,7 +252,7 @@ where
             // Errors that were not caused by unsupported may be transient, do nothing
             // so we may retry the migration on this query.
             Err(e) => {
-                warn!(
+                debug!(
                     error = %e,
                     query = %Sensitive(&view_request.statement),
                     "Select query may have transiently failed"
@@ -279,7 +279,7 @@ where
         if Instant::now() - *start_time > self.max_retry {
             // We've exceeded the max amount of times we'll try running dry runs with this query.
             // It's probably unsupported, but we'll allow a proper migration determine that.
-            error!(
+            debug!(
                 "Max retry time of {:?} exceeded for dry run migration. {:?} is probably unsupported",
                 self.max_retry,
                 view_request.to_anonymized_string()
