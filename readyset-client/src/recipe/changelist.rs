@@ -354,10 +354,6 @@ impl Change {
         match self {
             Change::AlterTable(alter_table) => {
                 if let Ok(definitions) = &alter_table.definitions {
-                    // NOTE: This exhaustive list is here so that we remember to think about the
-                    // behavior of any additional alter table additions we add
-                    // support for. We may not need to resnapshot for them. As
-                    // such, this list should not be removed.
                     definitions.iter().any(|def| match def {
                         nom_sql::AlterTableDefinition::AddColumn(_)
                         | nom_sql::AlterTableDefinition::AlterColumn { .. }
@@ -365,8 +361,8 @@ impl Change {
                         | nom_sql::AlterTableDefinition::ChangeColumn { .. }
                         | nom_sql::AlterTableDefinition::RenameColumn { .. }
                         | nom_sql::AlterTableDefinition::AddKey(_)
-                        | nom_sql::AlterTableDefinition::DropConstraint { .. }
-                        | nom_sql::AlterTableDefinition::ReplicaIdentity(_) => true,
+                        | nom_sql::AlterTableDefinition::DropConstraint { .. } => true,
+                        nom_sql::AlterTableDefinition::ReplicaIdentity(_) => false,
                     })
                 } else {
                     // We know it's an alter table, but we couldn't fully parse it.
