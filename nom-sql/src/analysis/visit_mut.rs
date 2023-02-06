@@ -936,7 +936,8 @@ pub fn walk_alter_table_definition<'a, V: VisitorMut<'a>>(
         | AlterTableDefinition::DropConstraint {
             name: _,
             drop_behavior: _,
-        } => Ok(()),
+        }
+        | AlterTableDefinition::ReplicaIdentity(_) => Ok(()),
     }
 }
 

@@ -1,12 +1,14 @@
-/// ALTER TABLE Statement AST and parsing (incomplete)
-///
-/// See https://dev.mysql.com/doc/refman/8.0/en/alter-table.html
-use std::{fmt, str};
+//! ALTER TABLE Statement AST and parsing (incomplete)
+//!
+//! See https://dev.mysql.com/doc/refman/8.0/en/alter-table.html
+
+use std::fmt::{self, Display};
+use std::str;
 
 use itertools::Itertools;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
-use nom::combinator::{map, opt};
+use nom::combinator::{map, opt, value};
 use nom::multi::separated_list1;
 use nom::sequence::{preceded, terminated};
 use nom_locate::LocatedSpan;
@@ -56,7 +58,25 @@ impl fmt::Display for DropBehavior {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
-#[allow(clippy::enum_variant_names)]
+pub enum ReplicaIdentity {
+    Default,
+    UsingIndex { index_name: SqlIdentifier },
+    Full,
+    Nothing,
+}
+
+impl Display for ReplicaIdentity {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ReplicaIdentity::Default => write!(f, "DEFAULT"),
+            ReplicaIdentity::UsingIndex { index_name } => write!(f, "USING INDEX {index_name}"),
+            ReplicaIdentity::Full => write!(f, "FULL"),
+            ReplicaIdentity::Nothing => write!(f, "NOTHING"),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum AlterTableDefinition {
     AddColumn(ColumnSpecification),
     AddKey(TableKey),
@@ -80,6 +100,7 @@ pub enum AlterTableDefinition {
         name: SqlIdentifier,
         drop_behavior: Option<DropBehavior>,
     },
+    ReplicaIdentity(ReplicaIdentity),
     /* TODO(grfn): https://ronsavage.github.io/SQL/sql-2003-2.bnf.html#add%20table%20constraint%20definition
      * AddTableConstraint(..),
      * TODO(grfn): https://ronsavage.github.io/SQL/sql-2003-2.bnf.html#drop%20table%20constraint%20definition
@@ -118,6 +139,9 @@ impl fmt::Display for AlterTableDefinition {
                 None => write!(f, "DROP CONSTRAINT {}", name),
                 Some(d) => write!(f, "DROP CONSTRAINT {} {}", name, d),
             },
+            AlterTableDefinition::ReplicaIdentity(replica_identity) => {
+                write!(f, "REPLICA IDENTITY {replica_identity}")
+            }
         }
     }
 }
@@ -326,6 +350,32 @@ fn drop_constraint(
     }
 }
 
+fn replica_identity(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AlterTableDefinition> {
+    move |i| {
+        let (i, _) = tag_no_case("replica")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("identity")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, replica_identity) = alt((
+            value(ReplicaIdentity::Default, tag_no_case("default")),
+            move |i| {
+                let (i, _) = tag_no_case("using")(i)?;
+                let (i, _) = whitespace1(i)?;
+                let (i, _) = tag_no_case("index")(i)?;
+                let (i, _) = whitespace1(i)?;
+                let (i, index_name) = dialect.identifier()(i)?;
+                Ok((i, ReplicaIdentity::UsingIndex { index_name }))
+            },
+            value(ReplicaIdentity::Full, tag_no_case("full")),
+            value(ReplicaIdentity::Nothing, tag_no_case("nothing")),
+        ))(i)?;
+
+        Ok((i, AlterTableDefinition::ReplicaIdentity(replica_identity)))
+    }
+}
+
 fn alter_table_definition(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AlterTableDefinition> {
@@ -339,6 +389,7 @@ fn alter_table_definition(
             modify_column(dialect),
             rename_column(dialect),
             drop_constraint(dialect),
+            replica_identity(dialect),
         ))(i)
     }
 }
@@ -1128,6 +1179,42 @@ mod tests {
                     on_delete: None,
                     on_update: None,
                 },
+            );
+        }
+
+        #[test]
+        fn alter_table_replica_identity() {
+            let res = test_parse!(
+                alter_table_statement(Dialect::MySQL),
+                b"ALTER TABLE t REPLICA IDENTITY DEFAULT"
+            );
+            assert_eq!(
+                res.definitions.unwrap(),
+                vec![AlterTableDefinition::ReplicaIdentity(
+                    ReplicaIdentity::Default
+                )]
+            );
+
+            let res = test_parse!(
+                alter_table_statement(Dialect::MySQL),
+                b"ALTER TABLE t REPLICA IDENTITY FULL"
+            );
+            assert_eq!(
+                res.definitions.unwrap(),
+                vec![AlterTableDefinition::ReplicaIdentity(ReplicaIdentity::Full)]
+            );
+
+            let res = test_parse!(
+                alter_table_statement(Dialect::MySQL),
+                b"ALTER TABLE t REPLICA IDENTITY USING INDEX asdf"
+            );
+            assert_eq!(
+                res.definitions.unwrap(),
+                vec![AlterTableDefinition::ReplicaIdentity(
+                    ReplicaIdentity::UsingIndex {
+                        index_name: "asdf".into()
+                    }
+                )]
             );
         }
     }

@@ -12,7 +12,9 @@ use nom::error::{ErrorKind, FromExternalError, ParseError};
 use nom::{AsBytes, Err, HexDisplay, IResult};
 use nom_locate::LocatedSpan;
 
-pub use self::alter::{AlterColumnOperation, AlterTableDefinition, AlterTableStatement};
+pub use self::alter::{
+    AlterColumnOperation, AlterTableDefinition, AlterTableStatement, ReplicaIdentity,
+};
 pub use self::column::{Column, ColumnConstraint, ColumnSpecification};
 pub use self::common::{FieldDefinitionExpr, FieldReference, IndexType, TableKey};
 pub use self::compound_select::{CompoundSelectOperator, CompoundSelectStatement};

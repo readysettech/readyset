@@ -365,7 +365,8 @@ impl Change {
                         | nom_sql::AlterTableDefinition::ChangeColumn { .. }
                         | nom_sql::AlterTableDefinition::RenameColumn { .. }
                         | nom_sql::AlterTableDefinition::AddKey(_)
-                        | nom_sql::AlterTableDefinition::DropConstraint { .. } => true,
+                        | nom_sql::AlterTableDefinition::DropConstraint { .. }
+                        | nom_sql::AlterTableDefinition::ReplicaIdentity(_) => true,
                     })
                 } else {
                     // We know it's an alter table, but we couldn't fully parse it.
