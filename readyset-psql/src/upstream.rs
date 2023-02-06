@@ -179,6 +179,10 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         })
     }
 
+    fn sql_dialect() -> nom_sql::Dialect {
+        nom_sql::Dialect::PostgreSQL
+    }
+
     fn url(&self) -> &str {
         self.upstream_config.upstream_db_url.as_deref().unwrap()
     }
