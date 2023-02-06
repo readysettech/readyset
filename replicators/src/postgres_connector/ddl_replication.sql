@@ -198,7 +198,7 @@ BEGIN
       ON t.oid = object.objid
     JOIN pg_catalog.pg_enum e
       ON e.enumtypid = t.oid
-    GROUP BY object.objid, object.schema_name, t.oid;
+    GROUP BY object.objid, object.schema_name, t.oid, t.typname, t.typarray;
 
     IF readyset.is_pre14() THEN
         UPDATE readyset.ddl_replication_log SET "ddl" = create_message;
@@ -251,7 +251,7 @@ BEGIN
       ON t.oid = object.objid
     JOIN pg_catalog.pg_enum e
       ON e.enumtypid = t.oid
-    GROUP BY object.objid, object.schema_name, t.oid;
+    GROUP BY object.objid, object.schema_name, t.oid, t.typname;
 
     DROP TABLE pg_enum_original;
 
