@@ -178,10 +178,10 @@ impl DbConnection {
                 tokio::spawn(conn);
 
                 no_db_client
-                    .simple_query(&format!("DROP SCHEMA IF EXISTS {test_db_name} CASCADE"))
+                    .simple_query(&format!("DROP DATABASE IF EXISTS {test_db_name}"))
                     .await?;
                 no_db_client
-                    .simple_query(&format!("CREATE SCHEMA {test_db_name}"))
+                    .simple_query(&format!("CREATE DATABASE {test_db_name}"))
                     .await?;
             }
 
@@ -189,6 +189,12 @@ impl DbConnection {
                 .await
                 .unwrap();
             let connection_handle = tokio::spawn(async move { conn.await.map_err(Into::into) });
+            client
+                .simple_query(&format!(
+                    "CREATE SCHEMA IF NOT EXISTS {}",
+                    opts.get_dbname().unwrap()
+                ))
+                .await?;
             Ok(DbConnection::PostgreSQL(client, connection_handle))
         } else {
             unimplemented!()
