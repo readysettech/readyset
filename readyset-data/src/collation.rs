@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
+use std::fmt::Display;
 use std::hash::{Hash, Hasher};
 
 use serde::{Deserialize, Serialize};
@@ -44,6 +45,15 @@ pub enum Collation {
     Citext,
 }
 
+impl Display for Collation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Utf8 => write!(f, "utf-8"),
+            Self::Citext => write!(f, "citext"),
+        }
+    }
+}
+
 impl Collation {
     /// Normalize the given string according to this collation.
     ///
@@ -78,6 +88,14 @@ impl Collation {
                 .map(|c| c.to_lowercase())
                 .cmp_by(s2.chars().map(|c| c.to_lowercase()), |c1, c2| c1.cmp(c2)),
         }
+    }
+
+    /// Returns `true` if the collation is [`Utf8`].
+    ///
+    /// [`Utf8`]: Collation::Utf8
+    #[must_use]
+    pub fn is_utf8(&self) -> bool {
+        matches!(self, Self::Utf8)
     }
 }
 

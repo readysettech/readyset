@@ -607,7 +607,6 @@ impl fmt::Display for DfType {
             | Self::UnsignedBigInt
             | Self::Float
             | Self::Double
-            | Self::Text { .. }
             | Self::Blob
             | Self::VarBit(None)
             | Self::Date
@@ -616,6 +615,14 @@ impl fmt::Display for DfType {
             | Self::Uuid
             | Self::Json
             | Self::Jsonb => write!(f, "{kind:?}"),
+
+            Self::Text(collation) => {
+                write!(f, "Text")?;
+                if !collation.is_utf8() {
+                    write!(f, "({collation})")?;
+                }
+                Ok(())
+            }
 
             Self::Array(ref ty) => write!(f, "{ty}[]"),
 
