@@ -649,6 +649,10 @@ pub enum ReadySetError {
     /// Error that the upstream database reports a server version the ReadySet could not parse.
     #[error("Upstream server version could not be parsed")]
     UnparseableServerVersion,
+
+    /// Error that we lost the connection to the upstream database
+    #[error("Connection to the upstream database was lost: {0}")]
+    UpstreamConnectionLost(String),
 }
 
 impl ReadySetError {

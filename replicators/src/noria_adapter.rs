@@ -516,7 +516,9 @@ impl NoriaAdapter {
 
                     snapshot_result?;
                 },
-                c = connection_handle.fuse() => c.unwrap()?,
+                c = connection_handle.fuse() => c.map_err(|e| {
+                    ReadySetError::UpstreamConnectionLost(e.to_string())
+                })??
             }
 
             info!("Snapshot finished");

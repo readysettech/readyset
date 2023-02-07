@@ -170,9 +170,10 @@ impl PostgresWalConnector {
         if let Some(reader) = reader.as_mut() {
             select! {
                 ev = reader.next_event().fuse() => ev,
-                err = connection_handle.fuse() => match err.unwrap() { // This unwrap is ok, because it is on the handle
-                    Ok(_) => unreachable!(), // Unreachable because it runs in infinite loop unless errors
-                    Err(err) => Err(WalError::ReadySetError(err.into())),
+                err = connection_handle.fuse() => match err {
+                    Err(e) => Err(WalError::ConnectionLost(e.to_string())),
+                    Ok(Ok(_)) => unreachable!(), // Unreachable because it runs in infinite loop unless errors
+                    Ok(Err(err)) => Err(WalError::ReadySetError(err.into())),
                 }
             }
         } else {

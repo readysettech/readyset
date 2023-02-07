@@ -30,6 +30,7 @@ pub enum WalError {
     CorruptMessage,
     TryFromSliceError,
     ReadySetError(readyset_client::ReadySetError),
+    ConnectionLost(String),
 
     /// An error specific to one of the tables
     TableError {
