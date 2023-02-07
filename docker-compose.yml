@@ -4,7 +4,7 @@ services:
     image: mysql
     environment:
       - MYSQL_ROOT_PASSWORD=readyset
-      - MYSQL_DATABASE=testbdb
+      - MYSQL_DATABASE=testdb
     ports:
       - '3306:3306'
   postgres:
