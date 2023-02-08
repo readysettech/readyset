@@ -730,4 +730,39 @@ mod types {
             vec![Abc::A, Abc::A, Abc::AB, Abc::B, Abc::C]
         );
     }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[serial_test::serial]
+    async fn citext() {
+        readyset_tracing::init_test_logging();
+        let (config, _handle) = setup().await;
+        let client = connect(config.clone()).await;
+
+        client
+            .simple_query("CREATE EXTENSION IF NOT EXISTS citext")
+            .await
+            .unwrap();
+
+        client
+            .simple_query("CREATE TABLE t (x citext);")
+            .await
+            .unwrap();
+
+        client
+            .simple_query("INSERT INTO t (x) VALUES ('a');")
+            .await
+            .unwrap();
+
+        let stmt = client
+            .prepare("SELECT * FROM t WHERE x = $1")
+            .await
+            .unwrap();
+        let res = client.query_one(&stmt, &[&"A"]).await.unwrap();
+        assert_eq!(res.get::<_, String>(0), "a");
+
+        assert_eq!(
+            last_query_info(&client).await.destination,
+            QueryDestination::Readyset
+        );
+    }
 }

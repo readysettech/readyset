@@ -69,6 +69,10 @@ impl TryFrom<Value> for ps::Value {
             (Type::NUMERIC, DfValue::Numeric(ref d)) => Ok(ps::Value::Numeric(*d.as_ref())),
             (Type::TEXT, DfValue::Text(v)) => Ok(ps::Value::Text(v)),
             (Type::TEXT, DfValue::TinyText(t)) => Ok(ps::Value::Text(t.as_str().into())),
+            (ref ty, DfValue::Text(v)) if ty.name() == "citext" => Ok(ps::Value::Text(v)),
+            (ref ty, DfValue::TinyText(t)) if ty.name() == "citext" => {
+                Ok(ps::Value::Text(t.as_str().into()))
+            }
             (Type::TIMESTAMP, DfValue::TimestampTz(v)) => {
                 Ok(ps::Value::Timestamp(v.to_chrono().naive_local()))
             }

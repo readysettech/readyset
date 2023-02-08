@@ -8,7 +8,7 @@ use bytes::{Buf, Bytes, BytesMut};
 use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
 use eui48::MacAddress;
 use postgres_types::{FromSql, Kind, Type};
-use readyset_data::Array;
+use readyset_data::{Array, Collation};
 use rust_decimal::prelude::FromStr;
 use rust_decimal::Decimal;
 use tokio_util::codec::Decoder;
@@ -353,6 +353,12 @@ fn get_binary_value(src: &mut Bytes, t: &Type) -> Result<Value, Error> {
             Type::JSONB => Ok(Value::Jsonb(serde_json::Value::from_sql(t, buf)?)),
             Type::BIT => Ok(Value::Bit(BitVec::from_sql(t, buf)?)),
             Type::VARBIT => Ok(Value::VarBit(BitVec::from_sql(t, buf)?)),
+            ref t if t.name() == "citext" => {
+                Ok(Value::Text(readyset_data::Text::from_str_with_collation(
+                    <&str>::from_sql(t, buf)?,
+                    Collation::Citext,
+                )))
+            }
             _ => Ok(Value::PassThrough(readyset_data::PassThrough {
                 ty: t.clone(),
                 data: buf.to_vec().into_boxed_slice(),
@@ -435,6 +441,7 @@ fn get_text_value(src: &mut Bytes, t: &Type) -> Result<Value, Error> {
             .map(Value::Jsonb),
         Type::BIT => get_bitvec_from_str(text_str).map(Value::Bit),
         Type::VARBIT => get_bitvec_from_str(text_str).map(Value::VarBit),
+        ref t if t.name() == "citext" => Ok(Value::Text(text_str.into())),
         _ => Err(Error::UnsupportedType(t.clone())),
     }
 }
