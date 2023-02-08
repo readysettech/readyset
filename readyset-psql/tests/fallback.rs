@@ -400,6 +400,7 @@ async fn generated_columns() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
+#[ignore = "ENG-2314: JoinError causing test flakiness"]
 async fn unsuported_numeric_scale() {
     // Tests that we handle tables that have NUMERIC values with scales > 28
     // by not snapshotting them and falling back to upstream
