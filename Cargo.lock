@@ -1586,12 +1586,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fmty"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b02102c7be05655e26ac6e7e2ed6484077a81ebee0582797c9b94289d800fcbc"
-
-[[package]]
 name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3055,7 +3049,6 @@ dependencies = [
  "eui48",
  "fail",
  "failpoint-macros",
- "fmty",
  "hex",
  "itertools",
  "lazy_static",

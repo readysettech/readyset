@@ -180,7 +180,7 @@ impl Dialect {
     /// Quotes the table/column identifier appropriately for this dialect.
     pub fn quote_identifier(self, ident: impl fmt::Display) -> impl fmt::Display {
         let quote = self.quote_identifier_char();
-        fmty::fmt_args!("{quote}{ident}{quote}")
+        readyset_util::fmt_args!("{quote}{ident}{quote}")
     }
 
     /// Parse the raw (byte) content of a string literal using this Dialect

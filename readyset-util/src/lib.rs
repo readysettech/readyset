@@ -9,6 +9,7 @@ use std::hash::Hash;
 
 pub mod arbitrary;
 pub mod display;
+pub mod fmt;
 pub mod futures;
 pub mod hash;
 pub mod intervals;
