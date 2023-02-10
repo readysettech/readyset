@@ -301,7 +301,13 @@ fn get_format(src: &mut Bytes) -> Result<TransferFormat, Error> {
 
 fn get_type(src: &mut Bytes) -> Result<Type, Error> {
     let oid = u32::try_from(get_i32(src)?)?;
-    Type::from_oid(oid).ok_or(Error::InvalidType(oid))
+    // Placing a zero here is equivalent to leaving the type unspecified. [1]
+    // https://www.postgresql.org/docs/current/protocol-message-formats.html
+    if oid == 0u32 {
+        Ok(Type::UNKNOWN)
+    } else {
+        Type::from_oid(oid).ok_or(Error::InvalidType(oid))
+    }
 }
 
 fn get_binary_value(src: &mut Bytes, t: &Type) -> Result<Value, Error> {
