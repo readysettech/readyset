@@ -49,7 +49,7 @@ impl Default for Builder {
 
 impl Builder {
     /// Initialize a [`Builder`] from a set of command-line worker options and a deployment name.
-    pub fn from_worker_options(mut opts: crate::WorkerOptions, deployment: &str) -> Self {
+    pub fn from_worker_options(opts: crate::WorkerOptions, deployment: &str) -> Self {
         let mut builder = Self::default();
         if opts.memory > 0 {
             builder.set_memory_limit(opts.memory, Duration::from_secs(opts.memory_check_freq));
@@ -86,10 +86,6 @@ impl Builder {
 
         if let Some(volume_id) = opts.volume_id {
             builder.set_volume_id(volume_id);
-        }
-
-        if opts.replicator_config.deployment_name.is_none() {
-            opts.replicator_config.deployment_name = Some(deployment.to_string())
         }
 
         let persistence_params = PersistenceParameters::new(

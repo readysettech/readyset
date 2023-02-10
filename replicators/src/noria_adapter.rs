@@ -158,16 +158,11 @@ impl NoriaAdapter {
                 )
                 .await?;
 
-                let repl_slot_name = match (&config.deployment_name, &config.replication_server_id)
-                {
-                    (Some(deployment), Some(server_id)) => {
-                        format!("{}_{}", deployment, server_id)
-                    }
-                    (Some(deployment), None) => deployment.to_string(),
-                    (None, Some(server_id)) => {
+                let repl_slot_name = match &config.replication_server_id {
+                    Some(server_id) => {
                         format!("{}_{}", REPLICATION_SLOT, server_id)
                     }
-                    (None, None) => REPLICATION_SLOT.to_string(),
+                    _ => REPLICATION_SLOT.to_string(),
                 };
 
                 NoriaAdapter::start_inner_postgres(

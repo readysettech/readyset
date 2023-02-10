@@ -436,12 +436,10 @@ async fn replication_test_multiple(url: &str) -> ReadySetResult<()> {
     client.query(POPULATE_SCHEMA).await?;
 
     let config_one = Config {
-        deployment_name: Some("deployment_one".to_string()),
         replication_server_id: Some(1),
         ..Default::default()
     };
     let config_two = Config {
-        deployment_name: Some("deployment_two".to_string()),
         replication_server_id: Some(2),
         ..Default::default()
     };

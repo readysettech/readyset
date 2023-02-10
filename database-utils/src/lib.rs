@@ -81,12 +81,6 @@ pub struct UpstreamConfig {
     #[clap(long, default_value = "50")]
     #[serde(default)]
     pub replication_pool_size: usize,
-
-    /// Used to set the replication slot, so that the replication slot is bound to the deployment
-    /// name.
-    #[clap(long, env = "DEPLOYMENT")]
-    #[serde(default)]
-    pub deployment_name: Option<String>,
 }
 
 impl UpstreamConfig {
@@ -140,7 +134,6 @@ impl Default for UpstreamConfig {
             snapshot_report_interval_secs: 30,
             ssl_root_cert: None,
             replication_pool_size: 50,
-            deployment_name: None,
         }
     }
 }
