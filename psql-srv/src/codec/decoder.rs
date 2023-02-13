@@ -1479,4 +1479,40 @@ mod tests {
             DataValue::TimestampTz(expected)
         );
     }
+
+    #[test]
+    fn test_parse_msg_with_undefined_type() {
+        let mut codec = Codec::<Vec<Value>>::new();
+        codec.is_starting_up = false;
+        let mut header = BytesMut::with_capacity(HEADER_LENGTH);
+        let mut body = BytesMut::new();
+
+        let prepared_statement_name = Bytes::from_static(b"foo");
+        let query = Bytes::from_static(b"SELECT 1");
+
+        body.put(&prepared_statement_name[..]);
+        // Strings are terminated with \0 in the encoding
+        body.put_u8(NUL_BYTE);
+        body.put(&query[..]);
+        body.put_u8(NUL_BYTE);
+        body.put_i16(1); // n_parameter_data_types=1
+        body.put_i32(0); // oid=0 indicating unspecified data type
+
+        header.put_u8(ID_PARSE);
+
+        // Length of message includes body and length itself, but not id byte of header
+        header.put_i32((body.len() + HEADER_LENGTH - 1) as i32);
+
+        let mut parse_msg = BytesMut::new();
+        parse_msg.put(header);
+        parse_msg.put(body);
+
+        let frontend_msg = FrontendMessage::Parse {
+            prepared_statement_name: BytesStr::try_from(prepared_statement_name).unwrap(),
+            query: BytesStr::try_from(query).unwrap(),
+            parameter_data_types: vec![Type::UNKNOWN],
+        };
+
+        assert_eq!(codec.decode(&mut parse_msg).unwrap(), Some(frontend_msg));
+    }
 }
