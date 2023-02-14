@@ -1628,29 +1628,6 @@ impl<'gen> Query<'gen> {
     pub fn new(state: QueryState<'gen>, statement: SelectStatement) -> Self {
         Self { state, statement }
     }
-
-    /// Converts the DDL for this query into a ReadySet recipe
-    pub fn ddl_recipe(&self) -> String {
-        self.state
-            .tables
-            .iter()
-            .map(|table_name| {
-                let stmt = CreateTableStatement::from(self.state.gen.tables[table_name].clone());
-                format!("{};", stmt)
-            })
-            .join("\n")
-    }
-
-    /// Converts this query into a ReadySet recipe, including both the DDL and the query itself,
-    /// using the given name for the query
-    pub fn to_recipe(&self, query_name: &str) -> String {
-        format!(
-            "{}\nQUERY {}: {};",
-            self.ddl_recipe(),
-            query_name,
-            self.statement
-        )
-    }
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize, Arbitrary)]
