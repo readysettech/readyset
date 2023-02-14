@@ -214,6 +214,14 @@ impl SqlIncorporator {
                             Sensitive(&unparsed)
                         ),
                     };
+                    if body.fields.is_empty() {
+                        return Err(ReadySetError::TableError {
+                            table: cts.table.clone(),
+                            source: Box::new(ReadySetError::Unsupported(
+                                "tables must have at least one column".to_string(),
+                            )),
+                        });
+                    }
                     match self.registry.get(&cts.table) {
                         Some(RecipeExpr::Table {
                             body: current_body, ..
