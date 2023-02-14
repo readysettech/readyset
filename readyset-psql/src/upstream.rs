@@ -121,48 +121,65 @@ impl NoriaCompare for StatementMeta {
 fn convert_params_for_upstream(params: &[DfValue], types: &[Type]) -> ReadySetResult<Vec<DfValue>> {
     invariant_eq!(params.len(), types.len());
 
+    let get_variant_label = |val: &DfValue, variants: &[String]| {
+        val.as_int()
+            .map(|idx| -> ReadySetResult<DfValue> {
+                Ok(DfValue::from(
+                    variants
+                        .get((idx - 1/* indexes are 1-based! */) as usize)
+                        .ok_or_else(|| {
+                            internal_err!(
+                                "Out-of-bounds index {idx} for enum with {} variants",
+                                variants.len()
+                            )
+                        })?
+                        .clone(),
+                ))
+            })
+            .transpose()
+    };
+
     params
         .iter()
         .zip(types)
         .map(|(val, t)| {
             let mut v = val.clone();
-            // Convert arrays of enums, which we represent internally as 1-based variant
+            // Convert enums and arrays of enums, which we represent internally as 1-based variant
             // indices, to the representation postgres expects, which is variant labels.
-            if let (DfValue::Array(arr), Kind::Array(member_type)) = (&mut v, t.kind()) {
-                // Get a mutable reference to the array by ensuring there's only one reference
-                // to the underlying array data
-                let arr = match Arc::get_mut(arr) {
-                    Some(arr) => arr, // there was already only one reference, so just use that
-                    None => {
-                        // There were other references - we have to clone the underlying array, then
-                        // make a fresh Arc, then get a mutable reference to that underlying array
-                        v = DfValue::Array(Arc::new((**arr).clone()));
-                        match &mut v {
-                            DfValue::Array(arr) => Arc::get_mut(arr).expect(
-                                "We just made the Arc, so we know we have the only copy of it",
-                            ),
-                            _ => unreachable!("We just made this, we know it's an Array"),
-                        }
+            match (&mut v, t.kind()) {
+                (v @ (DfValue::Int(_) | DfValue::UnsignedInt(_)), Kind::Enum(variants)) => {
+                    if let Some(label) = get_variant_label(v, variants)? {
+                        *v = label;
                     }
-                };
+                }
+                (DfValue::Array(arr), Kind::Array(member_type)) => {
+                    // Get a mutable reference to the array by ensuring there's only one reference
+                    // to the underlying array data
+                    let arr = match Arc::get_mut(arr) {
+                        Some(arr) => arr, // there was already only one reference, so just use that
+                        None => {
+                            // There were other references - we have to clone the underlying array,
+                            // then make a fresh Arc, then get a mutable
+                            // reference to that underlying array
+                            v = DfValue::Array(Arc::new((**arr).clone()));
+                            match &mut v {
+                                DfValue::Array(arr) => Arc::get_mut(arr).expect(
+                                    "We just made the Arc, so we know we have the only copy of it",
+                                ),
+                                _ => unreachable!("We just made this, we know it's an Array"),
+                            }
+                        }
+                    };
 
-                if let Kind::Enum(variants) = member_type.kind() {
-                    for array_elt in arr.values_mut() {
-                        if let Some(idx) = array_elt.as_int() {
-                            *array_elt = DfValue::from(
-                                variants
-                                    .get((idx - 1/* indexes are 1-based! */) as usize)
-                                    .ok_or_else(|| {
-                                        internal_err!(
-                                            "Out-of-bounds index {idx} for enum with {} variants",
-                                            variants.len()
-                                        )
-                                    })?
-                                    .clone(),
-                            )
+                    if let Kind::Enum(variants) = member_type.kind() {
+                        for array_elt in arr.values_mut() {
+                            if let Some(label) = get_variant_label(array_elt, variants)? {
+                                *array_elt = label;
+                            }
                         }
                     }
                 }
+                _ => (),
             }
 
             Ok(v)

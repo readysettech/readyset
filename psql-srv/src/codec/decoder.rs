@@ -320,7 +320,18 @@ fn get_binary_value(src: &mut Bytes, t: &Type) -> Result<Value, Error> {
 
     match t.kind() {
         Kind::Array(member_type) => Ok(Value::Array(Array::from_sql(t, buf)?, member_type.clone())),
-        Kind::Enum(_) => Ok(Value::Text(str::from_utf8(buf)?.into())),
+        Kind::Enum(variants) => {
+            let variant_str = str::from_utf8(buf)?;
+            Ok(Value::BigInt(
+                (variants
+                    .iter()
+                    .position(|v| v == variant_str)
+                    .ok_or_else(|| Error::UnknownEnumVariant(variant_str.into()))?
+                    // To be compatible with mysql enums, we always represent enum values as
+                    // *1-indexed* (since mysql needs 0 to represent invalid values)
+                    + 1) as _,
+            ))
+        }
         _ => match *t {
             // Postgres does not allow interior 0 bytes, even though it is valid UTF-8
             Type::BPCHAR | Type::VARCHAR | Type::TEXT | Type::NAME if buf.contains(&0) => {
