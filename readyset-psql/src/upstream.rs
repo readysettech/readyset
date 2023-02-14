@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::TryStreamExt;
@@ -9,13 +10,14 @@ use nom_sql::SqlIdentifier;
 use pgsql::config::Host;
 use pgsql::types::Type;
 use pgsql::{GenericResult, Row, SimpleQueryMessage};
+use postgres_types::Kind;
 use psql_srv::Column;
 use readyset_adapter::fallback_cache::FallbackCache;
 use readyset_adapter::upstream_database::{NoriaCompare, UpstreamDestination};
 use readyset_adapter::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
-use readyset_client::ColumnSchema;
+use readyset_client::{ColumnSchema, ReadySetResult};
 use readyset_data::DfValue;
-use readyset_errors::{unsupported, ReadySetError};
+use readyset_errors::{internal_err, invariant_eq, unsupported, ReadySetError};
 use readyset_tracing::{debug, info};
 use tokio::process::Command;
 use tokio_postgres as pgsql;
@@ -108,6 +110,64 @@ impl NoriaCompare for StatementMeta {
 
         Ok(())
     }
+}
+
+/// Convert the given list of parameters for a statement that's being proxied upstream to the format
+/// that the upstream database expects, according to the given list of parameter types
+///
+/// # Invariants
+///
+/// * `params` and `types` must have the same length
+fn convert_params_for_upstream(params: &[DfValue], types: &[Type]) -> ReadySetResult<Vec<DfValue>> {
+    invariant_eq!(params.len(), types.len());
+
+    params
+        .iter()
+        .zip(types)
+        .map(|(val, t)| {
+            let mut v = val.clone();
+            // Convert arrays of enums, which we represent internally as 1-based variant
+            // indices, to the representation postgres expects, which is variant labels.
+            if let (DfValue::Array(arr), Kind::Array(member_type)) = (&mut v, t.kind()) {
+                // Get a mutable reference to the array by ensuring there's only one reference
+                // to the underlying array data
+                let arr = match Arc::get_mut(arr) {
+                    Some(arr) => arr, // there was already only one reference, so just use that
+                    None => {
+                        // There were other references - we have to clone the underlying array, then
+                        // make a fresh Arc, then get a mutable reference to that underlying array
+                        v = DfValue::Array(Arc::new((**arr).clone()));
+                        match &mut v {
+                            DfValue::Array(arr) => Arc::get_mut(arr).expect(
+                                "We just made the Arc, so we know we have the only copy of it",
+                            ),
+                            _ => unreachable!("We just made this, we know it's an Array"),
+                        }
+                    }
+                };
+
+                if let Kind::Enum(variants) = member_type.kind() {
+                    for array_elt in arr.values_mut() {
+                        if let Some(idx) = array_elt.as_int() {
+                            *array_elt = DfValue::from(
+                                variants
+                                    .get((idx - 1/* indexes are 1-based! */) as usize)
+                                    .ok_or_else(|| {
+                                        internal_err!(
+                                            "Out-of-bounds index {idx} for enum with {} variants",
+                                            variants.len()
+                                        )
+                                    })?
+                                    .clone(),
+                            )
+                        }
+                    }
+                }
+            }
+
+            Ok(v)
+        })
+        .collect()
 }
 
 #[async_trait]
@@ -259,7 +319,10 @@ impl UpstreamDatabase for PostgreSqlUpstream {
 
         let results: Vec<GenericResult> = self
             .client
-            .generic_query_raw(statement, params)
+            .generic_query_raw(
+                statement,
+                &convert_params_for_upstream(params, statement.params())?,
+            )
             .await?
             .try_collect()
             .await?;

@@ -408,6 +408,16 @@ mod types {
             .get::<_, i64>(0);
         assert_eq!(proxied_parameter_res, 2);
 
+        let proxied_array_parameter_res = client
+            .query_one(
+                "SELECT COUNT(*) FROM (SELECT * FROM t WHERE x = ANY($1)) sq",
+                &[&vec![A, B]],
+            )
+            .await
+            .unwrap()
+            .get::<_, i64>(0);
+        assert_eq!(proxied_array_parameter_res, 3);
+
         client
             .simple_query("ALTER TYPE abc ADD VALUE 'd'")
             .await
