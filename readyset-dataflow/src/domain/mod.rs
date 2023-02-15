@@ -2184,6 +2184,11 @@ impl Domain {
                     .ok_or_else(|| ReadySetError::NoSuchNode(node.id()))?
                     .borrow_mut();
 
+                if n.is_dropped() {
+                    warn!(%node, "Requested replay from dropped reader");
+                    return Ok(());
+                }
+
                 let r = n.as_mut_reader().ok_or(ReadySetError::InvalidNodeType {
                     node_index: node.id(),
                     expected_type: NodeType::Reader,
