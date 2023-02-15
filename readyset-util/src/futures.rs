@@ -186,7 +186,9 @@ macro_rules! eventually {
                                "(see `eventually` docs for detail)"))
     };
     ($(attempts: $attempts: expr,)? $(sleep: $sleep: expr,)? { $($body: tt)* }) => {{
+        #[allow(unused_variables)]
         let attempts = 40;
+        #[allow(unused_variables)]
         let sleep = std::time::Duration::from_millis(500);
         $(let attempts = $attempts;)?
         // Shadow the above defaults if custom values were provided:
