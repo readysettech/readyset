@@ -155,7 +155,7 @@ where
 #[macro_export]
 macro_rules! eventually {
     ($(attempts: $attempts: expr,)? $(sleep: $sleep: expr,)? run_test: { $($test_body: tt)* },
-            then_assert: |$test_res: ident| $($assert_body: tt)+) => {
+            then_assert: |$test_res: pat_param| $($assert_body: tt)+) => {
         use futures::FutureExt;
 
         let attempts = 40;
