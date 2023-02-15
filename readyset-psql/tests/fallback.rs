@@ -490,6 +490,36 @@ async fn unsuported_numeric_scale() {
     ));
 }
 
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+#[ignore = "ENG-2548 Test reproduces client panic due to known bug"]
+async fn add_column_then_read() {
+    let (config, _handle) = setup().await;
+    let client = connect(config).await;
+
+    client
+        .simple_query("CREATE TABLE cats (id int)")
+        .await
+        .unwrap();
+
+    client
+        .simple_query("INSERT INTO cats (id) VALUES (1)")
+        .await
+        .unwrap();
+
+    client
+        .simple_query("ALTER TABLE cats ADD COLUMN meow VARCHAR")
+        .await
+        .unwrap();
+
+    let result = client
+        .query_one("SELECT * FROM cats", &[])
+        .await
+        .unwrap()
+        .get::<_, Option<String>>(1);
+    assert_eq!(result, None)
+}
+
 #[allow(dead_code)]
 async fn last_statement_matches(dest: &str, status: &str, client: &Client) -> bool {
     match &client
