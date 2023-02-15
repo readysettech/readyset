@@ -1107,12 +1107,16 @@ impl IndexParams {
 
 impl PersistentState {
     pub fn new<C: AsRef<[usize]>, K: IntoIterator<Item = C>>(
-        name: String,
+        mut name: String,
         unique_keys: K,
         params: &PersistenceParameters,
     ) -> Self {
         let unique_keys: Vec<Box<[usize]>> =
             unique_keys.into_iter().map(|c| c.as_ref().into()).collect();
+
+        if !name.ends_with(".db") {
+            name.push_str(".db");
+        }
 
         use rocksdb::ColumnFamilyDescriptor;
         let (tmpdir, full_path) = match params.mode {
@@ -1122,14 +1126,12 @@ impl PersistentState {
                     std::fs::create_dir_all(&path).expect("Could not create DB directory");
                 }
                 path.push(&name);
-                path.set_extension("db");
 
                 (None, path)
             }
             _ => {
                 let dir = tempdir().unwrap();
-                let mut path = dir.path().join(&name);
-                path.set_extension("db");
+                let path = dir.path().join(&name);
                 (Some(dir), path)
             }
         };
