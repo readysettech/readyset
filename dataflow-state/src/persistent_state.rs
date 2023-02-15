@@ -239,7 +239,7 @@ impl Default for PersistenceParameters {
     fn default() -> Self {
         Self {
             mode: DurabilityMode::MemoryOnly,
-            db_filename_prefix: String::from("soup"),
+            db_filename_prefix: String::from("readyset"),
             persistence_threads: 1,
             db_dir: None,
         }
@@ -267,7 +267,7 @@ impl PersistenceParameters {
         // ReadySet's deployment name as db filename prefix (which makes sense), and we don't
         // want to impose any restriction on it (since sometimes we automate the deployments
         // and deployment name generation).
-        let db_filename_prefix = db_filename_prefix.unwrap_or_else(|| String::from("soup"));
+        let db_filename_prefix = db_filename_prefix.unwrap_or_else(|| String::from("readyset"));
 
         Self {
             mode,
@@ -1904,7 +1904,7 @@ mod tests {
 
     fn get_tmp_path() -> (TempDir, String) {
         let dir = tempdir().unwrap();
-        let path = dir.path().join("soup");
+        let path = dir.path().join("readyset");
         (dir, path.to_string_lossy().into())
     }
 
