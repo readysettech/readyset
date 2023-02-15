@@ -3,7 +3,7 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 
-use dataflow_state::{PointKey, SnapshotMode};
+use dataflow_state::{MaterializedNodeState, PointKey, SnapshotMode};
 use itertools::Itertools;
 use nom_sql::Relation;
 use readyset_client::replication::ReplicationOffset;
@@ -166,7 +166,11 @@ impl Base {
 
     /// Process table operations for a base table that doesn't have a key, such tables can
     /// have multiple copies of the same row, and delete operations are free to remove any of them
-    fn process_unkeyed(&mut self, operations: Vec<TableOperation>) -> ReadySetResult<BaseWrite> {
+    fn process_unkeyed(
+        &mut self,
+        db: &MaterializedNodeState,
+        operations: Vec<TableOperation>,
+    ) -> ReadySetResult<BaseWrite> {
         // Keep track of the maximal replication offset in the list, if any
         let mut replication_offset: Option<ReplicationOffset> = None;
         let mut set_snapshot_mode: Option<SetSnapshotMode> = None;
@@ -193,7 +197,13 @@ impl Base {
                         SetSnapshotMode::FinishSnapshotMode
                     })
                 }
-                _ => {
+                TableOperation::Truncate => {
+                    records.clear();
+                    records.extend(db.cloned_records().into_iter().map(|r| Record::Negative(r)))
+                }
+                TableOperation::DeleteByKey { .. }
+                | TableOperation::InsertOrUpdate { .. }
+                | TableOperation::Update { .. } => {
                     internal!("unkeyed base got keyed operation {:?}", op);
                 }
             }
@@ -222,9 +232,14 @@ impl Base {
             apply_table_op_coercions(op, columns)?;
         }
 
+        let db = match state.get(our_index) {
+            Some(x) => x,
+            None => internal!("base nodes must always be materialized"),
+        };
+
         let key_cols = match &self.primary_key {
             Some(key) if !ops.is_empty() => key.as_ref(),
-            _ => return self.process_unkeyed(ops),
+            _ => return self.process_unkeyed(db, ops),
         };
 
         let mut n_ops = ops.len();
@@ -270,12 +285,6 @@ impl Base {
                 _ => break,
             }
         }
-
-        // starting record state
-        let db = match state.get(our_index) {
-            Some(x) => x,
-            None => internal!("base with primary key must be materialized"),
-        };
 
         let mut results = vec![];
 
@@ -967,6 +976,59 @@ mod tests {
 
             state.add_key(Index::hash_map(vec![0]), None);
 
+            let mut recs = vec![
+                Record::Positive(vec![1.into(), "a".into()]),
+                Record::Positive(vec![1.into(), "b".into()]),
+                Record::Positive(vec![2.into(), "b".into()]),
+                Record::Positive(vec![3.into(), "c".into()]),
+            ]
+            .into();
+            state.process_records(&mut recs, None, None).unwrap();
+
+            let mut state_map = NodeMap::new();
+            state_map.insert(ni, state);
+
+            let table = Relation {
+                name: "test".into(),
+                schema: None,
+            };
+            let res = b
+                .process_ops(
+                    ni,
+                    &[],
+                    vec![TableOperation::Truncate],
+                    &state_map,
+                    SnapshotMode::SnapshotModeDisabled,
+                    table,
+                )
+                .unwrap();
+            assert_eq!(
+                res,
+                BaseWrite {
+                    records: vec![
+                        Record::Negative(vec![1.into(), "a".into()]),
+                        Record::Negative(vec![1.into(), "b".into()]),
+                        Record::Negative(vec![2.into(), "b".into()]),
+                        Record::Negative(vec![3.into(), "c".into()]),
+                    ]
+                    .into(),
+                    replication_offset: None,
+                    set_snapshot_mode: None
+                }
+            );
+        }
+
+        #[test]
+        fn truncate_unkeyed() {
+            let mut b = Base::new();
+            let ni = LocalNodeIndex::make(0u32);
+            let mut state = MaterializedNodeState::Persistent(PersistentState::new(
+                "truncate".into(),
+                Vec::<Box<[usize]>>::new(),
+                &PersistenceParameters::default(),
+            ));
+
+            state.add_key(Index::hash_map(vec![0]), None);
             let mut recs = vec![
                 Record::Positive(vec![1.into(), "a".into()]),
                 Record::Positive(vec![1.into(), "b".into()]),
