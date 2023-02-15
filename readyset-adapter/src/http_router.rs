@@ -15,7 +15,7 @@ use metrics_exporter_prometheus::PrometheusHandle;
 use readyset_client::query::DeniedQuery;
 use readyset_client_metrics::recorded;
 use readyset_sql_passes::anonymize::Anonymizer;
-use stream_cancel::Valve;
+use readyset_util::shutdown::ShutdownReceiver;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::Sender;
 use tokio_stream::wrappers::TcpListenerStream;
@@ -32,8 +32,6 @@ pub struct NoriaAdapterHttpRouter {
     pub listen_addr: SocketAddr,
     /// A reference to the QueryStatusCache that is in use by the adapter.
     pub query_cache: &'static QueryStatusCache,
-    /// A valve for the http stream to trigger closing.
-    pub valve: Valve,
     /// Used to retrieve the current health of the adapter.
     pub health_reporter: AdapterHealthReporter,
     /// Used to communicate externally that a failpoint request has been received and successfully
@@ -60,9 +58,10 @@ impl NoriaAdapterHttpRouter {
     pub async fn route_requests(
         router: NoriaAdapterHttpRouter,
         http_listener: TcpListener,
+        shutdown_rx: ShutdownReceiver,
     ) -> anyhow::Result<()> {
         hyper::server::Server::builder(hyper::server::accept::from_stream(
-            router.valve.wrap(TcpListenerStream::new(http_listener)),
+            shutdown_rx.wrap_stream(TcpListenerStream::new(http_listener)),
         ))
         .serve(make_service_fn(move |_| {
             let s = router.clone();

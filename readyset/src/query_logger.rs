@@ -9,8 +9,8 @@ use readyset_client_metrics::{
 };
 use readyset_sql_passes::anonymize::anonymize_literals;
 use readyset_tracing::info;
+use readyset_util::shutdown::ShutdownReceiver;
 use tokio::select;
-use tokio::sync::broadcast;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tracing::info_span;
 
@@ -172,7 +172,7 @@ impl QueryLogger {
     /// Async task that logs query stats.
     pub(crate) async fn run(
         mut receiver: UnboundedReceiver<QueryExecutionEvent>,
-        mut shutdown_recv: broadcast::Receiver<()>,
+        mut shutdown_recv: ShutdownReceiver,
     ) {
         let _span = info_span!("query-logger");
 
@@ -183,6 +183,16 @@ impl QueryLogger {
 
         loop {
             select! {
+                // We use `biased` here to ensure that our shutdown signal will be received and
+                // acted upon even if the other branches in this `select!` are constantly in a
+                // ready state (e.g. a stream that has many messages where very little time passes
+                // between receipt of these messages). More information about this situation can
+                // be found in the docs for `tokio::select`.
+                biased;
+                _ = shutdown_recv.recv() => {
+                    info!("Metrics task shutting down after signal received.");
+                    break;
+                }
                 event = receiver.recv() => {
                     let event = match event {
                         Some(event) => event,
@@ -231,10 +241,6 @@ impl QueryLogger {
                             .upstream_histogram((event.event, event.sql_type))
                             .record(duration);
                     }
-                }
-                _ = shutdown_recv.recv() => {
-                    info!("Metrics task shutting down after signal received.");
-                    break;
                 }
             }
         }

@@ -46,8 +46,8 @@ use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetryIni
 use readyset_tracing::{debug, error, info, warn};
 use readyset_util::futures::abort_on_panic;
 use readyset_util::redacted::RedactedString;
+use readyset_util::shutdown;
 use readyset_version::*;
-use stream_cancel::Valve;
 use tokio::net;
 use tokio::net::UdpSocket;
 use tokio::time::timeout;
@@ -631,7 +631,7 @@ where
                 .as_millis() as u64
         );
 
-        let (shutdown_sender, shutdown_recv) = tokio::sync::broadcast::channel(1);
+        let (shutdown_tx, shutdown_rx) = shutdown::channel();
 
         // Gate query log code path on the log flag existing.
         let qlog_sender = if options.query_log {
@@ -644,12 +644,13 @@ where
                 .build()
                 .unwrap();
 
+            let shutdown_rx = shutdown_rx.clone();
             // Spawn the actual thread to run the logger
             std::thread::Builder::new()
                 .name("Query logger".to_string())
                 .stack_size(2 * 1024 * 1024) // Use the same value tokio is using
                 .spawn(move || {
-                    runtime.block_on(query_logger::QueryLogger::run(qlog_receiver, shutdown_recv));
+                    runtime.block_on(query_logger::QueryLogger::run(qlog_receiver, shutdown_rx));
                     runtime.shutdown_background();
                 })?;
 
@@ -706,43 +707,39 @@ where
         // Spawn a task for handling this adapter's HTTP request server.
         // This step is done as the last thing before accepting connections because it is used as
         // the health check for the service.
-        let router_handle = {
-            rs_connect.in_scope(|| info!("Spawning HTTP request server task"));
-            let (handle, valve) = Valve::new();
-            let (tx, rx) = if options.wait_for_failpoint {
-                let (tx, rx) = tokio::sync::mpsc::channel(1);
-                (Some(Arc::new(tx)), Some(rx))
-            } else {
-                (None, None)
-            };
-            let http_server = NoriaAdapterHttpRouter {
-                listen_addr: options.metrics_address,
-                query_cache: query_status_cache,
-                valve,
-                prometheus_handle,
-                health_reporter: health_reporter.clone(),
-                failpoint_channel: tx,
-            };
-
-            let fut = async move {
-                let http_listener = http_server.create_listener().await.unwrap();
-                NoriaAdapterHttpRouter::route_requests(http_server, http_listener).await
-            };
-
-            rt.handle().spawn(fut);
-
-            // If we previously setup a failpoint channel because wait_for_failpoint was enabled,
-            // then we should wait to hear from the http router that a failpoint request was
-            // handled.
-            if let Some(mut rx) = rx {
-                let fut = async move {
-                    let _ = rx.recv().await;
-                };
-                rt.block_on(fut);
-            }
-
-            handle
+        rs_connect.in_scope(|| info!("Spawning HTTP request server task"));
+        let (tx, rx) = if options.wait_for_failpoint {
+            let (tx, rx) = tokio::sync::mpsc::channel(1);
+            (Some(Arc::new(tx)), Some(rx))
+        } else {
+            (None, None)
         };
+        let http_server = NoriaAdapterHttpRouter {
+            listen_addr: options.metrics_address,
+            query_cache: query_status_cache,
+            prometheus_handle,
+            health_reporter: health_reporter.clone(),
+            failpoint_channel: tx,
+        };
+
+        let router_shutdown_rx = shutdown_rx.clone();
+        let fut = async move {
+            let http_listener = http_server.create_listener().await.unwrap();
+            NoriaAdapterHttpRouter::route_requests(http_server, http_listener, router_shutdown_rx)
+                .await
+        };
+
+        rt.handle().spawn(fut);
+
+        // If we previously setup a failpoint channel because wait_for_failpoint was enabled,
+        // then we should wait to hear from the http router that a failpoint request was
+        // handled.
+        if let Some(mut rx) = rx {
+            let fut = async move {
+                let _ = rx.recv().await;
+            };
+            rt.block_on(fut);
+        }
 
         let fallback_cache: Option<
             FallbackCache<
@@ -783,7 +780,7 @@ where
             set_failpoint!("adapter-out-of-band");
             let rh = rh.clone();
             let (auto_increments, query_cache) = (auto_increments.clone(), query_cache.clone());
-            let shutdown_recv = shutdown_sender.subscribe();
+            let shutdown_rx = shutdown_rx.clone();
             let loop_interval = options.migration_task_interval;
             let max_retry = options.max_processing_minutes;
             let validate_queries = options.validate_queries;
@@ -842,7 +839,7 @@ where
                     validate_queries,
                     std::time::Duration::from_millis(loop_interval),
                     std::time::Duration::from_secs(max_retry * 60),
-                    shutdown_recv,
+                    shutdown_rx.clone(),
                 );
 
                 migration_handler.run().await.map_err(move |e| {
@@ -858,15 +855,15 @@ where
             rs_connect.in_scope(|| info!("Spawning explicit migrations task"));
             let rh = rh.clone();
             let loop_interval = options.views_polling_interval;
-            let shutdown_recv = shutdown_sender.subscribe();
             let expr_dialect = self.expr_dialect;
+            let shutdown_rx = shutdown_rx.clone();
             let fut = async move {
                 let mut views_synchronizer = ViewsSynchronizer::new(
                     rh,
                     query_status_cache,
                     std::time::Duration::from_secs(loop_interval),
                     expr_dialect,
-                    shutdown_recv,
+                    shutdown_rx,
                 );
                 views_synchronizer.run().await
             };
@@ -897,7 +894,6 @@ where
 
         // Run a readyset-server instance within this adapter.
         let internal_server_handle = if options.standalone || options.embedded_readers {
-            let (handle, valve) = Valve::new();
             let authority = options.authority.clone();
             let deployment = options.deployment.clone();
             let mut builder = readyset_server::Builder::from_worker_options(
@@ -928,8 +924,6 @@ where
                             std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)),
                             4000,
                         ),
-                        valve,
-                        handle,
                     )
                     .await
             })?;
@@ -1082,13 +1076,17 @@ where
 
         let rs_shutdown = span!(Level::INFO, "RS server Shutting down");
         health_reporter.set_state(AdapterState::ShuttingDown);
-        // Dropping the sender acts as a shutdown signal.
-        drop(shutdown_sender);
 
+        // We need to drop the last remaining `ShutdownReceiver` before sending the shutdown
+        // signal. If we didn't, `ShutdownSender::shutdown` would hang forever, since it
+        // specifically waits for every associated `ShutdownReceiver` to be dropped.
+        drop(shutdown_rx);
+
+        // Shut down all of our background tasks
         rs_shutdown.in_scope(|| {
-            info!("Shutting down all tcp streams started by the adapters http router")
+            info!("Waiting up to 20 seconds for all background tasks to shut down");
         });
-        drop(router_handle);
+        rt.block_on(shutdown_tx.shutdown_timeout(Duration::from_secs(20)));
 
         rs_shutdown.in_scope(|| info!("Dropping controller handle"));
         drop(rh);
@@ -1104,7 +1102,7 @@ where
         });
         rt.block_on(async move {
             match telemetry_sender
-                .graceful_shutdown(std::time::Duration::from_secs(5))
+                .shutdown(std::time::Duration::from_secs(5))
                 .await
             {
                 Ok(_) => info!("TelemetrySender shutdown gracefully"),

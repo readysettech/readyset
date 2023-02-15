@@ -24,6 +24,7 @@ use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_telemetry_reporter::TelemetrySender;
 use readyset_tracing::{debug, error, info, warn};
 use readyset_util::futures::abort_on_panic;
+use readyset_util::shutdown::ShutdownReceiver;
 use readyset_version::RELEASE_VERSION;
 use reqwest::Url;
 use tokio::sync::mpsc::UnboundedSender;
@@ -55,8 +56,6 @@ pub struct Leader {
     worker_request_timeout: Duration,
     /// Configuration for the replicator
     pub(super) replicator_config: UpstreamConfig,
-    /// A handle to the replicator task
-    pub(super) replicator_task: Option<tokio::task::JoinHandle<()>>,
     /// A client to the current authority.
     pub(super) authority: Arc<Authority>,
 }
@@ -70,22 +69,17 @@ impl Leader {
         ready_notification: Arc<Notify>,
         replication_error: UnboundedSender<ReadySetError>,
         telemetry_sender: TelemetrySender,
+        shutdown_rx: ShutdownReceiver,
     ) {
         // When the controller becomes the leader, we need to read updates
         // from the binlog.
-        self.start_replication_task(ready_notification, replication_error, telemetry_sender)
-            .await;
-    }
-
-    pub(super) async fn stop(&mut self) {
-        self.stop_replication_task().await;
-    }
-
-    async fn stop_replication_task(&mut self) {
-        if let Some(handle) = self.replicator_task.take() {
-            handle.abort();
-            let _ = handle.await;
-        }
+        self.start_replication_task(
+            ready_notification,
+            replication_error,
+            telemetry_sender,
+            shutdown_rx,
+        )
+        .await;
     }
 
     /// Start replication/binlog synchronization in an infinite loop
@@ -99,6 +93,7 @@ impl Leader {
         ready_notification: Arc<Notify>,
         replication_error: UnboundedSender<ReadySetError>,
         telemetry_sender: TelemetrySender,
+        mut shutdown_rx: ShutdownReceiver,
     ) {
         if self.replicator_config.upstream_db_url.is_none() {
             ready_notification.notify_one();
@@ -114,45 +109,53 @@ impl Leader {
         // will mean the data we return, will be more and more stale, and the transaction logs on
         // the upstream will be filling up disk
         // So, we abort on any panic of the replicator task.
-        self.replicator_task = Some(tokio::spawn(abort_on_panic(async move {
-            // The replicator wants to know if we're restarting the server so that it can resnapshot
-            // to capture changes made to replication-tables.
-            let mut server_startup = true;
-            loop {
-                let noria: readyset_client::ReadySetHandle =
-                    readyset_client::ReadySetHandle::new(Arc::clone(&authority)).await;
+        tokio::spawn(abort_on_panic(async move {
+            let replication_future = async move {
+                // The replicator wants to know if we're restarting the server so that it can
+                // resnapshot to capture changes made to replication-tables.
+                let mut server_startup = true;
+                loop {
+                    let noria: readyset_client::ReadySetHandle =
+                        readyset_client::ReadySetHandle::new(Arc::clone(&authority)).await;
 
-                match replicators::NoriaAdapter::start(
-                    noria,
-                    config.clone(),
-                    Some(ready_notification.clone()),
-                    telemetry_sender.clone(),
-                    server_startup,
-                )
-                .await
-                {
-                    // Unrecoverable errors, propagate the error the controller and kill the loop.
-                    Err(err @ ReadySetError::RecipeInvariantViolated(_)) => {
-                        if let Err(e) = replication_error.send(err) {
-                            error!(error = %e, "Could not notify controller of critical error. The system may be in an invalid state");
+                    match replicators::NoriaAdapter::start(
+                        noria,
+                        config.clone(),
+                        Some(ready_notification.clone()),
+                        telemetry_sender.clone(),
+                        server_startup,
+                    )
+                    .await
+                    {
+                        // Unrecoverable errors, propagate the error the controller and kill the
+                        // loop.
+                        Err(err @ ReadySetError::RecipeInvariantViolated(_)) => {
+                            if let Err(e) = replication_error.send(err) {
+                                error!(error = %e, "Could not notify controller of critical error. The system may be in an invalid state");
+                            }
+                            break;
                         }
-                        break;
+                        Err(error) => {
+                            // On each replication error we wait for `replicator_restart_timeout`
+                            // then try again
+                            error!(
+                                target: "replicators",
+                                %error,
+                                timeout_sec=replicator_restart_timeout.as_secs(),
+                                "Error in replication, will retry after timeout"
+                            );
+                            tokio::time::sleep(replicator_restart_timeout).await;
+                        }
                     }
-                    Err(error) => {
-                        // On each replication error we wait for `replicator_restart_timeout` then
-                        // try again
-                        error!(
-                            target: "replicators",
-                            %error,
-                            timeout_sec=replicator_restart_timeout.as_secs(),
-                            "Error in replication, will retry after timeout"
-                        );
-                        tokio::time::sleep(replicator_restart_timeout).await;
-                    }
+                    server_startup = false;
                 }
-                server_startup = false;
+            };
+
+            tokio::select! {
+                _ = replication_future => {},
+                _ = shutdown_rx.recv() => {},
             }
-        })));
+        }));
     }
 
     #[failpoint("controller-request")]
@@ -700,7 +703,6 @@ impl Leader {
             controller_uri,
 
             replicator_config,
-            replicator_task: None,
             authority,
             worker_request_timeout,
         }

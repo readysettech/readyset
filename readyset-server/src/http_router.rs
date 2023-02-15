@@ -15,7 +15,7 @@ use readyset_client::consensus::{Authority, AuthorityControl};
 use readyset_client::metrics::recorded;
 use readyset_client::ReadySetError;
 use readyset_tracing::warn;
-use stream_cancel::Valve;
+use readyset_util::shutdown::ShutdownReceiver;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::Sender;
 use tokio_stream::wrappers::TcpListenerStream;
@@ -42,8 +42,6 @@ pub struct NoriaServerHttpRouter {
     pub controller_tx: Sender<ControllerRequest>,
     /// The `Authority` used inside the server.
     pub authority: Arc<Authority>,
-    /// A valve for the http stream to trigger closing.
-    pub valve: Valve,
     /// Used to record and report the servers current health.
     pub health_reporter: HealthReporter,
     /// Used to communicate externally that a failpoint request has been received and successfully
@@ -68,12 +66,13 @@ impl NoriaServerHttpRouter {
     /// Routes requests for a noria server http router received on `http_listener`
     /// the service layer of the NoriaServerHttpRouter, see
     /// mpl Service<_> for NoriaServerHttpRouter.
-    pub async fn route_requests(
+    pub(crate) async fn route_requests(
         router: NoriaServerHttpRouter,
         http_listener: TcpListener,
+        shutdown_rx: ShutdownReceiver,
     ) -> anyhow::Result<()> {
         hyper::server::Server::builder(hyper::server::accept::from_stream(
-            router.valve.wrap(TcpListenerStream::new(http_listener)),
+            shutdown_rx.wrap_stream(TcpListenerStream::new(http_listener)),
         ))
         .serve(make_service_fn(move |_| {
             let s = router.clone();

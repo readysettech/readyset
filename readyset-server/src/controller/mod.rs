@@ -8,9 +8,6 @@ use anyhow::{format_err, Context};
 use dataflow::node::{self, Column};
 use dataflow::prelude::ChannelCoordinator;
 use failpoint_macros::set_failpoint;
-use futures::future::join_all;
-use futures::stream::FuturesUnordered;
-use futures_util::StreamExt;
 use hyper::http::{Method, StatusCode};
 use metrics::{counter, gauge, histogram};
 use nom_sql::Relation;
@@ -27,9 +24,9 @@ use readyset_errors::{internal, internal_err, ReadySetError};
 use readyset_telemetry_reporter::TelemetrySender;
 use readyset_tracing::{debug, error, info, warn};
 use readyset_util::select;
+use readyset_util::shutdown::ShutdownReceiver;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use stream_cancel::Valve;
 use tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{Notify, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tracing_futures::Instrument;
@@ -302,16 +299,8 @@ pub struct Controller {
     handle_rx: Receiver<HandleRequest>,
     /// A `ControllerDescriptor` that describes this server instance.
     our_descriptor: ControllerDescriptor,
-    /// Valve for shutting down; triggered by the `Handle` when `Handle::shutdown()` is called.
-    valve: Valve,
     /// The descriptor of the worker this controller's server is running.
     worker_descriptor: WorkerDescriptor,
-    /// A handle to the authority task.
-    authority_task: Option<tokio::task::JoinHandle<anyhow::Result<()>>>,
-    /// A handle to the write processing task.
-    write_processing_task: Option<tokio::task::JoinHandle<anyhow::Result<()>>>,
-    /// A handle to the dry run processing task.
-    dry_run_task: Option<tokio::task::JoinHandle<anyhow::Result<()>>>,
     /// The config associated with this controller's server.
     config: Config,
     /// Whether we are the leader and ready to handle requests.
@@ -329,6 +318,9 @@ pub struct Controller {
 
     /// Whether or not to consider failed writes to base tables as no-ops
     permissive_writes: bool,
+
+    /// Handle used to receive a shutdown signal
+    shutdown_rx: ShutdownReceiver,
 }
 
 impl Controller {
@@ -338,10 +330,10 @@ impl Controller {
         controller_rx: Receiver<ControllerRequest>,
         handle_rx: Receiver<HandleRequest>,
         our_descriptor: ControllerDescriptor,
-        shutoff_valve: Valve,
         worker_descriptor: WorkerDescriptor,
         telemetry_sender: TelemetrySender,
         config: Config,
+        shutdown_rx: ShutdownReceiver,
     ) -> Self {
         // If we don't have an upstream, we allow permissive writes to base tables.
         let permissive_writes = config.replicator_config.upstream_db_url.is_none();
@@ -352,17 +344,14 @@ impl Controller {
             http_rx: controller_rx,
             handle_rx,
             our_descriptor,
-            valve: shutoff_valve,
             worker_descriptor,
             config,
             leader_ready: Arc::new(AtomicBool::new(false)),
             leader_ready_notification: Arc::new(Notify::new()),
             replication_error_channel: ReplicationErrorChannel::new(),
-            authority_task: None,
-            write_processing_task: None,
-            dry_run_task: None,
             telemetry_sender,
             permissive_writes,
+            shutdown_rx,
         }
     }
 
@@ -463,6 +452,7 @@ impl Controller {
                         self.leader_ready_notification.clone(),
                         self.replication_error_channel.sender(),
                         self.telemetry_sender.clone(),
+                        self.shutdown_rx.clone(),
                     )
                     .await;
 
@@ -504,7 +494,7 @@ impl Controller {
     pub async fn run(mut self) -> ReadySetResult<()> {
         // Start the authority thread responsible for leader election and liveness updates.
         let (authority_tx, mut authority_rx) = tokio::sync::mpsc::channel(16);
-        self.authority_task = Some(tokio::spawn(
+        tokio::spawn(
             crate::controller::authority_runner(
                 authority_tx,
                 self.authority.clone(),
@@ -512,38 +502,36 @@ impl Controller {
                 self.worker_descriptor.clone(),
                 self.config.clone(),
                 self.permissive_writes,
+                self.shutdown_rx.clone(),
             )
             .instrument(tracing::info_span!("authority")),
-        ));
+        );
 
         let (writer_tx, writer_rx) = tokio::sync::mpsc::channel(16);
-        self.write_processing_task = Some(tokio::spawn(
+        tokio::spawn(
             crate::controller::controller_req_processing_runner(
                 writer_rx,
                 self.authority.clone(),
                 self.inner.clone(),
-                self.valve.clone(),
+                self.shutdown_rx.clone(),
                 self.leader_ready.clone(),
             )
             .instrument(tracing::info_span!("write_processing")),
-        ));
+        );
         let (dry_run_tx, dry_run_rx) = tokio::sync::mpsc::channel(16);
-        self.dry_run_task = Some(tokio::spawn(
+        tokio::spawn(
             crate::controller::controller_req_processing_runner(
                 dry_run_rx,
                 self.authority.clone(),
                 self.inner.clone(),
-                self.valve.clone(),
+                self.shutdown_rx.clone(),
                 self.leader_ready.clone(),
             )
             .instrument(tracing::info_span!("dry_run_processing")),
-        ));
+        );
 
         let leader_ready = self.leader_ready.clone();
         loop {
-            // produces a value when the `Valve` is closed
-            let mut shutdown_stream = self.valve.wrap(futures_util::stream::pending::<()>());
-
             select! {
                 req = self.handle_rx.recv() => {
                     if let Some(req) = req {
@@ -615,42 +603,18 @@ impl Controller {
                 _ = self.leader_ready_notification.notified() => {
                     self.leader_ready.store(true, Ordering::Release);
                 }
-                _ = shutdown_stream.next() => {
-                    info!("Controller shutting down after valve shut");
+                _ = self.shutdown_rx.recv() => {
+                    info!("Controller shutting down after shutdown signal received");
                     break;
                 }
             }
         }
 
-        self.stop_background_tasks().await;
-
-        let mut guard = self.inner.write().await;
-        if let Some(ref mut inner) = *guard {
-            inner.stop().await;
-
-            if let Err(error) = self.authority.surrender_leadership().await {
-                error!(%error, "failed to surrender leadership");
-                internal!("failed to surrender leadership: {}", error)
-            }
+        if let Err(error) = self.authority.surrender_leadership().await {
+            error!(%error, "failed to surrender leadership");
+            internal!("failed to surrender leadership: {}", error)
         }
         Ok(())
-    }
-
-    async fn stop_background_tasks(&mut self) {
-        let background_tasks = FuturesUnordered::new();
-        if let Some(task) = self.authority_task.take() {
-            task.abort();
-            background_tasks.push(task);
-        }
-        if let Some(task) = self.dry_run_task.take() {
-            task.abort();
-            background_tasks.push(task);
-        }
-        if let Some(task) = self.write_processing_task.take() {
-            task.abort();
-            background_tasks.push(task);
-        }
-        join_all(background_tasks).await;
     }
 }
 
@@ -1008,19 +972,22 @@ pub(crate) async fn authority_runner(
     worker_descriptor: WorkerDescriptor,
     config: Config,
     permissive_writes: bool,
+    mut shutdown_rx: ShutdownReceiver,
 ) -> anyhow::Result<()> {
-    if let Err(e) = authority_inner(
-        event_tx.clone(),
-        authority,
-        descriptor,
-        worker_descriptor,
-        config,
-        permissive_writes,
-    )
-    .await
-    {
-        let _ = event_tx.send(AuthorityUpdate::AuthorityError(e)).await;
-        anyhow::bail!("Authority runner failed");
+    tokio::select! {
+        result = authority_inner(
+            event_tx.clone(),
+            authority,
+            descriptor,
+            worker_descriptor,
+            config,
+            permissive_writes,
+        ) => if let Err(e) = result
+        {
+            let _ = event_tx.send(AuthorityUpdate::AuthorityError(e)).await;
+            anyhow::bail!("Authority runner failed");
+        },
+        _ = shutdown_rx.recv() => {}
     }
     Ok(())
 }
@@ -1030,11 +997,10 @@ async fn controller_req_processing_runner(
     mut request_rx: Receiver<ControllerRequest>,
     authority: Arc<Authority>,
     leader_handle: Arc<LeaderHandle>,
-    shutdown_stream: Valve,
+    mut shutdown_rx: ShutdownReceiver,
     leader_ready: Arc<AtomicBool>,
 ) -> anyhow::Result<()> {
     loop {
-        let mut shutdown_stream = shutdown_stream.wrap(futures_util::stream::pending::<()>());
         select! {
             request = request_rx.recv() => {
                 if let Some(req) = request {
@@ -1050,8 +1016,8 @@ async fn controller_req_processing_runner(
                     break;
                 }
             },
-            _ = shutdown_stream.next() => {
-                debug!("Write processing task shutting down after valve shut");
+            _ = shutdown_rx.recv() => {
+                debug!("Write processing task shutting down after shutdown signal received");
                 break;
             }
         }

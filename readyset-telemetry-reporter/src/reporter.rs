@@ -1,7 +1,7 @@
 #![cfg_attr(any(test, feature = "test-util"), allow(dead_code, unused_imports))]
 //! TelemetryReporter
 //! The Telemetry Reporter acts asynchronously by spawning a background task that listens for
-//! [`TelemetryEvent`]s sent from [`TelemetryReporter`]s. When it receives one, it forwards the
+//! [`TelemetryEvent`]s sent from [`TelemetrySender`]s. When it receives one, it forwards the
 //! request to Segment.
 #[cfg(any(test, feature = "test-util"))]
 use std::collections::HashMap;
@@ -16,11 +16,12 @@ use blake2::digest::{Update, VariableOutput};
 use blake2::Blake2bVar;
 use lazy_static::lazy_static;
 use readyset_tracing::{debug, info, trace, warn};
+use readyset_util::shutdown::ShutdownReceiver;
 use readyset_version::COMMIT_ID;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use reqwest::{Client, RequestBuilder, Response, StatusCode, Url};
 use tokio::sync::mpsc::Receiver;
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::Mutex;
 use tokio::time::Interval;
 use uuid::Uuid;
 
@@ -93,10 +94,7 @@ pub struct TelemetryReporter {
     anonymous_id: String,
 
     /// Will shut down the run loop upon receiving a signal
-    shutdown_rx: oneshot::Receiver<()>,
-
-    /// Acknowledge that we shutdown gracefully
-    shutdown_ack_tx: Option<oneshot::Sender<()>>,
+    shutdown_rx: ShutdownReceiver,
 
     /// Deployment environment, e.g. container orchestrator framework, if any
     deployment_env: String,
@@ -118,8 +116,7 @@ impl TelemetryReporter {
     pub fn new(
         rx: Receiver<(TelemetryEvent, Telemetry)>,
         api_key: Option<String>,
-        shutdown_rx: oneshot::Receiver<()>,
-        shutdown_ack_tx: oneshot::Sender<()>,
+        shutdown_rx: ShutdownReceiver,
         deployment_id: String,
     ) -> Self {
         // If the api_key is set, use that as the user_id.
@@ -138,7 +135,6 @@ impl TelemetryReporter {
             user_id,
             anonymous_id: Uuid::new_v4().to_string(),
             shutdown_rx,
-            shutdown_ack_tx: Some(shutdown_ack_tx),
             deployment_env: std::env::var("DEPLOYMENT_ENV")
                 .unwrap_or_default()
                 .chars()
@@ -242,19 +238,18 @@ impl TelemetryReporter {
     async fn run_once(&mut self, interval: &mut Interval) -> bool {
         trace!("TelemetryReporter run_once");
         tokio::select! {
+            // We use `biased` here to ensure that our shutdown signal will be received and
+            // acted upon even if the other branches in this `select!` are constantly in a
+            // ready state (e.g. a stream that has many messages where very little time passes
+            // between receipt of these messages). More information about this situation can
+            // be found in the docs for `tokio::select`.
             biased;
-            _ = &mut self.shutdown_rx => {
+            _ = self.shutdown_rx.recv() => {
                 info!("shutting down telemetry reporter. will attempt to drain in-flight metrics");
                 while let Ok((event, telemetry)) = self.rx.try_recv() {
                     debug!(?event, ?telemetry, "TelemetryEvent received");
                     self.process_event(event, &telemetry).await;
                 }
-
-                if let Some(shutdown_ack_tx) = self.shutdown_ack_tx.take() {
-                    let _ = shutdown_ack_tx.send(());
-                } else {
-                    trace!("unable to acknowledge shutdown");
-                };
 
                 self.rx.close();
                 return false;
@@ -401,8 +396,13 @@ mod tests {
                 .unwrap()
         );
 
-        telemetry_sender.shutdown().await;
-        telemetry_reporter.run_once(&mut interval).await;
+        tokio::select! {
+            // We use biased here to make sure that the shut down signal always happens first
+            biased;
+            // It doesn't matter what the timeout value is, since time is paused anyway
+            _ = telemetry_sender.shutdown(Duration::from_secs(1)) => {},
+            _ = telemetry_reporter.run_once(&mut interval) => {},
+        }
 
         telemetry_sender.send_event(event).unwrap_err();
     }
@@ -437,10 +437,16 @@ mod tests {
         sender
             .send_event(TelemetryEvent::InstallerRun)
             .expect("failed to send event");
-        sender.shutdown().await;
 
         let mut interval = tokio::time::interval(Duration::from_secs(1));
-        reporter.run_once(&mut interval).await;
+
+        tokio::select! {
+            // We use biased here to make sure that the shut down signal always happens first
+            biased;
+            // It doesn't matter what the timeout value is, since time is paused anyway
+            _ = sender.shutdown(Duration::from_secs(1)) => {},
+            _ = reporter.run_once(&mut interval) => {}
+        }
 
         assert_eq!(
             1,

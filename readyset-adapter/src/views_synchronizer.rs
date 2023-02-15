@@ -4,6 +4,7 @@ use dataflow_expression::Dialect;
 use readyset_client::query::MigrationState;
 use readyset_client::ReadySetHandle;
 use readyset_tracing::{debug, info, trace, warn};
+use readyset_util::shutdown::ShutdownReceiver;
 use tokio::select;
 use tracing::instrument;
 
@@ -19,7 +20,7 @@ pub struct ViewsSynchronizer {
     /// Dialect to pass to ReadySet to control the expression semantics used for all queries
     dialect: Dialect,
     /// Receiver to return the shutdown signal on
-    shutdown_recv: tokio::sync::broadcast::Receiver<()>,
+    shutdown_recv: ShutdownReceiver,
 }
 
 impl ViewsSynchronizer {
@@ -28,7 +29,7 @@ impl ViewsSynchronizer {
         query_status_cache: &'static QueryStatusCache,
         poll_interval: std::time::Duration,
         dialect: Dialect,
-        shutdown_recv: tokio::sync::broadcast::Receiver<()>,
+        shutdown_recv: ShutdownReceiver,
     ) -> Self {
         ViewsSynchronizer {
             controller,
@@ -46,11 +47,17 @@ impl ViewsSynchronizer {
         let mut interval = tokio::time::interval(self.poll_interval);
         loop {
             select! {
-                _ = interval.tick() => self.poll().await,
+                // We use `biased` here to ensure that our shutdown signal will be received and
+                // acted upon even if the other branches in this `select!` are constantly in a
+                // ready state (e.g. a stream that has many messages where very little time passes
+                // between receipt of these messages). More information about this situation can
+                // be found in the docs for `tokio::select`.
+                biased;
                 _ = self.shutdown_recv.recv() => {
                     info!("Views Synchronizer shutting down after shut down signal received");
                     break;
                 }
+                _ = interval.tick() => self.poll().await,
             }
         }
     }

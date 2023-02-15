@@ -14,9 +14,9 @@ mod sender;
 pub use sender::*;
 
 mod telemetry;
+use readyset_util::shutdown;
 pub use telemetry::*;
-use tokio::sync::mpsc::channel;
-use tokio::sync::oneshot;
+use tokio::sync::mpsc;
 
 pub const TELMETRY_CHANNEL_LEN: usize = 1024;
 
@@ -33,14 +33,13 @@ impl TelemetryInitializer {
         if disable_telemetry {
             return TelemetrySender::new_no_op();
         }
-        let (tx, rx) = channel(TELMETRY_CHANNEL_LEN); // Arbitrary number of metrics to allow in queue before dropping them
-        let (shutdown_tx, shutdown_rx) = oneshot::channel();
-        let (shutdown_ack_tx, shutdown_ack_rx) = oneshot::channel();
-        let sender = TelemetrySender::new(tx, shutdown_tx, shutdown_ack_rx);
+        let (tx, rx) = mpsc::channel(TELMETRY_CHANNEL_LEN); // Arbitrary number of metrics to allow in queue before dropping them
+        let (shutdown_tx, shutdown_rx) = shutdown::channel();
+        let sender = TelemetrySender::new(tx, shutdown_tx);
 
         tokio::spawn(async move {
             let mut telemetry_reporter =
-                TelemetryReporter::new(rx, api_key, shutdown_rx, shutdown_ack_tx, deployment_id);
+                TelemetryReporter::new(rx, api_key, shutdown_rx, deployment_id);
             for reporter in periodic_reporters {
                 telemetry_reporter
                     .register_periodic_reporter(reporter)
@@ -55,16 +54,14 @@ impl TelemetryInitializer {
     #[cfg(any(test, feature = "test-util"))]
     pub fn test_init() -> (TelemetrySender, TelemetryReporter) {
         readyset_tracing::init_test_logging();
-        let (tx, rx) = channel(TELMETRY_CHANNEL_LEN); // Arbitrary number of metrics to allow in queue before dropping them
-        let (shutdown_tx, shutdown_rx) = oneshot::channel();
-        let (shutdown_ack_tx, shutdown_ack_rx) = oneshot::channel();
-        let sender = TelemetrySender::new(tx, shutdown_tx, shutdown_ack_rx);
+        let (tx, rx) = mpsc::channel(TELMETRY_CHANNEL_LEN); // Arbitrary number of metrics to allow in queue before dropping them
+        let (shutdown_tx, shutdown_rx) = shutdown::channel();
+        let sender = TelemetrySender::new(tx, shutdown_tx);
 
         let reporter = TelemetryReporter::new(
             rx,
             Some("api-key".into()),
             shutdown_rx,
-            shutdown_ack_tx,
             "deployment_id".into(),
         );
 

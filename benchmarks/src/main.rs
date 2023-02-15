@@ -308,7 +308,7 @@ impl BenchmarkRunner {
         // Initializes `DeploymentParameters` and `Benchmark` from the set of arguments passed by
         // the user. These arguments need not be passed by the arguments in the flattened structs
         // directly, and instead may be passed via YAML or via arguments like `--local`.
-        let mut handle = self.initialize_from_args().await?;
+        let handle = self.initialize_from_args().await?;
 
         let cmd_as_yaml = serde_yaml::to_string(&self.benchmark_cmd.as_ref().unwrap())?;
         let deployment_as_yaml = serde_yaml::to_string(&self.deployment_params)?;
@@ -418,9 +418,8 @@ impl BenchmarkRunner {
                 .error_for_status()?;
         }
 
-        if let Some(h) = handle.as_mut() {
-            h.shutdown();
-            h.wait_done().await;
+        if let Some(mut h) = handle {
+            h.shutdown().await;
         }
 
         Ok(())

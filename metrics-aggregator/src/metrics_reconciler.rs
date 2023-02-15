@@ -12,6 +12,7 @@ use prometheus_http_query::{Client, InstantVector as InstantVectorReq, Selector}
 use readyset_client::consensus::{AuthorityControl, ConsulAuthority};
 use readyset_client::ReadySetResult;
 use readyset_tracing::{error, info};
+use readyset_util::shutdown::ShutdownReceiver;
 use tokio::select;
 use tokio::sync::Mutex;
 
@@ -44,8 +45,8 @@ pub struct MetricsReconciler {
     /// that require processing take longer than `min_poll_interval`.
     min_poll_interval: std::time::Duration,
 
-    /// Reciever to return the broadcast signal on.
-    shutdown_recv: tokio::sync::broadcast::Receiver<()>,
+    /// Receiver to listen for a shutdown signal
+    shutdown_recv: ShutdownReceiver,
 
     /// A flag indicating whether the adapters we're aggregating over are hosting insecure (http,
     /// as opposed to https) endpoints for their respective allow and deny lists.
@@ -64,7 +65,7 @@ impl MetricsReconciler {
         deployment: String,
         query_metrics_cache: Arc<Mutex<QueryMetricsCache>>,
         min_poll_interval: std::time::Duration,
-        shutdown_recv: tokio::sync::broadcast::Receiver<()>,
+        shutdown_recv: ShutdownReceiver,
         insecure_adapters: bool,
         show_upstream_latencies: bool,
     ) -> MetricsReconciler {

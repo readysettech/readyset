@@ -14,8 +14,8 @@ use dataflow::{
     Expr as DfExpr, LookupError, ReaderMap, ReaderUpdatedNotifier, Readers, SingleReadHandle,
 };
 use failpoint_macros::set_failpoint;
+use futures::pin_mut;
 use futures_util::future::TryFutureExt;
-use futures_util::stream::{StreamExt, TryStreamExt};
 use pin_project::pin_project;
 use readyset_client::consistency::Timestamp;
 #[cfg(feature = "failure_injection")]
@@ -28,13 +28,14 @@ use readyset_client::{
 };
 use readyset_errors::internal_err;
 use readyset_tracing::{error, warn};
+use readyset_util::shutdown::ShutdownReceiver;
 use serde::ser::Serializer;
 use serde::Serialize;
-use stream_cancel::Valve;
 use streaming_iterator::StreamingIterator;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::oneshot;
 use tokio_stream::wrappers::TcpListenerStream;
+use tokio_stream::StreamExt;
 use tokio_tower::multiplex::server;
 use tower::Service;
 use tracing::instrument;
@@ -369,12 +370,13 @@ pub async fn retry_misses(mut rx: UnboundedReceiver<(BlockingRead, Ack)>) {
 }
 
 pub(crate) async fn listen(
-    valve: Valve,
     on: tokio::net::TcpListener,
     readers: Readers,
     upquery_timeout: Duration,
+    shutdown_rx: ShutdownReceiver,
 ) {
-    let mut stream = valve.wrap(TcpListenerStream::new(on)).into_stream();
+    let stream = shutdown_rx.wrap_stream(TcpListenerStream::new(on));
+    pin_mut!(stream);
     while let Some(stream) = stream.next().await {
         set_failpoint!(failpoints::READ_QUERY);
         if stream.is_err() {

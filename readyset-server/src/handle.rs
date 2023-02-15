@@ -1,14 +1,14 @@
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
+use std::time::Duration;
 
 use dataflow::prelude::*;
 use readyset_client::consensus::Authority;
 use readyset_client::prelude::*;
 use readyset_data::Dialect;
-#[cfg(feature = "failure_injection")]
 use readyset_tracing::info;
+use readyset_util::shutdown::ShutdownSender;
 use reqwest::Url;
-use stream_cancel::Trigger;
 use tokio::sync::mpsc::Sender;
 
 use crate::controller::migrate::Migration;
@@ -22,8 +22,8 @@ pub struct Handle {
     pub c: Option<ReadySetHandle>,
     #[allow(dead_code)]
     event_tx: Option<Sender<HandleRequest>>,
-    kill: Option<Trigger>,
     descriptor: ControllerDescriptor,
+    shutdown_tx: Option<ShutdownSender>,
 }
 
 impl Deref for Handle {
@@ -43,15 +43,15 @@ impl Handle {
     pub(super) fn new(
         authority: Arc<Authority>,
         event_tx: Sender<HandleRequest>,
-        kill: Trigger,
         descriptor: ControllerDescriptor,
+        shutdown_tx: ShutdownSender,
     ) -> Self {
         let c = ReadySetHandle::make(authority, None, None);
         Handle {
             c: Some(c),
             event_tx: Some(event_tx),
-            kill: Some(kill),
             descriptor,
+            shutdown_tx: Some(shutdown_tx),
         }
     }
 
@@ -118,19 +118,18 @@ impl Handle {
         ret_rx.await.unwrap()
     }
 
-    /// Inform the local instance that it should exit.
-    pub fn shutdown(&mut self) {
-        if let Some(kill) = self.kill.take() {
-            drop(self.c.take());
-            drop(kill);
+    /// Inform the local instance that it should exit. This method will wait up to 20 seconds for
+    /// every background task to shut down.
+    ///
+    /// # Panics
+    ///
+    /// If the background tasks take longer than 20 seconds to shutdown, this method will panic.
+    pub async fn shutdown(&mut self) {
+        if let Some(shutdown_tx) = self.shutdown_tx.take() {
+            info!("Waiting up to 20 seconds for controller background tasks to shut down");
+            shutdown_tx.shutdown_timeout(Duration::from_secs(20)).await;
         }
-    }
-
-    /// Wait until the instance has exited.
-    pub async fn wait_done(&mut self) {
-        if let Some(etx) = self.event_tx.take() {
-            etx.closed().await;
-        }
+        drop(self.c.take());
     }
 
     #[cfg(feature = "failure_injection")]
@@ -150,11 +149,5 @@ impl Handle {
             .ok()
             .expect("Controller dropped, failed, or panicked");
         rx.await.expect("failed to get failpoint ack");
-    }
-}
-
-impl Drop for Handle {
-    fn drop(&mut self) {
-        self.shutdown();
     }
 }

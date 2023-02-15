@@ -230,8 +230,7 @@ impl TestScript {
         let _ = adapter_task.await;
 
         // Stop ReadySet
-        noria_handle.shutdown();
-        noria_handle.wait_done().await;
+        noria_handle.shutdown().await;
 
         Ok(())
     }

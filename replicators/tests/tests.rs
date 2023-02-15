@@ -283,8 +283,7 @@ impl TestHandle {
 
     async fn stop(mut self) {
         self.stop_repl().await;
-        self.noria.shutdown();
-        self.noria.wait_done().await;
+        self.noria.shutdown().await;
     }
 
     async fn stop_repl(&mut self) {

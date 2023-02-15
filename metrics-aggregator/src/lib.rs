@@ -4,14 +4,15 @@
 
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::anyhow;
 use clap::Parser;
 use prometheus_http_query::{Client, Scheme};
 use readyset_client::consensus::ConsulAuthority;
 use readyset_tracing::info;
+use readyset_util::shutdown;
 use readyset_version::*;
-use stream_cancel::Valve;
 use tokio::sync::Mutex;
 
 use crate::http_router::MetricsAggregatorHttpRouter;
@@ -91,7 +92,7 @@ pub fn run(options: Options) -> anyhow::Result<()> {
         tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?
     };
 
-    let (shutdown_sender, shutdown_recv) = tokio::sync::broadcast::channel(1);
+    let (shutdown_tx, shutdown_rx) = shutdown::channel();
     #[allow(clippy::indexing_slicing)] // Validated as safe with early bail above.
     let (prom_ip, prom_port) = (prom_address_res[0].ip(), prom_address_res[0].port());
     let prom_client = if options.unsecured_prometheus {
@@ -112,6 +113,7 @@ pub fn run(options: Options) -> anyhow::Result<()> {
         let deployment = options.deployment.clone();
         let unsecured_adapters = options.unsecured_adapters;
         let show_upstream_latencies = options.show_upstream_latencies;
+        let shutdown_rx = shutdown_rx.clone();
         let fut = async move {
             let mut reconciler = MetricsReconciler::new(
                 consul,
@@ -119,7 +121,7 @@ pub fn run(options: Options) -> anyhow::Result<()> {
                 deployment,
                 cache_for_reconciler,
                 std::time::Duration::from_secs(loop_interval),
-                shutdown_recv,
+                shutdown_rx,
                 unsecured_adapters,
                 show_upstream_latencies,
             );
@@ -132,22 +134,16 @@ pub fn run(options: Options) -> anyhow::Result<()> {
     };
 
     // Create the HTTP server for handling metrics aggregator requests.
-    let router_handle = {
-        let (handle, valve) = Valve::new();
-        let http_server = MetricsAggregatorHttpRouter {
-            listen_addr: options.address,
-            query_metrics_cache,
-            valve,
-        };
-        let fut = async move {
-            let http_listener = http_server.create_listener().await.unwrap();
-            MetricsAggregatorHttpRouter::route_requests(http_server, http_listener).await
-        };
-
-        rt.handle().spawn(fut);
-
-        handle
+    let http_server = MetricsAggregatorHttpRouter {
+        listen_addr: options.address,
+        query_metrics_cache,
     };
+    let fut = async move {
+        let http_listener = http_server.create_listener().await.unwrap();
+        MetricsAggregatorHttpRouter::route_requests(http_server, http_listener, shutdown_rx).await
+    };
+
+    rt.handle().spawn(fut);
 
     // Wait on sigterm or sigint.
     rt.block_on(async move {
@@ -163,19 +159,18 @@ pub fn run(options: Options) -> anyhow::Result<()> {
 
     info!("shutting down all async threads");
 
-    // Dropping the sender acts as a shutdown signal.
-    drop(shutdown_sender);
-
-    // Shut down all tcp streams started by the adapters http router.
-    drop(router_handle);
+    // We use `shutdown_timeout` instead of `shutdown` in case any blocking IO is ongoing
+    info!("Waiting up to 20s for background tasks to complete shutdown");
+    rt.block_on(shutdown_tx.shutdown_timeout(Duration::from_secs(20)));
 
     // TODO(peter): Uncomment once we pull adapter endpoints from authority.
     // // Drop authority channel to close conn with authority.
     // drop(ch);
 
     // We use `shutdown_timeout` instead of `shutdown_background` in case any
-    // blocking IO is ongoing.
-    info!("Waiting up to 20s for tasks to complete shutdown");
+    // blocking IO is ongoing. Most tasks should have been cleaned up from the above shutdown
+    // signal, so in practice, this should not take 20 seconds.
+    info!("Waiting up to 20s for any lingering tasks to complete shutdown");
     rt.shutdown_timeout(std::time::Duration::from_secs(20));
 
     Ok(())

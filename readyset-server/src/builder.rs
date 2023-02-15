@@ -10,6 +10,7 @@ use readyset_client::consensus::{
     WorkerSchedulingConfig,
 };
 use readyset_telemetry_reporter::TelemetrySender;
+use readyset_util::shutdown;
 
 use crate::controller::replication::ReplicationStrategy;
 use crate::handle::Handle;
@@ -345,8 +346,6 @@ impl Builder {
         authority: Arc<Authority>,
         readers: dataflow::Readers,
         reader_addr: SocketAddr,
-        valve: stream_cancel::Valve,
-        trigger: stream_cancel::Trigger,
     ) -> impl Future<Output = Result<Handle, anyhow::Error>> {
         let Builder {
             listen_addr,
@@ -361,6 +360,7 @@ impl Builder {
         } = self;
 
         let config = config.clone();
+        let (shutdown_tx, shutdown_rx) = shutdown::channel();
 
         crate::startup::start_instance_inner(
             authority,
@@ -373,10 +373,10 @@ impl Builder {
             leader_eligible,
             readers,
             reader_addr,
-            valve,
-            trigger,
             telemetry,
             wait_for_failpoint,
+            shutdown_tx,
+            shutdown_rx,
         )
     }
 

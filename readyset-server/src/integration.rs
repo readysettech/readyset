@@ -110,9 +110,8 @@ async fn it_completes() {
     );
 
     // wait for exit
-    g.shutdown();
     eprintln!("waiting for completion");
-    g.wait_done().await;
+    g.shutdown().await;
 }
 
 fn timestamp(pairs: Vec<(u32, u64)>) -> Timestamp {
@@ -1298,8 +1297,7 @@ async fn it_recovers_persisted_bases() {
 
         // Let writes propagate:
         sleep().await;
-        g.shutdown();
-        g.wait_done().await;
+        g.shutdown().await;
         if let Authority::LocalAuthority(l) = authority.as_ref() {
             l.delete_ephemeral();
         }
@@ -1378,8 +1376,7 @@ async fn it_recovers_persisted_bases_with_volume_id() {
 
         // Let writes propagate:
         sleep().await;
-        g.shutdown();
-        g.wait_done().await;
+        g.shutdown().await;
         if let Authority::LocalAuthority(l) = authority.as_ref() {
             l.delete_ephemeral();
         }
@@ -1454,8 +1451,7 @@ async fn it_doesnt_recover_persisted_bases_with_wrong_volume_id() {
 
         // Let writes propagate:
         sleep().await;
-        g.shutdown();
-        g.wait_done().await;
+        g.shutdown().await;
         if let Authority::LocalAuthority(l) = authority.as_ref() {
             l.delete_ephemeral();
         }
@@ -1640,15 +1636,13 @@ async fn table_connection_churn() {
                     .unwrap();
 
                 drop(tx);
-                g.shutdown();
-                g.wait_done().await;
+                g.shutdown().await;
             })
         })
         .collect();
     drop(tx);
     assert_eq!(rx.recv().await, None);
-    g.shutdown();
-    g.wait_done().await;
+    g.shutdown().await;
     for jh in jhs {
         jh.await.unwrap();
     }
@@ -1698,8 +1692,7 @@ async fn it_recovers_persisted_bases_w_multiple_nodes() {
             }
         }
         sleep().await;
-        g.shutdown();
-        g.wait_done().await;
+        g.shutdown().await;
         if let Authority::LocalAuthority(l) = authority.as_ref() {
             l.delete_ephemeral();
         }
@@ -1727,8 +1720,7 @@ async fn it_recovers_persisted_bases_w_multiple_nodes() {
         assert_eq!(result.len(), 1);
         assert_eq!(result[0][0], i.into());
     }
-    g.shutdown();
-    g.wait_done().await;
+    g.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1775,8 +1767,7 @@ async fn it_recovers_persisted_bases_w_multiple_nodes_and_volume_id() {
             }
         }
         sleep().await;
-        g.shutdown();
-        g.wait_done().await;
+        g.shutdown().await;
         if let Authority::LocalAuthority(l) = authority.as_ref() {
             l.delete_ephemeral();
         }
@@ -1805,8 +1796,7 @@ async fn it_recovers_persisted_bases_w_multiple_nodes_and_volume_id() {
         assert_eq!(result.len(), 1);
         assert_eq!(result[0][0], i.into());
     }
-    g.shutdown();
-    g.wait_done().await;
+    g.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -8314,8 +8304,7 @@ async fn it_recovers_fully_materialized() {
 
         // Let writes propagate:
         sleep().await;
-        g.shutdown();
-        g.wait_done().await;
+        g.shutdown().await;
     }
 
     let mut g = start().await.unwrap();

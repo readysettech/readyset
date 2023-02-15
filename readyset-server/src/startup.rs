@@ -60,7 +60,7 @@ use readyset_client::{ControllerDescriptor, WorkerDescriptor};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 use readyset_tracing::error;
 use readyset_util::futures::abort_on_panic;
-use stream_cancel::{Trigger, Valve};
+use readyset_util::shutdown::{self, ShutdownReceiver, ShutdownSender};
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::{Receiver, Sender};
 use url::Url;
@@ -90,17 +90,17 @@ async fn start_readers(
     upquery_timeout: time::Duration,
     abort_on_task_failure: bool,
     readers: Readers,
-    valve: Valve,
+    shutdown_rx: ShutdownReceiver,
 ) -> Result<SocketAddr, anyhow::Error> {
     let readers_listener = TcpListener::bind(SocketAddr::new(listen_addr, 0)).await?;
     let reader_addr = SocketAddr::new(external_addr.ip(), readers_listener.local_addr()?.port());
     tokio::spawn(maybe_abort_on_panic!(
         abort_on_task_failure,
         crate::worker::readers::listen(
-            valve.clone(),
             readers_listener,
             readers.clone(),
             upquery_timeout,
+            shutdown_rx,
         )
     ));
 
@@ -115,7 +115,7 @@ async fn start_worker(
     readers: Readers,
     memory_limit: Option<usize>,
     memory_check_frequency: Option<time::Duration>,
-    valve: Valve,
+    shutdown_rx: ShutdownReceiver,
 ) -> Result<(), anyhow::Error> {
     set_failpoint!("start-worker");
     let worker = Worker {
@@ -129,11 +129,11 @@ async fn start_worker(
         domain_external: external_addr.ip(),
         state_sizes: Default::default(),
         readers,
-        valve,
         domains: Default::default(),
         memory: MemoryTracker::new()?,
         is_evicting: Default::default(),
         domain_wait_queue: Default::default(),
+        shutdown_rx,
     };
 
     tokio::spawn(maybe_abort_on_panic!(abort_on_task_failure, worker.run()));
@@ -151,8 +151,8 @@ async fn start_controller(
     abort_on_task_failure: bool,
     domain_scheduling_config: WorkerSchedulingConfig,
     leader_eligible: bool,
-    valve: Valve,
     telemetry_sender: TelemetrySender,
+    shutdown_rx: ShutdownReceiver,
 ) -> Result<ControllerDescriptor, anyhow::Error> {
     set_failpoint!("start-controller");
     let our_descriptor = ControllerDescriptor {
@@ -173,10 +173,10 @@ async fn start_controller(
         controller_rx,
         handle_rx,
         our_descriptor.clone(),
-        valve,
         worker_descriptor,
         telemetry_sender,
         config,
+        shutdown_rx,
     );
 
     tokio::spawn(maybe_abort_on_panic!(
@@ -199,14 +199,13 @@ async fn start_request_router(
     worker_tx: Sender<WorkerRequest>,
     controller_tx: Sender<ControllerRequest>,
     abort_on_task_failure: bool,
-    valve: Valve,
     health_reporter: HealthReporter,
     failpoint_channel: Option<Arc<Sender<()>>>,
+    shutdown_rx: ShutdownReceiver,
 ) -> Result<Url, anyhow::Error> {
     let http_server = NoriaServerHttpRouter {
         listen_addr,
         port: external_addr.port(),
-        valve,
         worker_tx: worker_tx.clone(),
         controller_tx,
         authority: authority.clone(),
@@ -221,7 +220,7 @@ async fn start_request_router(
     let http_uri = Url::parse(&format!("http://{}", real_external_addr))?;
     tokio::spawn(maybe_abort_on_panic!(
         abort_on_task_failure,
-        NoriaServerHttpRouter::route_requests(http_server, http_listener)
+        NoriaServerHttpRouter::route_requests(http_server, http_listener, shutdown_rx)
     ));
 
     Ok(http_uri)
@@ -254,8 +253,9 @@ async fn maybe_wait_for_failpoint(mut rx: Option<Receiver<()>>) {
 #[cfg(not(feature = "failure_injection"))]
 async fn maybe_wait_for_failpoint(_: Option<Receiver<()>>) {}
 
-/// Creates the instance, with an existing set of readers and a valve to cancel the intsance.
-pub async fn start_instance_inner(
+/// Creates the instance, with an existing set of readers and a signal sender to shut down the
+/// instance.
+pub(crate) async fn start_instance_inner(
     authority: Arc<Authority>,
     listen_addr: IpAddr,
     external_addr: SocketAddr,
@@ -266,10 +266,10 @@ pub async fn start_instance_inner(
     leader_eligible: bool,
     readers: Readers,
     reader_addr: SocketAddr,
-    valve: Valve,
-    trigger: Trigger,
     telemetry_sender: TelemetrySender,
     wait_for_failpoint: bool,
+    shutdown_tx: ShutdownSender,
+    shutdown_rx: ShutdownReceiver,
 ) -> Result<Handle, anyhow::Error> {
     let (worker_tx, worker_rx) = tokio::sync::mpsc::channel(16);
     let (controller_tx, controller_rx) = tokio::sync::mpsc::channel(16);
@@ -289,9 +289,9 @@ pub async fn start_instance_inner(
         worker_tx.clone(),
         controller_tx,
         abort_on_task_failure,
-        valve.clone(),
         health_reporter.clone(),
         tx,
+        shutdown_rx.clone(),
     )
     .await?;
 
@@ -308,7 +308,7 @@ pub async fn start_instance_inner(
         readers,
         memory_limit,
         memory_check_frequency,
-        valve.clone(),
+        shutdown_rx.clone(),
     )
     .await?;
 
@@ -323,8 +323,8 @@ pub async fn start_instance_inner(
         abort_on_task_failure,
         domain_scheduling_config,
         leader_eligible,
-        valve,
         telemetry_sender.clone(),
+        shutdown_rx,
     )
     .await?;
 
@@ -337,7 +337,12 @@ pub async fn start_instance_inner(
 
     health_reporter.set_state(ServerState::Healthy);
 
-    Ok(Handle::new(authority, handle_tx, trigger, our_descriptor))
+    Ok(Handle::new(
+        authority,
+        handle_tx,
+        our_descriptor,
+        shutdown_tx,
+    ))
 }
 
 /// Start up a new instance and return a handle to it. Dropping the handle will stop the
@@ -354,12 +359,13 @@ pub(super) async fn start_instance(
     telemetry_sender: TelemetrySender,
     wait_for_failpoint: bool,
 ) -> Result<Handle, anyhow::Error> {
-    let (trigger, valve) = Valve::new();
     let Config {
         abort_on_task_failure,
         upquery_timeout,
         ..
     } = config;
+
+    let (shutdown_tx, shutdown_rx) = shutdown::channel();
 
     let readers: Readers = Arc::new(Mutex::new(Default::default()));
     let reader_addr = start_readers(
@@ -368,7 +374,7 @@ pub(super) async fn start_instance(
         upquery_timeout,
         abort_on_task_failure,
         readers.clone(),
-        valve.clone(),
+        shutdown_rx.clone(),
     )
     .await?;
 
@@ -383,10 +389,10 @@ pub(super) async fn start_instance(
         leader_eligible,
         readers,
         reader_addr,
-        valve,
-        trigger,
         telemetry_sender,
         wait_for_failpoint,
+        shutdown_tx,
+        shutdown_rx,
     )
     .await
 }

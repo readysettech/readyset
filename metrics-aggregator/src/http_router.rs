@@ -10,7 +10,7 @@ use futures::TryFutureExt;
 use hyper::header::CONTENT_TYPE;
 use hyper::service::make_service_fn;
 use hyper::{self, Body, Method, Request, Response};
-use stream_cancel::Valve;
+use readyset_util::shutdown::ShutdownReceiver;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 use tokio_stream::wrappers::TcpListenerStream;
@@ -27,8 +27,6 @@ pub struct MetricsAggregatorHttpRouter {
     pub listen_addr: SocketAddr,
     /// A reference to the QueryMetricsCache that is in use.
     pub query_metrics_cache: Arc<Mutex<QueryMetricsCache>>,
-    /// A valve for the http stream to trigger closing.
-    pub valve: Valve,
 }
 
 impl MetricsAggregatorHttpRouter {
@@ -44,9 +42,10 @@ impl MetricsAggregatorHttpRouter {
     pub async fn route_requests(
         router: MetricsAggregatorHttpRouter,
         http_listener: TcpListener,
+        shutdown_rx: ShutdownReceiver,
     ) -> anyhow::Result<()> {
         hyper::server::Server::builder(hyper::server::accept::from_stream(
-            router.valve.wrap(TcpListenerStream::new(http_listener)),
+            shutdown_rx.wrap_stream(TcpListenerStream::new(http_listener)),
         ))
         .serve(make_service_fn(move |_| {
             let s = router.clone();

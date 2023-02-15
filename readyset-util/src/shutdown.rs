@@ -64,6 +64,8 @@
 //! # });
 //! ```
 
+use std::time::Duration;
+
 use futures::{Stream, StreamExt};
 use tokio::sync::watch;
 
@@ -81,6 +83,10 @@ pub struct ShutdownSender(watch::Sender<()>);
 
 impl ShutdownSender {
     /// Broadcast a shutdown signal to all of the [`ShutdownReceiver`]s associated with this sender.
+    /// The future returned by this method will never resolve if there are existing
+    /// [`ShutdownReceiver`]s that are not listening for a shutdown signal. If you want to send a
+    /// shutdown signal and time out after a given duration, use
+    /// [`ShutdownSender::shutdown_timeout`].
     pub async fn shutdown(self) {
         // The only situation in which this send will fail is if every receiver has been closed,
         // which is exactly what we want
@@ -88,17 +94,32 @@ impl ShutdownSender {
         self.0.closed().await;
     }
 
-    /// Waits until all of the receivers associated with this sender have closed. This method is
-    /// only useful if you need to wait until all of the assocaited [`ShutdownReceiver`]s have been
-    /// closed for reasons other than receiving a message from [`ShutdownSender::shutdown`].
-    pub async fn wait_done(&self) {
-        self.0.closed().await;
+    /// Broadcast a shutdown signal to all of the [`ShutdownReceiver`]s associated with this sender
+    /// and panic if it takes longer than the duration given by `timeout` for every associated
+    /// [`ShutdownReceiver`] to drop.
+    ///
+    /// # Panics
+    ///
+    /// This method panics if the shutdown process takes longer than the duration given by
+    /// `timeout` to complete.
+    pub async fn shutdown_timeout(self, timeout: Duration) {
+        if tokio::time::timeout(timeout, self.shutdown())
+            .await
+            .is_err()
+        {
+            panic!("shutdown process timed out: is every `ShutdownReceiver` listening for a shutdown signal?");
+        }
     }
 }
 
 /// A struct that can be used to wait for a shutdown signal from a [`ShutdownSender`]. A
 /// [`ShutdownReceiver`] can be cloned and passed to another subtask -- the clone will be
 /// associated with the same [`ShutdownSender`] as the original.
+///
+/// NOTE: Every [`ShutdownReceiver`] associated with a given [`ShutdownSender`] MUST be listening
+/// for a shutdown signal. If there are any existing [`ShutdownReceiver`]s that are not listening
+/// for a shutdown signal, [`ShutdownSender::shutdown`] will hang forever, since it specifically
+/// waits for confirmation that every [`ShutdownReceiver`] has been dropped.
 #[derive(Clone, Debug)]
 pub struct ShutdownReceiver(watch::Receiver<()>);
 
@@ -119,6 +140,10 @@ impl ShutdownReceiver {
         async_stream::stream! {
             loop {
                 tokio::select! {
+                    // We use `biased` here to ensure that our shutdown signal will be received and
+                    // acted upon even if the stream has many messages where very little time passes
+                    // between receipt of these messages. More information about this situation can
+                    // be found in the docs for `tokio::select`.
                     biased;
                     _ = self.recv() => break,
                     maybe_item = input.next() => match maybe_item {
@@ -133,8 +158,6 @@ impl ShutdownReceiver {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use super::*;
     use crate::eventually;
 
@@ -153,51 +176,30 @@ mod tests {
         // Send the shutdown signal
         shutdown_tx.shutdown().await;
 
-        // Assert the task has finished
+        // Assert the task eventually finishes
         eventually!(background_task.is_finished());
     }
 
     #[tokio::test]
-    async fn test_wait_done() {
+    #[should_panic]
+    async fn test_shutdown_timeout() {
         let (shutdown_tx, mut shutdown_rx) = channel();
 
+        let timeout_ms = 10;
+
         // Spawn a background task that is waiting for a shutdown signal
-        let background_task = tokio::spawn(async move {
+        tokio::spawn(async move {
             shutdown_rx.recv().await;
 
-            // When the shutdown_rx handle is dropped, the shutdown_tx will be notified that the
-            // last remaining [`ShutdownReceiver`] was dropped. For this test, we want to prevent
-            // that from happening right away, so we sleep for a very long time. We abort this task
-            // on the next line, so this test is not actually slow.
-            tokio::time::sleep(Duration::from_secs(1000)).await;
+            // Hang for just a tad longer than the timeout passed to
+            // [`ShutdownSender::shutdown_timeout`] so we trigger a panic
+            tokio::time::sleep(Duration::from_millis(timeout_ms * 2)).await;
         });
 
-        // Assert the task has not yet finished
-        assert!(!background_task.is_finished());
-
-        tokio::select! {
-            _ = async move {
-                background_task.abort();
-                let _ = background_task.await;
-                tokio::time::sleep(Duration::from_secs(5)).await;
-            } => panic!(),
-            _ = shutdown_tx.wait_done() => {}
-        }
-    }
-
-    /// Test that, when a [`ShutdownReceiver`] is dropped for a reason other than the invocation of
-    /// [`ShutdownSender::shutdown`], the [`ShutdownSender`] still takes this to mean that the
-    /// receiver has been closed.
-    #[tokio::test]
-    async fn test_drop_counts_as_shutdown() {
-        let (shutdown_tx, shutdown_rx) = channel();
-
-        tokio::select! {
-            _ = shutdown_tx.wait_done() => {},
-            _ = async {
-                std::mem::drop(shutdown_rx);
-                tokio::time::sleep(Duration::from_secs(5)).await;
-            } => panic!(),
-        }
+        // Send the shutdown signal. This should panic because the task doesn't finish within the
+        // specified timeout period
+        shutdown_tx
+            .shutdown_timeout(Duration::from_millis(timeout_ms))
+            .await;
     }
 }

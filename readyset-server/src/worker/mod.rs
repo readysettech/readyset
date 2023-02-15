@@ -20,8 +20,8 @@ use readyset_client::{channel, ReadySetError};
 use readyset_errors::internal_err;
 use readyset_tracing::{debug, error, info, trace, warn};
 use readyset_util::select;
+use readyset_util::shutdown::ShutdownReceiver;
 use serde::{Deserialize, Serialize};
-use stream_cancel::Valve;
 use tikv_jemalloc_ctl::stats::allocated_mib;
 use tikv_jemalloc_ctl::{epoch, epoch_mib, stats};
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -197,9 +197,6 @@ pub struct Worker {
     pub(crate) state_sizes: Arc<Mutex<HashMap<ReplicaAddress, Arc<AtomicUsize>>>>,
     /// Read handles.
     pub(crate) readers: Readers,
-    /// Valve for shutting down; triggered by the [`Handle`] when [`Handle::shutdown`] is called.
-    pub(crate) valve: Valve,
-
     /// Handles to domains currently being run by this worker.
     ///
     /// These are indexed by (domain index, shard).
@@ -208,6 +205,7 @@ pub struct Worker {
     pub(crate) memory: MemoryTracker,
     pub(crate) is_evicting: Arc<AtomicBool>,
     pub(crate) domain_wait_queue: FuturesUnordered<FinishedDomainFuture>,
+    pub(crate) shutdown_rx: ShutdownReceiver,
 }
 
 impl Worker {
@@ -386,9 +384,6 @@ impl Worker {
     /// This function returns if the worker request sender is dropped.
     pub async fn run(mut self) {
         loop {
-            // produces a value when the `Valve` is closed
-            let mut shutdown_stream = self.valve.wrap(futures_util::stream::pending::<()>());
-
             let ei = &mut self.evict_interval;
             let eviction = async {
                 if let Some(ref mut ei) = ei {
@@ -408,8 +403,8 @@ impl Worker {
                         return;
                     }
                 }
-                _ = shutdown_stream.next() => {
-                    debug!("worker shutting down after valve shut");
+                _ = self.shutdown_rx.recv() => {
+                    debug!("worker shutting down after shutdown signal received");
                     return;
                 }
                 _ = eviction => {

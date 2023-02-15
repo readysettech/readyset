@@ -339,8 +339,7 @@ async fn check_query(
             ));
         }
     }
-    g.shutdown();
-    g.wait_done().await;
+    g.shutdown().await;
     Ok(())
 }
 

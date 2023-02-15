@@ -62,8 +62,7 @@ impl SnapshotBenchmark {
                 println!("Disk space used:   {:.2} MiB", tables_size_metric_mib());
             }
 
-            noria.shutdown();
-            noria.wait_done().await;
+            noria.shutdown().await;
         }
 
         Ok(())

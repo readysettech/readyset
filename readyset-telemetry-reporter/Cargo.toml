@@ -19,6 +19,7 @@ thiserror = "1.0"
 tokio = { workspace = true, features = ["full"] }
 tracing = { version = "0.1", features = ["release_max_level_debug"] }
 readyset-tracing = { path = "../readyset-tracing" }
+readyset-util = { path = "../readyset-util" }
 uuid = { version = "0.8", features = [ "v4" ] }
 machine-uid = "0.2"
 blake2= "0.10"

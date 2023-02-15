@@ -402,6 +402,18 @@ impl NoriaAdapter {
         pool: deadpool_postgres::Pool,
         repl_slot_name: String,
     ) -> ReadySetResult<!> {
+        macro_rules! handle_joinhandle_result {
+            ($res: expr) => {
+                match $res {
+                    Ok(Ok(_)) => Err(ReadySetError::UpstreamConnectionLost(
+                        "connection closed for unknown reason".to_owned(),
+                    )),
+                    Ok(Err(e)) => Err(ReadySetError::UpstreamConnectionLost(e.to_string())),
+                    Err(e) => Err(ReadySetError::UpstreamConnectionLost(e.to_string())),
+                }
+            };
+        }
+
         let dbname = pgsql_opts.get_dbname().ok_or_else(|| {
             ReadySetError::ReplicationFailed("No database specified for replication".to_string())
         })?;
@@ -424,18 +436,20 @@ impl NoriaAdapter {
         // below
         let version_num: u32 = {
             let (client, connection) = pgsql_opts.connect(tls_connector.clone()).await?;
-            let _connection_handle = tokio::spawn(connection);
-            client
-                .query_one("SHOW server_version_num", &[])
-                .await
-                .and_then(|row| row.try_get::<_, String>(0))
-                .map_err(|e| {
-                    ReadySetError::Internal(format!("Unable to determine postgres version: {}", e))
-                })?
-                .parse()
-                .map_err(|e| {
-                    ReadySetError::Internal(format!("Unable to parse postgres version: {}", e))
-                })?
+            let connection_handle = tokio::spawn(connection);
+
+            select! {
+                result = client.query_one("SHOW server_version_num", &[]) => result
+                    .and_then(|row| row.try_get::<_, String>(0))
+                    .map_err(|e| {
+                        ReadySetError::Internal(format!("Unable to determine postgres version: {}", e))
+                    })?
+                    .parse()
+                    .map_err(|e| {
+                        ReadySetError::Internal(format!("Unable to parse postgres version: {}", e))
+                    })?,
+                c = connection_handle.fuse() => return handle_joinhandle_result!(c),
+            }
         };
 
         let mut connector = Box::new(
@@ -511,9 +525,7 @@ impl NoriaAdapter {
 
                     snapshot_result?;
                 },
-                c = connection_handle.fuse() => c.map_err(|e| {
-                    ReadySetError::UpstreamConnectionLost(e.to_string())
-                })??
+                c = connection_handle.fuse() => return handle_joinhandle_result!(c),
             }
 
             info!("Snapshot finished");

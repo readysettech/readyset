@@ -255,9 +255,11 @@ fn main() -> anyhow::Result<()> {
             _ = sigterm.recv() => {
                 info!("SIGTERM received, shutting down");
             }
-            _ = handle.wait_done() => (),
         }
     });
+
+    // Shut down the server gracefully
+    rt.block_on(handle.shutdown());
 
     // Attempt a graceful shutdown of the telemetry reporting system
     rt.block_on(async move {
@@ -265,7 +267,7 @@ fn main() -> anyhow::Result<()> {
 
         let shutdown_timeout = std::time::Duration::from_secs(5);
 
-        match telemetry_sender.graceful_shutdown(shutdown_timeout).await {
+        match telemetry_sender.shutdown(shutdown_timeout).await {
             Ok(_) => info!("TelemetrySender shutdown gracefully"),
             Err(e) => info!(error=%e, "TelemetrySender did not shut down gracefully"),
         }

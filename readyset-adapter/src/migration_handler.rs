@@ -16,6 +16,7 @@ use readyset_client::{ReadySetHandle, ReadySetResult, ViewCreateRequest};
 use readyset_client_metrics::recorded;
 use readyset_tracing::{debug, error, info};
 use readyset_util::redacted::Sensitive;
+use readyset_util::shutdown::ShutdownReceiver;
 use tokio::select;
 use tracing::instrument;
 
@@ -55,8 +56,8 @@ pub struct MigrationHandler<DB> {
     /// query for before marking it as Unsupported.
     max_retry: std::time::Duration,
 
-    /// Receiver to return the broadcast signal on.
-    shutdown_recv: tokio::sync::broadcast::Receiver<()>,
+    /// Receiver to listen for a shutdown signal
+    shutdown_recv: ShutdownReceiver,
 
     /// The time that we began performing migrations on the query.
     /// Queries are removed when a migration yields success or unsupported
@@ -78,7 +79,7 @@ where
         validate_queries: bool,
         min_poll_interval: std::time::Duration,
         max_retry: std::time::Duration,
-        shutdown_recv: tokio::sync::broadcast::Receiver<()>,
+        shutdown_recv: ShutdownReceiver,
     ) -> MigrationHandler<DB> {
         MigrationHandler {
             noria,
@@ -102,6 +103,16 @@ where
 
         loop {
             select! {
+                // We use `biased` here to ensure that our shutdown signal will be received and
+                // acted upon even if the other branches in this `select!` are constantly in a
+                // ready state (e.g. a stream that has many messages where very little time passes
+                // between receipt of these messages). More information about this situation can
+                // be found in the docs for `tokio::select`.
+                biased;
+                _ = self.shutdown_recv.recv() => {
+                    info!("Migration handler shutting down after shut down signal received");
+                    break;
+                }
                 _ = interval.tick() => {
                     let to_process = self.query_status_cache.pending_migration();
                     let has_controller = self.controller.is_some();
@@ -126,10 +137,6 @@ where
 
                     success_counter.increment(successes);
                     failure_counter.increment(failures);
-                }
-                _ = self.shutdown_recv.recv() => {
-                    info!("Migration handler shutting down after shut down signal received");
-                    break;
                 }
             }
         }
