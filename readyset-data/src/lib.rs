@@ -115,9 +115,13 @@ pub enum DfValue {
     /// This is a special value, as it cannot ever be constructed by user supplied values, and
     /// always returns an error when encountered during expression evaluation. Its only use is as
     /// the upper bound in a range query
-    // NOTE: when adding new DfValue variants, make sure to always keep Max last - we use the
-    // order of the variants to compare
     Max,
+    // NOTE: when adding new DfValue variants:
+    //
+    // - make sure to always keep Max last - we use the order of the variants to compare
+    // - remember to add that variant to:
+    //   - The `proptest::Arbitrary` impl for `DfValue`,
+    //   - The `example_row` in `src/serde.rs`
 }
 
 impl Eq for DfValue {}

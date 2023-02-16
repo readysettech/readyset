@@ -12,7 +12,53 @@ use serde_bytes::{ByteBuf, Bytes};
 use strum::VariantNames;
 use strum_macros::{EnumString, EnumVariantNames, FromRepr};
 
-use crate::{Collation, DfValue, Text, TimestampTz, TinyText};
+use crate::{Array, Collation, DfValue, Text, TimestampTz, TinyText};
+
+impl DfValue {
+    /// Version number for the current implementations of [`serde::Deserialize`] and
+    /// [`serde::Serialize`] for [`DfValue`]. Any data serialized with an older version *can not* be
+    /// deserialized with the later version.
+    ///
+    /// This constant exists so that it can be persisted alongside any serialized [`DfValue`]s (eg
+    /// in base tables) and checked on startup against the current number, to determine if we've
+    /// made backwards-incompatible changes to deserialization since that data was serialized
+    // Note for developers: Remember to increment this number, and run `cargo run --example
+    // make_serialized_row`, every time we make a backwards incompatible change to deserialization
+    // of DfValue! Hopefully `test::deserialize_backwards_compatibility` will automatically catch
+    // that, but it's worth being extra careful, as that test is not perfect.
+    pub const SERDE_VERSION: u8 = 1;
+
+    /// Reference example "row" of `DfValue`s to check against for backwards compatible
+    /// deserialization.
+    ///
+    /// This is only exported so it can be used by `examples/make_serialized_row.rs`
+    pub fn example_row() -> Vec<DfValue> {
+        vec![
+            DfValue::None,
+            DfValue::Int(0),
+            DfValue::Int(i64::MAX),
+            DfValue::Int(i64::MIN),
+            DfValue::UnsignedInt(0),
+            DfValue::UnsignedInt(u64::MAX),
+            DfValue::Float(f32::MAX),
+            DfValue::Float(0.0),
+            DfValue::Float(f32::MIN),
+            DfValue::Double(f64::MAX),
+            DfValue::Double(0.0),
+            DfValue::Double(f64::MIN),
+            DfValue::Text("aaaaaaaaaaaaaaaaaa".into()),
+            DfValue::TinyText(TinyText::from_slice(b"a").unwrap()),
+            DfValue::TimestampTz("2023-12-16 17:44:00".parse().unwrap()),
+            DfValue::Time(MySqlTime::from_bytes(b"1112").unwrap()),
+            DfValue::ByteArray(Arc::new(b"aaaaaaaaaaaa".to_vec())),
+            DfValue::Numeric(Arc::new(Decimal::MIN)),
+            DfValue::Numeric(Arc::new(Decimal::MAX)),
+            DfValue::BitVector(Arc::new(BitVec::from_bytes(b"aaaaaaaaa"))),
+            DfValue::Array(Arc::new(Array::from(vec![DfValue::from("aaaaaaaaa")]))),
+            DfValue::Max,
+        ]
+    }
+}
 
 #[derive(EnumVariantNames, EnumString, FromRepr, Clone, Copy)]
 enum Variant {
@@ -330,6 +376,25 @@ mod tests {
     use test_strategy::proptest;
 
     use super::*;
+
+    /// This test checks that a reference payload of `bincode`-serialized `DfValue`s can be
+    /// deserialized using the *current* implementation of [`serde::Deserialize`]. If this test
+    /// fails, you've probably just introduced a backwards-incompatible change to deserialization.
+    /// In that case, you have two options:
+    ///
+    /// 1. Fix the backwards incompatibility, if possible. Sometimes this is trivial, and if so,
+    ///    this should be the preferred option
+    /// 2. Bump the serde version for [`DfValue`]. Increment `DfValue::SERDE_VERSION` (at the top of
+    ///    this file), and run `cargo run --example make_serialized_row` to overwrite the reference
+    ///    serialized row for this serde version
+    #[test]
+    fn deserialize_backwards_compatibility() {
+        assert_eq!(
+            bincode::deserialize::<Vec<DfValue>>(include_bytes!("../tests/serialized-row.bincode"))
+                .unwrap(),
+            DfValue::example_row()
+        );
+    }
 
     #[proptest]
     fn text_serialize_bincode_round_trip(s: String, collation: Collation) {
