@@ -118,6 +118,8 @@ enum Operation {
     DeleteRow((String, i32)),
     /// Adds a new column to an existing table
     AddColumn((String, ColumnSpec)),
+    /// Removes a column from an existing table
+    DropColumn((String, String)),
     /// Alters a column to a different name
     AlterColumnName((String, String, String)),
 }
@@ -151,6 +153,10 @@ impl Operation {
                     && state.tables[table]
                         .iter()
                         .all(|cs| cs.name != *column_spec.name)
+            }
+            Self::DropColumn((table, col_name)) => {
+                state.tables.contains_key(table)
+                    && state.tables[table].iter().any(|cs| cs.name == *col_name)
             }
             Self::AlterColumnName((table, col_name, new_name)) => {
                 state.tables.contains_key(table)
@@ -203,7 +209,8 @@ impl TestModel {
             .prop_map(Operation::CreateTable)
             .boxed();
         let mut possible_ops = vec![create_table_strat];
-        // If we have at least one table, we can delete a table, write a row, or rename a column:
+
+        // If we have at least one table, we can delete a table or write a row:
         if !self.tables.is_empty() {
             possible_ops.push(
                 sample::select(self.tables.keys().cloned().collect::<Vec<_>>())
@@ -246,10 +253,25 @@ impl TestModel {
                 .prop_map(Operation::AddColumn)
                 .boxed();
             possible_ops.push(add_col_strat);
+        }
 
+        // If we have a table with at least one (non-pkey) column, we can rename or drop a column:
+        let tables_with_cols: Vec<String> = self
+            .tables
+            .iter()
+            .filter_map(|(table, columns)| {
+                if columns.is_empty() {
+                    None
+                } else {
+                    Some(table)
+                }
+            })
+            .cloned()
+            .collect();
+        if !tables_with_cols.is_empty() {
             // This is cloned so that we can move it into the closures for rename_col_strat:
             let tables = self.tables.clone();
-            let rename_col_strat = sample::select(self.tables.keys().cloned().collect::<Vec<_>>())
+            let rename_col_strat = sample::select(tables_with_cols.clone())
                 .prop_flat_map(move |table| {
                     let from_col_gen = sample::select(
                         tables[&table]
@@ -267,6 +289,20 @@ impl TestModel {
                 .prop_map(Operation::AlterColumnName)
                 .boxed();
             possible_ops.push(rename_col_strat);
+
+            let tables = self.tables.clone(); // Cloned for moving into closure
+            let _drop_col_strategy = sample::select(tables_with_cols)
+                .prop_flat_map(move |table| {
+                    let col_names = tables[&table]
+                        .iter()
+                        .map(|cs| cs.name.clone())
+                        .collect::<Vec<_>>();
+                    (Just(table), sample::select(col_names))
+                })
+                .prop_map(Operation::DropColumn)
+                .boxed();
+            // Commented out for now because this triggers ENG-2548
+            // possible_ops.push(drop_col_strategy);
         }
         // If we have at least one row written to a table, we can generate delete ops:
         let non_empty_tables: Vec<String> = self
@@ -329,6 +365,10 @@ impl TestModel {
             Operation::AddColumn((table, col_spec)) => {
                 let col_specs = self.tables.get_mut(table).unwrap();
                 col_specs.push(col_spec.clone());
+            }
+            Operation::DropColumn((table, col_name)) => {
+                let col_specs = self.tables.get_mut(table).unwrap();
+                col_specs.retain(|cs| cs.name != *col_name);
             }
             Operation::AlterColumnName((table, from_col_name, to_col_name)) => {
                 let col_specs = self.tables.get_mut(table).unwrap();
@@ -590,6 +630,11 @@ async fn run(ops: Vec<Operation>) {
                     "ALTER TABLE {} ADD COLUMN \"{}\" {}",
                     table_name, col_spec.name, col_spec.sql_type
                 );
+                rs_conn.simple_query(&query).await.unwrap();
+                pg_conn.simple_query(&query).await.unwrap();
+            }
+            Operation::DropColumn((table_name, col_name)) => {
+                let query = format!("ALTER TABLE {} DROP COLUMN \"{}\"", table_name, col_name);
                 rs_conn.simple_query(&query).await.unwrap();
                 pg_conn.simple_query(&query).await.unwrap();
             }
