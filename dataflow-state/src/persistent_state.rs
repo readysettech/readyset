@@ -645,7 +645,7 @@ impl State for PersistentState {
 
         let is_unique = check_if_index_is_unique(&self.unique_keys, columns);
         if self.db.inner().indices.is_empty() {
-            self.add_primary_index(&index.columns, is_unique);
+            self.add_primary_index(&index.columns, is_unique).unwrap();
             if index.index_type != IndexType::HashMap {
                 // Primary indices can only be HashMaps, so if this is our first index and it's
                 // *not* a HashMap index, add another secondary index of the correct index type
@@ -1110,7 +1110,7 @@ impl PersistentState {
         mut name: String,
         unique_keys: K,
         params: &PersistenceParameters,
-    ) -> Self {
+    ) -> ReadySetResult<Self> {
         let unique_keys: Vec<Box<[usize]>> =
             unique_keys.into_iter().map(|c| c.as_ref().into()).collect();
 
@@ -1123,14 +1123,14 @@ impl PersistentState {
             DurabilityMode::Permanent => {
                 let mut path = params.db_dir.clone().unwrap_or_else(|| ".".into());
                 if !path.is_dir() {
-                    std::fs::create_dir_all(&path).expect("Could not create DB directory");
+                    std::fs::create_dir_all(&path)?;
                 }
                 path.push(&name);
 
                 (None, path)
             }
             _ => {
-                let dir = tempdir().unwrap();
+                let dir = tempdir()?;
                 let path = dir.path().join(&name);
                 (Some(dir), path)
             }
@@ -1157,21 +1157,24 @@ impl PersistentState {
             .collect::<Vec<_>>();
 
         // ColumnFamilyDescriptor does not implement Clone, so we have to create a new Vec each time
-        let make_cfs = || -> Vec<ColumnFamilyDescriptor> {
+        let make_cfs = || -> ReadySetResult<Vec<ColumnFamilyDescriptor>> {
             cf_names
                 .iter()
                 .map(|cf_name| {
-                    ColumnFamilyDescriptor::new(
+                    Ok(ColumnFamilyDescriptor::new(
                         cf_name,
                         if cf_name == DEFAULT_CF {
                             default_options.clone()
                         } else {
-                            let cf_id: usize = cf_name.parse().expect("Invalid column family ID");
-                            let index_params =
-                                cf_index_params.get(cf_id).expect("Unknown column family");
+                            let cf_id: usize = cf_name
+                                .parse()
+                                .map_err(|e| internal_err!("Invalid column family ID: {e}"))?;
+                            let index_params = cf_index_params
+                                .get(cf_id)
+                                .ok_or_else(|| internal_err!("Unknown column family"))?;
                             index_params.make_rocksdb_options(&default_options)
                         },
-                    )
+                    ))
                 })
                 .collect()
         };
@@ -1179,13 +1182,13 @@ impl PersistentState {
         let mut retry = 0;
         let mut db = loop {
             // TODO: why is this loop even needed?
-            match DB::open_cf_descriptors(&default_options, &full_path, make_cfs()) {
+            match DB::open_cf_descriptors(&default_options, &full_path, make_cfs()?) {
                 Ok(db) => break db,
                 _ if retry < 100 => {
                     retry += 1;
                     std::thread::sleep(Duration::from_millis(50));
                 }
-                err => break err.expect("Unable to open RocksDB"),
+                Err(e) => return Err(internal_err!("Unable to open RocksDB: {e}")),
             }
         };
 
@@ -1200,7 +1203,8 @@ impl PersistentState {
         // meta.
         if cf_names.len() > indices.len() + 1 {
             for cf_name in cf_names.iter().skip(indices.len() + 1) {
-                db.drop_cf(cf_name).unwrap();
+                db.drop_cf(cf_name)
+                    .map_err(|e| internal_err!("Error dropping column family: {e}"))?;
             }
         }
 
@@ -1215,7 +1219,7 @@ impl PersistentState {
                         &index.column_family,
                         &IndexParams::from(&index.index).make_rocksdb_options(&default_options),
                     )
-                    .unwrap();
+                    .map_err(|e| internal_err!("Error creating column family: {e}"))?;
                 }
             }
         }
@@ -1245,10 +1249,10 @@ impl PersistentState {
         if let Some(pk) = state.unique_keys.first().cloned() {
             // This is the first time we're initializing this PersistentState,
             // so persist the primary key index right away.
-            state.add_primary_index(&pk, true);
+            state.add_primary_index(&pk, true)?;
         }
 
-        state
+        Ok(state)
     }
 
     /// Returns a new [`PersistentStateHandle`] that can be used to read directly from this
@@ -1259,7 +1263,7 @@ impl PersistentState {
     }
 
     /// Adds a new primary index, assuming there are none present
-    fn add_primary_index(&mut self, columns: &[usize], is_unique: bool) {
+    fn add_primary_index(&mut self, columns: &[usize], is_unique: bool) -> ReadySetResult<()> {
         if self.db.inner().indices.is_empty() {
             debug!(base = %self.name, index = ?columns, is_unique, "Base creating primary index");
 
@@ -1283,8 +1287,10 @@ impl PersistentState {
                     PK_CF,
                     &index_params.make_rocksdb_options(&self.default_options),
                 )
-                .unwrap();
+                .map_err(|e| internal_err!("Error creating column family: {e}"))?;
         }
+
+        Ok(())
     }
 
     /// Adds a new secondary index, secondary indices point to the primary index
@@ -1919,6 +1925,7 @@ mod tests {
             unique_keys,
             &PersistenceParameters::default(),
         )
+        .unwrap()
     }
 
     pub(self) fn setup_single_key(name: &str) -> PersistentState {
@@ -2121,7 +2128,8 @@ mod tests {
             String::from("persistent_state_primary_key"),
             Some(&pk_cols),
             &PersistenceParameters::default(),
-        );
+        )
+        .unwrap();
         let first: Vec<DfValue> = vec![1.into(), 2.into(), "Cat".into()];
         let second: Vec<DfValue> = vec![10.into(), 20.into(), "Cat".into()];
         state.add_key(pk, None);
@@ -2170,7 +2178,8 @@ mod tests {
             String::from("persistent_state_primary_key_delete"),
             Some(&pk.columns),
             &PersistenceParameters::default(),
-        );
+        )
+        .unwrap();
         let first: Vec<DfValue> = vec![1.into(), 2.into()];
         let second: Vec<DfValue> = vec![10.into(), 20.into()];
         state.add_key(pk, None);
@@ -2271,7 +2280,8 @@ mod tests {
         let first: Vec<DfValue> = vec![10.into(), "Cat".into()];
         let second: Vec<DfValue> = vec![20.into(), "Bob".into()];
         {
-            let mut state = PersistentState::new(name.clone(), Vec::<Box<[usize]>>::new(), &params);
+            let mut state =
+                PersistentState::new(name.clone(), Vec::<Box<[usize]>>::new(), &params).unwrap();
             state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
             state.add_key(Index::new(IndexType::HashMap, vec![1]), None);
             state
@@ -2279,7 +2289,7 @@ mod tests {
                 .unwrap();
         }
 
-        let state = PersistentState::new(name, Vec::<Box<[usize]>>::new(), &params);
+        let state = PersistentState::new(name, Vec::<Box<[usize]>>::new(), &params).unwrap();
         match state.lookup(&[0], &PointKey::Single(10.into())) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
                 assert_eq!(rows.len(), 1);
@@ -2307,7 +2317,7 @@ mod tests {
         let first: Vec<DfValue> = vec![10.into(), "Cat".into()];
         let second: Vec<DfValue> = vec![20.into(), "Bob".into()];
         {
-            let mut state = PersistentState::new(name.clone(), Some(&[0]), &params);
+            let mut state = PersistentState::new(name.clone(), Some(&[0]), &params).unwrap();
             state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
             state.add_key(Index::new(IndexType::HashMap, vec![1]), None);
             state
@@ -2315,7 +2325,7 @@ mod tests {
                 .unwrap();
         }
 
-        let state = PersistentState::new(name, Some(&[0]), &params);
+        let state = PersistentState::new(name, Some(&[0]), &params).unwrap();
         match state.lookup(&[0], &PointKey::Single(10.into())) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
                 assert_eq!(rows.len(), 1);
@@ -2489,7 +2499,8 @@ mod tests {
                 String::from(".s-o_u#p."),
                 Vec::<Box<[usize]>>::new(),
                 &PersistenceParameters::default(),
-            );
+            )
+            .unwrap();
             let path = state._tmpdir.as_ref().unwrap().path();
             assert!(path.exists());
             String::from(path.to_str().unwrap())

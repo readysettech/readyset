@@ -803,7 +803,8 @@ mod tests {
                 String::from("lots_of_changes_in_same_batch_persistent"),
                 Vec::<Box<[usize]>>::new(),
                 &PersistenceParameters::default(),
-            );
+            )
+            .unwrap();
 
             test_lots_of_changes_in_same_batch(MaterializedNodeState::Persistent(state));
         }
@@ -814,11 +815,14 @@ mod tests {
 
             let ni = LocalNodeIndex::make(0u32);
 
-            let state = MaterializedNodeState::Persistent(PersistentState::new(
-                String::from("delete_row_not_in_batch"),
-                Vec::<Box<[usize]>>::new(),
-                &PersistenceParameters::default(),
-            ));
+            let state = MaterializedNodeState::Persistent(
+                PersistentState::new(
+                    String::from("delete_row_not_in_batch"),
+                    Vec::<Box<[usize]>>::new(),
+                    &PersistenceParameters::default(),
+                )
+                .unwrap(),
+            );
 
             let mut state_map = NodeMap::new();
             state_map.insert(ni, state);
@@ -860,11 +864,14 @@ mod tests {
 
             let ni = LocalNodeIndex::make(0u32);
 
-            let mut state = MaterializedNodeState::Persistent(PersistentState::new(
-                String::from("delete_row_not_in_batch_keyed"),
-                Vec::<Box<[usize]>>::new(),
-                &PersistenceParameters::default(),
-            ));
+            let mut state = MaterializedNodeState::Persistent(
+                PersistentState::new(
+                    String::from("delete_row_not_in_batch_keyed"),
+                    Vec::<Box<[usize]>>::new(),
+                    &PersistenceParameters::default(),
+                )
+                .unwrap(),
+            );
 
             state.add_key(Index::hash_map(vec![0]), None);
 
@@ -911,11 +918,14 @@ mod tests {
 
             let ni = LocalNodeIndex::make(0u32);
 
-            let mut state = MaterializedNodeState::Persistent(PersistentState::new(
-                String::from("delete_after_key_update"),
-                Vec::<Box<[usize]>>::new(),
-                &PersistenceParameters::default(),
-            ));
+            let mut state = MaterializedNodeState::Persistent(
+                PersistentState::new(
+                    String::from("delete_after_key_update"),
+                    Vec::<Box<[usize]>>::new(),
+                    &PersistenceParameters::default(),
+                )
+                .unwrap(),
+            );
 
             state.add_key(Index::hash_map(vec![0]), None);
 
@@ -968,11 +978,14 @@ mod tests {
         fn truncate() {
             let mut b = Base::new().with_primary_key([0]);
             let ni = LocalNodeIndex::make(0u32);
-            let mut state = MaterializedNodeState::Persistent(PersistentState::new(
-                "truncate".into(),
-                Vec::<Box<[usize]>>::new(),
-                &PersistenceParameters::default(),
-            ));
+            let mut state = MaterializedNodeState::Persistent(
+                PersistentState::new(
+                    "truncate".into(),
+                    Vec::<Box<[usize]>>::new(),
+                    &PersistenceParameters::default(),
+                )
+                .unwrap(),
+            );
 
             state.add_key(Index::hash_map(vec![0]), None);
 
@@ -1022,11 +1035,14 @@ mod tests {
         fn truncate_unkeyed() {
             let mut b = Base::new();
             let ni = LocalNodeIndex::make(0u32);
-            let mut state = MaterializedNodeState::Persistent(PersistentState::new(
-                "truncate".into(),
-                Vec::<Box<[usize]>>::new(),
-                &PersistenceParameters::default(),
-            ));
+            let mut state = MaterializedNodeState::Persistent(
+                PersistentState::new(
+                    "truncate".into(),
+                    Vec::<Box<[usize]>>::new(),
+                    &PersistenceParameters::default(),
+                )
+                .unwrap(),
+            );
 
             state.add_key(Index::hash_map(vec![0]), None);
             let mut recs = vec![

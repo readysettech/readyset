@@ -528,11 +528,14 @@ mod tests {
 
     #[test]
     fn it_queries_through_all_persistent() {
-        let state = MaterializedNodeState::Persistent(PersistentState::new(
-            String::from("it_queries_through_all_persistent"),
-            Vec::<Box<[usize]>>::new(),
-            &PersistenceParameters::default(),
-        ));
+        let state = MaterializedNodeState::Persistent(
+            PersistentState::new(
+                String::from("it_queries_through_all_persistent"),
+                Vec::<Box<[usize]>>::new(),
+                &PersistenceParameters::default(),
+            )
+            .unwrap(),
+        );
 
         let (p, states) = setup_query_through(state, &[0, 1, 2], None, None);
         let expected: Vec<DfValue> = vec![1.into(), 2.into(), 3.into()];
@@ -549,11 +552,14 @@ mod tests {
 
     #[test]
     fn it_queries_through_some_persistent() {
-        let state = MaterializedNodeState::Persistent(PersistentState::new(
-            String::from("it_queries_through_some_persistent"),
-            Vec::<Box<[usize]>>::new(),
-            &PersistenceParameters::default(),
-        ));
+        let state = MaterializedNodeState::Persistent(
+            PersistentState::new(
+                String::from("it_queries_through_some_persistent"),
+                Vec::<Box<[usize]>>::new(),
+                &PersistenceParameters::default(),
+            )
+            .unwrap(),
+        );
 
         let (p, states) = setup_query_through(state, &[1], None, None);
         let expected: Vec<DfValue> = vec![2.into()];
@@ -572,11 +578,14 @@ mod tests {
     #[test]
     fn it_queries_through_w_literals_persistent() {
         let additional = Some(vec![DfValue::Int(42)]);
-        let state = MaterializedNodeState::Persistent(PersistentState::new(
-            String::from("it_queries_through_w_literals"),
-            Vec::<Box<[usize]>>::new(),
-            &PersistenceParameters::default(),
-        ));
+        let state = MaterializedNodeState::Persistent(
+            PersistentState::new(
+                String::from("it_queries_through_w_literals"),
+                Vec::<Box<[usize]>>::new(),
+                &PersistenceParameters::default(),
+            )
+            .unwrap(),
+        );
 
         let (p, states) = setup_query_through(state, &[1], additional, None);
         let expected: Vec<DfValue> = vec![2.into(), 42.into()];
@@ -609,11 +618,14 @@ mod tests {
             ty: DfType::Int,
         }]);
 
-        let state = MaterializedNodeState::Persistent(PersistentState::new(
-            String::from("it_queries_through_w_arithmetic_and_literals_persistent"),
-            Vec::<Box<[usize]>>::new(),
-            &PersistenceParameters::default(),
-        ));
+        let state = MaterializedNodeState::Persistent(
+            PersistentState::new(
+                String::from("it_queries_through_w_arithmetic_and_literals_persistent"),
+                Vec::<Box<[usize]>>::new(),
+                &PersistenceParameters::default(),
+            )
+            .unwrap(),
+        );
 
         let (p, states) = setup_query_through(state, &[1], additional, expressions);
         let expected: Vec<DfValue> = vec![2.into(), (1 + 2).into(), 42.into()];
@@ -634,11 +646,14 @@ mod tests {
             ty: DfType::Int,
         };
 
-        let state = MaterializedNodeState::Persistent(PersistentState::new(
-            String::from("it_queries_nested_expressions"),
-            Vec::<Box<[usize]>>::new(),
-            &PersistenceParameters::default(),
-        ));
+        let state = MaterializedNodeState::Persistent(
+            PersistentState::new(
+                String::from("it_queries_nested_expressions"),
+                Vec::<Box<[usize]>>::new(),
+                &PersistenceParameters::default(),
+            )
+            .unwrap(),
+        );
 
         let (p, states) = setup_query_through(state, &[1], None, Some(vec![expression]));
         let expected: Vec<DfValue> = vec![2.into(), ((1 + 2) * 2).into()];

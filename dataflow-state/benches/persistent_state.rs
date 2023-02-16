@@ -16,7 +16,7 @@ lazy_static::lazy_static! {
             String::from("bench"),
             vec![&[0usize][..], &[3][..]],
             &PersistenceParameters::default(),
-        );
+        ).unwrap();
 
         state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
         state.add_key(Index::new(IndexType::HashMap, vec![1, 2]), None);
@@ -52,7 +52,7 @@ lazy_static::lazy_static! {
             String::from("bench"),
             vec![&[0usize][..], &[3][..]],
             &PersistenceParameters::default(),
-        );
+        ).unwrap();
 
         state.set_snapshot_mode(SnapshotMode::SnapshotModeEnabled);
 

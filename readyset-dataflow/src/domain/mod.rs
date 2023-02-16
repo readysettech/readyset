@@ -1961,7 +1961,7 @@ impl Domain {
                                     base_name,
                                     base.all_unique_keys(),
                                     &self.persistence_parameters,
-                                ))
+                                )?)
                             }
                             _ => MaterializedNodeState::Memory(MemoryState::default()),
                         }
