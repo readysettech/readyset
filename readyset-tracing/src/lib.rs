@@ -16,6 +16,9 @@
 //! send them to a collector.
 
 #![feature(core_intrinsics)]
+use std::fs::File;
+use std::sync::Arc;
+
 use clap::Parser;
 use opentelemetry::sdk::trace::{Sampler, Tracer};
 use opentelemetry::sdk::Resource;
@@ -23,7 +26,7 @@ use opentelemetry::KeyValue;
 use opentelemetry_otlp::WithExportConfig;
 use tracing::Subscriber;
 use tracing_opentelemetry::OpenTelemetryLayer;
-use tracing_subscriber::filter::ParseError;
+use tracing_subscriber::filter::{self, ParseError};
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::{fmt, EnvFilter, Layer};
 
@@ -84,6 +87,15 @@ pub struct Options {
     /// Portion of traces that will be sent to the tracing endpoint; [0.0~1.0]
     #[clap(long, env = "TRACING_SAMPLE_PERCENT", default_value_t = Percent(0.01))]
     tracing_sample_percent: Percent,
+
+    /// Whether to log all statements received by ReadySet via the client or replicators
+    #[clap(long, env = "STATEMENT_LOGGING")]
+    pub statement_logging: bool,
+
+    /// Optional filename for storing the statement log. Defaults to
+    /// <deployment-name>_statements.log.
+    #[clap(long, env = "STATEMENT_LOG_PATH", requires = "statement-logging")]
+    pub statement_log_path: Option<String>,
 }
 
 impl Default for Options {
@@ -93,8 +105,15 @@ impl Default for Options {
             log_level: "info".to_owned(),
             tracing_host: None,
             tracing_sample_percent: Percent(0.01),
+            statement_logging: false,
+            statement_log_path: None,
         }
     }
+}
+
+/// Whether the target matches the target set for statement logs
+fn is_statement_log(target: &str) -> bool {
+    target == "client_statement" || target == "replicator_statement"
 }
 
 impl Options {
@@ -153,25 +172,62 @@ impl Options {
         Ok(layer)
     }
 
+    #[allow(clippy::type_complexity)]
+    fn statement_logging_layer<S>(&self, file_name: &str) -> Box<dyn Layer<S> + Send + Sync>
+    where
+        S: Subscriber + Send + Sync + for<'span> LookupSpan<'span>,
+    {
+        match File::create(file_name) {
+            Ok(f) => Box::new(fmt::layer().with_writer(Arc::new(f)).with_filter(
+                filter::filter_fn(|metadata| is_statement_log(metadata.target())),
+            )),
+            // If we can't create the file, include statements with other logs
+            _ => Box::new(fmt::layer().with_filter(filter::filter_fn(|metadata| {
+                is_statement_log(metadata.target())
+            }))),
+        }
+    }
+
     fn init_logging_and_tracing(&self, service_name: &str, deployment: &str) -> Result<(), Error> {
         use tracing_subscriber::prelude::*;
         tracing_subscriber::registry()
             .with(tracing_subscriber::EnvFilter::new(&self.log_level))
             .with(self.tracing_layer(service_name, deployment)?)
-            .with(self.logging_layer()?)
+            .with(
+                self.logging_layer()?
+                    .with_filter(filter::filter_fn(|metadata| {
+                        !is_statement_log(metadata.target())
+                    })),
+            )
+            .with(self.statement_logging_layer(&self.statement_log_path_or_default(deployment)))
             .init();
         Ok(())
     }
 
-    fn init_logging_only(&self) -> Result<(), ParseError> {
-        let filter = EnvFilter::try_new(&self.log_level)?;
-        let s = tracing_subscriber::fmt().with_env_filter(filter);
-
-        match self.log_format {
-            LogFormat::Compact => s.compact().init(),
-            LogFormat::Full => s.init(),
-            LogFormat::Pretty => s.pretty().init(),
-            LogFormat::Json => s.json().with_current_span(true).init(),
+    // Initializes logging, and conditionally, statement logging
+    fn init_logging_only(&self, deployment: &str) -> Result<(), ParseError> {
+        let env_filter = tracing_subscriber::EnvFilter::new(&self.log_level);
+        // Avoid using the registry if we are only using one layer
+        if self.statement_logging {
+            use tracing_subscriber::prelude::*;
+            tracing_subscriber::registry()
+                .with(
+                    self.logging_layer()?
+                        .with_filter(filter::filter_fn(|metadata| {
+                            !is_statement_log(metadata.target())
+                        })),
+                )
+                .with(self.statement_logging_layer(&self.statement_log_path_or_default(deployment)))
+                .with(env_filter)
+                .init();
+        } else {
+            let s = tracing_subscriber::fmt().with_env_filter(env_filter);
+            match self.log_format {
+                LogFormat::Compact => s.compact().init(),
+                LogFormat::Full => s.init(),
+                LogFormat::Pretty => s.pretty().init(),
+                LogFormat::Json => s.json().with_current_span(true).init(),
+            }
         }
 
         #[cfg(debug)]
@@ -217,7 +273,15 @@ impl Options {
         if self.tracing_host.is_some() {
             self.init_logging_and_tracing(service_name, deployment)
         } else {
-            self.init_logging_only().map_err(|e| e.into())
+            self.init_logging_only(deployment).map_err(|e| e.into())
+        }
+    }
+
+    // Returns the provided `statement_log_path` or a default filename.
+    fn statement_log_path_or_default(&self, deployment: &str) -> String {
+        match self.statement_log_path {
+            Some(ref p) => p.clone(),
+            None => format!("{}_statements.log", deployment),
         }
     }
 }

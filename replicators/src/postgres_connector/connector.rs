@@ -47,6 +47,8 @@ pub struct PostgresWalConnector {
     next_position: Option<PostgresPosition>,
     /// The replication slot if was created for this connector
     pub(crate) replication_slot: Option<CreatedSlot>,
+    /// Whether to log statements received by the connector
+    enable_statement_logging: bool,
 }
 
 /// The decoded response to `IDENTIFY_SYSTEM`
@@ -93,6 +95,7 @@ impl PostgresWalConnector {
         next_position: Option<PostgresPosition>,
         tls_connector: MakeTlsConnector,
         repl_slot_name: &str,
+        enable_statement_logging: bool,
     ) -> ReadySetResult<Self> {
         if !config.disable_setup_ddl_replication {
             setup_ddl_replication(pg_config.clone(), tls_connector.clone()).await?;
@@ -109,6 +112,7 @@ impl PostgresWalConnector {
             peek: None,
             next_position,
             replication_slot: None,
+            enable_statement_logging,
         };
 
         if next_position.is_none() {
@@ -501,6 +505,10 @@ impl Connector for PostgresWalConnector {
             }
 
             trace!(?event);
+            // Don't log the statement if we're catching up
+            if self.enable_statement_logging {
+                info!(target: "replicator_statement", "{:?}", event);
+            }
 
             // Check if next event is for another table, in which case we have to flush the events
             // accumulated for this table and store the next event in `peek`.

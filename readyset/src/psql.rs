@@ -7,7 +7,10 @@ use tracing::instrument;
 use crate::ConnectionHandler;
 
 #[derive(Clone, Copy)]
-pub struct PsqlHandler;
+pub struct PsqlHandler {
+    /// Whether to log statements received from the client
+    pub enable_statement_logging: bool,
+}
 
 #[async_trait]
 impl ConnectionHandler for PsqlHandler {
@@ -20,7 +23,12 @@ impl ConnectionHandler for PsqlHandler {
         stream: net::TcpStream,
         backend: readyset_adapter::Backend<PostgreSqlUpstream, PostgreSqlQueryHandler>,
     ) {
-        psql_srv::run_backend(readyset_psql::Backend(backend), stream).await;
+        psql_srv::run_backend(
+            readyset_psql::Backend(backend),
+            stream,
+            self.enable_statement_logging,
+        )
+        .await;
     }
 
     async fn immediate_error(self, stream: net::TcpStream, error_message: String) {

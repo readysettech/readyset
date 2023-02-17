@@ -493,6 +493,8 @@ pub struct Config {
     pub(crate) mir_config: sql::mir::Config,
     #[serde(flatten)]
     pub(crate) replicator_config: UpstreamConfig,
+    #[serde(default)]
+    pub(crate) replicator_statement_logging: bool,
     pub(crate) keep_prior_recipes: bool,
     #[serde(default)]
     pub(crate) replication_strategy: ReplicationStrategy,
@@ -525,6 +527,7 @@ impl Default for Config {
             reuse: None,
             abort_on_task_failure: true,
             mir_config: Default::default(),
+            replicator_statement_logging: false,
             replicator_config: Default::default(),
             keep_prior_recipes: true,
             replication_strategy: Default::default(),

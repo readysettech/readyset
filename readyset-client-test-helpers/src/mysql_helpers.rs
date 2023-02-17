@@ -86,7 +86,7 @@ impl Adapter for MySQLAdapter {
         backend: readyset_adapter::Backend<Self::Upstream, Self::Handler>,
         s: TcpStream,
     ) {
-        MySqlIntermediary::run_on_tcp(Backend::new(backend), s)
+        MySqlIntermediary::run_on_tcp(Backend::new(backend), s, false)
             .await
             .unwrap()
     }

@@ -54,6 +54,8 @@ pub struct Leader {
 
     /// The amount of time to wait for a worker request to complete.
     worker_request_timeout: Duration,
+    /// Whether to log statements received by the replicators
+    replicator_statement_logging: bool,
     /// Configuration for the replicator
     pub(super) replicator_config: UpstreamConfig,
     /// A client to the current authority.
@@ -104,6 +106,7 @@ impl Leader {
         let authority = Arc::clone(&self.authority);
         let replicator_restart_timeout = self.replicator_config.replicator_restart_timeout;
         let config = self.replicator_config.clone();
+        let replicator_statement_logging = self.replicator_statement_logging;
 
         // The replication task ideally won't panic, but if it does and we arent replicating, that
         // will mean the data we return, will be more and more stale, and the transaction logs on
@@ -124,6 +127,7 @@ impl Leader {
                         Some(ready_notification.clone()),
                         telemetry_sender.clone(),
                         server_startup,
+                        replicator_statement_logging,
                     )
                     .await
                     {
@@ -680,6 +684,7 @@ impl Leader {
         state: ControllerState,
         controller_uri: Url,
         authority: Arc<Authority>,
+        replicator_statement_logging: bool,
         replicator_config: UpstreamConfig,
         worker_request_timeout: Duration,
     ) -> Self {
@@ -702,6 +707,7 @@ impl Leader {
 
             controller_uri,
 
+            replicator_statement_logging,
             replicator_config,
             authority,
             worker_request_timeout,

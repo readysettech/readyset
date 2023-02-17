@@ -1,4 +1,5 @@
 use tokio::io::{AsyncRead, AsyncWrite};
+use tracing::info;
 
 use crate::channel::Channel;
 use crate::error::Error;
@@ -11,17 +12,20 @@ pub struct Runner<B: Backend, C> {
     backend: B,
     channel: Channel<C, B::Row>,
     protocol: Protocol,
+    /// Whether to log statements received from the client
+    enable_statement_logging: bool,
 }
 
 impl<B: Backend, C: AsyncRead + AsyncWrite + Unpin> Runner<B, C> {
     /// A simple run loop. For each `FrontendMessage` received on `channel`, use `protocol` to
     /// generate a response. Then send the response. If an error occurs, use `protocol` to generate
     /// an error response, then send the error response.
-    pub async fn run(backend: B, byte_channel: C) {
+    pub async fn run(backend: B, byte_channel: C, enable_statement_logging: bool) {
         let mut runner = Runner {
             backend,
             channel: Channel::new(byte_channel),
             protocol: Protocol::new(),
+            enable_statement_logging,
         };
 
         while let Some(message) = runner.channel.next().await {
@@ -42,6 +46,9 @@ impl<B: Backend, C: AsyncRead + AsyncWrite + Unpin> Runner<B, C> {
         request: Result<FrontendMessage, codec::DecodeError>,
     ) -> Result<(), Error> {
         let request = request?;
+        if self.enable_statement_logging {
+            info!(target: "client_statement", "{:?}", request);
+        }
         if request == FrontendMessage::Flush {
             self.channel.flush().await?;
         }

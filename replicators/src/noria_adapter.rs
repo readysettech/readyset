@@ -114,6 +114,7 @@ impl NoriaAdapter {
         mut notify: Option<Arc<Notify>>,
         telemetry_sender: TelemetrySender,
         server_startup: bool,
+        enable_statement_logging: bool,
     ) -> ReadySetResult<!> {
         // Resnapshot when restarting the server to apply changes that may have been made to the
         // replication-tables config parameter.
@@ -136,6 +137,7 @@ impl NoriaAdapter {
                     &mut notify,
                     resnapshot,
                     &telemetry_sender,
+                    enable_statement_logging,
                 )
                 .await
             }
@@ -177,6 +179,7 @@ impl NoriaAdapter {
                     tls_connector,
                     pool,
                     repl_slot_name,
+                    enable_statement_logging,
                 )
                 .await
             }
@@ -212,6 +215,7 @@ impl NoriaAdapter {
         ready_notify: &mut Option<Arc<Notify>>,
         resnapshot: bool,
         telemetry_sender: &TelemetrySender,
+        enable_statement_logging: bool,
     ) -> ReadySetResult<!> {
         use crate::mysql_connector::BinlogPosition;
 
@@ -346,6 +350,7 @@ impl NoriaAdapter {
                 mysql_options.clone(),
                 pos.clone(),
                 config.replication_server_id,
+                enable_statement_logging,
             )
             .await?,
         );
@@ -403,6 +408,7 @@ impl NoriaAdapter {
         tls_connector: MakeTlsConnector,
         pool: deadpool_postgres::Pool,
         repl_slot_name: String,
+        enable_statement_logging: bool,
     ) -> ReadySetResult<!> {
         macro_rules! handle_joinhandle_result {
             ($res: expr) => {
@@ -462,6 +468,7 @@ impl NoriaAdapter {
                 pos,
                 tls_connector.clone(),
                 &repl_slot_name,
+                enable_statement_logging,
             )
             .await?,
         );

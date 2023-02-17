@@ -16,7 +16,7 @@ use readyset_client::recipe::ChangeList;
 use readyset_client::replication::ReplicationOffset;
 use readyset_data::{DfValue, Dialect};
 use readyset_errors::{ReadySetError, ReadySetResult};
-use readyset_tracing::warn;
+use readyset_tracing::{info, warn};
 
 use super::BinlogPosition;
 use crate::noria_adapter::{Connector, ReplicationAction};
@@ -51,6 +51,8 @@ pub(crate) struct MySqlBinlogConnector {
     /// The GTID of the current transaction. Table modification events will have
     /// the current GTID attached if enabled in mysql.
     current_gtid: Option<u64>,
+    /// Whether to log statements received by the connector
+    enable_statement_logging: bool,
 }
 
 impl PartialOrd for BinlogPosition {
@@ -199,6 +201,7 @@ impl MySqlBinlogConnector {
         mysql_opts: O,
         next_position: BinlogPosition,
         server_id: Option<u32>,
+        enable_statement_logging: bool,
     ) -> ReadySetResult<Self> {
         let mut connector = MySqlBinlogConnector {
             connection: mysql::Conn::new(mysql_opts).await?,
@@ -206,6 +209,7 @@ impl MySqlBinlogConnector {
             server_id,
             next_position,
             current_gtid: None,
+            enable_statement_logging,
         };
 
         connector.register_as_replica().await?;
@@ -253,6 +257,9 @@ impl MySqlBinlogConnector {
                     // log file becomes too large. The maximum size is
                     // determined by max_binlog_size.
                     let ev: events::RotateEvent = binlog_event.read_event()?;
+                    if self.enable_statement_logging {
+                        info!(target: "replicator_statement", "{:?}", ev);
+                    }
 
                     self.next_position = BinlogPosition {
                         binlog_file: ev.name().to_string(),
@@ -267,6 +274,9 @@ impl MySqlBinlogConnector {
                 EventType::QUERY_EVENT => {
                     // Written when an updating statement is done.
                     let ev: events::QueryEvent = binlog_event.read_event()?;
+                    if self.enable_statement_logging {
+                        info!(target: "replicator_statement", "{:?}", ev);
+                    }
 
                     let schema = match ev
                         .status_vars()
@@ -302,7 +312,7 @@ impl MySqlBinlogConnector {
                     ));
                 }
 
-                EventType::TABLE_MAP_EVENT => {
+                ev @ EventType::TABLE_MAP_EVENT => {
                     // Used for row-based binary logging. This event precedes each row operation
                     // event. It maps a table definition to a number, where the
                     // table definition consists of database and table names and
@@ -314,11 +324,17 @@ impl MySqlBinlogConnector {
                     // TABLE_MAP_EVENT events: one per table used by events in the sequence.
                     // Those events are implicitly handled by our lord and saviour
                     // `binlog::EventStreamReader`
+                    if self.enable_statement_logging {
+                        info!(target: "replicator_statement", "unhandled event: {:?}", ev);
+                    }
                 }
 
                 EventType::WRITE_ROWS_EVENT => {
                     // This is the event we get on `INSERT INTO`
                     let ev: events::WriteRowsEvent = binlog_event.read_event()?;
+                    if self.enable_statement_logging {
+                        info!(target: "replicator_statement", "{:?}", ev);
+                    }
                     // Retrieve the corresponding TABLE_MAP_EVENT
                     let tme = self
                         .reader
@@ -354,6 +370,9 @@ impl MySqlBinlogConnector {
                 EventType::UPDATE_ROWS_EVENT => {
                     // This is the event we get on `UPDATE`
                     let ev: events::UpdateRowsEvent = binlog_event.read_event()?;
+                    if self.enable_statement_logging {
+                        info!(target: "replicator_statement", "{:?}", ev);
+                    }
                     // Retrieve the corresponding TABLE_MAP_EVENT
                     let tme = self
                         .reader
@@ -402,6 +421,9 @@ impl MySqlBinlogConnector {
                 EventType::DELETE_ROWS_EVENT => {
                     // This is the event we get on `ALTER TABLE`
                     let ev: events::DeleteRowsEvent = binlog_event.read_event()?;
+                    if self.enable_statement_logging {
+                        info!(target: "replicator_statement", "{:?}", ev);
+                    }
                     // Retrieve the corresponding TABLE_MAP_EVENT
                     let tme = self
                         .reader
@@ -453,6 +475,9 @@ impl MySqlBinlogConnector {
                     // master, the slave uses GTIDs instead of (file, offset)
                     // See also https://dev.mysql.com/doc/refman/8.0/en/replication-mode-change-online-concepts.html
                     let ev: events::GtidEvent = binlog_event.read_event()?;
+                    if self.enable_statement_logging {
+                        info!(target: "replicator_statement", "{:?}", ev);
+                    }
                     self.current_gtid = Some(ev.gno());
                 }
 
@@ -502,7 +527,11 @@ impl MySqlBinlogConnector {
                 EventType::PARTIAL_UPDATE_ROWS_EVENT => {}
                 EventType::ENUM_END_EVENT => {}
                 */
-                _ => {}
+                ev => {
+                    if self.enable_statement_logging {
+                        info!(target: "replicator_statement", "unhandled event: {:?}", ev);
+                    }
+                }
             }
 
             // We didn't get an actionable event, but we still need to check that we haven't reached

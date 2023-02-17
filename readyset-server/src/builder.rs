@@ -307,6 +307,11 @@ impl Builder {
         self.wait_for_failpoint = value;
     }
 
+    /// Sets whether to log statements in the replicator
+    pub fn set_replicator_statement_logging(&mut self, value: bool) {
+        self.config.replicator_statement_logging = value;
+    }
+
     /// Start a server instance and return a handle to it. This method also returns a
     /// [`ShutdownSender`] that should be used to shut down the server when it is no longer needed.
     pub fn start(

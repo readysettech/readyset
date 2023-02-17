@@ -116,7 +116,7 @@ where
             .send(listener.local_addr().unwrap().port())
             .unwrap();
         let (socket, _) = listener.accept().await.unwrap();
-        run_backend(ErrorBackend(error_pos), socket).await;
+        run_backend(ErrorBackend(error_pos), socket, false).await;
     });
     let client = tokio::spawn(async move {
         let port = recv_port.await.unwrap();
@@ -174,7 +174,7 @@ async fn prepare_error_sync() {
             .send(listener.local_addr().unwrap().port())
             .unwrap();
         let (socket, _) = listener.accept().await.unwrap();
-        run_backend(ErrorBackend(ErrorPosition::Execute), socket).await;
+        run_backend(ErrorBackend(ErrorPosition::Execute), socket, false).await;
     });
     let port = recv_port.await.unwrap();
     tokio::task::spawn_blocking(move || {

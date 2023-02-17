@@ -69,7 +69,7 @@ fn main() {
 
     let jh = thread::spawn(move || {
         if let Ok((s, _)) = listener.accept() {
-            MysqlIntermediary::run_on_tcp(Backend, s).unwrap();
+            MysqlIntermediary::run_on_tcp(Backend, s, false).unwrap();
         }
     });
 

@@ -442,6 +442,7 @@ impl Controller {
                     state,
                     self.our_descriptor.controller_uri.clone(),
                     self.authority.clone(),
+                    self.config.replicator_statement_logging,
                     self.config.replicator_config.clone(),
                     self.config.worker_request_timeout,
                 );

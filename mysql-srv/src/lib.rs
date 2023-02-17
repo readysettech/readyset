@@ -123,7 +123,7 @@
 //!                 let _guard = rt.handle().enter();
 //!                 tokio::net::TcpStream::from_std(s).unwrap()
 //!             };
-//!             rt.block_on(MySqlIntermediary::run_on_tcp(Backend, s))
+//!             rt.block_on(MySqlIntermediary::run_on_tcp(Backend, s, false))
 //!                 .unwrap();
 //!         }
 //!     });
@@ -168,7 +168,7 @@ use constants::{CLIENT_PLUGIN_AUTH, PROTOCOL_41, RESERVED, SECURE_CONNECTION};
 use error::{other_error, OtherErrorKind};
 use mysql_common::constants::CapabilityFlags;
 use readyset_data::DfType;
-use readyset_tracing::{debug, trace};
+use readyset_tracing::{debug, info, trace};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net;
 use writers::write_err;
@@ -304,6 +304,8 @@ pub struct MySqlIntermediary<B, R: AsyncRead + Unpin, W: AsyncWrite + Unpin> {
     writer: packet::PacketWriter<W>,
     /// A cache of schemas per statement id
     schema_cache: HashMap<u32, CachedSchema>,
+    /// Whether to log statements received from a client
+    enable_statement_logging: bool,
 }
 
 impl<B: MySqlShim<net::tcp::OwnedWriteHalf> + Send>
@@ -312,10 +314,14 @@ impl<B: MySqlShim<net::tcp::OwnedWriteHalf> + Send>
     /// Create a new server over a TCP stream and process client commands until the client
     /// disconnects or an error occurs. See also
     /// [`MySqlIntermediary::run_on`](struct.MySqlIntermediary.html#method.run_on).
-    pub async fn run_on_tcp(shim: B, stream: net::TcpStream) -> Result<(), io::Error> {
+    pub async fn run_on_tcp(
+        shim: B,
+        stream: net::TcpStream,
+        enable_statement_logging: bool,
+    ) -> Result<(), io::Error> {
         stream.set_nodelay(true)?;
         let (reader, writer) = stream.into_split();
-        MySqlIntermediary::run_on(shim, reader, writer).await
+        MySqlIntermediary::run_on(shim, reader, writer, enable_statement_logging).await
     }
 }
 
@@ -325,8 +331,12 @@ impl<B: MySqlShim<S> + Send, S: AsyncRead + AsyncWrite + Clone + Unpin + Send>
     /// Create a new server over a two-way stream and process client commands until the client
     /// disconnects or an error occurs. See also
     /// [`MySqlIntermediary::run_on`](struct.MySqlIntermediary.html#method.run_on).
-    pub async fn run_on_stream(shim: B, stream: S) -> Result<(), io::Error> {
-        MySqlIntermediary::run_on(shim, stream.clone(), stream).await
+    pub async fn run_on_stream(
+        shim: B,
+        stream: S,
+        enable_statement_logging: bool,
+    ) -> Result<(), io::Error> {
+        MySqlIntermediary::run_on(shim, stream.clone(), stream, enable_statement_logging).await
     }
 }
 
@@ -353,7 +363,12 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
 {
     /// Create a new server over two one-way channels and process client commands until the client
     /// disconnects or an error occurs.
-    pub async fn run_on(shim: B, reader: R, writer: W) -> Result<(), io::Error> {
+    pub async fn run_on(
+        shim: B,
+        reader: R,
+        writer: W,
+        enable_statement_logging: bool,
+    ) -> Result<(), io::Error> {
         let r = packet::PacketReader::new(reader);
         let w = packet::PacketWriter::new(writer);
         let mut mi = MySqlIntermediary {
@@ -361,6 +376,7 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
             reader: r,
             writer: w,
             schema_cache: HashMap::new(),
+            enable_statement_logging,
         };
         if let (true, database) = mi.init().await? {
             if let Some(database) = database {
@@ -537,6 +553,9 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
                     })
                 })?
                 .1;
+            if self.enable_statement_logging {
+                info!(target: "client_statement", "{:?}", cmd);
+            }
             match cmd {
                 Command::Query(q) => {
                     let w = QueryResultWriter::new(&mut self.writer, false);

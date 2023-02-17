@@ -186,7 +186,7 @@ where
                 let _guard = rt.handle().enter();
                 tokio::net::TcpStream::from_std(s).unwrap()
             };
-            rt.block_on(MySqlIntermediary::run_on_tcp(self, s))
+            rt.block_on(MySqlIntermediary::run_on_tcp(self, s, false))
         });
 
         let mut db = mysql::Conn::new(
@@ -223,7 +223,7 @@ fn failed_authentication() {
     let port = listener.local_addr().unwrap().port();
     let jh = thread::spawn(move || {
         let (s, _) = listener.accept().unwrap();
-        MySqlIntermediary::run_on_tcp(shim, s)
+        MySqlIntermediary::run_on_tcp(shim, s, false)
     });
 
     let res = mysql::Conn::new(&format!("mysql://user:bad_password@127.0.0.1:{}", port));

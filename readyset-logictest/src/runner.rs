@@ -568,6 +568,7 @@ impl TestScript {
                         Dialect::MySQL,
                     )),
                     s,
+                    false,
                 )
                 .await
                 .unwrap(),
@@ -579,6 +580,7 @@ impl TestScript {
                             Dialect::PostgreSQL,
                         )),
                         s,
+                        false,
                     )
                     .await
                 }

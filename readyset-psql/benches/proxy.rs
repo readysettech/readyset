@@ -163,7 +163,7 @@ where
                     .unwrap();
             tokio::spawn(conn);
             let backend = Backend { upstream: client };
-            psql_srv::run_backend(backend, sock).await
+            psql_srv::run_backend(backend, sock, false).await
         }
     }))
 }

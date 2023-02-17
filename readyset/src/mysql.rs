@@ -8,7 +8,10 @@ use tracing::instrument;
 use crate::ConnectionHandler;
 
 #[derive(Clone, Copy)]
-pub struct MySqlHandler;
+pub struct MySqlHandler {
+    /// Whether to log statements received by the client
+    pub enable_statement_logging: bool,
+}
 
 #[async_trait]
 impl ConnectionHandler for MySqlHandler {
@@ -21,8 +24,12 @@ impl ConnectionHandler for MySqlHandler {
         stream: TcpStream,
         backend: readyset_adapter::Backend<MySqlUpstream, MySqlQueryHandler>,
     ) {
-        if let Err(e) =
-            MySqlIntermediary::run_on_tcp(readyset_mysql::Backend::new(backend), stream).await
+        if let Err(e) = MySqlIntermediary::run_on_tcp(
+            readyset_mysql::Backend::new(backend),
+            stream,
+            self.enable_statement_logging,
+        )
+        .await
         {
             error!(err = %e, "connection lost");
         }

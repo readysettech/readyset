@@ -166,8 +166,13 @@ pub enum QueryResponse<S> {
 /// * `channel` - A bytestream channel connected to a PostgreSQL frontend. Requests sent by the
 ///   frontend on this channel will be forwarded to `backend`, and the `backend`'s responses will be
 ///   returned to the frontend. When `channel` is closed by the frontend, `run_backend` returns.
-pub async fn run_backend<B: Backend, C: AsyncRead + AsyncWrite + Unpin>(backend: B, channel: C) {
-    runner::Runner::run(backend, channel).await
+/// * `enable_statement_logging` - A flag to enable logging all statements received by the client
+pub async fn run_backend<B: Backend, C: AsyncRead + AsyncWrite + Unpin>(
+    backend: B,
+    channel: C,
+    enable_statement_logging: bool,
+) {
+    runner::Runner::run(backend, channel, enable_statement_logging).await
 }
 
 pub async fn send_immediate_err<B, C>(channel: C, error: Error) -> Result<(), Error>

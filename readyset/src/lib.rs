@@ -267,7 +267,7 @@ pub struct Options {
     use_aws_external_address: bool,
 
     #[clap(flatten)]
-    tracing: readyset_tracing::Options,
+    pub tracing: readyset_tracing::Options,
 
     /// Test feature to fail invalidated queries in the serving path instead of going
     /// to fallback.
@@ -907,6 +907,8 @@ where
                 builder.as_reader_only();
                 builder.cannot_become_leader();
             }
+
+            builder.set_replicator_statement_logging(options.tracing.statement_logging);
 
             builder.set_telemetry_sender(telemetry_sender.clone());
 

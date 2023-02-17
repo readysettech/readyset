@@ -317,6 +317,7 @@ impl TestHandle {
                 ready_notify.clone(),
                 telemetry_sender,
                 server_startup,
+                false, // disable statement logging in tests
             )
             .await
             {

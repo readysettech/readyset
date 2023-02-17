@@ -212,6 +212,7 @@ fn main() -> anyhow::Result<()> {
     builder.set_listen_addr(opts.address);
     builder.set_telemetry_sender(telemetry_sender.clone());
     builder.set_wait_for_failpoint(opts.wait_for_failpoint);
+    builder.set_replicator_statement_logging(opts.tracing.statement_logging);
 
     if opts.cannot_become_leader {
         builder.cannot_become_leader();

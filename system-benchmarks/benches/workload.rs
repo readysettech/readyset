@@ -599,7 +599,9 @@ fn start_adapter_with_options(fallback_cache_options: FallbackCacheOptions) {
     let mut adapter = NoriaAdapter {
         description: "ReadySet benchmark adapter",
         default_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), BENCHMARK_PORT),
-        connection_handler: MySqlHandler,
+        connection_handler: MySqlHandler {
+            enable_statement_logging: false,
+        },
         database_type: DatabaseType::MySQL,
         parse_dialect: nom_sql::Dialect::MySQL,
         expr_dialect: readyset_data::Dialect::DEFAULT_MYSQL,
