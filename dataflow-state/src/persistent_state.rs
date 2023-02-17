@@ -80,7 +80,7 @@ use readyset_client::internal::Index;
 use readyset_client::replication::ReplicationOffset;
 use readyset_client::{KeyComparison, KeyCount, SqlIdentifier};
 use readyset_data::DfValue;
-use readyset_errors::{internal_err, invariant, ReadySetError, ReadySetResult};
+use readyset_errors::{internal, internal_err, invariant, ReadySetError, ReadySetResult};
 use readyset_tracing::{debug, error, info, warn};
 use readyset_util::intervals::BoundPair;
 use rocksdb::{self, IteratorMode, PlainTableFactoryOptions, SliceTransform, WriteBatch, DB};
@@ -281,6 +281,11 @@ impl PersistenceParameters {
 /// Data structure used to persist metadata about the [`PersistentState`] to rocksdb
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct PersistentMeta<'a> {
+    /// The version of serialization used to serialize data to this [`PersistentState`]. This is
+    /// compared against [`DfValue::SERDE_VERSION`] at startup, and if it's unequal an error will
+    /// be returned
+    serde_version: u8,
+
     /// Index information is stored in RocksDB to avoid rebuilding indices on recovery
     indices: Vec<Index>,
     epoch: IndexEpoch,
@@ -1145,9 +1150,23 @@ impl PersistentState {
             Err(_err) => vec![DEFAULT_CF.to_string()],
         };
 
-        let cf_index_params = DB::open_for_read_only(&default_options, &full_path, false)
+        let meta = DB::open_for_read_only(&default_options, &full_path, false)
             .ok()
-            .map(|db| get_meta(&db))
+            .map(|db| get_meta(&db));
+
+        if let Some(meta) = &meta {
+            if meta.serde_version != DfValue::SERDE_VERSION {
+                internal!(
+                    "Persisted state at {} has serialization version {}, which does not match our \
+                     serialization version {}. Please delete the db directory and restart.",
+                    full_path.display(),
+                    meta.serde_version,
+                    DfValue::SERDE_VERSION,
+                );
+            }
+        }
+
+        let cf_index_params = meta
             .into_iter()
             .flat_map(|meta: PersistentMeta| {
                 meta.indices
@@ -1391,6 +1410,7 @@ impl PersistentState {
     /// * The replication offset
     fn meta(&self) -> PersistentMeta<'_> {
         PersistentMeta {
+            serde_version: DfValue::SERDE_VERSION,
             indices: self
                 .db
                 .inner()
