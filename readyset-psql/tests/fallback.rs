@@ -520,6 +520,39 @@ async fn add_column_then_read() {
     assert_eq!(result, None)
 }
 
+#[ignore = "ENG-2575 Test reproduces client error due to known bug"]
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn drop_column_then_read() {
+    let (config, _handle) = setup().await;
+    let client = connect(config).await;
+
+    client
+        .simple_query("CREATE TABLE cats (id INT, meow VARCHAR)")
+        .await
+        .unwrap();
+
+    client
+        .simple_query("INSERT INTO cats VALUES (1, 'purr')")
+        .await
+        .unwrap();
+
+    client
+        .simple_query("ALTER TABLE cats DROP COLUMN meow")
+        .await
+        .unwrap();
+
+    // Due to ENG-2575, this currently returns a DbError with reason:
+    // "encode error: internal error: incorrect DataRow transfer format length"
+    let result = client
+        .query_one("SELECT * FROM cats", &[])
+        .await
+        .unwrap()
+        .get::<_, i32>(0);
+
+    assert_eq!(result, 1);
+}
+
 #[allow(dead_code)]
 async fn last_statement_matches(dest: &str, status: &str, client: &Client) -> bool {
     match &client
