@@ -83,12 +83,16 @@ use readyset_data::DfValue;
 use readyset_errors::{internal_err, invariant, ReadySetError, ReadySetResult};
 use readyset_tracing::{debug, error, info, warn};
 use readyset_util::intervals::BoundPair;
-use rocksdb::{self, IteratorMode, PlainTableFactoryOptions, SliceTransform, WriteBatch, DB};
+use rocksdb::{
+    self, ColumnFamilyDescriptor, IteratorMode, PlainTableFactoryOptions, SliceTransform,
+    WriteBatch, DB,
+};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tempfile::{tempdir, TempDir};
 use test_strategy::Arbitrary;
 use thiserror::Error;
+use tracing::instrument;
 
 use crate::{
     EvictKeysResult, LookupResult, PointKey, RangeKey, RangeLookupResult, RecordResult, State,
@@ -292,7 +296,7 @@ pub enum Error {
 
     #[error(
         "Persisted state at {} has serialization version {persisted_version}, which does not match \
-         our serialization version {our_version}. Please delete the db directory and restart.",
+         our serialization version {our_version}",
         path.display(),
     )]
     SerdeVersionMismatch {
@@ -308,6 +312,22 @@ pub enum Error {
 impl From<Error> for ReadySetError {
     fn from(err: Error) -> Self {
         internal_err!("{err}")
+    }
+}
+
+impl Error {
+    /// Returns `true` if this error is "permanent", meaning it is not likely to go away if we
+    /// delete the DB file and try again
+    pub fn is_permanent(&self) -> bool {
+        match self {
+            // Could *maybe* try to slice up the RocksDB errors here, but for now it's simpler to
+            // just assume all RocksDB errors are permanent
+            Error::RocksDb(_) => true,
+            // Could *maybe* try to slice up the IO errors here, but for now it's simpler to just
+            // assume all IO errors are permanent
+            Error::Io(_) => true,
+            Error::BadDbFormat | Error::SerdeVersionMismatch { .. } => false,
+        }
     }
 }
 
@@ -1147,24 +1167,21 @@ impl IndexParams {
 }
 
 impl PersistentState {
+    #[instrument(name = "Creating persistent state", skip_all, fields(name))]
     pub fn new<C: AsRef<[usize]>, K: IntoIterator<Item = C>>(
         mut name: String,
         unique_keys: K,
         params: &PersistenceParameters,
     ) -> Result<Self> {
-        let unique_keys: Vec<Box<[usize]>> =
-            unique_keys.into_iter().map(|c| c.as_ref().into()).collect();
-
         if !name.ends_with(".db") {
             name.push_str(".db");
         }
 
-        use rocksdb::ColumnFamilyDescriptor;
         let (tmpdir, full_path) = match params.mode {
             DurabilityMode::Permanent => {
                 let mut path = params.db_dir.clone().unwrap_or_else(|| ".".into());
                 if !path.is_dir() {
-                    std::fs::create_dir_all(&path)?;
+                    fs::create_dir_all(&path)?;
                 }
                 path.push(&name);
 
@@ -1177,23 +1194,52 @@ impl PersistentState {
             }
         };
 
+        let name = SqlIdentifier::from(name);
+        let unique_keys: Vec<Box<[usize]>> =
+            unique_keys.into_iter().map(|c| c.as_ref().into()).collect();
+
+        match Self::new_inner(name.clone(), full_path.clone(), unique_keys.clone(), params) {
+            Ok(ps) => Ok(Self {
+                _tmpdir: tmpdir,
+                ..ps
+            }),
+            Err(e) if e.is_permanent() => Err(e),
+            Err(error) => {
+                warn!(
+                    %error,
+                    "Non-permanent error creating persistent state, deleting path and trying again"
+                );
+                if full_path.is_dir() {
+                    fs::remove_dir_all(&full_path)?;
+                }
+                Self::new_inner(name, full_path, unique_keys, params)
+            }
+        }
+    }
+
+    fn new_inner(
+        name: SqlIdentifier,
+        path: PathBuf,
+        unique_keys: Vec<Box<[usize]>>,
+        params: &PersistenceParameters,
+    ) -> Result<Self> {
         let default_options = base_options(params);
         // We use a column family for each index, and one for metadata.
         // When opening the DB the exact same column families needs to be used,
         // so we'll have to retrieve the existing ones first:
-        let cf_names = match DB::list_cf(&default_options, &full_path) {
+        let cf_names = match DB::list_cf(&default_options, &path) {
             Ok(cfs) => cfs,
             Err(_err) => vec![DEFAULT_CF.to_string()],
         };
 
-        let meta = DB::open_for_read_only(&default_options, &full_path, false)
+        let meta = DB::open_for_read_only(&default_options, &path, false)
             .ok()
             .and_then(|db| get_meta(&db).ok());
 
         if let Some(meta) = &meta {
             if meta.serde_version != DfValue::SERDE_VERSION {
                 return Err(Error::SerdeVersionMismatch {
-                    path: full_path,
+                    path,
                     persisted_version: meta.serde_version,
                     our_version: DfValue::SERDE_VERSION,
                 });
@@ -1232,7 +1278,7 @@ impl PersistentState {
         let mut retry = 0;
         let mut db = loop {
             // TODO: why is this loop even needed?
-            match DB::open_cf_descriptors(&default_options, &full_path, make_cfs()?) {
+            match DB::open_cf_descriptors(&default_options, &path, make_cfs()?) {
                 Ok(db) => break db,
                 _ if retry < 100 => {
                     retry += 1;
@@ -1272,7 +1318,6 @@ impl PersistentState {
             }
         }
 
-        let name: SqlIdentifier = name.into();
         let replication_offset = meta.replication_offset.map(|ro| ro.into_owned());
         let read_handle = PersistentStateHandle {
             inner: Arc::new(RwLock::new(SharedState {
@@ -1290,7 +1335,7 @@ impl PersistentState {
             unique_keys,
             epoch: meta.epoch,
             db: read_handle,
-            _tmpdir: tmpdir,
+            _tmpdir: None,
             snapshot_mode: SnapshotMode::SnapshotModeDisabled,
         };
 
