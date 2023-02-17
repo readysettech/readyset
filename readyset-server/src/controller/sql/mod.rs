@@ -304,13 +304,8 @@ impl SqlIncorporator {
                     self.add_query(ccqs.name, statement, ccqs.always, &schema_search_path, mig)?;
                 }
                 Change::AlterTable(_) => {
-                    // This should not get hit because all ALTER TABLE definitions currently require
-                    // a resnapshot (and as a result, nothing ever actually *sends*
-                    // Change::AlterTable to extend_recipe, instead we just get the
-                    // Change::CreateTable for the table post-altering). This *might* change in the
-                    // future if there are `AlterTableDefinition` variants which *don't* require
-                    // resnapshotting. If this error gets hit, that's probably what happened!
-                    internal!("ALTER TABLE change encountered in recipe")
+                    // The only ALTER TABLE changes that can end up here (currently) are ones that
+                    // aren't relevant to ReadySet, so we can just ignore them.
                 }
                 Change::CreateType { mut name, ty } => {
                     if let Some(first_schema) = schema_search_path.first() {
