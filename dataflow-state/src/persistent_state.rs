@@ -63,7 +63,7 @@
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::io::Read;
+use std::io::{self, Read};
 use std::ops::Bound;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -80,7 +80,7 @@ use readyset_client::internal::Index;
 use readyset_client::replication::ReplicationOffset;
 use readyset_client::{KeyComparison, KeyCount, SqlIdentifier};
 use readyset_data::DfValue;
-use readyset_errors::{internal, internal_err, invariant, ReadySetError, ReadySetResult};
+use readyset_errors::{internal_err, invariant, ReadySetError, ReadySetResult};
 use readyset_tracing::{debug, error, info, warn};
 use readyset_util::intervals::BoundPair;
 use rocksdb::{self, IteratorMode, PlainTableFactoryOptions, SliceTransform, WriteBatch, DB};
@@ -211,7 +211,7 @@ pub struct InvalidDurabilityMode;
 impl FromStr for DurabilityMode {
     type Err = InvalidDurabilityMode;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         match s {
             "persistent" => Ok(Self::Permanent),
             "ephemeral" => Ok(Self::DeleteOnExit),
@@ -277,6 +277,42 @@ impl PersistenceParameters {
         }
     }
 }
+
+/// Errors that can occur when creating a new persistent state or opening an existing one.
+///
+/// This is a distinct enum from [`ReadySetError`] so we can make it include [`rocksdb::Error`]
+/// without the `readyset-errors` crate having to depend on `rocksdb`
+#[derive(Debug, Error)]
+pub enum Error {
+    #[error("RocksDB error: {0}")]
+    RocksDb(#[from] rocksdb::Error),
+
+    #[error("Invalid on-disk DB format")]
+    BadDbFormat,
+
+    #[error(
+        "Persisted state at {} has serialization version {persisted_version}, which does not match \
+         our serialization version {our_version}. Please delete the db directory and restart.",
+        path.display(),
+    )]
+    SerdeVersionMismatch {
+        path: PathBuf,
+        persisted_version: u8,
+        our_version: u8,
+    },
+
+    #[error(transparent)]
+    Io(#[from] io::Error),
+}
+
+impl From<Error> for ReadySetError {
+    fn from(err: Error) -> Self {
+        internal_err!("{err}")
+    }
+}
+
+/// Result type for persistent state
+pub type Result<T> = std::result::Result<T, Error>;
 
 /// Data structure used to persist metadata about the [`PersistentState`] to rocksdb
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -1115,7 +1151,7 @@ impl PersistentState {
         mut name: String,
         unique_keys: K,
         params: &PersistenceParameters,
-    ) -> ReadySetResult<Self> {
+    ) -> Result<Self> {
         let unique_keys: Vec<Box<[usize]>> =
             unique_keys.into_iter().map(|c| c.as_ref().into()).collect();
 
@@ -1156,13 +1192,11 @@ impl PersistentState {
 
         if let Some(meta) = &meta {
             if meta.serde_version != DfValue::SERDE_VERSION {
-                internal!(
-                    "Persisted state at {} has serialization version {}, which does not match our \
-                     serialization version {}. Please delete the db directory and restart.",
-                    full_path.display(),
-                    meta.serde_version,
-                    DfValue::SERDE_VERSION,
-                );
+                return Err(Error::SerdeVersionMismatch {
+                    path: full_path,
+                    persisted_version: meta.serde_version,
+                    our_version: DfValue::SERDE_VERSION,
+                });
             }
         }
 
@@ -1176,7 +1210,7 @@ impl PersistentState {
             .collect::<Vec<_>>();
 
         // ColumnFamilyDescriptor does not implement Clone, so we have to create a new Vec each time
-        let make_cfs = || -> ReadySetResult<Vec<ColumnFamilyDescriptor>> {
+        let make_cfs = || -> Result<Vec<ColumnFamilyDescriptor>> {
             cf_names
                 .iter()
                 .map(|cf_name| {
@@ -1185,12 +1219,9 @@ impl PersistentState {
                         if cf_name == DEFAULT_CF {
                             default_options.clone()
                         } else {
-                            let cf_id: usize = cf_name
-                                .parse()
-                                .map_err(|e| internal_err!("Invalid column family ID: {e}"))?;
-                            let index_params = cf_index_params
-                                .get(cf_id)
-                                .ok_or_else(|| internal_err!("Unknown column family"))?;
+                            let cf_id: usize = cf_name.parse().map_err(|_| Error::BadDbFormat)?;
+                            let index_params =
+                                cf_index_params.get(cf_id).ok_or(Error::BadDbFormat)?;
                             index_params.make_rocksdb_options(&default_options)
                         },
                     ))
@@ -1207,7 +1238,7 @@ impl PersistentState {
                     retry += 1;
                     std::thread::sleep(Duration::from_millis(50));
                 }
-                Err(e) => return Err(internal_err!("Unable to open RocksDB: {e}")),
+                Err(e) => return Err(e.into()),
             }
         };
 
@@ -1222,8 +1253,7 @@ impl PersistentState {
         // meta.
         if cf_names.len() > indices.len() + 1 {
             for cf_name in cf_names.iter().skip(indices.len() + 1) {
-                db.drop_cf(cf_name)
-                    .map_err(|e| internal_err!("Error dropping column family: {e}"))?;
+                db.drop_cf(cf_name)?;
             }
         }
 
@@ -1237,8 +1267,7 @@ impl PersistentState {
                     db.create_cf(
                         &index.column_family,
                         &IndexParams::from(&index.index).make_rocksdb_options(&default_options),
-                    )
-                    .map_err(|e| internal_err!("Error creating column family: {e}"))?;
+                    )?;
                 }
             }
         }
@@ -1282,7 +1311,7 @@ impl PersistentState {
     }
 
     /// Adds a new primary index, assuming there are none present
-    fn add_primary_index(&mut self, columns: &[usize], is_unique: bool) -> ReadySetResult<()> {
+    fn add_primary_index(&mut self, columns: &[usize], is_unique: bool) -> Result<()> {
         if self.db.inner().indices.is_empty() {
             debug!(base = %self.name, index = ?columns, is_unique, "Base creating primary index");
 
@@ -1300,13 +1329,10 @@ impl PersistentState {
             self.db.inner_mut().indices.push(persistent_index);
             let meta = self.meta();
             self.db.handle().save_meta(&meta);
-            self.db
-                .handle_mut()
-                .create_cf(
-                    PK_CF,
-                    &index_params.make_rocksdb_options(&self.default_options),
-                )
-                .map_err(|e| internal_err!("Error creating column family: {e}"))?;
+            self.db.handle_mut().create_cf(
+                PK_CF,
+                &index_params.make_rocksdb_options(&self.default_options),
+            )?;
         }
 
         Ok(())
