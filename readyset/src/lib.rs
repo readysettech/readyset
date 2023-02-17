@@ -158,7 +158,7 @@ pub struct Options {
     deployment: String,
 
     /// Database engine protocol to emulate
-    #[clap(long, env = "DATABASE_TYPE", possible_values=&["mysql", "postgresql"])]
+    #[clap(long, env = "DATABASE_TYPE", possible_values=&["mysql", "postgresql", "postgres"])]
     pub database_type: DatabaseType,
 
     /// The authority to use. Possible values: zookeeper, consul, standalone.

@@ -154,6 +154,10 @@ pub enum DatabaseType {
 /// let pg: DatabaseType = "postgresql".parse().unwrap();
 /// assert_eq!(pg, DatabaseType::PostgreSQL);
 ///
+/// // "postgres" is supported as an alias for DatabaseType::PostgreSQL
+/// let pg: DatabaseType = "postgres".parse().unwrap();
+/// assert_eq!(pg, DatabaseType::PostgreSQL);
+///
 /// let my: DatabaseType = "mysql".parse().unwrap();
 /// assert_eq!(my, DatabaseType::MySQL);
 ///
@@ -164,7 +168,7 @@ impl FromStr for DatabaseType {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "mysql" => Ok(Self::MySQL),
-            "postgresql" => Ok(Self::PostgreSQL),
+            "postgresql" | "postgres" => Ok(Self::PostgreSQL),
             _ => Err(DatabaseTypeParseError {
                 value: s.to_owned(),
             }),
