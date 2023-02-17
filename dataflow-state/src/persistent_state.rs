@@ -117,9 +117,9 @@ const INDEX_BATCH_SIZE: usize = 10_000;
 
 /// Load the metadata from the database, stored in the `DEFAULT_CF` column family under the
 /// `META_KEY`
-fn get_meta(db: &DB) -> PersistentMeta<'static> {
-    db.get_pinned(META_KEY)
-        .unwrap()
+fn get_meta(db: &DB) -> Result<PersistentMeta<'static>> {
+    Ok(db
+        .get_pinned(META_KEY)?
         .and_then(|data| {
             serde_json::from_slice(&data)
                 .map_err(|error| {
@@ -130,7 +130,7 @@ fn get_meta(db: &DB) -> PersistentMeta<'static> {
                 })
                 .ok()
         })
-        .unwrap_or_default()
+        .unwrap_or_default())
 }
 
 /// Abstraction over writing to different kinds of rocksdb dbs.
@@ -174,11 +174,11 @@ impl Put for &mut rocksdb::WriteBatch {
 
 /// Load the saved [`PersistentMeta`] from the database, increment its
 /// [epoch](PersistentMeta::epoch) by one, and return it
-fn increment_epoch(db: &DB) -> PersistentMeta<'static> {
-    let mut meta = get_meta(db);
+fn increment_epoch(db: &DB) -> Result<PersistentMeta<'static>> {
+    let mut meta = get_meta(db)?;
     meta.epoch += 1;
     db.save_meta(&meta);
-    meta
+    Ok(meta)
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -1188,7 +1188,7 @@ impl PersistentState {
 
         let meta = DB::open_for_read_only(&default_options, &full_path, false)
             .ok()
-            .map(|db| get_meta(&db));
+            .and_then(|db| get_meta(&db).ok());
 
         if let Some(meta) = &meta {
             if meta.serde_version != DfValue::SERDE_VERSION {
@@ -1242,7 +1242,7 @@ impl PersistentState {
             }
         };
 
-        let meta = increment_epoch(&db);
+        let meta = increment_epoch(&db)?;
         let indices = meta.get_indices(&unique_keys);
 
         // If there are more column families than indices (+1 to account for the default column
