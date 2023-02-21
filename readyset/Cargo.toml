@@ -37,6 +37,7 @@ readyset-client = { path = "../readyset-client/" }
 readyset-client-metrics = { path = "../readyset-client-metrics" }
 readyset-data = { path = "../readyset-data" }
 readyset-dataflow = { path = "../readyset-dataflow" }
+readyset-errors = { path = "../readyset-errors" }
 readyset-mysql = { path = "../readyset-mysql" }
 readyset-psql = { path = "../readyset-psql" }
 readyset-server = { path = "../readyset-server/" }

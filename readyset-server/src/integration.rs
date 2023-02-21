@@ -34,7 +34,9 @@ use readyset_client::internal::LocalNodeIndex;
 use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::{KeyComparison, Modification, SchemaType, ViewPlaceholder, ViewQuery};
 use readyset_data::{DfType, DfValue, Dialect};
-use readyset_errors::ReadySetError::{MigrationPlanFailed, RpcFailed, SelectQueryCreationFailed};
+use readyset_errors::ReadySetError::{
+    self, MigrationPlanFailed, RpcFailed, SelectQueryCreationFailed,
+};
 use readyset_util::eventually;
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
@@ -47,7 +49,7 @@ use vec1::vec1;
 
 use crate::controller::sql::SqlIncorporator;
 use crate::integration_utils::*;
-use crate::{get_col, Builder, ReadySetError};
+use crate::{get_col, Builder};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn it_completes() {

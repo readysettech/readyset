@@ -5,7 +5,7 @@ use std::mem;
 use dataflow_state::{MaterializedNodeState, SnapshotMode};
 use readyset_client::consistency::Timestamp;
 use readyset_client::replication::ReplicationOffset;
-use readyset_client::{KeyComparison, PacketData, ReadySetError};
+use readyset_client::{KeyComparison, PacketData};
 use readyset_errors::ReadySetResult;
 use readyset_tracing::trace;
 use tracing::debug_span;

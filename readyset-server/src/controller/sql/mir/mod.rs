@@ -24,6 +24,7 @@ use petgraph::visit::Reversed;
 use petgraph::Direction;
 use readyset_errors::{
     internal, internal_err, invalid_err, invariant, invariant_eq, unsupported, ReadySetError,
+    ReadySetResult,
 };
 use readyset_sql_passes::is_correlated;
 use readyset_tracing::{debug, trace};
@@ -37,7 +38,6 @@ use crate::controller::sql::mir::grouped::{
 use crate::controller::sql::mir::join::{make_cross_joins, make_joins};
 use crate::controller::sql::query_graph::{to_query_graph, OutputColumn, Pagination, QueryGraph};
 use crate::controller::sql::query_signature::Signature;
-use crate::ReadySetResult;
 
 mod grouped;
 mod join;

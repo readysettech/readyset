@@ -4,7 +4,7 @@ use std::mem;
 
 pub use common::IndexRef;
 use dataflow::prelude::*;
-use readyset_client::ReadySetError;
+use readyset_errors::ReadySetError;
 use vec1::{vec1, Vec1};
 
 // TODO: rewrite as iterator

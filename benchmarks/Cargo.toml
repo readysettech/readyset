@@ -47,6 +47,7 @@ tokio-postgres = { workspace = true }
 database-utils = { path = "../database-utils" }
 readyset-client = { path = "../readyset-client" }
 readyset-data = { path = "../readyset-data" }
+readyset-errors = { path = "../readyset-errors" }
 nom-sql = { path = "../nom-sql" }
 query-generator = { path = "../query-generator" }
 readyset-adapter = { path = "../readyset-adapter" }

@@ -27,6 +27,7 @@ readyset-client = { path = "../readyset-client", features = ["failure_injection"
 readyset-data = { path = "../readyset-data" }
 readyset-util = { path = "../readyset-util" }
 readyset-tracing = { path = "../readyset-tracing" }
+readyset-errors = { path = "../readyset-errors" }
 
 [dev-dependencies]
 serial_test = "0.5.1"

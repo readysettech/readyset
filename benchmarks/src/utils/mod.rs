@@ -8,7 +8,7 @@ use anyhow::Result;
 use mysql_async::prelude::Queryable;
 use mysql_async::ServerError;
 use readyset_client::status::{ReadySetStatus, SnapshotStatus};
-use readyset_client::ReadySetResult;
+use readyset_errors::ReadySetResult;
 use readyset_tracing::info;
 
 pub mod generate;

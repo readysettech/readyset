@@ -641,7 +641,7 @@ async fn next_action_replication_failure_ignores_table() {
 async fn replication_failure_ignores_table(failpoint: &str) {
     readyset_tracing::init_test_logging();
     use nom_sql::Relation;
-    use readyset_client::ReadySetError;
+    use readyset_errors::ReadySetError;
 
     let (config, mut handle) = TestBuilder::default()
         .recreate_database(false)
@@ -710,7 +710,7 @@ async fn replication_failure_retries_if_failed_to_drop(failpoint: &str) {
     use std::time::Duration;
 
     use nom_sql::Relation;
-    use readyset_client::ReadySetError;
+    use readyset_errors::ReadySetError;
     use readyset_tracing::info;
 
     let (config, mut handle) = TestBuilder::default()

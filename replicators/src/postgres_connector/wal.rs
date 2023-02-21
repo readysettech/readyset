@@ -8,6 +8,7 @@ use std::convert::{TryFrom, TryInto};
 
 use bytes::Bytes;
 use nom_sql::Relation;
+use readyset_errors::ReadySetError;
 
 use crate::postgres_connector::lsn::Lsn;
 
@@ -29,7 +30,7 @@ pub enum WalError {
     CorruptTruncate,
     CorruptMessage,
     TryFromSliceError,
-    ReadySetError(readyset_client::ReadySetError),
+    ReadySetError(ReadySetError),
     ConnectionLost(String),
 
     /// An error specific to one of the tables
@@ -68,7 +69,7 @@ impl From<std::array::TryFromSliceError> for WalError {
     }
 }
 
-impl From<WalError> for readyset_client::ReadySetError {
+impl From<WalError> for ReadySetError {
     fn from(err: WalError) -> Self {
         match err {
             WalError::TableError {
@@ -81,21 +82,21 @@ impl From<WalError> for readyset_client::ReadySetError {
                     name: table.into(),
                 };
 
-                readyset_client::ReadySetError::TableError {
+                ReadySetError::TableError {
                     table,
-                    source: Box::new(readyset_client::ReadySetError::ReplicationFailed(format!(
+                    source: Box::new(ReadySetError::ReplicationFailed(format!(
                         "WAL error: {:?}",
                         kind
                     ))),
                 }
             }
-            _ => readyset_client::ReadySetError::ReplicationFailed(format!("WAL error: {:?}", err)),
+            _ => ReadySetError::ReplicationFailed(format!("WAL error: {:?}", err)),
         }
     }
 }
 
-impl From<readyset_client::ReadySetError> for WalError {
-    fn from(err: readyset_client::ReadySetError) -> Self {
+impl From<ReadySetError> for WalError {
+    fn from(err: ReadySetError) -> Self {
         WalError::ReadySetError(err)
     }
 }

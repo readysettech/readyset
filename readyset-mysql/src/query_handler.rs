@@ -8,9 +8,9 @@ use readyset_adapter::backend::noria_connector::QueryResult;
 use readyset_adapter::backend::SelectSchema;
 use readyset_adapter::{QueryHandler, SetBehavior};
 use readyset_client::results::Results;
-use readyset_client::{ColumnSchema, ReadySetError};
+use readyset_client::ColumnSchema;
 use readyset_data::{DfType, DfValue};
-use readyset_errors::ReadySetResult;
+use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_tracing::warn;
 
 const MAX_ALLOWED_PACKET_VARIABLE_NAME: &str = "max_allowed_packet";

@@ -23,6 +23,7 @@ itertools = "0.10"
 derive_more = "0.99.11"
 thiserror = "1.0.26"
 readyset-util = { path = "../readyset-util" }
+readyset-errors = { path = "../readyset-errors" }
 metrics = "0.19"
 futures = "0.3"
 readyset-tracing = { path = "../readyset-tracing" }

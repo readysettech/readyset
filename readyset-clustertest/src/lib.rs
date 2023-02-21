@@ -215,7 +215,7 @@ use std::time::{Duration, Instant};
 
 use ::readyset_client::consensus::AuthorityType;
 use ::readyset_client::metrics::client::MetricsClient;
-use ::readyset_client::{ReadySetHandle, ReadySetResult};
+use ::readyset_client::ReadySetHandle;
 use anyhow::{anyhow, Result};
 use database_utils::{DatabaseConnection, DatabaseType, DatabaseURL};
 use futures::executor;
@@ -224,6 +224,7 @@ use mysql_async::prelude::Queryable;
 use rand::Rng;
 #[cfg(test)]
 use readyset_clustertest_macros::clustertest;
+use readyset_errors::ReadySetResult;
 use readyset_tracing::{debug, warn};
 use serde::Deserialize;
 use server::{AdapterBuilder, ProcessHandle, ReadysetServerBuilder};

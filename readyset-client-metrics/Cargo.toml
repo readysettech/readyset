@@ -12,6 +12,7 @@ serde_json = "1.0.67"
 
 #local dependencies
 readyset-client = { path = "../readyset-client" }
+readyset-errors = { path = "../readyset-errors" }
 nom-sql = { path = "../nom-sql" }
 
 [lib]

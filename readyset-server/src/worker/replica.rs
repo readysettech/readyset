@@ -16,6 +16,7 @@ use futures_util::FutureExt;
 use readyset_client::channel::{self, CONNECTION_FROM_BASE};
 use readyset_client::internal::ReplicaAddress;
 use readyset_client::{KeyComparison, PacketData, PacketPayload, Tagged};
+use readyset_errors::ReadySetResult;
 use readyset_tracing::{debug, error, warn};
 use strawpoll::Strawpoll;
 use time::Duration;
@@ -26,7 +27,6 @@ use tokio_stream::wrappers::IntervalStream;
 use tracing::{info_span, instrument, Span};
 
 use super::ChannelCoordinator;
-use crate::ReadySetResult;
 
 type DualTcpStream =
     channel::DualTcpStream<BufStream<TcpStream>, Box<Packet>, Tagged<PacketData>, AsyncDestination>;

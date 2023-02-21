@@ -738,8 +738,8 @@ async fn replication_failure_ignores_table() {
     use mysql::serde_json;
     use nom_sql::Relation;
     use readyset_adapter::backend::MigrationMode;
-    use readyset_client::ReadySetError;
     use readyset_client_test_helpers::Adapter;
+    use readyset_errors::ReadySetError;
 
     let (config, mut handle) = TestBuilder::default()
         .recreate_database(false)

@@ -13,7 +13,7 @@ use hyper::service::make_service_fn;
 use hyper::{self, Body, Method, Request, Response, StatusCode};
 use readyset_client::consensus::{Authority, AuthorityControl};
 use readyset_client::metrics::recorded;
-use readyset_client::ReadySetError;
+use readyset_errors::ReadySetError;
 use readyset_tracing::warn;
 use readyset_util::shutdown::ShutdownReceiver;
 use tokio::net::TcpListener;

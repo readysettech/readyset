@@ -16,9 +16,8 @@ use nom_sql::{
 use postgres_types::{accepts, FromSql, Kind, Type};
 use readyset_client::metrics::recorded;
 use readyset_client::recipe::changelist::{Change, ChangeList};
-use readyset_client::{ReadySetError, ReadySetResult};
 use readyset_data::{DfType, DfValue, Dialect as DataDialect, PgEnumMetadata};
-use readyset_errors::{internal, internal_err, unsupported};
+use readyset_errors::{internal, internal_err, unsupported, ReadySetError, ReadySetResult};
 use readyset_tracing::{debug, error, info, trace, warn};
 use tokio_postgres as pgsql;
 use tracing::{info_span, Instrument};

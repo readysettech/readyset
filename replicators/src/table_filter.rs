@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use nom_locate::LocatedSpan;
 use nom_sql::{replicator_table_list, Dialect, SqlIdentifier};
-use readyset_client::{ReadySetError, ReadySetResult};
+use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_util::redacted::RedactedString;
 
 /// A [`TableFilter`] keeps lists of all the tables readyset-server is interested in, as well as a

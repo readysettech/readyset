@@ -8,8 +8,8 @@ use postgres_native_tls::MakeTlsConnector;
 #[cfg(feature = "failure_injection")]
 use readyset_client::failpoints;
 use readyset_client::replication::ReplicationOffset;
-use readyset_client::{ReadySetError, ReadySetResult, TableOperation};
-use readyset_errors::{invariant, set_failpoint_return_err};
+use readyset_client::TableOperation;
+use readyset_errors::{invariant, set_failpoint_return_err, ReadySetError, ReadySetResult};
 use readyset_tracing::{debug, error, info, trace, warn};
 use readyset_util::select;
 use tokio_postgres as pgsql;

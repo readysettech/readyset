@@ -20,7 +20,7 @@ use readyset_client::failpoints;
 use readyset_client::metrics::recorded;
 use readyset_client::ControllerDescriptor;
 use readyset_data::Dialect;
-use readyset_errors::{internal, internal_err, ReadySetError};
+use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
 use readyset_telemetry_reporter::TelemetrySender;
 use readyset_tracing::{debug, error, info, warn};
 use readyset_util::select;
@@ -38,7 +38,7 @@ use crate::controller::sql::Recipe;
 use crate::controller::state::DfState;
 use crate::materialization::Materializations;
 use crate::worker::{WorkerRequest, WorkerRequestKind};
-use crate::{Config, ReadySetResult, VolumeId};
+use crate::{Config, VolumeId};
 
 mod domain_handle;
 mod inner;

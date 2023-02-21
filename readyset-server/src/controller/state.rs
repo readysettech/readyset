@@ -46,11 +46,13 @@ use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::recipe::ExtendRecipeSpec;
 use readyset_client::replication::{ReplicationOffset, ReplicationOffsets};
 use readyset_client::{
-    NodeSize, ReadySetError, ReadySetResult, TableReplicationStatus, TableStatus,
-    ViewCreateRequest, ViewFilter, ViewRequest, ViewSchema,
+    NodeSize, TableReplicationStatus, TableStatus, ViewCreateRequest, ViewFilter, ViewRequest,
+    ViewSchema,
 };
 use readyset_data::Dialect;
-use readyset_errors::{internal, internal_err, invariant_eq, NodeType};
+use readyset_errors::{
+    internal, internal_err, invariant_eq, NodeType, ReadySetError, ReadySetResult,
+};
 use readyset_tracing::{debug, error, trace, warn};
 use regex::Regex;
 use serde::de::DeserializeOwned;

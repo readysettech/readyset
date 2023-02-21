@@ -38,8 +38,9 @@ use readyset_client::consensus::{AuthorityControl, AuthorityType, ConsulAuthorit
 #[cfg(feature = "failure_injection")]
 use readyset_client::failpoints;
 use readyset_client::metrics::recorded;
-use readyset_client::{ReadySetError, ReadySetHandle, ViewCreateRequest};
+use readyset_client::{ReadySetHandle, ViewCreateRequest};
 use readyset_dataflow::Readers;
+use readyset_errors::ReadySetError;
 use readyset_server::metrics::{CompositeMetricsRecorder, MetricsRecorder};
 use readyset_server::worker::readers::{retry_misses, Ack, BlockingRead, ReadRequestHandler};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetryInitializer};

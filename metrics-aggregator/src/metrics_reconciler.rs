@@ -10,7 +10,7 @@ use itertools::Itertools;
 use prometheus_http_query::response::{InstantVector, QueryResultType};
 use prometheus_http_query::{Client, InstantVector as InstantVectorReq, Selector};
 use readyset_client::consensus::{AuthorityControl, ConsulAuthority};
-use readyset_client::ReadySetResult;
+use readyset_errors::ReadySetResult;
 use readyset_tracing::{error, info};
 use readyset_util::shutdown::ShutdownReceiver;
 use tokio::select;

@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use metrics::SharedString;
 use nom_sql::SqlQuery;
 use readyset_client::query::QueryId;
-use readyset_client::ReadySetError;
+use readyset_errors::ReadySetError;
 use serde::Serialize;
 
 pub mod recorded;

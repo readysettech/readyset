@@ -2,12 +2,11 @@ use std::collections::{HashMap, HashSet};
 
 use mir::NodeIndex;
 use nom_sql::Relation;
-use readyset_errors::{internal, internal_err, invariant};
+use readyset_errors::{internal, internal_err, invariant, ReadySetResult};
 
 use super::JoinKind;
 use crate::controller::sql::mir::SqlToMirConverter;
 use crate::controller::sql::query_graph::{QueryGraph, QueryGraphEdge};
-use crate::ReadySetResult;
 
 struct JoinChain {
     tables: HashSet<Relation>,

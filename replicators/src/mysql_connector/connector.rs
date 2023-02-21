@@ -14,8 +14,8 @@ use nom_sql::Relation;
 use readyset_client::metrics::recorded;
 use readyset_client::recipe::ChangeList;
 use readyset_client::replication::ReplicationOffset;
-use readyset_client::{ReadySetError, ReadySetResult};
 use readyset_data::{DfValue, Dialect};
+use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_tracing::warn;
 
 use super::BinlogPosition;

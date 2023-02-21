@@ -14,10 +14,10 @@ use futures_util::future::TryFutureExt;
 use futures_util::sink::SinkExt;
 use futures_util::stream::StreamExt;
 use metrics::{counter, gauge, histogram};
+use readyset_client::channel;
 use readyset_client::internal::ReplicaAddress;
 use readyset_client::metrics::recorded;
-use readyset_client::{channel, ReadySetError};
-use readyset_errors::internal_err;
+use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
 use readyset_tracing::{debug, error, info, trace, warn};
 use readyset_util::select;
 use readyset_util::shutdown::ShutdownReceiver;
@@ -34,7 +34,6 @@ use url::Url;
 use self::replica::Replica;
 use crate::coordination::{DomainDescriptor, RunDomainResponse};
 use crate::worker::replica::WrappedDomainRequest;
-use crate::ReadySetResult;
 
 /// Request handlers and utilities for reading from the ReadHandle of a
 /// left-right map associated with a reader node.

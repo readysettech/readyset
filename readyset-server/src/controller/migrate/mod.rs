@@ -41,7 +41,7 @@ use dataflow::{node, DomainRequest, ReaderProcessing};
 use metrics::{counter, histogram};
 use nom_sql::Relation;
 use readyset_client::metrics::recorded;
-use readyset_client::{KeyColumnIdx, ReadySetError, ViewPlaceholder};
+use readyset_client::{KeyColumnIdx, ViewPlaceholder};
 use readyset_data::{DfType, Dialect};
 use readyset_tracing::{debug, error, info, trace};
 use tracing::{debug_span, info_span, instrument};

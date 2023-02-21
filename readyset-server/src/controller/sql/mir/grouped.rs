@@ -6,13 +6,12 @@ use mir::{Column, NodeIndex};
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::FunctionExpr::*;
 use nom_sql::{self, Expr, FieldDefinitionExpr, Relation, SqlIdentifier};
-use readyset_errors::{unsupported, ReadySetError};
+use readyset_errors::{unsupported, ReadySetError, ReadySetResult};
 use readyset_sql_passes::is_aggregate;
 
 use crate::controller::sql::mir::join::make_joins_for_aggregates;
 use crate::controller::sql::mir::SqlToMirConverter;
 use crate::controller::sql::query_graph::QueryGraph;
-use crate::ReadySetResult;
 
 // Move predicates above grouped_by nodes
 pub(super) fn make_predicates_above_grouped<'a>(

@@ -278,7 +278,7 @@ use std::pin::Pin;
 #[doc(hidden)]
 pub use nom_sql::{ColumnConstraint, SqlIdentifier};
 use readyset_data::{DfType, DfValue};
-pub use readyset_errors::{ReadySetError, ReadySetResult};
+use readyset_errors::{ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
 use tokio::task_local;
 pub use view::{

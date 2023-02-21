@@ -15,13 +15,13 @@ use readyset_client::internal::LocalNodeIndex;
 use readyset_client::recipe::changelist::{Change, ChangeList, IntoChanges};
 use readyset_client::results::{ResultIterator, Results};
 use readyset_client::{
-    ColumnSchema, ReadQuery, ReaderAddress, ReaderHandle, ReadySetError, ReadySetHandle,
-    ReadySetResult, SchemaType, Table, TableOperation, View, ViewCreateRequest, ViewQuery,
+    ColumnSchema, ReadQuery, ReaderAddress, ReaderHandle, ReadySetHandle, SchemaType, Table,
+    TableOperation, View, ViewCreateRequest, ViewQuery,
 };
 use readyset_data::{DfType, DfValue, Dialect};
-use readyset_errors::ReadySetError::PreparedStatementMissing;
+use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
 use readyset_errors::{
-    internal, internal_err, invariant_eq, table_err, unsupported, unsupported_err,
+    internal, internal_err, invariant_eq, table_err, unsupported, unsupported_err, ReadySetResult,
 };
 use readyset_server::worker::readers::{CallResult, ReadRequestHandler};
 use readyset_sql_passes::anonymize::anonymize_literals;

@@ -19,9 +19,11 @@ use readyset_client::failpoints;
 use readyset_client::metrics::recorded::{self, SnapshotStatusTag};
 use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::replication::{ReplicationOffset, ReplicationOffsets};
-use readyset_client::{ReadySetError, ReadySetHandle, ReadySetResult, Table, TableOperation};
+use readyset_client::{ReadySetHandle, Table, TableOperation};
 use readyset_data::Dialect;
-use readyset_errors::{internal_err, invalid_err, set_failpoint_return_err};
+use readyset_errors::{
+    internal_err, invalid_err, set_failpoint_return_err, ReadySetError, ReadySetResult,
+};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 use readyset_tracing::{debug, error, info, trace, warn};
 use readyset_util::select;

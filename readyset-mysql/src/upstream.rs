@@ -25,7 +25,7 @@ use readyset_adapter::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
 use readyset_client::ColumnSchema;
 use readyset_client_metrics::QueryDestination;
 use readyset_data::DfValue;
-use readyset_errors::{internal_err, ReadySetError};
+use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
 use readyset_tracing::{error, info};
 use tracing::{info_span, Instrument};
 
@@ -38,9 +38,7 @@ type StatementID = u32;
 /// during connection phase if the version for the upstream server is too low.
 const MIN_UPSTREAM_VERSION: u16 = 8;
 
-fn dt_to_value_params(
-    dt: &[DfValue],
-) -> Result<Vec<mysql_async::Value>, readyset_client::ReadySetError> {
+fn dt_to_value_params(dt: &[DfValue]) -> ReadySetResult<Vec<mysql_async::Value>> {
     dt.iter().map(|v| v.try_into()).collect()
 }
 

@@ -570,8 +570,9 @@ fn get_reader_from_cache<'a>(
 #[cfg(test)]
 mod readreply {
     use readyset_client::results::SharedResults;
-    use readyset_client::{LookupResult, ReadReply, ReadReplyStats, ReadySetError, Tagged};
+    use readyset_client::{LookupResult, ReadReply, ReadReplyStats, Tagged};
     use readyset_data::DfValue;
+    use readyset_errors::ReadySetError;
 
     use super::*;
 
