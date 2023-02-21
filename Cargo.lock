@@ -324,6 +324,7 @@ dependencies = [
  "readyset-mysql",
  "readyset-server",
  "readyset-tracing",
+ "readyset-util",
  "reqwest",
  "serde",
  "serde_json",
@@ -4417,6 +4418,7 @@ dependencies = [
  "readyset-psql",
  "readyset-server",
  "readyset-tracing",
+ "readyset-util",
  "tokio",
  "tokio-postgres",
  "tracing",
@@ -4639,6 +4641,7 @@ dependencies = [
  "readyset-psql",
  "readyset-server",
  "readyset-tracing",
+ "readyset-util",
  "rust_decimal",
  "tempfile",
  "thiserror",
@@ -4843,7 +4846,6 @@ dependencies = [
  "sha1 0.10.1",
  "slab",
  "strawpoll",
- "stream-cancel",
  "streaming-iterator",
  "tempfile",
  "test-strategy",
@@ -5737,17 +5739,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b2fbf5804ba7164e6df8af32e95684b02ce5a014fa903e16e4c71253bcade72"
 dependencies = [
  "futures-task",
-]
-
-[[package]]
-name = "stream-cancel"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b0a9eb2715209fb8cc0d942fcdff45674bfc9f0090a0d897e85a22955ad159b"
-dependencies = [
- "futures-core",
- "pin-project",
- "tokio",
 ]
 
 [[package]]

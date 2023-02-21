@@ -18,6 +18,7 @@ use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
 use readyset_client_test_helpers::TestBuilder;
 use readyset_server::Handle;
 use readyset_tracing::warn;
+use readyset_util::shutdown::ShutdownSender;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
@@ -183,7 +184,10 @@ impl BenchmarkRunner {
 
     // Creates a local deployment that may include an external upstream database. This does not
     // mutate the upstream database when --skip-setup is passed.
-    pub async fn start_local(&self, mysql_addr: Option<String>) -> (DeploymentParameters, Handle) {
+    pub async fn start_local(
+        &self,
+        mysql_addr: Option<String>,
+    ) -> (DeploymentParameters, Handle, ShutdownSender) {
         let mut test_builder = TestBuilder::new(
             BackendBuilder::default()
                 .unsupported_set_mode(UnsupportedSetMode::Allow)
@@ -197,7 +201,7 @@ impl BenchmarkRunner {
             test_builder = test_builder.fallback_url(addr.clone());
         }
 
-        let (mysql_opts, handle) = test_builder.build::<MySQLAdapter>().await;
+        let (mysql_opts, handle, shutdown_tx) = test_builder.build::<MySQLAdapter>().await;
 
         let target_conn_str = format!(
             "mysql://{}:{}",
@@ -214,6 +218,7 @@ impl BenchmarkRunner {
                 ..Default::default()
             },
             handle,
+            shutdown_tx,
         )
     }
 
@@ -247,7 +252,9 @@ impl BenchmarkRunner {
         }
     }
 
-    pub async fn initialize_from_args(&mut self) -> anyhow::Result<Option<Handle>> {
+    pub async fn initialize_from_args(
+        &mut self,
+    ) -> anyhow::Result<Option<(Handle, ShutdownSender)>> {
         if let Some(f) = &self.benchmark {
             self.warn_if_benchmark_params();
 
@@ -262,8 +269,8 @@ impl BenchmarkRunner {
 
         let (params, handle) = if self.local_with_mysql.is_some() {
             self.warn_if_deployment_params("local-with-mysql");
-            let (params, h) = self.start_local(self.local_with_mysql.clone()).await;
-            (params, Some(h))
+            let (params, h, shutdown_tx) = self.start_local(self.local_with_mysql.clone()).await;
+            (params, Some((h, shutdown_tx)))
         } else if self.local {
             self.warn_if_deployment_params("local");
 
@@ -271,8 +278,8 @@ impl BenchmarkRunner {
                 warn!("Ignoring --skip-setup as --local requires setup");
             }
 
-            let (params, h) = self.start_local(None).await;
-            (params, Some(h))
+            let (params, h, shutdown_tx) = self.start_local(None).await;
+            (params, Some((h, shutdown_tx)))
         } else if let Some(f) = &self.deployment {
             // Verify that the deployment is passed through some method.
             self.warn_if_deployment_params("deployment");
@@ -418,8 +425,8 @@ impl BenchmarkRunner {
                 .error_for_status()?;
         }
 
-        if let Some(mut h) = handle {
-            h.shutdown().await;
+        if let Some((_, shutdown_tx)) = handle {
+            shutdown_tx.shutdown().await;
         }
 
         Ok(())

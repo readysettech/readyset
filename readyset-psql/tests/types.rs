@@ -2,11 +2,12 @@ use readyset_adapter::backend::BackendBuilder;
 use readyset_client_test_helpers::psql_helpers::PostgreSQLAdapter;
 use readyset_client_test_helpers::TestBuilder;
 use readyset_server::Handle;
+use readyset_util::shutdown::ShutdownSender;
 
 mod common;
 use common::connect;
 
-async fn setup() -> (tokio_postgres::Config, Handle) {
+async fn setup() -> (tokio_postgres::Config, Handle, ShutdownSender) {
     TestBuilder::new(BackendBuilder::new().require_authentication(false))
         .fallback(true)
         .build::<PostgreSQLAdapter>()
@@ -43,7 +44,7 @@ mod types {
         V: ToSql + Sync + PartialEq,
         for<'a> V: FromSql<'a>,
     {
-        let (config, _handle) = setup().await;
+        let (config, _handle, shutdown_tx) = setup().await;
         let mut client = connect(config).await;
 
         sleep().await;
@@ -95,6 +96,8 @@ mod types {
                 .get::<_, V>(0);
             assert_eq!(fallback_result, val);
         }
+
+        shutdown_tx.shutdown().await;
     }
 
     macro_rules! test_types {
@@ -160,7 +163,7 @@ mod types {
     #[tokio::test(flavor = "multi_thread")]
     #[serial_test::serial]
     async fn regclass() {
-        let (config, _handle) = setup().await;
+        let (config, _handle, shutdown_tx) = setup().await;
         let client = connect(config).await;
 
         client
@@ -173,6 +176,8 @@ mod types {
             .await
             .unwrap()
             .get::<_, DfValue>(0);
+
+        shutdown_tx.shutdown().await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -191,7 +196,7 @@ mod types {
             .unwrap()
             .get(0);
 
-        let (config, _handle) = setup().await;
+        let (config, _handle, shutdown_tx) = setup().await;
         let client = connect(config).await;
 
         let typinput: DfValue = client
@@ -210,13 +215,15 @@ mod types {
             .unwrap()
             .get(0);
         assert_eq!(typname, "bool");
+
+        shutdown_tx.shutdown().await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
     #[serial_test::serial]
     async fn enums() {
         readyset_tracing::init_test_logging();
-        let (config, _handle) = setup().await;
+        let (config, _handle, shutdown_tx) = setup().await;
         let client = connect(config.clone()).await;
 
         client
@@ -658,13 +665,15 @@ mod types {
             last_query_info(&client).await.destination,
             QueryDestination::Readyset
         );
+
+        shutdown_tx.shutdown().await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
     #[serial_test::serial]
     async fn alter_enum_complex_variant_changes() {
         readyset_tracing::init_test_logging();
-        let (config, _handle) = setup().await;
+        let (config, _handle, shutdown_tx) = setup().await;
         let client = connect(config.clone()).await;
 
         client
@@ -739,13 +748,15 @@ mod types {
             post_insert_value_res,
             vec![Abc::A, Abc::A, Abc::AB, Abc::B, Abc::C]
         );
+
+        shutdown_tx.shutdown().await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
     #[serial_test::serial]
     async fn citext() {
         readyset_tracing::init_test_logging();
-        let (config, _handle) = setup().await;
+        let (config, _handle, shutdown_tx) = setup().await;
         let client = connect(config.clone()).await;
 
         client
@@ -774,5 +785,7 @@ mod types {
             last_query_info(&client).await.destination,
             QueryDestination::Readyset
         );
+
+        shutdown_tx.shutdown().await;
     }
 }

@@ -50,3 +50,4 @@ query-generator = { path = "../query-generator" }
 mysql-time = { path = "../mysql-time" }
 readyset-tracing = { path = "../readyset-tracing" }
 readyset-data = { path = "../readyset-data" }
+readyset-util = { path = "../readyset-util" }

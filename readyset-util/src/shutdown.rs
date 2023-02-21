@@ -110,6 +110,11 @@ impl ShutdownSender {
             panic!("shutdown process timed out: is every `ShutdownReceiver` listening for a shutdown signal?");
         }
     }
+
+    /// Creates a new `ShutdownReceiver` registered with the given `ShutdownSender`.
+    pub fn subscribe(&self) -> ShutdownReceiver {
+        ShutdownReceiver(self.0.subscribe())
+    }
 }
 
 /// A struct that can be used to wait for a shutdown signal from a [`ShutdownSender`]. A

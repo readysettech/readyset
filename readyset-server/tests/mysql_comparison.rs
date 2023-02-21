@@ -271,7 +271,7 @@ async fn check_query(
         .chain(Some(query_name.to_owned() + ": " + &query.select_query))
         .collect();
 
-    let mut g = Builder::default().start_local().await.unwrap();
+    let (mut g, shutdown_tx) = Builder::default().start_local().await.unwrap();
     g.extend_recipe(ChangeList::from_str(queries.join("\n"), Dialect::DEFAULT_MYSQL).unwrap())
         .await
         .unwrap();
@@ -339,7 +339,7 @@ async fn check_query(
             ));
         }
     }
-    g.shutdown().await;
+    shutdown_tx.shutdown().await;
     Ok(())
 }
 

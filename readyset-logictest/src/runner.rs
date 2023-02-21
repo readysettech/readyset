@@ -24,6 +24,7 @@ use readyset_client::{ReadySetHandle, ViewCreateRequest};
 use readyset_mysql::{MySqlQueryHandler, MySqlUpstream};
 use readyset_psql::{PostgreSqlQueryHandler, PostgreSqlUpstream};
 use readyset_server::{Builder, LocalAuthority, ReuseConfigType};
+use readyset_util::shutdown::ShutdownSender;
 use tokio::time::sleep;
 use {mysql_async as mysql, tokio_postgres as pgsql};
 
@@ -212,7 +213,7 @@ impl TestScript {
         opts: &RunOptions,
         noria_opts: &NoriaOptions,
     ) -> anyhow::Result<()> {
-        let mut noria_handle = self
+        let (noria_handle, shutdown_tx) = self
             .start_noria_server(opts, noria_opts.authority.clone())
             .await;
         let (adapter_task, db_url) = self.setup_adapter(opts, noria_opts.authority.clone()).await;
@@ -230,7 +231,7 @@ impl TestScript {
         let _ = adapter_task.await;
 
         // Stop ReadySet
-        noria_handle.shutdown().await;
+        shutdown_tx.shutdown().await;
 
         Ok(())
     }
@@ -447,7 +448,7 @@ impl TestScript {
         &self,
         run_opts: &RunOptions,
         authority: Arc<Authority>,
-    ) -> readyset_server::Handle {
+    ) -> (readyset_server::Handle, ShutdownSender) {
         let mut retry: usize = 0;
         loop {
             retry += 1;
@@ -472,7 +473,7 @@ impl TestScript {
 
             builder.set_persistence(persistence);
 
-            let mut noria = match builder.start(Arc::clone(&authority)).await {
+            let (mut noria, shutdown_tx) = match builder.start(Arc::clone(&authority)).await {
                 Ok(builder) => builder,
                 Err(err) => {
                     // This can error out if there are too many open files, but if we wait a bit
@@ -485,7 +486,7 @@ impl TestScript {
                 }
             };
             noria.backend_ready().await;
-            return noria;
+            return (noria, shutdown_tx);
         }
     }
 

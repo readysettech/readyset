@@ -1,13 +1,12 @@
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
-use std::time::Duration;
 
 use dataflow::prelude::*;
 use readyset_client::consensus::Authority;
 use readyset_client::prelude::*;
 use readyset_data::Dialect;
+#[cfg(feature = "failure_injection")]
 use readyset_tracing::info;
-use readyset_util::shutdown::ShutdownSender;
 use reqwest::Url;
 use tokio::sync::mpsc::Sender;
 
@@ -23,7 +22,6 @@ pub struct Handle {
     #[allow(dead_code)]
     event_tx: Option<Sender<HandleRequest>>,
     descriptor: ControllerDescriptor,
-    shutdown_tx: Option<ShutdownSender>,
 }
 
 impl Deref for Handle {
@@ -44,14 +42,12 @@ impl Handle {
         authority: Arc<Authority>,
         event_tx: Sender<HandleRequest>,
         descriptor: ControllerDescriptor,
-        shutdown_tx: ShutdownSender,
     ) -> Self {
         let c = ReadySetHandle::make(authority, None, None);
         Handle {
             c: Some(c),
             event_tx: Some(event_tx),
             descriptor,
-            shutdown_tx: Some(shutdown_tx),
         }
     }
 
@@ -116,20 +112,6 @@ impl Handle {
 
         fin_rx.await.unwrap().unwrap();
         ret_rx.await.unwrap()
-    }
-
-    /// Inform the local instance that it should exit. This method will wait up to 20 seconds for
-    /// every background task to shut down.
-    ///
-    /// # Panics
-    ///
-    /// If the background tasks take longer than 20 seconds to shutdown, this method will panic.
-    pub async fn shutdown(&mut self) {
-        if let Some(shutdown_tx) = self.shutdown_tx.take() {
-            info!("Waiting up to 20 seconds for controller background tasks to shut down");
-            shutdown_tx.shutdown_timeout(Duration::from_secs(20)).await;
-        }
-        drop(self.c.take());
     }
 
     #[cfg(feature = "failure_injection")]

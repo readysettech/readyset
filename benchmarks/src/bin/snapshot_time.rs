@@ -41,7 +41,7 @@ impl SnapshotBenchmark {
             builder.set_replication_url(self.replication_url.clone());
 
             let start = Instant::now();
-            let mut noria = builder.start_local().await?;
+            let (mut noria, shutdown_tx) = builder.start_local().await?;
             noria.backend_ready().await;
 
             println!("Snapshot time:     {} s", start.elapsed().as_secs());
@@ -62,7 +62,7 @@ impl SnapshotBenchmark {
                 println!("Disk space used:   {:.2} MiB", tables_size_metric_mib());
             }
 
-            noria.shutdown().await;
+            shutdown_tx.shutdown().await;
         }
 
         Ok(())

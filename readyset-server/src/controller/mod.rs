@@ -1105,7 +1105,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn remove_query() {
-        let mut noria = start_simple("remove_query").await;
+        let (mut noria, shutdown_tx) = start_simple("remove_query").await;
         noria
             .extend_recipe(
                 ChangeList::from_str(
@@ -1125,11 +1125,13 @@ mod tests {
 
         let queries = noria.views().await.unwrap();
         assert!(!queries.contains_key(&"test_query".into()));
+
+        shutdown_tx.shutdown().await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn remove_all_queries() {
-        let mut noria = start_simple("remove_all_queries").await;
+        let (mut noria, shutdown_tx) = start_simple("remove_all_queries").await;
         noria
             .extend_recipe(
                 ChangeList::from_str(
@@ -1151,11 +1153,13 @@ mod tests {
 
         let queries = noria.views().await.unwrap();
         assert!(queries.is_empty());
+
+        shutdown_tx.shutdown().await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn replication_offsets() {
-        let mut noria = start_simple("all_tables").await;
+        let (mut noria, shutdown_tx) = start_simple("all_tables").await;
 
         let offset = ReplicationOffset {
             offset: 1,
@@ -1202,11 +1206,13 @@ mod tests {
         assert_eq!(offsets.tables[&"t1".into()].as_ref().unwrap().offset, 2);
         assert_eq!(offsets.tables[&"t2".into()].as_ref().unwrap().offset, 3);
         assert_eq!(offsets.tables[&"t3".into()], None);
+
+        shutdown_tx.shutdown().await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn key_count_rpc() {
-        let mut noria = start_simple("all_tables").await;
+        let (mut noria, shutdown_tx) = start_simple("all_tables").await;
 
         noria
             .extend_recipe(
@@ -1249,11 +1255,13 @@ mod tests {
             assert_eq!(key_counts[&table_idx].key_count, KeyCount::EstimatedRowCount(1));
             assert_eq!(key_counts[&view_idx].key_count, KeyCount::ExactKeyCount(1));
         });
+
+        shutdown_tx.shutdown().await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn view_statuses() {
-        let mut noria = start_simple("view_statuses").await;
+        let (mut noria, shutdown_tx) = start_simple("view_statuses").await;
 
         let query1 = parse_select_statement(Dialect::MySQL, "SELECT * FROM t1").unwrap();
         let query2 = parse_select_statement(Dialect::MySQL, "SELECT * FROM t2").unwrap();
@@ -1345,11 +1353,13 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(res3, vec![false]);
+
+        shutdown_tx.shutdown().await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn non_replicated_relations() {
-        let mut noria = start_simple("non_replicated_tables").await;
+        let (mut noria, shutdown_tx) = start_simple("non_replicated_tables").await;
         noria
             .extend_recipe(ChangeList::from_changes(
                 vec![
@@ -1381,11 +1391,13 @@ mod tests {
                 },
             ])
         );
+
+        shutdown_tx.shutdown().await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn table_statuses() {
-        let mut noria = start_simple("table_status").await;
+        let (mut noria, shutdown_tx) = start_simple("table_status").await;
         noria
             .extend_recipe(ChangeList::from_changes(
                 vec![
@@ -1473,5 +1485,7 @@ mod tests {
                 ),
             ])
         );
+
+        shutdown_tx.shutdown().await;
     }
 }

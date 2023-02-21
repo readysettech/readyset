@@ -15,6 +15,7 @@ use readyset_adapter::{Backend, QueryHandler, UpstreamConfig, UpstreamDatabase};
 use readyset_client::consensus::{Authority, LocalAuthorityStore};
 use readyset_client::ViewCreateRequest;
 use readyset_server::{Builder, Handle, LocalAuthority, ReadySetHandle};
+use readyset_util::shutdown::ShutdownSender;
 use tokio::net::{TcpListener, TcpStream};
 
 #[cfg(feature = "mysql")]
@@ -123,7 +124,7 @@ impl TestBuilder {
         self
     }
 
-    pub async fn build<A>(self) -> (A::ConnectionOpts, Handle)
+    pub async fn build<A>(self) -> (A::ConnectionOpts, Handle, ShutdownSender)
     where
         A: Adapter + 'static,
     {
@@ -158,7 +159,7 @@ impl TestBuilder {
         if let Some(f) = &fallback_url {
             builder.set_replication_url(f.clone());
         }
-        let mut handle = builder.start(authority.clone()).await.unwrap();
+        let (mut handle, shutdown_tx) = builder.start(authority.clone()).await.unwrap();
         if self.wait_for_backend {
             handle.backend_ready().await;
         }
@@ -168,49 +169,68 @@ impl TestBuilder {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
 
+        let mut backend_shutdown_rx = shutdown_tx.subscribe();
         tokio::spawn(async move {
-            loop {
-                let (s, _) = listener.accept().await.unwrap();
-                let query_cache = query_cache.clone();
-                let backend_builder = self.backend_builder.clone();
-                let auto_increments = auto_increments.clone();
-                let authority = authority.clone();
+            let backend_shutdown_rx_connection = backend_shutdown_rx.clone();
+            let connection_fut = async move {
+                loop {
+                    let (s, _) = listener.accept().await.unwrap();
+                    let query_cache = query_cache.clone();
+                    let backend_builder = self.backend_builder.clone();
+                    let auto_increments = auto_increments.clone();
+                    let authority = authority.clone();
 
-                // backend either has upstream or noria writer
-                let mut upstream = if let Some(f) = &fallback_url {
-                    Some(A::make_upstream(f.clone()).await)
-                } else {
-                    None
-                };
+                    // backend either has upstream or noria writer
+                    let mut upstream = if let Some(f) = &fallback_url {
+                        Some(A::make_upstream(f.clone()).await)
+                    } else {
+                        None
+                    };
 
-                let schema_search_path = if let Some(upstream) = &mut upstream {
-                    upstream.schema_search_path().await.unwrap()
-                } else {
-                    Default::default()
-                };
+                    let schema_search_path = if let Some(upstream) = &mut upstream {
+                        upstream.schema_search_path().await.unwrap()
+                    } else {
+                        Default::default()
+                    };
 
-                let mut rh = ReadySetHandle::new(authority).await;
-                let server_supports_pagination = rh.supports_pagination().await.unwrap();
-                let noria = NoriaConnector::new(
-                    rh,
-                    auto_increments,
-                    query_cache,
-                    self.read_behavior,
-                    A::EXPR_DIALECT,
-                    schema_search_path,
-                    server_supports_pagination,
-                )
-                .await;
+                    let mut rh = ReadySetHandle::new(authority).await;
+                    let server_supports_pagination = rh.supports_pagination().await.unwrap();
+                    let noria = NoriaConnector::new(
+                        rh,
+                        auto_increments,
+                        query_cache,
+                        self.read_behavior,
+                        A::EXPR_DIALECT,
+                        schema_search_path,
+                        server_supports_pagination,
+                    )
+                    .await;
 
-                let backend = backend_builder
-                    .dialect(A::DIALECT)
-                    .migration_mode(self.migration_mode)
-                    .build(noria, upstream, query_status_cache);
+                    let backend = backend_builder
+                        .dialect(A::DIALECT)
+                        .migration_mode(self.migration_mode)
+                        .build(noria, upstream, query_status_cache);
 
-                tokio::spawn(A::run_backend(backend, s));
+                    let mut backend_shutdown_rx_clone = backend_shutdown_rx_connection.clone();
+                    tokio::spawn(async move {
+                        tokio::select! {
+                            _ = A::run_backend(backend, s) => {},
+                            _ = backend_shutdown_rx_clone.recv() => {},
+                        }
+                    });
+                }
+            };
+
+            tokio::select! {
+                _ = connection_fut => {},
+                _ = backend_shutdown_rx.recv() => {},
             }
         });
 
-        (A::connection_opts_with_port(addr.port()), handle)
+        (
+            A::connection_opts_with_port(addr.port()),
+            handle,
+            shutdown_tx,
+        )
     }
 }

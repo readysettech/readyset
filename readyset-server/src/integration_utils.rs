@@ -9,6 +9,7 @@ use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore}
 use readyset_client::metrics::client::MetricsClient;
 use readyset_client::metrics::{DumpedMetric, DumpedMetricValue, MetricsDump};
 use readyset_errors::{ReadySetError, ReadySetResult};
+use readyset_util::shutdown::ShutdownSender;
 
 use crate::metrics::{
     get_global_recorder, install_global_recorder, CompositeMetricsRecorder, MetricsRecorder,
@@ -44,17 +45,17 @@ pub fn get_persistence_params_in_tmp_dir(prefix: &str, tmpdir: &str) -> Persiste
 }
 
 /// Builds a local worker.
-pub async fn start_simple(prefix: &str) -> Handle {
+pub async fn start_simple(prefix: &str) -> (Handle, ShutdownSender) {
     build(prefix, Some(DEFAULT_SHARDING), None).await
 }
 
 #[allow(dead_code)]
 /// Builds a local worker without sharding.
-pub async fn start_simple_unsharded(prefix: &str) -> Handle {
+pub async fn start_simple_unsharded(prefix: &str) -> (Handle, ShutdownSender) {
     build(prefix, None, None).await
 }
 
-pub async fn start_simple_reuse_unsharded(prefix: &str) -> Handle {
+pub async fn start_simple_reuse_unsharded(prefix: &str) -> (Handle, ShutdownSender) {
     let authority_store = Arc::new(LocalAuthorityStore::new());
     let authority = Arc::new(Authority::from(LocalAuthority::new_with_store(
         authority_store,
@@ -74,7 +75,7 @@ pub async fn build(
     prefix: &str,
     sharding: Option<usize>,
     eviction: Option<(usize, Duration)>,
-) -> Handle {
+) -> (Handle, ShutdownSender) {
     let authority_store = Arc::new(LocalAuthorityStore::new());
     build_custom(
         prefix,
@@ -97,7 +98,7 @@ pub async fn build_custom(
     authority: Arc<Authority>,
     reader_only: bool,
     eviction: Option<(usize, Duration)>,
-) -> Handle {
+) -> (Handle, ShutdownSender) {
     readyset_tracing::init_test_logging();
     let mut builder = Builder::for_tests();
     builder.set_sharding(sharding);

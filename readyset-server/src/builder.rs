@@ -10,7 +10,7 @@ use readyset_client::consensus::{
     WorkerSchedulingConfig,
 };
 use readyset_telemetry_reporter::TelemetrySender;
-use readyset_util::shutdown;
+use readyset_util::shutdown::{self, ShutdownSender};
 
 use crate::controller::replication::ReplicationStrategy;
 use crate::handle::Handle;
@@ -307,11 +307,12 @@ impl Builder {
         self.wait_for_failpoint = value;
     }
 
-    /// Start a server instance and return a handle to it.
+    /// Start a server instance and return a handle to it. This method also returns a
+    /// [`ShutdownSender`] that should be used to shut down the server when it is no longer needed.
     pub fn start(
         self,
         authority: Arc<Authority>,
-    ) -> impl Future<Output = Result<Handle, anyhow::Error>> {
+    ) -> impl Future<Output = Result<(Handle, ShutdownSender), anyhow::Error>> {
         let Builder {
             listen_addr,
             external_addr,
@@ -340,13 +341,15 @@ impl Builder {
         )
     }
 
-    /// Start a server instance with readers already created and return a handle to it.
-    pub fn start_with_readers(
+    /// Start a server instance with readers already created and return a handle to it. This method
+    /// also returns a [`ShutdownSender`] that should be used to shut down the server when it is no
+    /// longer needed.
+    pub async fn start_with_readers(
         self,
         authority: Arc<Authority>,
         readers: dataflow::Readers,
         reader_addr: SocketAddr,
-    ) -> impl Future<Output = Result<Handle, anyhow::Error>> {
+    ) -> Result<(Handle, ShutdownSender), anyhow::Error> {
         let Builder {
             listen_addr,
             external_addr,
@@ -362,7 +365,7 @@ impl Builder {
         let config = config.clone();
         let (shutdown_tx, shutdown_rx) = shutdown::channel();
 
-        crate::startup::start_instance_inner(
+        let controller = crate::startup::start_instance_inner(
             authority,
             listen_addr,
             external_addr,
@@ -375,31 +378,38 @@ impl Builder {
             reader_addr,
             telemetry,
             wait_for_failpoint,
-            shutdown_tx,
             shutdown_rx,
         )
+        .await?;
+
+        Ok((controller, shutdown_tx))
     }
 
-    /// Start a local-only worker, and return a handle to it.
-    pub fn start_local(self) -> impl Future<Output = Result<Handle, anyhow::Error>> {
+    /// Start a local-only worker, and return a handle to it. This method also returns a
+    /// [`ShutdownSender`] that should be used to shut down the server when it is no longer needed.
+    pub fn start_local(
+        self,
+    ) -> impl Future<Output = Result<(Handle, ShutdownSender), anyhow::Error>> {
         let store = Arc::new(LocalAuthorityStore::new());
         self.start_local_custom(Arc::new(Authority::from(LocalAuthority::new_with_store(
             store,
         ))))
     }
 
-    /// Start a local-only worker using a custom authority, and return a handle to it.
+    /// Start a local-only worker using a custom authority, and return a handle to it. This method
+    /// also returns a [`ShutdownSender`] that should be used to shut down the server when it is no
+    /// longer needed.
     pub fn start_local_custom(
         self,
         authority: Arc<Authority>,
-    ) -> impl Future<Output = Result<Handle, anyhow::Error>> {
+    ) -> impl Future<Output = Result<(Handle, ShutdownSender), anyhow::Error>> {
         let fut = self.start(authority);
         async move {
             #[allow(unused_mut)]
-            let mut wh = fut.await?;
+            let (mut wh, shutdown_tx) = fut.await?;
             #[cfg(test)]
             wh.backend_ready().await;
-            Ok(wh)
+            Ok((wh, shutdown_tx))
         }
     }
 }

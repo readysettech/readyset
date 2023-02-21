@@ -7,6 +7,7 @@ use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::mysql_helpers::{last_query_info, MySQLAdapter};
 use readyset_client_test_helpers::{sleep, TestBuilder};
 use readyset_server::Handle;
+use readyset_util::shutdown::ShutdownSender;
 use serial_test::serial;
 
 pub async fn setup(
@@ -14,7 +15,7 @@ pub async fn setup(
     fallback: bool,
     migration_mode: MigrationMode,
     set_mode: UnsupportedSetMode,
-) -> (mysql_async::Opts, Handle) {
+) -> (mysql_async::Opts, Handle, ShutdownSender) {
     TestBuilder::new(
         BackendBuilder::default()
             .require_authentication(false)
@@ -34,7 +35,7 @@ pub async fn setup(
 #[serial]
 async fn in_request_path_query_with_fallback() {
     let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
-    let (opts, _handle) = setup(
+    let (opts, _handle, shutdown_tx) = setup(
         query_status_cache,
         true, // fallback enabled
         MigrationMode::InRequestPath,
@@ -71,6 +72,8 @@ async fn in_request_path_query_with_fallback() {
         last_query_info(&mut conn).await.destination,
         QueryDestination::Upstream
     );
+
+    shutdown_tx.shutdown().await;
 }
 
 // With in_request_path query mode without fallback, a supported query should execute on ReadySet
@@ -80,7 +83,7 @@ async fn in_request_path_query_with_fallback() {
 #[serial]
 async fn in_request_path_query_without_fallback() {
     let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
-    let (opts, _handle) = setup(
+    let (opts, _handle, shutdown_tx) = setup(
         query_status_cache,
         false, // fallback disabled
         MigrationMode::InRequestPath,
@@ -101,6 +104,8 @@ async fn in_request_path_query_without_fallback() {
     res.unwrap_err(); // Unable to handle this unsupported query.
     assert_eq!(query_status_cache.allow_list().len(), 1);
     assert_eq!(query_status_cache.deny_list().len(), 1);
+
+    shutdown_tx.shutdown().await;
 }
 
 // With the out_of_band query mode and fallback, both supported and unsupported
@@ -111,7 +116,7 @@ async fn in_request_path_query_without_fallback() {
 #[serial]
 async fn out_of_band_query_with_fallback() {
     let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
-    let (opts, _handle) = setup(
+    let (opts, _handle, shutdown_tx) = setup(
         query_status_cache,
         true, // fallback enabled
         MigrationMode::OutOfBand,
@@ -153,13 +158,15 @@ async fn out_of_band_query_with_fallback() {
         last_query_info(&mut conn).await.destination,
         QueryDestination::Readyset
     );
+
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn autocommit_state_query() {
     let _query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
-    let (opts, _handle) = setup(
+    let (opts, _handle, shutdown_tx) = setup(
         _query_status_cache,
         true, // fallback enabled
         MigrationMode::OutOfBand,
@@ -263,6 +270,8 @@ async fn autocommit_state_query() {
         .unwrap()
         .unwrap();
     assert_eq!(destination.destination, QueryDestination::Readyset);
+
+    shutdown_tx.shutdown().await;
 }
 
 // This is particularly challenging to test because the way that mysql_async works, is if the
@@ -275,7 +284,7 @@ async fn autocommit_state_query() {
 #[serial]
 async fn autocommit_prepare_execute() {
     let _query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
-    let (opts, _handle) = setup(
+    let (opts, _handle, shutdown_tx) = setup(
         _query_status_cache,
         true, // fallback enabled
         MigrationMode::OutOfBand,
@@ -351,6 +360,8 @@ async fn autocommit_prepare_execute() {
         .unwrap()
         .unwrap();
     assert_eq!(destination.destination, QueryDestination::Readyset);
+
+    shutdown_tx.shutdown().await;
 }
 
 // With in_request_path migration and fallback, a supported query should execute on ReadySet
@@ -360,7 +371,7 @@ async fn autocommit_prepare_execute() {
 #[serial]
 async fn in_request_path_prep_exec_with_fallback() {
     let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
-    let (opts, _handle) = setup(
+    let (opts, _handle, shutdown_tx) = setup(
         query_status_cache,
         true, // fallback enabled
         MigrationMode::InRequestPath,
@@ -429,6 +440,8 @@ async fn in_request_path_prep_exec_with_fallback() {
         last_query_info(&mut conn).await.destination,
         QueryDestination::Upstream
     );
+
+    shutdown_tx.shutdown().await;
 }
 
 // With in_request_path query mode without fallback, a supported query should execute on ReadySet
@@ -438,7 +451,7 @@ async fn in_request_path_prep_exec_with_fallback() {
 #[serial]
 async fn in_request_path_prep_without_fallback() {
     let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
-    let (opts, _handle) = setup(
+    let (opts, _handle, shutdown_tx) = setup(
         query_status_cache,
         false, // fallback disabled
         MigrationMode::InRequestPath,
@@ -459,6 +472,8 @@ async fn in_request_path_prep_without_fallback() {
     res.unwrap_err(); // Unable to handle this unsupported query.
     assert_eq!(query_status_cache.allow_list().len(), 1);
     assert_eq!(query_status_cache.deny_list().len(), 1);
+
+    shutdown_tx.shutdown().await;
 }
 
 // With the out_of_band query mode and fallback, both supported and unsupported
@@ -469,7 +484,7 @@ async fn in_request_path_prep_without_fallback() {
 #[serial]
 async fn out_of_band_prep_exec_with_fallback() {
     let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
-    let (opts, _handle) = setup(
+    let (opts, _handle, shutdown_tx) = setup(
         query_status_cache,
         true, // fallback enabled
         MigrationMode::OutOfBand,
@@ -555,6 +570,8 @@ async fn out_of_band_prep_exec_with_fallback() {
         last_query_info(&mut conn).await.destination,
         QueryDestination::Upstream
     );
+
+    shutdown_tx.shutdown().await;
 }
 
 // Allow migrations within the request path. Both migrations, the CREATE QUERY
@@ -565,7 +582,7 @@ async fn out_of_band_prep_exec_with_fallback() {
 #[serial]
 async fn in_request_path_rewritten_query_without_fallback() {
     let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
-    let (opts, _handle) = setup(
+    let (opts, _handle, shutdown_tx) = setup(
         query_status_cache,
         false, // fallback disabled
         MigrationMode::InRequestPath,
@@ -588,6 +605,8 @@ async fn in_request_path_rewritten_query_without_fallback() {
     res.unwrap(); // Executed successfully against fallback.
     assert_eq!(query_status_cache.allow_list().len(), 1);
     assert_eq!(query_status_cache.deny_list().len(), 0);
+
+    shutdown_tx.shutdown().await;
 }
 
 // With the out_of_band query mode without fallback, queries that are not
@@ -598,7 +617,7 @@ async fn in_request_path_rewritten_query_without_fallback() {
 #[serial]
 async fn out_of_band_rewritten_query_without_fallback() {
     let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
-    let (opts, _handle) = setup(
+    let (opts, _handle, shutdown_tx) = setup(
         query_status_cache,
         false, // fallback disabled
         MigrationMode::OutOfBand,
@@ -621,12 +640,14 @@ async fn out_of_band_rewritten_query_without_fallback() {
     res.unwrap(); // Executed successfully against fallback.
     assert_eq!(query_status_cache.allow_list().len(), 1);
     assert_eq!(query_status_cache.deny_list().len(), 0);
+
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn drop_all_caches() {
     let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
-    let (opts, _handle) = setup(
+    let (opts, _handle, shutdown_tx) = setup(
         query_status_cache,
         false, // fallback disabled
         MigrationMode::OutOfBand,
@@ -653,4 +674,6 @@ async fn drop_all_caches() {
 
     assert_eq!(query_status_cache.allow_list().len(), 0);
     assert_eq!(query_status_cache.deny_list().len(), 0);
+
+    shutdown_tx.shutdown().await;
 }

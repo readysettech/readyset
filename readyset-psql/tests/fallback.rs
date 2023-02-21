@@ -4,6 +4,7 @@ use readyset_adapter::BackendBuilder;
 use readyset_client_test_helpers::psql_helpers::{upstream_config, PostgreSQLAdapter};
 use readyset_client_test_helpers::{sleep, Adapter, TestBuilder};
 use readyset_server::Handle;
+use readyset_util::shutdown::ShutdownSender;
 use serial_test::serial;
 
 mod common;
@@ -11,7 +12,7 @@ use common::connect;
 use postgres_types::{FromSql, ToSql};
 use tokio_postgres::{Client, CommandCompleteContents, SimpleQueryMessage};
 
-async fn setup() -> (tokio_postgres::Config, Handle) {
+async fn setup() -> (tokio_postgres::Config, Handle, ShutdownSender) {
     TestBuilder::default()
         .fallback(true)
         .build::<PostgreSQLAdapter>()
@@ -21,7 +22,7 @@ async fn setup() -> (tokio_postgres::Config, Handle) {
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn create_table() {
-    let (config, _handle) = setup().await;
+    let (config, _handle, shutdown_tx) = setup().await;
     let client = connect(config).await;
 
     client
@@ -43,13 +44,15 @@ async fn create_table() {
         .await
         .unwrap()
         .get::<_, i32>(0);
-    assert_eq!(result, 1)
+    assert_eq!(result, 1);
+
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn delete_case_sensitive() {
-    for (opts, _handle) in [
+    for (opts, _handle, shutdown_tx) in [
         TestBuilder::default().build::<PostgreSQLAdapter>().await,
         setup().await,
     ] {
@@ -108,13 +111,15 @@ async fn delete_case_sensitive() {
             .await
             .unwrap();
         assert!(row.is_none());
+
+        shutdown_tx.shutdown().await;
     }
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn unsupported_query_ad_hoc() {
-    let (config, _handle) = setup().await;
+    let (config, _handle, shutdown_tx) = setup().await;
     let client = connect(config).await;
     let result = match client
         .simple_query("SELECT relname FROM pg_class WHERE oid = 'pg_type'::regclass")
@@ -129,13 +134,15 @@ async fn unsupported_query_ad_hoc() {
     };
 
     assert_eq!(result, "pg_type");
+
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 #[ignore] // needs proper detection of reads vs writes through fallback
 async fn prepare_execute_fallback() {
-    let (config, _handle) = setup().await;
+    let (config, _handle, shutdown_tx) = setup().await;
     let client = connect(config).await;
 
     client
@@ -159,12 +166,14 @@ async fn prepare_execute_fallback() {
         .unwrap();
     assert_eq!(res.len(), 1);
     assert_eq!(res[0].get::<_, i32>(0), 1);
+
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn proxy_unsupported_sets() {
-    let (config, _handle) = TestBuilder::new(
+    let (config, _handle, shutdown_tx) = TestBuilder::new(
         BackendBuilder::new()
             .unsupported_set_mode(UnsupportedSetMode::Proxy)
             .require_authentication(false),
@@ -185,12 +194,14 @@ async fn proxy_unsupported_sets() {
         res[0].get::<_, NaiveDate>(0),
         NaiveDate::from_ymd(2022, 3, 5)
     );
+
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn proxy_unsupported_type() {
-    let (config, _handle) = setup().await;
+    let (config, _handle, shutdown_tx) = setup().await;
     let client = connect(config).await;
 
     #[derive(PartialEq, Eq, Debug, ToSql, FromSql)]
@@ -226,6 +237,8 @@ async fn proxy_unsupported_type() {
         _ => panic!(),
     };
     assert_eq!(simple_res.get(0).unwrap(), "(1,2)");
+
+    shutdown_tx.shutdown().await;
 }
 
 #[cfg(feature = "failure_injection")]
@@ -233,7 +246,7 @@ async fn proxy_unsupported_type() {
 #[serial]
 async fn schema_resolution_with_unreplicated_tables() {
     readyset_tracing::init_test_logging();
-    let (config, mut handle) = setup().await;
+    let (config, mut handle, shutdown_tx) = setup().await;
     let client = connect(config).await;
 
     // s2 will exist in readyset
@@ -295,7 +308,9 @@ async fn schema_resolution_with_unreplicated_tables() {
         .get::<_, i32>(0);
     assert_eq!(result, 2);
 
-    assert!(last_statement_matches("readyset", "ok", &client).await)
+    assert!(last_statement_matches("readyset", "ok", &client).await);
+
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -344,7 +359,7 @@ async fn generated_columns() {
     // CommandComplete and 1 row should be returned
     assert_eq!(res.len(), 2);
 
-    let (opts, _handle) = TestBuilder::default()
+    let (opts, _handle, shutdown_tx) = TestBuilder::default()
         .recreate_database(false)
         .fallback_url(PostgreSQLAdapter::url())
         .migration_mode(MigrationMode::OutOfBand)
@@ -395,12 +410,13 @@ async fn generated_columns() {
     assert!(matches!(
         res[2],
         SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 2, .. })
-    ))
+    ));
+
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
-#[ignore = "ENG-2314: JoinError causing test flakiness"]
 async fn unsuported_numeric_scale() {
     // Tests that we handle tables that have NUMERIC values with scales > 28
     // by not snapshotting them and falling back to upstream
@@ -437,7 +453,7 @@ async fn unsuported_numeric_scale() {
     // CommandComplete and 1 row should be returned
     assert_eq!(res.len(), 2);
 
-    let (opts, _handle) = TestBuilder::default()
+    let (opts, _handle, shutdown_tx) = TestBuilder::default()
         .recreate_database(false)
         .fallback_url(PostgreSQLAdapter::url())
         .migration_mode(MigrationMode::OutOfBand)
@@ -488,13 +504,15 @@ async fn unsuported_numeric_scale() {
         res[2],
         SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 2, .. })
     ));
+
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 #[ignore = "ENG-2548 Test reproduces client panic due to known bug"]
 async fn add_column_then_read() {
-    let (config, _handle) = setup().await;
+    let (config, _handle, shutdown_tx) = setup().await;
     let client = connect(config).await;
 
     client
@@ -517,7 +535,9 @@ async fn add_column_then_read() {
         .await
         .unwrap()
         .get::<_, Option<String>>(1);
-    assert_eq!(result, None)
+    assert_eq!(result, None);
+
+    shutdown_tx.shutdown().await;
 }
 
 #[ignore = "ENG-2575 Test reproduces client error due to known bug"]
@@ -676,7 +696,7 @@ async fn replication_failure_ignores_table(failpoint: &str) {
     use nom_sql::Relation;
     use readyset_errors::ReadySetError;
 
-    let (config, mut handle) = TestBuilder::default()
+    let (config, mut handle, shutdown_tx) = TestBuilder::default()
         .recreate_database(false)
         .fallback_url(PostgreSQLAdapter::url())
         .migration_mode(MigrationMode::OutOfBand)
@@ -715,6 +735,8 @@ async fn replication_failure_ignores_table(failpoint: &str) {
     sleep().await;
 
     assert_table_ignored(&client).await;
+
+    shutdown_tx.shutdown().await;
 }
 
 #[cfg(feature = "failure_injection")]
@@ -746,7 +768,7 @@ async fn replication_failure_retries_if_failed_to_drop(failpoint: &str) {
     use readyset_errors::ReadySetError;
     use readyset_tracing::info;
 
-    let (config, mut handle) = TestBuilder::default()
+    let (config, mut handle, shutdown_tx) = TestBuilder::default()
         .recreate_database(false)
         .fallback_url(PostgreSQLAdapter::url())
         .migration_mode(MigrationMode::OutOfBand)
@@ -832,4 +854,6 @@ async fn replication_failure_retries_if_failed_to_drop(failpoint: &str) {
         })
         .collect();
     assert_eq!(result, expected);
+
+    shutdown_tx.shutdown().await;
 }

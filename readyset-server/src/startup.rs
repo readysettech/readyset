@@ -268,7 +268,6 @@ pub(crate) async fn start_instance_inner(
     reader_addr: SocketAddr,
     telemetry_sender: TelemetrySender,
     wait_for_failpoint: bool,
-    shutdown_tx: ShutdownSender,
     shutdown_rx: ShutdownReceiver,
 ) -> Result<Handle, anyhow::Error> {
     let (worker_tx, worker_rx) = tokio::sync::mpsc::channel(16);
@@ -337,12 +336,7 @@ pub(crate) async fn start_instance_inner(
 
     health_reporter.set_state(ServerState::Healthy);
 
-    Ok(Handle::new(
-        authority,
-        handle_tx,
-        our_descriptor,
-        shutdown_tx,
-    ))
+    Ok(Handle::new(authority, handle_tx, our_descriptor))
 }
 
 /// Start up a new instance and return a handle to it. Dropping the handle will stop the
@@ -358,7 +352,7 @@ pub(super) async fn start_instance(
     leader_eligible: bool,
     telemetry_sender: TelemetrySender,
     wait_for_failpoint: bool,
-) -> Result<Handle, anyhow::Error> {
+) -> Result<(Handle, ShutdownSender), anyhow::Error> {
     let Config {
         abort_on_task_failure,
         upquery_timeout,
@@ -378,7 +372,7 @@ pub(super) async fn start_instance(
     )
     .await?;
 
-    start_instance_inner(
+    let controller = start_instance_inner(
         authority,
         listen_addr,
         external_addr,
@@ -391,8 +385,9 @@ pub(super) async fn start_instance(
         reader_addr,
         telemetry_sender,
         wait_for_failpoint,
-        shutdown_tx,
         shutdown_rx,
     )
-    .await
+    .await?;
+
+    Ok((controller, shutdown_tx))
 }

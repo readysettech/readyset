@@ -23,6 +23,7 @@ readyset-data = { path = "../readyset-data" }
 readyset-tracing = { path = "../readyset-tracing" }
 readyset-mysql = { path = "../readyset-mysql", optional = true }
 readyset-psql = { path = "../readyset-psql", optional = true }
+readyset-util = { path = "../readyset-util" }
 mysql-srv = { path = "../mysql-srv", optional = true }
 psql-srv = { path = "../psql-srv", optional = true }
 

@@ -1,7 +1,7 @@
 use std::net::{IpAddr, SocketAddr};
 use std::process;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use clap::Parser;
 use futures_util::future::{self, Either};
@@ -226,7 +226,7 @@ fn main() -> anyhow::Result<()> {
 
     let deployment = opts.deployment;
     let external_port = opts.external_port;
-    let mut handle = rt.block_on(async move {
+    let (_handle, shutdown_tx) = rt.block_on(async move {
         let authority = authority.to_authority(&authority_addr, &deployment).await;
 
         let external_addr = external_addr.await.unwrap_or_else(|error| {
@@ -258,8 +258,8 @@ fn main() -> anyhow::Result<()> {
         }
     });
 
-    // Shut down the server gracefully
-    rt.block_on(handle.shutdown());
+    // Shut down the server gracefully.
+    rt.block_on(shutdown_tx.shutdown_timeout(Duration::from_secs(20)));
 
     // Attempt a graceful shutdown of the telemetry reporting system
     rt.block_on(async move {

@@ -52,7 +52,7 @@ rusty_fork_test! {
 
 async fn it_works_basic_impl() {
     register_metric_recorder();
-    let mut g = {
+    let (mut g, shutdown_tx) = {
         let mut builder = Builder::for_tests();
         builder.set_sharding(None);
         builder.set_persistence(get_persistence_params("it_works_basic"));
@@ -202,6 +202,8 @@ async fn it_works_basic_impl() {
 
     // send a query to c
     //assert_eq!(cq.lookup(&[id.clone()], true).await, Ok(vec![vec![1.into(), 6.into()]]));
+
+    shutdown_tx.shutdown().await;
 }
 
 async fn it_works_basic_standalone_impl() {
@@ -223,7 +225,7 @@ async fn it_works_basic_standalone_impl() {
         ))
     };
 
-    let mut g = start_standalone().await.unwrap();
+    let (mut g, shutdown_tx) = start_standalone().await.unwrap();
 
     g.extend_recipe(
         ChangeList::from_str(
@@ -288,9 +290,10 @@ async fn it_works_basic_standalone_impl() {
         .unwrap();
 
     // Stop the server and start a new one
+    shutdown_tx.shutdown().await;
     drop(g);
 
-    let mut g = start_standalone().await.unwrap();
+    let (mut g, shutdown_tx) = start_standalone().await.unwrap();
 
     // Check that everything was restored properly
     let mut cq = g.view("q").await.unwrap().into_reader_handle().unwrap();
@@ -300,6 +303,8 @@ async fn it_works_basic_standalone_impl() {
         res,
         vec![vec![id.clone(), 2.into()], vec![id.clone(), 4.into()]]
     );
+
+    shutdown_tx.shutdown().await;
 }
 
 fn get_external_requests_count(metrics_dump: &MetricsDump) -> f64 {
@@ -314,7 +319,7 @@ async fn test_metrics_client_impl() {
     // other tests impacting the metrics collected.
     register_metric_recorder();
     let builder = Builder::for_tests();
-    let mut g = builder.start_local().await.unwrap();
+    let (mut g, shutdown_tx) = builder.start_local().await.unwrap();
     let mut client = initialize_metrics(&mut g).await;
 
     let metrics = client.get_metrics().await.unwrap();
@@ -333,4 +338,6 @@ async fn test_metrics_client_impl() {
     let metrics = client.get_metrics().await.unwrap();
     let metrics_dump = &metrics[0].metrics;
     assert!(get_external_requests_count(metrics_dump) < second_count);
+
+    shutdown_tx.shutdown().await;
 }

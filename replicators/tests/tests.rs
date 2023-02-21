@@ -20,6 +20,7 @@ use readyset_server::Builder;
 use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer, TelemetrySender};
 use readyset_tracing::{error, trace};
 use readyset_util::eventually;
+use readyset_util::shutdown::ShutdownSender;
 use replicators::db_util::error_is_slot_not_found;
 use replicators::NoriaAdapter;
 use test_utils::slow;
@@ -227,7 +228,10 @@ impl DbConnection {
 }
 
 impl TestHandle {
-    async fn start_noria(url: String, config: Option<Config>) -> ReadySetResult<TestHandle> {
+    async fn start_noria(
+        url: String,
+        config: Option<Config>,
+    ) -> ReadySetResult<(TestHandle, ShutdownSender)> {
         Self::start_noria_with_builder(url, config, Builder::for_tests()).await
     }
 
@@ -235,7 +239,7 @@ impl TestHandle {
         url: String,
         config: Option<Config>,
         builder: Builder,
-    ) -> ReadySetResult<TestHandle> {
+    ) -> ReadySetResult<(TestHandle, ShutdownSender)> {
         let authority_store = Arc::new(LocalAuthorityStore::new());
         let authority = Arc::new(Authority::from(LocalAuthority::new_with_store(
             authority_store,
@@ -248,7 +252,7 @@ impl TestHandle {
         authority: Arc<Authority>,
         config: Option<Config>,
         mut builder: Builder,
-    ) -> ReadySetResult<TestHandle> {
+    ) -> ReadySetResult<(TestHandle, ShutdownSender)> {
         readyset_tracing::init_test_logging();
         let persistence = readyset_server::PersistenceParameters {
             mode: readyset_server::DurabilityMode::DeleteOnExit,
@@ -256,7 +260,7 @@ impl TestHandle {
         };
         builder.set_persistence(persistence);
         let telemetry_sender = builder.telemetry.clone();
-        let noria = builder.start(Arc::clone(&authority)).await.unwrap();
+        let (noria, shutdown_tx) = builder.start(Arc::clone(&authority)).await.unwrap();
 
         let dialect = if url.starts_with("postgresql") {
             Dialect::DEFAULT_POSTGRESQL
@@ -275,7 +279,7 @@ impl TestHandle {
 
         handle.start_repl(config, telemetry_sender, true).await?;
 
-        Ok(handle)
+        Ok((handle, shutdown_tx))
     }
 
     async fn controller(&self) -> ReadySetHandle {
@@ -284,7 +288,6 @@ impl TestHandle {
 
     async fn stop(mut self) {
         self.stop_repl().await;
-        self.noria.shutdown().await;
     }
 
     async fn stop_repl(&mut self) {
@@ -443,8 +446,10 @@ async fn replication_test_multiple(url: &str) -> ReadySetResult<()> {
         replication_server_id: Some(2),
         ..Default::default()
     };
-    let mut ctx_one = TestHandle::start_noria(url.to_string(), Some(config_one)).await?;
-    let mut ctx_two = TestHandle::start_noria(url.to_string(), Some(config_two)).await?;
+    let (mut ctx_one, shutdown_tx_one) =
+        TestHandle::start_noria(url.to_string(), Some(config_one)).await?;
+    let (mut ctx_two, shutdown_tx_two) =
+        TestHandle::start_noria(url.to_string(), Some(config_two)).await?;
 
     for ctx in [&mut ctx_one, &mut ctx_two] {
         ctx.ready_notify.as_ref().unwrap().notified().await;
@@ -454,9 +459,7 @@ async fn replication_test_multiple(url: &str) -> ReadySetResult<()> {
     }
 
     client.stop().await;
-    for ctx in [ctx_one, ctx_two] {
-        ctx.stop().await;
-    }
+    tokio::join!(shutdown_tx_one.shutdown(), shutdown_tx_two.shutdown());
 
     Ok(())
 }
@@ -467,7 +470,7 @@ async fn replication_test_inner(url: &str) -> ReadySetResult<()> {
     client.query(CREATE_SCHEMA).await?;
     client.query(POPULATE_SCHEMA).await?;
 
-    let mut ctx = TestHandle::start_noria(url.to_string(), None).await?;
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None).await?;
     ctx.ready_notify.as_ref().unwrap().notified().await;
 
     ctx.check_results("noria_view", "Snapshot", SNAPSHOT_RESULT)
@@ -495,6 +498,8 @@ async fn replication_test_inner(url: &str) -> ReadySetResult<()> {
 
     client.stop().await;
     ctx.stop().await;
+
+    shutdown_tx.shutdown().await;
 
     Ok(())
 }
@@ -750,7 +755,7 @@ async fn replication_catch_up_inner(url: &str) -> ReadySetResult<()> {
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
 
-    let mut ctx = TestHandle::start_noria(url.to_string(), None).await?;
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None).await?;
     ctx.ready_notify.as_ref().unwrap().notified().await;
     let mut client = inserter.await.unwrap()?;
 
@@ -784,6 +789,8 @@ async fn replication_catch_up_inner(url: &str) -> ReadySetResult<()> {
 
     client.stop().await;
 
+    shutdown_tx.shutdown().await;
+
     Ok(())
 }
 
@@ -801,7 +808,7 @@ async fn replication_many_tables_inner(url: &str) -> ReadySetResult<()> {
             .await?;
     }
 
-    let ctx = TestHandle::start_noria(url.to_string(), None).await?;
+    let (ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None).await?;
     ctx.ready_notify.as_ref().unwrap().notified().await;
 
     for t in 0..TOTAL_TABLES {
@@ -825,6 +832,8 @@ async fn replication_many_tables_inner(url: &str) -> ReadySetResult<()> {
     }
 
     client.stop().await;
+
+    shutdown_tx.shutdown().await;
 
     Ok(())
 }
@@ -850,7 +859,7 @@ async fn replication_big_tables_inner(url: &str) -> ReadySetResult<()> {
         }
     }
 
-    let ctx = TestHandle::start_noria(url.to_string(), None).await?;
+    let (ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None).await?;
     ctx.ready_notify.as_ref().unwrap().notified().await;
 
     for t in 0..TOTAL_TABLES {
@@ -874,6 +883,8 @@ async fn replication_big_tables_inner(url: &str) -> ReadySetResult<()> {
     }
 
     client.stop().await;
+
+    shutdown_tx.shutdown().await;
 
     Ok(())
 }
@@ -907,7 +918,7 @@ async fn mysql_datetime_replication_inner() -> ReadySetResult<()> {
         )
         .await?;
 
-    let mut ctx = TestHandle::start_noria(url.to_string(), None).await?;
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None).await?;
     ctx.ready_notify.as_ref().unwrap().notified().await;
 
     // TODO: Those are obviously not the right answers, but at least we don't panic
@@ -980,6 +991,8 @@ async fn mysql_datetime_replication_inner() -> ReadySetResult<()> {
 
     client.stop().await;
     ctx.stop().await;
+    shutdown_tx.shutdown().await;
+
     Ok(())
 }
 
@@ -1000,7 +1013,7 @@ async fn replication_skip_unparsable_inner(url: &str) -> ReadySetResult<()> {
         )
         .await.expect("failed to setup");
 
-    let mut ctx = TestHandle::start_noria(url.to_string(), None)
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .expect("failed to start noria");
     ctx.ready_notify.as_ref().unwrap().notified().await;
@@ -1052,6 +1065,8 @@ async fn replication_skip_unparsable_inner(url: &str) -> ReadySetResult<()> {
     ctx.stop().await;
     client.stop().await;
 
+    shutdown_tx.shutdown().await;
+
     Ok(())
 }
 
@@ -1081,7 +1096,7 @@ async fn replication_filter_inner(url: &str) -> ReadySetResult<()> {
 
     client.query(&query).await?;
 
-    let mut ctx = TestHandle::start_noria(
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(
         url.to_string(),
         Some(Config {
             replication_tables: Some(
@@ -1158,6 +1173,8 @@ async fn replication_filter_inner(url: &str) -> ReadySetResult<()> {
     ctx.stop().await;
     client.stop().await;
 
+    shutdown_tx.shutdown().await;
+
     Ok(())
 }
 
@@ -1183,7 +1200,7 @@ async fn replication_all_schemas_inner(url: &str) -> ReadySetResult<()> {
 
     client.query(&query).await?;
 
-    let mut ctx = TestHandle::start_noria(
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(
         url.to_string(),
         Some(Config {
             replication_tables: Some("*.*".to_string().into()),
@@ -1235,6 +1252,8 @@ async fn replication_all_schemas_inner(url: &str) -> ReadySetResult<()> {
     ctx.stop().await;
     client.stop().await;
 
+    shutdown_tx.shutdown().await;
+
     Ok(())
 }
 
@@ -1274,7 +1293,7 @@ async fn resnapshot_inner(url: &str) -> ReadySetResult<()> {
             .await?;
     }
 
-    let mut ctx = TestHandle::start_noria(url.to_string(), None).await?;
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None).await?;
     ctx.ready_notify.as_ref().unwrap().notified().await;
     // Initial snapshot is done
     let rs: Vec<_> = (0..ROWS)
@@ -1359,6 +1378,8 @@ async fn resnapshot_inner(url: &str) -> ReadySetResult<()> {
 
     client.stop().await;
 
+    shutdown_tx.shutdown().await;
+
     Ok(())
 }
 
@@ -1393,7 +1414,7 @@ async fn mysql_enum_replication() -> ReadySetResult<()> {
         )
         .await?;
 
-    let mut ctx = TestHandle::start_noria(url.to_string(), None).await?;
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None).await?;
     ctx.ready_notify.as_ref().unwrap().notified().await;
 
     ctx.check_results(
@@ -1432,6 +1453,8 @@ async fn mysql_enum_replication() -> ReadySetResult<()> {
 
     client.stop().await;
     ctx.stop().await;
+    shutdown_tx.shutdown().await;
+
     Ok(())
 }
 
@@ -1442,7 +1465,7 @@ async fn postgresql_ddl_replicate_drop_table_internal(url: &str) {
         .query("DROP TABLE IF EXISTS t1 CASCADE; CREATE TABLE t1 (id int);")
         .await
         .unwrap();
-    let mut ctx = TestHandle::start_noria(url.to_string(), None)
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
     ctx.ready_notify.as_ref().unwrap().notified().await;
@@ -1474,6 +1497,8 @@ async fn postgresql_ddl_replicate_drop_table_internal(url: &str) {
                 } if name == "t1" && schema == "public")
         )
     }
+
+    shutdown_tx.shutdown().await;
 }
 
 async fn postgresql_ddl_replicate_create_table_internal(url: &str) {
@@ -1483,7 +1508,7 @@ async fn postgresql_ddl_replicate_create_table_internal(url: &str) {
         .query("DROP TABLE IF EXISTS t2 CASCADE")
         .await
         .unwrap();
-    let mut ctx = TestHandle::start_noria(url.to_string(), None)
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
     ctx.ready_notify.as_ref().unwrap().notified().await;
@@ -1499,6 +1524,8 @@ async fn postgresql_ddl_replicate_create_table_internal(url: &str) {
         })
         .await
         .is_ok());
+
+    shutdown_tx.shutdown().await;
 }
 
 async fn postgresql_ddl_replicate_drop_view_internal(url: &str) {
@@ -1511,7 +1538,7 @@ async fn postgresql_ddl_replicate_drop_view_internal(url: &str) {
         )
         .await
         .unwrap();
-    let mut ctx = TestHandle::start_noria(url.to_string(), None)
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
     ctx.ready_notify.as_ref().unwrap().notified().await;
@@ -1562,6 +1589,8 @@ async fn postgresql_ddl_replicate_drop_view_internal(url: &str) {
             .iter()
             .any(|(table, _)| *table == "t2_view")
     };
+
+    shutdown_tx.shutdown().await;
 }
 
 async fn postgresql_ddl_replicate_create_view_internal(url: &str) {
@@ -1574,7 +1603,7 @@ async fn postgresql_ddl_replicate_create_view_internal(url: &str) {
         )
         .await
         .unwrap();
-    let mut ctx = TestHandle::start_noria(url.to_string(), None)
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
     ctx.ready_notify.as_ref().unwrap().notified().await;
@@ -1607,6 +1636,8 @@ async fn postgresql_ddl_replicate_create_view_internal(url: &str) {
         ))
         .await
         .is_ok());
+
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1630,7 +1661,8 @@ async fn snapshot_telemetry_inner(url: &String) -> ReadySetResult<()> {
     let (sender, mut reporter) = TelemetryInitializer::test_init();
     let mut builder = Builder::for_tests();
     builder.set_telemetry_sender(sender);
-    let mut ctx = TestHandle::start_noria_with_builder(url.to_string(), None, builder).await?;
+    let (mut ctx, shutdown_tx) =
+        TestHandle::start_noria_with_builder(url.to_string(), None, builder).await?;
     ctx.ready_notify.as_ref().unwrap().notified().await;
 
     ctx.check_results("noria_view", "Snapshot", SNAPSHOT_RESULT)
@@ -1659,6 +1691,8 @@ async fn snapshot_telemetry_inner(url: &String) -> ReadySetResult<()> {
 
     assert!(schema_str.contains("CREATE TABLE"));
     assert!(schema_str.contains("CREATE VIEW"));
+
+    shutdown_tx.shutdown().await;
 
     Ok(())
 }
@@ -1694,7 +1728,7 @@ async fn applies_replication_table_updates_on_restart(url: &str) {
         ..Default::default()
     };
 
-    let mut ctx = TestHandle::start_noria(url.to_string(), Some(config))
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), Some(config))
         .await
         .unwrap();
     ctx.ready_notify.as_ref().unwrap().notified().await;
@@ -1716,7 +1750,9 @@ async fn applies_replication_table_updates_on_restart(url: &str) {
         ..Default::default()
     };
 
-    let mut ctx = TestHandle::start_noria(url.to_string(), Some(config))
+    shutdown_tx.shutdown().await;
+
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), Some(config))
         .await
         .unwrap();
     ctx.ready_notify.as_ref().unwrap().notified().await;
@@ -1740,6 +1776,8 @@ async fn applies_replication_table_updates_on_restart(url: &str) {
 
     client.stop().await;
     ctx.stop().await;
+
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1763,7 +1801,7 @@ async fn postgresql_replicate_copy_from() {
         .await
         .unwrap();
 
-    let mut ctx = TestHandle::start_noria(url.to_string(), None)
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
     ctx.ready_notify.as_ref().unwrap().notified().await;
@@ -1800,6 +1838,8 @@ async fn postgresql_replicate_copy_from() {
     )
     .await
     .unwrap();
+
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1825,7 +1865,7 @@ async fn postgresql_non_base_offsets() {
         .await
         .unwrap();
 
-    let mut ctx = TestHandle::start_noria(url.to_string(), None)
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
     ctx.ready_notify.as_ref().unwrap().notified().await;
@@ -1833,6 +1873,8 @@ async fn postgresql_non_base_offsets() {
     ctx.check_results("v1", "Snapshot", &[&[0.into()]])
         .await
         .unwrap();
+
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1863,7 +1905,7 @@ async fn postgresql_orphaned_nodes() {
         .await
         .unwrap();
 
-    let mut ctx = TestHandle::start_noria(url.to_string(), None)
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
     ctx.ready_notify.as_ref().unwrap().notified().await;
@@ -1871,6 +1913,8 @@ async fn postgresql_orphaned_nodes() {
     ctx.check_results("check_t1", "Snapshot", &[&[99.into()]])
         .await
         .unwrap();
+
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1893,7 +1937,7 @@ async fn postgresql_replicate_citext() {
         .await
         .unwrap();
 
-    let mut ctx = TestHandle::start_noria(url.to_string(), None)
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
     ctx.ready_notify.as_ref().unwrap().notified().await;
@@ -1908,6 +1952,8 @@ async fn postgresql_replicate_citext() {
     )
     .await
     .unwrap();
+
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1930,7 +1976,7 @@ async fn postgresql_replicate_citext_array() {
         .await
         .unwrap();
 
-    let mut ctx = TestHandle::start_noria(url.to_string(), None)
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
     ctx.ready_notify.as_ref().unwrap().notified().await;
@@ -1951,6 +1997,8 @@ async fn postgresql_replicate_citext_array() {
     )
     .await
     .unwrap();
+
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1974,7 +2022,7 @@ async fn postgresql_replicate_custom_type() {
         .await
         .unwrap();
 
-    let mut ctx = TestHandle::start_noria(url.to_string(), None)
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
     ctx.ready_notify.as_ref().unwrap().notified().await;
@@ -1994,7 +2042,9 @@ async fn postgresql_replicate_custom_type() {
         ],
     )
     .await
-    .unwrap()
+    .unwrap();
+
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -2018,7 +2068,7 @@ async fn postgresql_replicate_truncate() {
         .await
         .unwrap();
 
-    let mut ctx = TestHandle::start_noria(url.to_string(), None)
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
     ctx.ready_notify.as_ref().unwrap().notified().await;
@@ -2051,6 +2101,8 @@ async fn postgresql_replicate_truncate() {
 
     ctx.check_results("v", "post-truncate", &[]).await.unwrap();
     ctx.check_results("v2", "post-truncate", &[]).await.unwrap();
+
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -2151,7 +2203,7 @@ async fn postgresql_toast_update_unkeyed() {
     assert!(postgresql_is_toasty(&client, "t").await);
 
     // Snapshot the table
-    let mut ctx = TestHandle::start_noria(url.to_string(), None)
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
     ctx.ready_notify.as_ref().unwrap().notified().await;
@@ -2170,6 +2222,8 @@ async fn postgresql_toast_update_unkeyed() {
     )
     .await
     .unwrap();
+
+    shutdown_tx.shutdown().await;
 }
 
 /// An UPDATE to a TOAST-containing row, where one or more TOAST values are unmodified, should
@@ -2216,7 +2270,7 @@ async fn postgresql_toast_update_key() {
     assert!(postgresql_is_toasty(&client, "t").await);
 
     // Snapshot the table
-    let mut ctx = TestHandle::start_noria(url.to_string(), None)
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
     ctx.ready_notify.as_ref().unwrap().notified().await;
@@ -2235,6 +2289,8 @@ async fn postgresql_toast_update_key() {
     )
     .await
     .unwrap();
+
+    shutdown_tx.shutdown().await;
 }
 
 /// An UPDATE to a TOAST-containing row, where one or more TOAST values are unmodified, should
@@ -2281,7 +2337,7 @@ async fn postgresql_toast_update_not_key() {
     assert!(postgresql_is_toasty(&client, "t").await);
 
     // Snapshot the table
-    let mut ctx = TestHandle::start_noria(url.to_string(), None)
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
     ctx.ready_notify.as_ref().unwrap().notified().await;
@@ -2301,6 +2357,8 @@ async fn postgresql_toast_update_not_key() {
     )
     .await
     .unwrap();
+
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -2321,7 +2379,7 @@ async fn pgsql_unsupported() {
         .await
         .unwrap();
 
-    let mut ctx = TestHandle::start_noria(url.to_string(), None)
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
     ctx.ready_notify.as_ref().unwrap().notified().await;
@@ -2345,6 +2403,8 @@ async fn pgsql_unsupported() {
             name: "t2".into()
         })
     }
+
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -2363,7 +2423,7 @@ async fn pgsql_delete_from_table_without_pk() {
         .await
         .unwrap();
 
-    let mut ctx = TestHandle::start_noria(url.to_string(), None)
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
     ctx.ready_notify.as_ref().unwrap().notified().await;
@@ -2413,4 +2473,6 @@ async fn pgsql_delete_from_table_without_pk() {
     )
     .await
     .unwrap();
+
+    shutdown_tx.shutdown().await;
 }

@@ -590,7 +590,7 @@ impl Operations {
         )
         .await
         .unwrap();
-        let (opts, _handle) = TestBuilder::default().build::<MySQLAdapter>().await;
+        let (opts, _handle, shutdown_tx) = TestBuilder::default().build::<MySQLAdapter>().await;
         let mut noria = mysql_async::Conn::new(opts).await.unwrap();
 
         for table in tables.values() {
@@ -610,6 +610,8 @@ impl Operations {
             let noria_res = op.run(&mut noria, query, tables).await?;
             assert_eq!(mysql_res, noria_res);
         }
+
+        shutdown_tx.shutdown().await;
 
         Ok(())
     }

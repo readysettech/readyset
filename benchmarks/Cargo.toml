@@ -55,6 +55,7 @@ readyset-server = { path = "../readyset-server" }
 readyset-mysql = { path = "../readyset-mysql" }
 readyset-tracing = { path = "../readyset-tracing" }
 readyset-client-test-helpers = { path = "../readyset-client-test-helpers", features = ["mysql"] }
+readyset-util = { path = "../readyset-util" }
 
 [lib]
 path = "src/lib.rs"

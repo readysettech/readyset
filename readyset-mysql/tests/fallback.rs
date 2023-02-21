@@ -7,24 +7,27 @@ use readyset_client_test_helpers::mysql_helpers::{last_query_info, MySQLAdapter}
 use readyset_client_test_helpers::{self, sleep, TestBuilder};
 use readyset_server::Handle;
 use readyset_util::hash::hash;
+use readyset_util::shutdown::ShutdownSender;
 use serial_test::serial;
 use test_utils::skip_flaky_finder;
 
-async fn setup_with(backend_builder: BackendBuilder) -> (mysql_async::Opts, Handle) {
+async fn setup_with(
+    backend_builder: BackendBuilder,
+) -> (mysql_async::Opts, Handle, ShutdownSender) {
     TestBuilder::new(backend_builder)
         .fallback(true)
         .build::<MySQLAdapter>()
         .await
 }
 
-async fn setup() -> (mysql_async::Opts, Handle) {
+async fn setup() -> (mysql_async::Opts, Handle, ShutdownSender) {
     setup_with(BackendBuilder::new().require_authentication(false)).await
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn create_table() {
-    let (opts, _handle) = setup().await;
+    let (opts, _handle, shutdown_tx) = setup().await;
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
 
     conn.query_drop("CREATE TABLE Cats (id int, PRIMARY KEY(id))")
@@ -41,14 +44,16 @@ async fn create_table() {
         .query_first("SELECT Cats.id FROM Cats WHERE Cats.id = 1")
         .await
         .unwrap();
-    assert_eq!(row, Some((1,)))
+    assert_eq!(row, Some((1,)));
+
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 #[ignore] // alter table not supported yet
 async fn add_column() {
-    let (opts, _handle) = setup().await;
+    let (opts, _handle, shutdown_tx) = setup().await;
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
 
     conn.query_drop("CREATE TABLE Cats (id int, PRIMARY KEY(id))")
@@ -80,12 +85,14 @@ async fn add_column() {
         .await
         .unwrap();
     assert_eq!(row, Some((1, "Whiskers".to_owned())));
+
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn json_column_insert_read() {
-    let (opts, _handle) = setup().await;
+    let (opts, _handle, shutdown_tx) = setup().await;
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
 
     conn.query_drop("CREATE TABLE Cats (id int PRIMARY KEY, data JSON)")
@@ -107,12 +114,14 @@ async fn json_column_insert_read() {
         rows,
         vec![(1, "{\"name\":\"Mr. Mistoffelees\"}".to_string())]
     );
+
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn json_column_partial_update() {
-    let (opts, _handle) = setup().await;
+    let (opts, _handle, shutdown_tx) = setup().await;
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
 
     conn.query_drop("CREATE TABLE Cats (id int PRIMARY KEY, data JSON)")
@@ -133,13 +142,15 @@ async fn json_column_partial_update() {
         .await
         .unwrap();
     assert_eq!(rows, vec![(1, "{}".to_string())]);
+
+    shutdown_tx.shutdown().await;
 }
 
 // TODO: remove this once we support range queries again
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn range_query() {
-    let (opts, _handle) = setup().await;
+    let (opts, _handle, shutdown_tx) = setup().await;
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
 
     conn.query_drop("CREATE TABLE cats (id int PRIMARY KEY, cuteness int)")
@@ -155,13 +166,15 @@ async fn range_query() {
         .await
         .unwrap();
     assert_eq!(rows, vec![(1, 10)]);
+
+    shutdown_tx.shutdown().await;
 }
 
 // TODO: remove this once we support aggregates on parametrized IN
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn aggregate_in() {
-    let (opts, _handle) = setup().await;
+    let (opts, _handle, shutdown_tx) = setup().await;
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE cats (id int PRIMARY KEY, cuteness int)")
         .await
@@ -179,12 +192,14 @@ async fn aggregate_in() {
         .await
         .unwrap();
     assert_eq!(rows, vec![(18,)]);
+
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn set_autocommit() {
-    let (opts, _handle) = setup().await;
+    let (opts, _handle, shutdown_tx) = setup().await;
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
     // We do not support SET autocommit = 0;
     conn.query_drop("SET @@SESSION.autocommit = 1;")
@@ -199,12 +214,14 @@ async fn set_autocommit() {
     conn.query_drop("SET @@LOCAL.autocommit = 0;")
         .await
         .unwrap_err();
+
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn proxy_unsupported_sets() {
-    let (opts, _handle) = setup_with(
+    let (opts, _handle, shutdown_tx) = setup_with(
         BackendBuilder::new()
             .require_authentication(false)
             .unsupported_set_mode(UnsupportedSetMode::Proxy),
@@ -239,12 +256,14 @@ async fn proxy_unsupported_sets() {
         last_query_info(&mut conn).await.destination,
         QueryDestination::Upstream
     );
+
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn proxy_unsupported_sets_prep_exec() {
-    let (opts, _handle) = setup_with(
+    let (opts, _handle, shutdown_tx) = setup_with(
         BackendBuilder::new()
             .require_authentication(false)
             .unsupported_set_mode(UnsupportedSetMode::Proxy),
@@ -269,12 +288,14 @@ async fn proxy_unsupported_sets_prep_exec() {
         last_query_info(&mut conn).await.destination,
         QueryDestination::Upstream
     );
+
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn prepare_in_tx_select_out() {
-    let (opts, _handle) = setup_with(
+    let (opts, _handle, shutdown_tx) = setup_with(
         BackendBuilder::new()
             .require_authentication(false)
             .unsupported_set_mode(UnsupportedSetMode::Proxy),
@@ -297,12 +318,14 @@ async fn prepare_in_tx_select_out() {
         last_query_info(&mut conn).await.destination,
         QueryDestination::Readyset
     );
+
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn prep_and_select_in_tx() {
-    let (opts, _handle) = setup_with(
+    let (opts, _handle, shutdown_tx) = setup_with(
         BackendBuilder::new()
             .require_authentication(false)
             .unsupported_set_mode(UnsupportedSetMode::Proxy),
@@ -326,12 +349,14 @@ async fn prep_and_select_in_tx() {
         QueryDestination::Upstream
     );
     tx.rollback().await.unwrap();
+
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn prep_then_select_in_tx() {
-    let (opts, _handle) = setup_with(
+    let (opts, _handle, shutdown_tx) = setup_with(
         BackendBuilder::new()
             .require_authentication(false)
             .unsupported_set_mode(UnsupportedSetMode::Proxy),
@@ -355,12 +380,14 @@ async fn prep_then_select_in_tx() {
         QueryDestination::Upstream
     );
     tx.rollback().await.unwrap();
+
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn prep_then_always_select_in_tx() {
-    let (opts, _handle) = setup_with(
+    let (opts, _handle, shutdown_tx) = setup_with(
         BackendBuilder::new()
             .require_authentication(false)
             .unsupported_set_mode(UnsupportedSetMode::Proxy),
@@ -387,12 +414,14 @@ async fn prep_then_always_select_in_tx() {
         QueryDestination::Readyset
     );
     tx.rollback().await.unwrap();
+
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn always_should_bypass_tx() {
-    let (opts, _handle) = setup_with(
+    let (opts, _handle, shutdown_tx) = setup_with(
         BackendBuilder::new()
             .require_authentication(false)
             .unsupported_set_mode(UnsupportedSetMode::Proxy),
@@ -420,12 +449,14 @@ async fn always_should_bypass_tx() {
         QueryDestination::Readyset
     );
     tx.rollback().await.unwrap();
+
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn prep_select() {
-    let (opts, _handle) = setup_with(
+    let (opts, _handle, shutdown_tx) = setup_with(
         BackendBuilder::new()
             .require_authentication(false)
             .unsupported_set_mode(UnsupportedSetMode::Proxy),
@@ -445,12 +476,14 @@ async fn prep_select() {
         last_query_info(&mut conn).await.destination,
         QueryDestination::Readyset
     );
+
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn set_then_prep_and_select() {
-    let (opts, _handle) = setup_with(
+    let (opts, _handle, shutdown_tx) = setup_with(
         BackendBuilder::new()
             .require_authentication(false)
             .unsupported_set_mode(UnsupportedSetMode::Proxy),
@@ -470,12 +503,14 @@ async fn set_then_prep_and_select() {
         last_query_info(&mut conn).await.destination,
         QueryDestination::Upstream
     );
+
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn always_should_never_proxy() {
-    let (opts, _handle) = setup_with(
+    let (opts, _handle, shutdown_tx) = setup_with(
         BackendBuilder::new()
             .require_authentication(false)
             .unsupported_set_mode(UnsupportedSetMode::Proxy),
@@ -495,12 +530,14 @@ async fn always_should_never_proxy() {
         last_query_info(&mut conn).await.destination,
         QueryDestination::Readyset
     );
+
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn always_should_never_proxy_exec() {
-    let (opts, _handle) = setup_with(
+    let (opts, _handle, shutdown_tx) = setup_with(
         BackendBuilder::new()
             .require_authentication(false)
             .unsupported_set_mode(UnsupportedSetMode::Proxy),
@@ -529,12 +566,14 @@ async fn always_should_never_proxy_exec() {
         last_query_info(&mut conn).await.destination,
         QueryDestination::Readyset
     );
+
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn prep_then_set_then_select_proxy() {
-    let (opts, _handle) = setup_with(
+    let (opts, _handle, shutdown_tx) = setup_with(
         BackendBuilder::new()
             .require_authentication(false)
             .unsupported_set_mode(UnsupportedSetMode::Proxy),
@@ -554,12 +593,14 @@ async fn prep_then_set_then_select_proxy() {
         last_query_info(&mut conn).await.destination,
         QueryDestination::Upstream
     );
+
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn proxy_mode_should_allow_commands() {
-    let (opts, _handle) = setup_with(
+    let (opts, _handle, shutdown_tx) = setup_with(
         BackendBuilder::new()
             .require_authentication(false)
             .unsupported_set_mode(UnsupportedSetMode::Proxy),
@@ -598,12 +639,14 @@ async fn proxy_mode_should_allow_commands() {
         last_query_info(&mut conn).await.destination,
         QueryDestination::Upstream
     );
+
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn drop_then_recreate_table_with_query() {
-    let (opts, _handle) = setup().await;
+    let (opts, _handle, shutdown_tx) = setup().await;
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
 
     conn.query_drop("CREATE TABLE t (x int)").await.unwrap();
@@ -629,13 +672,15 @@ async fn drop_then_recreate_table_with_query() {
         last_query_info(&mut conn).await.destination,
         QueryDestination::Readyset
     );
+
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 #[skip_flaky_finder]
 async fn transaction_proxies() {
-    let (opts, _handle) = setup().await;
+    let (opts, _handle, shutdown_tx) = setup().await;
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
 
     conn.query_drop("CREATE TABLE t (x int)").await.unwrap();
@@ -660,12 +705,14 @@ async fn transaction_proxies() {
         last_query_info(&mut conn).await.destination,
         QueryDestination::Readyset
     );
+
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn valid_sql_parsing_failed_shows_proxied() {
-    let (opts, _handle) = setup().await;
+    let (opts, _handle, shutdown_tx) = setup().await;
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
     // This query needs to be valid SQL but fail to parse. The current query is one known to not be
     // supported by the parser, but if this test is failing, that may no longer be the case and
@@ -685,12 +732,14 @@ async fn valid_sql_parsing_failed_shows_proxied() {
         "proxied_queries = {:?}",
         proxied_queries,
     );
+
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn invalid_sql_parsing_failed_doesnt_show_proxied() {
-    let (opts, _handle) = setup().await;
+    let (opts, _handle, shutdown_tx) = setup().await;
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
 
     let q = "this isn't valid SQL".to_string();
@@ -701,13 +750,15 @@ async fn invalid_sql_parsing_failed_doesnt_show_proxied() {
         .unwrap();
 
     assert!(proxied_queries.is_empty());
+
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 #[skip_flaky_finder]
 async fn switch_database_with_use() {
-    let (opts, _handle) = setup().await;
+    let (opts, _handle, shutdown_tx) = setup().await;
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
 
     conn.query_drop("DROP DATABASE IF EXISTS s1;")
@@ -728,6 +779,8 @@ async fn switch_database_with_use() {
     conn.query_drop("USE s2;").await.unwrap();
     conn.query_drop("SELECT b FROM t").await.unwrap();
     conn.query_drop("SELECT c FROM t2").await.unwrap();
+
+    shutdown_tx.shutdown().await;
 }
 
 #[cfg(feature = "failure_injection")]
@@ -741,7 +794,7 @@ async fn replication_failure_ignores_table() {
     use readyset_client_test_helpers::Adapter;
     use readyset_errors::ReadySetError;
 
-    let (config, mut handle) = TestBuilder::default()
+    let (config, mut handle, shutdown_tx) = TestBuilder::default()
         .recreate_database(false)
         .fallback_url(MySQLAdapter::url())
         .migration_mode(MigrationMode::OutOfBand)
@@ -847,6 +900,8 @@ async fn replication_failure_ignores_table() {
             last_statement_matches("readyset_then_upstream", "view destroyed", &mut client).await
         );
     }
+
+    shutdown_tx.shutdown().await;
 }
 
 #[allow(dead_code)]
