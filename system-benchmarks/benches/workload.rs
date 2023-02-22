@@ -580,7 +580,6 @@ fn start_adapter_with_options(fallback_cache_options: FallbackCacheOptions) {
         temp_dir.path().to_str().unwrap(),
         "--log-level",
         "error",
-        "--query-caching=explicit",
         "--eviction-policy",
         "lru",
         "--noria-metrics",

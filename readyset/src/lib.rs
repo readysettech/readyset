@@ -196,7 +196,7 @@ pub struct Options {
     #[clap(
         long,
         env = "QUERY_CACHING",
-        default_value = "async",
+        default_value = "explicit",
         possible_values = &["inrequestpath", "explicit", "async"]
     )]
     query_caching: MigrationStyle,

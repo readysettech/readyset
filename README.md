@@ -146,7 +146,6 @@ public.ecr.aws/readyset/readyset:beta-2023-01-18 \
 --address=0.0.0.0:5433 \
 --username='postgres' \
 --password='readyset' \
---query-caching='explicit' \
 --db-dir='/state'
 ```
 
@@ -168,7 +167,6 @@ public.ecr.aws/readyset/readyset:beta-2023-01-18 \
 --address=0.0.0.0:3307 \
 --username='root' \
 --password='readyset' \
---query-caching='explicit' \
 --db-dir='/state'
 ```
 
@@ -178,7 +176,7 @@ public.ecr.aws/readyset/readyset:beta-2023-01-18 \
 
     Once you have a ReadySet instance up and running, the next step is to connect your application by swapping out your database connection string to point to ReadySet instead. The specifics of how to do this vary by database client library, ORM, and programming language. See [Connect an App](https://docs.readyset.io/guides/connect-an-app/) for examples.
 
-    **Note:** By default, ReadySet will proxy all queries to the database, so changing your app to connect to ReadySet should not impact performance. You will explicitly tell ReadySet which queries to cache.   
+    **Note:** By default, ReadySet will proxy all queries to the database, so changing your app to connect to ReadySet should not impact performance. You will explicitly tell ReadySet which queries to cache.
 
 - Cache queries
 
