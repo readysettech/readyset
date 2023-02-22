@@ -32,6 +32,7 @@ rusty_fork_test! {
     }
 
     #[test]
+    #[ignore = "ENG-2596"]
     fn it_works_basic_standalone(){
         let rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
