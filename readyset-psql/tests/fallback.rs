@@ -544,7 +544,7 @@ async fn add_column_then_read() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn drop_column_then_read() {
-    let (config, _handle) = setup().await;
+    let (config, _handle, shutdown_tx) = setup().await;
     let client = connect(config).await;
 
     client
@@ -571,6 +571,8 @@ async fn drop_column_then_read() {
         .get::<_, i32>(0);
 
     assert_eq!(result, 1);
+
+    shutdown_tx.shutdown().await;
 }
 
 #[allow(dead_code)]
