@@ -315,6 +315,7 @@ lazy_static! {
             ("client_encoding", AllowedParameterValue::one_of([
                 PostgresParameterValue::literal("utf-8"),
                 PostgresParameterValue::literal("UTF8"),
+                PostgresParameterValue::literal("unicode"),
             ])),
             ("timezone", AllowedParameterValue::literal("UTC")),
             ("datestyle", AllowedParameterValue::one_of([
