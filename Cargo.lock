@@ -4585,6 +4585,7 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "bincode",
+ "consulrs",
  "deadpool-postgres",
  "derive_more",
  "failpoint-macros",
@@ -4592,6 +4593,7 @@ dependencies = [
  "nom-sql",
  "petgraph",
  "readyset-util",
+ "rmp-serde",
  "serde",
  "serde_json",
  "thiserror",
@@ -4599,6 +4601,7 @@ dependencies = [
  "tokio-postgres",
  "url",
  "vec1",
+ "zookeeper-async",
 ]
 
 [[package]]

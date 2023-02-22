@@ -7,10 +7,12 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0"
+consulrs = { workspace = true }
 thiserror = "1.0.26"
 mysql_async = { workspace = true }
 tokio-postgres = { workspace = true, features = ["with-chrono-0_4", "with-eui48-1", "with-uuid-0_8", "with-serde_json-1", "with-bit-vec-0_6"] }
 petgraph = { version = "0.5", features = ["serde-1"] }
+rmp-serde = "1.0.0"
 url = { version = "2.2", features = ["serde"] }
 serde_json = { version = "1.0.2", features = ["arbitrary_precision"] }
 derive_more = "0.99.11"
@@ -22,3 +24,4 @@ tikv-jemalloc-ctl = "0.4"
 readyset-util = { path = "../readyset-util" }
 deadpool-postgres = "0.10.3"
 failpoint-macros = { path = "../failpoint-macros" }
+zookeeper-async = "4.0.1"

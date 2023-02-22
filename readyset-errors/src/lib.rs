@@ -653,6 +653,14 @@ pub enum ReadySetError {
     /// Error that we lost the connection to the upstream database
     #[error("Connection to the upstream database was lost: {0}")]
     UpstreamConnectionLost(String),
+
+    /// Error interacting with a Consul server
+    #[error("Consul error: {0}")]
+    ConsulError(String),
+
+    /// Error interacting with Zookeeper
+    #[error("Zookeeper error: {0}")]
+    ZookeeperError(String),
 }
 
 impl ReadySetError {
@@ -1111,6 +1119,8 @@ macro_rules! impl_from_to_string {
 
 impl_from_to_string!(serde_json::error::Error, SerializationFailed);
 impl_from_to_string!(bincode::Error, SerializationFailed);
+impl_from_to_string!(rmp_serde::encode::Error, SerializationFailed);
+impl_from_to_string!(rmp_serde::decode::Error, SerializationFailed);
 impl_from_to_string!(url::ParseError, UrlParseFailed);
 impl_from_to_string!(mysql_async::Error, ReplicationFailed);
 impl_from_to_string!(tokio_postgres::Error, ReplicationFailed);
@@ -1119,6 +1129,8 @@ impl_from_to_string!(deadpool_postgres::CreatePoolError, ReplicationFailed);
 impl_from_to_string!(deadpool_postgres::BuildError, ReplicationFailed);
 impl_from_to_string!(io::Error, IOError);
 impl_from_to_string!(tikv_jemalloc_ctl::Error, JemallocCtlError);
+impl_from_to_string!(consulrs::error::ClientError, ConsulError);
+impl_from_to_string!(zookeeper_async::ZkError, ZookeeperError);
 
 impl From<Size0Error> for ReadySetError {
     fn from(_: Size0Error) -> Self {

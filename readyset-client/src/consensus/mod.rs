@@ -6,9 +6,10 @@ use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::str::FromStr;
 
-use anyhow::{anyhow, Error};
+use anyhow::anyhow;
 use async_trait::async_trait;
 use enum_dispatch::enum_dispatch;
+use readyset_errors::ReadySetResult;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -125,23 +126,23 @@ pub trait AuthorityControl: Send + Sync {
     /// calls are made to AuthorityControl functions.
     /// TODO(justin): Existing authorities should guarentee authority usage adheres to calling
     /// init() before other functionality.
-    async fn init(&self) -> Result<(), Error>;
+    async fn init(&self) -> ReadySetResult<()>;
 
     /// Attempt to become leader with a specific payload. The payload should be something that can
     /// be deserialized to get the information on how to connect to the leader. If it is successful
     /// the this will return Some(payload), otherwise None and another instance has become leader.
-    async fn become_leader(&self, payload: LeaderPayload) -> Result<Option<LeaderPayload>, Error>;
+    async fn become_leader(&self, payload: LeaderPayload) -> ReadySetResult<Option<LeaderPayload>>;
 
     /// Voluntarily give up leadership, allowing another node to become leader. It is extremely
     /// important that the node calling this function is actually the leader.
-    async fn surrender_leadership(&self) -> Result<(), Error>;
+    async fn surrender_leadership(&self) -> ReadySetResult<()>;
 
     /// Returns the payload for the current leader, blocking if there is not currently a leader.
     /// This method is intended for clients to determine the current leader.
-    async fn get_leader(&self) -> Result<LeaderPayload, Error>;
+    async fn get_leader(&self) -> ReadySetResult<LeaderPayload>;
 
     /// Non-blocking call to retrieve a change in the authorities leader state.
-    async fn try_get_leader(&self) -> Result<GetLeaderResult, Error>;
+    async fn try_get_leader(&self) -> ReadySetResult<GetLeaderResult>;
 
     /// Whether the authority can place a watch that can unpark the thread when
     /// there is a change in authority state.
@@ -149,27 +150,27 @@ pub trait AuthorityControl: Send + Sync {
 
     /// Waits for a change in the leader, and returns on a change. This should only
     /// be called if `can_watch` returns True.
-    async fn watch_leader(&self) -> Result<(), Error>;
+    async fn watch_leader(&self) -> ReadySetResult<()>;
 
     /// Waits for a change in the workers, and returns on a change. This should only
     /// be called if `can_watch` returns True.
-    async fn watch_workers(&self) -> Result<(), Error>;
+    async fn watch_workers(&self) -> ReadySetResult<()>;
 
     /// Do a non-blocking read at the indicated key.
-    async fn try_read<P>(&self, path: &str) -> Result<Option<P>, Error>
+    async fn try_read<P>(&self, path: &str) -> ReadySetResult<Option<P>>
     where
         P: DeserializeOwned;
 
     // Temporarily here to support arbitrary introspection into the authority. Will replace with
     // better functions later.
-    async fn try_read_raw(&self, path: &str) -> Result<Option<Vec<u8>>, Error>;
+    async fn try_read_raw(&self, path: &str) -> ReadySetResult<Option<Vec<u8>>>;
 
     /// Repeatedly attempts to do a read modify write operation. Each attempt consists of a read of
     /// the indicated node, a call to `f` with the data read (or None if the node did not exist),
     /// and finally a write back to the node if it hasn't changed from when it was originally
     /// written. The process aborts when a write succeeds or a call to `f` returns `Err`. In either
     /// case, returns the last value produced by `f`.
-    async fn read_modify_write<F, P, E>(&self, path: &str, f: F) -> Result<Result<P, E>, Error>
+    async fn read_modify_write<F, P, E>(&self, path: &str, f: F) -> ReadySetResult<Result<P, E>>
     where
         F: Send + FnMut(Option<P>) -> Result<P, E>,
         P: Send + Serialize + DeserializeOwned,
@@ -177,7 +178,7 @@ pub trait AuthorityControl: Send + Sync {
 
     /// Register a worker with their descriptor. Returns a unique identifier that represents this
     /// worker if successful.
-    async fn register_worker(&self, payload: WorkerDescriptor) -> Result<Option<WorkerId>, Error>
+    async fn register_worker(&self, payload: WorkerDescriptor) -> ReadySetResult<Option<WorkerId>>
     where
         WorkerDescriptor: Serialize;
 
@@ -186,16 +187,16 @@ pub trait AuthorityControl: Send + Sync {
     async fn worker_heartbeat(
         &self,
         id: WorkerId,
-    ) -> Result<AuthorityWorkerHeartbeatResponse, Error>;
+    ) -> ReadySetResult<AuthorityWorkerHeartbeatResponse>;
 
     /// Retrieves the current set of workers from the authority.
-    async fn get_workers(&self) -> Result<HashSet<WorkerId>, Error>;
+    async fn get_workers(&self) -> ReadySetResult<HashSet<WorkerId>>;
 
     /// Retrieves the worker data for a set of workers.
     async fn worker_data(
         &self,
         worker_ids: Vec<WorkerId>,
-    ) -> Result<HashMap<WorkerId, WorkerDescriptor>, Error>;
+    ) -> ReadySetResult<HashMap<WorkerId, WorkerDescriptor>>;
 
     /// Repeatedly attempts to do update the controller state. Each attempt consists of a read of
     /// the indicated node, a call to `f` with the data read (or None if the node did not exist),
@@ -208,7 +209,7 @@ pub trait AuthorityControl: Send + Sync {
         &self,
         f: F,
         u: U,
-    ) -> Result<Result<P, E>, Error>
+    ) -> ReadySetResult<Result<P, E>>
     where
         F: Send + FnMut(Option<P>) -> Result<P, E>,
         U: Send + FnMut(&mut P),
@@ -216,10 +217,10 @@ pub trait AuthorityControl: Send + Sync {
         E: Send;
 
     /// Register an adapters http port.
-    async fn register_adapter(&self, endpoint: SocketAddr) -> Result<Option<AdapterId>, Error>;
+    async fn register_adapter(&self, endpoint: SocketAddr) -> ReadySetResult<Option<AdapterId>>;
 
     /// Retrieves the current set of adapter endpoints from the authority.
-    async fn get_adapters(&self) -> Result<HashSet<SocketAddr>, Error>;
+    async fn get_adapters(&self) -> ReadySetResult<HashSet<SocketAddr>>;
 }
 
 /// Enum that dispatches calls to the `AuthorityControl` trait to

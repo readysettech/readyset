@@ -7,11 +7,10 @@ use std::process;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::time::Duration;
 
-use anyhow::{bail, Error};
 use async_trait::async_trait;
 use backoff::exponential::ExponentialBackoff;
 use backoff::SystemClock;
-use readyset_errors::internal_err;
+use readyset_errors::internal;
 use readyset_tracing::{error, info, warn};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -123,36 +122,32 @@ impl ZookeeperAuthority {
         Self::new_with_inner(connect_string, inner).await
     }
 
-    fn read_inner(&self) -> Result<RwLockReadGuard<'_, ZookeeperAuthorityInner>, Error> {
+    fn read_inner(&self) -> ReadySetResult<RwLockReadGuard<'_, ZookeeperAuthorityInner>> {
         if let Some(inner_mutex) = &self.inner {
             match inner_mutex.read() {
                 Ok(inner) => Ok(inner),
-                Err(e) => bail!(internal_err!("rwlock is poisoned: '{}'", e)),
+                Err(e) => internal!("rwlock is poisoned: '{}'", e),
             }
         } else {
-            bail!(internal_err!(
-                "attempting to read inner on readonly zk authority"
-            ))
+            internal!("attempting to read inner on readonly zk authority")
         }
     }
 
-    fn write_inner(&self) -> Result<RwLockWriteGuard<'_, ZookeeperAuthorityInner>, Error> {
+    fn write_inner(&self) -> ReadySetResult<RwLockWriteGuard<'_, ZookeeperAuthorityInner>> {
         if let Some(inner_mutex) = &self.inner {
             match inner_mutex.write() {
                 Ok(inner) => Ok(inner),
-                Err(e) => bail!(internal_err!("rwlock is poisoned: '{}'", e)),
+                Err(e) => internal!("rwlock is poisoned: '{}'", e),
             }
         } else {
-            bail!(internal_err!(
-                "attempting to mutate inner on readonly zk authority"
-            ))
+            internal!("attempting to mutate inner on readonly zk authority")
         }
     }
 
     fn update_leader_create_epoch(
         &self,
         new_leader_create_epoch: Option<i64>,
-    ) -> Result<(), Error> {
+    ) -> ReadySetResult<()> {
         let mut inner = self.write_inner()?;
         inner.leader_create_epoch = new_leader_create_epoch;
         Ok(())
@@ -161,7 +156,7 @@ impl ZookeeperAuthority {
 
 #[async_trait]
 impl AuthorityControl for ZookeeperAuthority {
-    async fn init(&self) -> Result<(), Error> {
+    async fn init(&self) -> ReadySetResult<()> {
         // Attempt to create the base path in case we are the first worker.
         let _ = self.zk.create(
             WORKER_PATH,
@@ -172,7 +167,7 @@ impl AuthorityControl for ZookeeperAuthority {
         Ok(())
     }
 
-    async fn become_leader(&self, payload: LeaderPayload) -> Result<Option<LeaderPayload>, Error> {
+    async fn become_leader(&self, payload: LeaderPayload) -> ReadySetResult<Option<LeaderPayload>> {
         let path = match self
             .zk
             .create(
@@ -185,7 +180,7 @@ impl AuthorityControl for ZookeeperAuthority {
         {
             Ok(path) => path,
             Err(ZkError::NodeExists) => return Ok(None),
-            Err(e) => bail!(e),
+            Err(e) => return Err(e.into()),
         };
 
         let (ref current_data, ref stat) = self.zk.get_data(&path, false).await?;
@@ -199,12 +194,12 @@ impl AuthorityControl for ZookeeperAuthority {
         }
     }
 
-    async fn surrender_leadership(&self) -> Result<(), Error> {
+    async fn surrender_leadership(&self) -> ReadySetResult<()> {
         self.zk.delete(CONTROLLER_KEY, None).await?;
         Ok(())
     }
 
-    async fn get_leader(&self) -> Result<LeaderPayload, Error> {
+    async fn get_leader(&self) -> ReadySetResult<LeaderPayload> {
         loop {
             match self.zk.get_data(CONTROLLER_KEY, false).await {
                 Ok((data, stat)) => {
@@ -213,7 +208,7 @@ impl AuthorityControl for ZookeeperAuthority {
                     return Ok(payload);
                 }
                 Err(ZkError::NoNode) => {}
-                Err(e) => bail!(e),
+                Err(e) => return Err(e.into()),
             };
 
             let notify = Arc::new(Notify::new());
@@ -229,12 +224,12 @@ impl AuthorityControl for ZookeeperAuthority {
                     warn!("no controller present, waiting for one to appear...");
                     wait.notified().await;
                 }
-                Err(e) => bail!(e),
+                Err(e) => return Err(e.into()),
             }
         }
     }
 
-    async fn try_get_leader(&self) -> Result<GetLeaderResult, Error> {
+    async fn try_get_leader(&self) -> ReadySetResult<GetLeaderResult> {
         let current_epoch = {
             let inner = self.read_inner()?;
             inner.leader_create_epoch
@@ -255,7 +250,7 @@ impl AuthorityControl for ZookeeperAuthority {
                 GetLeaderResult::NewLeader(payload)
             }
             Err(ZkError::NoNode) => GetLeaderResult::NoLeader,
-            Err(e) => bail!(e),
+            Err(e) => return Err(e.into()),
         })
     }
 
@@ -263,7 +258,7 @@ impl AuthorityControl for ZookeeperAuthority {
         true
     }
 
-    async fn watch_leader(&self) -> Result<(), Error> {
+    async fn watch_leader(&self) -> ReadySetResult<()> {
         let notify = Arc::new(Notify::new());
         let wait = notify.clone();
 
@@ -274,7 +269,7 @@ impl AuthorityControl for ZookeeperAuthority {
         Ok(())
     }
 
-    async fn watch_workers(&self) -> Result<(), Error> {
+    async fn watch_workers(&self) -> ReadySetResult<()> {
         let notify = Arc::new(Notify::new());
         let wait = notify.clone();
 
@@ -286,15 +281,15 @@ impl AuthorityControl for ZookeeperAuthority {
         Ok(())
     }
 
-    async fn try_read<P: DeserializeOwned>(&self, path: &str) -> Result<Option<P>, Error> {
+    async fn try_read<P: DeserializeOwned>(&self, path: &str) -> ReadySetResult<Option<P>> {
         match self.zk.get_data(path, false).await {
             Ok((data, _)) => Ok(Some(serde_json::from_slice(&data)?)),
             Err(ZkError::NoNode) => Ok(None),
-            Err(e) => bail!(e),
+            Err(e) => return Err(e.into()),
         }
     }
 
-    async fn read_modify_write<F, P, E>(&self, path: &str, mut f: F) -> Result<Result<P, E>, Error>
+    async fn read_modify_write<F, P, E>(&self, path: &str, mut f: F) -> ReadySetResult<Result<P, E>>
     where
         F: Send + FnMut(Option<P>) -> Result<P, E>,
         P: Send + Serialize + DeserializeOwned,
@@ -310,7 +305,7 @@ impl AuthorityControl for ZookeeperAuthority {
                         match self.zk.set_data(path, as_vec, Some(stat.version)).await {
                             Err(ZkError::NoNode) | Err(ZkError::BadVersion) => continue,
                             Ok(_) => return Ok(Ok(r)),
-                            Err(e) => bail!(e),
+                            Err(e) => return Err(e.into()),
                         }
                     }
                 }
@@ -330,16 +325,16 @@ impl AuthorityControl for ZookeeperAuthority {
                         {
                             Err(ZkError::NodeExists) => continue,
                             Ok(_) => return Ok(Ok(r)),
-                            Err(e) => bail!(e),
+                            Err(e) => return Err(e.into()),
                         }
                     }
                 }
-                Err(e) => bail!(e),
+                Err(e) => return Err(e.into()),
             }
         }
     }
 
-    async fn update_controller_state<F, U, P, E>(&self, f: F, _: U) -> Result<Result<P, E>, Error>
+    async fn update_controller_state<F, U, P, E>(&self, f: F, _: U) -> ReadySetResult<Result<P, E>>
     where
         F: Send + FnMut(Option<P>) -> Result<P, E>,
         U: Send,
@@ -349,15 +344,15 @@ impl AuthorityControl for ZookeeperAuthority {
         self.read_modify_write(STATE_KEY, f).await
     }
 
-    async fn try_read_raw(&self, path: &str) -> Result<Option<Vec<u8>>, Error> {
+    async fn try_read_raw(&self, path: &str) -> ReadySetResult<Option<Vec<u8>>> {
         match self.zk.get_data(path, false).await {
             Ok((data, _)) => Ok(Some(data)),
             Err(ZkError::NoNode) => Ok(None),
-            Err(e) => bail!(e),
+            Err(e) => return Err(e.into()),
         }
     }
 
-    async fn register_worker(&self, payload: WorkerDescriptor) -> Result<Option<WorkerId>, Error>
+    async fn register_worker(&self, payload: WorkerDescriptor) -> ReadySetResult<Option<WorkerId>>
     where
         WorkerDescriptor: Serialize,
     {
@@ -384,7 +379,7 @@ impl AuthorityControl for ZookeeperAuthority {
         {
             Ok(path) => path,
             Err(ZkError::NodeExists) => return Ok(None),
-            Err(e) => bail!(e),
+            Err(e) => return Err(e.into()),
         };
         let worker_id = path_to_worker_id(&path);
         let mut inner = self.write_inner()?;
@@ -395,7 +390,7 @@ impl AuthorityControl for ZookeeperAuthority {
     async fn worker_heartbeat(
         &self,
         id: WorkerId,
-    ) -> Result<AuthorityWorkerHeartbeatResponse, Error> {
+    ) -> ReadySetResult<AuthorityWorkerHeartbeatResponse> {
         let path = worker_id_to_path(&id);
         Ok(match self.zk.exists(&path, false).await {
             Ok(Some(_)) => AuthorityWorkerHeartbeatResponse::Alive,
@@ -403,11 +398,11 @@ impl AuthorityControl for ZookeeperAuthority {
         })
     }
 
-    async fn get_workers(&self) -> Result<HashSet<WorkerId>, Error> {
+    async fn get_workers(&self) -> ReadySetResult<HashSet<WorkerId>> {
         let children = match self.zk.get_children(WORKER_PATH, false).await {
             Ok(v) => v,
             Err(ZkError::NoNode) => Vec::new(),
-            Err(e) => bail!(e),
+            Err(e) => return Err(e.into()),
         };
         Ok(children
             .into_iter()
@@ -418,7 +413,7 @@ impl AuthorityControl for ZookeeperAuthority {
     async fn worker_data(
         &self,
         worker_ids: Vec<WorkerId>,
-    ) -> Result<HashMap<WorkerId, WorkerDescriptor>, Error> {
+    ) -> ReadySetResult<HashMap<WorkerId, WorkerDescriptor>> {
         let mut worker_descriptors: HashMap<WorkerId, WorkerDescriptor> = HashMap::new();
 
         for w in worker_ids {
@@ -430,11 +425,11 @@ impl AuthorityControl for ZookeeperAuthority {
         Ok(worker_descriptors)
     }
 
-    async fn register_adapter(&self, _: SocketAddr) -> Result<Option<AdapterId>, Error> {
+    async fn register_adapter(&self, _: SocketAddr) -> ReadySetResult<Option<AdapterId>> {
         todo!();
     }
 
-    async fn get_adapters(&self) -> Result<HashSet<SocketAddr>, Error> {
+    async fn get_adapters(&self) -> ReadySetResult<HashSet<SocketAddr>> {
         todo!();
     }
 }

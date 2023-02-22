@@ -18,9 +18,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::net::SocketAddr;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
-use anyhow::{anyhow, bail, Error};
 use async_trait::async_trait;
-use readyset_errors::internal_err;
+use readyset_errors::{internal, internal_err, ReadySetResult};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
@@ -75,21 +74,19 @@ impl LocalAuthorityStore {
         }
     }
 
-    fn inner_lock(&self) -> Result<MutexGuard<'_, LocalAuthorityStoreInner>, Error> {
-        match self.inner.lock() {
-            Ok(inner) => Ok(inner),
-            Err(e) => bail!(internal_err!("mutex is poisoned: '{}'", e)),
-        }
+    fn inner_lock(&self) -> ReadySetResult<MutexGuard<'_, LocalAuthorityStoreInner>> {
+        self.inner
+            .lock()
+            .map_err(|e| internal_err!("mutex is poisoned: {e}"))
     }
 
     fn inner_wait<'a>(
         &self,
         inner_guard: MutexGuard<'a, LocalAuthorityStoreInner>,
-    ) -> Result<MutexGuard<'a, LocalAuthorityStoreInner>, Error> {
-        match self.cv.wait(inner_guard) {
-            Ok(inner) => Ok(inner),
-            Err(e) => bail!(internal_err!("mutex is poisoned: '{}'", e)),
-        }
+    ) -> ReadySetResult<MutexGuard<'a, LocalAuthorityStoreInner>> {
+        self.cv
+            .wait(inner_guard)
+            .map_err(|e| internal_err!("mutex is poisoned: {e}"))
     }
 
     fn inner_notify_all(&self) {
@@ -121,18 +118,16 @@ impl LocalAuthority {
         }
     }
 
-    fn inner_read(&self) -> Result<RwLockReadGuard<'_, LocalAuthorityInner>, Error> {
-        match self.inner.read() {
-            Ok(inner) => Ok(inner),
-            Err(e) => bail!(internal_err!("rwlock is poisoned: '{}'", e)),
-        }
+    fn inner_read(&self) -> ReadySetResult<RwLockReadGuard<'_, LocalAuthorityInner>> {
+        self.inner
+            .read()
+            .map_err(|e| internal_err!("rwlock is poisoned: {e}"))
     }
 
-    fn inner_write(&self) -> Result<RwLockWriteGuard<'_, LocalAuthorityInner>, Error> {
-        match self.inner.write() {
-            Ok(inner) => Ok(inner),
-            Err(e) => bail!(internal_err!("rwlock is poisoned: '{}'", e)),
-        }
+    fn inner_write(&self) -> ReadySetResult<RwLockWriteGuard<'_, LocalAuthorityInner>> {
+        self.inner
+            .write()
+            .map_err(|e| internal_err!("rwlock is poisoned: {e}"))
     }
 }
 
@@ -167,14 +162,14 @@ impl LocalAuthority {
         mut store_inner: MutexGuard<'_, LocalAuthorityStoreInner>,
         key: &str,
         val: Vec<u8>,
-    ) -> Result<(), Error> {
+    ) -> ReadySetResult<()> {
         if let Entry::Vacant(e) = store_inner.keys.entry(key.to_owned()) {
             let mut inner = self.inner_write()?;
             inner.ephemeral_keys.insert(key.to_owned());
             e.insert(val);
             Ok(())
         } else {
-            Err(anyhow!("Key already exists"))
+            internal!("Key already exists")
         }
     }
 
@@ -194,11 +189,11 @@ impl LocalAuthority {
 
 #[async_trait]
 impl AuthorityControl for LocalAuthority {
-    async fn init(&self) -> Result<(), Error> {
+    async fn init(&self) -> ReadySetResult<()> {
         Ok(())
     }
 
-    async fn become_leader(&self, payload: LeaderPayload) -> Result<Option<LeaderPayload>, Error> {
+    async fn become_leader(&self, payload: LeaderPayload) -> ReadySetResult<Option<LeaderPayload>> {
         let mut store_inner = self.store.inner_lock()?;
 
         if !store_inner.keys.contains_key(CONTROLLER_KEY) {
@@ -218,7 +213,7 @@ impl AuthorityControl for LocalAuthority {
         }
     }
 
-    async fn surrender_leadership(&self) -> Result<(), Error> {
+    async fn surrender_leadership(&self) -> ReadySetResult<()> {
         let mut store_inner = self.store.inner_lock()?;
 
         assert!(store_inner.keys.remove(CONTROLLER_KEY).is_some());
@@ -231,7 +226,7 @@ impl AuthorityControl for LocalAuthority {
         Ok(())
     }
 
-    async fn get_leader(&self) -> Result<LeaderPayload, Error> {
+    async fn get_leader(&self) -> ReadySetResult<LeaderPayload> {
         let mut store_inner = self.store.inner_lock()?;
         while !store_inner.keys.contains_key(CONTROLLER_KEY) {
             store_inner = self.store.inner_wait(store_inner)?;
@@ -240,23 +235,16 @@ impl AuthorityControl for LocalAuthority {
         let mut inner = self.inner_write()?;
         inner.known_leader_epoch = Some(store_inner.leader_epoch);
 
-        #[allow(clippy::significant_drop_in_scrutinee)]
-        match store_inner.keys.get(CONTROLLER_KEY) {
-            Some(data) => match serde_json::from_slice(data) {
-                Ok(payload) => Ok(payload),
-                Err(e) => bail!(internal_err!(
-                    "failed to deserialize leader payload '{}'",
-                    e
-                )),
-            },
-            None => {
-                bail!(internal_err!("no keys found when looking for leader"))
-            }
-        }
+        Ok(serde_json::from_slice(
+            store_inner
+                .keys
+                .get(CONTROLLER_KEY)
+                .ok_or_else(|| internal_err!("no keys found when looking for leader"))?,
+        )?)
     }
 
-    async fn try_get_leader(&self) -> Result<GetLeaderResult, Error> {
-        let is_same_epoch = |leader_epoch: u64| -> Result<bool, Error> {
+    async fn try_get_leader(&self) -> ReadySetResult<GetLeaderResult> {
+        let is_same_epoch = |leader_epoch: u64| -> ReadySetResult<bool> {
             let inner = self.inner_read()?;
             if let Some(epoch) = inner.known_leader_epoch {
                 Ok(leader_epoch == epoch)
@@ -288,15 +276,15 @@ impl AuthorityControl for LocalAuthority {
         false
     }
 
-    async fn watch_leader(&self) -> Result<(), Error> {
+    async fn watch_leader(&self) -> ReadySetResult<()> {
         unreachable!("LocalAuthority does not support `watch_leader`.");
     }
 
-    async fn watch_workers(&self) -> Result<(), Error> {
+    async fn watch_workers(&self) -> ReadySetResult<()> {
         unreachable!("LocalAuthority does not support `watch_workers`.");
     }
 
-    async fn try_read<P>(&self, path: &str) -> Result<Option<P>, Error>
+    async fn try_read<P>(&self, path: &str) -> ReadySetResult<Option<P>>
     where
         P: DeserializeOwned,
     {
@@ -307,7 +295,7 @@ impl AuthorityControl for LocalAuthority {
             .and_then(|data| serde_json::from_slice(data).ok()))
     }
 
-    async fn read_modify_write<F, P, E>(&self, path: &str, mut f: F) -> Result<Result<P, E>, Error>
+    async fn read_modify_write<F, P, E>(&self, path: &str, mut f: F) -> ReadySetResult<Result<P, E>>
     where
         F: Send + FnMut(Option<P>) -> Result<P, E>,
         P: Send + Serialize + DeserializeOwned,
@@ -339,7 +327,7 @@ impl AuthorityControl for LocalAuthority {
         &self,
         mut f: F,
         mut u: U,
-    ) -> Result<Result<P, E>, Error>
+    ) -> ReadySetResult<Result<P, E>>
     where
         F: Send + FnMut(Option<P>) -> Result<P, E>,
         U: Send + FnMut(&mut P),
@@ -363,12 +351,12 @@ impl AuthorityControl for LocalAuthority {
         Ok(r)
     }
 
-    async fn try_read_raw(&self, path: &str) -> Result<Option<Vec<u8>>, Error> {
+    async fn try_read_raw(&self, path: &str) -> ReadySetResult<Option<Vec<u8>>> {
         let store_inner = self.store.inner_lock()?;
         Ok(store_inner.keys.get(path).cloned())
     }
 
-    async fn register_worker(&self, payload: WorkerDescriptor) -> Result<Option<WorkerId>, Error>
+    async fn register_worker(&self, payload: WorkerDescriptor) -> ReadySetResult<Option<WorkerId>>
     where
         WorkerDescriptor: Serialize,
     {
@@ -383,13 +371,13 @@ impl AuthorityControl for LocalAuthority {
             return Ok(Some(next_id.to_string()));
         }
 
-        Err(anyhow!("Error registering worker"))
+        internal!("Error registering worker")
     }
 
     async fn worker_heartbeat(
         &self,
         id: WorkerId,
-    ) -> Result<AuthorityWorkerHeartbeatResponse, Error> {
+    ) -> ReadySetResult<AuthorityWorkerHeartbeatResponse> {
         let store_inner = self.store.inner_lock()?;
         let path = WORKER_PATH.to_string() + "/" + &id;
         Ok(if store_inner.keys.contains_key(&path) {
@@ -399,7 +387,7 @@ impl AuthorityControl for LocalAuthority {
         })
     }
 
-    async fn get_workers(&self) -> Result<HashSet<WorkerId>, Error> {
+    async fn get_workers(&self) -> ReadySetResult<HashSet<WorkerId>> {
         let store_inner = self.store.inner_lock()?;
         let worker_prefix = WORKER_PATH.to_string();
 
@@ -418,7 +406,7 @@ impl AuthorityControl for LocalAuthority {
     async fn worker_data(
         &self,
         worker_ids: Vec<WorkerId>,
-    ) -> Result<HashMap<WorkerId, WorkerDescriptor>, Error> {
+    ) -> ReadySetResult<HashMap<WorkerId, WorkerDescriptor>> {
         let store_inner = self.store.inner_lock()?;
         let worker_prefix = WORKER_PATH.to_string();
 
@@ -434,11 +422,11 @@ impl AuthorityControl for LocalAuthority {
             .collect())
     }
 
-    async fn register_adapter(&self, _: SocketAddr) -> Result<Option<AdapterId>, Error> {
+    async fn register_adapter(&self, _: SocketAddr) -> ReadySetResult<Option<AdapterId>> {
         todo!();
     }
 
-    async fn get_adapters(&self) -> Result<HashSet<SocketAddr>, Error> {
+    async fn get_adapters(&self) -> ReadySetResult<HashSet<SocketAddr>> {
         todo!();
     }
 }

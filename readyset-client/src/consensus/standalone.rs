@@ -19,7 +19,7 @@ use std::time::Duration;
 use anyhow::Error;
 use async_trait::async_trait;
 use parking_lot::{Mutex, RwLock};
-use readyset_errors::internal;
+use readyset_errors::{internal, internal_err, ReadySetResult};
 use rocksdb::DB;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -107,11 +107,11 @@ impl Drop for StandaloneAuthority {
 
 #[async_trait]
 impl AuthorityControl for StandaloneAuthority {
-    async fn init(&self) -> Result<(), Error> {
+    async fn init(&self) -> ReadySetResult<()> {
         Ok(())
     }
 
-    async fn become_leader(&self, payload: LeaderPayload) -> Result<Option<LeaderPayload>, Error> {
+    async fn become_leader(&self, payload: LeaderPayload) -> ReadySetResult<Option<LeaderPayload>> {
         // Leadership info is not persisted outside the process, it is kept in a shared state
         match &mut *self.state.leader.write() {
             Some(_) => Ok(None),
@@ -122,12 +122,12 @@ impl AuthorityControl for StandaloneAuthority {
         }
     }
 
-    async fn surrender_leadership(&self) -> Result<(), Error> {
+    async fn surrender_leadership(&self) -> ReadySetResult<()> {
         self.state.leader.write().take();
         Ok(())
     }
 
-    async fn get_leader(&self) -> Result<LeaderPayload, Error> {
+    async fn get_leader(&self) -> ReadySetResult<LeaderPayload> {
         loop {
             if let Some(leader) = &*self.state.leader.read() {
                 return Ok(leader.clone());
@@ -136,7 +136,7 @@ impl AuthorityControl for StandaloneAuthority {
         }
     }
 
-    async fn try_get_leader(&self) -> Result<GetLeaderResult, Error> {
+    async fn try_get_leader(&self) -> ReadySetResult<GetLeaderResult> {
         let last_leader = self.last_leader.read().clone();
 
         match &*self.state.leader.read() {
@@ -153,16 +153,16 @@ impl AuthorityControl for StandaloneAuthority {
         false
     }
 
-    async fn watch_leader(&self) -> Result<(), Error> {
+    async fn watch_leader(&self) -> ReadySetResult<()> {
         internal!("StandaloneAuthority does not support `watch_leader`.");
     }
 
-    async fn watch_workers(&self) -> Result<(), Error> {
+    async fn watch_workers(&self) -> ReadySetResult<()> {
         internal!("StandaloneAuthority does not support `watch_workers`.");
     }
 
     /// Do a non-blocking read at the indicated key.
-    async fn try_read<P>(&self, path: &str) -> Result<Option<P>, Error>
+    async fn try_read<P>(&self, path: &str) -> ReadySetResult<Option<P>>
     where
         P: DeserializeOwned,
     {
@@ -173,11 +173,17 @@ impl AuthorityControl for StandaloneAuthority {
             .transpose()?)
     }
 
-    async fn try_read_raw(&self, path: &str) -> Result<Option<Vec<u8>>, Error> {
-        Ok(self.state.db.read().get_pinned(path)?.map(|v| v.to_vec()))
+    async fn try_read_raw(&self, path: &str) -> ReadySetResult<Option<Vec<u8>>> {
+        Ok(self
+            .state
+            .db
+            .read()
+            .get_pinned(path)
+            .map_err(|e| internal_err!("RocksDB error: {e}"))?
+            .map(|v| v.to_vec()))
     }
 
-    async fn read_modify_write<F, P, E>(&self, path: &str, mut f: F) -> Result<Result<P, E>, Error>
+    async fn read_modify_write<F, P, E>(&self, path: &str, mut f: F) -> ReadySetResult<Result<P, E>>
     where
         F: Send + FnMut(Option<P>) -> Result<P, E>,
         P: Send + Serialize + DeserializeOwned,
@@ -185,7 +191,8 @@ impl AuthorityControl for StandaloneAuthority {
     {
         let db = self.state.db.write();
         let current_val = db
-            .get_pinned(path)?
+            .get_pinned(path)
+            .map_err(|e| internal_err!("RocksDB error: {e}"))?
             .map(|v| rmp_serde::from_slice(&v))
             .transpose()?;
 
@@ -193,7 +200,8 @@ impl AuthorityControl for StandaloneAuthority {
 
         if let Ok(updated_val) = &res {
             let new_val = rmp_serde::to_vec(&updated_val)?;
-            db.put(path, new_val)?;
+            db.put(path, new_val)
+                .map_err(|e| internal_err!("RocksDB error: {e}"))?;
         }
 
         Ok(res)
@@ -201,7 +209,7 @@ impl AuthorityControl for StandaloneAuthority {
 
     /// Register a worker with their descriptor. Returns a unique identifier that represents this
     /// worker if successful.
-    async fn register_worker(&self, payload: WorkerDescriptor) -> Result<Option<WorkerId>, Error>
+    async fn register_worker(&self, payload: WorkerDescriptor) -> ReadySetResult<Option<WorkerId>>
     where
         WorkerDescriptor: Serialize,
     {
@@ -219,7 +227,7 @@ impl AuthorityControl for StandaloneAuthority {
     async fn worker_heartbeat(
         &self,
         id: WorkerId,
-    ) -> Result<AuthorityWorkerHeartbeatResponse, Error> {
+    ) -> ReadySetResult<AuthorityWorkerHeartbeatResponse> {
         if self.state.workers.read().contains_key(&id) {
             Ok(AuthorityWorkerHeartbeatResponse::Alive)
         } else {
@@ -228,7 +236,7 @@ impl AuthorityControl for StandaloneAuthority {
     }
 
     /// Retrieves the current set of workers from the authority.
-    async fn get_workers(&self) -> Result<HashSet<WorkerId>, Error> {
+    async fn get_workers(&self) -> ReadySetResult<HashSet<WorkerId>> {
         Ok(self.state.workers.read().keys().cloned().collect())
     }
 
@@ -236,7 +244,7 @@ impl AuthorityControl for StandaloneAuthority {
     async fn worker_data(
         &self,
         worker_ids: Vec<WorkerId>,
-    ) -> Result<HashMap<WorkerId, WorkerDescriptor>, Error> {
+    ) -> ReadySetResult<HashMap<WorkerId, WorkerDescriptor>> {
         let workers = self.state.workers.read();
 
         Ok(worker_ids
@@ -249,7 +257,7 @@ impl AuthorityControl for StandaloneAuthority {
         &self,
         f: F,
         _u: U,
-    ) -> Result<Result<P, E>, Error>
+    ) -> ReadySetResult<Result<P, E>>
     where
         F: Send + FnMut(Option<P>) -> Result<P, E>,
         U: Send,
@@ -259,12 +267,12 @@ impl AuthorityControl for StandaloneAuthority {
         self.read_modify_write(STATE_KEY, f).await
     }
 
-    async fn register_adapter(&self, _: SocketAddr) -> Result<Option<AdapterId>, Error> {
+    async fn register_adapter(&self, _: SocketAddr) -> ReadySetResult<Option<AdapterId>> {
         internal!("StandaloneAuthority does not support `register_adapter`.");
     }
 
     /// Retrieves the current set of adapter endpoints from the authority.
-    async fn get_adapters(&self) -> Result<HashSet<SocketAddr>, Error> {
+    async fn get_adapters(&self) -> ReadySetResult<HashSet<SocketAddr>> {
         internal!("StandaloneAuthority does not support `get_adapters`.");
     }
 }

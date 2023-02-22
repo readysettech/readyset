@@ -657,11 +657,11 @@ impl AuthorityLeaderElectionState {
         self.is_leader
     }
 
-    async fn watch_leader(&self) -> anyhow::Result<()> {
+    async fn watch_leader(&self) -> ReadySetResult<()> {
         self.authority.watch_leader().await
     }
 
-    async fn update_leader_state(&mut self) -> anyhow::Result<()> {
+    async fn update_leader_state(&mut self) -> ReadySetResult<()> {
         let mut should_attempt_leader_election = false;
         match self.authority.try_get_leader().await? {
             // The leader has changed, inform the worker.
@@ -671,7 +671,7 @@ impl AuthorityLeaderElectionState {
                 self.event_tx
                     .send(authority_update)
                     .await
-                    .map_err(|_| format_err!("send failed"))?;
+                    .map_err(|_| internal_err!("send failed"))?;
             }
 
             GetLeaderResult::NoLeader if self.leader_eligible => {
@@ -771,7 +771,7 @@ impl AuthorityLeaderElectionState {
             self.event_tx
                 .send(AuthorityUpdate::WonLeaderElection(state.unwrap()))
                 .await
-                .map_err(|_| format_err!("failed to announce who won leader election"))?;
+                .map_err(|_| internal_err!("failed to announce who won leader election"))?;
 
             self.is_leader = true;
         }
@@ -805,7 +805,7 @@ impl AuthorityWorkerState {
         }
     }
 
-    async fn register(&mut self) -> anyhow::Result<()> {
+    async fn register(&mut self) -> ReadySetResult<()> {
         self.worker_id = self
             .authority
             .register_worker(self.descriptor.clone())
@@ -813,7 +813,7 @@ impl AuthorityWorkerState {
         Ok(())
     }
 
-    async fn heartbeat(&self) -> anyhow::Result<AuthorityWorkerHeartbeatResponse> {
+    async fn heartbeat(&self) -> ReadySetResult<AuthorityWorkerHeartbeatResponse> {
         if let Some(id) = &self.worker_id {
             return self.authority.worker_heartbeat(id.clone()).await;
         }
@@ -825,7 +825,7 @@ impl AuthorityWorkerState {
         self.active_workers.clear();
     }
 
-    async fn watch_workers(&self) -> anyhow::Result<()> {
+    async fn watch_workers(&self) -> ReadySetResult<()> {
         self.authority.watch_workers().await
     }
 
