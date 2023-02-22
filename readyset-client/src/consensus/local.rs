@@ -351,6 +351,14 @@ impl AuthorityControl for LocalAuthority {
         Ok(r)
     }
 
+    async fn overwrite_controller_state<P>(&self, state: P) -> ReadySetResult<()>
+    where
+        P: Send + Serialize + 'static,
+    {
+        self.store.inner_lock()?.state.replace(Box::new(state));
+        Ok(())
+    }
+
     async fn try_read_raw(&self, path: &str) -> ReadySetResult<Option<Vec<u8>>> {
         let store_inner = self.store.inner_lock()?;
         Ok(store_inner.keys.get(path).cloned())

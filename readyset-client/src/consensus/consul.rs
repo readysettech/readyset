@@ -391,6 +391,23 @@ impl ConsulAuthority {
         format!("{}/{}", &self.deployment, path)
     }
 
+    async fn ensure_leader(&self) -> ReadySetResult<()> {
+        let my_session = Some(self.get_session()?);
+
+        let r = kv::read(
+            &self.consul,
+            &self.prefix_with_deployment(CONTROLLER_KEY),
+            None,
+        )
+        .await?;
+
+        if get_kv_pair(r)?.session != my_session {
+            internal!("An authority that has lost leadership attempted to issue a write")
+        }
+
+        Ok(())
+    }
+
     #[cfg(test)]
     async fn destroy_session(&self) -> ReadySetResult<()> {
         let inner_session = self.read_inner()?.session.clone();
@@ -788,17 +805,7 @@ impl AuthorityControl for ConsulAuthority {
         P: Send + Serialize + DeserializeOwned,
         E: Send,
     {
-        let my_session = Some(self.get_session()?);
-
-        let r = kv::read(
-            &self.consul,
-            &self.prefix_with_deployment(CONTROLLER_KEY),
-            None,
-        )
-        .await?;
-        if get_kv_pair(r)?.session != my_session {
-            internal!("An authority that has lost leadership attempted to issue a write")
-        }
+        self.ensure_leader().await?;
 
         loop {
             let current_value = self.get_controller_state_value().await?;
@@ -814,6 +821,18 @@ impl AuthorityControl for ConsulAuthority {
                 return Ok(Ok(r));
             }
         }
+    }
+
+    async fn overwrite_controller_state<P>(&self, state: P) -> ReadySetResult<()>
+    where
+        P: Send + Serialize + 'static,
+    {
+        self.ensure_leader().await?;
+
+        let current_value = self.get_controller_state_value().await?;
+        let (new_value, _) = self.write_controller_state(current_value, state).await?;
+        self.write_controller_state_value(new_value).await?;
+        Ok(())
     }
 
     async fn try_read_raw(&self, path: &str) -> ReadySetResult<Option<Vec<u8>>> {
@@ -1045,6 +1064,49 @@ mod tests {
             authority.try_read::<Duration>("a").await.unwrap(),
             Some(Duration::from_secs(10))
         );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn overwrite_controller_state() {
+        let authority_address = test_authority_address("overwrite_controller_state");
+        let authority = ConsulAuthority::new(&authority_address).unwrap();
+        authority.init().await.unwrap();
+        authority.delete_all_keys().await;
+
+        authority
+            .become_leader(LeaderPayload {
+                controller_uri: url::Url::parse("http://127.0.0.1:2181").unwrap(),
+                nonce: 1,
+            })
+            .await
+            .unwrap();
+
+        async fn incr_state(authority: &ConsulAuthority) -> u32 {
+            authority
+                .update_controller_state(
+                    |n: Option<u32>| -> Result<u32, ()> {
+                        match n {
+                            None => Ok(0),
+                            Some(mut n) => Ok({
+                                n += 1;
+                                n
+                            }),
+                        }
+                    },
+                    |_| {},
+                )
+                .await
+                .unwrap()
+                .unwrap()
+        }
+
+        for _ in 0..5 {
+            incr_state(&authority).await;
+        }
+
+        authority.overwrite_controller_state(1).await.unwrap();
+        assert_eq!(incr_state(&authority).await, 2);
     }
 
     #[tokio::test]

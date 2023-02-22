@@ -267,6 +267,15 @@ impl AuthorityControl for StandaloneAuthority {
         self.read_modify_write(STATE_KEY, f).await
     }
 
+    async fn overwrite_controller_state<S>(&self, state: S) -> ReadySetResult<()>
+    where
+        S: Send + Serialize + 'static,
+    {
+        let db = self.state.db.write();
+        db.put(STATE_KEY, rmp_serde::to_vec(&state)?)
+            .map_err(|e| internal_err!("RocksDB error: {e}"))
+    }
+
     async fn register_adapter(&self, _: SocketAddr) -> ReadySetResult<Option<AdapterId>> {
         internal!("StandaloneAuthority does not support `register_adapter`.");
     }
@@ -394,5 +403,46 @@ mod tests {
             AuthorityWorkerHeartbeatResponse::Failed
         );
         assert_eq!(workers.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn overwrite_controller_state() {
+        let dir = tempdir().unwrap();
+        let authority =
+            StandaloneAuthority::new(dir.path().to_str().unwrap(), "retrieve_workers").unwrap();
+
+        authority
+            .become_leader(LeaderPayload {
+                controller_uri: url::Url::parse("http://127.0.0.1:2181").unwrap(),
+                nonce: 1,
+            })
+            .await
+            .unwrap();
+
+        async fn incr_state(authority: &StandaloneAuthority) -> u32 {
+            authority
+                .update_controller_state(
+                    |n: Option<u32>| -> Result<u32, ()> {
+                        match n {
+                            None => Ok(0),
+                            Some(mut n) => Ok({
+                                n += 1;
+                                n
+                            }),
+                        }
+                    },
+                    |_| {},
+                )
+                .await
+                .unwrap()
+                .unwrap()
+        }
+
+        for _ in 0..5 {
+            incr_state(&authority).await;
+        }
+
+        authority.overwrite_controller_state(1).await.unwrap();
+        assert_eq!(incr_state(&authority).await, 2);
     }
 }

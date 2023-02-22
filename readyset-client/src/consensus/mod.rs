@@ -198,7 +198,7 @@ pub trait AuthorityControl: Send + Sync {
         worker_ids: Vec<WorkerId>,
     ) -> ReadySetResult<HashMap<WorkerId, WorkerDescriptor>>;
 
-    /// Repeatedly attempts to do update the controller state. Each attempt consists of a read of
+    /// Repeatedly attempts to update the controller state. Each attempt consists of a read of
     /// the indicated node, a call to `f` with the data read (or None if the node did not exist),
     /// and finally a write back to the node if it hasn't changed from when it was originally
     /// written. The process aborts when a write succeeds or a call to `f` returns `Err`. In either
@@ -215,6 +215,12 @@ pub trait AuthorityControl: Send + Sync {
         U: Send + FnMut(&mut P),
         P: Send + Serialize + DeserializeOwned + Clone,
         E: Send;
+
+    /// Overwrite the controller state with the given value, without regard for what was stored
+    /// there before.
+    async fn overwrite_controller_state<P>(&self, state: P) -> ReadySetResult<()>
+    where
+        P: Send + Serialize + 'static;
 
     /// Register an adapters http port.
     async fn register_adapter(&self, endpoint: SocketAddr) -> ReadySetResult<Option<AdapterId>>;

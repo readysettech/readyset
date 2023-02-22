@@ -344,6 +344,35 @@ impl AuthorityControl for ZookeeperAuthority {
         self.read_modify_write(STATE_KEY, f).await
     }
 
+    async fn overwrite_controller_state<P>(&self, state: P) -> ReadySetResult<()>
+    where
+        P: Send + Serialize + 'static,
+    {
+        let data = serde_json::to_vec(&state)?;
+        loop {
+            match self.zk.set_data(STATE_KEY, data.clone(), None).await {
+                Err(ZkError::NoNode) => {
+                    match self
+                        .zk
+                        .create(
+                            STATE_KEY,
+                            data.clone(),
+                            Acl::open_unsafe().clone(),
+                            CreateMode::Persistent,
+                        )
+                        .await
+                    {
+                        Err(ZkError::NodeExists) => continue,
+                        Ok(_) => return Ok(()),
+                        Err(e) => return Err(e.into()),
+                    }
+                }
+                Ok(_) => return Ok(()),
+                Err(e) => return Err(e.into()),
+            }
+        }
+    }
+
     async fn try_read_raw(&self, path: &str) -> ReadySetResult<Option<Vec<u8>>> {
         match self.zk.get_data(path, false).await {
             Ok((data, _)) => Ok(Some(data)),

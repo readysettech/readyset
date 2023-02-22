@@ -1560,8 +1560,7 @@ impl DfStateHandle {
                         state.dataflow_state.touch_up();
                     },
                 )
-                .await
-                .map_err(|e| internal_err!("Unable to update state: {}", e))?
+                .await?
                 .map(|_| ())
         }
         .map_err(|_| internal_err!("Unable to update state"))?;

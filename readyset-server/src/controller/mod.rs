@@ -107,6 +107,56 @@ impl Debug for ControllerState {
     }
 }
 
+impl ControllerState {
+    /// Initialize a new, empty [`ControllerState`] with the given configuration, and with the given
+    /// value for the `permissive_writes` setting
+    fn new(config: Config, permissive_writes: bool) -> Self {
+        let mut g = petgraph::Graph::new();
+        // Create the root node in the graph.
+        let source = g.add_node(node::Node::new::<_, _, Vec<Column>, _>(
+            "source",
+            Vec::new(),
+            node::special::Source,
+        ));
+
+        let mut materializations = Materializations::new();
+        materializations.set_config(config.materialization_config.clone());
+
+        let cc = Arc::new(ChannelCoordinator::new());
+        assert_ne!(config.quorum, 0);
+
+        let recipe = Recipe::with_config(
+            crate::sql::Config {
+                reuse_type: config.reuse,
+                ..Default::default()
+            },
+            config.mir_config.clone(),
+            permissive_writes,
+        );
+
+        let dataflow_state = DfState::new(
+            g,
+            source,
+            0,
+            config.sharding,
+            config.domain_config.clone(),
+            config.persistence.clone(),
+            materializations,
+            recipe,
+            None,
+            HashMap::new(),
+            cc,
+            config.keep_prior_recipes,
+            config.replication_strategy,
+        );
+
+        Self {
+            config,
+            dataflow_state,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Worker {
     healthy: bool,
@@ -730,54 +780,13 @@ impl AuthorityLeaderElectionState {
             }
 
             // We are the new leader, attempt to update the leader state with our state.
-            let state = self
+            let update_res = self
                 .authority
                 .update_controller_state(
                     |state: Option<ControllerState>| -> Result<ControllerState, ()> {
                         match state {
                             None => {
-                                let mut g = petgraph::Graph::new();
-                                // Create the root node in the graph.
-                                let source = g.add_node(node::Node::new::<_, _, Vec<Column>, _>(
-                                    "source",
-                                    Vec::new(),
-                                    node::special::Source,
-                                ));
-
-                                let mut materializations = Materializations::new();
-                                materializations.set_config(self.config.materialization_config.clone());
-
-                                let cc = Arc::new(ChannelCoordinator::new());
-                                assert_ne!(self.config.quorum, 0);
-
-                                let recipe = Recipe::with_config(
-                                    crate::sql::Config {
-                                        reuse_type: self.config.reuse,
-                                        ..Default::default()
-                                    },
-                                    self.config.mir_config.clone(),
-                                    self.permissive_writes,
-                                );
-
-                                let dataflow_state = DfState::new(
-                                    g,
-                                    source,
-                                    0,
-                                    self.config.sharding,
-                                    self.config.domain_config.clone(),
-                                    self.config.persistence.clone(),
-                                    materializations,
-                                    recipe,
-                                    None,
-                                    HashMap::new(),
-                                    cc,
-                                    self.config.keep_prior_recipes,
-                                    self.config.replication_strategy,
-                                );
-                                Ok(ControllerState {
-                                    config: self.config.clone(),
-                                    dataflow_state,
-                                })
+                                Ok(ControllerState::new(self.config.clone(), self.permissive_writes))
                             },
                             Some(mut state) => {
                                 // check that running config is compatible with the new
@@ -800,14 +809,28 @@ impl AuthorityLeaderElectionState {
                         state.dataflow_state.touch_up();
                     }
                 )
-                .await?;
-            if state.is_err() {
-                return Ok(());
-            }
+                .await;
+
+            let state = match update_res {
+                Ok(Ok(state)) => state,
+                Ok(Err(_)) => return Ok(()),
+                Err(error) if error.caused_by_serialization_failed() => {
+                    warn!(
+                        %error,
+                        "Error deserializing controller state, wiping state and starting fresh \
+                         (NOTE: this will drop all caches!)"
+                    );
+                    let state = ControllerState::new(self.config.clone(), self.permissive_writes);
+                    let new_state = state.clone(); // needs to be in a `let` binding for Send reasons...
+                    self.authority.overwrite_controller_state(new_state).await?;
+                    state
+                }
+                Err(e) => return Err(e),
+            };
 
             // Notify our worker that we have won the leader election.
             self.event_tx
-                .send(AuthorityUpdate::WonLeaderElection(state.unwrap()))
+                .send(AuthorityUpdate::WonLeaderElection(state))
                 .await
                 .map_err(|_| internal_err!("failed to announce who won leader election"))?;
 

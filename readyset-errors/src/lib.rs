@@ -788,6 +788,12 @@ impl ReadySetError {
         self.any_cause(|e| matches!(e, Self::ViewDestroyed))
     }
 
+    /// Returns true if the error either *is* [`SerializationFailed`], or was *caused by*
+    /// [`SerializationFailed`]
+    pub fn caused_by_serialization_failed(&self) -> bool {
+        self.any_cause(|e| matches!(e, Self::SerializationFailed(_)))
+    }
+
     /// Returns `true` if the error is [`InvalidQuery`].
     pub fn is_invalid_query(&self) -> bool {
         matches!(self, Self::InvalidQuery(..))
