@@ -1097,87 +1097,32 @@ macro_rules! rpc_err {
     };
 }
 
-/// HACK(eta): this From impl just stringifies the error, so that `ReadySetError` can be serialized
-/// and deserialized.
-impl From<serde_json::error::Error> for ReadySetError {
-    fn from(e: serde_json::error::Error) -> ReadySetError {
-        ReadySetError::SerializationFailed(e.to_string())
-    }
+/// Generate a `From` impl for the given error type and variant that just stringifies the error, so
+/// that `ReadySetError` can be serialized and deserialized
+macro_rules! impl_from_to_string {
+    ($err_type:ty, $err_variant:ident) => {
+        impl From<$err_type> for ReadySetError {
+            fn from(e: $err_type) -> Self {
+                Self::$err_variant(e.to_string())
+            }
+        }
+    };
 }
 
-/// HACK(eta): this From impl just stringifies the error, so that `ReadySetError` can be serialized
-/// and deserialized.
-impl From<bincode::Error> for ReadySetError {
-    fn from(e: bincode::Error) -> ReadySetError {
-        ReadySetError::SerializationFailed(e.to_string())
-    }
-}
-
-/// HACK(eta): this From impl just stringifies the error, so that `ReadySetError` can be serialized
-/// and deserialized.
-impl From<url::ParseError> for ReadySetError {
-    fn from(e: url::ParseError) -> ReadySetError {
-        ReadySetError::UrlParseFailed(e.to_string())
-    }
-}
-
-/// HACK(eta): this From impl just stringifies the error, so that `ReadySetError` can be serialized
-/// and deserialized.
-impl From<mysql_async::Error> for ReadySetError {
-    fn from(e: mysql_async::Error) -> ReadySetError {
-        ReadySetError::ReplicationFailed(format!("MySQL: {}", e))
-    }
-}
-
-/// HACK(eta): this From impl just stringifies the error, so that `ReadySetError` can be serialized
-/// and deserialized.
-impl From<tokio_postgres::Error> for ReadySetError {
-    fn from(e: tokio_postgres::Error) -> ReadySetError {
-        ReadySetError::ReplicationFailed(format!("PostgreSQL: {}", e))
-    }
-}
-
-/// HACK(eta): this From impl just stringifies the error, so that `ReadySetError` can be serialized
-/// and deserialized.
-impl From<deadpool_postgres::PoolError> for ReadySetError {
-    fn from(e: deadpool_postgres::PoolError) -> ReadySetError {
-        ReadySetError::ReplicationFailed(format!("PostgreSQL deadpool PoolError: {}", e))
-    }
-}
-
-/// HACK(eta): this From impl just stringifies the error, so that `ReadySetError` can be serialized
-/// and deserialized.
-impl From<deadpool_postgres::CreatePoolError> for ReadySetError {
-    fn from(e: deadpool_postgres::CreatePoolError) -> ReadySetError {
-        ReadySetError::ReplicationFailed(format!("PostgreSQL deadpool CreatePoolError: {}", e))
-    }
-}
-
-/// HACK(eta): this From impl just stringifies the error, so that `ReadySetError` can be serialized
-/// and deserialized.
-impl From<deadpool_postgres::BuildError> for ReadySetError {
-    fn from(e: deadpool_postgres::BuildError) -> ReadySetError {
-        ReadySetError::ReplicationFailed(format!("PostgreSQL deadpool BuildError: {}", e))
-    }
-}
-
-/// HACK(eta): this From impl just stringifies the error, so that `ReadySetError` can be serialized
-/// and deserialized.
-impl From<io::Error> for ReadySetError {
-    fn from(e: io::Error) -> ReadySetError {
-        ReadySetError::IOError(e.to_string())
-    }
-}
+impl_from_to_string!(serde_json::error::Error, SerializationFailed);
+impl_from_to_string!(bincode::Error, SerializationFailed);
+impl_from_to_string!(url::ParseError, UrlParseFailed);
+impl_from_to_string!(mysql_async::Error, ReplicationFailed);
+impl_from_to_string!(tokio_postgres::Error, ReplicationFailed);
+impl_from_to_string!(deadpool_postgres::PoolError, ReplicationFailed);
+impl_from_to_string!(deadpool_postgres::CreatePoolError, ReplicationFailed);
+impl_from_to_string!(deadpool_postgres::BuildError, ReplicationFailed);
+impl_from_to_string!(io::Error, IOError);
+impl_from_to_string!(tikv_jemalloc_ctl::Error, JemallocCtlError);
 
 impl From<Size0Error> for ReadySetError {
     fn from(_: Size0Error) -> Self {
         ReadySetError::Size0Error
-    }
-}
-
-impl From<tikv_jemalloc_ctl::Error> for ReadySetError {
-    fn from(err: tikv_jemalloc_ctl::Error) -> Self {
-        Self::JemallocCtlError(err.to_string())
     }
 }
 
