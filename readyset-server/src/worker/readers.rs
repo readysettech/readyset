@@ -375,9 +375,10 @@ pub(crate) async fn listen(
     upquery_timeout: Duration,
     shutdown_rx: ShutdownReceiver,
 ) {
-    let stream = shutdown_rx.wrap_stream(TcpListenerStream::new(on));
+    let stream = shutdown_rx.clone().wrap_stream(TcpListenerStream::new(on));
     pin_mut!(stream);
     while let Some(stream) = stream.next().await {
+        let mut shutdown_rx = shutdown_rx.clone();
         set_failpoint!(failpoints::READ_QUERY);
         if stream.is_err() {
             // io error from client: just ignore it
@@ -391,31 +392,43 @@ pub(crate) async fn listen(
         // future that ensures all blocking reads are handled in FIFO order
         // and avoid hogging the executors with read retries
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<(BlockingRead, Ack)>();
-        tokio::spawn(retry_misses(rx));
+        let mut retry_misses_shutdown_rx = shutdown_rx.clone();
+        tokio::spawn(async move {
+            tokio::select! {
+                _ = retry_misses(rx) => {},
+                _ = retry_misses_shutdown_rx.recv() => {},
+            }
+        });
 
         let r = ReadRequestHandler::new(readers, tx, upquery_timeout);
 
-        let server = server::Server::new(AsyncBincodeStream::from(stream).for_async(), r);
-
-        tokio::spawn(server.map_err(|e| {
-            match e {
-                // server is shutting down -- no need to report this error
-                server::Error::Service(ReadySetError::ServerShuttingDown) => {}
-                server::Error::BrokenTransportRecv(ref e)
-                | server::Error::BrokenTransportSend(ref e) => {
-                    if let bincode::ErrorKind::Io(ref e) = **e {
-                        if e.kind() == std::io::ErrorKind::BrokenPipe
-                            || e.kind() == std::io::ErrorKind::ConnectionReset
-                        {
-                            // client went away
+        let server =
+            server::Server::new(AsyncBincodeStream::from(stream).for_async(), r).map_err(|e| {
+                match e {
+                    // server is shutting down -- no need to report this error
+                    server::Error::Service(ReadySetError::ServerShuttingDown) => {}
+                    server::Error::BrokenTransportRecv(ref e)
+                    | server::Error::BrokenTransportSend(ref e) => {
+                        if let bincode::ErrorKind::Io(ref e) = **e {
+                            if e.kind() == std::io::ErrorKind::BrokenPipe
+                                || e.kind() == std::io::ErrorKind::ConnectionReset
+                            {
+                                // client went away
+                            }
+                        } else {
+                            error!(error = %e, "client transport error");
                         }
-                    } else {
-                        error!(error = %e, "client transport error");
                     }
+                    e => error!(error = %e, "reader service error"),
                 }
-                e => error!(error = %e, "reader service error"),
+            });
+
+        tokio::spawn(async move {
+            tokio::select! {
+                _ = server => {},
+                _ = shutdown_rx.recv() => {},
             }
-        }));
+        });
     }
 }
 

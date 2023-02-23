@@ -136,6 +136,18 @@ impl ShutdownReceiver {
         let _ = self.0.changed().await;
     }
 
+    /// Returns true if the shutdown signal has been received and false otherwise.
+    ///
+    /// # Panics
+    ///
+    /// This method panics if the [`ShutdownSender`] associated with this receiver has been
+    /// dropped.
+    pub fn signal_received(&self) -> bool {
+        self.0
+            .has_changed()
+            .expect("associated ShutdownSender has been dropped!")
+    }
+
     /// A convenience method that allows you to generate a new stream that will short-circuit
     /// if the shutdown signal has been received.
     pub fn wrap_stream<S, I>(mut self, mut input: S) -> impl Stream<Item = I>

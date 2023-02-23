@@ -564,15 +564,27 @@ impl Controller {
                                 ).await?;
                             }
                             ControllerRequestType::Write => {
-
                                 if writer_tx.send(req).await.is_err() {
-                                    internal!("write processing handle hung up!")
+                                    if self.shutdown_rx.signal_received() {
+                                        // If we've encountered an error but the shutdown signal has been received, the
+                                        // error probably occurred because the server is shutting down
+                                        info!("Controller shutting down after shutdown signal received");
+                                        break;
+                                    } else {
+                                        internal!("write processing handle hung up but no shutdown signal was received!")
+                                    }
                                 }
                             }
                             ControllerRequestType::DryRun => {
-
                                 if dry_run_tx.send(req).await.is_err() {
-                                    internal!("dry run processing handle hung up!")
+                                    if self.shutdown_rx.signal_received() {
+                                        // If we've encountered an error but the shutdown signal has been received, the
+                                        // error probably occurred because the server is shutting down
+                                        info!("Controller shutting down after shutdown signal received");
+                                        break;
+                                    } else {
+                                        internal!("dry run processing handle hung up but no shutdown signal was received!")
+                                    }
                                 }
                             }
                         }
@@ -585,18 +597,43 @@ impl Controller {
                 req = authority_rx.recv() => {
                     set_failpoint!(failpoints::AUTHORITY);
                     match req {
-                        Some(req) => self.handle_authority_update(req).await?,
+                        Some(req) => match self.handle_authority_update(req).await {
+                            Ok(()) => {},
+                            Err(_) if self.shutdown_rx.signal_received() => {
+                                // If we've encountered an error but the shutdown signal has been received, the
+                                // error probably occurred because the server is shutting down
+                                info!("Controller shutting down after shutdown signal received");
+                                break;
+                            }
+                            Err(e) => return Err(e),
+                        }
                         None => {
-                            // this shouldn't ever happen: if the leadership campaign thread fails,
-                            // it should send a `CampaignError` in `handle_authority_update`.
-                            internal!("leadership thread has unexpectedly failed.")
+                            if self.shutdown_rx.signal_received() {
+                                // If we've encountered an error but the shutdown signal has been received, the
+                                // error probably occurred because the server is shutting down
+                                info!("Controller shutting down after shutdown signal received");
+                                break;
+                            } else {
+                                // this shouldn't ever happen: if the leadership campaign thread fails,
+                                // it should send a `CampaignError` in `handle_authority_update`.
+                                internal!("leadership thread has unexpectedly failed.")
+                            }
                         }
                     }
                 }
                 req = self.replication_error_channel.receiver.recv() => {
                     match req {
                         Some(e) => return Err(e),
-                        _ => internal!("leader status invalid or channel dropped, leader failed")
+                        _ => {
+                            if self.shutdown_rx.signal_received() {
+                                // If we've encountered an error but the shutdown signal has been received, the
+                                // error probably occurred because the server is shutting down
+                                info!("Controller shutting down after shutdown signal received");
+                                break;
+                            } else {
+                                internal!("leader status invalid or channel dropped, leader failed")
+                            }
+                        }
                     }
 
                 }
@@ -984,10 +1021,18 @@ pub(crate) async fn authority_runner(
             permissive_writes,
         ) => if let Err(e) = result
         {
-            let _ = event_tx.send(AuthorityUpdate::AuthorityError(e)).await;
-            anyhow::bail!("Authority runner failed");
+            if shutdown_rx.signal_received() {
+                // If we've encountered an error but the shutdown signal has been received, the
+                // error probably occurred because the server is shutting down
+                info!("Authority runner shutting down after shutdown signal received");
+            } else {
+                let _ = event_tx.send(AuthorityUpdate::AuthorityError(e)).await;
+                anyhow::bail!("Authority runner failed");
+            }
         },
-        _ = shutdown_rx.recv() => {}
+        _ = shutdown_rx.recv() => {
+            info!("Authority runner shutting down after shutdown signal received");
+        }
     }
     Ok(())
 }
