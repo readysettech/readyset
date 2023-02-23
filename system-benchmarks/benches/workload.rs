@@ -38,7 +38,7 @@ const BENCHMARK_PORT: u16 = 50000;
 /// The MySQL database name where benchmark schemas are installed
 const DB_NAME: &str = "rs_bench";
 /// The batch size (number of queries) ] per benchmark iteration
-const BENCH_BATH_SIZE: u64 = 8192;
+const BENCH_BATCH_SIZE: u64 = 8192;
 /// The duration of the data collection step of criterion
 const WORKLOAD_DURATION: Duration = Duration::from_secs(30);
 /// The controller address to make RPC calls to
@@ -76,11 +76,11 @@ struct PreparedPool {
 }
 
 impl PreparedPool {
-    /// Try to create a new pool with `num` connections to the default ReadySet adapter URL
-    async fn try_new(num: usize) -> anyhow::Result<Self> {
+    /// Try to create a new pool with `num` connections to the given URL
+    async fn try_new(num: usize, url: &str) -> anyhow::Result<Self> {
         let mut conns = Vec::with_capacity(num);
         for _ in 0..num {
-            let conn = Conn::from_url(readyset_url()).await?;
+            let conn = Conn::from_url(&url).await?;
             let statements = Vec::new();
             conns.push(PreparedConn { conn, statements })
         }
@@ -99,7 +99,7 @@ impl PreparedPool {
     /// possible workload queries and execute them one by one to get them into ReadySet readers.
     async fn prepare_pool_and_warm_cache(
         &mut self,
-        workload: WorkloadSpec,
+        workload: &WorkloadSpec,
     ) -> anyhow::Result<QuerySet> {
         let distributions = workload
             .load_distributions(&mut Conn::from_url(mysql_url(DB_NAME)).await?)
@@ -233,12 +233,17 @@ impl Benchmark {
 
         let hdl = AdapterHandle::generate_data_and_start_adapter(&self.schema)?;
         let rt = tokio::runtime::Runtime::new()?;
-        let mut pool = rt.block_on(PreparedPool::try_new(num_cpus::get_physical() * 8))?;
+        let pool_size = num_cpus::get_physical() * 4;
+        let mut readyset_pool = rt.block_on(PreparedPool::try_new(pool_size, &readyset_url()))?;
+        let mut upstream_pool = args
+            .compare_upstream
+            .then(|| rt.block_on(PreparedPool::try_new(pool_size, &mysql_url(DB_NAME))))
+            .transpose()?;
 
         let mut group = c.benchmark_group(&self.name);
         group.confidence_level(0.995);
         group.measurement_time(WORKLOAD_DURATION);
-        group.throughput(Throughput::Elements(BENCH_BATH_SIZE));
+        group.throughput(Throughput::Elements(BENCH_BATCH_SIZE));
 
         for workload in self.workloads.iter() {
             let workload_name = workload.file_stem().unwrap().to_string_lossy();
@@ -250,9 +255,12 @@ impl Benchmark {
             set_memory_limit_bytes(None)?;
 
             let workload = WorkloadSpec::from_yaml(&std::fs::read_to_string(workload)?)?;
-            let query_set = rt.block_on(pool.prepare_pool_and_warm_cache(workload))?;
+            let query_set = rt.block_on(readyset_pool.prepare_pool_and_warm_cache(&workload))?;
+            if let Some(upstream_pool) = &mut upstream_pool {
+                rt.block_on(upstream_pool.prepare_pool_and_warm_cache(&workload))?;
+            }
 
-            let mut do_bench = |param: &str| -> anyhow::Result<()> {
+            let mut do_bench = |param: &str, pool: &mut PreparedPool| -> anyhow::Result<()> {
                 // Will collect data until dropped, then report flamegraph for the last
                 // `WORKLOAD_DURATION`
                 let _perf = if args.flamegraph {
@@ -270,12 +278,12 @@ impl Benchmark {
 
                 group.bench_with_input(
                     BenchmarkId::new(workload_name.clone(), param),
-                    &(&Mutex::new(&mut pool), &query_set),
+                    &(&Mutex::new(pool), &query_set),
                     |b, (pool, query_set)| {
                         b.to_async(&rt).iter_batched(
                             || {
                                 let mut commands = Vec::new();
-                                for _ in 0..BENCH_BATH_SIZE {
+                                for _ in 0..BENCH_BATCH_SIZE {
                                     let query = query_set.get_query();
                                     let params = query.get_params();
                                     commands.push((query.idx, params));
@@ -297,7 +305,10 @@ impl Benchmark {
                 Ok(())
             };
 
-            do_bench("cached")?;
+            if let Some(upstream_pool) = &mut upstream_pool {
+                do_bench("upstream", upstream_pool)?;
+            }
+            do_bench("no_memory_limit", &mut readyset_pool)?;
 
             let bytes_after_workload = get_allocated_bytes()?;
             assert!(bytes_after_workload > bytes_before_workload);
@@ -321,7 +332,7 @@ impl Benchmark {
                     }
                 };
 
-                do_bench(&param)?;
+                do_bench(&param, &mut readyset_pool)?;
             }
 
             rt.block_on(drop_cached_queries())?;
@@ -747,6 +758,9 @@ struct SystemBenchArgs {
     /// Names an explicit baseline and enables overwriting the previous results.
     #[clap(long)]
     save_baseline: Option<String>,
+    /// Compare all benchmark results against the upstream database as well
+    #[clap(long)]
+    compare_upstream: bool,
 
     #[clap(long, hide(true))]
     /// Is present when executed with `cargo bench`
@@ -756,26 +770,28 @@ struct SystemBenchArgs {
     test: bool,
 }
 
-fn main() {
+fn main() -> anyhow::Result<()> {
     let mut args = SystemBenchArgs::parse();
 
     if args.test {
         // Move along citizen, no tests here
-        return;
+        return Ok(());
     }
 
-    let filter = Regex::new(args.benchname.as_deref().unwrap_or(".*")).unwrap();
+    let filter = Regex::new(args.benchname.as_deref().unwrap_or(".*"))?;
 
     let mut criterion = Criterion::default();
     if let Some(baseline) = args.save_baseline.take() {
         criterion = criterion.save_baseline(baseline);
     }
 
-    let benchmarks = Benchmark::find_benchmarks(filter).unwrap();
+    let benchmarks = Benchmark::find_benchmarks(filter)?;
 
     for benchmark in benchmarks {
-        benchmark.run_benchmark(&mut criterion, &args).unwrap();
+        benchmark.run_benchmark(&mut criterion, &args)?;
     }
 
     criterion.final_summary();
+
+    Ok(())
 }
