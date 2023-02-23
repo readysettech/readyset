@@ -562,11 +562,10 @@ impl TestScript {
 
             match database_type {
                 DatabaseType::MySQL => MySqlIntermediary::run_on_tcp(
-                    readyset_mysql::Backend::new(make_backend!(
-                        MySqlUpstream,
-                        MySqlQueryHandler,
-                        Dialect::MySQL,
-                    )),
+                    readyset_mysql::Backend {
+                        noria: make_backend!(MySqlUpstream, MySqlQueryHandler, Dialect::MySQL,),
+                        enable_statement_logging: false,
+                    },
                     s,
                     false,
                 )

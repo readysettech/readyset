@@ -22,7 +22,7 @@ use readyset_adapter::backend::{
 };
 use readyset_data::{DfType, DfValue, DfValueKind};
 use readyset_errors::{internal, ReadySetError};
-use readyset_tracing::{error, trace};
+use readyset_tracing::{error, info, trace};
 use readyset_util::redacted::Sensitive;
 use streaming_iterator::StreamingIterator;
 use tokio::io::{self, AsyncWrite};
@@ -277,14 +277,10 @@ async fn write_meta_with_header<W: AsyncWrite + Unpin>(
 
 pub struct Backend {
     /// Handle to the backing noria client
-    noria: readyset_adapter::Backend<MySqlUpstream, MySqlQueryHandler>,
-}
-
-impl Backend {
-    #[allow(dead_code)]
-    pub fn new(noria: readyset_adapter::Backend<MySqlUpstream, MySqlQueryHandler>) -> Self {
-        Backend { noria }
-    }
+    pub noria: readyset_adapter::Backend<MySqlUpstream, MySqlQueryHandler>,
+    /// Enables logging of statements received from the client. The `Backend` only logs Query,
+    /// Prepare and Execute statements.
+    pub enable_statement_logging: bool,
 }
 
 impl Deref for Backend {
@@ -506,6 +502,9 @@ where
         info: StatementMetaWriter<'_, W>,
         schema_cache: &mut HashMap<u32, CachedSchema>,
     ) -> io::Result<()> {
+        if self.enable_statement_logging {
+            info!(target: "client_statement", "Prepare: {query}");
+        }
         use noria_connector::PrepareResult::*;
 
         trace!("delegate");
@@ -611,6 +610,10 @@ where
             }
         };
 
+        if self.enable_statement_logging {
+            info!(target: "client_statement", "Execute: {{id: {id}, params: {:?}}}", value_params)
+        }
+
         match self.execute(id, &value_params).await {
             Ok(QueryResult::Noria(noria_connector::QueryResult::Select { mut rows, schema })) => {
                 let CachedSchema {
@@ -658,6 +661,9 @@ where
     }
 
     async fn on_init(&mut self, database: &str, w: Option<InitWriter<'_, W>>) -> io::Result<()> {
+        if self.enable_statement_logging {
+            info!(target: "client_statement", "database: {database}");
+        }
         match self.set_database(database).await {
             Ok(()) => {
                 if let Some(w) = w {
@@ -683,6 +689,9 @@ where
     async fn on_close(&mut self, _: u32) {}
 
     async fn on_query(&mut self, query: &str, results: QueryResultWriter<'_, W>) -> io::Result<()> {
+        if self.enable_statement_logging {
+            info!(target: "client_statement", "Query: {query}");
+        }
         let query_result = self.query(query).await;
         handle_query_result(query_result, results).await
     }

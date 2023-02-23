@@ -25,7 +25,10 @@ impl ConnectionHandler for MySqlHandler {
         backend: readyset_adapter::Backend<MySqlUpstream, MySqlQueryHandler>,
     ) {
         if let Err(e) = MySqlIntermediary::run_on_tcp(
-            readyset_mysql::Backend::new(backend),
+            readyset_mysql::Backend {
+                noria: backend,
+                enable_statement_logging: self.enable_statement_logging,
+            },
             stream,
             self.enable_statement_logging,
         )

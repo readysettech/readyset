@@ -553,7 +553,16 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
                     })
                 })?
                 .1;
-            if self.enable_statement_logging {
+            // These other variants are logged by the readyset-mysql `Backend`.
+            if self.enable_statement_logging
+                && !matches!(
+                    cmd,
+                    Command::Query(_)
+                        | Command::Prepare(_)
+                        | Command::Execute { .. }
+                        | Command::Init(_)
+                )
+            {
                 info!(target: "client_statement", "{:?}", cmd);
             }
             match cmd {
