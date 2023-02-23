@@ -12,10 +12,18 @@ use readyset_errors::ReadySetError;
 use crate::fallback_cache::FallbackCache;
 
 /// Information about a statement that has been prepared in an [`UpstreamDatabase`]
-#[derive(Debug)]
 pub struct UpstreamPrepare<DB: UpstreamDatabase> {
     pub statement_id: u32,
     pub meta: DB::StatementMeta,
+}
+
+impl<DB: UpstreamDatabase> Debug for UpstreamPrepare<DB> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UpstreamPrepare")
+            .field("statement_id", &self.statement_id)
+            .field("meta", &self.meta)
+            .finish()
+    }
 }
 
 impl<DB: UpstreamDatabase> Clone for UpstreamPrepare<DB> {

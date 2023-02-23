@@ -629,11 +629,20 @@ pub enum SinglePrepareResult<'a, DB: UpstreamDatabase> {
 }
 
 /// The type returned when a query is prepared by `Backend` through the `prepare` function.
-#[derive(Debug)]
 pub enum PrepareResult<DB: UpstreamDatabase> {
     Noria(noria_connector::PrepareResult),
     Upstream(UpstreamPrepare<DB>),
     Both(noria_connector::PrepareResult, UpstreamPrepare<DB>),
+}
+
+impl<DB: UpstreamDatabase> Debug for PrepareResult<DB> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Noria(r) => f.debug_tuple("Noria").field(r).finish(),
+            Self::Upstream(r) => f.debug_tuple("Upstream").field(r).finish(),
+            Self::Both(nr, ur) => f.debug_tuple("Both").field(nr).field(ur).finish(),
+        }
+    }
 }
 
 // Sadly rustc is very confused when trying to derive Clone for UpstreamPrepare, so have to do it
