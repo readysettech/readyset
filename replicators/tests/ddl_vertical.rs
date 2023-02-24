@@ -723,9 +723,12 @@ async fn run(ops: Vec<Operation>) {
         println!("Running op: {op:?}");
         match &op {
             Operation::CreateTable(table_name, cols) => {
-                let non_pkey_cols = cols
-                    .iter()
-                    .map(|ColumnSpec { name, sql_type, .. }| format!("\"{name}\" {sql_type}"));
+                let non_pkey_cols = cols.iter().map(|ColumnSpec { name, sql_type, .. }| {
+                    format!(
+                        "\"{name}\" {}",
+                        sql_type.display(nom_sql::Dialect::PostgreSQL)
+                    )
+                });
                 let col_defs: Vec<String> = once("id INT PRIMARY KEY".to_string())
                     .chain(non_pkey_cols)
                     .collect();
@@ -765,7 +768,9 @@ async fn run(ops: Vec<Operation>) {
             Operation::AddColumn(table_name, col_spec) => {
                 let query = format!(
                     "ALTER TABLE \"{}\" ADD COLUMN \"{}\" {}",
-                    table_name, col_spec.name, col_spec.sql_type
+                    table_name,
+                    col_spec.name,
+                    col_spec.sql_type.display(nom_sql::Dialect::PostgreSQL)
                 );
                 rs_conn.simple_query(&query).await.unwrap();
                 pg_conn.simple_query(&query).await.unwrap();

@@ -223,7 +223,7 @@ impl ResolveSchemas for CreateTableStatement {
 
 #[cfg(test)]
 mod tests {
-    use std::fmt::{Debug, Display};
+    use std::fmt::Debug;
 
     use nom_sql::{parse_create_table, Dialect};
 
@@ -231,9 +231,13 @@ mod tests {
     use crate::util::parse_select_statement;
 
     #[track_caller]
-    fn rewrites_to<S>(input: &str, expected: &str, parser: impl Fn(&str) -> S)
-    where
-        S: Display + Debug + PartialEq + ResolveSchemas,
+    fn rewrites_to<S>(
+        input: &str,
+        expected: &str,
+        parser: impl Fn(&str) -> S,
+        result_to_string: impl Fn(&S) -> String,
+    ) where
+        S: Debug + PartialEq + ResolveSchemas,
     {
         let input = parser(input);
         let expected = parser(expected);
@@ -262,15 +266,21 @@ mod tests {
                 None,
             )
             .unwrap();
+
         assert_eq!(
-            result, expected,
-            "\nExpected: {expected}\n     Got: {result}"
+            result,
+            expected,
+            "\nExpected: {expected}\n     Got: {result}",
+            expected = result_to_string(&expected),
+            result = result_to_string(&result),
         );
     }
 
     #[track_caller]
     fn select_rewrites_to(input: &str, expected: &str) {
-        rewrites_to(input, expected, parse_select_statement)
+        rewrites_to(input, expected, parse_select_statement, |result| {
+            result.display(Dialect::MySQL).to_string()
+        });
     }
 
     #[test]
@@ -320,6 +330,7 @@ mod tests {
             "select cast(t1.x as abc) from t1",
             "select cast(s1.t1.x as s2.abc) from s1.t1",
             |s| nom_sql::parse_select_statement(Dialect::PostgreSQL, s).unwrap(),
+            |result| result.display(Dialect::MySQL).to_string(),
         )
     }
 
@@ -329,14 +340,18 @@ mod tests {
             "select cast(t1.x as abc[][]) from t1",
             "select cast(s1.t1.x as s2.abc[][]) from s1.t1",
             |s| nom_sql::parse_select_statement(Dialect::PostgreSQL, s).unwrap(),
+            |result| result.display(Dialect::MySQL).to_string(),
         )
     }
 
     #[track_caller]
     fn create_table_rewrites_to(input: &str, expected: &str) {
-        rewrites_to(input, expected, |s| {
-            parse_create_table(Dialect::MySQL, s).unwrap()
-        })
+        rewrites_to(
+            input,
+            expected,
+            |s| parse_create_table(Dialect::MySQL, s).unwrap(),
+            |result| result.display(Dialect::MySQL).to_string(),
+        );
     }
 
     #[test]
@@ -369,6 +384,7 @@ mod tests {
             "create table t (x abc)",
             "create table s1.t (x s2.abc)",
             |s| parse_create_table(Dialect::PostgreSQL, s).unwrap(),
+            |result| result.display(Dialect::MySQL).to_string(),
         );
     }
 
@@ -378,6 +394,7 @@ mod tests {
             "create table t (x abc[][])",
             "create table s1.t (x s2.abc[][])",
             |s| parse_create_table(Dialect::PostgreSQL, s).unwrap(),
+            |result| result.display(Dialect::MySQL).to_string(),
         );
     }
 

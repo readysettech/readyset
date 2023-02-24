@@ -303,7 +303,7 @@ impl DfType {
             Inet => Self::Inet,
             Citext => Self::Text(Collation::Citext),
             Other(ref id) => resolve_custom_type(id.clone())
-                .ok_or_else(|| unsupported_err!("Unsupported type: {id}"))?,
+                .ok_or_else(|| unsupported_err!("Unsupported type: {}", id.display_unquoted()))?,
         })
     }
 }

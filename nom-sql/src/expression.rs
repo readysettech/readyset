@@ -13,6 +13,7 @@ use nom::sequence::{delimited, pair, preceded, terminated, tuple};
 use nom::Parser;
 use nom_locate::LocatedSpan;
 use pratt::{Affix, Associativity, PrattParser, Precedence};
+use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
@@ -94,46 +95,57 @@ impl FunctionExpr {
     }
 }
 
-impl Display for FunctionExpr {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
+impl FunctionExpr {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| match self {
             FunctionExpr::Avg {
                 expr,
                 distinct: true,
-            } => write!(f, "avg(distinct {})", expr),
+            } => write!(f, "avg(distinct {})", expr.display(dialect)),
             FunctionExpr::Count {
                 expr,
                 distinct: true,
-            } => write!(f, "count(distinct {})", expr),
+            } => write!(f, "count(distinct {})", expr.display(dialect)),
             FunctionExpr::Sum {
                 expr,
                 distinct: true,
-            } => write!(f, "sum(distinct {})", expr),
-            FunctionExpr::Avg { expr, .. } => write!(f, "avg({})", expr),
-            FunctionExpr::Count { expr, .. } => write!(f, "count({})", expr),
+            } => write!(f, "sum(distinct {})", expr.display(dialect)),
+            FunctionExpr::Avg { expr, .. } => write!(f, "avg({})", expr.display(dialect)),
+            FunctionExpr::Count { expr, .. } => write!(f, "count({})", expr.display(dialect)),
             FunctionExpr::CountStar => write!(f, "count(*)"),
-            FunctionExpr::Sum { expr, .. } => write!(f, "sum({})", expr),
-            FunctionExpr::Max(col) => write!(f, "max({})", col),
-            FunctionExpr::Min(col) => write!(f, "min({})", col),
+            FunctionExpr::Sum { expr, .. } => write!(f, "sum({})", expr.display(dialect)),
+            FunctionExpr::Max(col) => write!(f, "max({})", col.display(dialect)),
+            FunctionExpr::Min(col) => write!(f, "min({})", col.display(dialect)),
             FunctionExpr::GroupConcat { expr, separator } => {
-                write!(f, "group_concat({} separator '{}')", expr, separator)
+                write!(
+                    f,
+                    "group_concat({} separator '{}')",
+                    expr.display(dialect),
+                    separator
+                )
             }
             FunctionExpr::Call { name, arguments } => {
-                write!(f, "{}({})", name, arguments.iter().join(", "))
+                write!(
+                    f,
+                    "{}({})",
+                    name,
+                    arguments.iter().map(|arg| arg.display(dialect)).join(", ")
+                )
             }
             FunctionExpr::Substring { string, pos, len } => {
-                write!(f, "substring({string}")?;
+                write!(f, "substring({}", string.display(dialect))?;
+
                 if let Some(pos) = pos {
-                    write!(f, " from {pos}")?;
+                    write!(f, " from {}", pos.display(dialect))?;
                 }
 
                 if let Some(len) = len {
-                    write!(f, " for {len}")?;
+                    write!(f, " for {}", len.display(dialect))?;
                 }
 
                 write!(f, ")")
             }
-        }
+        })
     }
 }
 
@@ -334,12 +346,16 @@ pub enum InValue {
     List(Vec<Expr>),
 }
 
-impl Display for InValue {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            InValue::Subquery(stmt) => write!(f, "{}", stmt),
-            InValue::List(exprs) => write!(f, "{}", exprs.iter().join(", ")),
-        }
+impl InValue {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| match self {
+            InValue::Subquery(stmt) => write!(f, "{}", stmt.display(dialect)),
+            InValue::List(exprs) => write!(
+                f,
+                "{}",
+                exprs.iter().map(|expr| expr.display(dialect)).join(", ")
+            ),
+        })
     }
 }
 
@@ -350,9 +366,16 @@ pub struct CaseWhenBranch {
     pub body: Expr,
 }
 
-impl Display for CaseWhenBranch {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "WHEN {} THEN {}", self.condition, self.body)
+impl CaseWhenBranch {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| {
+            write!(
+                f,
+                "WHEN {} THEN {}",
+                self.condition.display(dialect),
+                self.body.display(dialect)
+            )
+        })
     }
 }
 
@@ -455,35 +478,55 @@ pub enum Expr {
     Variable(Variable),
 }
 
-impl Display for Expr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Expr::Call(fe) => fe.fmt(f),
+impl Expr {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| match self {
+            Expr::Call(fe) => write!(f, "{}", fe.display(dialect)),
             Expr::Literal(l) => write!(f, "{}", l),
-            Expr::Column(col) => col.fmt(f),
+            Expr::Column(col) => write!(f, "{}", col.display(dialect)),
             Expr::CaseWhen {
                 branches,
                 else_expr,
             } => {
                 write!(f, "CASE ")?;
                 for branch in branches {
-                    write!(f, "{branch} ")?;
+                    write!(f, "{} ", branch.display(dialect))?;
                 }
                 if let Some(else_expr) = else_expr {
-                    write!(f, "ELSE {} ", else_expr)?;
+                    write!(f, "ELSE {} ", else_expr.display(dialect))?;
                 }
                 write!(f, "END")
             }
-            Expr::BinaryOp { lhs, op, rhs } => write!(f, "({} {} {})", lhs, op, rhs),
-            Expr::OpAny { lhs, op, rhs } => write!(f, "{lhs} {op} ANY ({rhs})"),
-            Expr::OpSome { lhs, op, rhs } => write!(f, "{lhs} {op} SOME ({rhs})"),
-            Expr::OpAll { lhs, op, rhs } => write!(f, "{lhs} {op} ALL ({rhs})"),
+            Expr::BinaryOp { lhs, op, rhs } => write!(
+                f,
+                "({} {op} {})",
+                lhs.display(dialect),
+                rhs.display(dialect)
+            ),
+            Expr::OpAny { lhs, op, rhs } => write!(
+                f,
+                "{} {op} ANY ({})",
+                lhs.display(dialect),
+                rhs.display(dialect)
+            ),
+            Expr::OpSome { lhs, op, rhs } => write!(
+                f,
+                "{} {op} SOME ({})",
+                lhs.display(dialect),
+                rhs.display(dialect)
+            ),
+            Expr::OpAll { lhs, op, rhs } => write!(
+                f,
+                "{} {op} ALL ({})",
+                lhs.display(dialect),
+                rhs.display(dialect)
+            ),
             Expr::UnaryOp {
                 op: UnaryOperator::Neg,
                 rhs,
-            } => write!(f, "(-{})", rhs),
-            Expr::UnaryOp { op, rhs } => write!(f, "({} {})", op, rhs),
-            Expr::Exists(statement) => write!(f, "EXISTS ({})", statement),
+            } => write!(f, "(-{})", rhs.display(dialect)),
+            Expr::UnaryOp { op, rhs } => write!(f, "({op} {})", rhs.display(dialect)),
+            Expr::Exists(statement) => write!(f, "EXISTS ({})", statement.display(dialect)),
 
             Expr::Between {
                 operand,
@@ -494,28 +537,39 @@ impl Display for Expr {
                 write!(
                     f,
                     "{} {}BETWEEN {} AND {}",
-                    operand,
+                    operand.display(dialect),
                     if *negated { "NOT " } else { "" },
-                    min,
-                    max
+                    min.display(dialect),
+                    max.display(dialect)
                 )
             }
             Expr::In { lhs, rhs, negated } => {
-                write!(f, "{}", lhs)?;
+                write!(f, "{}", lhs.display(dialect))?;
                 if *negated {
                     write!(f, " NOT")?;
                 }
-                write!(f, " IN ({})", rhs)
+                write!(f, " IN ({})", rhs.display(dialect))
             }
-            Expr::NestedSelect(q) => write!(f, "({})", q),
+            Expr::NestedSelect(q) => write!(f, "({})", q.display(dialect)),
             Expr::Cast {
                 expr,
                 ty,
                 postgres_style,
-            } if *postgres_style => write!(f, "({}::{})", expr, ty),
-            Expr::Cast { expr, ty, .. } => write!(f, "CAST({} as {})", expr, ty),
+            } if *postgres_style => {
+                write!(f, "({}::{})", expr.display(dialect), ty.display(dialect))
+            }
+            Expr::Cast { expr, ty, .. } => write!(
+                f,
+                "CAST({} as {})",
+                expr.display(dialect),
+                ty.display(dialect)
+            ),
             Expr::Array(exprs) => {
-                fn write_value(expr: &Expr, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                fn write_value(
+                    expr: &Expr,
+                    dialect: Dialect,
+                    f: &mut fmt::Formatter,
+                ) -> fmt::Result {
                     match expr {
                         Expr::Array(elems) => {
                             write!(f, "[")?;
@@ -523,11 +577,11 @@ impl Display for Expr {
                                 if i != 0 {
                                     write!(f, ",")?;
                                 }
-                                write_value(elem, f)?;
+                                write_value(elem, dialect, f)?;
                             }
                             write!(f, "]")
                         }
-                        _ => write!(f, "{expr}"),
+                        _ => write!(f, "{}", expr.display(dialect)),
                     }
                 }
 
@@ -536,12 +590,12 @@ impl Display for Expr {
                     if i != 0 {
                         write!(f, ",")?;
                     }
-                    write_value(expr, f)?;
+                    write_value(expr, dialect, f)?;
                 }
                 write!(f, "]")
             }
             Expr::Variable(var) => write!(f, "{}", var),
-        }
+        })
     }
 }
 
@@ -1882,7 +1936,7 @@ mod tests {
             assert_eq!(c1, expected1);
 
             let expected1 = "`id` NOT IN (1, 2)";
-            assert_eq!(c1.to_string(), expected1);
+            assert_eq!(c1.display(Dialect::MySQL).to_string(), expected1);
         }
 
         #[test]
@@ -1956,7 +2010,7 @@ mod tests {
             let res = to_nom_result(expression(Dialect::MySQL)(LocatedSpan::new(qs)));
             let (remaining, result) = res.unwrap();
             assert_eq!(std::str::from_utf8(remaining).unwrap(), "");
-            eprintln!("{}", result);
+            eprintln!("{}", result.display(Dialect::MySQL));
             assert_eq!(result, expected);
         }
 
@@ -2097,7 +2151,7 @@ mod tests {
         };
 
         assert_eq!(
-            exp.to_string(),
+            exp.display(Dialect::MySQL).to_string(),
             "CASE WHEN (`foo` = 0) THEN `foo` ELSE 1 END"
         );
 
@@ -2114,7 +2168,7 @@ mod tests {
         };
 
         assert_eq!(
-            exp_no_else.to_string(),
+            exp_no_else.display(Dialect::MySQL).to_string(),
             "CASE WHEN (`foo` = 0) THEN `foo` END"
         );
 
@@ -2141,7 +2195,7 @@ mod tests {
         };
 
         assert_eq!(
-            exp_multiple_branches.to_string(),
+            exp_multiple_branches.display(Dialect::MySQL).to_string(),
             "CASE WHEN (`foo` = 0) THEN `foo` WHEN (`foo` = 7) THEN `foo` END"
         );
     }
@@ -2820,7 +2874,7 @@ mod tests {
                     postgres_style: true,
                 },
             ])]);
-            let res = expr.to_string();
+            let res = expr.display(Dialect::MySQL).to_string();
 
             assert_eq!(res, "ARRAY[[1,('2'::INT)]]");
         }

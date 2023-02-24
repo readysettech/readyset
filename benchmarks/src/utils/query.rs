@@ -195,7 +195,14 @@ impl ArbitraryQueryParameters {
             always: false,
         };
 
-        conn.query_drop(create_cache_query.to_string()).await?;
+        // FIXME: Use correct dialect.
+        conn.query_drop(
+            create_cache_query
+                .display(nom_sql::Dialect::MySQL)
+                .to_string(),
+        )
+        .await?;
+
         Ok(())
     }
 

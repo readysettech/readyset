@@ -724,7 +724,11 @@ fn make_join_node(
 
             make_project_node(
                 graph,
-                format!("{}_cross_join_bogokey", graph[node].name()).into(),
+                format!(
+                    "{}_cross_join_bogokey",
+                    graph[node].name().display_unquoted()
+                )
+                .into(),
                 node,
                 &node_columns,
                 &graph.columns(node),

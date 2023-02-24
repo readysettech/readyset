@@ -6,6 +6,7 @@ use nom::combinator::{map, opt};
 use nom::multi::many1;
 use nom::sequence::{delimited, preceded, tuple};
 use nom_locate::LocatedSpan;
+use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 
 use crate::common::{opt_delimited, terminated_with_statement_terminator};
@@ -40,22 +41,26 @@ pub struct CompoundSelectStatement {
     pub limit_clause: LimitClause,
 }
 
-impl fmt::Display for CompoundSelectStatement {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        for (ref op, ref sel) in &self.selects {
-            if let Some(o) = op {
-                write!(f, " {}", o)?;
+impl CompoundSelectStatement {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| {
+            for (op, sel) in &self.selects {
+                if let Some(o) = op {
+                    write!(f, " {}", o)?;
+                }
+                write!(f, " {}", sel.display(dialect))?;
             }
-            write!(f, " {}", sel)?;
-        }
-        if let Some(ord) = &self.order {
-            write!(f, " {}", ord)?;
-        }
-        if self.limit_clause.is_empty() {
-            write!(f, " {}", self.limit_clause)?;
-        }
 
-        Ok(())
+            if let Some(ord) = &self.order {
+                write!(f, " {}", ord.display(dialect))?;
+            }
+
+            if self.limit_clause.is_empty() {
+                write!(f, " {}", self.limit_clause)?;
+            }
+
+            Ok(())
+        })
     }
 }
 
@@ -320,6 +325,6 @@ mod tests {
         let qstring = b"(select `discussions`.* from `discussions` where (`discussions`.`id` not in (select `discussion_id` from `discussion_tag` where `tag_id` not in (select `tags`.`id` from `tags` where (`tags`.`id` in (select `perm_tags`.`id` from `tags` as `perm_tags` where (`perm_tags`.`is_restricted` = ? and 0 = 1) or `perm_tags`.`is_restricted` = ?) and (`tags`.`parent_id` in (select `perm_tags`.`id` from `tags` as `perm_tags` where (`perm_tags`.`is_restricted` = ? and 0 = 1) or `perm_tags`.`is_restricted` = ?) or `tags`.`parent_id` is null))))) and (`discussions`.`is_private` = ? or (((`discussions`.`is_approved` = ? and (`discussions`.`user_id` = ? or ((`discussions`.`id` not in (select `discussion_id` from `discussion_tag` where `tag_id` not in (select `tags`.`id` from `tags` where (`tags`.`id` in (select `perm_tags`.`id` from `tags` as `perm_tags` where (`perm_tags`.`is_restricted` = ? and 0 = 1)) and (`tags`.`parent_id` in (select `perm_tags`.`id` from `tags` as `perm_tags` where (`perm_tags`.`is_restricted` = ? and 0 = 1)) or `tags`.`parent_id` is null))))) and exists (select * from `tags` inner join `discussion_tag` on `tags`.`id` = `discussion_tag`.`tag_id` where `discussions`.`id` = `discussion_tag`.`discussion_id`))))))) and (`discussions`.`hidden_at` is null or `discussions`.`user_id` = ? or ((`discussions`.`id` not in (select `discussion_id` from `discussion_tag` where `tag_id` not in (select `tags`.`id` from `tags` where (`tags`.`id` in (select `perm_tags`.`id` from `tags` as `perm_tags` where (`perm_tags`.`is_restricted` = ? and 0 = 1)) and (`tags`.`parent_id` in (select `perm_tags`.`id` from `tags` as `perm_tags` where (`perm_tags`.`is_restricted` = ? and 0 = 1)) or `tags`.`parent_id` is null))))) and exists (select * from `tags` inner join `discussion_tag` on `tags`.`id` = `discussion_tag`.`tag_id` where `discussions`.`id` = `discussion_tag`.`discussion_id`))) and (`discussions`.`comment_count` > ? or `discussions`.`user_id` = ? or ((`discussions`.`id` not in (select `discussion_id` from `discussion_tag` where `tag_id` not in (select `tags`.`id` from `tags` where (`tags`.`id` in (select `perm_tags`.`id` from `tags` as `perm_tags` where (`perm_tags`.`is_restricted` = ? and 0 = 1)) and (`tags`.`parent_id` in (select `perm_tags`.`id` from `tags` as `perm_tags` where (`perm_tags`.`is_restricted` = ? and 0 = 1)) or `tags`.`parent_id` is null))))) and exists (select * from `tags` inner join `discussion_tag` on `tags`.`id` = `discussion_tag`.`tag_id` where `discussions`.`id` = `discussion_tag`.`discussion_id`))) and not exists (select 1 from `discussion_user` where `discussions`.`id` = `discussion_id` and `user_id` = ? and `subscription` = ?) and `discussions`.`id` not in (select `discussion_id` from `discussion_tag` where 0 = 1) order by `last_posted_at` desc limit 21) union (select `discussions`.* from `discussions` where (`discussions`.`id` not in (select `discussion_id` from `discussion_tag` where `tag_id` not in (select `tags`.`id` from `tags` where (`tags`.`id` in (select `perm_tags`.`id` from `tags` as `perm_tags` where (`perm_tags`.`is_restricted` = ? and 0 = 1) or `perm_tags`.`is_restricted` = ?) and (`tags`.`parent_id` in (select `perm_tags`.`id` from `tags` as `perm_tags` where (`perm_tags`.`is_restricted` = ? and 0 = 1) or `perm_tags`.`is_restricted` = ?) or `tags`.`parent_id` is null))))) and (`discussions`.`is_private` = ? or (((`discussions`.`is_approved` = ? and (`discussions`.`user_id` = ? or ((`discussions`.`id` not in (select `discussion_id` from `discussion_tag` where `tag_id` not in (select `tags`.`id` from `tags` where (`tags`.`id` in (select `perm_tags`.`id` from `tags` as `perm_tags` where (`perm_tags`.`is_restricted` = ? and 0 = 1)) and (`tags`.`parent_id` in (select `perm_tags`.`id` from `tags` as `perm_tags` where (`perm_tags`.`is_restricted` = ? and 0 = 1)) or `tags`.`parent_id` is null))))) and exists (select * from `tags` inner join `discussion_tag` on `tags`.`id` = `discussion_tag`.`tag_id` where `discussions`.`id` = `discussion_tag`.`discussion_id`))))))) and (`discussions`.`hidden_at` is null or `discussions`.`user_id` = ? or ((`discussions`.`id` not in (select `discussion_id` from `discussion_tag` where `tag_id` not in (select `tags`.`id` from `tags` where (`tags`.`id` in (select `perm_tags`.`id` from `tags` as `perm_tags` where (`perm_tags`.`is_restricted` = ? and 0 = 1)) and (`tags`.`parent_id` in (select `perm_tags`.`id` from `tags` as `perm_tags` where (`perm_tags`.`is_restricted` = ? and 0 = 1)) or `tags`.`parent_id` is null))))) and exists (select * from `tags` inner join `discussion_tag` on `tags`.`id` = `discussion_tag`.`tag_id` where `discussions`.`id` = `discussion_tag`.`discussion_id`))) and (`discussions`.`comment_count` > ? or `discussions`.`user_id` = ? or ((`discussions`.`id` not in (select `discussion_id` from `discussion_tag` where `tag_id` not in (select `tags`.`id` from `tags` where (`tags`.`id` in (select `perm_tags`.`id` from `tags` as `perm_tags` where (`perm_tags`.`is_restricted` = ? and 0 = 1)) and (`tags`.`parent_id` in (select `perm_tags`.`id` from `tags` as `perm_tags` where (`perm_tags`.`is_restricted` = ? and 0 = 1)) or `tags`.`parent_id` is null))))) and exists (select * from `tags` inner join `discussion_tag` on `tags`.`id` = `discussion_tag`.`tag_id` where `discussions`.`id` = `discussion_tag`.`discussion_id`))) and `is_sticky` = ? limit 21) order by is_sticky and not exists (select 1 from `discussion_user` as `sticky` where `sticky`.`discussion_id` = `id` and `sticky`.`user_id` = ? and `sticky`.`last_read_post_number` >= `last_post_number`) and last_posted_at > ? desc, `last_posted_at` desc limit 21";
         let _res = test_parse!(compound_selection(Dialect::MySQL), qstring);
         // TODO:  assert_eq!(res, ...)
-        // TODO:  assert_eq!(res.to_string(), ...)
+        // TODO:  assert_eq!(res.display(Dialect::MySQL).to_string(), ...)
     }
 }

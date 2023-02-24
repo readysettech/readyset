@@ -615,7 +615,7 @@ impl DfValue {
             DfValue::Array(array) => Ok(array),
             _ => Err(ReadySetError::DfValueConversionError {
                 src_type: match self.sql_type() {
-                    Some(ty) => ty.to_string(),
+                    Some(ty) => ty.display(nom_sql::Dialect::MySQL).to_string(),
                     None => "Null".to_string(),
                 },
                 target_type: "Array".to_string(),
@@ -634,7 +634,7 @@ impl DfValue {
             DfValue::ByteArray(bytes) => Ok(bytes.as_ref()),
             _ => Err(ReadySetError::DfValueConversionError {
                 src_type: match self.sql_type() {
-                    Some(ty) => ty.to_string(),
+                    Some(ty) => ty.display(nom_sql::Dialect::MySQL).to_string(),
                     None => "Null".to_string(),
                 },
                 target_type: "ByteArray".to_string(),
@@ -1390,7 +1390,7 @@ impl<'a> TryFrom<&'a DfValue> for &'a str {
         data.as_str()
             .ok_or_else(|| ReadySetError::DfValueConversionError {
                 src_type: match data.sql_type() {
-                    Some(ty) => ty.to_string(),
+                    Some(ty) => ty.display(nom_sql::Dialect::MySQL).to_string(),
                     None => "Null".to_string(),
                 },
                 target_type: "&str".to_string(),
@@ -1409,7 +1409,7 @@ impl TryFrom<DfValue> for Vec<u8> {
             DfValue::ByteArray(bytes) => Ok(bytes.as_ref().clone()),
             _ => Err(Self::Error::DfValueConversionError {
                 src_type: match data.sql_type() {
-                    Some(ty) => ty.to_string(),
+                    Some(ty) => ty.display(nom_sql::Dialect::MySQL).to_string(),
                     None => "Null".to_string(),
                 },
                 target_type: "&str".to_string(),

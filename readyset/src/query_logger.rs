@@ -106,7 +106,8 @@ impl QueryLogger {
                 let mut stmt = stmt.clone();
                 if readyset_adapter::rewrite::process_query(&mut stmt, true).is_ok() {
                     anonymize_literals(&mut stmt);
-                    stmt.to_string()
+                    // FIXME(ENG-2499): Use correct dialect.
+                    stmt.display(nom_sql::Dialect::MySQL).to_string()
                 } else {
                     "".to_string()
                 }

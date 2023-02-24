@@ -653,7 +653,8 @@ fn classify_conditionals(
                     | Expr::Variable(_) => {
                         unsupported!(
                             "Unsupported right-hand side of condition expression: {}",
-                            rhs
+                            // FIXME(ENG-2499): Use correct dialect.
+                            rhs.display(nom_sql::Dialect::MySQL)
                         )
                     }
                 }
@@ -773,7 +774,8 @@ fn extract_having_aggregates(
 
         fn visit_expr(&mut self, expr: &'ast mut Expr) -> Result<(), Self::Error> {
             if matches!(expr, Expr::Call(fun) if is_aggregate(fun)) {
-                let name: SqlIdentifier = expr.to_string().into();
+                // FIXME(ENG-2499): Use correct dialect.
+                let name: SqlIdentifier = expr.display(nom_sql::Dialect::MySQL).to_string().into();
                 let col_expr = Expr::Column(nom_sql::Column {
                     name: name.clone(),
                     table: None,
@@ -958,7 +960,10 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                     .insert(t.clone(), new_node(t.clone(), vec![], &stmt)?)
                     .is_some()
                 {
-                    invalid!("Table name {t} specified more than once");
+                    invalid!(
+                        "Table name {} specified more than once",
+                        t.display_unquoted()
+                    );
                 };
                 Ok(t.clone())
             }
@@ -975,7 +980,10 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                     node.subgraph = Some(Box::new(to_query_graph((**sq).clone())?));
                     e.insert(node);
                 } else {
-                    invalid!("Table name {rel} specified more than once");
+                    invalid!(
+                        "Table name {} specified more than once",
+                        rel.display_unquoted()
+                    );
                 }
 
                 Ok(rel)
@@ -1146,7 +1154,7 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                 internal!(
                     "predicate(s) {:?} on relation {} that is not in query graph",
                     preds,
-                    name
+                    name.display_unquoted()
                 );
             } else {
                 #[allow(clippy::unwrap_used)] // checked that this key is in qg.relations
@@ -1197,7 +1205,7 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                     invalid_err!(
                         "Column {} references non-existent table {}",
                         param.col.name,
-                        table
+                        table.display_unquoted()
                     )
                 })?;
                 if !rel.columns.contains(&param.col) {
@@ -1228,7 +1236,10 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                 internal!("Stars should have been expanded by now!")
             }
             FieldDefinitionExpr::Expr { expr, alias } => {
-                let name: SqlIdentifier = alias.clone().unwrap_or_else(|| expr.to_string().into());
+                let name: SqlIdentifier = alias
+                    .clone()
+                    // FIXME(ENG-2499): Use correct dialect.
+                    .unwrap_or_else(|| expr.display(nom_sql::Dialect::MySQL).to_string().into());
                 match expr {
                     Expr::Literal(l) => columns.push(OutputColumn::Literal(LiteralColumn {
                         name,
@@ -1326,14 +1337,16 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                     // we don't necessarily need it projected in the result set of the query, and
                     // the pull_columns pass will make sure the topk/paginate node gets the
                     // aggregate result column
-                    aggregates
-                        .entry(func.clone())
-                        .or_insert_with(|| func.to_string().into());
+                    aggregates.entry(func.clone()).or_insert_with(|| {
+                        // FIXME(ENG-2499): Use correct dialect.
+                        func.display(nom_sql::Dialect::MySQL).to_string().into()
+                    });
                 }
                 FieldReference::Expr(expr) => {
                     // This is an expression that we need to add to the list of projected columns
                     columns.push(OutputColumn::Expr(ExprColumn {
-                        name: expr.to_string().into(),
+                        // FIXME(ENG-2499): Use correct dialect.
+                        name: expr.display(nom_sql::Dialect::MySQL).to_string().into(),
                         table: None,
                         expression: expr.clone(),
                     }));
@@ -1356,7 +1369,8 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                         match expr {
                             FieldReference::Expr(Expr::Column(col)) => col,
                             FieldReference::Expr(expr) => Column {
-                                name: expr.to_string().into(),
+                                // FIXME(ENG-2499): Use correct dialect.
+                                name: expr.display(nom_sql::Dialect::MySQL).to_string().into(),
                                 table: None,
                             },
                             FieldReference::Numeric(_) => {

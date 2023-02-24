@@ -1631,7 +1631,12 @@ impl Domain {
                             )
                             .is_some()
                         {
-                            warn!(?node_index, %name, %shard, "Overwrote existing reader at worker");
+                            warn!(
+                                ?node_index,
+                                name = %name.display_unquoted(),
+                                %shard,
+                                "Overwrote existing reader at worker"
+                            );
                         }
 
                         self.reader_write_handles.insert(node, w_part);

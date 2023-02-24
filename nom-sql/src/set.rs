@@ -9,6 +9,7 @@ use nom::multi::separated_list1;
 use nom::sequence::{terminated, tuple};
 use nom::Parser;
 use nom_locate::LocatedSpan;
+use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 
 use crate::common::statement_terminator;
@@ -24,14 +25,16 @@ pub enum SetStatement {
     PostgresParameter(SetPostgresParameter),
 }
 
-impl Display for SetStatement {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "SET ")?;
-        match self {
-            Self::Variable(set) => write!(f, "{}", set),
-            Self::Names(set) => write!(f, "{}", set),
-            Self::PostgresParameter(set) => write!(f, "{}", set),
-        }
+impl SetStatement {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| {
+            write!(f, "SET ")?;
+            match self {
+                Self::Variable(set) => write!(f, "{}", set.display(dialect)),
+                Self::Names(set) => write!(f, "{}", set),
+                Self::PostgresParameter(set) => write!(f, "{}", set),
+            }
+        })
     }
 }
 
@@ -254,16 +257,18 @@ impl Display for Variable {
     }
 }
 
-impl Display for SetVariables {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "{}",
-            self.variables
-                .iter()
-                .map(|(var, value)| format!("{} = {}", var, value))
-                .join(", ")
-        )
+impl SetVariables {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| {
+            write!(
+                f,
+                "{}",
+                self.variables
+                    .iter()
+                    .map(|(var, value)| format!("{} = {}", var, value.display(dialect)))
+                    .join(", ")
+            )
+        })
     }
 }
 
@@ -456,7 +461,7 @@ mod tests {
         let qstring = "set autocommit=1";
         let expected = "SET @@LOCAL.autocommit = 1";
         let res = set(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
-        assert_eq!(res.unwrap().1.to_string(), expected);
+        assert_eq!(res.unwrap().1.display(Dialect::MySQL).to_string(), expected);
     }
 
     #[test]
@@ -466,8 +471,8 @@ mod tests {
         let expected = "SET @@GLOBAL.var = 2";
         let res1 = test_parse!(set(Dialect::MySQL), qstring1.as_bytes());
         let res2 = test_parse!(set(Dialect::MySQL), qstring2.as_bytes());
-        assert_eq!(res1.to_string(), expected);
-        assert_eq!(res2.to_string(), expected);
+        assert_eq!(res1.display(Dialect::MySQL).to_string(), expected);
+        assert_eq!(res2.display(Dialect::MySQL).to_string(), expected);
     }
 
     #[test]
@@ -479,9 +484,18 @@ mod tests {
         let res1 = set(Dialect::MySQL)(LocatedSpan::new(qstring1.as_bytes()));
         let res2 = set(Dialect::MySQL)(LocatedSpan::new(qstring2.as_bytes()));
         let res3 = set(Dialect::MySQL)(LocatedSpan::new(qstring3.as_bytes()));
-        assert_eq!(res1.unwrap().1.to_string(), expected);
-        assert_eq!(res2.unwrap().1.to_string(), expected);
-        assert_eq!(res3.unwrap().1.to_string(), expected);
+        assert_eq!(
+            res1.unwrap().1.display(Dialect::MySQL).to_string(),
+            expected
+        );
+        assert_eq!(
+            res2.unwrap().1.display(Dialect::MySQL).to_string(),
+            expected
+        );
+        assert_eq!(
+            res3.unwrap().1.display(Dialect::MySQL).to_string(),
+            expected
+        );
     }
 
     #[test]
@@ -491,8 +505,14 @@ mod tests {
         let expected = "SET @@LOCAL.var = 2";
         let res1 = set(Dialect::MySQL)(LocatedSpan::new(qstring1.as_bytes()));
         let res2 = set(Dialect::MySQL)(LocatedSpan::new(qstring2.as_bytes()));
-        assert_eq!(res1.unwrap().1.to_string(), expected);
-        assert_eq!(res2.unwrap().1.to_string(), expected);
+        assert_eq!(
+            res1.unwrap().1.display(Dialect::MySQL).to_string(),
+            expected
+        );
+        assert_eq!(
+            res2.unwrap().1.display(Dialect::MySQL).to_string(),
+            expected
+        );
     }
 
     #[test]
@@ -594,7 +614,7 @@ mod tests {
                 set(Dialect::PostgreSQL),
                 b"SET client_min_messages TO 'warning'"
             );
-            let roundtripped = res.to_string();
+            let roundtripped = res.display(Dialect::MySQL).to_string();
             assert_eq!(roundtripped, "SET client_min_messages = 'warning'");
 
             assert_eq!(
@@ -612,7 +632,7 @@ mod tests {
         #[test]
         fn set_session_timezone() {
             let res = test_parse!(set(Dialect::PostgreSQL), b"SET SESSION timezone TO 'UTC'");
-            let roundtripped = res.to_string();
+            let roundtripped = res.display(Dialect::MySQL).to_string();
             assert_eq!(roundtripped, "SET SESSION timezone = 'UTC'");
 
             assert_eq!(
@@ -630,7 +650,7 @@ mod tests {
         #[test]
         fn set_names() {
             let res = test_parse!(set(Dialect::PostgreSQL), b"SET NAMES 'UTF8'");
-            let roundtripped = res.to_string();
+            let roundtripped = res.display(Dialect::MySQL).to_string();
             assert_eq!(roundtripped, "SET NAMES 'UTF8'");
 
             assert_eq!(
@@ -646,7 +666,7 @@ mod tests {
         fn set_default() {
             let res1 = test_parse!(set(Dialect::PostgreSQL), b"SET SESSION timezone TO DEFAULT");
             let res2 = test_parse!(set(Dialect::PostgreSQL), b"SET SESSION timezone = DEFAULT");
-            let roundtripped = res1.to_string();
+            let roundtripped = res1.display(Dialect::MySQL).to_string();
             assert_eq!(roundtripped, "SET SESSION timezone = DEFAULT");
 
             assert_eq!(
@@ -663,7 +683,7 @@ mod tests {
         #[test]
         fn set_list() {
             let res = test_parse!(set(Dialect::PostgreSQL), b"SET LOCAL whatever = 'x', 1, hi");
-            let roundtripped = res.to_string();
+            let roundtripped = res.display(Dialect::MySQL).to_string();
             assert_eq!(roundtripped, "SET LOCAL whatever = 'x', 1, hi");
 
             assert_eq!(

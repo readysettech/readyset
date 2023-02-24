@@ -339,7 +339,7 @@ pub enum ReadySetError {
     },
 
     /// Manipulating a base table failed.
-    #[error("Failed to manipulate table {table}: {source}")]
+    #[error("Failed to manipulate table {}: {source}", table.display_unquoted())]
     TableError {
         /// The base table being manipulated.
         table: Relation,
@@ -631,7 +631,7 @@ pub enum ReadySetError {
     RelationNotFound { relation: String },
 
     /// Error applying ops to base node
-    #[error("Failed to apply some operations to base node for {table}")]
+    #[error("Failed to apply some operations to base node for {}", table.display_unquoted())]
     FailedBaseOps {
         /// The base table being manipulated.
         table: Relation,

@@ -82,11 +82,10 @@ mod tests {
         let mut expr = parse_expr(nom_sql::Dialect::MySQL, input).unwrap();
         let expected = parse_expr(nom_sql::Dialect::MySQL, expected).unwrap();
         constant_fold_expr(&mut expr, Dialect::DEFAULT_MYSQL);
-        assert_eq!(
-            expr.to_string(),
-            expected.to_string(),
-            "\nExpected; {expected}\n     Got: {expr}"
-        );
+
+        let expr = expr.display(nom_sql::Dialect::MySQL).to_string();
+        let expected = expected.display(nom_sql::Dialect::MySQL).to_string();
+        assert_eq!(expr, expected, "\nExpected; {expected}\n     Got: {expr}");
     }
 
     macro_rules! cf_tests {

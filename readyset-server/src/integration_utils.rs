@@ -205,9 +205,12 @@ where
             source: box ReadySetError::ViewNotFoundInWorkers { name, .. },
             ..
         }) => {
-            assert_eq!(*name, view_name.to_string())
+            assert_eq!(*name, view_name.display_unquoted().to_string())
         }
-        _ => panic!("Expected view not found error for view {}", view_name),
+        _ => panic!(
+            "Expected view not found error for view {}",
+            view_name.display_unquoted()
+        ),
     }
 }
 

@@ -210,7 +210,7 @@ impl SqlIncorporator {
                         Ok(body) => body,
                         Err(unparsed) => unsupported!(
                             "CREATE TABLE {} body failed to parse: {}",
-                            cts.table,
+                            cts.table.display_unquoted(),
                             Sensitive(&unparsed)
                         ),
                     };
@@ -230,7 +230,7 @@ impl SqlIncorporator {
                             if current_body != &body {
                                 // Table has changed. Drop and recreate.
                                 trace!(
-                                    table = %cts.table,
+                                    table = %cts.table.display_unquoted(),
                                     "table exists and has changed. Dropping and recreating..."
                                 );
                                 self.drop_and_recreate_table(&cts.table.clone(), body, mig)?;
@@ -255,8 +255,8 @@ impl SqlIncorporator {
 
                             for invalidate_query in invalidate_queries {
                                 info!(
-                                    table = %cts.table,
-                                    query = %invalidate_query,
+                                    table = %cts.table.display_unquoted(),
+                                    query = %invalidate_query.display_unquoted(),
                                     "Created table invalidates previously-created query due to \
                                      schema resolution; dropping query"
                                 );
@@ -271,7 +271,7 @@ impl SqlIncorporator {
                     }
                 }
                 Change::AddNonReplicatedRelation(name) => {
-                    debug!(%name, "Adding non-replicated relation");
+                    debug!(name = %name.display_unquoted(), "Adding non-replicated relation");
                     self.add_non_replicated_relation(name);
                 }
                 Change::CreateView(mut stmt) => {
@@ -285,7 +285,7 @@ impl SqlIncorporator {
                         Ok(definition) => *definition,
                         Err(unparsed) => unsupported!(
                             "CREATE VIEW {} body failed to parse: {}",
-                            stmt.name,
+                            stmt.name.display_unquoted(),
                             Sensitive(&unparsed)
                         ),
                     };
@@ -341,7 +341,10 @@ impl SqlIncorporator {
                     self.registry.add_custom_type(name.clone());
                     self.add_custom_type(name.clone(), ty);
                     if needs_resnapshot {
-                        debug!(name = %name.clone(), "Replacing existing custom type");
+                        debug!(
+                            name = %name.display_unquoted(),
+                            "Replacing existing custom type"
+                        );
                         for expr in self
                             .registry
                             .expressions_referencing_custom_type(&name)
@@ -397,14 +400,24 @@ impl SqlIncorporator {
                     };
 
                     if !removed && !if_exists {
-                        error!(%name, "attempted to drop relation, but relation does not exist");
-                        internal!("attempted to drop relation, but relation {name} does not exist",);
+                        error!(
+                            name = %name.display_unquoted(),
+                            "attempted to drop relation, but relation does not exist"
+                        );
+                        internal!(
+                            "attempted to drop relation, but relation {} does not exist",
+                            name.display_unquoted()
+                        );
                     }
                 }
                 Change::AlterType { oid, name, change } => {
-                    let (ty, _old_name) = self
-                        .alter_custom_type(oid, &name, change)
-                        .map_err(|e| e.context(format!("while altering custom type {name}")))?;
+                    let (ty, _old_name) =
+                        self.alter_custom_type(oid, &name, change).map_err(|e| {
+                            e.context(format!(
+                                "while altering custom type {}",
+                                name.display_unquoted()
+                            ))
+                        })?;
                     let ty = ty.clone();
 
                     let mut table_names = vec![];
@@ -477,7 +490,7 @@ impl SqlIncorporator {
         definition: SelectSpecification,
         schema_search_path: Vec<SqlIdentifier>,
     ) -> ReadySetResult<()> {
-        trace!(%name, "Adding uncompiled view");
+        trace!(name = %name.display_unquoted(), "Adding uncompiled view");
         self.remove_non_replicated_relation(&name);
         self.uncompiled_views.insert(
             name,
@@ -524,7 +537,11 @@ impl SqlIncorporator {
                     self.registry
                         .add_reused_caches(name.clone(), Vec1::try_from(caches).unwrap());
                     warn!(%err, "Migration failed");
-                    info!("Found compatible view for {}. View may not satisfy all possible placeholder values", name);
+                    info!(
+                        "Found compatible view for {}. View may not satisfy all possible \
+                         placeholder values",
+                        name.display_unquoted()
+                    );
                 }
                 None
             }
@@ -585,7 +602,12 @@ impl SqlIncorporator {
                 .expect("custom_types_by_oid must point at types in custom_types");
             self.custom_types.insert(name.clone(), ty);
             self.registry.rename_custom_type(&old_name, name);
-            trace!(%old_name, new_name = %name, %oid, "Renaming custom type");
+            trace!(
+                old_name = %old_name.display_unquoted(),
+                new_name = %name.display_unquoted(),
+                %oid,
+                "Renaming custom type"
+            );
             Some(old_name)
         } else {
             None
@@ -618,7 +640,12 @@ impl SqlIncorporator {
                         }
                         metadata.take()
                     }
-                    _ => return Err(invalid_err!("Custom type {name} is not an enum")),
+                    _ => {
+                        return Err(invalid_err!(
+                            "Custom type {} is not an enum",
+                            name.display_unquoted()
+                        ))
+                    }
                 };
 
                 *ty = DfType::from_enum_variants(new_variants, metadata);
@@ -711,12 +738,13 @@ impl SqlIncorporator {
                     Err(e) => {
                         error!(
                             err = %e,
-                            %name,
+                            name = %name.display_unquoted(),
                             "failed to remove base whose address could not be resolved",
                         );
 
                         return Err(e.context(format!(
-                            "failed to remove base {name} whose address could not be resolved"
+                            "failed to remove base {} whose address could not be resolved",
+                            name.display_unquoted()
                         )));
                     }
                 }
@@ -735,7 +763,7 @@ impl SqlIncorporator {
         let removed_node_indices = self.remove_expression(table, mig)?;
         if removed_node_indices.is_none() {
             error!(
-                table = %table,
+                table = %table.display_unquoted(),
                 "attempted to issue ALTER TABLE, but table does not exist"
             );
             return Err(ReadySetError::TableNotFound {
@@ -846,7 +874,7 @@ impl SqlIncorporator {
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<MirNodeIndex> {
         let on_err = |e| ReadySetError::SelectQueryCreationFailed {
-            qname: query_name.to_string(),
+            qname: query_name.display_unquoted().to_string(),
             source: Box::new(e),
         };
 
@@ -883,7 +911,10 @@ impl SqlIncorporator {
                         })
                         .and_then(|rel| Some((self.take_uncompiled_view(search_path, &rel)?, rel)))
                     {
-                        trace!(%name, "Query referenced uncompiled view; compiling");
+                        trace!(
+                            name = %name.display_unquoted(),
+                            "Query referenced uncompiled view; compiling"
+                        );
                         if let Err(e) =
                             self.compile_uncompiled_view(name.clone(), view.clone(), mig)
                         {
@@ -915,7 +946,8 @@ impl SqlIncorporator {
         leaf_behavior: LeafBehavior,
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<MirNodeIndex> {
-        trace!(%stmt, "Adding select query");
+        // FIXME(ENG-2499): Use correct dialect.
+        trace!(stmt = %stmt.display(nom_sql::Dialect::MySQL), "Adding select query");
         *stmt = self.rewrite(stmt.clone(), search_path, mig.dialect, invalidating_tables)?;
 
         self.num_queries += 1;
@@ -965,7 +997,8 @@ impl SqlIncorporator {
             }
         }
 
-        trace!(rewritten_query = %stmt);
+        // FIXME(ENG-2499): Use correct dialect.
+        trace!(rewritten_query = %stmt.display(nom_sql::Dialect::MySQL));
 
         let query_graph = to_query_graph(stmt.clone())?;
 
@@ -1053,7 +1086,7 @@ impl SqlIncorporator {
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<NodeIndex> {
         let on_err = |e| ReadySetError::SelectQueryCreationFailed {
-            qname: query_name.to_string(),
+            qname: query_name.display_unquoted().to_string(),
             source: Box::new(e),
         };
         let mir_query = self
@@ -1078,9 +1111,9 @@ impl SqlIncorporator {
         query_name: &Relation,
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<MirRemovalResult> {
-        trace!(%query_name, "removing query");
+        trace!(query_name = %query_name.display_unquoted(), "removing query");
         if self.uncompiled_views.remove(query_name).is_some() {
-            trace!(%query_name, "Removed uncompiled view");
+            trace!(query_name = %query_name.display_unquoted(), "Removed uncompiled view");
             return Ok(Default::default());
         }
         let mut mir_removal_result = self.mir_converter.remove_query(query_name)?;
@@ -1093,7 +1126,7 @@ impl SqlIncorporator {
         table_name: &Relation,
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<MirRemovalResult> {
-        trace!(%table_name, "removing base table");
+        trace!(table_name = %table_name.display_unquoted(), "removing base table");
         let mut mir_removal_result = self.mir_converter.remove_base(table_name)?;
         self.process_removal(&mut mir_removal_result, mig);
         Ok(mir_removal_result)
@@ -1104,7 +1137,7 @@ impl SqlIncorporator {
         table_name: &Relation,
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<MirRemovalResult> {
-        trace!(%table_name, "removing base table dependencies");
+        trace!(table_name = %table_name.display_unquoted(), "removing base table dependencies");
         let mut mir_removal_result = self.mir_converter.remove_dependent_queries(table_name)?;
         self.process_removal(&mut mir_removal_result, mig);
         Ok(mir_removal_result)
@@ -1147,7 +1180,7 @@ impl SqlIncorporator {
     }
 
     fn register_query(&mut self, query_name: Relation, fields: Vec<SqlIdentifier>) {
-        debug!(%query_name, "registering query");
+        debug!(query_name = %query_name.display_unquoted(), "registering query");
         self.view_schemas.insert(query_name, fields);
     }
 }

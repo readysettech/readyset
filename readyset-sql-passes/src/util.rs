@@ -89,7 +89,7 @@ pub fn map_aggregates(expr: &mut Expr) -> Vec<(FunctionExpr, SqlIdentifier)> {
     let mut ret = Vec::new();
     match expr {
         Expr::Call(f) if is_aggregate(f) => {
-            let name: SqlIdentifier = f.to_string().into();
+            let name: SqlIdentifier = f.display(nom_sql::Dialect::MySQL).to_string().into();
             ret.push((f.clone(), name.clone()));
             *expr = Expr::Column(Column { name, table: None });
         }

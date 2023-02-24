@@ -71,7 +71,7 @@ where
             "{} [label=\"{{ {}: {} | {} }}\"]",
             n.index(),
             n.index(),
-            name,
+            name.display_unquoted(),
             Sanitized(MirNodeRef { node: n, graph }.to_graphviz()),
         )?;
 
@@ -130,7 +130,7 @@ impl<'a> GraphViz for MirNodeRef<'a> {
             if i != 0 {
                 write!(f, ",\\n")?;
             }
-            write!(f, "{}", owner)?;
+            write!(f, "{}", owner.display_unquoted())?;
         }
         if !owners.is_empty() {
             write!(f, " | ")?;
@@ -201,7 +201,10 @@ impl GraphViz for MirNodeInner {
                 let group_cols = group_by.iter().join(", ");
                 write!(f, "{} | γ: {}", op_string, group_cols)
             }
-            MirNodeInner::Filter { ref conditions, .. } => write!(f, "σ: {}", conditions),
+            MirNodeInner::Filter { ref conditions, .. } => {
+                // FIXME(ENG-2502): Use correct dialect.
+                write!(f, "σ: {}", conditions.display(nom_sql::Dialect::MySQL))
+            }
 
             MirNodeInner::Identity => write!(f, "≡"),
             MirNodeInner::Join { ref on, .. } => {
@@ -295,11 +298,12 @@ impl GraphViz for MirNodeInner {
                                 .iter()
                                 .map(|&(ref n, ref v)| format!("{}: {}", n, v))
                         )
-                        .chain(
-                            expressions
-                                .iter()
-                                .map(|&(ref n, ref e)| format!("{}: {}", n, e))
-                        )
+                        .chain(expressions.iter().map(|&(ref n, ref e)| format!(
+                            "{}: {}",
+                            n,
+                            // FIXME(ENG-2502): Use correct dialect.
+                            e.display(nom_sql::Dialect::MySQL)
+                        )))
                         .join(", ")
                 )
             }
@@ -355,7 +359,7 @@ impl GraphViz for MirNodeInner {
                 write!(f, "{}", cols)
             }
             MirNodeInner::AliasTable { ref table } => {
-                write!(f, "AliasTable [{}]", table)
+                write!(f, "AliasTable [{}]", table.display_unquoted())
             }
         }
     }

@@ -7,6 +7,7 @@ use nom::combinator::{map, opt};
 use nom::multi::separated_list1;
 use nom::sequence::preceded;
 use nom_locate::LocatedSpan;
+use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 
 use crate::common::{statement_terminator, ws_sep_comma};
@@ -38,20 +39,24 @@ pub struct DropTableStatement {
     pub if_exists: bool,
 }
 
-impl Display for DropTableStatement {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "DROP TABLE ")?;
-        if self.if_exists {
-            write!(f, "IF EXISTS ")?;
-        }
-        let ts = self
-            .tables
-            .iter()
-            .map(|t| format!("`{}`", t.name))
-            .collect::<Vec<_>>()
-            .join(", ");
-        write!(f, "{}", ts)?;
-        Ok(())
+impl DropTableStatement {
+    pub fn display(&self, dialect: Dialect) -> impl Display + '_ {
+        fmt_with(move |f| {
+            write!(f, "DROP TABLE ")?;
+
+            if self.if_exists {
+                write!(f, "IF EXISTS ")?;
+            }
+
+            write!(
+                f,
+                "{}",
+                self.tables
+                    .iter()
+                    .map(|t| dialect.quote_identifier(&t.name))
+                    .join(", ")
+            )
+        })
     }
 }
 
@@ -77,9 +82,9 @@ pub struct DropCacheStatement {
     pub name: Relation,
 }
 
-impl Display for DropCacheStatement {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "DROP CACHE {}", self.name)
+impl DropCacheStatement {
+    pub fn display(&self, dialect: Dialect) -> impl Display + '_ {
+        fmt_with(move |f| write!(f, "DROP CACHE {}", self.name.display(dialect)))
     }
 }
 
@@ -103,13 +108,22 @@ pub struct DropViewStatement {
     pub if_exists: bool,
 }
 
-impl Display for DropViewStatement {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "DROP VIEW ")?;
-        if self.if_exists {
-            write!(f, "IF EXISTS ")?;
-        }
-        write!(f, "{}", self.views.iter().join(", "))
+impl DropViewStatement {
+    pub fn display(&self, dialect: Dialect) -> impl Display + '_ {
+        fmt_with(move |f| {
+            write!(f, "DROP VIEW ")?;
+            if self.if_exists {
+                write!(f, "IF EXISTS ")?;
+            }
+            write!(
+                f,
+                "{}",
+                self.views
+                    .iter()
+                    .map(|view| view.display(dialect))
+                    .join(", ")
+            )
+        })
     }
 }
 
@@ -170,7 +184,7 @@ mod tests {
         let qstring = "DROP TABLE IF EXISTS users,posts;";
         let expected = "DROP TABLE IF EXISTS `users`, `posts`";
         let res = drop_table(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
-        assert_eq!(res.unwrap().1.to_string(), expected);
+        assert_eq!(res.unwrap().1.display(Dialect::MySQL).to_string(), expected);
     }
 
     #[test]
@@ -205,6 +219,7 @@ mod tests {
         let res = DropCacheStatement {
             name: "test".into(),
         }
+        .display(Dialect::MySQL)
         .to_string();
         assert_eq!(res, "DROP CACHE `test`");
     }
@@ -244,6 +259,9 @@ mod tests {
             if_exists: true,
         };
 
-        assert_eq!(stmt.to_string(), "DROP VIEW IF EXISTS `v1`, `v2`");
+        assert_eq!(
+            stmt.display(Dialect::MySQL).to_string(),
+            "DROP VIEW IF EXISTS `v1`, `v2`"
+        );
     }
 }

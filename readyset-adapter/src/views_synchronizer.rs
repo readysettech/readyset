@@ -79,7 +79,8 @@ impl ViewsSynchronizer {
             Ok(statuses) => {
                 for (query, migrated) in queries.into_iter().zip(statuses) {
                     trace!(
-                        query = %query.statement,
+                        // FIXME(ENG-2499): Use correct dialect.
+                        query = %query.statement.display(nom_sql::Dialect::MySQL),
                         migrated,
                         "Loaded query status from controller"
                     );

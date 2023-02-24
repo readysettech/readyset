@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
-use std::fmt::{Debug, Display};
+use std::fmt::Debug;
 use std::vec::Vec;
 
 use ::serde::{Deserialize, Serialize};
@@ -196,11 +196,13 @@ impl SqlToMirConverter {
     /// then the two names will be identical.
     /// New nodes must be added between consecutive calls for the names to be unique.
     // TODO(fran): Remove this once we get rid of node names.
-    pub(crate) fn generate_label<N>(&self, label_prefix: &N) -> Relation
-    where
-        N: Display,
-    {
-        format!("{}_n{}", label_prefix, self.mir_graph.node_count()).into()
+    pub(crate) fn generate_label(&self, label_prefix: &Relation) -> Relation {
+        format!(
+            "{}_n{}",
+            label_prefix.display_unquoted(),
+            self.mir_graph.node_count()
+        )
+        .into()
     }
 
     /// Return the correct error for a table not being found during a migration.
@@ -238,7 +240,7 @@ impl SqlToMirConverter {
         let name = if !leaf_behavior.should_register() && !has_limit {
             query_name.clone()
         } else {
-            format!("{}_union", query_name).into()
+            format!("{}_union", query_name.display_unquoted()).into()
         };
         let mut final_node = match op {
             CompoundSelectOperator::Union => self.make_union_node(
@@ -254,9 +256,9 @@ impl SqlToMirConverter {
             let make_topk = offset.is_none();
             let paginate_name = if leaf_behavior.should_register() {
                 if make_topk {
-                    format!("{}_topk", query_name)
+                    format!("{}_topk", query_name.display_unquoted())
                 } else {
-                    format!("{}_paginate", query_name)
+                    format!("{}_paginate", query_name.display_unquoted())
                 }
                 .into()
             } else {
@@ -268,7 +270,7 @@ impl SqlToMirConverter {
             let paginate_node = *self
                 .make_paginate_node(
                     query_name,
-                    paginate_name.to_string().into(),
+                    paginate_name.display_unquoted().to_string().into(),
                     final_node,
                     group_by,
                     &order
@@ -300,7 +302,7 @@ impl SqlToMirConverter {
 
         let mut alias_table_node = MirNode::new(
             if leaf_behavior.should_register() {
-                format!("{}_alias_table", query_name).into()
+                format!("{}_alias_table", query_name.display_unquoted()).into()
             } else {
                 query_name.clone()
             },
@@ -368,7 +370,7 @@ impl SqlToMirConverter {
             self.relations
                 .remove(name)
                 .ok_or_else(|| ReadySetError::RelationNotFound {
-                    relation: name.to_string(),
+                    relation: name.display_unquoted().to_string(),
                 })?;
 
         self.remove_dependent_nodes(leaf_mn)
@@ -376,12 +378,12 @@ impl SqlToMirConverter {
 
     /// Removes a base table, along with all the views/cached queries associated with it.
     pub(super) fn remove_base(&mut self, name: &Relation) -> ReadySetResult<MirRemovalResult> {
-        debug!(%name, "Removing base node");
+        debug!(name = %name.display_unquoted(), "Removing base node");
         let root = self
             .relations
             .remove(name)
             .ok_or_else(|| ReadySetError::RelationNotFound {
-                relation: name.to_string(),
+                relation: name.display_unquoted().to_string(),
             })?;
 
         let mut mir_removal_result = self.remove_dependent_nodes(root)?;
@@ -408,12 +410,12 @@ impl SqlToMirConverter {
         &mut self,
         table_name: &Relation,
     ) -> ReadySetResult<MirRemovalResult> {
-        debug!(%table_name, "Removing dependent queries");
+        debug!(table_name = %table_name.display_unquoted(), "Removing dependent queries");
         let root =
             self.relations
                 .get(table_name)
                 .ok_or_else(|| ReadySetError::RelationNotFound {
-                    relation: table_name.to_string(),
+                    relation: table_name.display_unquoted().to_string(),
                 })?;
         self.mir_graph
             .node_weight(*root)
@@ -528,7 +530,7 @@ impl SqlToMirConverter {
                 MirNodeInner::Base { column_specs, .. } => {
                     if column_specs.as_slice() == cols {
                         debug!(
-                            %table_name,
+                            table_name = %table_name.display_unquoted(),
                             "base table already exists with identical schema; reusing it.",
                         );
                         return Ok(ni);
@@ -545,7 +547,7 @@ impl SqlToMirConverter {
                 }
                 _ => internal!(
                     "a MIR node already exists with the same name: {}",
-                    table_name
+                    table_name.display_unquoted()
                 ),
             }
         }
@@ -683,7 +685,7 @@ impl SqlToMirConverter {
         duplicate_mode: union::DuplicateMode,
     ) -> ReadySetResult<NodeIndex> {
         invariant!(ancestors.len() > 1, "union must have more than 1 ancestors");
-        trace!(%name, ?columns, "Added union node");
+        trace!(name = %name.display_unquoted(), ?columns, "Added union node");
         let emit = ancestors.iter().map(|_| columns.clone()).collect();
         Ok(self.add_query_node(
             query_name.clone(),
@@ -705,7 +707,12 @@ impl SqlToMirConverter {
         parent: NodeIndex,
         conditions: Expr,
     ) -> NodeIndex {
-        trace!(%name, %conditions, "Added filter node");
+        trace!(
+            name = %name.display_unquoted(),
+            // FIXME(ENG-2499+2502): Use correct dialect.
+            conditions = %conditions.display(nom_sql::Dialect::MySQL),
+            "Added filter node"
+        );
         self.add_query_node(
             query_name.clone(),
             MirNode::new(name, MirNodeInner::Filter { conditions }),
@@ -739,7 +746,7 @@ impl SqlToMirConverter {
 
         let mknode = |over: Column, t: GroupedNodeType, distinct: bool| {
             if distinct {
-                let new_name = format!("{}_d{}", name, out_nodes.len()).into();
+                let new_name = format!("{}_d{}", name.display_unquoted(), out_nodes.len()).into();
                 let mut dist_col = vec![over.clone()];
                 dist_col.extend(group_cols.clone());
                 let node = self.make_distinct_node(query_name, new_name, parent, dist_col.clone());
@@ -1080,7 +1087,10 @@ impl SqlToMirConverter {
                         match expr {
                             Expr::Column(col) => Column::from(col),
                             expr => {
-                                let col = Column::named(expr.to_string());
+                                let col = Column::named(
+                                    // FIXME(ENG-2499+2502): Use correct dialect.
+                                    expr.display(nom_sql::Dialect::MySQL).to_string(),
+                                );
                                 if self
                                     .mir_graph
                                     .column_id_for_column(parent, &col)
@@ -1114,7 +1124,11 @@ impl SqlToMirConverter {
                 parent_columns,
                 exprs_to_project
                     .into_iter()
-                    .map(|expr| (expr.to_string().into(), expr))
+                    .map(|expr| {
+                        // FIXME(ENG-2502): Use correct dialect.
+                        let expr_string = expr.display(nom_sql::Dialect::MySQL).to_string();
+                        (expr_string.into(), expr)
+                    })
                     .collect(),
                 vec![],
             );
@@ -1184,7 +1198,12 @@ impl SqlToMirConverter {
 
                 self.make_union_from_same_base(
                     query_name,
-                    format!("{}_un{}", name, self.mir_graph.node_count()).into(),
+                    format!(
+                        "{}_un{}",
+                        name.display_unquoted(),
+                        self.mir_graph.node_count()
+                    )
+                    .into(),
                     vec![left_subquery_leaf, right_subquery_leaf],
                     output_cols,
                     // the filters might overlap, so we need to set BagUnion mode which
@@ -1198,7 +1217,12 @@ impl SqlToMirConverter {
             } => internal!("negation should have been removed earlier"),
             Expr::Literal(_) | Expr::Column(_) => self.make_filter_node(
                 query_name,
-                format!("{}_f{}", name, self.mir_graph.node_count()).into(),
+                format!(
+                    "{}_f{}",
+                    name.display_unquoted(),
+                    self.mir_graph.node_count()
+                )
+                .into(),
                 parent,
                 Expr::BinaryOp {
                     lhs: Box::new(ce.clone()),
@@ -1219,7 +1243,7 @@ impl SqlToMirConverter {
                 // -> π[lit: 0, lit: 0]
                 let group_proj = self.make_project_node(
                     query_name,
-                    format!("{}_prj_hlpr", name).into(),
+                    format!("{}_prj_hlpr", name.display_unquoted()).into(),
                     subquery_leaf,
                     vec![],
                     vec![],
@@ -1234,7 +1258,7 @@ impl SqlToMirConverter {
                 let exists_count_col = Column::named("__exists_count");
                 let exists_count_node = self.make_grouped_node(
                     query_name,
-                    format!("{}_count", name).into(),
+                    format!("{}_count", name.display_unquoted()).into(),
                     exists_count_col,
                     (group_proj, Column::named("__count_val")),
                     vec![Column::named("__count_grp")],
@@ -1245,7 +1269,7 @@ impl SqlToMirConverter {
                 // -> σ[c1 > 0]
                 let gt_0_filter = self.make_filter_node(
                     query_name,
-                    format!("{}_count_gt_0", name).into(),
+                    format!("{}_count_gt_0", name.display_unquoted()).into(),
                     exists_count_node,
                     Expr::BinaryOp {
                         lhs: Box::new(Expr::Column("__exists_count".into())),
@@ -1258,7 +1282,7 @@ impl SqlToMirConverter {
                 let parent_columns = self.mir_graph.columns(parent);
                 let left_literal_join_key_proj = self.make_project_node(
                     query_name,
-                    format!("{}_join_key", name).into(),
+                    format!("{}_join_key", name.display_unquoted()).into(),
                     parent,
                     parent_columns,
                     vec![],
@@ -1268,7 +1292,7 @@ impl SqlToMirConverter {
                 // -> ⋈ on: l.__exists_join_key ≡ r.__count_grp
                 self.make_join_node(
                     query_name,
-                    format!("{}_join", name).into(),
+                    format!("{}_join", name.display_unquoted()).into(),
                     &[JoinPredicate {
                         left: Expr::Column("__exists_join_key".into()),
                         right: Expr::Column("__count_grp".into()),
@@ -1288,7 +1312,12 @@ impl SqlToMirConverter {
             Expr::NestedSelect(_) => unsupported!("Nested selects not supported in filters"),
             _ => self.make_filter_node(
                 query_name,
-                format!("{}_f{}", name, self.mir_graph.node_count()).into(),
+                format!(
+                    "{}_f{}",
+                    name.display_unquoted(),
+                    self.mir_graph.node_count()
+                )
+                .into(),
                 parent,
                 ce.clone(),
             ),
@@ -1315,7 +1344,12 @@ impl SqlToMirConverter {
             if !created_predicates.contains(ce) {
                 let subquery_leaf = self.make_predicate_nodes(
                     query_name,
-                    format!("{}_mp{}", name, self.mir_graph.node_count()).into(),
+                    format!(
+                        "{}_mp{}",
+                        name.display_unquoted(),
+                        self.mir_graph.node_count()
+                    )
+                    .into(),
                     leaf,
                     ce,
                 )?;
@@ -1439,7 +1473,7 @@ impl SqlToMirConverter {
                 let alias_table_node_name = format!(
                     "q_{:x}_{}_alias_table_{}",
                     query_graph.signature().hash,
-                    self.mir_graph[base_for_rel].name(),
+                    self.mir_graph[base_for_rel].name().display_unquoted(),
                     rel.name
                 )
                 .into();
@@ -1793,7 +1827,12 @@ impl SqlToMirConverter {
                     )
                     .into()
                 } else {
-                    format!("{}_d{}", query_name, self.mir_graph.node_count()).into()
+                    format!(
+                        "{}_d{}",
+                        query_name.display_unquoted(),
+                        self.mir_graph.node_count()
+                    )
+                    .into()
                 };
                 let distinct_node = self.make_distinct_node(
                     query_name,
@@ -1835,9 +1874,9 @@ impl SqlToMirConverter {
                                 expr: Expr::Column(c),
                                 ..
                             } => Ok(Column::from(c)),
-                            FieldDefinitionExpr::Expr { expr, .. } => {
-                                Ok(Column::named(expr.to_string()))
-                            }
+                            FieldDefinitionExpr::Expr { expr, .. } => Ok(Column::named(
+                                expr.display(nom_sql::Dialect::MySQL).to_string(),
+                            )),
                         }
                     })
                     .collect::<Result<Vec<_>, _>>()?;
@@ -1915,7 +1954,7 @@ impl SqlToMirConverter {
             self.relations.insert(query_name.clone(), leaf);
         }
 
-        debug!(%query_name, "Added final MIR node for query");
+        debug!(query_name = %query_name.display_unquoted(), "Added final MIR node for query");
 
         // finally, we output all the nodes we generated
         Ok(leaf)

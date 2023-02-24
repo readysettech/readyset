@@ -310,7 +310,9 @@ impl Literal {
             SqlType::Serial => any::<i32>().prop_map(Self::from).boxed(),
             SqlType::BigSerial => any::<i64>().prop_map(Self::from).boxed(),
             SqlType::Array(_) => unimplemented!("Arrays aren't implemented yet"),
-            SqlType::Other(ty) => unimplemented!("Other({ty}) isn't implemented yet"),
+            SqlType::Other(ty) => {
+                unimplemented!("Other({}) isn't implemented yet", ty.display_unquoted())
+            }
         }
     }
 

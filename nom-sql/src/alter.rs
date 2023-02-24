@@ -12,6 +12,7 @@ use nom::combinator::{map, opt, value};
 use nom::multi::separated_list1;
 use nom::sequence::{preceded, terminated};
 use nom_locate::LocatedSpan;
+use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 
 use crate::column::{column_specification, ColumnSpecification};
@@ -107,42 +108,57 @@ pub enum AlterTableDefinition {
      * DropTableConstraint(..), */
 }
 
-impl fmt::Display for AlterTableDefinition {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            AlterTableDefinition::AddColumn(col) => {
-                write!(f, "ADD COLUMN {}", col)
+impl AlterTableDefinition {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| match self {
+            Self::AddColumn(col) => {
+                write!(f, "ADD COLUMN {}", col.display(dialect))
             }
-            AlterTableDefinition::AddKey(index) => {
-                write!(f, "ADD {}", index)
+            Self::AddKey(index) => {
+                write!(f, "ADD {}", index.display(dialect))
             }
-            AlterTableDefinition::AlterColumn { name, operation } => {
-                write!(f, "ALTER COLUMN `{}` {}", name, operation)
+            Self::AlterColumn { name, operation } => {
+                write!(
+                    f,
+                    "ALTER COLUMN {} {}",
+                    dialect.quote_identifier(name),
+                    operation
+                )
             }
-            AlterTableDefinition::DropColumn { name, behavior } => {
-                write!(f, "DROP COLUMN `{}`", name)?;
+            Self::DropColumn { name, behavior } => {
+                write!(f, "DROP COLUMN {}", dialect.quote_identifier(name))?;
                 if let Some(behavior) = behavior {
                     write!(f, " {}", behavior)?;
                 }
                 Ok(())
             }
-            AlterTableDefinition::ChangeColumn { name, spec } => {
-                write!(f, "CHANGE COLUMN `{}` {}", name, spec)
+            Self::ChangeColumn { name, spec } => {
+                write!(
+                    f,
+                    "CHANGE COLUMN {} {}",
+                    dialect.quote_identifier(name),
+                    spec.display(dialect)
+                )
             }
-            AlterTableDefinition::RenameColumn { name, new_name } => {
-                write!(f, "RENAME COLUMN `{}` `{}`", name, new_name)
+            Self::RenameColumn { name, new_name } => {
+                write!(
+                    f,
+                    "RENAME COLUMN {} {}",
+                    dialect.quote_identifier(name),
+                    dialect.quote_identifier(new_name)
+                )
             }
-            AlterTableDefinition::DropConstraint {
+            Self::DropConstraint {
                 name,
                 drop_behavior,
             } => match drop_behavior {
                 None => write!(f, "DROP CONSTRAINT {}", name),
                 Some(d) => write!(f, "DROP CONSTRAINT {} {}", name, d),
             },
-            AlterTableDefinition::ReplicaIdentity(replica_identity) => {
+            Self::ReplicaIdentity(replica_identity) => {
                 write!(f, "REPLICA IDENTITY {replica_identity}")
             }
-        }
+        })
     }
 }
 
@@ -158,22 +174,33 @@ pub struct AlterTableStatement {
     pub only: bool,
 }
 
-impl fmt::Display for AlterTableStatement {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "ALTER TABLE `{}` ", self.table.name)?;
-        match &self.definitions {
-            Ok(definitions) => {
-                write!(
-                    f,
-                    "{}",
-                    definitions.iter().map(|def| def.to_string()).join(", ")
-                )?;
+impl AlterTableStatement {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| {
+            // FIXME(ENG-2483): Use full table name including its schema.
+            write!(
+                f,
+                "ALTER TABLE {} ",
+                dialect.quote_identifier(&self.table.name)
+            )?;
+
+            match &self.definitions {
+                Ok(definitions) => {
+                    write!(
+                        f,
+                        "{}",
+                        definitions
+                            .iter()
+                            .map(|def| def.display(dialect))
+                            .join(", ")
+                    )?;
+                }
+                Err(unparsed) => {
+                    write!(f, "{}", unparsed)?;
+                }
             }
-            Err(unparsed) => {
-                write!(f, "{}", unparsed)?;
-            }
-        }
-        Ok(())
+            Ok(())
+        })
     }
 }
 
@@ -461,7 +488,7 @@ mod tests {
             only: false,
         };
 
-        let result = stmt.to_string();
+        let result = stmt.display(Dialect::MySQL).to_string();
         assert_eq!(result, "ALTER TABLE `t` ADD COLUMN `c` INT(32)");
     }
 
@@ -473,7 +500,7 @@ mod tests {
             only: false,
         };
 
-        let result = stmt.to_string();
+        let result = stmt.display(Dialect::MySQL).to_string();
         assert_eq!(result, "ALTER TABLE `t` unsupported rest of the query");
     }
 
@@ -752,7 +779,7 @@ mod tests {
                 }
             );
             assert_eq!(
-                res.to_string(),
+                res.display(Dialect::MySQL).to_string(),
                 "ALTER TABLE `t` CHANGE COLUMN `f` `modify` DATETIME"
             );
         }
@@ -836,7 +863,7 @@ mod tests {
                 }
             );
             assert_eq!(
-                res.to_string(),
+                res.display(Dialect::MySQL).to_string(),
                 "ALTER TABLE `discussion_user` ADD COLUMN `subscription` ENUM('follow', 'ignore') NULL"
             );
         }

@@ -160,7 +160,7 @@ impl PartialOrd for Column {
 impl Display for Column {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(table) = &self.table {
-            write!(f, "{table}.")?;
+            write!(f, "{}.", table.display_unquoted())?;
         }
 
         write!(f, "{}", self.name)?;

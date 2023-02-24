@@ -117,7 +117,8 @@ impl CreateSchema {
             *table = match nom_sql::parse_create_table(self.dialect, table.clone()) {
                 Ok(mut parsed_table) => {
                     parsed_table.anonymize(anonymizer);
-                    parsed_table.to_string()
+                    // FIXME(ENG-1860): Use correct dialect.
+                    parsed_table.display(nom_sql::Dialect::MySQL).to_string()
                 }
                 // If we fail to parse, fully anonymize the statement.
                 Err(_) => "<anonymized: create table failed to parse>".to_string(),
@@ -131,7 +132,7 @@ impl CreateSchema {
             *view = match nom_sql::parse_create_view(self.dialect, view.clone()) {
                 Ok(mut parsed_view) => {
                     parsed_view.anonymize(anonymizer);
-                    parsed_view.to_string()
+                    parsed_view.display(nom_sql::Dialect::MySQL).to_string()
                 }
                 // If we fail to parse, fully anonymize the statement.
                 Err(_) => "<anonymized: create view failed to parse>".to_string(),

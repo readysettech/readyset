@@ -76,7 +76,8 @@ impl TryFrom<PathBuf> for Seed {
                             tables.push(tbl)
                         }
                         SqlQuery::CreateView(view) => {
-                            relations_to_drop.push(Relation::View(view.name.to_string()));
+                            relations_to_drop
+                                .push(Relation::View(view.name.display_unquoted().to_string()));
                         }
                         _ => {}
                     }
@@ -127,6 +128,11 @@ impl TryFrom<Vec<QuerySeed>> for Seed {
             .map(|seed| -> anyhow::Result<Query> {
                 let query = generator.generate_query(seed);
 
+                // FIXME: Use correct dialect.
+                // NOTE: Without a binding, there is a compile error that `statement` does not live
+                // long enough if this expression is at `query:`.
+                let query_string = query.statement.display(nom_sql::Dialect::MySQL).to_string();
+
                 Ok(Query {
                     label: None,
                     column_types: None,
@@ -136,7 +142,7 @@ impl TryFrom<Vec<QuerySeed>> for Seed {
                         Some(SortMode::RowSort)
                     },
                     conditionals: vec![],
-                    query: query.statement.to_string(),
+                    query: query_string,
                     results: Default::default(),
                     params: QueryParams::PositionalParams(
                         query
@@ -160,7 +166,8 @@ impl TryFrom<Vec<QuerySeed>> for Seed {
 
             records.push(Record::Statement(Statement {
                 result: StatementResult::Ok,
-                command: create_stmt.to_string(),
+                // FIXME: Use correct dialect.
+                command: create_stmt.display(nom_sql::Dialect::MySQL).to_string(),
                 conditionals: vec![],
             }));
             tables.push(create_stmt);
@@ -314,17 +321,30 @@ impl Seed {
             if opts.verbose {
                 eprintln!(
                     "     > Inserting {} rows of seed data into {}",
-                    opts.rows_per_table, insert_statement.table
+                    opts.rows_per_table,
+                    insert_statement.table.display_unquoted()
                 );
             }
-            conn.query_drop(insert_statement.to_string())
-                .await
-                .with_context(|| format!("Inserting seed data for {}", insert_statement.table))?;
+            conn.query_drop(
+                insert_statement
+                    .display(nom_sql::Dialect::MySQL)
+                    .to_string(),
+            )
+            .await
+            .with_context(|| {
+                format!(
+                    "Inserting seed data for {}",
+                    insert_statement.table.display_unquoted()
+                )
+            })?;
         }
 
-        let new_entries = insert_statements
-            .iter()
-            .map(|stmt| Record::Statement(Statement::ok(stmt.to_string())));
+        let new_entries = insert_statements.iter().map(|stmt| {
+            // FIXME: Use correct dialect.
+            Record::Statement(Statement::ok(
+                stmt.display(nom_sql::Dialect::MySQL).to_string(),
+            ))
+        });
 
         let hash_threshold = self.hash_threshold;
         let queries = mem::take(&mut self.queries);
@@ -343,7 +363,7 @@ impl Seed {
                     let pk = spec.primary_key.clone().ok_or_else(|| {
                         anyhow!(
                             "--include-deletes specified, but table {} missing a primary key",
-                            table
+                            table.display_unquoted()
                         )
                     })?;
 
@@ -365,11 +385,12 @@ impl Seed {
                 .flatten()
                 .collect();
 
-            let new_entries = new_entries.chain(
-                delete_statements
-                    .iter()
-                    .map(|stmt| Record::Statement(Statement::ok(stmt.to_string()))),
-            );
+            let new_entries = new_entries.chain(delete_statements.iter().map(|stmt| {
+                // FIXME: Use correct dialect.
+                Record::Statement(Statement::ok(
+                    stmt.display(nom_sql::Dialect::MySQL).to_string(),
+                ))
+            }));
 
             eprintln!(
                 "{}",
@@ -384,14 +405,23 @@ impl Seed {
                 if opts.verbose {
                     eprintln!(
                         "     > Deleting {} rows of seed data from {}",
-                        rows_to_delete, delete_statement.table
+                        rows_to_delete,
+                        delete_statement.table.display_unquoted()
                     );
                 }
-                conn.query_drop(delete_statement.to_string())
-                    .await
-                    .with_context(|| {
-                        format!("Deleting seed data for {}", delete_statement.table)
-                    })?;
+
+                conn.query_drop(
+                    delete_statement
+                        .display(nom_sql::Dialect::MySQL)
+                        .to_string(),
+                )
+                .await
+                .with_context(|| {
+                    format!(
+                        "Deleting seed data for {}",
+                        delete_statement.table.display_unquoted()
+                    )
+                })?;
             }
 
             self.script

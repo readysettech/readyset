@@ -383,7 +383,7 @@ impl MirNodeInner {
                 format!("{} γ[{}]", op_string, group_cols)
             }
             MirNodeInner::Filter { ref conditions, .. } => {
-                format!("σ[{}]", conditions)
+                format!("σ[{}]", conditions.display(nom_sql::Dialect::MySQL))
             }
             MirNodeInner::Identity => "≡".to_string(),
             MirNodeInner::Join {
@@ -464,11 +464,9 @@ impl MirNodeInner {
                 "π [{}]",
                 emit.iter()
                     .map(|c| c.name.clone())
-                    .chain(
-                        expressions
-                            .iter()
-                            .map(|&(ref n, ref e)| format!("{}: {}", n, e).into())
-                    )
+                    .chain(expressions.iter().map(|&(ref n, ref e)| {
+                        format!("{}: {}", n, e.display(nom_sql::Dialect::MySQL)).into()
+                    }))
                     .chain(
                         literals
                             .iter()
@@ -517,7 +515,7 @@ impl MirNodeInner {
                     .join(&format!(" {} ", symbol))
             }
             MirNodeInner::AliasTable { ref table } => {
-                format!("AliasTable [{}]", table)
+                format!("AliasTable [{}]", table.display_unquoted())
             }
         }
     }

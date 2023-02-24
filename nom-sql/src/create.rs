@@ -1,8 +1,8 @@
-use std::fmt::Display;
 use std::str::FromStr;
 use std::{fmt, str};
 
-use derive_more::{Display, From};
+use derive_more::From;
+use itertools::Itertools;
 use nom::branch::alt;
 use nom::bytes::complete::{is_not, tag, tag_no_case};
 use nom::character::complete::digit1;
@@ -10,6 +10,7 @@ use nom::combinator::{map, map_res, opt};
 use nom::multi::{separated_list0, separated_list1};
 use nom::sequence::{delimited, preceded, terminated, tuple};
 use nom_locate::LocatedSpan;
+use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 
 use crate::column::{column_specification, Column, ColumnSpecification};
@@ -32,20 +33,24 @@ pub struct CreateTableBody {
     pub keys: Option<Vec<TableKey>>,
 }
 
-impl Display for CreateTableBody {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for (i, field) in self.fields.iter().enumerate() {
-            if i != 0 {
-                write!(f, ", ")?;
+impl CreateTableBody {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| {
+            for (i, field) in self.fields.iter().enumerate() {
+                if i != 0 {
+                    write!(f, ", ")?;
+                }
+                write!(f, "{}", field.display(dialect))?;
             }
-            write!(f, "{field}")?;
-        }
-        if let Some(keys) = &self.keys {
-            for key in keys {
-                write!(f, ", {key}")?;
+
+            if let Some(keys) = &self.keys {
+                for key in keys {
+                    write!(f, ", {}", key.display(dialect))?;
+                }
             }
-        }
-        Ok(())
+
+            Ok(())
+        })
     }
 }
 
@@ -67,37 +72,39 @@ pub struct CreateTableStatement {
     pub options: Result<Vec<CreateTableOption>, String>,
 }
 
-impl Display for CreateTableStatement {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "CREATE TABLE ")?;
-        if self.if_not_exists {
-            write!(f, "IF NOT EXISTS ")?;
-        }
-        write!(f, "{} (", self.table)?;
+impl CreateTableStatement {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| {
+            write!(f, "CREATE TABLE ")?;
+            if self.if_not_exists {
+                write!(f, "IF NOT EXISTS ")?;
+            }
+            write!(f, "{} (", self.table.display(dialect))?;
 
-        match &self.body {
-            Ok(body) => write!(f, "{body}")?,
-            Err(unparsed) => write!(f, "{unparsed}")?,
-        }
-
-        write!(f, ")")?;
-
-        match &self.options {
-            Ok(options) => {
-                for (i, option) in options.iter().enumerate() {
-                    if i == 0 {
-                        write!(f, " ")?;
-                    } else {
-                        write!(f, ", ")?;
-                    }
-                    write!(f, "{option}")?;
-                }
+            match &self.body {
+                Ok(body) => write!(f, "{}", body.display(dialect))?,
+                Err(unparsed) => write!(f, "{unparsed}")?,
             }
 
-            Err(unparsed) => write!(f, "{unparsed}")?,
-        }
+            write!(f, ")")?;
 
-        Ok(())
+            match &self.options {
+                Ok(options) => {
+                    for (i, option) in options.iter().enumerate() {
+                        if i == 0 {
+                            write!(f, " ")?;
+                        } else {
+                            write!(f, ", ")?;
+                        }
+                        write!(f, "{option}")?;
+                    }
+                }
+
+                Err(unparsed) => write!(f, "{unparsed}")?,
+            }
+
+            Ok(())
+        })
     }
 }
 
@@ -134,12 +141,12 @@ pub enum SelectSpecification {
     Simple(SelectStatement),
 }
 
-impl Display for SelectSpecification {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            SelectSpecification::Compound(ref csq) => write!(f, "{}", csq),
-            SelectSpecification::Simple(ref sq) => write!(f, "{}", sq),
-        }
+impl SelectSpecification {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| match self {
+            Self::Compound(csq) => write!(f, "{}", csq.display(dialect)),
+            Self::Simple(sq) => write!(f, "{}", sq.display(dialect)),
+        })
     }
 }
 
@@ -156,35 +163,44 @@ pub struct CreateViewStatement {
     pub definition: Result<Box<SelectSpecification>, String>,
 }
 
-impl Display for CreateViewStatement {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "CREATE VIEW {} ", self.name)?;
-        if !self.fields.is_empty() {
-            write!(f, "(")?;
-            write!(
-                f,
-                "{}",
-                self.fields
-                    .iter()
-                    .map(|field| field.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )?;
-            write!(f, ") ")?;
-        }
-        write!(f, "AS ")?;
-        match &self.definition {
-            Ok(def) => write!(f, "{def}"),
-            Err(unparsed) => write!(f, "{unparsed}"),
-        }
+impl CreateViewStatement {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| {
+            write!(f, "CREATE VIEW {} ", self.name.display(dialect))?;
+
+            if !self.fields.is_empty() {
+                write!(f, "(")?;
+                write!(
+                    f,
+                    "{}",
+                    self.fields.iter().map(|f| f.display(dialect)).join(", ")
+                )?;
+                write!(f, ") ")?;
+            }
+
+            write!(f, "AS ")?;
+            match &self.definition {
+                Ok(def) => write!(f, "{}", def.display(dialect)),
+                Err(unparsed) => write!(f, "{unparsed}"),
+            }
+        })
     }
 }
 
 /// The SelectStatement or query ID referenced in a [`CreateCacheStatement`]
-#[derive(Clone, Debug, Display, Eq, Hash, PartialEq, Serialize, Deserialize, From)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, From)]
 pub enum CacheInner {
     Statement(Box<SelectStatement>),
     Id(SqlIdentifier),
+}
+
+impl CacheInner {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| match self {
+            Self::Statement(stmt) => write!(f, "{}", stmt.display(dialect)),
+            Self::Id(id) => write!(f, "{id}"),
+        })
+    }
 }
 
 /// `CREATE CACHE [ALWAYS] [<name>] FROM ...`
@@ -202,20 +218,22 @@ pub struct CreateCacheStatement {
     pub always: bool,
 }
 
-impl Display for CreateCacheStatement {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "CREATE CACHE ")?;
-        if self.always {
-            write!(f, "ALWAYS ")?;
-        }
-        if let Some(name) = &self.name {
-            write!(f, "{} ", name)?;
-        }
-        write!(f, "FROM ")?;
-        match &self.inner {
-            Ok(inner) => write!(f, "{inner}"),
-            Err(unparsed) => write!(f, "{unparsed}"),
-        }
+impl CreateCacheStatement {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| {
+            write!(f, "CREATE CACHE ")?;
+            if self.always {
+                write!(f, "ALWAYS ")?;
+            }
+            if let Some(name) = &self.name {
+                write!(f, "{} ", name.display(dialect))?;
+            }
+            write!(f, "FROM ")?;
+            match &self.inner {
+                Ok(inner) => write!(f, "{}", inner.display(dialect)),
+                Err(unparsed) => write!(f, "{unparsed}"),
+            }
+        })
     }
 }
 
@@ -878,7 +896,7 @@ mod tests {
             b"CREATE TABLE IF NOT EXISTS t (x int)"
         );
         assert!(res.if_not_exists);
-        let rt = res.to_string();
+        let rt = res.display(Dialect::MySQL).to_string();
         assert_eq!(rt, "CREATE TABLE IF NOT EXISTS `t` (`x` INT)");
     }
 
@@ -1435,7 +1453,7 @@ mod tests {
                         `name` VARCHAR(80) NOT NULL UNIQUE) \
                         ENGINE=InnoDB, AUTO_INCREMENT=495209, DEFAULT CHARSET=utf8mb4, COLLATE=utf8mb4_unicode_ci";
             let res = create_table(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
-            assert_eq!(res.unwrap().1.to_string(), expected);
+            assert_eq!(res.unwrap().1.display(Dialect::MySQL).to_string(), expected);
         }
 
         #[test]
@@ -1471,7 +1489,7 @@ mod tests {
             let qstring = "CREATE VIEW `v` AS SELECT * FROM `t`;";
             let expected = "CREATE VIEW `v` AS SELECT * FROM `t`";
             let res = view_creation(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
-            assert_eq!(res.unwrap().1.to_string(), expected);
+            assert_eq!(res.unwrap().1.display(Dialect::MySQL).to_string(), expected);
         }
 
         #[test]
@@ -1560,7 +1578,7 @@ mod tests {
                 create_cached_query(Dialect::MySQL),
                 b"CREATE CACHE foo FROM SELECT id FROM users WHERE name = ?"
             );
-            let res = stmt.to_string();
+            let res = stmt.display(Dialect::MySQL).to_string();
             assert_eq!(
                 res,
                 "CREATE CACHE `foo` FROM SELECT `id` FROM `users` WHERE (`name` = ?)"
@@ -1958,7 +1976,7 @@ mod tests {
                         `id` INT AUTO_INCREMENT NOT NULL PRIMARY KEY, \
                         `name` VARCHAR(80) NOT NULL UNIQUE)";
             let res = create_table(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
-            assert_eq!(res.unwrap().1.to_string(), expected);
+            assert_eq!(res.unwrap().1.display(Dialect::MySQL).to_string(), expected);
         }
 
         #[test]
@@ -1994,7 +2012,7 @@ mod tests {
             let qstring = "CREATE VIEW \"v\" AS SELECT * FROM \"t\";";
             let expected = "CREATE VIEW `v` AS SELECT * FROM `t`";
             let res = view_creation(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
-            assert_eq!(res.unwrap().1.to_string(), expected);
+            assert_eq!(res.unwrap().1.display(Dialect::MySQL).to_string(), expected);
         }
 
         #[test]

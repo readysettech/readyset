@@ -4,6 +4,7 @@ use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::sequence::{delimited, tuple};
 use nom_locate::LocatedSpan;
+use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 
 use crate::common::statement_terminator;
@@ -18,14 +19,22 @@ pub struct DeleteStatement {
     pub where_clause: Option<Expr>,
 }
 
-impl fmt::Display for DeleteStatement {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "DELETE FROM `{}`", self.table.name)?;
-        if let Some(ref where_clause) = self.where_clause {
-            write!(f, " WHERE ")?;
-            write!(f, "{}", where_clause)?;
-        }
-        Ok(())
+impl DeleteStatement {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| {
+            // FIXME(ENG-2483): Use full table name including its schema.
+            write!(
+                f,
+                "DELETE FROM {}",
+                dialect.quote_identifier(&self.table.name)
+            )?;
+
+            if let Some(ref where_clause) = self.where_clause {
+                write!(f, " WHERE {}", where_clause.display(dialect))?;
+            }
+
+            Ok(())
+        })
     }
 }
 
@@ -111,6 +120,6 @@ mod tests {
         let qstring = "DELETE FROM users WHERE id = 1";
         let expected = "DELETE FROM `users` WHERE (`id` = 1)";
         let res = deletion(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
-        assert_eq!(res.unwrap().1.to_string(), expected);
+        assert_eq!(res.unwrap().1.display(Dialect::MySQL).to_string(), expected);
     }
 }

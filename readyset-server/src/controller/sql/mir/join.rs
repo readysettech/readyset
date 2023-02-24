@@ -58,7 +58,7 @@ pub(super) fn make_joins(
             match join_kind {
                 JoinKind::Left => internal!(
                     "Dependent left join not yet supported (when joining to {})",
-                    jref.dst
+                    jref.dst.display_unquoted()
                 ),
                 JoinKind::Inner => {
                     join_kind = JoinKind::Dependent;
@@ -114,7 +114,7 @@ pub(super) fn make_cross_joins(
 
         let node = mir_converter.make_join_node(
             query_name,
-            mir_converter.generate_label(&name),
+            mir_converter.generate_label(&name.into()),
             &[],
             n1,
             n2,
@@ -140,7 +140,7 @@ pub(super) fn make_joins_for_aggregates(
 
     let parent_join = mir_converter.make_join_aggregates_node(
         query_name,
-        mir_converter.generate_label(&name),
+        mir_converter.generate_label(&name.into()),
         ancestors[0],
         ancestors[1],
     )?;
@@ -152,7 +152,7 @@ pub(super) fn make_joins_for_aggregates(
         // We want top join our most recent join node to our next ancestor.
         let jn = mir_converter.make_join_aggregates_node(
             query_name,
-            mir_converter.generate_label(&name),
+            mir_converter.generate_label(&name.into()),
             *join_nodes.last().unwrap(),
             *ancestor,
         )?;

@@ -9,6 +9,7 @@ use nom::error::ErrorKind;
 use nom::multi::{many0, separated_list1};
 use nom::sequence::{delimited, preceded, terminated, tuple};
 use nom_locate::LocatedSpan;
+use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 
 use crate::common::{
@@ -31,19 +32,18 @@ pub struct GroupByClause {
     pub fields: Vec<FieldReference>,
 }
 
-impl fmt::Display for GroupByClause {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "GROUP BY ")?;
-        write!(
-            f,
-            "{}",
-            self.fields
-                .iter()
-                .map(|c| c.to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )?;
-        Ok(())
+impl GroupByClause {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| {
+            write!(
+                f,
+                "GROUP BY {}",
+                self.fields
+                    .iter()
+                    .map(|field| field.display(dialect))
+                    .join(", ")
+            )
+        })
     }
 }
 
@@ -54,12 +54,17 @@ pub struct JoinClause {
     pub constraint: JoinConstraint,
 }
 
-impl fmt::Display for JoinClause {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.operator)?;
-        write!(f, " {}", self.right)?;
-        write!(f, " {}", self.constraint)?;
-        Ok(())
+impl JoinClause {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| {
+            write!(
+                f,
+                "{} {} {}",
+                self.operator,
+                self.right.display(dialect),
+                self.constraint.display(dialect)
+            )
+        })
     }
 }
 
@@ -69,9 +74,16 @@ pub struct CommonTableExpr {
     pub statement: SelectStatement,
 }
 
-impl fmt::Display for CommonTableExpr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "`{}` AS ({})", self.name, self.statement)
+impl CommonTableExpr {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| {
+            write!(
+                f,
+                "{} AS ({})",
+                dialect.quote_identifier(&self.name),
+                self.statement.display(dialect)
+            )
+        })
     }
 }
 
@@ -89,7 +101,7 @@ pub enum LimitClause {
 
 impl LimitClause {
     /// Returns an [`Option`] with the [`Literal`] value corresponding to the `limit` clause.
-    /// Returns [`None`] if there's no `limit`.  
+    /// Returns [`None`] if there's no `limit`.
     pub fn limit(&self) -> Option<&Literal> {
         match self {
             LimitClause::LimitOffset { limit, .. } => limit.as_ref(),
@@ -188,59 +200,65 @@ impl SelectStatement {
     }
 }
 
-impl fmt::Display for SelectStatement {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if !self.ctes.is_empty() {
-            write!(f, "WITH {} ", self.ctes.iter().join(", "))?;
-        }
+impl SelectStatement {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| {
+            if !self.ctes.is_empty() {
+                write!(
+                    f,
+                    "WITH {} ",
+                    self.ctes.iter().map(|cte| cte.display(dialect)).join(", ")
+                )?;
+            }
 
-        write!(f, "SELECT ")?;
-        if self.distinct {
-            write!(f, "DISTINCT ")?;
-        }
-        write!(
-            f,
-            "{}",
-            self.fields
-                .iter()
-                .map(|field| field.to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )?;
+            write!(f, "SELECT ")?;
+            if self.distinct {
+                write!(f, "DISTINCT ")?;
+            }
 
-        if !self.tables.is_empty() {
-            write!(f, " FROM ")?;
             write!(
                 f,
                 "{}",
-                self.tables
+                self.fields
                     .iter()
-                    .map(|table| table.to_string())
-                    .collect::<Vec<_>>()
+                    .map(|field| field.display(dialect))
                     .join(", ")
             )?;
-        }
-        for jc in &self.join {
-            write!(f, " {}", jc)?;
-        }
-        if let Some(ref where_clause) = self.where_clause {
-            write!(f, " WHERE ")?;
-            write!(f, "{}", where_clause)?;
-        }
-        if let Some(ref group_by) = self.group_by {
-            write!(f, " {}", group_by)?;
-        }
-        if let Some(ref having) = self.having {
-            write!(f, " HAVING {}", having)?;
-        }
-        if let Some(ref order) = self.order {
-            write!(f, " {}", order)?;
-        }
-        if self.limit_clause.limit().is_some() || self.limit_clause.offset().is_some() {
-            write!(f, " {}", self.limit_clause)?;
-        }
 
-        Ok(())
+            if !self.tables.is_empty() {
+                write!(f, " FROM ")?;
+                write!(
+                    f,
+                    "{}",
+                    self.tables
+                        .iter()
+                        .map(|table| table.display(dialect))
+                        .join(", ")
+                )?;
+            }
+
+            for jc in &self.join {
+                write!(f, " {}", jc.display(dialect))?;
+            }
+
+            if let Some(where_clause) = &self.where_clause {
+                write!(f, " WHERE {}", where_clause.display(dialect))?;
+            }
+            if let Some(group_by) = &self.group_by {
+                write!(f, " {}", group_by.display(dialect))?;
+            }
+            if let Some(having) = &self.having {
+                write!(f, " HAVING {}", having.display(dialect))?;
+            }
+            if let Some(order) = &self.order {
+                write!(f, " {}", order.display(dialect))?;
+            }
+            if self.limit_clause.limit().is_some() || self.limit_clause.offset().is_some() {
+                write!(f, " {}", self.limit_clause)?;
+            }
+
+            Ok(())
+        })
     }
 }
 
@@ -1771,7 +1789,7 @@ mod tests {
             tables: vec![TableExpr::from(Relation::from("foo"))],
             ..Default::default()
         };
-        let res = query.to_string();
+        let res = query.display(Dialect::MySQL).to_string();
         assert_eq!(
             res,
             "WITH `foo` AS (SELECT `x` FROM `t`) SELECT `x` FROM `foo`"
@@ -1792,7 +1810,7 @@ mod tests {
                 rhs: Box::new(Expr::Literal(1_u32.into()))
             })
         );
-        let stringified = res.to_string();
+        let stringified = res.display(Dialect::MySQL).to_string();
         assert_eq!(
             stringified,
             "SELECT `x`, count(*) FROM `t` HAVING (count(*) > 1)"
@@ -2041,7 +2059,7 @@ mod tests {
         fn flarum_select_roundtrip_1() {
             let qstr = "select exists(select * from `groups` where `id` = ?) as `exists`";
             let res = test_parse!(selection(Dialect::MySQL), qstr.as_bytes());
-            let qstr = res.to_string();
+            let qstr = res.display(Dialect::MySQL).to_string();
             println!("{}", qstr);
             assert_eq!(
                 qstr,

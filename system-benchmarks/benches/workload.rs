@@ -634,7 +634,9 @@ async fn wait_adapter_ready() {
     // Then query status until snaphot is completed
     let q = nom_sql::ShowStatement::ReadySetStatus;
     loop {
-        let status: Result<Vec<(String, String)>, _> = conn.query(q.to_string()).await;
+        let status: Result<Vec<(String, String)>, _> = conn
+            .query(q.display(nom_sql::Dialect::MySQL).to_string())
+            .await;
         match status {
             Ok(data)
                 if data

@@ -552,7 +552,7 @@ impl ExprRegistry {
         if !self.aliases.contains_key(&query_name) {
             return Err(ReadySetError::RecipeInvariantViolated(format!(
                 "Query {} does not exist",
-                query_name,
+                query_name.display_unquoted(),
             )));
         }
 
@@ -620,12 +620,13 @@ impl ExprRegistry {
             Entry::Occupied(e) => {
                 if *e.get() != query_id {
                     return Err(ReadySetError::RecipeInvariantViolated(format!(
-                        "Query name exists but existing query is different: {alias}"
+                        "Query name exists but existing query is different: {}",
+                        alias.display_unquoted()
                     )));
                 }
             }
             Entry::Vacant(e) => {
-                debug!(alias = %e.key(), %query_id, "Aliasing existing query");
+                debug!(alias = %e.key().display_unquoted(), %query_id, "Aliasing existing query");
                 e.insert(query_id);
             }
         }

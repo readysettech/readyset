@@ -736,7 +736,7 @@ impl NoriaAdapter {
             // a failure.
             if self.warned_missing_tables.insert(table.clone()) {
                 warn!(
-                    table_name = %table,
+                    table_name = %table.display(nom_sql::Dialect::PostgreSQL),
                     num_actions = actions.len(),
                     "Could not find table, discarding actions"
                 );
@@ -790,15 +790,23 @@ impl NoriaAdapter {
                 match self.replication_offsets.tables.get(table) {
                     Some(Some(cur)) if pos <= *cur => {
                         if !catchup {
-                            warn!(%table, %pos, %cur, "Skipping table action for earlier entry");
+                            warn!(
+                                table = %table.display_unquoted(),
+                                %pos,
+                                %cur,
+                                "Skipping table action for earlier entry"
+                            );
                         }
                         return Ok(());
                     }
                     Some(Some(cur)) => {
-                        trace!(%table, %cur);
+                        trace!(table = %table.display_unquoted(), %cur);
                     }
                     _ => {
-                        trace!(%table, "no replication offset for table");
+                        trace!(
+                            table = %table.display_unquoted(),
+                            "no replication offset for table"
+                        );
                     }
                 }
 
@@ -907,7 +915,10 @@ impl NoriaAdapter {
     /// Remove the table referenced by the provided schema and table name from our base table and
     /// dataflow state (if any).
     async fn remove_table_from_readyset(&mut self, table: Relation) -> ReadySetResult<()> {
-        info!(%table, "Removing table state from readyset");
+        info!(
+            table = %table.display(nom_sql::Dialect::PostgreSQL),
+            "Removing table state from readyset"
+        );
         self.replication_offsets.tables.remove(&table);
         self.mutator_map.remove(&table);
         // Dropping the table cleans up any dataflow state that may have been made as well as
@@ -937,13 +948,20 @@ impl NoriaAdapter {
         // This is an error log because we don't know of any operations that will cause
         // this currently--if we see this, we should investigate and fix the issue
         // causing a table to not be supported by our replication
-        error!(%table, error=%source, "Will stop replicating a table due to table error");
+        error!(
+            table = %table.display(nom_sql::Dialect::PostgreSQL),
+            error = %source,
+            "Will stop replicating a table due to table error"
+        );
 
         let schema = table.schema.clone().ok_or_else(|| {
             // Tables should have a schema defined at this point, or something has gone wrong
             // somewhere. If we don't have a schema at this point, we don't know which
             // table encountered an error, so we fall back to resnapshotting.
-            error!(%table, "Unable to deny replication for table without schema. Will Re-snapshot");
+            error!(
+                table = %table.display(nom_sql::Dialect::PostgreSQL),
+                "Unable to deny replication for table without schema. Will Re-snapshot"
+            );
             ReadySetError::ResnapshotNeeded
         })?;
         let name = table.name.clone();

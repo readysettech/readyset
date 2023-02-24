@@ -864,9 +864,11 @@ where
                                 if self.settings.fail_invalidated_queries {
                                     internal!("Query comparison failed to validate: {}", e);
                                 }
-                                warn!(error = %e,
-                                    query = %Sensitive(&select_meta.stmt),
-                                    "Query compare failed");
+                                warn!(
+                                    error = %e,
+                                    query = %Sensitive(&select_meta.stmt.display(DB::sql_dialect())),
+                                    "Query compare failed"
+                                );
                                 state = MigrationState::Unsupported;
                             }
                         } else if self.settings.fail_invalidated_queries {
@@ -1001,8 +1003,11 @@ where
                 }
             }
             None => {
-                warn!(statement = %Sensitive(&stmt),
-                      "This statement could not be rewritten by ReadySet");
+                warn!(
+                    // FIXME(ENG-2499): Use correct dialect.
+                    statement = %Sensitive(&stmt.display(nom_sql::Dialect::MySQL)),
+                    "This statement could not be rewritten by ReadySet"
+                );
                 PrepareMeta::FailedToRewrite
             }
         }
@@ -1049,7 +1054,11 @@ where
                 | query @ SqlQuery::Delete(_),
             ) => PrepareMeta::Write { stmt: query },
             Ok(pq) => {
-                warn!(statement = %Sensitive(&pq), "Statement cannot be prepared by ReadySet");
+                warn!(
+                    // FIXME(ENG-2499): Use correct dialect.
+                    statement = %Sensitive(&pq.display(nom_sql::Dialect::MySQL)),
+                    "Statement cannot be prepared by ReadySet"
+                );
                 PrepareMeta::Unimplemented
             }
             Err(_) => {
@@ -1566,8 +1575,9 @@ where
         if let Some(name) = name {
             if let Some(view_request) = self.noria.view_create_request_from_name(name) {
                 warn!(
-                    statement = %Sensitive(&view_request.statement),
-                    %name,
+                    // FIXME(ENG-2499): Use correct dialect.
+                    statement = %Sensitive(&view_request.statement.display(nom_sql::Dialect::MySQL)),
+                    name = %name.display(nom_sql::Dialect::MySQL),
                     "Dropping previously cached query",
                 );
                 self.drop_cached_query(name).await?;
@@ -1675,6 +1685,7 @@ where
 
                 vec![
                     DfValue::from(id.to_string()),
+                    // FIXME(ENG-2501): Use correct dialect
                     DfValue::from(query.to_string()),
                     DfValue::from(s),
                 ]
@@ -1934,8 +1945,11 @@ where
                 status = Some(s);
                 should_try
             } else {
-                warn!(statement = %Sensitive(&q.statement),
-                  "This statement could not be rewritten by ReadySet");
+                warn!(
+                    // FIXME(ENG-2499): Use correct dialect.
+                    statement = %Sensitive(&q.statement.display(nom_sql::Dialect::MySQL)),
+                    "This statement could not be rewritten by ReadySet"
+                );
                 matches!(
                     self.state.proxy_state,
                     ProxyState::Never | ProxyState::Fallback
@@ -1961,7 +1975,11 @@ where
     ) -> Result<(), DB::Error> {
         match Handler::handle_set_statement(set) {
             SetBehavior::Unsupported => {
-                warn!(%set, "received unsupported SET statement");
+                warn!(
+                    // FIXME(ENG-2499): Use correct dialect.
+                    set = %set.display(nom_sql::Dialect::MySQL),
+                    "received unsupported SET statement"
+                );
                 match settings.unsupported_set_mode {
                     UnsupportedSetMode::Error => {
                         let e = ReadySetError::SetDisallowed {
@@ -1980,7 +1998,11 @@ where
             }
             SetBehavior::Proxy => { /* Do nothing (the caller will proxy for us) */ }
             SetBehavior::SetAutocommit(on) => {
-                warn!(%set, "received unsupported SET statement");
+                warn!(
+                    // FIXME(ENG-2499): Use correct dialect.
+                    set = %set.display(nom_sql::Dialect::MySQL),
+                    "received unsupported SET statement"
+                );
                 match settings.unsupported_set_mode {
                     UnsupportedSetMode::Error if !on => {
                         let e = ReadySetError::SetDisallowed {
@@ -2369,7 +2391,13 @@ fn log_query(
             || event.readyset_duration.unwrap_or_default() > SLOW_DURATION)
     {
         if let Some(query) = &event.query {
-            warn!(query = %Sensitive(&query), readyset_time = ?event.readyset_duration, upstream_time = ?event.upstream_duration, "slow query");
+            warn!(
+                // FIXME(ENG-2499): Use correct dialect.
+                query = %Sensitive(&query.display(nom_sql::Dialect::MySQL)),
+                readyset_time = ?event.readyset_duration,
+                upstream_time = ?event.upstream_duration,
+                "slow query"
+            );
         }
     }
 

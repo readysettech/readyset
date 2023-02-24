@@ -208,7 +208,8 @@ impl TryFrom<pgsql::Row> for ConstraintEntry {
 
 impl Display for ConstraintEntry {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.definition)
+        // FIXME: Use PostgreSQL dialect.
+        write!(f, "{}", self.definition.display(nom_sql::Dialect::MySQL))
     }
 }
 
@@ -392,7 +393,12 @@ impl TableEntry {
 
 impl Display for TableDescription {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "CREATE TABLE {} (", self.name)?;
+        writeln!(
+            f,
+            "CREATE TABLE {} (",
+            // FIXME: Use PostgreSQL dialect.
+            self.name.display(Dialect::MySQL)
+        )?;
         write!(
             f,
             "{}",
@@ -506,7 +512,7 @@ impl TableDescription {
                     progress_percentage_metric.set(0.0);
                     ReadySetError::ReplicationFailed(format!(
                         "Failed converting to DfValue, table: {}, row: {}, err: {}",
-                        noria_table.table_name(),
+                        noria_table.table_name().display(Dialect::PostgreSQL),
                         cnt,
                         err
                     ))
@@ -708,8 +714,10 @@ impl<'a> PostgresReplicator<'a> {
                 })
                 .and_then(|(change, create_table)| {
                     debug!(%create_table, "Extending recipe");
-                    create_schema
-                        .add_table_create(create_table.name.to_string(), create_table.to_string());
+                    create_schema.add_table_create(
+                        create_table.name.display(Dialect::PostgreSQL).to_string(),
+                        create_table.to_string(),
+                    );
                     self.noria
                         .extend_recipe_no_leader_ready(ChangeList::from_change(
                             change,
@@ -752,7 +760,7 @@ impl<'a> PostgresReplicator<'a> {
                     )
                 })
                 .and_then(|view| {
-                    debug!(%view, "Extending recipe");
+                    debug!(view = %view.display(nom_sql::Dialect::PostgreSQL), "Extending recipe");
                     self.noria.extend_recipe_no_leader_ready(
                         ChangeList::from_change(
                             Change::CreateView(view),
@@ -791,9 +799,14 @@ impl<'a> PostgresReplicator<'a> {
 
         let replication_offsets = self.noria.replication_offsets().await?;
 
-        tables.drain_filter(|t| replication_offsets.has_table(&t.name)).for_each(|t|
-            info!(table = %t.name, "Replication offset already exists for table, skipping snapshot")
-        );
+        tables
+            .drain_filter(|t| replication_offsets.has_table(&t.name))
+            .for_each(|t| {
+                info!(
+                    table = %t.name.display(Dialect::PostgreSQL),
+                    "Replication offset already exists for table, skipping snapshot"
+                )
+            });
 
         // Commit the transaction we were using to snapshot the schema. This is important since that
         // transaction holds onto locks for tables which we now need to load data from.
@@ -802,7 +815,8 @@ impl<'a> PostgresReplicator<'a> {
         // Finally copy each table into noria
         let mut futs = Vec::with_capacity(tables.len());
         for table in &tables {
-            let span = info_span!("Snapshotting table", table = %table.name);
+            let span =
+                info_span!("Snapshotting table", table = %table.name.display(Dialect::PostgreSQL));
             span.in_scope(|| info!("Snapshotting table"));
             let mut noria_table = self
                 .noria
@@ -833,7 +847,7 @@ impl<'a> PostgresReplicator<'a> {
             if let Err(e) = res {
                 match e {
                     ReadySetError::TableError { ref table, .. } => {
-                        warn!(%e, table=%table.to_string(), "Error snapshotting, table will not be used");
+                        warn!(%e, table=%table.display(Dialect::PostgreSQL), "Error snapshotting, table will not be used");
                         tables.retain(|t| t.name != *table);
                         self.noria
                             .extend_recipe_no_leader_ready(ChangeList::from_changes(
@@ -858,7 +872,7 @@ impl<'a> PostgresReplicator<'a> {
             let mut noria_table = self.noria.table(table.name.clone()).await?;
             let wal_position = wal_position.clone();
             compacting.push(async move {
-                let span = info_span!("Compacting table", table = %table.name);
+                let span = info_span!("Compacting table", table = %table.name.display(Dialect::PostgreSQL));
                 span.in_scope(|| info!(%wal_position, "Setting replication offset"));
                 if let Err(error) = noria_table
                     .set_replication_offset(wal_position)
@@ -972,7 +986,10 @@ impl<'a> PostgresReplicator<'a> {
         if !leftover_tables.is_empty() {
             warn!(
                 "Removing existing ReadySet cache tables with no upstream table/view: {}",
-                leftover_tables.keys().map(Relation::to_string).join(", ")
+                leftover_tables
+                    .keys()
+                    .map(|r| r.display(Dialect::PostgreSQL))
+                    .join(", ")
             );
             for rel in leftover_tables.keys() {
                 if let Err(error) = self
@@ -986,7 +1003,11 @@ impl<'a> PostgresReplicator<'a> {
                     ))
                     .await
                 {
-                    warn!(%error, "Error removing leftover cache table {rel}");
+                    warn!(
+                        %error,
+                        table = %rel.display(Dialect::PostgreSQL),
+                        "Error removing leftover cache table"
+                    );
                 }
             }
         }

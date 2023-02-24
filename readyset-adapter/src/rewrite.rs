@@ -253,7 +253,11 @@ fn where_in_to_placeholders(
     let literals = list_iter
         .map(|e| match e {
             Expr::Literal(Literal::Placeholder(ph)) => Ok(ph),
-            _ => unsupported!("IN only supported on placeholders, got: {}", e),
+            _ => unsupported!(
+                "IN only supported on placeholders, got: {}",
+                // FIXME(ENG-2499): Use correct dialect.
+                e.display(nom_sql::Dialect::MySQL)
+            ),
         })
         .collect::<ReadySetResult<Vec<_>>>()?;
 
@@ -1032,7 +1036,13 @@ mod tests {
             let mut query = parse_select_statement(query);
             let expected = parse_select_statement(expected_query);
             let res = auto_parametrize_query(&mut query);
-            assert_eq!(query, expected, "\n  left: {}\n right: {}", query, expected);
+            assert_eq!(
+                query,
+                expected,
+                "\n  left: {}\n right: {}",
+                query.display(nom_sql::Dialect::MySQL),
+                expected.display(nom_sql::Dialect::MySQL)
+            );
             assert_eq!(res, expected_parameters);
         }
 
@@ -1265,7 +1275,10 @@ mod tests {
             );
 
             process_query(&mut query, false).expect("Should be able to rewrite query");
-            assert_eq!(query.to_string(), expected.to_string());
+            assert_eq!(
+                query.display(nom_sql::Dialect::MySQL).to_string(),
+                expected.display(nom_sql::Dialect::MySQL).to_string()
+            );
         }
 
         #[test]
@@ -1390,7 +1403,7 @@ mod tests {
                 query,
                 parse_select_statement("SELECT * FROM t WHERE x = $1 AND y = $2 AND z = $3"),
                 "{}",
-                query
+                query.display(nom_sql::Dialect::MySQL)
             );
 
             assert_eq!(keys, vec![vec!["x".into(), "y".into(), "z".into()]]);
@@ -1407,7 +1420,7 @@ mod tests {
                 query,
                 parse_select_statement("SELECT * FROM t WHERE x = $1 AND y = $2 AND z = $3"),
                 "{}",
-                query
+                query.display(nom_sql::Dialect::MySQL)
             );
 
             assert_eq!(keys, vec![vec!["x".into(), "y".into(), "z".into()]]);
@@ -1424,7 +1437,7 @@ mod tests {
                 query,
                 parse_select_statement("SELECT * FROM t WHERE x = $1"),
                 "{}",
-                query
+                query.display(nom_sql::Dialect::MySQL)
             );
             assert_eq!(keys, vec![vec![1.into()]]);
         }
@@ -1440,7 +1453,7 @@ mod tests {
                 query,
                 parse_select_statement("SELECT * FROM t WHERE x = $1"),
                 "{}",
-                query
+                query.display(nom_sql::Dialect::MySQL)
             );
             assert_eq!(keys, vec![vec![1.into()]]);
         }

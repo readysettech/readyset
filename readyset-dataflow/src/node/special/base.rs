@@ -608,25 +608,32 @@ impl FailedOpLogger {
         if self.has_failed_inserts() {
             // If we failed to insert an op to the base table, our state is no longer correct, even
             // if we are allowing permissive writes.
-            error!(node=%self.table,
-                  insert = %self.insert_existing,
-              "Table failed to apply insert operations");
+            error!(
+                node = %self.table.display_unquoted(),
+                insert = %self.insert_existing,
+                "Table failed to apply insert operations"
+            );
         }
 
         // If we are allowing permissive writes, we should have never called this function for
         // failed deletes or updates, so any we see here we log an error for.
         if self.has_failed_deletes_or_updates() {
-            error!(table=%self.table,
-              update = %self.update_non_existing,
-              delete_non_existing = %self.delete_non_existing,
-              delete_type_mismatch = %self.delete_type_mismatch.len(),
-              delete_data_mismatch = %self.delete_row_data_mismatch.len(),
-              "Table failed to apply update or delete operations");
+            error!(
+                table = %self.table.display_unquoted(),
+                update = %self.update_non_existing,
+                delete_non_existing = %self.delete_non_existing,
+                delete_type_mismatch = %self.delete_type_mismatch.len(),
+                delete_data_mismatch = %self.delete_row_data_mismatch.len(),
+                "Table failed to apply update or delete operations"
+            );
 
             if !self.delete_type_mismatch.is_empty() || !self.delete_row_data_mismatch.is_empty() {
-                error!(table=%self.table, type_mismatch = ?self.delete_type_mismatch,
-                  data_mismatch = ?self.delete_row_data_mismatch,
-                  "Table failed to apply delete operations");
+                error!(
+                    table = %self.table.display_unquoted(),
+                    type_mismatch = ?self.delete_type_mismatch,
+                    data_mismatch = ?self.delete_row_data_mismatch,
+                    "Table failed to apply delete operations"
+                );
             }
         }
     }

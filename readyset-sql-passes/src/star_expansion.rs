@@ -136,7 +136,13 @@ mod tests {
         let q = parse_query(Dialect::MySQL, source).unwrap();
         let expected = parse_query(Dialect::MySQL, expected).unwrap();
         let res = q.expand_stars(&schema, &Default::default()).unwrap();
-        assert_eq!(res, expected, "{} != {}", res, expected);
+        assert_eq!(
+            res,
+            expected,
+            "{} != {}",
+            res.display(nom_sql::Dialect::MySQL),
+            expected.display(nom_sql::Dialect::MySQL)
+        );
     }
 
     #[test]

@@ -368,7 +368,13 @@ impl Display for Expr {
             } => {
                 write!(f, "({left} {op} ALL ({right}))")
             }
-            Cast { expr, to_type, .. } => write!(f, "cast({} as {})", expr, to_type),
+            Cast { expr, to_type, .. } => write!(
+                f,
+                "cast({} as {})",
+                expr,
+                // XXX: The `SqlType` isn't used during eval, so this should probably use `DfType`.
+                to_type.display(nom_sql::Dialect::MySQL)
+            ),
             Call { func, .. } => write!(f, "{}", func),
             CaseWhen {
                 branches,

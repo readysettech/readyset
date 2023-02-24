@@ -68,7 +68,7 @@ impl Recipe {
             }),
         });
         if expr.is_none() {
-            warn!(%alias, "Query not found in expression registry");
+            warn!(alias = %alias.display_unquoted(), "Query not found in expression registry");
         }
         expr
     }
@@ -133,7 +133,10 @@ impl Recipe {
         // `name` might be an alias for another identical query, so resolve if needed
         let query_name = self.inc.registry.resolve_alias(name).unwrap_or(name);
         match self.inc.get_query_address(query_name) {
-            None => Err(format!("No query endpoint for \"{}\" exists .", name)),
+            None => Err(format!(
+                "No query endpoint for {} exists .",
+                name.display_unquoted()
+            )),
             Some(na) => Ok(na),
         }
     }

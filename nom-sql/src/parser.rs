@@ -3,6 +3,7 @@ use std::{fmt, str};
 use nom::branch::alt;
 use nom::combinator::map;
 use nom_locate::LocatedSpan;
+use readyset_util::fmt::fmt_with;
 use readyset_util::redacted::Sensitive;
 use serde::{Deserialize, Serialize};
 
@@ -60,31 +61,31 @@ pub enum SqlQuery {
     Explain(ExplainStatement),
 }
 
-impl fmt::Display for SqlQuery {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            SqlQuery::Select(ref select) => write!(f, "{}", select),
-            SqlQuery::Insert(ref insert) => write!(f, "{}", insert),
-            SqlQuery::CreateTable(ref create) => write!(f, "{}", create),
-            SqlQuery::CreateView(ref create) => write!(f, "{}", create),
-            SqlQuery::CreateCache(ref create) => write!(f, "{}", create),
-            SqlQuery::DropCache(ref drop) => write!(f, "{}", drop),
-            SqlQuery::DropAllCaches(ref drop) => write!(f, "{}", drop),
-            SqlQuery::Delete(ref delete) => write!(f, "{}", delete),
-            SqlQuery::DropTable(ref drop) => write!(f, "{}", drop),
-            SqlQuery::DropView(ref drop) => write!(f, "{}", drop),
-            SqlQuery::Update(ref update) => write!(f, "{}", update),
-            SqlQuery::Set(ref set) => write!(f, "{}", set),
-            SqlQuery::AlterTable(ref alter) => write!(f, "{}", alter),
-            SqlQuery::CompoundSelect(ref compound) => write!(f, "{}", compound),
-            SqlQuery::StartTransaction(ref tx) => write!(f, "{}", tx),
-            SqlQuery::Commit(ref commit) => write!(f, "{}", commit),
-            SqlQuery::Rollback(ref rollback) => write!(f, "{}", rollback),
-            SqlQuery::RenameTable(ref rename) => write!(f, "{}", rename),
-            SqlQuery::Use(ref use_db) => write!(f, "{}", use_db),
-            SqlQuery::Show(ref show) => write!(f, "{}", show),
-            SqlQuery::Explain(ref explain) => write!(f, "{}", explain),
-        }
+impl SqlQuery {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| match self {
+            Self::Select(select) => write!(f, "{}", select.display(dialect)),
+            Self::Insert(insert) => write!(f, "{}", insert.display(dialect)),
+            Self::CreateTable(create) => write!(f, "{}", create.display(dialect)),
+            Self::CreateView(create) => write!(f, "{}", create.display(dialect)),
+            Self::CreateCache(create) => write!(f, "{}", create.display(dialect)),
+            Self::DropCache(drop) => write!(f, "{}", drop.display(dialect)),
+            Self::DropAllCaches(drop) => write!(f, "{}", drop),
+            Self::Delete(delete) => write!(f, "{}", delete.display(dialect)),
+            Self::DropTable(drop) => write!(f, "{}", drop.display(dialect)),
+            Self::DropView(drop) => write!(f, "{}", drop.display(dialect)),
+            Self::Update(update) => write!(f, "{}", update.display(dialect)),
+            Self::Set(set) => write!(f, "{}", set.display(dialect)),
+            Self::AlterTable(alter) => write!(f, "{}", alter.display(dialect)),
+            Self::CompoundSelect(compound) => write!(f, "{}", compound.display(dialect)),
+            Self::StartTransaction(tx) => write!(f, "{}", tx),
+            Self::Commit(commit) => write!(f, "{}", commit),
+            Self::Rollback(rollback) => write!(f, "{}", rollback),
+            Self::RenameTable(rename) => write!(f, "{}", rename.display(dialect)),
+            Self::Use(use_db) => write!(f, "{}", use_db),
+            Self::Show(show) => write!(f, "{}", show.display(dialect)),
+            Self::Explain(explain) => write!(f, "{}", explain),
+        })
     }
 }
 
@@ -239,12 +240,12 @@ mod tests {
         assert!(res4.is_ok());
         assert!(res5.is_ok());
 
-        assert_eq!(qstring0, res0.unwrap().to_string());
-        assert_eq!(qstring1, res1.unwrap().to_string());
-        assert_eq!(qstring2, res2.unwrap().to_string());
-        assert_eq!(qstring3, res3.unwrap().to_string());
-        assert_eq!(qstring4, res4.unwrap().to_string());
-        assert_eq!(qstring5, res5.unwrap().to_string());
+        assert_eq!(qstring0, res0.unwrap().display(Dialect::MySQL).to_string());
+        assert_eq!(qstring1, res1.unwrap().display(Dialect::MySQL).to_string());
+        assert_eq!(qstring2, res2.unwrap().display(Dialect::MySQL).to_string());
+        assert_eq!(qstring3, res3.unwrap().display(Dialect::MySQL).to_string());
+        assert_eq!(qstring4, res4.unwrap().display(Dialect::MySQL).to_string());
+        assert_eq!(qstring5, res5.unwrap().display(Dialect::MySQL).to_string());
     }
 
     #[test]
@@ -265,9 +266,9 @@ mod tests {
         assert!(res2.is_ok());
         assert!(res3.is_ok());
 
-        assert_eq!(expected1, res1.unwrap().to_string());
-        assert_eq!(expected2, res2.unwrap().to_string());
-        assert_eq!(expected3, res3.unwrap().to_string());
+        assert_eq!(expected1, res1.unwrap().display(Dialect::MySQL).to_string());
+        assert_eq!(expected2, res2.unwrap().display(Dialect::MySQL).to_string());
+        assert_eq!(expected3, res3.unwrap().display(Dialect::MySQL).to_string());
     }
 
     #[test]
@@ -284,8 +285,8 @@ mod tests {
         let res1 = parse_query(Dialect::MySQL, qstring1);
         assert!(res0.is_ok());
         assert!(res1.is_ok());
-        assert_eq!(expected0, res0.unwrap().to_string());
-        assert_eq!(expected1, res1.unwrap().to_string());
+        assert_eq!(expected0, res0.unwrap().display(Dialect::MySQL).to_string());
+        assert_eq!(expected1, res1.unwrap().display(Dialect::MySQL).to_string());
     }
 
     #[test]
@@ -295,7 +296,7 @@ mod tests {
 
         let res1 = parse_query(Dialect::MySQL, qstring1);
         assert!(res1.is_ok());
-        assert_eq!(expected1, res1.unwrap().to_string());
+        assert_eq!(expected1, res1.unwrap().display(Dialect::MySQL).to_string());
     }
 
     #[test]
@@ -304,7 +305,7 @@ mod tests {
         let expected = "INSERT INTO `users` (`name`, `password`) VALUES ('aaa', 'xxx')";
         let res = parse_query(Dialect::MySQL, qstring);
         assert!(res.is_ok());
-        assert_eq!(expected, res.unwrap().to_string());
+        assert_eq!(expected, res.unwrap().display(Dialect::MySQL).to_string());
     }
 
     #[test]
@@ -313,7 +314,7 @@ mod tests {
         let expected = "INSERT INTO `users` VALUES ('aaa', 'xxx')";
         let res = parse_query(Dialect::MySQL, qstring);
         assert!(res.is_ok());
-        assert_eq!(expected, res.unwrap().to_string());
+        assert_eq!(expected, res.unwrap().display(Dialect::MySQL).to_string());
     }
 
     #[test]
@@ -322,7 +323,7 @@ mod tests {
         let expected = "INSERT INTO `users` (`name`, `password`) VALUES ('aaa', 'xxx')";
         let res = parse_query(Dialect::MySQL, qstring);
         assert!(res.is_ok());
-        assert_eq!(expected, res.unwrap().to_string());
+        assert_eq!(expected, res.unwrap().display(Dialect::MySQL).to_string());
     }
 
     #[test]
@@ -331,7 +332,7 @@ mod tests {
         let expected = "UPDATE `users` SET `name` = 42, `password` = 'xxx' WHERE (`id` = 1)";
         let res = parse_query(Dialect::MySQL, qstring);
         assert!(res.is_ok());
-        assert_eq!(expected, res.unwrap().to_string());
+        assert_eq!(expected, res.unwrap().display(Dialect::MySQL).to_string());
     }
 
     #[test]
@@ -346,8 +347,8 @@ mod tests {
         let res1 = parse_query(Dialect::MySQL, qstring1);
         assert!(res0.is_ok());
         assert!(res1.is_ok());
-        assert_eq!(expected0, res0.unwrap().to_string());
-        assert_eq!(expected1, res1.unwrap().to_string());
+        assert_eq!(expected0, res0.unwrap().display(Dialect::MySQL).to_string());
+        assert_eq!(expected1, res1.unwrap().display(Dialect::MySQL).to_string());
     }
 
     #[test]
@@ -419,8 +420,8 @@ mod tests {
             let res1 = parse_query(Dialect::MySQL, qstring1);
             assert!(res0.is_ok());
             assert!(res1.is_ok());
-            assert_eq!(expected0, res0.unwrap().to_string());
-            assert_eq!(expected1, res1.unwrap().to_string());
+            assert_eq!(expected0, res0.unwrap().display(Dialect::MySQL).to_string());
+            assert_eq!(expected1, res1.unwrap().display(Dialect::MySQL).to_string());
         }
     }
 
@@ -493,8 +494,8 @@ mod tests {
             let res1 = parse_query(Dialect::PostgreSQL, qstring1);
             assert!(res0.is_ok());
             assert!(res1.is_ok());
-            assert_eq!(expected0, res0.unwrap().to_string());
-            assert_eq!(expected1, res1.unwrap().to_string());
+            assert_eq!(expected0, res0.unwrap().display(Dialect::MySQL).to_string());
+            assert_eq!(expected1, res1.unwrap().display(Dialect::MySQL).to_string());
         }
     }
 }

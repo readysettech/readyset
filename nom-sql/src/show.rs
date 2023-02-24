@@ -5,6 +5,7 @@ use nom::bytes::complete::tag_no_case;
 use nom::combinator::{map, map_res, opt, value};
 use nom::sequence::{preceded, tuple};
 use nom_locate::LocatedSpan;
+use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 
 use crate::expression::expression;
@@ -24,30 +25,32 @@ pub enum ShowStatement {
     ReadySetTables,
 }
 
-impl fmt::Display for ShowStatement {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "SHOW ")?;
-        match self {
-            Self::Events => write!(f, "EVENTS"),
-            Self::Tables(tables) => write!(f, "{}", tables),
-            Self::CachedQueries(maybe_query_id) => {
-                if let Some(query_id) = maybe_query_id {
-                    write!(f, "CACHES WHERE query_id = {}", query_id)
-                } else {
-                    write!(f, "CACHES")
+impl ShowStatement {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| {
+            write!(f, "SHOW ")?;
+            match self {
+                Self::Events => write!(f, "EVENTS"),
+                Self::Tables(tables) => write!(f, "{}", tables.display(dialect)),
+                Self::CachedQueries(maybe_query_id) => {
+                    if let Some(query_id) = maybe_query_id {
+                        write!(f, "CACHES WHERE query_id = {}", query_id)
+                    } else {
+                        write!(f, "CACHES")
+                    }
                 }
-            }
-            Self::ProxiedQueries(maybe_query_id) => {
-                if let Some(query_id) = maybe_query_id {
-                    write!(f, "PROXIED QUERIES WHERE query_id = {}", query_id)
-                } else {
-                    write!(f, "PROXIED QUERIES")
+                Self::ProxiedQueries(maybe_query_id) => {
+                    if let Some(query_id) = maybe_query_id {
+                        write!(f, "PROXIED QUERIES WHERE query_id = {}", query_id)
+                    } else {
+                        write!(f, "PROXIED QUERIES")
+                    }
                 }
+                Self::ReadySetStatus => write!(f, "READYSET STATUS"),
+                Self::ReadySetVersion => write!(f, "READYSET VERSION"),
+                Self::ReadySetTables => write!(f, "READYSET TABLES"),
             }
-            Self::ReadySetStatus => write!(f, "READYSET STATUS"),
-            Self::ReadySetVersion => write!(f, "READYSET VERSION"),
-            Self::ReadySetTables => write!(f, "READYSET TABLES"),
-        }
+        })
     }
 }
 
@@ -120,19 +123,21 @@ pub struct Tables {
     pub filter: Option<FilterPredicate>,
 }
 
-impl fmt::Display for Tables {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if self.full {
-            write!(f, "FULL ")?;
-        }
-        write!(f, "TABLES")?;
-        if let Some(from_db) = self.from_db.as_ref() {
-            write!(f, " FROM {}", from_db)?;
-        }
-        if let Some(filter) = self.filter.as_ref() {
-            write!(f, " {}", filter)?;
-        }
-        Ok(())
+impl Tables {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| {
+            if self.full {
+                write!(f, "FULL ")?;
+            }
+            write!(f, "TABLES")?;
+            if let Some(from_db) = self.from_db.as_ref() {
+                write!(f, " FROM {}", from_db)?;
+            }
+            if let Some(filter) = self.filter.as_ref() {
+                write!(f, " {}", filter.display(dialect))?;
+            }
+            Ok(())
+        })
     }
 }
 
@@ -169,12 +174,12 @@ pub enum FilterPredicate {
     Where(Expr),
 }
 
-impl fmt::Display for FilterPredicate {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
+impl FilterPredicate {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| match self {
             Self::Like(like) => write!(f, "LIKE '{}'", like),
-            Self::Where(expr) => write!(f, "WHERE {}", expr),
-        }
+            Self::Where(expr) => write!(f, "WHERE {}", expr.display(dialect)),
+        })
     }
 }
 

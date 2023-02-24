@@ -144,6 +144,7 @@ pub(crate) fn convert_column(col: &ColumnSchema) -> ReadySetResult<mysql_srv::Co
                 schema: None,
                 name: "".into(),
             })
+            .display(nom_sql::Dialect::MySQL)
             .to_string(),
         column: col.column.name.to_string(),
         coltype,

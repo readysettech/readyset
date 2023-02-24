@@ -107,7 +107,7 @@ impl Display for MirNode {
             f,
             "{:?} | name: {} | owners: {:?}",
             self.inner.description(),
-            self.name,
+            self.name.display_unquoted(),
             self.owners
         )
     }

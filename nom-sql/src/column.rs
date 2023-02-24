@@ -22,15 +22,6 @@ pub struct Column {
     pub table: Option<Relation>,
 }
 
-impl fmt::Display for Column {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if let Some(ref table) = self.table {
-            write!(f, "{}.", table)?;
-        }
-        write!(f, "`{}`", self.name)
-    }
-}
-
 impl<'a> From<&'a str> for Column {
     fn from(c: &str) -> Column {
         match c.split_once('.') {
@@ -62,6 +53,15 @@ impl PartialOrd for Column {
 }
 
 impl Column {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| {
+            if let Some(ref table) = self.table {
+                write!(f, "{}.", table.display(dialect))?;
+            }
+            write!(f, "{}", dialect.quote_identifier(&self.name))
+        })
+    }
+
     /// Like [`display()`](Self::display) except the schema, table, and column name will not be
     /// quoted.
     ///
@@ -91,21 +91,19 @@ pub enum ColumnConstraint {
     OnUpdateCurrentTimestamp,
 }
 
-impl fmt::Display for ColumnConstraint {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            ColumnConstraint::Null => write!(f, "NULL"),
-            ColumnConstraint::NotNull => write!(f, "NOT NULL"),
-            ColumnConstraint::CharacterSet(ref charset) => write!(f, "CHARACTER SET {}", charset),
-            ColumnConstraint::Collation(ref collation) => write!(f, "COLLATE {}", collation),
-            ColumnConstraint::DefaultValue(ref expr) => {
-                write!(f, "DEFAULT {}", expr)
-            }
-            ColumnConstraint::AutoIncrement => write!(f, "AUTO_INCREMENT"),
-            ColumnConstraint::PrimaryKey => write!(f, "PRIMARY KEY"),
-            ColumnConstraint::Unique => write!(f, "UNIQUE"),
-            ColumnConstraint::OnUpdateCurrentTimestamp => write!(f, "ON UPDATE CURRENT_TIMESTAMP"),
-        }
+impl ColumnConstraint {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| match self {
+            Self::Null => write!(f, "NULL"),
+            Self::NotNull => write!(f, "NOT NULL"),
+            Self::CharacterSet(charset) => write!(f, "CHARACTER SET {}", charset),
+            Self::Collation(collation) => write!(f, "COLLATE {}", collation),
+            Self::DefaultValue(expr) => write!(f, "DEFAULT {}", expr.display(dialect)),
+            Self::AutoIncrement => write!(f, "AUTO_INCREMENT"),
+            Self::PrimaryKey => write!(f, "PRIMARY KEY"),
+            Self::Unique => write!(f, "UNIQUE"),
+            Self::OnUpdateCurrentTimestamp => write!(f, "ON UPDATE CURRENT_TIMESTAMP"),
+        })
     }
 }
 
@@ -115,19 +113,6 @@ pub struct ColumnSpecification {
     pub sql_type: SqlType,
     pub constraints: Vec<ColumnConstraint>,
     pub comment: Option<String>,
-}
-
-impl fmt::Display for ColumnSpecification {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "`{}` {}", &self.column.name, self.sql_type)?;
-        for constraint in &self.constraints {
-            write!(f, " {}", constraint)?;
-        }
-        if let Some(ref comment) = self.comment {
-            write!(f, " COMMENT '{}'", comment)?;
-        }
-        Ok(())
-    }
 }
 
 impl ColumnSpecification {
@@ -157,6 +142,27 @@ impl ColumnSpecification {
         self.constraints.iter().find_map(|c| match c {
             ColumnConstraint::DefaultValue(Expr::Literal(ref l)) => Some(l),
             _ => None,
+        })
+    }
+
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| {
+            write!(
+                f,
+                "{} {}",
+                dialect.quote_identifier(&self.column.name),
+                self.sql_type.display(dialect)
+            )?;
+
+            for constraint in &self.constraints {
+                write!(f, " {}", constraint.display(dialect))?;
+            }
+
+            if let Some(ref comment) = self.comment {
+                write!(f, " COMMENT '{}'", comment)?;
+            }
+
+            Ok(())
         })
     }
 }
@@ -326,7 +332,7 @@ mod tests {
             let cspec = column_specification(Dialect::MySQL)(LocatedSpan::new(input))
                 .unwrap()
                 .1;
-            let res = cspec.to_string();
+            let res = cspec.display(Dialect::MySQL).to_string();
             assert_eq!(res, String::from_utf8(input.to_vec()).unwrap());
         }
 

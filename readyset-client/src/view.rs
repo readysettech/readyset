@@ -305,7 +305,7 @@ impl ViewSchema {
                     .get(&c.name)
                     .or_else(|| by_base_name.get(&c.name))
                     .copied()
-                    .ok_or_else(|| internal_err!("Column `{}` not found", c))
+                    .ok_or_else(|| internal_err!("Column {} not found", c.display_unquoted()))
             })
             .collect()
     }
@@ -944,7 +944,7 @@ impl ReaderHandleBuilder {
         }
         .ok_or_else(|| ReadySetError::ViewReplicaOutOfBounds {
             replica: replica.unwrap_or(0),
-            view_name: self.name.clone().to_string(),
+            view_name: self.name.clone().display_unquoted().to_string(),
             num_replicas: self.replica_shard_addrs.num_rows(),
         })?;
 
@@ -1003,8 +1003,12 @@ impl ReaderHandleBuilder {
             columns,
             key_mapping,
             shard_addrs: addrs,
-            shards: Vec1::try_from_vec(conns)
-                .map_err(|_| internal_err!("cannot create view '{}' without shards", self.name))?,
+            shards: Vec1::try_from_vec(conns).map_err(|_| {
+                internal_err!(
+                    "cannot create view {} without shards",
+                    self.name.display_unquoted()
+                )
+            })?,
         })
     }
 }

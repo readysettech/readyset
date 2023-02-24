@@ -138,7 +138,13 @@ mod tests {
         };
 
         let Ok(()) = NormalizeNegationVisitor.visit_expr(&mut expr);
-        assert_eq!(expr, target, "expected = {}\nactual = {}", target, expr);
+        assert_eq!(
+            expr,
+            target,
+            "expected = {}\nactual = {}",
+            target.display(nom_sql::Dialect::MySQL),
+            expr.display(nom_sql::Dialect::MySQL)
+        );
     }
 
     #[test]

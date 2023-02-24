@@ -128,6 +128,11 @@ mod tests {
         )
         .unwrap();
         let result = query.rewrite_between();
-        assert_eq!(result, expected, "result = {}", result);
+        assert_eq!(
+            result,
+            expected,
+            "result = {}",
+            result.display(nom_sql::Dialect::MySQL)
+        );
     }
 }

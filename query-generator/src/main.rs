@@ -29,16 +29,22 @@ impl Opts {
 
         if self.queries_only {
             for query in queries {
-                println!("{}", query);
+                // FIXME(ENG-2498): Use correct dialect.
+                println!("{}", query.display(nom_sql::Dialect::MySQL));
             }
         } else {
             let queries = queries.collect::<Vec<_>>();
             for create_table_statement in gen.ddl() {
-                println!("{}", create_table_statement)
+                // FIXME(ENG-2498): Use correct dialect.
+                println!(
+                    "{}",
+                    create_table_statement.display(nom_sql::Dialect::MySQL)
+                )
             }
             if !self.ddl_only {
                 for query in queries {
-                    println!("{}", query);
+                    // FIXME(ENG-2498): Use correct dialect.
+                    println!("{}", query.display(nom_sql::Dialect::MySQL));
                 }
             }
         }

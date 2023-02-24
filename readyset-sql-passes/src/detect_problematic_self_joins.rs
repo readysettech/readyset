@@ -85,7 +85,11 @@ fn check_select_statement<'a>(
                         _ => None,
                     })
                     .ok_or_else(|| {
-                        invalid_err!("Could not resolve column reference {}.{}", table, col_name)
+                        invalid_err!(
+                            "Could not resolve column reference {}.{}",
+                            table.display_unquoted(),
+                            col_name
+                        )
                     })?;
                 let ctes = ctes.clone();
                 Ok(expr
@@ -164,17 +168,19 @@ fn check_select_statement<'a>(
             }
 
             Ok(Either::Right(
-                res.ok_or_else(|| unsupported_err!("Could not resolve table alias {}", table))?
-                    .map(move |c| {
-                        let (tbl, cn) = c?;
-                        if tbl.schema.is_none() && let Some(cte) = ctes.get(&tbl.name) {
+                res.ok_or_else(|| {
+                    unsupported_err!("Could not resolve table alias {}", table.display_unquoted())
+                })?
+                .map(move |c| {
+                    let (tbl, cn) = c?;
+                    if tbl.schema.is_none() && let Some(cte) = ctes.get(&tbl.name) {
                             Ok(Either::Right(trace_subquery(cte, tbl, cn, &ctes)?))
                         } else {
                             Ok(once_ok!((tbl, cn)))
                         }
-                    })
-                    .flatten_ok()
-                    .map(|r| r.flatten()),
+                })
+                .flatten_ok()
+                .map(|r| r.flatten()),
             ))
         }
     }

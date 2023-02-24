@@ -164,21 +164,22 @@ impl FromQueryLog {
             .into_iter()
             .map(Value::try_from)
             .collect::<Result<Vec<_>, _>>()?;
-        let rows = conn.execute(&stmt.to_string(), &params).await?;
+
+        // FIXME(ENG-2499): Use correct dialect.
+        let stmt_string = stmt.display(nom_sql::Dialect::MySQL).to_string();
+
+        let rows = conn.execute(&stmt_string, &params).await?;
+
         if self.skip_ddl && is_ddl(&parsed) {
             return Ok(None);
         }
-        if should_validate_results(&stmt.to_string(), &Some(parsed)) {
-            Ok(Some(Record::query(
-                stmt.to_string(),
-                Some(stmt),
-                params,
-                rows,
-            )))
+
+        if should_validate_results(&stmt_string, &Some(parsed)) {
+            Ok(Some(Record::query(stmt_string, Some(stmt), params, rows)))
         } else {
             Ok(Some(Record::Statement(Statement {
                 result: StatementResult::Ok,
-                command: stmt.to_string(),
+                command: stmt_string,
                 conditionals: vec![],
             })))
         }

@@ -58,7 +58,10 @@ impl NormalizeTopKWithAggregate for SelectStatement {
 
                             if !in_group_by_clause && !references_aggregate {
                                 return Err(ReadySetError::ExprNotInGroupBy {
-                                    expression: order_field.to_string(),
+                                    // FIXME(ENG-2499): Use correct dialect.
+                                    expression: order_field
+                                        .display(nom_sql::Dialect::MySQL)
+                                        .to_string(),
                                     position: "ORDER BY".to_owned(),
                                 });
                             }

@@ -5,11 +5,12 @@ use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::map;
 use nom_locate::LocatedSpan;
+use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
 use crate::column::Column;
-use crate::{Expr, NomSqlResult, TableExpr};
+use crate::{Dialect, Expr, NomSqlResult, TableExpr};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum JoinRightSide {
@@ -29,12 +30,12 @@ impl JoinRightSide {
     }
 }
 
-impl fmt::Display for JoinRightSide {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            JoinRightSide::Table(t) => write!(f, "{}", t),
-            JoinRightSide::Tables(ts) => write!(f, "({})", ts.iter().join(", ")),
-        }
+impl JoinRightSide {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| match self {
+            Self::Table(t) => write!(f, "{}", t.display(dialect)),
+            Self::Tables(ts) => write!(f, "({})", ts.iter().map(|t| t.display(dialect)).join(", ")),
+        })
     }
 }
 
@@ -83,22 +84,17 @@ pub enum JoinConstraint {
     Empty,
 }
 
-impl fmt::Display for JoinConstraint {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            JoinConstraint::On(ref ce) => write!(f, "ON {}", ce)?,
-            JoinConstraint::Using(ref columns) => write!(
+impl JoinConstraint {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| match self {
+            Self::On(ce) => write!(f, "ON {}", ce.display(dialect)),
+            Self::Using(columns) => write!(
                 f,
                 "USING ({})",
-                columns
-                    .iter()
-                    .map(|c| c.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )?,
-            JoinConstraint::Empty => {}
-        }
-        Ok(())
+                columns.iter().map(|c| c.display(dialect)).join(", ")
+            ),
+            Self::Empty => Ok(()),
+        })
     }
 }
 
@@ -151,6 +147,6 @@ mod tests {
 
         let q = res.unwrap().1;
         assert_eq!(q, expected_stmt);
-        assert_eq!(expected, q.to_string());
+        assert_eq!(expected, q.display(Dialect::MySQL).to_string());
     }
 }

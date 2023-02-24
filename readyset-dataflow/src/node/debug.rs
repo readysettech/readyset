@@ -59,7 +59,7 @@ impl Node {
                 NodeType::Base(..) => {
                     s.push_str(&format!(
                         "[style=bold, shape=tab, label=\"{}\"]\n",
-                        escape(self.name())
+                        escape(self.name().display_unquoted())
                     ));
                 }
                 NodeType::Sharder(ref sharder) => {
@@ -76,7 +76,7 @@ impl Node {
                         } else {
                             "#5CBFF9"
                         },
-                        escape(&self.name().to_string())
+                        escape(&self.name().display_unquoted().to_string())
                     ));
                 }
                 NodeType::Internal(ref i) => {
@@ -179,7 +179,7 @@ impl Node {
                     s.push_str(&format!(
                         "{{ {{ {} / {} | {} {} {} }} | {} | {} }}",
                         addr,
-                        escape(self.name()),
+                        escape(self.name().display_unquoted()),
                         "B",
                         materialized,
                         key_count_str,
@@ -212,7 +212,7 @@ impl Node {
                     s.push_str(&format!(
                         "{{ {{ {} / {} {} {} {} }} | (reader / ⚷: {}) | {} }}",
                         addr,
-                        escape(self.name()),
+                        escape(self.name().display_unquoted()),
                         materialized,
                         key_count_str,
                         node_size_str,
@@ -227,7 +227,7 @@ impl Node {
                     s.push_str(&format!(
                         "{{ {} / {} | {} {} {} {} }}",
                         addr,
-                        escape(self.name()),
+                        escape(self.name().display_unquoted()),
                         escape(&i.description(detailed)),
                         materialized,
                         key_count_str,

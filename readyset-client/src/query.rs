@@ -114,7 +114,8 @@ impl Hash for Query {
 impl Display for Query {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Query::Parsed(q) => write!(f, "{}", q.statement),
+            // FIXME(ENG-2501): Use correct dialect.
+            Query::Parsed(q) => write!(f, "{}", q.statement.display(nom_sql::Dialect::MySQL)),
             Query::ParseFailed(s) => write!(f, "{s}"),
         }
     }
@@ -128,7 +129,10 @@ impl Query {
             Query::Parsed(q) => {
                 let mut statement = q.statement.clone();
                 statement.anonymize(anonymizer);
-                statement.to_string()
+                // NOTE: Without `return`, there is a compile error that `statement` does not live
+                // long enough.
+                // FIXME: Use correct dialect.
+                return statement.display(nom_sql::Dialect::MySQL).to_string();
             }
             Query::ParseFailed(_) => "<redacted: parsing failed>".to_string(),
         }

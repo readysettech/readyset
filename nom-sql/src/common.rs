@@ -14,6 +14,7 @@ use nom::multi::{separated_list0, separated_list1};
 use nom::sequence::{delimited, pair, preceded, separated_pair, terminated, tuple};
 use nom::{IResult, InputLength, InputTake};
 use nom_locate::LocatedSpan;
+use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 
 use crate::column::Column;
@@ -132,142 +133,138 @@ impl TableKey {
             TableKey::FulltextKey { .. } => &None,
         }
     }
-}
 
-impl fmt::Display for TableKey {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if let Some(constraint_name) = self.constraint_name() {
-            write!(f, "CONSTRAINT `{constraint_name}` ")?;
-        }
-        match self {
-            TableKey::PrimaryKey {
-                index_name,
-                columns,
-                ..
-            } => {
-                write!(f, "PRIMARY KEY ")?;
-                if let Some(index_name) = index_name {
-                    write!(f, "`{}` ", index_name)?;
-                }
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| {
+            if let Some(constraint_name) = self.constraint_name() {
                 write!(
                     f,
-                    "({})",
-                    columns
-                        .iter()
-                        .map(|c| format!("{}", c))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-            }
-            TableKey::UniqueKey {
-                index_name,
-                columns,
-                index_type,
-                ..
-            } => {
-                write!(f, "UNIQUE KEY ")?;
-                if let Some(ref index_name) = *index_name {
-                    write!(f, "`{}` ", index_name)?;
-                }
-                write!(
-                    f,
-                    "({})",
-                    columns
-                        .iter()
-                        .map(|c| format!("{}", c))
-                        .collect::<Vec<_>>()
-                        .join(", ")
+                    "CONSTRAINT {} ",
+                    dialect.quote_identifier(constraint_name)
                 )?;
-                if let Some(index_type) = index_type {
-                    write!(f, " USING {}", index_type)?;
-                }
-                Ok(())
             }
-            TableKey::FulltextKey {
-                index_name,
-                columns,
-            } => {
-                write!(f, "FULLTEXT KEY ")?;
-                if let Some(ref index_name) = *index_name {
-                    write!(f, "`{index_name}` ")?;
-                }
-                write!(
-                    f,
-                    "({})",
-                    columns
-                        .iter()
-                        .map(|c| format!("{}", c))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-            }
-            TableKey::Key {
-                index_name,
-                columns,
-                index_type,
-                ..
-            } => {
-                write!(f, "KEY ")?;
-                if let Some(index_name) = index_name {
-                    write!(f, "`{index_name}` ")?;
-                }
-                write!(
-                    f,
-                    "({})",
-                    columns
-                        .iter()
-                        .map(|c| format!("{}", c))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )?;
-                if let Some(index_type) = index_type {
-                    write!(f, " USING {}", index_type)?;
-                }
-                Ok(())
-            }
-            TableKey::ForeignKey {
-                index_name,
-                columns: column,
-                target_table,
-                target_columns: target_column,
-                on_delete,
-                on_update,
-                ..
-            } => {
-                write!(
-                    f,
-                    "FOREIGN KEY {} ({}) REFERENCES {} ({})",
-                    index_name.as_deref().unwrap_or(""),
-                    column.iter().map(|c| format!("{}", c)).join(", "),
-                    target_table,
-                    target_column.iter().map(|c| format!("{}", c)).join(", ")
-                )?;
-                if let Some(on_delete) = on_delete {
-                    write!(f, " ON DELETE {}", on_delete)?;
-                }
-                if let Some(on_update) = on_update {
-                    write!(f, " ON UPDATE {}", on_update)?;
-                }
-                Ok(())
-            }
-            TableKey::CheckConstraint { expr, enforced, .. } => {
-                // NOTE: MySQL does not allow an optional 'CONSTRAINT' here and expects only "ADD
-                // CHECK" https://dev.mysql.com/doc/refman/5.7/en/alter-table.html
 
-                // Postgres is fine with it, but since this is our own display, leave it out.
-                // https://www.postgresql.org/docs/current/sql-altertable.html
-                write!(f, " CHECK {}", expr)?;
-
-                if let Some(enforced) = enforced {
-                    if !enforced {
-                        write!(f, " NOT")?;
+            match self {
+                TableKey::PrimaryKey {
+                    index_name,
+                    columns,
+                    ..
+                } => {
+                    write!(f, "PRIMARY KEY ")?;
+                    if let Some(index_name) = index_name {
+                        write!(f, "{} ", dialect.quote_identifier(index_name))?;
                     }
-                    write!(f, " ENFORCED")?;
+                    write!(
+                        f,
+                        "({})",
+                        columns.iter().map(|c| c.display(dialect)).join(", ")
+                    )
                 }
+                TableKey::UniqueKey {
+                    index_name,
+                    columns,
+                    index_type,
+                    ..
+                } => {
+                    write!(f, "UNIQUE KEY ")?;
+                    if let Some(index_name) = index_name {
+                        write!(f, "{} ", dialect.quote_identifier(index_name))?;
+                    }
+                    write!(
+                        f,
+                        "({})",
+                        columns.iter().map(|c| c.display(dialect)).join(", ")
+                    )?;
+                    if let Some(index_type) = index_type {
+                        write!(f, " USING {}", index_type)?;
+                    }
+                    Ok(())
+                }
+                TableKey::FulltextKey {
+                    index_name,
+                    columns,
+                } => {
+                    write!(f, "FULLTEXT KEY ")?;
+                    if let Some(ref index_name) = *index_name {
+                        write!(f, "{} ", dialect.quote_identifier(index_name))?;
+                    }
+                    write!(
+                        f,
+                        "({})",
+                        columns.iter().map(|c| c.display(dialect)).join(", ")
+                    )
+                }
+                TableKey::Key {
+                    index_name,
+                    columns,
+                    index_type,
+                    ..
+                } => {
+                    write!(f, "KEY ")?;
+                    if let Some(index_name) = index_name {
+                        write!(f, "{} ", dialect.quote_identifier(index_name))?;
+                    }
+                    write!(
+                        f,
+                        "({})",
+                        columns.iter().map(|c| c.display(dialect)).join(", ")
+                    )?;
+                    if let Some(index_type) = index_type {
+                        write!(f, " USING {}", index_type)?;
+                    }
+                    Ok(())
+                }
+                TableKey::ForeignKey {
+                    index_name,
+                    columns,
+                    target_table,
+                    target_columns,
+                    on_delete,
+                    on_update,
+                    ..
+                } => {
+                    let index_name = fmt_with(|f| {
+                        if let Some(index_name) = index_name {
+                            write!(f, "{}", dialect.quote_identifier(index_name))?;
+                        }
+                        Ok(())
+                    });
 
-                Ok(())
+                    write!(
+                        f,
+                        "FOREIGN KEY {} ({}) REFERENCES {} ({})",
+                        index_name,
+                        columns.iter().map(|c| c.display(dialect)).join(", "),
+                        target_table.display(dialect),
+                        target_columns.iter().map(|c| c.display(dialect)).join(", ")
+                    )?;
+                    if let Some(on_delete) = on_delete {
+                        write!(f, " ON DELETE {}", on_delete)?;
+                    }
+                    if let Some(on_update) = on_update {
+                        write!(f, " ON UPDATE {}", on_update)?;
+                    }
+                    Ok(())
+                }
+                TableKey::CheckConstraint { expr, enforced, .. } => {
+                    // NOTE: MySQL does not allow an optional 'CONSTRAINT' here and expects only
+                    // "ADD CHECK" https://dev.mysql.com/doc/refman/5.7/en/alter-table.html
+
+                    // Postgres is fine with it, but since this is our own display, leave it out.
+                    // https://www.postgresql.org/docs/current/sql-altertable.html
+                    write!(f, " CHECK {}", expr.display(dialect))?;
+
+                    if let Some(enforced) = enforced {
+                        if !enforced {
+                            write!(f, " NOT")?;
+                        }
+                        write!(f, " ENFORCED")?;
+                    }
+
+                    Ok(())
+                }
             }
-        }
+        })
     }
 }
 
@@ -306,27 +303,27 @@ impl From<Literal> for FieldDefinitionExpr {
     }
 }
 
-impl Display for FieldDefinitionExpr {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            FieldDefinitionExpr::All => write!(f, "*"),
-            FieldDefinitionExpr::AllInTable(ref table) => {
-                write!(f, "{}.*", table)
-            }
-            FieldDefinitionExpr::Expr { expr, alias } => {
-                write!(f, "{}", expr)?;
-                if let Some(alias) = alias {
-                    write!(f, " AS `{}`", alias)?;
-                }
-                Ok(())
-            }
-        }
-    }
-}
-
 impl Default for FieldDefinitionExpr {
     fn default() -> FieldDefinitionExpr {
         FieldDefinitionExpr::All
+    }
+}
+
+impl FieldDefinitionExpr {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| match self {
+            Self::All => write!(f, "*"),
+            Self::AllInTable(table) => {
+                write!(f, "{}.*", table.display(dialect))
+            }
+            Self::Expr { expr, alias } => {
+                write!(f, "{}", expr.display(dialect))?;
+                if let Some(alias) = alias {
+                    write!(f, " AS {}", dialect.quote_identifier(alias))?;
+                }
+                Ok(())
+            }
+        })
     }
 }
 
@@ -345,12 +342,12 @@ pub enum FieldReference {
     Expr(Expr),
 }
 
-impl Display for FieldReference {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            FieldReference::Numeric(n) => write!(f, "{}", n),
-            FieldReference::Expr(expr) => write!(f, "{}", expr),
-        }
+impl FieldReference {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| match self {
+            Self::Numeric(n) => write!(f, "{}", n),
+            Self::Expr(expr) => write!(f, "{}", expr.display(dialect)),
+        })
     }
 }
 

@@ -315,8 +315,11 @@ impl MySqlReplicator {
             .await
             .map_err(log_err);
 
-        let query_count = format!("select count(*) from {table}");
-        let query = format!("select * from {table}");
+        let query_count = format!(
+            "select count(*) from {}",
+            table.display(nom_sql::Dialect::MySQL)
+        );
+        let query = format!("select * from {}", table.display(nom_sql::Dialect::MySQL));
         Ok(TableDumper {
             query_count,
             query,
@@ -347,7 +350,10 @@ impl MySqlReplicator {
     /// Issue a `LOCK TABLES tbl_name READ` for the table name provided
     async fn lock_table(&self, table: &Relation) -> mysql::Result<mysql::Conn> {
         let mut conn = self.pool.get_conn().await?;
-        let query = format!("LOCK TABLES {table} READ");
+        let query = format!(
+            "LOCK TABLES {} READ",
+            table.display(nom_sql::Dialect::MySQL)
+        );
         conn.query_drop(query).await?;
         Ok(conn)
     }
@@ -377,7 +383,7 @@ impl MySqlReplicator {
         table_mutator.set_snapshot_mode(true).await?;
         let progress_percentage_metric: metrics::Gauge = register_gauge!(
             recorded::REPLICATOR_SNAPSHOT_PERCENT,
-            "name" => table_mutator.table_name().to_string(),
+            "name" => table_mutator.table_name().display(nom_sql::Dialect::MySQL).to_string(),
         );
 
         let start_time = Instant::now();
@@ -522,7 +528,10 @@ impl MySqlReplicator {
         table: Relation,
         snapshot_report_interval_secs: u16,
     ) -> ReadySetResult<JoinHandle<(Relation, ReplicationOffset, ReadySetResult<()>)>> {
-        let span = info_span!("Snapshotting table", %table);
+        let span = info_span!(
+            "Snapshotting table",
+            table = %table.display(nom_sql::Dialect::MySQL)
+        );
         span.in_scope(|| info!("Acquiring read lock"));
         let mut read_lock = self.lock_table(&table).await?;
         // We acquire the position for each table individually, since it changes from
@@ -566,7 +575,10 @@ impl MySqlReplicator {
         // tables. TODO: do we need to fully finish tables before views?
         while let Some(table) = table_list.pop() {
             if replication_offsets.has_table(&table) {
-                info!(%table, "Replication offset already exists for table, skipping snapshot");
+                info!(
+                    table = %table.display(nom_sql::Dialect::MySQL),
+                    "Replication offset already exists for table, skipping snapshot"
+                );
             } else {
                 replication_tasks.push(
                     self.dumper_task_for_table(noria, table, snapshot_report_interval_secs)
@@ -585,7 +597,10 @@ impl MySqlReplicator {
                 (table, repl_offset, Ok(())) => {
                     let mut noria_table = noria.table(table.clone()).await?;
                     compacting_tasks.push(tokio::spawn(async move {
-                        let span = info_span!("Compacting table", %table);
+                        let span = info_span!(
+                            "Compacting table",
+                            table = %table.display(nom_sql::Dialect::MySQL)
+                        );
                         span.in_scope(|| info!("Setting replication offset"));
                         noria_table
                             .set_replication_offset(repl_offset)
@@ -605,7 +620,11 @@ impl MySqlReplicator {
                     }));
                 }
                 (table, _, Err(err)) => {
-                    error!(%table, error = %err, "Replication failed, retrying");
+                    error!(
+                        table = %table.display(nom_sql::Dialect::MySQL),
+                        error = %err,
+                        "Replication failed, retrying"
+                    );
                     replication_tasks.push(
                         self.dumper_task_for_table(noria, table, snapshot_report_interval_secs)
                             .await?,
@@ -617,7 +636,10 @@ impl MySqlReplicator {
             while replication_tasks.len() < MAX_SNAPSHOT_BATCH && !table_list.is_empty() {
                 let table = table_list.pop().expect("Not empty");
                 if replication_offsets.has_table(&table) {
-                    info!(%table, "Replication offset already exists for table, skipping snapshot");
+                    info!(
+                        table = %table.display(nom_sql::Dialect::MySQL),
+                        "Replication offset already exists for table, skipping snapshot"
+                    );
                 } else {
                     replication_tasks.push(
                         self.dumper_task_for_table(noria, table, snapshot_report_interval_secs)

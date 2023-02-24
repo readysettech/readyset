@@ -154,7 +154,15 @@ where
         let upstream_result = match self.upstream {
             Some(ref mut db) if self.validate_queries => {
                 // TODO(grfn): Set search path here
-                let mut upstream_result = db.prepare(view_request.statement.to_string()).await;
+                let mut upstream_result = db
+                    .prepare(
+                        view_request
+                            .statement
+                            // FIXME(ENG-2500): Use correct dialect.
+                            .display(nom_sql::Dialect::MySQL)
+                            .to_string(),
+                    )
+                    .await;
 
                 // If we returned an error indicating the connection was closed, we will try to
                 // reconnect. If that fails, we have an unrecoverable error and should wait until
@@ -164,13 +172,22 @@ where
                         if let Err(e) = db.reset().await {
                             error!(
                                 error = %e,
-                                query = %Sensitive(&view_request.statement),
+                                // FIXME(ENG-2499 + ENG-2500): Use correct dialect.
+                                query = %Sensitive(&view_request.statement.display(nom_sql::Dialect::MySQL)),
                                 "MigrationHandler dropped conn to Upstream and failed to reconnnect",
                             );
                             return;
                         } else {
                             // Succeeded on reconnecting. Retry prepare.
-                            upstream_result = db.prepare(view_request.statement.to_string()).await;
+                            upstream_result = db
+                                .prepare(
+                                    view_request
+                                        .statement
+                                        // FIXME(ENG-2500): Use correct dialect.
+                                        .display(nom_sql::Dialect::MySQL)
+                                        .to_string(),
+                                )
+                                .await;
                         }
                     }
                     _ => {}
@@ -179,7 +196,8 @@ where
                 if let Err(e) = upstream_result {
                     debug!(
                         error = %e,
-                        query = %Sensitive(&view_request.statement),
+                        // FIXME(ENG-2499 + ENG-2500): Use correct dialect.
+                        query = %Sensitive(&view_request.statement.display(nom_sql::Dialect::MySQL)),
                         "Query failed to be prepared against upstream",
                     );
                     return;
@@ -220,7 +238,8 @@ where
                             {
                                 debug!(
                                     error = %e,
-                                    query = %Sensitive(&view_request.statement),
+                                    // FIXME(ENG-2499 + ENG-2500): Use correct dialect.
+                                    query = %Sensitive(&view_request.statement.display(nom_sql::Dialect::MySQL)),
                                     "Query compare failed"
                                 );
                                 // TODO(justin): Fix setting migration state to unsupported with
@@ -249,7 +268,8 @@ where
             Err(e) if e.caused_by_unsupported() => {
                 debug!(
                     error = %e,
-                    query = %Sensitive(&view_request.statement),
+                    // FIXME(ENG-2499 + ENG-2500): Use correct dialect.
+                    query = %Sensitive(&view_request.statement.display(nom_sql::Dialect::MySQL)),
                     "Select query is unsupported in ReadySet"
                 );
 
@@ -262,7 +282,8 @@ where
             Err(e) => {
                 debug!(
                     error = %e,
-                    query = %Sensitive(&view_request.statement),
+                    // FIXME(ENG-2499 + ENG-2500): Use correct dialect.
+                    query = %Sensitive(&view_request.statement.display(nom_sql::Dialect::MySQL)),
                     "Select query may have transiently failed"
                 );
                 if Instant::now() - *self.start_time.get(view_request).unwrap() > self.max_retry {

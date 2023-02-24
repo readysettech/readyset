@@ -68,7 +68,9 @@ impl DataGenerator {
             .map_err(|e| anyhow!("Error parsing DDL {}", e.to_string()))?;
         // This may be a multi-line DDL, if it is semi-colons terminate the statements.
         for statement in parsed.1 {
-            conn.query_drop(statement.to_string()).await?;
+            // FIXME: Use correct dialect.
+            conn.query_drop(statement.display(nom_sql::Dialect::MySQL).to_string())
+                .await?;
         }
         Ok(())
     }
@@ -331,7 +333,8 @@ pub async fn load_to_backend(
             on_duplicate: None,
         };
 
-        db.query(&insert.to_string())
+        // FIXME: Use correct dialect.
+        db.query(&insert.display(nom_sql::Dialect::MySQL).to_string())
             .await
             .with_context(|| format!("Inserting row into database for {}", table_name))?;
     }

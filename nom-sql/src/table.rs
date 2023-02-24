@@ -1,6 +1,6 @@
 use std::fmt::Display;
 use std::hash::Hash;
-use std::{fmt, str};
+use std::str;
 
 use nom::branch::alt;
 use nom::bytes::complete::tag;
@@ -31,16 +31,6 @@ pub struct Relation {
 
     /// The name of the relation itself
     pub name: SqlIdentifier,
-}
-
-impl Display for Relation {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if let Some(ref schema) = self.schema {
-            write!(f, "`{}`.", schema)?;
-        }
-        write!(f, "`{}`", self.name)?;
-        Ok(())
-    }
 }
 
 impl From<SqlIdentifier> for Relation {
@@ -83,6 +73,15 @@ impl<'a> From<&'a String> for Relation {
 }
 
 impl Relation {
+    pub fn display(&self, dialect: Dialect) -> impl Display + '_ {
+        fmt_with(move |f| {
+            if let Some(schema) = &self.schema {
+                write!(f, "{}.", dialect.quote_identifier(schema))?;
+            }
+            write!(f, "{}", dialect.quote_identifier(&self.name))
+        })
+    }
+
     /// Like [`display()`](Self::display) except the schema and table name will not be quoted.
     ///
     /// This should not be used to emit SQL code and instead should mostly be for error messages.
@@ -119,14 +118,12 @@ impl TableExprInner {
             Err(self)
         }
     }
-}
 
-impl Display for TableExprInner {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            TableExprInner::Table(t) => write!(f, "{t}"),
-            TableExprInner::Subquery(sq) => write!(f, "({sq})"),
-        }
+    pub fn display(&self, dialect: Dialect) -> impl Display + '_ {
+        fmt_with(move |f| match self {
+            TableExprInner::Table(t) => write!(f, "{}", t.display(dialect)),
+            TableExprInner::Subquery(sq) => write!(f, "({})", sq.display(dialect)),
+        })
     }
 }
 
@@ -137,16 +134,6 @@ pub struct TableExpr {
     pub alias: Option<SqlIdentifier>,
 }
 
-impl Display for TableExpr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.inner)?;
-        if let Some(alias) = &self.alias {
-            write!(f, " AS `{alias}`")?;
-        }
-        Ok(())
-    }
-}
-
 /// Constructs a [`TableExpr`] with no alias
 impl From<Relation> for TableExpr {
     fn from(table: Relation) -> Self {
@@ -154,6 +141,20 @@ impl From<Relation> for TableExpr {
             inner: TableExprInner::Table(table),
             alias: None,
         }
+    }
+}
+
+impl TableExpr {
+    pub fn display(&self, dialect: Dialect) -> impl Display + '_ {
+        fmt_with(move |f| {
+            write!(f, "{}", self.inner.display(dialect))?;
+
+            if let Some(alias) = &self.alias {
+                write!(f, " AS {}", dialect.quote_identifier(alias))?;
+            }
+
+            Ok(())
+        })
     }
 }
 

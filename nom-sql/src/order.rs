@@ -8,6 +8,7 @@ use nom::combinator::{map, opt};
 use nom::multi::separated_list1;
 use nom::sequence::preceded;
 use nom_locate::LocatedSpan;
+use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
@@ -49,25 +50,26 @@ pub struct OrderClause {
     pub order_by: Vec<(FieldReference, Option<OrderType>)>,
 }
 
-impl fmt::Display for OrderClause {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "ORDER BY ")?;
-        write!(
-            f,
-            "{}",
-            self.order_by
-                .iter()
-                .map(|&(ref c, ref o)| format!(
-                    "{}{}",
-                    c,
-                    if let Some(ot) = o {
-                        format!(" {}", ot)
-                    } else {
-                        "".to_owned()
-                    }
-                ))
-                .join(", ")
-        )
+impl OrderClause {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| {
+            write!(
+                f,
+                "ORDER BY {}",
+                self.order_by
+                    .iter()
+                    .map(|(c, o)| format!(
+                        "{}{}",
+                        c.display(dialect),
+                        if let Some(ot) = o {
+                            format!(" {}", ot)
+                        } else {
+                            "".to_owned()
+                        }
+                    ))
+                    .join(", ")
+            )
+        })
     }
 }
 
@@ -154,6 +156,9 @@ mod tests {
                 Some(OrderType::OrderDescending),
             )],
         };
-        assert_eq!(clause.to_string(), "ORDER BY `t`.`n` DESC");
+        assert_eq!(
+            clause.display(Dialect::MySQL).to_string(),
+            "ORDER BY `t`.`n` DESC"
+        );
     }
 }

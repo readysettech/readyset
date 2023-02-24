@@ -64,7 +64,7 @@ impl<'schema> ExpandImpliedTablesVisitor<'schema> {
             warn!(
                 "Ambiguous column {} exists in tables: {} -- picking a random one",
                 column_name,
-                matches.iter().join(", ")
+                matches.iter().map(|t| t.display_unquoted()).join(", ")
             );
             Some(matches.pop().unwrap())
         } else if matches.is_empty() {
@@ -174,7 +174,10 @@ impl<'ast, 'schema> VisitorMut<'ast> for ExpandImpliedTablesVisitor<'schema> {
                 .collect::<Vec<_>>();
 
             if matches.len() > 1 {
-                return Err(invalid_err!("Table reference {table} is ambiguous"));
+                return Err(invalid_err!(
+                    "Table reference {} is ambiguous",
+                    table.display_unquoted()
+                ));
             }
 
             if let Some(t) = matches.first() {
@@ -412,7 +415,13 @@ Dialect::MySQL,
         ]);
 
         let res = orig.expand_implied_tables(&schema).unwrap();
-        assert_eq!(res, expected, "{} != {}", res, expected);
+        assert_eq!(
+            res,
+            expected,
+            "{} != {}",
+            res.display(nom_sql::Dialect::MySQL),
+            expected.display(nom_sql::Dialect::MySQL)
+        );
     }
 
     #[test]
@@ -429,7 +438,13 @@ Dialect::MySQL,
         .into();
         let res = orig.expand_implied_tables(&schema).unwrap();
 
-        assert_eq!(res, expected, "\n{} != {}", res, expected);
+        assert_eq!(
+            res,
+            expected,
+            "\n{} != {}",
+            res.display(nom_sql::Dialect::MySQL),
+            expected.display(nom_sql::Dialect::MySQL)
+        );
     }
 
     #[test]
@@ -495,7 +510,13 @@ Dialect::MySQL,
         ]
         .into();
         let res = orig.expand_implied_tables(&schema).unwrap();
-        assert_eq!(res, expected, "\n left: {res}\nright: {expected}");
+        assert_eq!(
+            res,
+            expected,
+            "\n left: {}\nright: {}",
+            res.display(nom_sql::Dialect::MySQL),
+            expected.display(nom_sql::Dialect::MySQL)
+        );
     }
 
     #[test]
@@ -539,7 +560,13 @@ Dialect::MySQL,
         .into();
 
         let res = orig.expand_implied_tables(&schema).unwrap();
-        assert_eq!(res, expected, "\n left: {res}\nright: {expected}");
+        assert_eq!(
+            res,
+            expected,
+            "\n left: {}\nright: {}",
+            res.display(nom_sql::Dialect::MySQL),
+            expected.display(nom_sql::Dialect::MySQL)
+        );
     }
 
     #[test]
@@ -550,6 +577,12 @@ Dialect::MySQL,
         let schema = [(Relation::from("t1"), vec!["x".into()])].into();
 
         let res = orig.expand_implied_tables(&schema).unwrap();
-        assert_eq!(res, expected, "\n left: {res}\nright: {expected}");
+        assert_eq!(
+            res,
+            expected,
+            "\n left: {}\nright: {}",
+            res.display(nom_sql::Dialect::MySQL),
+            expected.display(nom_sql::Dialect::MySQL)
+        );
     }
 }

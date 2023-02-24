@@ -430,10 +430,12 @@ impl ReadySetHandle {
             Some(vb) => Ok(vb),
             None => match view_request.filter {
                 Some(ViewFilter::Workers(w)) => Err(ReadySetError::ViewNotFoundInWorkers {
-                    name: view_request.name.to_string(),
+                    name: view_request.name.display_unquoted().to_string(),
                     workers: w,
                 }),
-                _ => Err(ReadySetError::ViewNotFound(view_request.name.to_string())),
+                _ => Err(ReadySetError::ViewNotFound(
+                    view_request.name.display_unquoted().to_string(),
+                )),
             },
         }
     }

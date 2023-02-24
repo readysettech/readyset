@@ -19,7 +19,7 @@
 //! Generating a simple query, with a single query parameter and a single inner join:
 //!
 //! ```rust
-//! use nom_sql::JoinOperator;
+//! use nom_sql::{Dialect, JoinOperator};
 //! use query_generator::{GeneratorState, QueryOperation, QuerySeed};
 //!
 //! let mut gen = GeneratorState::default();
@@ -30,7 +30,7 @@
 //!     ],
 //!     vec![],
 //! ));
-//! let query_str = query.statement.to_string();
+//! let query_str = query.statement.display(Dialect::MySQL).to_string();
 //! assert_eq!(
 //!     query_str,
 //!     "SELECT `table_1`.`column_2` AS `alias_1`, `table_2`.`column_2` AS `alias_2` \
@@ -457,6 +457,12 @@ impl FromStr for TableName {
     type Err = !;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(Self::from(s))
+    }
+}
+
+impl From<String> for TableName {
+    fn from(s: String) -> Self {
+        Self(s.into())
     }
 }
 
@@ -2797,7 +2803,10 @@ impl Subquery {
                 alias: alias @ None,
                 ..
             }) => alias.insert(state.fresh_alias()).clone(),
-            _ => panic!("Could not find a join key in subquery: {}", subquery),
+            _ => panic!(
+                "Could not find a join key in subquery: {}",
+                subquery.display(nom_sql::Dialect::MySQL)
+            ),
         };
 
         let left_join_col = column_in_query(state, query);
@@ -3237,7 +3246,7 @@ mod tests {
     #[test]
     fn single_join() {
         let query = generate_query(vec![QueryOperation::Join(JoinOperator::LeftJoin)]);
-        eprintln!("query: {}", query);
+        eprintln!("query: {}", query.display(nom_sql::Dialect::MySQL));
         assert_eq!(query.tables.len(), 1);
         assert_eq!(query.join.len(), 1);
         let join = query.join.first().unwrap();
@@ -3309,7 +3318,10 @@ mod tests {
             subqueries: vec![],
         };
         let query = gen.generate_query(seed);
-        eprintln!("query: {}", query.statement);
+        eprintln!(
+            "query: {}",
+            query.statement.display(nom_sql::Dialect::MySQL)
+        );
         match query.statement.where_clause {
             Some(Expr::In {
                 lhs: _,

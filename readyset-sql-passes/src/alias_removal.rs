@@ -234,11 +234,15 @@ mod tests {
             let expected = parse_query(Dialect::MySQL, $after).unwrap();
             res.rewrite_table_aliases("query");
             assert_eq!(
-                res, expected,
+                res,
+                expected,
                 "\n     expected: {} \n\
                  to rewrite to: {} \n\
                        but got: {}",
-                $before, expected, res,
+                $before,
+                // FIXME(ENG-2499): Use correct dialect.
+                expected.display(nom_sql::Dialect::MySQL),
+                res.display(nom_sql::Dialect::MySQL),
             );
         }};
     }
@@ -525,7 +529,14 @@ mod tests {
                 }
             }]
         );
-        assert_eq!(res, expected, "\n\n   {}\n!= {}", res, expected);
+        assert_eq!(
+            res,
+            expected,
+            "\n\n   {}\n!= {}",
+            // FIXME(ENG-2499): Use correct dialect.
+            res.display(nom_sql::Dialect::MySQL),
+            expected.display(nom_sql::Dialect::MySQL)
+        );
     }
 
     #[test]

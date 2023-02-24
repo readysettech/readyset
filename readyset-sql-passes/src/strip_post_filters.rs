@@ -86,7 +86,12 @@ mod tests {
             parse_query(Dialect::MySQL, "SELECT id FROM posts WHERE title ILIKE ?;").unwrap();
         let expected = parse_query(Dialect::MySQL, "SELECT id FROM posts;").unwrap();
         let result = query.strip_post_filters();
-        assert_eq!(result, expected, "result = {}", result);
+        assert_eq!(
+            result,
+            expected,
+            "result = {}",
+            result.display(nom_sql::Dialect::MySQL)
+        );
     }
 
     #[test]
@@ -98,6 +103,11 @@ mod tests {
         .unwrap();
         let expected = parse_query(Dialect::MySQL, "SELECT id FROM posts WHERE id < 5;").unwrap();
         let result = query.strip_post_filters();
-        assert_eq!(result, expected, "result = {}", result);
+        assert_eq!(
+            result,
+            expected,
+            "result = {}",
+            result.display(nom_sql::Dialect::MySQL)
+        );
     }
 }

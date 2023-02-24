@@ -53,13 +53,19 @@ pub(crate) struct PreparedSelectStatement {
 
 impl fmt::Debug for PreparedStatement {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        // FIXME(ENG-2499): Use correct dialect.
         match self {
             PreparedStatement::Select(PreparedSelectStatement {
                 name, statement, ..
-            }) => write!(f, "{}: {}", name, statement),
-            PreparedStatement::Insert(s) => write!(f, "{}", s),
-            PreparedStatement::Update(s) => write!(f, "{}", s),
-            PreparedStatement::Delete(s) => write!(f, "{}", s),
+            }) => write!(
+                f,
+                "{}: {}",
+                name.display(nom_sql::Dialect::MySQL),
+                statement.display(nom_sql::Dialect::MySQL)
+            ),
+            PreparedStatement::Insert(s) => write!(f, "{}", s.display(nom_sql::Dialect::MySQL)),
+            PreparedStatement::Update(s) => write!(f, "{}", s.display(nom_sql::Dialect::MySQL)),
+            PreparedStatement::Delete(s) => write!(f, "{}", s.display(nom_sql::Dialect::MySQL)),
         }
     }
 }
@@ -584,8 +590,9 @@ impl NoriaConnector {
             .map(|(n, (mut q, always))| {
                 anonymize_literals(&mut q);
                 vec![
-                    DfValue::from(n.to_string()),
-                    DfValue::from(q.to_string()),
+                    // FIXME(ENG-2499): Use correct dialect.
+                    DfValue::from(n.display(nom_sql::Dialect::MySQL).to_string()),
+                    DfValue::from(q.display(nom_sql::Dialect::MySQL).to_string()),
                     DfValue::from(if always {
                         "no fallback"
                     } else {
@@ -622,12 +629,12 @@ impl NoriaConnector {
         let table = &q.table;
 
         // create a mutator if we don't have one for this table already
-        trace!(%table, "query::insert::access mutator");
+        trace!(table = %table.display_unquoted(), "query::insert::access mutator");
         let putter = self.inner.get_mut()?.get_noria_table(table).await?;
         trace!("query::insert::extract schema");
         let schema = putter
             .schema()
-            .ok_or_else(|| internal_err!("no schema for table '{}'", table))?;
+            .ok_or_else(|| internal_err!("no schema for table {}", table.display_unquoted()))?;
 
         // set column names (insert schema) if not set
         let q = match q.fields {
@@ -703,7 +710,12 @@ impl NoriaConnector {
                         .iter()
                         .cloned()
                         .find(|mc| c.name == mc.column.name)
-                        .ok_or_else(|| internal_err!("column '{}' missing in mutator schema", c))
+                        .ok_or_else(|| {
+                            internal_err!(
+                                "column {} missing in mutator schema",
+                                c.display_unquoted()
+                            )
+                        })
                 })
                 .collect::<ReadySetResult<Vec<_>>>()?
         };
@@ -736,9 +748,9 @@ impl NoriaConnector {
                 let table = &q.table;
                 let putter = self.inner.get_mut()?.get_noria_table(table).await?;
                 trace!("insert::extract schema");
-                let schema = putter
-                    .schema()
-                    .ok_or_else(|| internal_err!("no schema for table '{}'", table))?;
+                let schema = putter.schema().ok_or_else(|| {
+                    internal_err!("no schema for table {}", table.display_unquoted())
+                })?;
                 // unwrap: safe because we always pass in Some(params) so don't hit None path of
                 // coerce_params
                 let coerced_params = utils::coerce_params(
@@ -840,7 +852,7 @@ impl NoriaConnector {
                     .cloned()
                     .map(|cs| ColumnSchema::from_base(cs, q.table.clone(), self.dialect))
                     .transpose()?
-                    .ok_or_else(|| internal_err!("Unknown column {}", c))
+                    .ok_or_else(|| internal_err!("Unknown column {}", c.display_unquoted()))
             })
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -897,7 +909,7 @@ impl NoriaConnector {
                     .cloned()
                     .map(|cs| ColumnSchema::from_base(cs, q.table.clone(), self.dialect))
                     .transpose()?
-                    .ok_or_else(|| internal_err!("Unknown column {}", c))
+                    .ok_or_else(|| internal_err!("Unknown column {}", c.display_unquoted()))
             })
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -988,7 +1000,8 @@ impl NoriaConnector {
             .into_iter()
             .map(|(tbl, status)| {
                 vec![
-                    tbl.to_string().into(),
+                    // FIXME(ENG-2499): Use correct dialect.
+                    tbl.display(nom_sql::Dialect::MySQL).to_string().into(),
                     status.replication_status.to_string().into(),
                 ]
             })
@@ -1059,10 +1072,19 @@ impl NoriaConnector {
 
                 // add the query to ReadySet
                 if create_if_not_exist {
+                    // FIXME(ENG-2499): Use correct dialect.
                     if prepared {
-                        info!(query = %Sensitive(q), name = %qname, "adding parameterized query");
+                        info!(
+                            query = %Sensitive(&q.display(nom_sql::Dialect::MySQL)),
+                            name = %qname.display_unquoted(),
+                            "adding parameterized query"
+                        );
                     } else {
-                        info!(query = %Sensitive(q), name = %qname, "adding ad-hoc query");
+                        info!(
+                            query = %Sensitive(&q.display(nom_sql::Dialect::MySQL)),
+                            name = %qname.display_unquoted(),
+                            "adding ad-hoc query"
+                        );
                     }
 
                     let changelist = ChangeList::from_change(
@@ -1139,12 +1161,12 @@ impl NoriaConnector {
         let table = &q.table;
 
         // create a mutator if we don't have one for this table already
-        trace!(%table, "insert::access mutator");
+        trace!(table = %table.display_unquoted(), "insert::access mutator");
         let putter = self.inner.get_mut()?.get_noria_table(table).await?;
         trace!("insert::extract schema");
         let schema = putter
             .schema()
-            .ok_or_else(|| internal_err!("no schema for table '{}'", table))?;
+            .ok_or_else(|| internal_err!("no schema for table {}", table.display_unquoted()))?;
 
         let columns_specified: Vec<_> = q
             .fields
@@ -1432,7 +1454,7 @@ impl NoriaConnector {
             View::Single(view) => {
                 let schema = view.schema();
                 if schema.is_none() {
-                    warn!(view = %qname, "no schema for view");
+                    warn!(view = %qname.display_unquoted(), "no schema for view");
                 }
                 schema
             }

@@ -1,10 +1,12 @@
 use std::{fmt, str};
 
+use itertools::Itertools;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::opt;
 use nom::multi::separated_list1;
 use nom::sequence::{delimited, preceded, terminated, tuple};
 use nom_locate::LocatedSpan;
+use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 
 use crate::column::Column;
@@ -24,36 +26,39 @@ pub struct InsertStatement {
     pub on_duplicate: Option<Vec<(Column, Expr)>>,
 }
 
-impl fmt::Display for InsertStatement {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "INSERT INTO `{}`", self.table.name)?;
-        if let Some(ref fields) = self.fields {
+impl InsertStatement {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| {
+            // FIXME(ENG-2483): Use full table name including its schema.
             write!(
                 f,
-                " ({})",
-                fields
-                    .iter()
-                    .map(|col| format!("`{}`", col.name))
-                    .collect::<Vec<_>>()
-                    .join(", ")
+                "INSERT INTO {}",
+                dialect.quote_identifier(&self.table.name)
             )?;
-        }
-        write!(
-            f,
-            " VALUES {}",
-            self.data
-                .iter()
-                .map(|datas| format!(
-                    "({})",
-                    datas
+
+            if let Some(ref fields) = self.fields {
+                write!(
+                    f,
+                    " ({})",
+                    fields
                         .iter()
-                        .map(|l| l.to_string())
-                        .collect::<Vec<_>>()
+                        .map(|col| dialect.quote_identifier(&col.name))
                         .join(", ")
-                ))
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
+                )?;
+            }
+
+            write!(
+                f,
+                " VALUES {}",
+                self.data
+                    .iter()
+                    .map(|datas| format!(
+                        "({})",
+                        datas.iter().map(|l| l.display(dialect)).join(", ")
+                    ))
+                    .join(", ")
+            )
+        })
     }
 }
 
@@ -348,7 +353,7 @@ mod tests {
         fn stringify_insert_with_reserved_keyword_col() {
             let orig = b"INSERT INTO users (`id`, `name`, `key`) VALUES (1, 'bob', 1);";
             let parsed = test_parse!(insertion(Dialect::MySQL), orig);
-            let stringified = parsed.to_string();
+            let stringified = parsed.display(Dialect::MySQL).to_string();
             let parsed_again = test_parse!(insertion(Dialect::MySQL), stringified.as_bytes());
             assert_eq!(parsed, parsed_again);
         }

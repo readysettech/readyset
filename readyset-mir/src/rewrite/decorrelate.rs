@@ -164,7 +164,7 @@ fn push_dependent_filter(
 /// coefficients here are usually quite small). There's a lot of stuff that would likely be a lot
 /// easier to memoize if it weren't for the way MIR is structured, with [`RefCell`]s throwing borrow
 /// errors at runtime basically all the time
-#[instrument(skip_all, fields(query = %query.name()))]
+#[instrument(skip_all, fields(query = %query.name().display_unquoted()))]
 pub(crate) fn eliminate_dependent_joins(query: &mut MirQuery<'_>) -> ReadySetResult<()> {
     // TODO(grfn): lots of opportunity for memoization here, but the MIR RefCell mess makes that a
     // lot harder
@@ -263,7 +263,7 @@ pub(crate) fn eliminate_dependent_joins(query: &mut MirQuery<'_>) -> ReadySetRes
             push_dependent_filter(query, node, join, dependency)?;
         } else {
             trace!(
-                dependent_join = %query.get_node(join).unwrap().name(),
+                dependent_join = %query.get_node(join).unwrap().name().display_unquoted(),
                 "Can't find any more dependent nodes, done rewriting!"
             );
             // Can't find any dependent nodes, which means the join isn't dependent anymore! So turn
@@ -500,7 +500,7 @@ mod tests {
             }
             _ => panic!(
                 "should have rewritten dependent to non-dependent join (got: {})",
-                graph[exists_join].name()
+                graph[exists_join].name().display_unquoted()
             ),
         };
 
@@ -750,7 +750,7 @@ mod tests {
             }
             _ => panic!(
                 "should have rewritten dependent to non-dependent join (got: {})",
-                graph[exists_join].name()
+                graph[exists_join].name().display_unquoted()
             ),
         };
 

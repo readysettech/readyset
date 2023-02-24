@@ -1,9 +1,11 @@
-use std::{fmt, str};
+use std::fmt::Display;
+use std::str;
 
 use itertools::Itertools;
 use nom::bytes::complete::tag_no_case;
 use nom::multi::separated_list1;
 use nom_locate::LocatedSpan;
+use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 
 use crate::common::ws_sep_comma;
@@ -16,13 +18,15 @@ pub struct RenameTableStatement {
     pub ops: Vec<RenameTableOperation>,
 }
 
-impl fmt::Display for RenameTableStatement {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "RENAME TABLE {}",
-            self.ops.iter().map(|op| op.to_string()).join(", ")
-        )
+impl RenameTableStatement {
+    pub fn display(&self, dialect: Dialect) -> impl Display + '_ {
+        fmt_with(move |f| {
+            write!(
+                f,
+                "RENAME TABLE {}",
+                self.ops.iter().map(|op| op.display(dialect)).join(", ")
+            )
+        })
     }
 }
 
@@ -45,9 +49,16 @@ pub struct RenameTableOperation {
     pub to: Relation,
 }
 
-impl fmt::Display for RenameTableOperation {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{} TO {}", self.from, self.to)
+impl RenameTableOperation {
+    pub fn display(&self, dialect: Dialect) -> impl Display + '_ {
+        fmt_with(move |f| {
+            write!(
+                f,
+                "{} TO {}",
+                self.from.display(dialect),
+                self.to.display(dialect)
+            )
+        })
     }
 }
 
@@ -82,7 +93,10 @@ mod tests {
                 }]
             }
         );
-        assert_eq!(res.to_string(), "RENAME TABLE `t1` TO `t2`");
+        assert_eq!(
+            res.display(Dialect::MySQL).to_string(),
+            "RENAME TABLE `t1` TO `t2`"
+        );
     }
 
     #[test]
@@ -98,7 +112,10 @@ mod tests {
                 }]
             }
         );
-        assert_eq!(res.to_string(), "RENAME TABLE `from` TO `to`");
+        assert_eq!(
+            res.display(Dialect::MySQL).to_string(),
+            "RENAME TABLE `from` TO `to`"
+        );
     }
 
     #[test]
@@ -125,7 +142,7 @@ mod tests {
             }
         );
         assert_eq!(
-            res.to_string(),
+            res.display(Dialect::MySQL).to_string(),
             "RENAME TABLE `t1` TO `t2`, `change` TO `t3`, `t4` TO `select`"
         );
     }
@@ -144,7 +161,7 @@ mod tests {
             }
         );
         assert_eq!(
-            res.to_string(),
+            res.display(Dialect::MySQL).to_string(),
             "RENAME TABLE `posts_likes` TO `post_likes`"
         );
     }

@@ -61,7 +61,7 @@ impl BenchmarkControl for WriteLatencyBenchmark {
         let parsed_query =
             parse_query(Dialect::MySQL, &prepared_statement.query).map_err(|e| anyhow!("{}", e))?;
         let table: TableName = match parsed_query {
-            SqlQuery::Update(q) => q.table.to_string().replace('`', "").as_str().into(),
+            SqlQuery::Update(q) => q.table.display_unquoted().to_string().into(),
             _ => bail!("The provided query must be an UPDATE query"),
         };
 

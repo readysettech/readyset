@@ -69,7 +69,13 @@ pub(super) fn make_expressions_above_grouped(
         .flat_map(|f| f.arguments())
         // We don't need to do any work for bare column expressions
         .filter(|arg| !matches!(arg, Expr::Column(_)))
-        .map(|expr| (SqlIdentifier::from(expr.to_string()), expr.clone()))
+        .map(|expr| {
+            (
+                // FIXME(ENG-2502): Use correct dialect.
+                SqlIdentifier::from(expr.display(nom_sql::Dialect::MySQL).to_string()),
+                expr.clone(),
+            )
+        })
         .collect();
 
     if !exprs.is_empty() {
@@ -77,7 +83,7 @@ pub(super) fn make_expressions_above_grouped(
 
         let node = mir_converter.make_project_node(
             query_name,
-            mir_converter.generate_label(&name),
+            mir_converter.generate_label(&name.into()),
             *prev_node,
             cols,
             exprs.clone(),
@@ -176,7 +182,7 @@ pub(super) fn make_grouped(
                 // table on which we compute has no projected columns in the
                 // output, we make one up a group column by adding an extra
                 // projection node
-                let proj_name = format!("{}_prj_hlpr", name).into();
+                let proj_name = format!("{}_prj_hlpr", name.display_unquoted()).into();
                 let fn_cols: Vec<_> = function
                     .referred_columns()
                     .map(|c| Column::from(c.clone()))
@@ -272,9 +278,11 @@ pub(super) fn post_lookup_aggregates(
                         expr: Expr::Column(col),
                         ..
                     } => Some(Column::from(col).aliased_as_table(query_name.clone())),
-                    FieldDefinitionExpr::Expr { expr, .. } => {
-                        Some(Column::named(expr.to_string()).aliased_as_table(query_name.clone()))
-                    }
+                    FieldDefinitionExpr::Expr { expr, .. } => Some(
+                        // FIXME(ENG-2502): Use correct dialect.
+                        Column::named(expr.display(nom_sql::Dialect::MySQL).to_string())
+                            .aliased_as_table(query_name.clone()),
+                    ),
                     _ => None,
                 })
                 .collect(),

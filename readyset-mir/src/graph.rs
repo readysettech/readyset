@@ -286,7 +286,7 @@ impl MirGraph {
     pub fn column_id_for_column(&self, node: NodeIndex, c: &MirColumn) -> ReadySetResult<usize> {
         let err = Err(ReadySetError::NonExistentColumn {
             column: c.to_string(),
-            node: self.graph[node].name().to_string(),
+            node: self.graph[node].name().display_unquoted().to_string(),
         });
         #[allow(clippy::cmp_owned)]
         match self.graph[node].inner {

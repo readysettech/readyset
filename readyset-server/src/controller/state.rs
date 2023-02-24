@@ -566,7 +566,7 @@ impl DfState {
             .ok_or_else(|| ReadySetError::NodeNotFound { index: ni.index() })?;
         let base = node.name();
 
-        trace!(%base, "creating table");
+        trace!(base = %base.display_unquoted(), "creating table");
 
         let mut key = node
             .get_base()
@@ -640,7 +640,11 @@ impl DfState {
             .map(|s| -> ReadySetResult<_> {
                 match s {
                     Schema::Table(s) => Ok(s),
-                    _ => internal!("non-base schema {:?} returned for table '{}'", s, base),
+                    _ => internal!(
+                        "non-base schema {:?} returned for table {}",
+                        s,
+                        base.display_unquoted()
+                    ),
                 }
             })
             .transpose()?;

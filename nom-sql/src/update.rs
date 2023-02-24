@@ -1,9 +1,11 @@
 use std::{fmt, str};
 
+use itertools::Itertools;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::sequence::tuple;
 use nom_locate::LocatedSpan;
+use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 
 use crate::column::Column;
@@ -20,24 +22,34 @@ pub struct UpdateStatement {
     pub where_clause: Option<Expr>,
 }
 
-impl fmt::Display for UpdateStatement {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "UPDATE `{}` ", self.table.name)?;
-        assert!(!self.fields.is_empty());
-        write!(
-            f,
-            "SET {}",
-            self.fields
-                .iter()
-                .map(|&(ref col, ref literal)| format!("{} = {}", col, literal))
-                .collect::<Vec<_>>()
-                .join(", ")
-        )?;
-        if let Some(ref where_clause) = self.where_clause {
-            write!(f, " WHERE ")?;
-            write!(f, "{}", where_clause)?;
-        }
-        Ok(())
+impl UpdateStatement {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| {
+            // FIXME(ENG-2483): Use full table name including its schema.
+            write!(f, "UPDATE {} ", dialect.quote_identifier(&self.table.name))?;
+
+            // TODO: Consider using `Vec1`.
+            assert!(!self.fields.is_empty());
+            write!(
+                f,
+                "SET {}",
+                self.fields
+                    .iter()
+                    .map(|(col, literal)| format!(
+                        "{} = {}",
+                        col.display(dialect),
+                        literal.display(dialect)
+                    ))
+                    .join(", ")
+            )?;
+
+            if let Some(ref where_clause) = self.where_clause {
+                write!(f, " WHERE ")?;
+                write!(f, "{}", where_clause.display(dialect))?;
+            }
+
+            Ok(())
+        })
     }
 }
 
@@ -122,7 +134,7 @@ mod tests {
         let qstring = "UPDATE users SET id = 42, name = 'test' WHERE id = 1";
         let expected = "UPDATE `users` SET `id` = 42, `name` = 'test' WHERE (`id` = 1)";
         let res = updating(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
-        assert_eq!(res.unwrap().1.to_string(), expected);
+        assert_eq!(res.unwrap().1.display(Dialect::MySQL).to_string(), expected);
     }
 
     #[test]
