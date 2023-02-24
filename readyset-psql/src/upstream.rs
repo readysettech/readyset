@@ -5,7 +5,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::TryStreamExt;
+use futures::{pin_mut, Stream, TryStreamExt};
 use nom_sql::SqlIdentifier;
 use pgsql::config::Host;
 use pgsql::types::Type;
@@ -334,32 +334,30 @@ impl UpstreamDatabase for PostgreSqlUpstream {
             .get(&statement_id)
             .ok_or(ReadySetError::PreparedStatementMissing { statement_id })?;
 
-        let results: Vec<GenericResult> = self
+        let results = self
             .client
             .generic_query_raw(
                 statement,
                 &convert_params_for_upstream(params, statement.params())?,
             )
-            .await?
-            .try_collect()
             .await?;
+        pin_mut!(results);
 
-        let mut results = results.into_iter().peekable();
-
-        // If results starts with a command complete then return a write result.
-        // This could happen if a write returns no results, which is fine
-        //
-        // Otherwise return all the rows we get and ignore the command complete at the end
-        if let Some(GenericResult::NumRows(n)) = results.peek() {
-            Ok(QueryResult::Write {
-                num_rows_affected: *n,
-            })
-        } else {
-            let mut data = Vec::new();
-            while let Some(GenericResult::Row(r)) = results.next() {
-                data.push(r);
+        let peeked = results.try_next().await?;
+        match peeked {
+            Some(GenericResult::NumRows(num_rows_affected)) => {
+                Ok(QueryResult::Write { num_rows_affected })
             }
-            Ok(QueryResult::Read { data })
+            Some(GenericResult::Row(r)) => {
+                let mut data = Vec::with_capacity(results.size_hint().0 + 1);
+                data.push(r);
+
+                while let Some(GenericResult::Row(r)) = results.try_next().await? {
+                    data.push(r);
+                }
+                Ok(QueryResult::Read { data })
+            }
+            None => Ok(QueryResult::Read { data: vec![] }),
         }
     }
 
