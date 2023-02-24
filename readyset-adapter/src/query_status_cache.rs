@@ -19,15 +19,15 @@ use readyset_util::hash::hash;
 pub struct QueryStatusCache {
     /// A thread-safe hash map that holds the query status of each successfully parsed query that
     /// is cached.
-    statuses: DashMap<Arc<ViewCreateRequest>, QueryStatus>,
+    statuses: DashMap<Arc<ViewCreateRequest>, QueryStatus, ahash::RandomState>,
 
     // A thread-safe hash map that holds the query status of each query that has failed to parse.
-    failed_parses: DashMap<Arc<String>, QueryStatus>,
+    failed_parses: DashMap<Arc<String>, QueryStatus, ahash::RandomState>,
 
     /// A thread-safe hash map that maps a query's id to the query. The id is a string formatted as
     /// q_<16-digit-query-hash>. The id is stored as a string instead of a u64 to allow for
     /// different id formats in the future.
-    ids: DashMap<QueryId, Query>,
+    ids: DashMap<QueryId, Query, ahash::RandomState>,
 
     /// Holds the current style of migration, whether async or explicit, which may change the
     /// behavior of some internal methods.
@@ -114,9 +114,9 @@ impl QueryStatusCache {
     /// Constructs a new QueryStatusCache with the migration style set to Async.
     pub fn new() -> QueryStatusCache {
         QueryStatusCache {
-            statuses: DashMap::new(),
-            failed_parses: DashMap::new(),
-            ids: DashMap::new(),
+            statuses: DashMap::default(),
+            failed_parses: DashMap::default(),
+            ids: DashMap::default(),
             style: MigrationStyle::InRequestPath,
         }
     }
