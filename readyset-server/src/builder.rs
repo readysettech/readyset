@@ -215,6 +215,11 @@ impl Builder {
         self.config.replicator_config = config;
     }
 
+    /// Set the server ID for replication
+    pub fn set_replicator_server_id(&mut self, server_id: u32) {
+        self.config.replicator_config.replication_server_id = Some(server_id);
+    }
+
     /// Sets the value of [`replicators::Config::disable_upstream_ssl_verification`]
     pub fn set_disable_upstream_ssl_verification(&mut self, value: bool) {
         self.config
