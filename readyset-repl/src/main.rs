@@ -33,10 +33,10 @@ impl<'a> Command<'a> {
             Ok(Self::Help)
         } else if let Some(query) = s.strip_prefix("prepare ") {
             Ok(Self::Prepare(query))
-        } else if let Some(exec) = s.strip_prefix("execute ") {
+        } else if let Some(exec) = s.trim_end_matches(';').strip_prefix("execute ") {
             let (statement_id, params) = exec.split_once(' ').unwrap_or((exec, ""));
             let statement_id = statement_id.parse().context("parsing statement ID")?;
-            let params = params.split(", ").collect();
+            let params = params.split(", ").filter(|p| !p.is_empty()).collect();
 
             Ok(Self::ExecutePrepared {
                 statement_id,
