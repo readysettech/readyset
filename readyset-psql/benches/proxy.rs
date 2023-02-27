@@ -262,7 +262,7 @@ where
                     .unwrap();
             tokio::spawn(conn);
             let backend = Backend::new(client, streaming);
-            tokio::spawn(psql_srv::run_backend(backend, sock, false));
+            tokio::spawn(psql_srv::run_backend(backend, sock, false, None));
         }
     }))
 }

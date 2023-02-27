@@ -77,4 +77,8 @@ where
     pub async fn flush(&mut self) -> Result<(), EncodeError> {
         self.0.flush().await
     }
+
+    pub fn into_inner(self) -> C {
+        self.0.into_inner()
+    }
 }

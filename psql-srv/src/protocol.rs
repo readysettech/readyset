@@ -42,6 +42,8 @@ const UNKNOWN_TABLE: i32 = 0;
 ///
 /// The state transitions are:
 ///
+/// * StartingUp -> SslHandshake
+/// * SslHandshake -> StartingUp
 /// * StartingUp -> Ready
 /// * StartingUp -> Authenticating
 /// * Authenticating -> Ready
@@ -58,6 +60,10 @@ pub(crate) enum State {
 
     /// The server is ready to accept queries
     Ready,
+
+    /// The client has requested SSL. If the client sends an SslRequest, it is done as the first
+    /// message, and followed by a StartupMessage.
+    SslHandshake,
 
     /// The server is currently processing an [extended query][0]
     ///
@@ -93,6 +99,9 @@ pub struct Protocol {
     /// unsupported/custom type. On the first instance of such a type, the hashmap will be
     /// populated with the data from pg_catalog.pg_type.
     extended_types: HashMap<Oid, i16>,
+
+    /// Whether to allow TLS connections.
+    allow_tls_connections: bool,
 }
 
 /// A prepared statement allows a frontend to specify the general form of a SQL statement while
@@ -125,7 +134,14 @@ impl Protocol {
             prepared_statements: HashMap::new(),
             portals: HashMap::new(),
             extended_types: HashMap::new(),
+            allow_tls_connections: false,
         }
+    }
+
+    /// Instruct the `Protocol` to respond to SslRequest messages from the client with
+    /// ssl_response_willing(), which indicates that the server will accept a TLS handshake.
+    pub fn allow_tls_connections(&mut self) {
+        self.allow_tls_connections = true;
     }
 
     /// The core implementation of the backend side of the PostgreSQL frontend/backend protocol.
@@ -178,10 +194,16 @@ impl Protocol {
         };
         match self.state {
             State::StartingUp => match message {
-                // A request for an SSL connection.
-                SSLRequest { .. } => {
-                    // Deny the SSL connection. The frontend may choose to proceed without SSL.
-                    Ok(Response::Message(BackendMessage::ssl_response_n()))
+                // A request for an SSL connection. This will come before a StartupMessage.
+                SSLRequest => {
+                    if self.allow_tls_connections {
+                        // Allow the SSL request. ReadySet responds to the TLS handshake as the
+                        // server, and afterwards returns to `State::StartingUp`.
+                        self.state = State::SslHandshake;
+                        Ok(Response::Message(BackendMessage::ssl_response_willing()))
+                    } else {
+                        Ok(Response::Message(BackendMessage::ssl_response_unwilling()))
+                    }
                 }
 
                 // A request to start up a connection, with some metadata provided.
@@ -546,6 +568,17 @@ impl Protocol {
                 BackendMessage::ready_for_query_idle(),
             ])),
         }
+    }
+
+    /// Whether the `Protocol` has agreed to initate a TLS handshake, and is waiting for the
+    /// handshake to complete.
+    pub fn is_initiating_ssl_handshake(&self) -> bool {
+        self.state == State::SslHandshake
+    }
+
+    /// Informs the `Protocol` that we have initiated a TLS connection with the client.
+    pub fn completed_ssl_handshake(&mut self) {
+        self.state = State::StartingUp;
     }
 }
 
@@ -944,9 +977,20 @@ mod tests {
         let request = FrontendMessage::SSLRequest;
         let mut backend = Backend::new();
         let mut channel = Channel::<NullBytestream, Vec<Value>>::new(NullBytestream);
-        // SSLRequest is denied.
+        // SSLRequest is not allowed by the protocol by default.
         match block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap() {
-            Response::Message(msg) => assert_eq!(msg, BackendMessage::ssl_response_n()),
+            Response::Message(msg) => assert_eq!(msg, BackendMessage::ssl_response_unwilling()),
+            _ => panic!(),
+        }
+        // After the SSL handshake completes, we return to `State::StartingUp`.
+        protocol.completed_ssl_handshake();
+        assert_eq!(protocol.state, State::StartingUp);
+
+        // Try again with SSL allowed
+        let request = FrontendMessage::SSLRequest;
+        protocol.allow_tls_connections();
+        match block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap() {
+            Response::Message(msg) => assert_eq!(msg, BackendMessage::ssl_response_willing()),
             _ => panic!(),
         }
     }

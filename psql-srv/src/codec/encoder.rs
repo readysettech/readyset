@@ -587,7 +587,7 @@ mod tests {
         let mut codec = Codec::<Vec<Value>>::new();
         let mut buf = BytesMut::new();
         codec
-            .encode(BackendMessage::ssl_response_n(), &mut buf)
+            .encode(BackendMessage::ssl_response_unwilling(), &mut buf)
             .unwrap();
         let mut exp = BytesMut::new();
         exp.put_u8(b'N'); // byte response

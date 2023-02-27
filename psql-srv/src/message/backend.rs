@@ -12,7 +12,8 @@ use crate::message::TransferFormat;
 use crate::value::Value;
 
 const READY_FOR_QUERY_IDLE: u8 = b'I';
-const SSL_RESPONSE_N: u8 = b'N';
+const SSL_RESPONSE_UNWILLING: u8 = b'N';
+const SSL_RESPONSE_WILLING: u8 = b'S';
 
 /// A message to be sent by a Postgresql backend (server). The different types of backend messages,
 /// and the fields they contain, are described in the
@@ -72,9 +73,15 @@ impl<R: IntoIterator<Item: TryInto<Value, Error = Error>>> BackendMessage<R> {
         }
     }
 
-    pub fn ssl_response_n() -> BackendMessage<R> {
+    pub fn ssl_response_unwilling() -> BackendMessage<R> {
         BackendMessage::SSLResponse {
-            byte: SSL_RESPONSE_N,
+            byte: SSL_RESPONSE_UNWILLING,
+        }
+    }
+
+    pub fn ssl_response_willing() -> BackendMessage<R> {
+        BackendMessage::SSLResponse {
+            byte: SSL_RESPONSE_WILLING,
         }
     }
 }

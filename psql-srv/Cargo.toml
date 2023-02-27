@@ -20,8 +20,9 @@ postgres-types = { workspace = true, features = ["with-chrono-0_4", "with-cidr-0
 postgres-protocol = { workspace = true }
 thiserror = "1.0.26"
 tokio = { workspace = true, features = ["full"] }
-tokio-util = { version = "0.6.6", features = ["codec"] }
+tokio-native-tls = "0.3.1"
 tokio-postgres = { workspace = true, features = ["with-chrono-0_4", "with-eui48-1", "with-uuid-0_8", "with-serde_json-1", "with-bit-vec-0_6"] }
+tokio-util = { version = "0.6.6", features = ["codec"] }
 smallvec = "1.6"
 hex = "0.4.3"
 rust_decimal = { version = "1.26" }
@@ -35,3 +36,4 @@ cidr = "0.2.1"
 [dev-dependencies]
 tokio = { workspace = true, features = ["full"] }
 tokio-test = "0.4.1"
+database-utils = { path = "../database-utils" }

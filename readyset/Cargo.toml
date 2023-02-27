@@ -18,6 +18,7 @@ failpoint-macros = { path = "../failpoint-macros" }
 metrics = "0.19"
 metrics-exporter-prometheus = "0.10"
 tokio = { workspace = true, features = ["full"] }
+tokio-native-tls = "0.3.1"
 tokio-stream = { version = "0.1.5", features = ["net"] }
 tracing = { version = "0.1", features = ["release_max_level_debug"] }
 tracing-subscriber = "0.3.9"

@@ -23,9 +23,10 @@ fn main() -> anyhow::Result<()> {
         DatabaseType::PostgreSQL => NoriaAdapter {
             description: "PostgreSQL adapter for ReadySet.",
             default_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 3306),
-            connection_handler: PsqlHandler {
+            connection_handler: PsqlHandler::new(readyset::psql::Config {
+                options: options.tls.clone(),
                 enable_statement_logging: options.tracing.statement_logging,
-            },
+            })?,
             database_type: DatabaseType::PostgreSQL,
             parse_dialect: nom_sql::Dialect::PostgreSQL,
             expr_dialect: readyset_data::Dialect::DEFAULT_POSTGRESQL,

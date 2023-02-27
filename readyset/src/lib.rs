@@ -1,4 +1,5 @@
 #![deny(macro_use_extern_crate)]
+#![feature(let_else)]
 
 pub mod mysql;
 pub mod psql;
@@ -268,6 +269,10 @@ pub struct Options {
 
     #[clap(flatten)]
     pub tracing: readyset_tracing::Options,
+
+    /// TLS options for readyset-psql
+    #[clap(flatten)]
+    pub tls: psql::Options,
 
     /// Test feature to fail invalidated queries in the serving path instead of going
     /// to fallback.

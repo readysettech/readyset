@@ -26,6 +26,7 @@ pub mod util;
 mod value;
 
 use std::convert::TryInto;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::Stream;
@@ -33,6 +34,7 @@ use postgres::SimpleQueryMessage;
 use postgres_types::Type;
 use protocol::Protocol;
 use tokio::io::{AsyncRead, AsyncWrite};
+use tokio_native_tls::TlsAcceptor;
 
 pub use crate::bytes::BytesStr;
 pub use crate::error::Error;
@@ -43,7 +45,7 @@ pub enum CredentialsNeeded {
     Cleartext,
 }
 
-// Represents different forms of credentials provided by the client as part of authorization
+/// Represents different forms of credentials provided by the client as part of authorization
 #[derive(PartialEq, Eq)]
 pub enum Credentials {
     Cleartext { user: String, password: String },
@@ -167,13 +169,16 @@ pub enum QueryResponse<R> {
 /// * `channel` - A bytestream channel connected to a PostgreSQL frontend. Requests sent by the
 ///   frontend on this channel will be forwarded to `backend`, and the `backend`'s responses will be
 ///   returned to the frontend. When `channel` is closed by the frontend, `run_backend` returns.
-/// * `enable_statement_logging` - A flag to enable logging all statements received by the client
-pub async fn run_backend<B: Backend, C: AsyncRead + AsyncWrite + Unpin>(
+/// * `enable_statement_logging` - Whether to log statements received from the client.
+/// * `tls_acceptor` - An object that performs a TLS handshake and creates a `TlsStream` or returns
+///   an error.
+pub async fn run_backend<B: Backend>(
     backend: B,
-    channel: C,
+    channel: tokio::net::TcpStream,
     enable_statement_logging: bool,
+    tls_acceptor: Option<Arc<TlsAcceptor>>,
 ) {
-    runner::Runner::run(backend, channel, enable_statement_logging).await
+    runner::Runner::run(backend, channel, enable_statement_logging, tls_acceptor).await
 }
 
 pub async fn send_immediate_err<B, C>(channel: C, error: Error) -> Result<(), Error>

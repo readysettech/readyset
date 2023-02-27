@@ -673,6 +673,10 @@ pub enum ReadySetError {
         /// was given by the client. As such, these values may not make sense to a user.
         placeholders: Vec1<u32>,
     },
+
+    /// Error interacting with native_tls
+    #[error("TLS error: {0}")]
+    NativeTlsError(String),
 }
 
 impl ReadySetError {
@@ -1148,6 +1152,7 @@ impl_from_to_string!(io::Error, IOError);
 impl_from_to_string!(tikv_jemalloc_ctl::Error, JemallocCtlError);
 impl_from_to_string!(consulrs::error::ClientError, ConsulError);
 impl_from_to_string!(zookeeper_async::ZkError, ZookeeperError);
+impl_from_to_string!(tokio_native_tls::native_tls::Error, NativeTlsError);
 
 impl From<Size0Error> for ReadySetError {
     fn from(_: Size0Error) -> Self {

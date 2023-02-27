@@ -39,6 +39,9 @@ pub enum Error {
     #[error("parse error: {0}")]
     ParseError(String),
 
+    #[error("unexpected message: {0}")]
+    UnexpectedMessage(String),
+
     #[error("unimplemented: {0}")]
     Unimplemented(String),
 
@@ -72,6 +75,7 @@ impl<R> From<Error> for BackendMessage<R> {
             Error::MissingPreparedStatement(_) => SqlState::UNDEFINED_PSTATEMENT,
             Error::ParseError(_) => SqlState::INVALID_PSTATEMENT_DEFINITION,
             Error::Unimplemented(_) => SqlState::FEATURE_NOT_SUPPORTED,
+            Error::UnexpectedMessage(_) => SqlState::PROTOCOL_VIOLATION,
             Error::Unknown(_) => SqlState::INTERNAL_ERROR,
             Error::Unsupported(_) => SqlState::FEATURE_NOT_SUPPORTED,
             Error::UnsupportedMessage(_) => SqlState::FEATURE_NOT_SUPPORTED,
