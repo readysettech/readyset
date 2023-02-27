@@ -47,7 +47,6 @@ pub struct NodeStats {
 /// Statistics about the Soup data-flow.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GraphStats {
-    #[doc(hidden)]
     pub domains: DomainMap,
 }
 

@@ -906,7 +906,6 @@ pub fn no_table_for_col() -> ReadySetError {
 
 /// Renders information about the current source location *if* building in debug mode, for use in
 /// error-generating macros
-#[doc(hidden)]
 #[macro_export]
 macro_rules! __location_info {
     () => {

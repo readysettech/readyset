@@ -13,7 +13,6 @@ type WorkersInfo = HashMap<Url, DomainMap<Vec<NodeIndex>>>;
 /// Information about the dataflow graph.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GraphInfo {
-    #[doc(hidden)]
     pub workers: WorkersInfo,
 }
 

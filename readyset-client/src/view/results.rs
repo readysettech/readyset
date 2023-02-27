@@ -32,7 +32,6 @@ pub struct Results {
 }
 
 impl Results {
-    #[doc(hidden)]
     pub fn new(results: Vec<Vec<DfValue>>) -> Self {
         Self {
             results,
@@ -40,7 +39,6 @@ impl Results {
         }
     }
 
-    #[doc(hidden)]
     pub fn with_stats(results: Vec<Vec<DfValue>>, stats: ReadReplyStats) -> Self {
         Self {
             results,
@@ -48,7 +46,6 @@ impl Results {
         }
     }
 
-    #[doc(hidden)]
     pub fn into_data(self) -> Vec<Vec<DfValue>> {
         self.results
     }

@@ -149,7 +149,7 @@
     is_sorted,
     once_cell
 )]
-#![deny(missing_docs, macro_use_extern_crate)]
+#![deny(macro_use_extern_crate)]
 #![deny(unused_extern_crates)]
 #![deny(unreachable_pub)]
 #![warn(rust_2018_idioms)]
@@ -262,12 +262,9 @@ use std::default::Default;
 pub mod recipe;
 pub mod replication;
 
-#[doc(hidden)]
 pub mod channel;
-#[doc(hidden)]
 #[allow(unreachable_pub)] // https://github.com/rust-lang/rust/issues/57411
 pub mod consensus;
-#[doc(hidden)]
 #[allow(unreachable_pub)] // https://github.com/rust-lang/rust/issues/57411
 pub mod internal;
 
@@ -275,7 +272,6 @@ pub mod internal;
 use std::future::Future;
 use std::pin::Pin;
 
-#[doc(hidden)]
 pub use nom_sql::{ColumnConstraint, SqlIdentifier};
 use readyset_data::{DfType, DfValue};
 use readyset_errors::{ReadySetError, ReadySetResult};
@@ -316,7 +312,6 @@ pub async fn trace_ops_in<T>(f: impl Future<Output = T>) -> T {
 }
 
 #[derive(Debug, Default)]
-#[doc(hidden)]
 // only pub because we use it to figure out the error type for ViewError
 pub struct Tagger(slab::Slab<()>);
 
@@ -348,7 +343,6 @@ impl<Request, Response> multiplex::TagStore<Instrumented<Tagged<Request>>, Tagge
     }
 }
 
-#[doc(hidden)]
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Tagged<T> {
     pub v: T,
@@ -366,19 +360,14 @@ use url::Url;
 pub use crate::consensus::WorkerDescriptor;
 pub use crate::controller::{ControllerDescriptor, ReadySetHandle};
 pub use crate::table::{
-    Modification, Operation, Table, TableOperation, TableReplicationStatus, TableRequest,
-    TableStatus,
+    Modification, Operation, PacketData, PacketPayload, PacketTrace, Table, TableOperation,
+    TableReplicationStatus, TableRequest, TableStatus,
 };
-#[doc(hidden)]
-pub use crate::table::{PacketData, PacketPayload, PacketTrace};
-pub use crate::view::View;
-#[doc(hidden)]
 pub use crate::view::{
     KeyComparison, LookupResult, ReadQuery, ReadReply, ReadReplyBatch, ReadReplyStats, SchemaType,
-    ViewCreateRequest, ViewQuery,
+    View, ViewCreateRequest, ViewQuery,
 };
 
-#[doc(hidden)]
 pub mod builders {
     pub use super::table::TableBuilder;
     pub use super::view::{ReaderHandleBuilder, ReusedReaderHandleBuilder, ViewBuilder};
@@ -510,7 +499,6 @@ impl AddAssign for NodeMaterializedSize {
     }
 }
 
-#[doc(hidden)]
 #[inline]
 pub fn shard_by(dt: &DfValue, shards: usize) -> usize {
     match *dt {

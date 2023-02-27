@@ -117,7 +117,6 @@ pub enum TableOperation {
 }
 
 impl TableOperation {
-    #[doc(hidden)]
     pub fn row(&self) -> Option<&[DfValue]> {
         match *self {
             TableOperation::Insert(ref r) => Some(r),
@@ -300,7 +299,6 @@ pub struct TableStatus {
     pub replication_status: TableReplicationStatus,
 }
 
-#[doc(hidden)]
 #[derive(Clone, Serialize, Deserialize)]
 pub struct TableBuilder {
     pub txs: Vec<SocketAddr>,

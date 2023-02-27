@@ -81,7 +81,6 @@ impl Handle {
 
     /// Perform a migration to alter the state of the graph in the controller, using the MySQL
     /// dialect to normalize all queries
-    #[doc(hidden)]
     pub async fn migrate<F, T>(&mut self, f: F) -> T
     where
         F: FnOnce(&mut Migration<'_>) -> T + Send + 'static,

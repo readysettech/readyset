@@ -787,7 +787,6 @@ impl Arbitrary for KeyComparison {
     type Strategy = proptest::strategy::BoxedStrategy<KeyComparison>;
 }
 
-#[doc(hidden)]
 #[derive(Serialize, Deserialize, Debug)]
 #[allow(clippy::large_enum_variant)] // TODO: benchmark cost/benefit of boxing ViewQuery
 pub enum ReadQuery {
@@ -845,7 +844,6 @@ impl<D> LookupResult<D> {
     }
 }
 
-#[doc(hidden)]
 #[derive(Serialize, Deserialize, Debug, Default, PartialEq, Eq, Clone)]
 pub struct ReadReplyStats {
     /// The count of cache misses which have occurred
@@ -862,7 +860,6 @@ impl ReadReplyStats {
     }
 }
 
-#[doc(hidden)]
 #[derive(Serialize, Deserialize, Debug)]
 pub enum ReadReply<D = ReadReplyBatch> {
     /// A reply to a normal lookup request
@@ -884,7 +881,6 @@ impl<D> ReadReply<D> {
     }
 }
 
-#[doc(hidden)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ReaderHandleBuilder {
     pub name: Relation,
@@ -936,7 +932,6 @@ impl ReaderHandleBuilder {
     ///
     /// If `replica` is specified, this selects the reader replica with that index, returning an
     /// error if the index is out of bounds. Otherwise, a replica is selected at random
-    #[doc(hidden)]
     pub fn build(
         &self,
         replica: Option<usize>,
@@ -1960,7 +1955,6 @@ impl View {
 }
 
 #[derive(Debug, Default)]
-#[doc(hidden)]
 #[repr(transparent)]
 pub struct ReadReplyBatch(pub Vec<Vec<DfValue>>);
 

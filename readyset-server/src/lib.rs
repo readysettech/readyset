@@ -403,7 +403,6 @@
     type_alias_impl_trait,
     hash_drain_filter
 )]
-#![deny(missing_docs)]
 #![deny(unused_extern_crates)]
 #![deny(macro_use_extern_crate)]
 //#![deny(unreachable_pub)]
@@ -432,7 +431,6 @@ mod integration_utils;
 pub mod metrics;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[allow(missing_docs)]
 pub enum ReuseConfigType {
     Finkelstein,
     Relaxed,
@@ -453,7 +451,6 @@ pub use crate::builder::Builder;
 pub use crate::handle::Handle;
 pub use crate::metrics::NoriaMetricsRecorder;
 
-#[doc(hidden)]
 pub mod manual {
     pub use dataflow::node::special::Base;
     pub use dataflow::ops;
@@ -551,7 +548,6 @@ pub fn resolve_addr(addr: &str) -> anyhow::Result<IpAddr> {
 //
 // This option struct is intended to be embedded inside of a larger option struct using
 // `#[clap(flatten)]`.
-#[allow(missing_docs)] // Allows us to exclude docs (from doc comments) from --help text
 #[derive(Parser, Debug)]
 pub struct WorkerOptions {
     /// The durability of base tables. `persistent` and `ephemeral` store base tables
@@ -627,11 +623,9 @@ pub struct WorkerOptions {
     #[clap(long, env = "DB_DIR")]
     pub db_dir: Option<PathBuf>,
 
-    #[allow(missing_docs)]
     #[clap(flatten)]
     pub domain_replication_options: ReplicationOptions,
 
-    #[allow(missing_docs)]
     #[clap(flatten)]
     pub replicator_config: UpstreamConfig,
 

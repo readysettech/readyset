@@ -20,7 +20,6 @@ type RpcFuture<'a, R: 'a> = impl Future<Output = ReadySetResult<R>> + 'a;
 
 impl ReadySetHandle {
     /// Perform a raw RPC request to the HTTP `path` provided, providing a request body `r`.
-    #[doc(hidden)]
     pub fn rpc<'a, Q, R>(
         &'a mut self,
         path: &'static str,
