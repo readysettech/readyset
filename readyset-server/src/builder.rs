@@ -1,5 +1,6 @@
 use std::future::Future;
 use std::net::{IpAddr, SocketAddr};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{self, Duration};
 
@@ -50,7 +51,11 @@ impl Default for Builder {
 
 impl Builder {
     /// Initialize a [`Builder`] from a set of command-line worker options and a deployment name.
-    pub fn from_worker_options(opts: crate::WorkerOptions, deployment: &str) -> Self {
+    pub fn from_worker_options(
+        opts: crate::WorkerOptions,
+        deployment: &str,
+        deployment_dir: PathBuf,
+    ) -> Self {
         let mut builder = Self::default();
         if opts.memory > 0 {
             builder.set_memory_limit(opts.memory, Duration::from_secs(opts.memory_check_freq));
@@ -93,7 +98,7 @@ impl Builder {
             opts.durability,
             Some(deployment.into()),
             opts.persistence_threads,
-            opts.db_dir,
+            Some(deployment_dir),
         );
         builder.set_persistence(persistence_params);
 

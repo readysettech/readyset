@@ -6,9 +6,11 @@ pub mod psql;
 mod query_logger;
 
 use std::collections::HashMap;
+use std::fs::remove_dir_all;
 use std::io;
 use std::marker::Send;
 use std::net::{IpAddr, SocketAddr};
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Mutex, RwLock};
@@ -379,6 +381,11 @@ pub struct Options {
     /// positions every time the statement is executed with a new set of parameters.
     #[clap(long, env = "AUTOMATIC_PLACEHOLDER_INLINING", hide = true)]
     automatic_placeholder_inlining: bool,
+
+    /// If supplied we will clean up assets for the supplied deployment. If an upstream url is
+    /// supplied, we will also clean up various assets related to upstream (replication slot, etc.)
+    #[clap(long)]
+    cleanup: bool,
 }
 
 // Command-line options for running the experimental fallback_cache.
@@ -441,6 +448,18 @@ where
         let rt = tokio::runtime::Runtime::new()?;
         rt.block_on(async { options.tracing.init("adapter", options.deployment.as_ref()) })?;
         info!(?options, "Starting ReadySet adapter");
+
+        let deployment_dir = options
+            .server_worker_options
+            .db_dir
+            .clone()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(&options.deployment);
+
+        if options.cleanup {
+            info!(?options, "Cleaning up deployment");
+            return self.cleanup(deployment_dir);
+        }
 
         let upstream_config = options.server_worker_options.replicator_config.clone();
         let mut parsed_upstream_url = None;
@@ -524,17 +543,11 @@ where
 
         let authority = options.authority.clone();
         let authority_address = match authority {
-            AuthorityType::Standalone => options
-                .server_worker_options
-                .db_dir
-                .as_ref()
-                .map(|path| {
-                    path.clone()
-                        .into_os_string()
-                        .into_string()
-                        .unwrap_or_else(|_| options.authority_address.clone())
-                })
-                .unwrap_or_else(|| options.authority_address.clone()),
+            AuthorityType::Standalone => deployment_dir
+                .clone()
+                .into_os_string()
+                .into_string()
+                .unwrap_or_else(|_| options.authority_address.clone()),
             _ => options.authority_address.clone(),
         };
         let deployment = options.deployment.clone();
@@ -915,6 +928,7 @@ where
             let mut builder = readyset_server::Builder::from_worker_options(
                 options.server_worker_options,
                 &options.deployment,
+                deployment_dir,
             );
             let r = readers.clone();
 
@@ -1134,6 +1148,16 @@ where
         rs_shutdown.in_scope(|| info!("Waiting up to 20s for tasks to complete shutdown"));
         rt.shutdown_timeout(std::time::Duration::from_secs(20));
         rs_shutdown.in_scope(|| info!("Shutdown completed successfully"));
+
+        Ok(())
+    }
+
+    // TODO: Figure out a way to not require as many flags when --cleanup flag is supplied.
+    /// Cleans up the provided deployment assets on disk.
+    fn cleanup(&mut self, deployment_dir: PathBuf) -> anyhow::Result<()> {
+        if deployment_dir.exists() {
+            remove_dir_all(deployment_dir)?;
+        }
 
         Ok(())
     }

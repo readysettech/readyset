@@ -1,4 +1,5 @@
 use std::net::{IpAddr, SocketAddr};
+use std::path::PathBuf;
 use std::process;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -193,22 +194,25 @@ fn main() -> anyhow::Result<()> {
         info!(%volume_id);
     }
 
-    let authority = opts.authority;
+    let deployment_dir = opts
+        .worker_options
+        .db_dir
+        .clone()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(&opts.deployment);
+
+    let authority = opts.authority.clone();
     let authority_addr = match authority {
-        AuthorityType::Standalone => opts
-            .worker_options
-            .db_dir
-            .as_ref()
-            .map(|path| {
-                path.clone()
-                    .into_os_string()
-                    .into_string()
-                    .unwrap_or_else(|_| opts.authority_address.clone())
-            })
-            .unwrap_or_else(|| opts.authority_address.clone()),
+        AuthorityType::Standalone => deployment_dir
+            .clone()
+            .into_os_string()
+            .into_string()
+            .unwrap_or_else(|_| opts.authority_address.clone()),
         _ => opts.authority_address.clone(),
     };
-    let mut builder = Builder::from_worker_options(opts.worker_options, &opts.deployment);
+
+    let mut builder =
+        Builder::from_worker_options(opts.worker_options, &opts.deployment, deployment_dir);
     builder.set_listen_addr(opts.address);
     builder.set_telemetry_sender(telemetry_sender.clone());
     builder.set_wait_for_failpoint(opts.wait_for_failpoint);
