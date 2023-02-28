@@ -109,19 +109,19 @@ impl Arbitrary for ColumnSpec {
 #[derive(Clone, Debug)]
 enum Operation {
     /// Create a new table with the given name and columns
-    CreateTable((String, Vec<ColumnSpec>)),
+    CreateTable(String, Vec<ColumnSpec>),
     /// Drop a table or view with the given name
     DropTable(String),
     /// Write a random row to a random table with the given primary key
-    WriteRow((String, i32, Vec<DfValue>)),
+    WriteRow(String, i32, Vec<DfValue>),
     /// Delete rows to a given table that match a given key
-    DeleteRow((String, i32)),
+    DeleteRow(String, i32),
     /// Adds a new column to an existing table
-    AddColumn((String, ColumnSpec)),
+    AddColumn(String, ColumnSpec),
     /// Removes a column from an existing table
-    DropColumn((String, String)),
+    DropColumn(String, String),
     /// Alters a column to a different name
-    AlterColumnName((String, String, String)),
+    AlterColumnName(String, String, String),
 }
 
 impl Operation {
@@ -139,25 +139,25 @@ impl Operation {
     /// save us from a false positive test failure.
     fn preconditions(&self, state: &TestModel) -> bool {
         match self {
-            Self::CreateTable((name, _cols)) => !state.tables.contains_key(name),
+            Self::CreateTable(name, _cols) => !state.tables.contains_key(name),
             Self::DropTable(name) => state.tables.contains_key(name),
-            Self::WriteRow((table, key, _col_vals)) => state
+            Self::WriteRow(table, key, _col_vals) => state
                 .pkeys
                 .get(table)
                 .map_or(false, |table_keys| !table_keys.contains(key)),
-            Self::DeleteRow((table, key)) => state
+            Self::DeleteRow(table, key) => state
                 .pkeys
                 .get(table)
                 .map_or(false, |table_keys| table_keys.contains(key)),
-            Self::AddColumn((table, column_spec)) => state
+            Self::AddColumn(table, column_spec) => state
                 .tables
                 .get(table)
                 .map_or(false, |t| t.iter().all(|cs| cs.name != *column_spec.name)),
-            Self::DropColumn((table, col_name)) => state
+            Self::DropColumn(table, col_name) => state
                 .tables
                 .get(table)
                 .map_or(false, |t| t.iter().any(|cs| cs.name == *col_name)),
-            Self::AlterColumnName((table, col_name, new_name)) => {
+            Self::AlterColumnName(table, col_name, new_name) => {
                 state.tables.get(table).map_or(false, |t| {
                     t.iter().any(|cs| cs.name == *col_name)
                         && t.iter().all(|cs| cs.name != *new_name)
@@ -206,7 +206,7 @@ impl TestModel {
                     specs.iter().map(|cs| &cs.name).all_unique()
                 }),
         )
-            .prop_map(Operation::CreateTable)
+            .prop_map(|(name, cols)| Operation::CreateTable(name, cols))
             .boxed();
         let mut possible_ops = vec![create_table_strat];
 
@@ -230,7 +230,7 @@ impl TestModel {
                 .prop_map(move |(table, col_vals): (String, Vec<DfValue>)| {
                     let table_keys = &pkeys[&table];
                     let first_free_key = (0..).find(|k| !table_keys.contains(k)).unwrap();
-                    Operation::WriteRow((table.to_string(), first_free_key, col_vals))
+                    Operation::WriteRow(table.to_string(), first_free_key, col_vals)
                 })
                 .boxed();
             possible_ops.push(write_strategy);
@@ -250,7 +250,7 @@ impl TestModel {
                                 .any(|table_cs| new_cs.name.eq_ignore_ascii_case(&table_cs.name))
                     },
                 )
-                .prop_map(Operation::AddColumn)
+                .prop_map(|(table, col)| Operation::AddColumn(table, col))
                 .boxed();
             possible_ops.push(add_col_strat);
         }
@@ -286,7 +286,9 @@ impl TestModel {
 
                     (Just(table), from_col_gen, to_col_gen)
                 })
-                .prop_map(Operation::AlterColumnName)
+                .prop_map(|(table, from_col, to_col)| {
+                    Operation::AlterColumnName(table, from_col, to_col)
+                })
                 .boxed();
             possible_ops.push(rename_col_strat);
 
@@ -299,7 +301,7 @@ impl TestModel {
                         .collect::<Vec<_>>();
                     (Just(table), sample::select(col_names))
                 })
-                .prop_map(Operation::DropColumn)
+                .prop_map(|(table, col_name)| Operation::DropColumn(table, col_name))
                 .boxed();
             // Commented out for now because this triggers ENG-2548
             // possible_ops.push(drop_col_strategy);
@@ -323,7 +325,7 @@ impl TestModel {
                     let keys_in_use = &pkeys[&table];
                     (Just(table.to_string()), sample::select(keys_in_use.clone()))
                 })
-                .prop_map(Operation::DeleteRow)
+                .prop_map(|(table, key)| Operation::DeleteRow(table, key))
                 .boxed();
             possible_ops.push(delete_strategy);
         }
@@ -350,7 +352,7 @@ impl TestModel {
     /// calls two separate times will become strictly necessary as a result.
     fn next_state(&mut self, op: &Operation) {
         match op {
-            Operation::CreateTable((name, cols)) => {
+            Operation::CreateTable(name, cols) => {
                 self.tables.insert(name.clone(), cols.clone());
                 self.pkeys.insert(name.clone(), vec![]);
             }
@@ -359,18 +361,18 @@ impl TestModel {
                 self.deleted_tables.push(name.clone());
                 self.pkeys.remove(name);
             }
-            Operation::WriteRow((table, pkey, _col_vals)) => {
+            Operation::WriteRow(table, pkey, _col_vals) => {
                 self.pkeys.get_mut(table).unwrap().push(*pkey);
             }
-            Operation::AddColumn((table, col_spec)) => {
+            Operation::AddColumn(table, col_spec) => {
                 let col_specs = self.tables.get_mut(table).unwrap();
                 col_specs.push(col_spec.clone());
             }
-            Operation::DropColumn((table, col_name)) => {
+            Operation::DropColumn(table, col_name) => {
                 let col_specs = self.tables.get_mut(table).unwrap();
                 col_specs.retain(|cs| cs.name != *col_name);
             }
-            Operation::AlterColumnName((table, from_col_name, to_col_name)) => {
+            Operation::AlterColumnName(table, from_col_name, to_col_name) => {
                 let col_specs = self.tables.get_mut(table).unwrap();
                 let mut spec = col_specs
                     .iter_mut()
@@ -378,7 +380,7 @@ impl TestModel {
                     .unwrap();
                 spec.name = to_col_name.clone();
             }
-            Operation::DeleteRow(_) => (),
+            Operation::DeleteRow(..) => (),
         }
     }
 }
@@ -599,7 +601,7 @@ async fn run(ops: Vec<Operation>) {
     for op in ops {
         println!("Running op: {op:?}");
         match &op {
-            Operation::CreateTable((table_name, cols)) => {
+            Operation::CreateTable(table_name, cols) => {
                 let non_pkey_cols = cols
                     .iter()
                     .map(|ColumnSpec { name, sql_type, .. }| format!("\"{name}\" {sql_type}"));
@@ -616,7 +618,7 @@ async fn run(ops: Vec<Operation>) {
                 rs_conn.simple_query(&query).await.unwrap();
                 pg_conn.simple_query(&query).await.unwrap();
             }
-            Operation::WriteRow((table_name, pk, col_vals)) => {
+            Operation::WriteRow(table_name, pk, col_vals) => {
                 let pk = DfValue::from(*pk);
                 let params: Vec<&DfValue> = once(&pk).chain(col_vals.iter()).collect();
                 let placeholders: Vec<_> = (1..=params.len()).map(|n| format!("${n}")).collect();
@@ -625,7 +627,7 @@ async fn run(ops: Vec<Operation>) {
                 rs_conn.query_raw(&query, &params).await.unwrap();
                 pg_conn.query_raw(&query, &params).await.unwrap();
             }
-            Operation::AddColumn((table_name, col_spec)) => {
+            Operation::AddColumn(table_name, col_spec) => {
                 let query = format!(
                     "ALTER TABLE {} ADD COLUMN \"{}\" {}",
                     table_name, col_spec.name, col_spec.sql_type
@@ -633,12 +635,12 @@ async fn run(ops: Vec<Operation>) {
                 rs_conn.simple_query(&query).await.unwrap();
                 pg_conn.simple_query(&query).await.unwrap();
             }
-            Operation::DropColumn((table_name, col_name)) => {
+            Operation::DropColumn(table_name, col_name) => {
                 let query = format!("ALTER TABLE {} DROP COLUMN \"{}\"", table_name, col_name);
                 rs_conn.simple_query(&query).await.unwrap();
                 pg_conn.simple_query(&query).await.unwrap();
             }
-            Operation::AlterColumnName((table, from_col_name, to_col_name)) => {
+            Operation::AlterColumnName(table, from_col_name, to_col_name) => {
                 let query = format!(
                     "ALTER TABLE {} RENAME COLUMN \"{}\" TO \"{}\"",
                     table, from_col_name, to_col_name
@@ -646,7 +648,7 @@ async fn run(ops: Vec<Operation>) {
                 rs_conn.simple_query(&query).await.unwrap();
                 pg_conn.simple_query(&query).await.unwrap();
             }
-            Operation::DeleteRow((table_name, key)) => {
+            Operation::DeleteRow(table_name, key) => {
                 let query = format!("DELETE FROM {table_name} WHERE id = ({key})");
                 rs_conn.simple_query(&query).await.unwrap();
                 pg_conn.simple_query(&query).await.unwrap();
