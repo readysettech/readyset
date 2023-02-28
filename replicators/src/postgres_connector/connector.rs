@@ -383,22 +383,9 @@ impl PostgresWalConnector {
     /// the walsender is connected to, this command fails.
     /// Not really needed when `TEMPORARY` slot is Used
     pub(crate) async fn drop_replication_slot(&mut self, name: &str) -> ReadySetResult<()> {
-        info!(slot = name, "Dropping replication slot if exists");
-        let res = self
-            .simple_query(&format!("DROP_REPLICATION_SLOT {}", name))
-            .await;
+        drop_replication_slot(&mut self.client, name).await?;
 
-        match res {
-            Ok(_) => Ok(()),
-            Err(err) if error_is_slot_not_found(&err, name) => {
-                debug!(
-                    slot = name,
-                    "Replication slot to-drop already doesn't exist"
-                );
-                Ok(())
-            }
-            Err(err) => Err(err),
-        }
+        Ok(())
     }
 
     /// Perform a simple query that expects a singe row in response, check that the response is
@@ -434,6 +421,30 @@ impl PostgresWalConnector {
     /// Perform a simple query and return the resulting rows
     async fn simple_query(&mut self, query: &str) -> ReadySetResult<Vec<SimpleQueryMessage>> {
         Ok(self.client.simple_query(query).await?)
+    }
+}
+
+/// Drops a replication slot, freeing any reserved server-side resources.
+/// If the slot is a logical slot that was created in a database other than the database
+/// the walsender is connected to, this command fails.
+/// Not really needed when `TEMPORARY` slot is Used
+pub async fn drop_replication_slot(client: &mut pgsql::Client, name: &str) -> ReadySetResult<()> {
+    info!(slot = name, "Dropping replication slot if exists");
+    let res: ReadySetResult<Vec<pgsql::SimpleQueryMessage>> = client
+        .simple_query(&format!("DROP_REPLICATION_SLOT {}", name))
+        .await
+        .map_err(ReadySetError::from);
+
+    match res {
+        Ok(_) => Ok(()),
+        Err(err) if error_is_slot_not_found(&err, name) => {
+            debug!(
+                slot = name,
+                "Replication slot to-drop already doesn't exist"
+            );
+            Ok(())
+        }
+        Err(err) => Err(err),
     }
 }
 
