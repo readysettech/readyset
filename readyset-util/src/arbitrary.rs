@@ -1,10 +1,12 @@
 //! Utilities for generating arbitrary values with [`proptest`]
 
 use std::iter::FromIterator;
+use std::net::{Ipv4Addr, Ipv6Addr};
 use std::time::{Duration as StdDuration, SystemTime, UNIX_EPOCH};
 
 use bit_vec::BitVec;
 use chrono::{Date, DateTime, Duration, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
+use cidr::IpInet;
 use eui48::MacAddress;
 use proptest::prelude::*;
 use proptest::sample::SizeRange;
@@ -174,4 +176,14 @@ where
     T: Into<SizeRange>,
 {
     prop::collection::vec(any::<bool>(), size_range.into()).prop_map(BitVec::from_iter)
+}
+
+/// Strategy to generate an arbitrary [`IpInet`].
+pub fn arbitrary_ipinet() -> impl Strategy<Value = IpInet> {
+    let ipv4 = (any::<Ipv4Addr>(), 0u8..=32)
+        .prop_map(|(ip_addr, netmask)| IpInet::new(ip_addr.into(), netmask).unwrap());
+    let ipv6 = (any::<Ipv6Addr>(), 0u8..=128)
+        .prop_map(|(ip_addr, netmask)| IpInet::new(ip_addr.into(), netmask).unwrap());
+
+    prop_oneof![ipv4, ipv6]
 }

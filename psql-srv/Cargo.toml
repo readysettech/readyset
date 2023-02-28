@@ -16,7 +16,7 @@ futures = "0.3"
 nom-sql = { path = "../nom-sql" }
 readyset-data = { path = "../readyset-data" }
 postgres = { workspace = true }
-postgres-types = { workspace = true, features = ["with-chrono-0_4"] }
+postgres-types = { workspace = true, features = ["with-chrono-0_4", "with-cidr-0_2"] }
 postgres-protocol = { workspace = true }
 thiserror = "1.0.26"
 tokio = { workspace = true, features = ["full"] }
@@ -30,6 +30,7 @@ uuid = "0.8"
 serde_json = { version = "1", features = ["arbitrary_precision"] }
 bit-vec = { version = "0.6", features = ["serde"] }
 tracing = "0.1.29"
+cidr = "0.2.1"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full"] }

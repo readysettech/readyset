@@ -1,7 +1,6 @@
-use std::net::IpAddr;
-
 use bit_vec::BitVec;
 use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
+use cidr::IpInet;
 use eui48::MacAddress;
 use readyset_data::{Array, Text};
 use rust_decimal::Decimal;
@@ -30,7 +29,7 @@ pub enum Value {
     Time(NaiveTime),
     ByteArray(Vec<u8>),
     MacAddress(MacAddress),
-    Inet(IpAddr),
+    Inet(IpInet),
     Uuid(Uuid),
     Json(serde_json::Value),
     Jsonb(serde_json::Value),

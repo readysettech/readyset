@@ -1,6 +1,5 @@
 use std::fmt::{self, Display};
 use std::hash::{Hash, Hasher};
-use std::net::IpAddr;
 use std::str;
 use std::str::FromStr;
 
@@ -17,8 +16,9 @@ use nom::sequence::{delimited, pair, preceded, terminated, tuple};
 use nom_locate::LocatedSpan;
 use proptest::strategy::Strategy;
 use readyset_util::arbitrary::{
-    arbitrary_bitvec, arbitrary_date_time, arbitrary_decimal, arbitrary_json, arbitrary_naive_time,
-    arbitrary_positive_naive_date, arbitrary_timestamp_naive_date_time, arbitrary_uuid,
+    arbitrary_bitvec, arbitrary_date_time, arbitrary_decimal, arbitrary_ipinet, arbitrary_json,
+    arbitrary_naive_time, arbitrary_positive_naive_date, arbitrary_timestamp_naive_date_time,
+    arbitrary_uuid,
 };
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -278,7 +278,7 @@ impl Literal {
             SqlType::Json | SqlType::Jsonb => arbitrary_json()
                 .prop_map(|v| Self::String(v.to_string()))
                 .boxed(),
-            SqlType::Inet => any::<IpAddr>()
+            SqlType::Inet => arbitrary_ipinet()
                 .prop_map(|v| Self::String(v.to_string()))
                 .boxed(),
             SqlType::MacAddr => any::<[u8; 6]>()

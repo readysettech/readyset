@@ -5,7 +5,6 @@ use std::cmp::Ordering;
 use std::convert::{TryFrom, TryInto};
 use std::error::Error;
 use std::hash::{Hash, Hasher};
-use std::net::IpAddr;
 use std::ops::{Add, Div, Mul, Sub};
 use std::sync::Arc;
 use std::{fmt, io, str};
@@ -14,6 +13,7 @@ use ::serde::{Deserialize, Serialize};
 use bit_vec::BitVec;
 use bytes::BytesMut;
 use chrono::{self, DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, TimeZone};
+use cidr::IpInet;
 use enum_kinds::EnumKind;
 use eui48::{MacAddress, MacAddressFormat};
 use itertools::Itertools;
@@ -1724,7 +1724,7 @@ impl ToSql for DfValue {
             }
             (Self::Text(_) | Self::TinyText(_), &Type::INET) => <&str>::try_from(self)
                 .unwrap()
-                .parse::<IpAddr>()
+                .parse::<IpInet>()
                 .map_err(|e| {
                     Box::<dyn Error + Send + Sync>::from(format!(
                         "Could not convert Text into an IP Address: {}",
@@ -1842,7 +1842,7 @@ impl<'a> FromSql<'a> for DfValue {
                 Type::MACADDR => Ok(DfValue::from(
                     MacAddress::from_sql(ty, raw)?.to_string(MacAddressFormat::HexString),
                 )),
-                Type::INET => Ok(DfValue::from(IpAddr::from_sql(ty, raw)?.to_string())),
+                Type::INET => Ok(DfValue::from(IpInet::from_sql(ty, raw)?.to_string())),
                 Type::UUID => Ok(DfValue::from(Uuid::from_sql(ty, raw)?.to_string())),
                 Type::JSON | Type::JSONB => {
                     let raw = match (ty, raw) {

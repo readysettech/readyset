@@ -31,6 +31,8 @@ fallible-iterator = "0.2.0" # Only for internals of ToSql impls
 nom = "7.1"
 nom_locate = "4.0.0"
 postgres-protocol = { workspace = true }
+cidr = "0.2.1"
+postgres-types = { workspace = true, features = ["with-cidr-0_2"] }
 
 # Local dependencies
 nom-sql = { path = "../nom-sql" }

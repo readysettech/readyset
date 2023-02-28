@@ -1,12 +1,12 @@
 use std::cmp::Ordering;
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
-use std::net::IpAddr;
 use std::num::{IntErrorKind, ParseIntError};
 use std::str::FromStr;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
 
+use cidr::IpInet;
 use readyset_errors::{ReadySetError, ReadySetResult};
 
 use crate::{Array, Collation, DfType, DfValue};
@@ -485,7 +485,7 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
                 // '0:0::beef', and
                 // '::beef' are equal
                 let ip = str
-                    .parse::<IpAddr>()
+                    .parse::<IpInet>()
                     .map_err(|e| Self::coerce_err(to_ty, e))?
                     .to_string();
                 Ok(ip.into())
@@ -814,6 +814,13 @@ mod tests {
                 .coerce_to(&DfType::Inet, &DfType::Unknown)
                 .unwrap(),
             DfValue::from("feed::beef")
+        );
+        // TEXT to INET (with netmask)
+        assert_eq!(
+            DfValue::from("feed:0:0::beef/32")
+                .coerce_to(&DfType::Inet, &DfType::Unknown)
+                .unwrap(),
+            DfValue::from("feed::beef/32")
         );
         // TEXT to ENUM
         let enum_type = DfType::from_enum_variants(

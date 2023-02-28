@@ -1,11 +1,11 @@
 use std::borrow::Borrow;
 use std::convert::{TryFrom, TryInto};
-use std::net::IpAddr;
 use std::str;
 
 use bit_vec::BitVec;
 use bytes::{Buf, Bytes, BytesMut};
 use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
+use cidr::IpInet;
 use eui48::MacAddress;
 use postgres_types::{FromSql, Kind, Type};
 use readyset_data::{Array, Collation};
@@ -358,7 +358,7 @@ fn get_binary_value(src: &mut Bytes, t: &Type) -> Result<Value, Error> {
             )?)),
             Type::BYTEA => Ok(Value::ByteArray(<Vec<u8>>::from_sql(t, buf)?)),
             Type::MACADDR => Ok(Value::MacAddress(MacAddress::from_sql(t, buf)?)),
-            Type::INET => Ok(Value::Inet(IpAddr::from_sql(t, buf)?)),
+            Type::INET => Ok(Value::Inet(IpInet::from_sql(t, buf)?)),
             Type::UUID => Ok(Value::Uuid(Uuid::from_sql(t, buf)?)),
             Type::JSON => Ok(Value::Json(serde_json::Value::from_sql(t, buf)?)),
             Type::JSONB => Ok(Value::Jsonb(serde_json::Value::from_sql(t, buf)?)),
@@ -438,7 +438,7 @@ fn get_text_value(src: &mut Bytes, t: &Type) -> Result<Value, Error> {
             .map_err(DecodeError::InvalidTextMacAddressValue)
             .map(Value::MacAddress),
         Type::INET => text_str
-            .parse::<IpAddr>()
+            .parse::<IpInet>()
             .map_err(DecodeError::InvalidTextIpAddressValue)
             .map(Value::Inet),
         Type::UUID => Uuid::parse_str(text_str)

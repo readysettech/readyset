@@ -1,6 +1,6 @@
 use std::convert::{TryFrom, TryInto};
-use std::net::IpAddr;
 
+use cidr::IpInet;
 use eui48::MacAddress;
 use postgres_types::Kind;
 use ps::util::type_is_oid;
@@ -95,7 +95,7 @@ impl TryFrom<Value> for ps::Value {
             (Type::INET, dt @ (DfValue::Text(_) | DfValue::TinyText(_))) => Ok(ps::Value::Inet(
                 <&str>::try_from(&dt)
                     .unwrap()
-                    .parse::<IpAddr>()
+                    .parse::<IpInet>()
                     .map_err(|e| ps::Error::ParseError(e.to_string()))?,
             )),
             (Type::UUID, DfValue::Text(u)) => Ok(ps::Value::Uuid(
