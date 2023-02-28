@@ -121,7 +121,11 @@ enum Operation {
     /// Removes a column from an existing table
     DropColumn(String, String),
     /// Alters a column to a different name
-    AlterColumnName(String, String, String),
+    AlterColumnName {
+        table: String,
+        col_name: String,
+        new_name: String,
+    },
 }
 
 impl Operation {
@@ -157,12 +161,13 @@ impl Operation {
                 .tables
                 .get(table)
                 .map_or(false, |t| t.iter().any(|cs| cs.name == *col_name)),
-            Self::AlterColumnName(table, col_name, new_name) => {
-                state.tables.get(table).map_or(false, |t| {
-                    t.iter().any(|cs| cs.name == *col_name)
-                        && t.iter().all(|cs| cs.name != *new_name)
-                })
-            }
+            Self::AlterColumnName {
+                table,
+                col_name,
+                new_name,
+            } => state.tables.get(table).map_or(false, |t| {
+                t.iter().any(|cs| cs.name == *col_name) && t.iter().all(|cs| cs.name != *new_name)
+            }),
         }
     }
 }
@@ -286,8 +291,10 @@ impl TestModel {
 
                     (Just(table), from_col_gen, to_col_gen)
                 })
-                .prop_map(|(table, from_col, to_col)| {
-                    Operation::AlterColumnName(table, from_col, to_col)
+                .prop_map(|(table, col_name, new_name)| Operation::AlterColumnName {
+                    table,
+                    col_name,
+                    new_name,
                 })
                 .boxed();
             possible_ops.push(rename_col_strat);
@@ -372,13 +379,17 @@ impl TestModel {
                 let col_specs = self.tables.get_mut(table).unwrap();
                 col_specs.retain(|cs| cs.name != *col_name);
             }
-            Operation::AlterColumnName(table, from_col_name, to_col_name) => {
+            Operation::AlterColumnName {
+                table,
+                col_name,
+                new_name,
+            } => {
                 let col_specs = self.tables.get_mut(table).unwrap();
                 let mut spec = col_specs
                     .iter_mut()
-                    .find(|cs| cs.name == *from_col_name)
+                    .find(|cs| cs.name == *col_name)
                     .unwrap();
-                spec.name = to_col_name.clone();
+                spec.name = new_name.clone();
             }
             Operation::DeleteRow(..) => (),
         }
@@ -640,10 +651,14 @@ async fn run(ops: Vec<Operation>) {
                 rs_conn.simple_query(&query).await.unwrap();
                 pg_conn.simple_query(&query).await.unwrap();
             }
-            Operation::AlterColumnName(table, from_col_name, to_col_name) => {
+            Operation::AlterColumnName {
+                table,
+                col_name,
+                new_name,
+            } => {
                 let query = format!(
                     "ALTER TABLE {} RENAME COLUMN \"{}\" TO \"{}\"",
-                    table, from_col_name, to_col_name
+                    table, col_name, new_name
                 );
                 rs_conn.simple_query(&query).await.unwrap();
                 pg_conn.simple_query(&query).await.unwrap();
