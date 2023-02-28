@@ -1,7 +1,7 @@
 version: "3.8"
 services:
   consul:
-    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/consul
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/consul:1.15
     healthcheck:
       test: [ "CMD", "nc", "-vz", "localhost", "8500" ]
       interval: 10s
