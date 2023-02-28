@@ -19,6 +19,7 @@ tracing-opentelemetry = "0.18.0"
 opentelemetry-otlp = { version = "0.11.0" }
 opentelemetry-semantic-conventions = "0.10"
 tracing-subscriber = { version = "0.3.9", features = ["env-filter", "json"] }
+lazy_static = "1.0"
 
 [dev-dependencies]
 anyhow = "1.0.53"

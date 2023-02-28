@@ -4942,6 +4942,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap 3.0.4",
+ "lazy_static",
  "once_cell",
  "opentelemetry",
  "opentelemetry-otlp",
