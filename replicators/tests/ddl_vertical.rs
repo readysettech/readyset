@@ -172,6 +172,107 @@ impl Operation {
     }
 }
 
+// Generators for Operation:
+
+fn gen_column_specs() -> impl Strategy<Value = Vec<ColumnSpec>> {
+    collection::vec(any::<ColumnSpec>(), 1..4)
+        .prop_filter("duplicate column names not allowed", |specs| {
+            specs.iter().map(|cs| &cs.name).all_unique()
+        })
+}
+
+prop_compose! {
+    fn gen_create_table()(name in SQL_NAME_REGEX, cols in gen_column_specs()) -> Operation {
+        Operation::CreateTable(name, cols)
+    }
+}
+
+prop_compose! {
+    fn gen_drop_table(tables: Vec<String>)(t in sample::select(tables)) -> Operation {
+        Operation::DropTable(t)
+    }
+}
+
+prop_compose! {
+    fn gen_write_row(tables: HashMap<String, Vec<ColumnSpec>>, pkeys: HashMap<String, Vec<i32>>)
+                    (t in sample::select(tables.keys().cloned().collect::<Vec<_>>()))
+                    (cols in tables[&t].iter().map(|cs| cs.gen.clone()).collect::<Vec<_>>(),
+                     t in Just(t))
+                    -> Operation {
+        let table_keys = &pkeys[&t];
+        let first_free_key = (0..).find(|k| !table_keys.contains(k)).unwrap();
+        Operation::WriteRow(t, first_free_key, cols)
+    }
+}
+
+prop_compose! {
+    fn gen_add_col_unfiltered(tables: Vec<String>)
+                             (t in sample::select(tables), col in any::<ColumnSpec>())
+                             -> Operation {
+        Operation::AddColumn(t, col)
+    }
+}
+
+fn gen_add_col(tables: HashMap<String, Vec<ColumnSpec>>) -> impl Strategy<Value = Operation> {
+    gen_add_col_unfiltered(tables.keys().cloned().collect()).prop_filter(
+        "Can't add a new column with a duplicate name",
+        move |op| match op {
+            Operation::AddColumn(table, new_cs) => {
+                new_cs.name != "id"
+                    && !tables[table]
+                        .iter()
+                        .any(|table_cs| new_cs.name.eq_ignore_ascii_case(&table_cs.name))
+            }
+            _ => unreachable!(),
+        },
+    )
+}
+
+fn gen_non_id_col_name() -> impl Strategy<Value = String> {
+    SQL_NAME_REGEX.prop_filter("Can't generate additional columns named \"id\"", |s| {
+        s.to_lowercase() != "id"
+    })
+}
+
+prop_compose! {
+    fn gen_rename_col(tables: HashMap<String, Vec<ColumnSpec>>, tables_with_cols: Vec<String>)
+                     (table in sample::select(tables_with_cols))
+                     (col_name in sample::select(
+                         tables[&table]
+                             .iter()
+                             .map(|cs| cs.name.clone())
+                             .collect::<Vec<_>>()),
+                      new_name in gen_non_id_col_name(),
+                      table in Just(table))
+                     -> Operation {
+        Operation::AlterColumnName { table, col_name, new_name }
+    }
+}
+
+prop_compose! {
+    fn gen_drop_col(tables: HashMap<String, Vec<ColumnSpec>>, tables_with_cols: Vec<String>)
+                   (table in sample::select(tables_with_cols))
+                   (col_name in sample::select(
+                       tables[&table]
+                           .iter()
+                           .map(|cs| cs.name.clone())
+                           .collect::<Vec<_>>()),
+                    table in Just(table))
+                 -> Operation {
+        Operation::DropColumn(table, col_name)
+    }
+}
+
+prop_compose! {
+    fn gen_delete_row(non_empty_tables: Vec<String>, pkeys: HashMap<String, Vec<i32>>)
+                     (table in sample::select(non_empty_tables))
+                     (key in sample::select(pkeys[&table].clone()),
+                      table in Just(table))
+                     -> Operation {
+        Operation::DeleteRow(table, key)
+    }
+}
+
 /// A model of the current test state, used to help generate operations in a way that we expect to
 /// succeed, as well as to assist in shrinking, and to determine postconditions to check during
 /// test runtime.
@@ -203,61 +304,16 @@ impl TestModel {
     /// of each test, but it's best to depend on that check as little as possible since test
     /// filters like that can lead to slow and lopsided test generation.)
     fn gen_op(&self, runner: &mut TestRunner) -> impl Strategy<Value = Operation> {
-        // We can always create more tables:
-        let create_table_strat = (
-            SQL_NAME_REGEX,
-            collection::vec(any::<ColumnSpec>(), 1..4)
-                .prop_filter("duplicate column names not allowed", |specs| {
-                    specs.iter().map(|cs| &cs.name).all_unique()
-                }),
-        )
-            .prop_map(|(name, cols)| Operation::CreateTable(name, cols))
-            .boxed();
-        let mut possible_ops = vec![create_table_strat];
+        // We can always create more tables, so start with just the one operation generator:
+        let mut possible_ops = vec![gen_create_table().boxed()];
 
-        // If we have at least one table, we can delete a table or write a row:
+        // If we have at least one table, we can delete a table, write a row, or add a column:
         if !self.tables.is_empty() {
-            possible_ops.push(
-                sample::select(self.tables.keys().cloned().collect::<Vec<_>>())
-                    .prop_map(Operation::DropTable)
-                    .boxed(),
-            );
+            let drop_strategy = gen_drop_table(self.tables.keys().cloned().collect()).boxed();
+            let write_strategy = gen_write_row(self.tables.clone(), self.pkeys.clone()).boxed();
+            let add_col_strat = gen_add_col(self.tables.clone()).boxed();
 
-            // These are cloned so that we can move them into the closures for write_strategy:
-            let tables = self.tables.clone();
-            let pkeys = self.pkeys.clone();
-            let write_strategy = sample::select(self.tables.keys().cloned().collect::<Vec<_>>())
-                .prop_flat_map(move |table| {
-                    let col_gens: Vec<BoxedStrategy<DfValue>> =
-                        tables[&table].iter().map(|cs| cs.gen.clone()).collect();
-                    (Just(table), col_gens)
-                })
-                .prop_map(move |(table, col_vals): (String, Vec<DfValue>)| {
-                    let table_keys = &pkeys[&table];
-                    let first_free_key = (0..).find(|k| !table_keys.contains(k)).unwrap();
-                    Operation::WriteRow(table.to_string(), first_free_key, col_vals)
-                })
-                .boxed();
-            possible_ops.push(write_strategy);
-
-            // This is cloned so that we can move it into the closures for add_col_strat:
-            let tables = self.tables.clone();
-            let add_col_strat = (
-                sample::select(self.tables.keys().cloned().collect::<Vec<_>>()),
-                any::<ColumnSpec>(),
-            )
-                .prop_filter(
-                    "Can't add a new column with a duplicate name",
-                    move |(table, new_cs)| {
-                        new_cs.name != "id"
-                            && !tables[table]
-                                .iter()
-                                .any(|table_cs| new_cs.name.eq_ignore_ascii_case(&table_cs.name))
-                    },
-                )
-                .prop_map(|(table, col)| Operation::AddColumn(table, col))
-                .boxed();
-            possible_ops.push(add_col_strat);
+            possible_ops.extend([drop_strategy, write_strategy, add_col_strat].into_iter());
         }
 
         // If we have a table with at least one (non-pkey) column, we can rename or drop a column:
@@ -275,41 +331,11 @@ impl TestModel {
             .collect();
         if !tables_with_cols.is_empty() {
             // This is cloned so that we can move it into the closures for rename_col_strat:
-            let tables = self.tables.clone();
-            let rename_col_strat = sample::select(tables_with_cols.clone())
-                .prop_flat_map(move |table| {
-                    let from_col_gen = sample::select(
-                        tables[&table]
-                            .iter()
-                            .map(|cs| cs.name.clone())
-                            .collect::<Vec<_>>(),
-                    );
-                    let to_col_gen = SQL_NAME_REGEX
-                        .prop_filter("Can't generate additional columns named \"id\"", |s| {
-                            s.to_lowercase() != "id"
-                        });
-
-                    (Just(table), from_col_gen, to_col_gen)
-                })
-                .prop_map(|(table, col_name, new_name)| Operation::AlterColumnName {
-                    table,
-                    col_name,
-                    new_name,
-                })
-                .boxed();
+            let rename_col_strat =
+                gen_rename_col(self.tables.clone(), tables_with_cols.clone()).boxed();
             possible_ops.push(rename_col_strat);
 
-            let tables = self.tables.clone(); // Cloned for moving into closure
-            let _drop_col_strategy = sample::select(tables_with_cols)
-                .prop_flat_map(move |table| {
-                    let col_names = tables[&table]
-                        .iter()
-                        .map(|cs| cs.name.clone())
-                        .collect::<Vec<_>>();
-                    (Just(table), sample::select(col_names))
-                })
-                .prop_map(|(table, col_name)| Operation::DropColumn(table, col_name))
-                .boxed();
+            let _drop_col_strategy = gen_drop_col(self.tables.clone(), tables_with_cols).boxed();
             // Commented out for now because this triggers ENG-2548
             // possible_ops.push(drop_col_strategy);
         }
@@ -326,14 +352,7 @@ impl TestModel {
             })
             .collect();
         if !non_empty_tables.is_empty() {
-            let pkeys = self.pkeys.clone();
-            let delete_strategy = sample::select(non_empty_tables)
-                .prop_flat_map(move |table| {
-                    let keys_in_use = &pkeys[&table];
-                    (Just(table.to_string()), sample::select(keys_in_use.clone()))
-                })
-                .prop_map(|(table, key)| Operation::DeleteRow(table, key))
-                .boxed();
+            let delete_strategy = gen_delete_row(non_empty_tables, self.pkeys.clone()).boxed();
             possible_ops.push(delete_strategy);
         }
 
