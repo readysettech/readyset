@@ -141,27 +141,27 @@ impl Operation {
         match self {
             Self::CreateTable((name, _cols)) => !state.tables.contains_key(name),
             Self::DropTable(name) => state.tables.contains_key(name),
-            Self::WriteRow((table, pk, _col_vals)) => {
-                state.tables.contains_key(table) && !state.pkeys[table].contains(pk)
-            }
+            Self::WriteRow((table, key, _col_vals)) => state
+                .pkeys
+                .get(table)
+                .map_or(false, |table_keys| !table_keys.contains(key)),
             Self::DeleteRow((table, key)) => state
                 .pkeys
                 .get(table)
                 .map_or(false, |table_keys| table_keys.contains(key)),
-            Self::AddColumn((table, column_spec)) => {
-                state.tables.contains_key(table)
-                    && state.tables[table]
-                        .iter()
-                        .all(|cs| cs.name != *column_spec.name)
-            }
-            Self::DropColumn((table, col_name)) => {
-                state.tables.contains_key(table)
-                    && state.tables[table].iter().any(|cs| cs.name == *col_name)
-            }
+            Self::AddColumn((table, column_spec)) => state
+                .tables
+                .get(table)
+                .map_or(false, |t| t.iter().all(|cs| cs.name != *column_spec.name)),
+            Self::DropColumn((table, col_name)) => state
+                .tables
+                .get(table)
+                .map_or(false, |t| t.iter().any(|cs| cs.name == *col_name)),
             Self::AlterColumnName((table, col_name, new_name)) => {
-                state.tables.contains_key(table)
-                    && state.tables[table].iter().any(|cs| cs.name == *col_name)
-                    && state.tables[table].iter().all(|cs| cs.name != *new_name)
+                state.tables.get(table).map_or(false, |t| {
+                    t.iter().any(|cs| cs.name == *col_name)
+                        && t.iter().all(|cs| cs.name != *new_name)
+                })
             }
         }
     }
