@@ -642,6 +642,15 @@ async fn run(ops: Vec<Operation>) {
                 let query = format!("CREATE TABLE \"{table_name}\" ({col_defs})");
                 rs_conn.simple_query(&query).await.unwrap();
                 pg_conn.simple_query(&query).await.unwrap();
+
+                let create_cache =
+                    format!("CREATE CACHE ALWAYS FROM SELECT * FROM \"{table_name}\"");
+                eventually!(run_test: {
+                    let result = rs_conn.simple_query(&create_cache).await;
+                    AssertUnwindSafe(move || result)
+                }, then_assert: |result| {
+                    result().unwrap()
+                });
             }
             Operation::DropTable(name) => {
                 let query = format!("DROP TABLE \"{name}\"");
