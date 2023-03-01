@@ -31,12 +31,12 @@ const BUFFER_SIZE: usize = 16 * 1024 * 1024;
 const NUM_ROWS: usize = 10_000;
 
 async fn proxy_pipe(mut upstream: TcpStream, mut downstream: TcpStream) -> io::Result<()> {
-    let mut upstream_buf = [0; BUFFER_SIZE];
-    let mut downstream_buf = [0; BUFFER_SIZE];
+    let mut upstream_buf = Box::new([0; BUFFER_SIZE]);
+    let mut downstream_buf = Box::new([0; BUFFER_SIZE]);
     loop {
         match try_select(
-            Box::pin(upstream.read(&mut upstream_buf)),
-            Box::pin(downstream.read(&mut downstream_buf)),
+            Box::pin(upstream.read(upstream_buf.as_mut())),
+            Box::pin(downstream.read(downstream_buf.as_mut())),
         )
         .await
         .map_err(|e| e.factor_first().0)?
