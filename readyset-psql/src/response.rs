@@ -3,7 +3,6 @@ use std::convert::{TryFrom, TryInto};
 
 use nom_sql::SqlIdentifier;
 use psql_srv as ps;
-use psql_srv::Column;
 use readyset_adapter::backend::{
     self as cl, noria_connector, SinglePrepareResult, UpstreamPrepare,
 };
@@ -81,7 +80,7 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
             }) => Ok(Insert(num_rows_inserted)),
             Noria(NoriaResult::Select { rows, schema }) => {
                 let select_schema = SelectSchema(schema);
-                let resultset = Resultset::try_new(rows, &select_schema)?;
+                let resultset = Resultset::from_readyset(rows, &select_schema)?;
                 Ok(Select {
                     schema: select_schema.try_into()?,
                     resultset,
@@ -111,7 +110,7 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                     columns: Cow::Owned(columns),
                 });
 
-                let resultset = Resultset::try_new(
+                let resultset = Resultset::from_readyset(
                     ResultIterator::owned(vec![Results::new(vec![vars
                         .into_iter()
                         .map(|v| readyset_data::DfValue::from(v.value))
@@ -151,7 +150,7 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                     rows.push(vec![v.name.as_str().into(), v.value.into()]);
                 }
 
-                let resultset = Resultset::try_new(
+                let resultset = Resultset::from_readyset(
                     ResultIterator::owned(vec![Results::new(rows)]),
                     &select_schema,
                 )?;
@@ -190,7 +189,7 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                     rows.push(vec![v.name.as_str().into(), v.value.into()]);
                 }
 
-                let resultset = Resultset::try_new(
+                let resultset = Resultset::from_readyset(
                     ResultIterator::owned(vec![Results::new(rows)]),
                     &select_schema,
                 )?;
@@ -199,21 +198,20 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                     resultset,
                 })
             }
-            Upstream(upstream::QueryResult::Read { data: rows }) => {
-                let schema = match rows.first() {
-                    None => vec![],
-                    Some(row) => row
-                        .columns()
-                        .iter()
-                        .map(|c| Column {
-                            name: c.name().to_owned(),
-                            col_type: c.type_().clone(),
-                        })
-                        .collect(),
-                };
+            Upstream(upstream::QueryResult::EmptyRead) => Ok(ps::QueryResponse::Select {
+                schema: vec![],
+                resultset: Resultset::empty(),
+            }),
+            Upstream(upstream::QueryResult::Stream { first_row, stream }) => {
+                let field_types = first_row
+                    .columns()
+                    .iter()
+                    .map(|c| c.type_().clone())
+                    .collect();
+
                 Ok(ps::QueryResponse::Select {
-                    schema,
-                    resultset: Resultset::try_from(rows)?,
+                    schema: vec![], // Schema isn't necessary for upstream execute results
+                    resultset: Resultset::from_stream(stream, first_row, field_types),
                 })
             }
             Upstream(upstream::QueryResult::Write { num_rows_affected }) => {

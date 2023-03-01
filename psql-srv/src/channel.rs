@@ -69,7 +69,7 @@ where
     /// Write a `Response` (actually the `BackendMessage`s generated a `Response`) to the channel.
     pub async fn send<S>(&mut self, item: Response<R, S>) -> Result<(), EncodeError>
     where
-        S: IntoIterator<Item = R>,
+        S: Stream<Item = Result<R, Error>> + Unpin,
     {
         item.write(&mut self.0).await
     }

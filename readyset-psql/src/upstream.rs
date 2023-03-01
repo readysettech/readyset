@@ -1,15 +1,17 @@
 use std::collections::HashMap;
 use std::ffi::OsStr;
+use std::fmt::Debug;
 use std::os::unix::ffi::OsStrExt;
+use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::{pin_mut, Stream, TryStreamExt};
+use futures::StreamExt;
 use nom_sql::SqlIdentifier;
 use pgsql::config::Host;
 use pgsql::types::Type;
-use pgsql::{GenericResult, Row, SimpleQueryMessage};
+use pgsql::{GenericResult, ResultStream, Row, SimpleQueryMessage};
 use postgres_types::Kind;
 use psql_srv::Column;
 use readyset_adapter::fallback_cache::FallbackCache;
@@ -50,12 +52,39 @@ pub struct PostgreSqlUpstream {
     version: String,
 }
 
-#[derive(Debug)]
 pub enum QueryResult {
-    Read { data: Vec<Row> },
-    Write { num_rows_affected: u64 },
+    EmptyRead,
+    Stream {
+        first_row: Row,
+        stream: Pin<Box<ResultStream>>,
+    },
+    Write {
+        num_rows_affected: u64,
+    },
     Command,
     SimpleQuery(Vec<SimpleQueryMessage>),
+}
+
+impl Debug for QueryResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::EmptyRead => write!(f, "EmptyRead"),
+            Self::Stream {
+                first_row,
+                stream: _,
+            } => f
+                .debug_struct("Stream")
+                .field("first_row", first_row)
+                .field("stream", &"...")
+                .finish(),
+            Self::Write { num_rows_affected } => f
+                .debug_struct("Write")
+                .field("num_rows_affected", num_rows_affected)
+                .finish(),
+            Self::Command => write!(f, "Command"),
+            Self::SimpleQuery(ms) => f.debug_tuple("SimpleQuery").field(ms).finish(),
+        }
+    }
 }
 
 impl UpstreamDestination for QueryResult {}
@@ -334,30 +363,24 @@ impl UpstreamDatabase for PostgreSqlUpstream {
             .get(&statement_id)
             .ok_or(ReadySetError::PreparedStatementMissing { statement_id })?;
 
-        let results = self
-            .client
-            .generic_query_raw(
-                statement,
-                &convert_params_for_upstream(params, statement.params())?,
-            )
-            .await?;
-        pin_mut!(results);
+        let mut stream = Box::pin(
+            self.client
+                .generic_query_raw(
+                    statement,
+                    &convert_params_for_upstream(params, statement.params())?,
+                )
+                .await?,
+        );
 
-        let peeked = results.try_next().await?;
-        match peeked {
-            Some(GenericResult::NumRows(num_rows_affected)) => {
+        match stream.next().await {
+            None => Ok(QueryResult::EmptyRead),
+            Some(Err(e)) => Err(e.into()),
+            Some(Ok(GenericResult::NumRows(num_rows_affected))) => {
                 Ok(QueryResult::Write { num_rows_affected })
             }
-            Some(GenericResult::Row(r)) => {
-                let mut data = Vec::with_capacity(results.size_hint().0 + 1);
-                data.push(r);
-
-                while let Some(GenericResult::Row(r)) = results.try_next().await? {
-                    data.push(r);
-                }
-                Ok(QueryResult::Read { data })
+            Some(Ok(GenericResult::Row(first_row))) => {
+                Ok(QueryResult::Stream { first_row, stream })
             }
-            None => Ok(QueryResult::Read { data: vec![] }),
         }
     }
 

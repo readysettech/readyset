@@ -12,19 +12,24 @@
 //! $ cargo criterion -p noria-psql --bench proxy
 //! ```
 
-use std::io;
 use std::net::SocketAddr;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use std::{io, vec};
 
 use async_trait::async_trait;
 use criterion::{criterion_group, criterion_main, Criterion};
 use futures::future::{try_select, Either};
-use psql_srv::{Credentials, CredentialsNeeded, QueryResponse};
-use readyset_psql::Value;
+use futures::stream::Peekable;
+use futures::{ready, Stream, StreamExt, TryStreamExt};
+use psql_srv::{Credentials, CredentialsNeeded, PrepareResponse, QueryResponse};
+use readyset_data::DfValue;
+use readyset_psql::{ParamRef, Value};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, ToSocketAddrs};
 use tokio::runtime::Runtime;
 use tokio::task::JoinHandle;
-use tokio_postgres::{Client, NoTls};
+use tokio_postgres::{Client, NoTls, Row, RowStream, Statement};
 
 const BUFFER_SIZE: usize = 16 * 1024 * 1024;
 
@@ -70,15 +75,62 @@ where
     }))
 }
 
+enum ResultStream {
+    Owned(vec::IntoIter<Row>),
+    Streaming(Pin<Box<Peekable<RowStream>>>),
+}
+
+impl Stream for ResultStream {
+    type Item = Result<Vec<Value>, psql_srv::Error>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match self.get_mut() {
+            ResultStream::Owned(iter) => Poll::Ready(iter.next().map(|r| {
+                Ok((0..r.len())
+                    .map(|i| Value {
+                        col_type: r.columns()[i].type_().clone(),
+                        value: r.get(i),
+                    })
+                    .collect())
+            })),
+            ResultStream::Streaming(stream) => {
+                Poll::Ready(ready!(stream.as_mut().poll_next(cx)).map(|res| {
+                    match res {
+                        Ok(r) => Ok((0..r.len())
+                            .map(|i| Value {
+                                col_type: r.columns()[i].type_().clone(),
+                                value: r.get(i),
+                            })
+                            .collect()),
+                        Err(e) => Err(e.into()),
+                    }
+                }))
+            }
+        }
+    }
+}
+
 struct Backend {
     upstream: Client,
+    streaming: bool,
+    statements: Vec<Statement>,
+}
+
+impl Backend {
+    fn new(upstream: Client, streaming: bool) -> Self {
+        Self {
+            upstream,
+            streaming,
+            statements: Vec::with_capacity(2048),
+        }
+    }
 }
 
 #[async_trait]
 impl psql_srv::Backend for Backend {
     type Value = Value;
     type Row = Vec<Self::Value>;
-    type Resultset = Vec<Self::Row>;
+    type Resultset = ResultStream;
 
     fn version(&self) -> String {
         "14".into()
@@ -95,7 +147,7 @@ impl psql_srv::Backend for Backend {
     async fn on_query(
         &mut self,
         query: &str,
-    ) -> Result<psql_srv::QueryResponse<Self::Resultset>, psql_srv::Error> {
+    ) -> Result<QueryResponse<Self::Resultset>, psql_srv::Error> {
         let res = self
             .upstream
             .query(query, &[])
@@ -115,41 +167,88 @@ impl psql_srv::Backend for Backend {
                         .collect()
                 })
                 .unwrap_or_default(),
-            resultset: res
-                .into_iter()
-                .map(|r| {
-                    (0..r.len())
-                        .map(|i| Value {
-                            col_type: r.columns()[i].type_().clone(),
-                            value: r.get(i),
-                        })
-                        .collect()
-                })
-                .collect(),
+            resultset: ResultStream::Owned(res.into_iter()),
         })
     }
 
-    async fn on_prepare(
-        &mut self,
-        _query: &str,
-    ) -> Result<psql_srv::PrepareResponse, psql_srv::Error> {
-        todo!()
+    async fn on_prepare(&mut self, query: &str) -> Result<PrepareResponse, psql_srv::Error> {
+        let stmt = self
+            .upstream
+            .prepare(query)
+            .await
+            .map_err(|e| psql_srv::Error::Unknown(e.to_string()))?;
+
+        let resp = PrepareResponse {
+            prepared_statement_id: self.statements.len() as _,
+            param_schema: stmt.params().to_vec(),
+            row_schema: stmt
+                .columns()
+                .iter()
+                .map(|c| psql_srv::Column {
+                    name: c.name().into(),
+                    col_type: c.type_().clone(),
+                })
+                .collect(),
+        };
+
+        self.statements.push(stmt);
+
+        Ok(resp)
     }
 
     async fn on_execute(
         &mut self,
-        _statement_id: u32,
-        _params: &[psql_srv::Value],
-    ) -> Result<psql_srv::QueryResponse<Self::Resultset>, psql_srv::Error> {
-        todo!()
+        statement_id: u32,
+        params: &[psql_srv::Value],
+    ) -> Result<QueryResponse<Self::Resultset>, psql_srv::Error> {
+        let stmt = self
+            .statements
+            .get(statement_id as usize)
+            .ok_or_else(|| psql_srv::Error::MissingPreparedStatement(statement_id.to_string()))?;
+
+        let mut res = Box::pin(
+            self.upstream
+                .query_raw(
+                    stmt,
+                    params
+                        .iter()
+                        .map(|p| DfValue::try_from(ParamRef(p)).unwrap()),
+                )
+                .await?
+                .peekable(),
+        );
+
+        let schema = res
+            .as_mut()
+            .peek()
+            .await
+            .and_then(|r| r.as_ref().ok())
+            .map(|row| {
+                row.columns()
+                    .iter()
+                    .map(|col| psql_srv::Column {
+                        name: col.name().into(),
+                        col_type: col.type_().clone(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let resultset = if self.streaming {
+            ResultStream::Streaming(res)
+        } else {
+            ResultStream::Owned(res.try_collect::<Vec<_>>().await?.into_iter())
+        };
+
+        Ok(QueryResponse::Select { schema, resultset })
     }
 
     async fn on_close(&mut self, _statement_id: u32) -> Result<(), psql_srv::Error> {
-        todo!()
+        Ok(())
     }
 }
 
-async fn psql_srv_proxy<A>(listen: A) -> io::Result<JoinHandle<()>>
+async fn psql_srv_proxy<A>(listen: A, streaming: bool) -> io::Result<JoinHandle<()>>
 where
     A: ToSocketAddrs,
 {
@@ -162,8 +261,8 @@ where
                     .await
                     .unwrap();
             tokio::spawn(conn);
-            let backend = Backend { upstream: client };
-            psql_srv::run_backend(backend, sock, false).await
+            let backend = Backend::new(client, streaming);
+            tokio::spawn(psql_srv::run_backend(backend, sock, false));
         }
     }))
 }
@@ -242,9 +341,9 @@ fn benchmark_direct_proxy(c: &mut Criterion) {
             });
         });
 
-        group.bench_function("psql-srv proxy", |b| {
+        group.bench_function("accumulating psql-srv proxy", |b| {
             let rt = Runtime::new().unwrap();
-            let _proxy = rt.block_on(psql_srv_proxy("0.0.0.0:8888")).unwrap();
+            let _proxy = rt.block_on(psql_srv_proxy("0.0.0.0:8888", false)).unwrap();
             let (client, conn) = rt
                 .block_on(tokio_postgres::connect(
                     "postgresql://postgres:noria@127.0.0.1:8888/noria",
@@ -255,7 +354,24 @@ fn benchmark_direct_proxy(c: &mut Criterion) {
             let c = &client;
 
             b.to_async(&rt).iter(move || async move {
-                c.simple_query(query).await.unwrap();
+                c.query(query, &[]).await.unwrap();
+            });
+        });
+
+        group.bench_function("streaming psql-srv proxy", |b| {
+            let rt = Runtime::new().unwrap();
+            let _proxy = rt.block_on(psql_srv_proxy("0.0.0.0:8888", true)).unwrap();
+            let (client, conn) = rt
+                .block_on(tokio_postgres::connect(
+                    "postgresql://postgres:noria@127.0.0.1:8888/noria",
+                    NoTls,
+                ))
+                .unwrap();
+            rt.spawn(conn);
+            let c = &client;
+
+            b.to_async(&rt).iter(move || async move {
+                c.query(query, &[]).await.unwrap();
             });
         });
 

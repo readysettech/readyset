@@ -28,6 +28,7 @@ mod value;
 use std::convert::TryInto;
 
 use async_trait::async_trait;
+use futures::Stream;
 use postgres::SimpleQueryMessage;
 use postgres_types::Type;
 use protocol::Protocol;
@@ -61,7 +62,7 @@ pub trait Backend {
 
     /// An associated type representing a resultset returned by a SQL query, which can be iterated
     /// to produce `Self::Row`s.
-    type Resultset: IntoIterator<Item = Self::Row>;
+    type Resultset: Stream<Item = Result<Self::Row, Error>> + Unpin;
 
     /// The postgresql server version number to send to the client on startup, along with ReadySet
     /// info
@@ -138,13 +139,13 @@ pub struct PrepareResponse {
 
 /// A response produced by `Backend::on_query` or `Backend::on_execute`, containing either data
 /// that has been requested using a read statement or the confirmation of a write statement.
-pub enum QueryResponse<S> {
+pub enum QueryResponse<R> {
     /// The response to a select statement.
     Select {
         /// The schema of the resultset produced by the select statement.
         schema: Vec<Column>,
         /// The actual resultset produced by the select statement.
-        resultset: S,
+        resultset: R,
     },
     /// The response to an insert statement, including the number of rows inserted.
     Insert(u64),

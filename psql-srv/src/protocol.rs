@@ -16,7 +16,7 @@ use crate::message::BackendMessage::{self, *};
 use crate::message::FrontendMessage::{self, *};
 use crate::message::StatementName::*;
 use crate::message::TransferFormat::{self, *};
-use crate::message::{CommandCompleteTag, ErrorSeverity, FieldDescription, SqlState};
+use crate::message::{CommandCompleteTag, FieldDescription};
 use crate::response::Response;
 use crate::value::Value;
 use crate::QueryResponse::*;
@@ -539,39 +539,13 @@ impl Protocol {
         match self.state {
             State::StartingUp | State::Extended => {
                 self.state = State::Error;
-                Ok(Response::Message(make_error_response(error)))
+                Ok(Response::Message(error.into()))
             }
             _ => Ok(Response::Messages(smallvec![
-                make_error_response(error),
+                error.into(),
                 BackendMessage::ready_for_query_idle(),
             ])),
         }
-    }
-}
-
-fn make_error_response<R>(error: Error) -> BackendMessage<R> {
-    let sqlstate = match error {
-        Error::AuthenticationFailure(_) => SqlState::INVALID_PASSWORD,
-        Error::DecodeError(_) => SqlState::IO_ERROR,
-        Error::EncodeError(_) => SqlState::IO_ERROR,
-        Error::IncorrectFormatCount(_) => SqlState::IO_ERROR,
-        Error::InternalError(_) => SqlState::INTERNAL_ERROR,
-        Error::InvalidInteger(_) => SqlState::DATATYPE_MISMATCH,
-        Error::IoError(_) => SqlState::IO_ERROR,
-        Error::MissingPortal(_) => SqlState::UNDEFINED_PSTATEMENT,
-        Error::MissingPreparedStatement(_) => SqlState::UNDEFINED_PSTATEMENT,
-        Error::ParseError(_) => SqlState::INVALID_PSTATEMENT_DEFINITION,
-        Error::Unimplemented(_) => SqlState::FEATURE_NOT_SUPPORTED,
-        Error::Unknown(_) => SqlState::INTERNAL_ERROR,
-        Error::Unsupported(_) => SqlState::FEATURE_NOT_SUPPORTED,
-        Error::UnsupportedMessage(_) => SqlState::FEATURE_NOT_SUPPORTED,
-        Error::UnsupportedType(_) => SqlState::FEATURE_NOT_SUPPORTED,
-        Error::PostgresError(ref e) => e.code().cloned().unwrap_or(SqlState::INTERNAL_ERROR),
-    };
-    ErrorResponse {
-        severity: ErrorSeverity::Error,
-        sqlstate,
-        message: error.to_string(),
     }
 }
 
@@ -735,18 +709,21 @@ async fn make_field_description<B: Backend>(
 mod tests {
 
     use std::convert::TryFrom;
-    use std::io;
     use std::pin::Pin;
     use std::task::Poll;
+    use std::{io, vec};
 
     use async_trait::async_trait;
     use bytes::BytesMut;
     use futures::task::Context;
+    use futures::{stream, TryStreamExt};
+    use postgres::error::SqlState;
     use tokio::io::ReadBuf;
     use tokio_test::block_on;
 
     use super::*;
     use crate::bytes::BytesStr;
+    use crate::message::ErrorSeverity;
     use crate::value::Value as DataValue;
     use crate::{Credentials, CredentialsNeeded, PrepareResponse, QueryResponse};
 
@@ -805,7 +782,11 @@ mod tests {
     impl crate::Backend for Backend {
         type Value = Value;
         type Row = Vec<Self::Value>;
-        type Resultset = Vec<Self::Row>;
+        type Resultset = stream::Iter<vec::IntoIter<Result<Self::Row, Error>>>;
+
+        fn version(&self) -> String {
+            "14.5 ReadySet".to_string()
+        }
 
         async fn on_init(&mut self, database: &str) -> Result<CredentialsNeeded, Error> {
             self.database = Some(database.to_string());
@@ -813,10 +794,6 @@ mod tests {
                 Some(_) => Ok(CredentialsNeeded::Cleartext),
                 None => Ok(CredentialsNeeded::None),
             }
-        }
-
-        fn version(&self) -> String {
-            "14.5 ReadySet".to_string()
         }
 
         async fn on_auth(&mut self, provided: Credentials) -> Result<(), Error> {
@@ -849,10 +826,16 @@ mod tests {
                             col_type: Type::FLOAT8,
                         },
                     ],
-                    resultset: vec![
-                        vec![Value(DataValue::Int(88)), Value(DataValue::Double(0.123))],
-                        vec![Value(DataValue::Int(22)), Value(DataValue::Double(0.456))],
-                    ],
+                    resultset: stream::iter(vec![
+                        Ok(vec![
+                            Value(DataValue::Int(88)),
+                            Value(DataValue::Double(0.123)),
+                        ]),
+                        Ok(vec![
+                            Value(DataValue::Int(22)),
+                            Value(DataValue::Double(0.456)),
+                        ]),
+                    ]),
                 })
             } else {
                 Ok(QueryResponse::Delete(5))
@@ -902,10 +885,16 @@ mod tests {
                             col_type: Type::FLOAT8,
                         },
                     ],
-                    resultset: vec![
-                        vec![Value(DataValue::Int(88)), Value(DataValue::Double(0.123))],
-                        vec![Value(DataValue::Int(22)), Value(DataValue::Double(0.456))],
-                    ],
+                    resultset: stream::iter(vec![
+                        Ok(vec![
+                            Value(DataValue::Int(88)),
+                            Value(DataValue::Double(0.123)),
+                        ]),
+                        Ok(vec![
+                            Value(DataValue::Int(22)),
+                            Value(DataValue::Double(0.456)),
+                        ]),
+                    ]),
                 })
             } else {
                 Ok(QueryResponse::Delete(5))
@@ -956,10 +945,10 @@ mod tests {
         let mut backend = Backend::new();
         let mut channel = Channel::<NullBytestream, Vec<Value>>::new(NullBytestream);
         // SSLRequest is denied.
-        assert_eq!(
-            block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap(),
-            Response::Message(BackendMessage::ssl_response_n())
-        );
+        match block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap() {
+            Response::Message(msg) => assert_eq!(msg, BackendMessage::ssl_response_n()),
+            _ => panic!(),
+        }
     }
 
     #[test]
@@ -974,33 +963,36 @@ mod tests {
         let mut backend = Backend::new();
         let mut channel = Channel::<NullBytestream, Vec<Value>>::new(NullBytestream);
         // A StartupMessage with a database specified is accepted.
-        assert_eq!(
-            block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap(),
-            Response::Messages(smallvec![
-                BackendMessage::AuthenticationOk,
-                BackendMessage::ParameterStatus {
-                    parameter_name: "client_encoding".to_owned(),
-                    parameter_value: "UTF8".to_owned(),
-                },
-                BackendMessage::ParameterStatus {
-                    parameter_name: "DateStyle".to_owned(),
-                    parameter_value: "ISO".to_owned(),
-                },
-                BackendMessage::ParameterStatus {
-                    parameter_name: "TimeZone".to_owned(),
-                    parameter_value: "UTC".to_owned(),
-                },
-                BackendMessage::ParameterStatus {
-                    parameter_name: "standard_conforming_strings".to_owned(),
-                    parameter_value: "on".to_owned(),
-                },
-                BackendMessage::ParameterStatus {
-                    parameter_name: "server_version".to_owned(),
-                    parameter_value: "14.5 ReadySet".to_owned(),
-                },
-                BackendMessage::ready_for_query_idle()
-            ])
-        );
+        match block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap() {
+            Response::Messages(ms) => assert_eq!(
+                ms.as_ref(),
+                vec![
+                    BackendMessage::AuthenticationOk,
+                    BackendMessage::ParameterStatus {
+                        parameter_name: "client_encoding".to_owned(),
+                        parameter_value: "UTF8".to_owned(),
+                    },
+                    BackendMessage::ParameterStatus {
+                        parameter_name: "DateStyle".to_owned(),
+                        parameter_value: "ISO".to_owned(),
+                    },
+                    BackendMessage::ParameterStatus {
+                        parameter_name: "TimeZone".to_owned(),
+                        parameter_value: "UTC".to_owned(),
+                    },
+                    BackendMessage::ParameterStatus {
+                        parameter_name: "standard_conforming_strings".to_owned(),
+                        parameter_value: "on".to_owned(),
+                    },
+                    BackendMessage::ParameterStatus {
+                        parameter_name: "server_version".to_owned(),
+                        parameter_value: "14.5 ReadySet".to_owned(),
+                    },
+                    BackendMessage::ready_for_query_idle()
+                ]
+            ),
+            _ => panic!(),
+        }
         // The database has been set on the backend.
         assert_eq!(backend.database.unwrap(), "database_name");
         // The protocol is no longer "starting up".
@@ -1024,10 +1016,13 @@ mod tests {
             password: expected_password.to_string(),
         });
         let mut channel = Channel::<NullBytestream, Vec<Value>>::new(NullBytestream);
-        assert_eq!(
-            block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap(),
-            Response::Messages(smallvec![BackendMessage::AuthenticationCleartextPassword])
-        );
+        match block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap() {
+            Response::Messages(ms) => assert_eq!(
+                ms.as_ref(),
+                vec![BackendMessage::AuthenticationCleartextPassword]
+            ),
+            _ => panic!(),
+        }
         assert_eq!(
             protocol.state,
             State::Authenticating {
@@ -1039,33 +1034,36 @@ mod tests {
             password: expected_password,
         };
 
-        assert_eq!(
-            block_on(protocol.on_request(auth_request, &mut backend, &mut channel)).unwrap(),
-            Response::Messages(smallvec![
-                BackendMessage::AuthenticationOk,
-                BackendMessage::ParameterStatus {
-                    parameter_name: "client_encoding".to_owned(),
-                    parameter_value: "UTF8".to_owned(),
-                },
-                BackendMessage::ParameterStatus {
-                    parameter_name: "DateStyle".to_owned(),
-                    parameter_value: "ISO".to_owned(),
-                },
-                BackendMessage::ParameterStatus {
-                    parameter_name: "TimeZone".to_owned(),
-                    parameter_value: "UTC".to_owned(),
-                },
-                BackendMessage::ParameterStatus {
-                    parameter_name: "standard_conforming_strings".to_owned(),
-                    parameter_value: "on".to_owned(),
-                },
-                BackendMessage::ParameterStatus {
-                    parameter_name: "server_version".to_owned(),
-                    parameter_value: "14.5 ReadySet".to_owned(),
-                },
-                BackendMessage::ready_for_query_idle()
-            ])
-        );
+        match block_on(protocol.on_request(auth_request, &mut backend, &mut channel)).unwrap() {
+            Response::Messages(ms) => assert_eq!(
+                ms.as_ref(),
+                vec![
+                    BackendMessage::AuthenticationOk,
+                    BackendMessage::ParameterStatus {
+                        parameter_name: "client_encoding".to_owned(),
+                        parameter_value: "UTF8".to_owned(),
+                    },
+                    BackendMessage::ParameterStatus {
+                        parameter_name: "DateStyle".to_owned(),
+                        parameter_value: "ISO".to_owned(),
+                    },
+                    BackendMessage::ParameterStatus {
+                        parameter_name: "TimeZone".to_owned(),
+                        parameter_value: "UTC".to_owned(),
+                    },
+                    BackendMessage::ParameterStatus {
+                        parameter_name: "standard_conforming_strings".to_owned(),
+                        parameter_value: "on".to_owned(),
+                    },
+                    BackendMessage::ParameterStatus {
+                        parameter_name: "server_version".to_owned(),
+                        parameter_value: "14.5 ReadySet".to_owned(),
+                    },
+                    BackendMessage::ready_for_query_idle()
+                ]
+            ),
+            _ => panic!(),
+        }
     }
 
     #[test]
@@ -1086,10 +1084,13 @@ mod tests {
             password: expected_password.to_string(),
         });
         let mut channel = Channel::<NullBytestream, Vec<Value>>::new(NullBytestream);
-        assert_eq!(
-            block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap(),
-            Response::Messages(smallvec![BackendMessage::AuthenticationCleartextPassword])
-        );
+        match block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap() {
+            Response::Messages(ms) => assert_eq!(
+                ms.as_ref(),
+                vec![BackendMessage::AuthenticationCleartextPassword]
+            ),
+            _ => panic!(),
+        }
         assert_eq!(
             protocol.state,
             State::Authenticating {
@@ -1169,10 +1170,10 @@ mod tests {
 
         // A Sync message is accepted (after connection start up completes).
         let request = FrontendMessage::Sync;
-        assert_eq!(
-            block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap(),
-            Response::Message(BackendMessage::ready_for_query_idle())
-        );
+        match block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap() {
+            Response::Message(m) => assert_eq!(m, BackendMessage::ready_for_query_idle()),
+            _ => panic!(),
+        }
     }
 
     #[test]
@@ -1190,14 +1191,14 @@ mod tests {
 
         // A Terminate message is accepted (no response message is returned).
         let request = FrontendMessage::Terminate;
-        assert_eq!(
+        assert!(matches!(
             block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap(),
             Response::Empty
-        );
+        ));
     }
 
-    #[test]
-    fn query_read() {
+    #[tokio::test]
+    async fn query_read() {
         let mut protocol = Protocol::new();
         let mut backend = Backend::new();
         let mut channel = Channel::<NullBytestream, Vec<Value>>::new(NullBytestream);
@@ -1207,45 +1208,63 @@ mod tests {
             user: Some(bytes_str("user_name")),
             database: Some(bytes_str("database_name")),
         };
-        block_on(protocol.on_request(startup_request, &mut backend, &mut channel)).unwrap();
+        protocol
+            .on_request(startup_request, &mut backend, &mut channel)
+            .await
+            .unwrap();
 
         // A read query is passed to the backend correctly and a suitable result is returned.
         let request = FrontendMessage::Query {
             query: bytes_str("SELECT * FROM test;"),
         };
-        assert_eq!(
-            block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap(),
+        match protocol
+            .on_request(request, &mut backend, &mut channel)
+            .await
+            .unwrap()
+        {
             Response::Select {
-                header: Some(RowDescription {
-                    field_descriptions: vec![
-                        FieldDescription {
-                            field_name: "col1".to_string(),
-                            table_id: UNKNOWN_TABLE,
-                            col_id: UNKNOWN_COLUMN,
-                            data_type: Type::INT4,
-                            data_type_size: TYPLEN_4,
-                            type_modifier: ATTTYPMOD_NONE,
-                            transfer_format: TransferFormat::Text
-                        },
-                        FieldDescription {
-                            field_name: "col2".to_string(),
-                            table_id: UNKNOWN_TABLE,
-                            col_id: UNKNOWN_COLUMN,
-                            data_type: Type::FLOAT8,
-                            data_type_size: TYPLEN_8,
-                            type_modifier: ATTTYPMOD_NONE,
-                            transfer_format: TransferFormat::Text
-                        },
-                    ],
-                }),
-                resultset: vec![
-                    vec![Value(DataValue::Int(88)), Value(DataValue::Double(0.123))],
-                    vec![Value(DataValue::Int(22)), Value(DataValue::Double(0.456))]
-                ],
-                result_transfer_formats: None,
-                trailer: Some(BackendMessage::ready_for_query_idle())
+                header,
+                resultset,
+                result_transfer_formats,
+                trailer,
+            } => {
+                assert_eq!(
+                    header,
+                    Some(RowDescription {
+                        field_descriptions: vec![
+                            FieldDescription {
+                                field_name: "col1".to_string(),
+                                table_id: UNKNOWN_TABLE,
+                                col_id: UNKNOWN_COLUMN,
+                                data_type: Type::INT4,
+                                data_type_size: TYPLEN_4,
+                                type_modifier: ATTTYPMOD_NONE,
+                                transfer_format: TransferFormat::Text
+                            },
+                            FieldDescription {
+                                field_name: "col2".to_string(),
+                                table_id: UNKNOWN_TABLE,
+                                col_id: UNKNOWN_COLUMN,
+                                data_type: Type::FLOAT8,
+                                data_type_size: TYPLEN_8,
+                                type_modifier: ATTTYPMOD_NONE,
+                                transfer_format: TransferFormat::Text
+                            },
+                        ],
+                    })
+                );
+                assert_eq!(result_transfer_formats, None);
+                assert_eq!(trailer, Some(BackendMessage::ready_for_query_idle()));
+                assert_eq!(
+                    resultset.try_collect::<Vec<_>>().await.unwrap(),
+                    vec![
+                        vec![Value(DataValue::Int(88)), Value(DataValue::Double(0.123))],
+                        vec![Value(DataValue::Int(22)), Value(DataValue::Double(0.456))]
+                    ]
+                );
             }
-        );
+            _ => panic!(),
+        }
         assert_eq!(backend.last_query.unwrap(), "SELECT * FROM test;");
     }
 
@@ -1288,15 +1307,18 @@ mod tests {
         let request = FrontendMessage::Query {
             query: bytes_str("DELETE * FROM test;"),
         };
-        assert_eq!(
-            block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap(),
-            Response::Messages(smallvec![
-                CommandComplete {
-                    tag: CommandCompleteTag::Delete(5)
-                },
-                BackendMessage::ready_for_query_idle()
-            ])
-        );
+        match block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap() {
+            Response::Messages(ms) => assert_eq!(
+                ms.as_ref(),
+                vec![
+                    CommandComplete {
+                        tag: CommandCompleteTag::Delete(5)
+                    },
+                    BackendMessage::ready_for_query_idle()
+                ]
+            ),
+            _ => panic!(),
+        }
         assert_eq!(backend.last_query.unwrap(), "DELETE * FROM test;");
     }
 
@@ -1320,10 +1342,10 @@ mod tests {
             query: bytes_str("SELECT * FROM test WHERE x = $1 AND y = $2;"),
             parameter_data_types: vec![],
         };
-        assert_eq!(
+        assert!(matches!(
             block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap(),
             Response::Message(ParseComplete)
-        );
+        ));
         assert_eq!(
             backend.last_prepare.unwrap(),
             "SELECT * FROM test WHERE x = $1 AND y = $2;"
@@ -1398,10 +1420,10 @@ mod tests {
             params: vec![DataValue::Double(0.8887), DataValue::Int(45678)],
             result_transfer_formats: vec![TransferFormat::Text, TransferFormat::Binary],
         };
-        assert_eq!(
+        assert!(matches!(
             block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap(),
             Response::Message(BindComplete)
-        );
+        ));
         assert_eq!(
             *protocol.portals.get("portal1").unwrap(),
             PortalData {
@@ -1444,10 +1466,10 @@ mod tests {
             params: vec![DataValue::Double(0.8887), DataValue::Int(45678)],
             result_transfer_formats: vec![],
         };
-        assert_eq!(
+        assert!(matches!(
             block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap(),
             Response::Message(BindComplete)
-        );
+        ));
         assert_eq!(
             *protocol.portals.get("portal1").unwrap(),
             PortalData {
@@ -1488,10 +1510,10 @@ mod tests {
             params: vec![DataValue::Double(0.8887), DataValue::Int(45678)],
             result_transfer_formats: vec![TransferFormat::Binary],
         };
-        assert_eq!(
+        assert!(matches!(
             block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap(),
             Response::Message(BindComplete)
-        );
+        ));
         assert_eq!(
             *protocol.portals.get("portal1").unwrap(),
             PortalData {
@@ -1597,10 +1619,10 @@ mod tests {
         let request = FrontendMessage::Close {
             name: PreparedStatement(bytes_str("prepared1")),
         };
-        assert_eq!(
+        assert!(matches!(
             block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap(),
             Response::Message(CloseComplete)
-        );
+        ));
         assert_eq!(backend.last_close.unwrap(), 0);
         assert!(protocol.prepared_statements.get("prepared1").is_none());
     }
@@ -1622,10 +1644,10 @@ mod tests {
         let request = FrontendMessage::Close {
             name: PreparedStatement(bytes_str("prepared1")),
         };
-        assert_eq!(
+        assert!(matches!(
             block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap(),
             Response::Message(CloseComplete)
-        );
+        ));
     }
 
     #[test]
@@ -1654,20 +1676,20 @@ mod tests {
             params: vec![DataValue::Double(0.8887), DataValue::Int(45678)],
             result_transfer_formats: vec![TransferFormat::Text, TransferFormat::Binary],
         };
-        assert_eq!(
+        assert!(matches!(
             block_on(protocol.on_request(bind_request, &mut backend, &mut channel)).unwrap(),
             Response::Message(BindComplete)
-        );
+        ));
         assert!(protocol.portals.get("portal1").is_some());
 
         // A portal close request removes Protocol state for the portal.
         let request = FrontendMessage::Close {
             name: Portal(bytes_str("portal1")),
         };
-        assert_eq!(
+        assert!(matches!(
             block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap(),
             Response::Message(CloseComplete)
-        );
+        ));
         assert!(protocol.portals.get("protal1").is_none());
     }
 
@@ -1688,10 +1710,10 @@ mod tests {
         let request = FrontendMessage::Close {
             name: Portal(bytes_str("portal1")),
         };
-        assert_eq!(
+        assert!(matches!(
             block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap(),
             Response::Message(CloseComplete)
-        );
+        ));
     }
 
     #[test]
@@ -1719,36 +1741,39 @@ mod tests {
         let request = FrontendMessage::Describe {
             name: PreparedStatement(bytes_str("prepared1")),
         };
-        assert_eq!(
-            block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap(),
-            Response::Messages(smallvec![
-                ParameterDescription {
-                    parameter_data_types: vec![Type::FLOAT8, Type::INT4]
-                },
-                RowDescription {
-                    field_descriptions: vec![
-                        FieldDescription {
-                            field_name: "col1".to_string(),
-                            table_id: UNKNOWN_TABLE,
-                            col_id: UNKNOWN_COLUMN,
-                            data_type: Type::INT4,
-                            data_type_size: TYPLEN_4,
-                            type_modifier: ATTTYPMOD_NONE,
-                            transfer_format: TransferFormat::Text
-                        },
-                        FieldDescription {
-                            field_name: "col2".to_string(),
-                            table_id: UNKNOWN_TABLE,
-                            col_id: UNKNOWN_COLUMN,
-                            data_type: Type::FLOAT8,
-                            data_type_size: TYPLEN_8,
-                            type_modifier: ATTTYPMOD_NONE,
-                            transfer_format: TransferFormat::Text
-                        },
-                    ],
-                }
-            ])
-        );
+        match block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap() {
+            Response::Messages(ms) => assert_eq!(
+                ms.as_ref(),
+                vec![
+                    ParameterDescription {
+                        parameter_data_types: vec![Type::FLOAT8, Type::INT4]
+                    },
+                    RowDescription {
+                        field_descriptions: vec![
+                            FieldDescription {
+                                field_name: "col1".to_string(),
+                                table_id: UNKNOWN_TABLE,
+                                col_id: UNKNOWN_COLUMN,
+                                data_type: Type::INT4,
+                                data_type_size: TYPLEN_4,
+                                type_modifier: ATTTYPMOD_NONE,
+                                transfer_format: TransferFormat::Text
+                            },
+                            FieldDescription {
+                                field_name: "col2".to_string(),
+                                table_id: UNKNOWN_TABLE,
+                                col_id: UNKNOWN_COLUMN,
+                                data_type: Type::FLOAT8,
+                                data_type_size: TYPLEN_8,
+                                type_modifier: ATTTYPMOD_NONE,
+                                transfer_format: TransferFormat::Text
+                            },
+                        ],
+                    }
+                ]
+            ),
+            _ => panic!(),
+        }
     }
 
     #[test]
@@ -1798,40 +1823,43 @@ mod tests {
             params: vec![DataValue::Double(0.8887), DataValue::Int(45678)],
             result_transfer_formats: vec![TransferFormat::Text, TransferFormat::Binary],
         };
-        assert_eq!(
+        assert!(matches!(
             block_on(protocol.on_request(bind_request, &mut backend, &mut channel)).unwrap(),
             Response::Message(BindComplete)
-        );
+        ));
 
         // A portal describe request generates a suitable description.
         let request = FrontendMessage::Describe {
             name: Portal(bytes_str("portal1")),
         };
-        assert_eq!(
-            block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap(),
-            Response::Message(RowDescription {
-                field_descriptions: vec![
-                    FieldDescription {
-                        field_name: "col1".to_string(),
-                        table_id: UNKNOWN_TABLE,
-                        col_id: UNKNOWN_COLUMN,
-                        data_type: Type::INT4,
-                        data_type_size: TYPLEN_4,
-                        type_modifier: ATTTYPMOD_NONE,
-                        transfer_format: TransferFormat::Text
-                    },
-                    FieldDescription {
-                        field_name: "col2".to_string(),
-                        table_id: UNKNOWN_TABLE,
-                        col_id: UNKNOWN_COLUMN,
-                        data_type: Type::FLOAT8,
-                        data_type_size: TYPLEN_8,
-                        type_modifier: ATTTYPMOD_NONE,
-                        transfer_format: TransferFormat::Binary
-                    },
-                ],
-            })
-        );
+        match block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap() {
+            Response::Message(m) => assert_eq!(
+                m,
+                RowDescription {
+                    field_descriptions: vec![
+                        FieldDescription {
+                            field_name: "col1".to_string(),
+                            table_id: UNKNOWN_TABLE,
+                            col_id: UNKNOWN_COLUMN,
+                            data_type: Type::INT4,
+                            data_type_size: TYPLEN_4,
+                            type_modifier: ATTTYPMOD_NONE,
+                            transfer_format: TransferFormat::Text
+                        },
+                        FieldDescription {
+                            field_name: "col2".to_string(),
+                            table_id: UNKNOWN_TABLE,
+                            col_id: UNKNOWN_COLUMN,
+                            data_type: Type::FLOAT8,
+                            data_type_size: TYPLEN_8,
+                            type_modifier: ATTTYPMOD_NONE,
+                            transfer_format: TransferFormat::Binary
+                        },
+                    ],
+                }
+            ),
+            _ => panic!(),
+        }
     }
 
     #[test]
@@ -1854,8 +1882,8 @@ mod tests {
         block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap_err();
     }
 
-    #[test]
-    fn execute_read() {
+    #[tokio::test]
+    async fn execute_read() {
         let mut protocol = Protocol::new();
         let mut backend = Backend::new();
         let mut channel = Channel::<NullBytestream, Vec<Value>>::new(NullBytestream);
@@ -1865,14 +1893,20 @@ mod tests {
             user: Some(bytes_str("user_name")),
             database: Some(bytes_str("database_name")),
         };
-        block_on(protocol.on_request(startup_request, &mut backend, &mut channel)).unwrap();
+        protocol
+            .on_request(startup_request, &mut backend, &mut channel)
+            .await
+            .unwrap();
 
         let parse_request = FrontendMessage::Parse {
             prepared_statement_name: bytes_str("prepared1"),
             query: bytes_str("SELECT * FROM test WHERE x = $1 AND y = $2;"),
             parameter_data_types: vec![],
         };
-        block_on(protocol.on_request(parse_request, &mut backend, &mut channel)).unwrap();
+        protocol
+            .on_request(parse_request, &mut backend, &mut channel)
+            .await
+            .unwrap();
         assert!(protocol.prepared_statements.get("prepared1").is_some());
 
         let bind_request = FrontendMessage::Bind {
@@ -1881,31 +1915,46 @@ mod tests {
             params: vec![DataValue::Double(0.8887), DataValue::Int(45678)],
             result_transfer_formats: vec![TransferFormat::Text, TransferFormat::Binary],
         };
-        assert_eq!(
-            block_on(protocol.on_request(bind_request, &mut backend, &mut channel)).unwrap(),
+        assert!(matches!(
+            protocol
+                .on_request(bind_request, &mut backend, &mut channel)
+                .await
+                .unwrap(),
             Response::Message(BindComplete)
-        );
+        ));
 
         // A portal execute request returns the correct results from the backend.
         let request = FrontendMessage::Execute {
             portal_name: bytes_str("portal1"),
             limit: 0,
         };
-        assert_eq!(
-            block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap(),
+        match protocol
+            .on_request(request, &mut backend, &mut channel)
+            .await
+            .unwrap()
+        {
             Response::Select {
-                header: None,
-                resultset: vec![
-                    vec![Value(DataValue::Int(88)), Value(DataValue::Double(0.123))],
-                    vec![Value(DataValue::Int(22)), Value(DataValue::Double(0.456))]
-                ],
-                result_transfer_formats: Some(Arc::new(vec![
-                    TransferFormat::Text,
-                    TransferFormat::Binary
-                ])),
-                trailer: None
+                header,
+                resultset,
+                result_transfer_formats,
+                trailer,
+            } => {
+                assert_eq!(header, None);
+                assert_eq!(
+                    resultset.try_collect::<Vec<_>>().await.unwrap(),
+                    vec![
+                        vec![Value(DataValue::Int(88)), Value(DataValue::Double(0.123))],
+                        vec![Value(DataValue::Int(22)), Value(DataValue::Double(0.456))]
+                    ]
+                );
+                assert_eq!(
+                    result_transfer_formats,
+                    Some(Arc::new(vec![TransferFormat::Text, TransferFormat::Binary]))
+                );
+                assert_eq!(trailer, None);
             }
-        );
+            _ => panic!(),
+        }
         assert_eq!(backend.last_execute_id.unwrap(), 0);
         assert_eq!(
             backend.last_execute_params.unwrap(),
@@ -1941,10 +1990,10 @@ mod tests {
             params: vec![DataValue::Double(0.8887), DataValue::Int(45678)],
             result_transfer_formats: vec![TransferFormat::Text, TransferFormat::Binary],
         };
-        assert_eq!(
+        assert!(matches!(
             block_on(protocol.on_request(bind_request, &mut backend, &mut channel)).unwrap(),
             Response::Message(BindComplete)
-        );
+        ));
 
         // An `Error` is returned when the backend returns an error.
         let request = FrontendMessage::Execute {
@@ -1982,22 +2031,22 @@ mod tests {
             params: vec![DataValue::Double(0.8887), DataValue::Int(45678)],
             result_transfer_formats: vec![TransferFormat::Text, TransferFormat::Binary],
         };
-        assert_eq!(
+        assert!(matches!(
             block_on(protocol.on_request(bind_request, &mut backend, &mut channel)).unwrap(),
             Response::Message(BindComplete)
-        );
+        ));
 
         // A write portal is passed to the backend correctly and a suitable result is returned.
         let request = FrontendMessage::Execute {
             portal_name: bytes_str("portal1"),
             limit: 0,
         };
-        assert_eq!(
+        assert!(matches!(
             block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap(),
             Response::Message(CommandComplete {
                 tag: CommandCompleteTag::Delete(5)
             })
-        );
+        ));
         assert_eq!(backend.last_execute_id.unwrap(), 0);
         assert_eq!(
             backend.last_execute_params.unwrap(),
@@ -2008,7 +2057,7 @@ mod tests {
     #[test]
     fn on_error_starting_up() {
         let mut protocol = Protocol::new();
-        assert_eq!(
+        assert!(matches!(
             block_on(
                 protocol.on_error::<Backend>(Error::InternalError("error requested".to_string()))
             )
@@ -2016,36 +2065,40 @@ mod tests {
             Response::Message(ErrorResponse {
                 severity: ErrorSeverity::Error,
                 sqlstate: SqlState::INTERNAL_ERROR,
-                message: "internal error: error requested".to_string()
-            })
-        );
+                message
+            }) if message == "internal error: error requested"
+        ));
     }
 
     #[test]
     fn on_error_after_starting_up() {
         let mut protocol = Protocol::new();
         protocol.state = State::Ready;
-        assert_eq!(
-            block_on(
-                protocol.on_error::<Backend>(Error::InternalError("error requested".to_string()))
-            )
-            .unwrap(),
-            Response::Messages(smallvec![
-                ErrorResponse {
-                    severity: ErrorSeverity::Error,
-                    sqlstate: SqlState::INTERNAL_ERROR,
-                    message: "internal error: error requested".to_string()
-                },
-                BackendMessage::ready_for_query_idle()
-            ])
-        );
+        match block_on(
+            protocol.on_error::<Backend>(Error::InternalError("error requested".to_string())),
+        )
+        .unwrap()
+        {
+            Response::Messages(ms) => assert_eq!(
+                ms.as_ref(),
+                vec![
+                    ErrorResponse {
+                        severity: ErrorSeverity::Error,
+                        sqlstate: SqlState::INTERNAL_ERROR,
+                        message: "internal error: error requested".to_string()
+                    },
+                    BackendMessage::ready_for_query_idle()
+                ]
+            ),
+            _ => panic!(),
+        }
     }
 
     #[test]
     fn on_error_in_extended() {
         let mut protocol = Protocol::new();
         protocol.state = State::Extended;
-        assert_eq!(
+        assert!(matches!(
             block_on(
                 protocol.on_error::<Backend>(Error::InternalError("error requested".to_string()))
             )
@@ -2053,9 +2106,9 @@ mod tests {
             Response::Message(ErrorResponse {
                 severity: ErrorSeverity::Error,
                 sqlstate: SqlState::INTERNAL_ERROR,
-                message: "internal error: error requested".to_string()
-            })
-        );
+                message
+            }) if message == "internal error: error requested"
+        ));
         assert_eq!(protocol.state, State::Error);
     }
 }

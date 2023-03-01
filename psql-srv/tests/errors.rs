@@ -1,7 +1,8 @@
 use std::convert::TryFrom;
+use std::vec;
 
 use async_trait::async_trait;
-use futures::Future;
+use futures::{stream, Future};
 use postgres::NoTls;
 use postgres_types::Type;
 use psql_srv::{
@@ -38,7 +39,7 @@ struct ErrorBackend(ErrorPosition);
 impl Backend for ErrorBackend {
     type Value = Value;
     type Row = Vec<Value>;
-    type Resultset = Vec<Self::Row>;
+    type Resultset = stream::Iter<vec::IntoIter<Result<Self::Row, psql_srv::Error>>>;
 
     async fn on_init(&mut self, _database: &str) -> Result<CredentialsNeeded, Error> {
         Ok(CredentialsNeeded::None)
@@ -54,7 +55,7 @@ impl Backend for ErrorBackend {
         } else {
             Ok(QueryResponse::Select {
                 schema: vec![],
-                resultset: vec![],
+                resultset: stream::iter(vec![]),
             })
         }
     }
@@ -86,11 +87,13 @@ impl Backend for ErrorBackend {
                     name: "x".to_owned(),
                     col_type: Type::BOOL,
                 }],
-                resultset: vec![vec![Value(Err(Error::InternalError("factory".to_owned())))]],
+                resultset: stream::iter(vec![Ok(vec![Value(Err(Error::InternalError(
+                    "factory".to_owned(),
+                )))])]),
             }),
             _ => Ok(QueryResponse::Select {
                 schema: vec![],
-                resultset: vec![],
+                resultset: stream::iter(vec![]),
             }),
         }
     }

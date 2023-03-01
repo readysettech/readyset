@@ -33,7 +33,7 @@ pub enum Response<R, S> {
 impl<R, S> Response<R, S>
 where
     R: IntoIterator<Item: TryInto<Value, Error = Error>>,
-    S: IntoIterator<Item = R>,
+    S: Stream<Item = Result<R, Error>> + Unpin,
 {
     pub async fn write<K>(self, sink: &mut K) -> Result<(), EncodeError>
     where
@@ -59,7 +59,7 @@ where
 
             Select {
                 header,
-                resultset,
+                mut resultset,
                 result_transfer_formats,
                 trailer,
             } => {
@@ -68,13 +68,20 @@ where
                 }
 
                 let mut n_rows = 0;
-                for r in resultset {
-                    sink.feed(BackendMessage::DataRow {
-                        values: r,
-                        explicit_transfer_formats: result_transfer_formats.clone(),
-                    })
-                    .await?;
-                    n_rows += 1;
+                while let Some(r) = resultset.next().await {
+                    match r {
+                        Ok(row) => {
+                            sink.feed(BackendMessage::DataRow {
+                                values: row,
+                                explicit_transfer_formats: result_transfer_formats.clone(),
+                            })
+                            .await?;
+                            n_rows += 1;
+                        }
+                        Err(e) => {
+                            sink.feed(e.into()).await?;
+                        }
+                    }
                 }
 
                 sink.feed(BackendMessage::CommandComplete {
@@ -96,6 +103,7 @@ where
 mod tests {
 
     use std::convert::TryFrom;
+    use std::vec;
 
     use smallvec::smallvec;
     use tokio_test::block_on;
@@ -114,9 +122,12 @@ mod tests {
         }
     }
 
+    type TestResponse =
+        Response<Vec<Value>, stream::Iter<vec::IntoIter<Result<Vec<Value>, Error>>>>;
+
     #[test]
     fn write_empty() {
-        let response = Response::<Vec<Value>, Vec<Vec<Value>>>::Empty;
+        let response = TestResponse::Empty;
         let validating_sink = sink::unfold(0, |_i, _m: BackendMessage<Vec<Value>>| {
             async move {
                 // No messages are expected.
@@ -129,8 +140,7 @@ mod tests {
 
     #[test]
     fn write_message() {
-        let response =
-            Response::<Vec<Value>, Vec<Vec<Value>>>::Message(BackendMessage::BindComplete);
+        let response = TestResponse::Empty;
         let validating_sink = sink::unfold(0, |i, m: BackendMessage<Vec<Value>>| {
             async move {
                 match i {
@@ -147,7 +157,7 @@ mod tests {
 
     #[test]
     fn write_message2() {
-        let response = Response::<Vec<Value>, Vec<Vec<Value>>>::Messages(smallvec![
+        let response = TestResponse::Messages(smallvec![
             BackendMessage::BindComplete,
             BackendMessage::CloseComplete,
         ]);
@@ -168,9 +178,9 @@ mod tests {
 
     #[test]
     fn write_select_simple_empty() {
-        let response = Response::<Vec<Value>, Vec<Vec<Value>>>::Select {
+        let response = TestResponse::Select {
             header: None,
-            resultset: vec![],
+            resultset: stream::iter(vec![]),
             result_transfer_formats: None,
             trailer: None,
         };
@@ -195,14 +205,20 @@ mod tests {
 
     #[test]
     fn write_select() {
-        let response = Response::<Vec<Value>, Vec<Vec<Value>>>::Select {
+        let response = Response::Select {
             header: Some(BackendMessage::RowDescription {
                 field_descriptions: vec![],
             }),
-            resultset: vec![
-                vec![Value(DataValue::Int(5)), Value(DataValue::Double(0.123))],
-                vec![Value(DataValue::Int(99)), Value(DataValue::Double(0.456))],
-            ],
+            resultset: stream::iter(vec![
+                Ok(vec![
+                    Value(DataValue::Int(5)),
+                    Value(DataValue::Double(0.123)),
+                ]),
+                Ok(vec![
+                    Value(DataValue::Int(99)),
+                    Value(DataValue::Double(0.456)),
+                ]),
+            ]),
             result_transfer_formats: Some(Arc::new(vec![
                 TransferFormat::Text,
                 TransferFormat::Binary,

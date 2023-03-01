@@ -100,7 +100,7 @@ impl ps::Backend for Backend {
 
 /// A simple wrapper around a request parameter `psql_srv::Value` reference, facilitiating
 /// conversion to `DfValue`.
-struct ParamRef<'a>(&'a ps::Value);
+pub struct ParamRef<'a>(pub &'a ps::Value);
 
 impl TryFrom<ParamRef<'_>> for DfValue {
     type Error = ps::Error;
