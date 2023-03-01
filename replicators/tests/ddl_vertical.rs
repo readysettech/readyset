@@ -639,12 +639,12 @@ async fn run(ops: Vec<Operation>) {
                     .chain(non_pkey_cols)
                     .collect();
                 let col_defs = col_defs.join(", ");
-                let query = format!("CREATE TABLE {table_name} ({col_defs})");
+                let query = format!("CREATE TABLE \"{table_name}\" ({col_defs})");
                 rs_conn.simple_query(&query).await.unwrap();
                 pg_conn.simple_query(&query).await.unwrap();
             }
             Operation::DropTable(name) => {
-                let query = format!("DROP TABLE {name}");
+                let query = format!("DROP TABLE \"{name}\"");
                 rs_conn.simple_query(&query).await.unwrap();
                 pg_conn.simple_query(&query).await.unwrap();
             }
@@ -653,20 +653,23 @@ async fn run(ops: Vec<Operation>) {
                 let params: Vec<&DfValue> = once(&pk).chain(col_vals.iter()).collect();
                 let placeholders: Vec<_> = (1..=params.len()).map(|n| format!("${n}")).collect();
                 let placeholders = placeholders.join(", ");
-                let query = format!("INSERT INTO {table_name} VALUES ({placeholders})");
+                let query = format!("INSERT INTO \"{table_name}\" VALUES ({placeholders})");
                 rs_conn.query_raw(&query, &params).await.unwrap();
                 pg_conn.query_raw(&query, &params).await.unwrap();
             }
             Operation::AddColumn(table_name, col_spec) => {
                 let query = format!(
-                    "ALTER TABLE {} ADD COLUMN \"{}\" {}",
+                    "ALTER TABLE \"{}\" ADD COLUMN \"{}\" {}",
                     table_name, col_spec.name, col_spec.sql_type
                 );
                 rs_conn.simple_query(&query).await.unwrap();
                 pg_conn.simple_query(&query).await.unwrap();
             }
             Operation::DropColumn(table_name, col_name) => {
-                let query = format!("ALTER TABLE {} DROP COLUMN \"{}\"", table_name, col_name);
+                let query = format!(
+                    "ALTER TABLE \"{}\" DROP COLUMN \"{}\"",
+                    table_name, col_name
+                );
                 rs_conn.simple_query(&query).await.unwrap();
                 pg_conn.simple_query(&query).await.unwrap();
             }
@@ -676,14 +679,14 @@ async fn run(ops: Vec<Operation>) {
                 new_name,
             } => {
                 let query = format!(
-                    "ALTER TABLE {} RENAME COLUMN \"{}\" TO \"{}\"",
+                    "ALTER TABLE \"{}\" RENAME COLUMN \"{}\" TO \"{}\"",
                     table, col_name, new_name
                 );
                 rs_conn.simple_query(&query).await.unwrap();
                 pg_conn.simple_query(&query).await.unwrap();
             }
             Operation::DeleteRow(table_name, key) => {
-                let query = format!("DELETE FROM {table_name} WHERE id = ({key})");
+                let query = format!("DELETE FROM \"{table_name}\" WHERE id = ({key})");
                 rs_conn.simple_query(&query).await.unwrap();
                 pg_conn.simple_query(&query).await.unwrap();
             }
@@ -702,11 +705,11 @@ async fn run(ops: Vec<Operation>) {
         for table in runtime_state.tables.keys() {
             eventually!(run_test: {
                 let rs_rows = rs_conn
-                    .query(&format!("SELECT * FROM {table}"), &[])
+                    .query(&format!("SELECT * FROM \"{table}\""), &[])
                     .await
                     .unwrap();
                 let pg_rows = pg_conn
-                    .query(&format!("SELECT * FROM {table}"), &[])
+                    .query(&format!("SELECT * FROM \"{table}\""), &[])
                     .await
                     .unwrap();
                 // Previously, we would run all the result handling in the run_test block, but
@@ -729,7 +732,7 @@ async fn run(ops: Vec<Operation>) {
         // Also make sure all deleted tables were actually deleted:
         for table in &runtime_state.deleted_tables {
             rs_conn
-                .query(&format!("DROP TABLE {table}"), &[])
+                .query(&format!("DROP TABLE \"{table}\""), &[])
                 .await
                 .unwrap_err();
         }
