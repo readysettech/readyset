@@ -585,7 +585,7 @@ fn rows_to_dfvalue_vec(rows: Vec<Row>) -> Vec<Vec<DfValue>> {
 async fn run(ops: Vec<Operation>) {
     readyset_tracing::init_test_logging();
 
-    let (opts, _handle) = TestBuilder::default()
+    let (opts, _handle, shutdown_tx) = TestBuilder::default()
         .fallback(true)
         .build::<PostgreSQLAdapter>()
         .await;
@@ -698,6 +698,8 @@ async fn run(ops: Vec<Operation>) {
                 .unwrap_err();
         }
     }
+
+    shutdown_tx.shutdown().await;
 }
 
 proptest! {
