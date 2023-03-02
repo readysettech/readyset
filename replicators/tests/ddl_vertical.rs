@@ -126,6 +126,8 @@ enum Operation {
         col_name: String,
         new_name: String,
     },
+    /// Creates a simple view that does a SELECT * on a given table
+    CreateSimpleView(String, String),
 }
 
 impl Operation {
@@ -168,6 +170,11 @@ impl Operation {
             } => state.tables.get(table).map_or(false, |t| {
                 t.iter().any(|cs| cs.name == *col_name) && t.iter().all(|cs| cs.name != *new_name)
             }),
+            Self::CreateSimpleView(name, table_source) => {
+                state.tables.contains_key(table_source)
+                    && !state.tables.contains_key(name)
+                    && !state.views.contains_key(name)
+            }
         }
     }
 }
@@ -273,6 +280,15 @@ prop_compose! {
     }
 }
 
+prop_compose! {
+    fn gen_create_simple_view(tables: Vec<String>)
+                             (name in SQL_NAME_REGEX,
+                              table_source in sample::select(tables))
+                             -> Operation {
+        Operation::CreateSimpleView(name, table_source)
+    }
+}
+
 /// A model of the current test state, used to help generate operations in a way that we expect to
 /// succeed, as well as to assist in shrinking, and to determine postconditions to check during
 /// test runtime.
@@ -289,6 +305,8 @@ struct TestModel {
     tables: HashMap<String, Vec<ColumnSpec>>,
     deleted_tables: Vec<String>,
     pkeys: HashMap<String, Vec<i32>>, // Primary keys in use for each table
+    // Map of view name to view definition (right now just a table that we do a SELECT * from)
+    views: HashMap<String, String>,
 }
 
 impl TestModel {
@@ -307,13 +325,27 @@ impl TestModel {
         // We can always create more tables, so start with just the one operation generator:
         let mut possible_ops = vec![gen_create_table().boxed()];
 
-        // If we have at least one table, we can delete a table, write a row, or add a column:
+        // If we have at least one table, we can do any of:
+        //  * delete a table
+        //  * write a row
+        //  * add a column
+        //  * create a simple view
         if !self.tables.is_empty() {
             let drop_strategy = gen_drop_table(self.tables.keys().cloned().collect()).boxed();
             let write_strategy = gen_write_row(self.tables.clone(), self.pkeys.clone()).boxed();
             let add_col_strat = gen_add_col(self.tables.clone()).boxed();
+            let create_simple_view_strat =
+                gen_create_simple_view(self.tables.keys().cloned().collect()).boxed();
 
-            possible_ops.extend([drop_strategy, write_strategy, add_col_strat].into_iter());
+            possible_ops.extend(
+                [
+                    drop_strategy,
+                    write_strategy,
+                    add_col_strat,
+                    create_simple_view_strat,
+                ]
+                .into_iter(),
+            );
         }
 
         // If we have a table with at least one (non-pkey) column, we can rename or drop a column:
@@ -386,6 +418,8 @@ impl TestModel {
                 self.tables.remove(name);
                 self.deleted_tables.push(name.clone());
                 self.pkeys.remove(name);
+                self.views
+                    .retain(|_view_name, table_source| name != table_source);
             }
             Operation::WriteRow(table, pkey, _col_vals) => {
                 self.pkeys.get_mut(table).unwrap().push(*pkey);
@@ -411,6 +445,9 @@ impl TestModel {
                 spec.name = new_name.clone();
             }
             Operation::DeleteRow(..) => (),
+            Operation::CreateSimpleView(name, table_source) => {
+                self.views.insert(name.clone(), table_source.clone());
+            }
         }
     }
 }
@@ -653,7 +690,7 @@ async fn run(ops: Vec<Operation>) {
                 });
             }
             Operation::DropTable(name) => {
-                let query = format!("DROP TABLE \"{name}\"");
+                let query = format!("DROP TABLE \"{name}\" CASCADE");
                 rs_conn.simple_query(&query).await.unwrap();
                 pg_conn.simple_query(&query).await.unwrap();
             }
@@ -699,6 +736,18 @@ async fn run(ops: Vec<Operation>) {
                 rs_conn.simple_query(&query).await.unwrap();
                 pg_conn.simple_query(&query).await.unwrap();
             }
+            Operation::CreateSimpleView(name, table_source) => {
+                let query = format!("CREATE VIEW \"{name}\" AS SELECT * FROM \"{table_source}\"");
+                rs_conn.simple_query(&query).await.unwrap();
+                pg_conn.simple_query(&query).await.unwrap();
+                let create_cache = format!("CREATE CACHE ALWAYS FROM SELECT * FROM \"{name}\"");
+                eventually!(run_test: {
+                    let result = rs_conn.simple_query(&create_cache).await;
+                    AssertUnwindSafe(move || result)
+                }, then_assert: |result| {
+                    result().unwrap()
+                });
+            }
         }
 
         // Note that if we were verifying results of any operations directly, it would be better to
@@ -709,16 +758,19 @@ async fn run(ops: Vec<Operation>) {
         // state right away and then check the table contents based on that.
         runtime_state.next_state(&op);
 
-        // After each op, check postconditions (currently just make sure the rows in all the tables
-        // match our expectations)
-        for table in runtime_state.tables.keys() {
+        // After each op, check that all table and view contents match
+        for relation in runtime_state
+            .tables
+            .keys()
+            .chain(runtime_state.views.keys())
+        {
             eventually!(run_test: {
                 let rs_rows = rs_conn
-                    .query(&format!("SELECT * FROM \"{table}\""), &[])
+                    .query(&format!("SELECT * FROM \"{relation}\""), &[])
                     .await
                     .unwrap();
                 let pg_rows = pg_conn
-                    .query(&format!("SELECT * FROM \"{table}\""), &[])
+                    .query(&format!("SELECT * FROM \"{relation}\""), &[])
                     .await
                     .unwrap();
                 // Previously, we would run all the result handling in the run_test block, but
