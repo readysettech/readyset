@@ -97,7 +97,7 @@ readyset-sql-passes = { path = "../readyset-sql-passes" }
 
 [dev-dependencies]
 serial_test = "0.5.1"
-tempfile = "3.2"
+tempfile = "3.4"
 
 [features]
 failure_injection = ["fail/failpoints"]

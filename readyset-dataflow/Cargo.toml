@@ -27,7 +27,7 @@ tracing = { version = "0.1", features = ["release_max_level_debug"] }
 tokio = { workspace = true, features = ["full"] }
 tokio-stream = { version = "0.1.5", features = ["net"] }
 vec_map = { version = "0.8.0", features = ["eders"] }
-tempfile = "3.0.2"
+tempfile = "3.4"
 derive_more = "0.99.11"
 tuple = "0.5.1"
 vec1 = "1.6.0"

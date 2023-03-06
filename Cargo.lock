@@ -553,9 +553,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.0.72"
+version = "1.0.79"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22a9137b95ea06864e018375b72adfb7db6e6f68cfc8df5a04d00288050485ee"
+checksum = "50d30906286121d95be3d479533b458f87493b30a4b5f79a607db8f5d11aa91f"
 dependencies = [
  "jobserver",
 ]
@@ -1552,13 +1552,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4443176a9f2c162692bd3d352d745ef9413eec5782a80d8fd6f8a1ac692a07f7"
 
 [[package]]
+name = "fastrand"
+version = "1.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e51093e27b0797c359783294ca4f0a911c270184cb10f85783b118614a1501be"
+dependencies = [
+ "instant",
+]
+
+[[package]]
 name = "fd-lock"
 version = "3.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "46e245f4c8ec30c6415c56cb132c07e69e74f1942f6b4a4061da748b49f486ca"
 dependencies = [
  "cfg-if 1.0.0",
- "rustix",
+ "rustix 0.34.4",
  "windows-sys 0.30.0",
 ]
 
@@ -1570,7 +1579,7 @@ checksum = "975ccf83d8d9d0d84682850a38c8169027be83368805971cc4f238c2b245bc98"
 dependencies = [
  "cfg-if 1.0.0",
  "libc",
- "redox_syscall 0.2.10",
+ "redox_syscall 0.2.16",
  "winapi 0.3.9",
 ]
 
@@ -2266,6 +2275,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9448015e586b611e5d322f6703812bbca2f1e709d5773ecd38ddb4e3bb649504"
 
 [[package]]
+name = "io-lifetimes"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e7d6c6f8c91b4b9ed43484ad1a938e393caf35960fce7f82a040497207bd8e9e"
+dependencies = [
+ "libc",
+ "windows-sys 0.42.0",
+]
+
+[[package]]
 name = "iovec"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2303,9 +2322,9 @@ checksum = "1aab8fc367588b89dcee83ab0fd66b72b50b72fa1904d7095045ace2b0c81c35"
 
 [[package]]
 name = "jobserver"
-version = "0.1.24"
+version = "0.1.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af25a77299a7f711a01975c35a6a424eb6862092cc2d6c72c4ed6cbc56dfc1fa"
+checksum = "068b1ee6743e4d11fb9c6a1e6064b3693a1b600e7f5f5988047d98b3dc9fb90b"
 dependencies = [
  "libc",
 ]
@@ -2426,9 +2445,9 @@ dependencies = [
 
 [[package]]
 name = "libc"
-version = "0.2.128"
+version = "0.2.139"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "95f2a930906a03d4ee59113b31586c057c94f4d40c9fe90f21597a8b6822bfd8"
+checksum = "201de327520df007757c1f0adce6e827fe8562fbc28bfd9c15571c66ca1f5f79"
 
 [[package]]
 name = "libloading"
@@ -2482,6 +2501,12 @@ name = "linux-raw-sys"
 version = "0.0.42"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5284f00d480e1c39af34e72f8ad60b94f47007e3481cd3b731c1d67190ddc7b7"
+
+[[package]]
+name = "linux-raw-sys"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f051f77a7c8e6957c0696eac88f26b0117e54f52d3fc682ab19397a8812846a4"
 
 [[package]]
 name = "lock_api"
@@ -3457,7 +3482,7 @@ dependencies = [
  "cfg-if 1.0.0",
  "instant",
  "libc",
- "redox_syscall 0.2.10",
+ "redox_syscall 0.2.16",
  "smallvec",
  "winapi 0.3.9",
 ]
@@ -3470,7 +3495,7 @@ checksum = "995f667a6c822200b0433ac218e05582f0e2efa1b922a3fd2fbaadc5f87bab37"
 dependencies = [
  "cfg-if 1.0.0",
  "libc",
- "redox_syscall 0.2.10",
+ "redox_syscall 0.2.16",
  "smallvec",
  "windows-sys 0.34.0",
 ]
@@ -3656,7 +3681,7 @@ dependencies = [
 [[package]]
 name = "postgres"
 version = "0.19.4"
-source = "git+https://github.com/readysettech/rust-postgres.git#7fe50ff41822cf087a0c06d65add99f4454d0702"
+source = "git+https://github.com/readysettech/rust-postgres.git#5302d7ed0b9cca0b4672b8a3fdde21c7b0643f3d"
 dependencies = [
  "bytes 1.1.0",
  "fallible-iterator",
@@ -3669,7 +3694,7 @@ dependencies = [
 [[package]]
 name = "postgres-derive"
 version = "0.4.3"
-source = "git+https://github.com/readysettech/rust-postgres.git#7fe50ff41822cf087a0c06d65add99f4454d0702"
+source = "git+https://github.com/readysettech/rust-postgres.git#5302d7ed0b9cca0b4672b8a3fdde21c7b0643f3d"
 dependencies = [
  "proc-macro2 1.0.47",
  "quote 1.0.21",
@@ -3679,7 +3704,7 @@ dependencies = [
 [[package]]
 name = "postgres-native-tls"
 version = "0.5.0"
-source = "git+https://github.com/readysettech/rust-postgres.git#7fe50ff41822cf087a0c06d65add99f4454d0702"
+source = "git+https://github.com/readysettech/rust-postgres.git#5302d7ed0b9cca0b4672b8a3fdde21c7b0643f3d"
 dependencies = [
  "native-tls",
  "tokio",
@@ -3690,7 +3715,7 @@ dependencies = [
 [[package]]
 name = "postgres-protocol"
 version = "0.6.4"
-source = "git+https://github.com/readysettech/rust-postgres.git#7fe50ff41822cf087a0c06d65add99f4454d0702"
+source = "git+https://github.com/readysettech/rust-postgres.git#5302d7ed0b9cca0b4672b8a3fdde21c7b0643f3d"
 dependencies = [
  "base64 0.20.0",
  "byteorder",
@@ -3707,7 +3732,7 @@ dependencies = [
 [[package]]
 name = "postgres-types"
 version = "0.2.4"
-source = "git+https://github.com/readysettech/rust-postgres.git#7fe50ff41822cf087a0c06d65add99f4454d0702"
+source = "git+https://github.com/readysettech/rust-postgres.git#5302d7ed0b9cca0b4672b8a3fdde21c7b0643f3d"
 dependencies = [
  "bit-vec",
  "bytes 1.1.0",
@@ -4996,9 +5021,9 @@ checksum = "41cc0f7e4d5d4544e8861606a285bb08d3e70712ccc7d2b84d7c0ccfaf4b05ce"
 
 [[package]]
 name = "redox_syscall"
-version = "0.2.10"
+version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8383f39639269cde97d255a32bdb68c047337295414940c68bdd30c2e13203ff"
+checksum = "fb5a58c1855b4b6819d59012155603f0b22ad30cad752600aadfcb695265519a"
 dependencies = [
  "bitflags",
 ]
@@ -5021,7 +5046,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "528532f3d801c87aec9def2add9ca802fe569e44a544afe633765267840abe64"
 dependencies = [
  "getrandom 0.2.3",
- "redox_syscall 0.2.10",
+ "redox_syscall 0.2.16",
 ]
 
 [[package]]
@@ -5049,15 +5074,6 @@ name = "regex-syntax"
 version = "0.6.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f497285884f3fcff424ffc933e56d7cbca511def0c9831a7f9b5f6153e3cc89b"
-
-[[package]]
-name = "remove_dir_all"
-version = "0.5.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3acd125665422973a33ac9d3dd2df85edad0f4ae9b00dafb1a05e43a9f5ef8e7"
-dependencies = [
- "winapi 0.3.9",
-]
 
 [[package]]
 name = "replicators"
@@ -5279,10 +5295,24 @@ checksum = "3f5d1c6ed6d1c6915aa64749b809fc1bafff49d160f5d927463658093d7d62ab"
 dependencies = [
  "bitflags",
  "errno",
- "io-lifetimes",
+ "io-lifetimes 0.6.1",
  "libc",
- "linux-raw-sys",
+ "linux-raw-sys 0.0.42",
  "winapi 0.3.9",
+]
+
+[[package]]
+name = "rustix"
+version = "0.36.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d4fdebc4b395b7fbb9ab11e462e20ed9051e7b16e42d24042c776eca0ac81b03"
+dependencies = [
+ "bitflags",
+ "errno",
+ "io-lifetimes 1.0.4",
+ "libc",
+ "linux-raw-sys 0.1.4",
+ "windows-sys 0.42.0",
 ]
 
 [[package]]
@@ -5966,16 +5996,15 @@ checksum = "af547b166dd1ea4b472165569fc456cfb6818116f854690b0ff205e636523dab"
 
 [[package]]
 name = "tempfile"
-version = "3.2.0"
+version = "3.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dac1c663cfc93810f88aed9b8941d48cabf856a1b111c29a40439018d870eb22"
+checksum = "af18f7ae1acd354b992402e9ec5864359d693cd8a79dcbef59f76891701c1e95"
 dependencies = [
  "cfg-if 1.0.0",
- "libc",
- "rand 0.8.5",
- "redox_syscall 0.2.10",
- "remove_dir_all",
- "winapi 0.3.9",
+ "fastrand",
+ "redox_syscall 0.2.16",
+ "rustix 0.36.7",
+ "windows-sys 0.42.0",
 ]
 
 [[package]]
@@ -6244,7 +6273,7 @@ dependencies = [
 [[package]]
 name = "tokio-postgres"
 version = "0.7.7"
-source = "git+https://github.com/readysettech/rust-postgres.git#7fe50ff41822cf087a0c06d65add99f4454d0702"
+source = "git+https://github.com/readysettech/rust-postgres.git#5302d7ed0b9cca0b4672b8a3fdde21c7b0643f3d"
 dependencies = [
  "async-trait",
  "byteorder",
@@ -6576,8 +6605,8 @@ version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f559b464de2e2bdabcac6a210d12e9b5a5973c251e102c44c585c71d51bd78e"
 dependencies = [
- "cfg-if 1.0.0",
- "rand 0.8.5",
+ "cfg-if 0.1.10",
+ "rand 0.7.3",
  "static_assertions",
 ]
 
