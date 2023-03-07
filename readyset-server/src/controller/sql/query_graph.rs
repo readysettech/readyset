@@ -701,14 +701,22 @@ fn classify_conditionals(
         Expr::Between { .. } => {
             internal!("Between should have been removed earlier")
         }
-        expr => {
-            // don't expect to see a base here: we ought to exit when classifying its
-            // parent selection predicate
-            internal!(
-                "encountered unexpected standalone base of condition expression {:?}",
-                expr
-            );
-        }
+        Expr::In {
+            rhs: InValue::Subquery(..),
+            ..
+        } => unsupported!("IN with subqueries is not yet supported"),
+        Expr::Call(_)
+        | Expr::Literal(_)
+        | Expr::UnaryOp { .. }
+        | Expr::OpAny { .. }
+        | Expr::OpSome { .. }
+        | Expr::OpAll { .. }
+        | Expr::CaseWhen { .. }
+        | Expr::Column(_)
+        | Expr::NestedSelect(_)
+        | Expr::Cast { .. }
+        | Expr::Array(_)
+        | Expr::Variable(_) => global.push(ce.clone()),
     }
     Ok(())
 }
@@ -1634,6 +1642,12 @@ mod tests {
                 "sum(`t`.`c`)".into()
             )])
         );
+    }
+
+    #[test]
+    fn constant_filter() {
+        let qg = make_query_graph("SELECT x FROM t WHERE x = $1 AND 1");
+        assert_eq!(qg.global_predicates, vec![Expr::Literal(1u64.into())])
     }
 
     mod view_key {

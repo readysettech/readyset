@@ -1,0 +1,12 @@
+statement ok
+CREATE TABLE t (x int);
+
+statement ok
+INSERT INTO t (x) VALUES (1), (1);
+
+query I nosort
+SELECT x FROM t WHERE x = ? AND 1=1;
+? = 1
+----
+1
+1
