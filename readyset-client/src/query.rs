@@ -12,6 +12,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use readyset_sql_passes::anonymize::{Anonymize, Anonymizer};
+use readyset_util::hash::hash;
 use serde::ser::{SerializeSeq, SerializeTuple};
 use serde::{Deserialize, Serialize, Serializer};
 
@@ -26,6 +27,11 @@ impl QueryId {
     /// Wrap a u64 in a [`QueryId`]
     pub fn new(id: u64) -> Self {
         QueryId(id)
+    }
+
+    /// Constructs a new [`QueryId`] from a hash of the given [`ViewCreateRequest`]
+    pub fn from_view_create_request(q: &ViewCreateRequest) -> Self {
+        QueryId::new(hash(q))
     }
 }
 

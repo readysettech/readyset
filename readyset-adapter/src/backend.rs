@@ -2257,6 +2257,7 @@ where
                     event.sql_type = SqlQueryType::Read;
                     if self.settings.query_log_ad_hoc_queries {
                         event.query = Some(Arc::new(SqlQuery::Select(stmt.clone())));
+                        event.query_id = Some(QueryId::from_view_create_request(&view_request));
                     }
                     Self::query_adhoc_select(
                         &mut self.noria,
