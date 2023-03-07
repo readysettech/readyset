@@ -113,7 +113,9 @@ enum Operation {
     /// Drop a table or view with the given name
     DropTable(String),
     /// Write a random row to a random table with the given primary key
-    WriteRow(String, i32, Vec<DfValue>),
+    /// (The [`SqlTypes`] values are just to check preconditions so that we don't try to write a
+    /// row to a table whose column types don't match the row we originally generated.)
+    WriteRow(String, i32, Vec<DfValue>, Vec<SqlType>),
     /// Delete rows to a given table that match a given key
     DeleteRow(String, i32),
     /// Adds a new column to an existing table
@@ -147,10 +149,21 @@ impl Operation {
         match self {
             Self::CreateTable(name, _cols) => !state.tables.contains_key(name),
             Self::DropTable(name) => state.tables.contains_key(name),
-            Self::WriteRow(table, key, _col_vals) => state
-                .pkeys
-                .get(table)
-                .map_or(false, |table_keys| !table_keys.contains(key)),
+            Self::WriteRow(table, key, _col_vals, col_types) => {
+                // Make sure that the table doesn't already contain a row with this key, and also
+                // make sure that the column types in the table also match up with the types in the
+                // row that we're trying to write:
+                state
+                    .pkeys
+                    .get(table)
+                    .map_or(false, |table_keys| !table_keys.contains(key))
+                    && state.tables.get(table).map_or(false, |table_cols| {
+                        table_cols
+                            .iter()
+                            .zip(col_types)
+                            .all(|(cs, row_type)| cs.sql_type == *row_type)
+                    })
+            }
             Self::DeleteRow(table, key) => state
                 .pkeys
                 .get(table)
@@ -205,11 +218,12 @@ prop_compose! {
     fn gen_write_row(tables: HashMap<String, Vec<ColumnSpec>>, pkeys: HashMap<String, Vec<i32>>)
                     (t in sample::select(tables.keys().cloned().collect::<Vec<_>>()))
                     (cols in tables[&t].iter().map(|cs| cs.gen.clone()).collect::<Vec<_>>(),
+                     types in Just(tables[&t].iter().map(|cs| cs.sql_type.clone()).collect()),
                      t in Just(t))
                     -> Operation {
         let table_keys = &pkeys[&t];
         let first_free_key = (0..).find(|k| !table_keys.contains(k)).unwrap();
-        Operation::WriteRow(t, first_free_key, cols)
+        Operation::WriteRow(t, first_free_key, cols, types)
     }
 }
 
@@ -430,7 +444,7 @@ impl TestModel {
                 self.views
                     .retain(|_view_name, table_source| name != table_source);
             }
-            Operation::WriteRow(table, pkey, _col_vals) => {
+            Operation::WriteRow(table, pkey, _col_vals, _col_types) => {
                 self.pkeys.get_mut(table).unwrap().push(*pkey);
             }
             Operation::AddColumn(table, col_spec) => {
@@ -704,7 +718,7 @@ async fn run(ops: Vec<Operation>) {
                 rs_conn.simple_query(&query).await.unwrap();
                 pg_conn.simple_query(&query).await.unwrap();
             }
-            Operation::WriteRow(table_name, pk, col_vals) => {
+            Operation::WriteRow(table_name, pk, col_vals, _col_types) => {
                 let pk = DfValue::from(*pk);
                 let params: Vec<&DfValue> = once(&pk).chain(col_vals.iter()).collect();
                 let placeholders: Vec<_> = (1..=params.len()).map(|n| format!("${n}")).collect();
