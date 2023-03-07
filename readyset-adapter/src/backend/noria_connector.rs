@@ -5,7 +5,7 @@ use std::fmt;
 use std::sync::{atomic, Arc, RwLock};
 
 use itertools::Itertools;
-use nom_sql::analysis::visit_mut::VisitorMut;
+use nom_sql::analysis::visit::Visitor;
 use nom_sql::{
     self, ColumnConstraint, DeleteStatement, Expr, InsertStatement, Literal, Relation,
     SelectStatement, SqlIdentifier, SqlQuery, UnaryOperator, UpdateStatement,
@@ -21,7 +21,8 @@ use readyset_client::{
 use readyset_data::{DfType, DfValue, Dialect};
 use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
 use readyset_errors::{
-    internal, internal_err, invariant_eq, table_err, unsupported, unsupported_err, ReadySetResult,
+    internal, internal_err, invalid, invariant_eq, table_err, unsupported, unsupported_err,
+    ReadySetResult,
 };
 use readyset_server::worker::readers::{CallResult, ReadRequestHandler};
 use readyset_sql_passes::anonymize::anonymize_literals;
@@ -463,7 +464,6 @@ pub(crate) enum ExecuteSelectContext<'ctx> {
     },
     AdHoc {
         statement: nom_sql::SelectStatement,
-        query: &'ctx str,
         create_if_missing: bool,
     },
 }
@@ -1502,10 +1502,9 @@ impl NoriaConnector {
             }
             ExecuteSelectContext::AdHoc {
                 mut statement,
-                query,
                 create_if_missing,
             } => {
-                verify_no_placeholders(&mut statement, query)?;
+                verify_no_placeholders(&statement)?;
                 let processed_query_params =
                     rewrite::process_query(&mut statement, self.server_supports_pagination())?;
                 let name = self.get_view(&statement, false, create_if_missing).await?;
@@ -1568,29 +1567,22 @@ impl NoriaConnector {
 /// Verifies that there are no placeholder parameters in the given SELECT statement (i.e. ? or $N),
 /// returning `Ok(())` if none are found, or an `InvalidQuery` error if there are any placeholders
 /// present in the statement.
-fn verify_no_placeholders(statement: &mut SelectStatement, query: &str) -> ReadySetResult<()> {
+fn verify_no_placeholders(statement: &SelectStatement) -> ReadySetResult<()> {
     struct PlaceholderFoundVisitor;
 
-    impl<'ast> VisitorMut<'ast> for PlaceholderFoundVisitor {
-        type Error = ();
+    impl<'ast> Visitor<'ast> for PlaceholderFoundVisitor {
+        type Error = ReadySetError;
 
-        fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
+        fn visit_literal(&mut self, literal: &'ast Literal) -> Result<(), Self::Error> {
             if matches!(literal, Literal::Placeholder(_)) {
-                Err(())
+                invalid!("Ad-hoc queries may not contain placeholders")
             } else {
                 Ok(())
             }
         }
     }
 
-    if PlaceholderFoundVisitor
-        .visit_select_statement(statement)
-        .is_err()
-    {
-        Err(ReadySetError::InvalidQuery(query.to_string()))
-    } else {
-        Ok(())
-    }
+    PlaceholderFoundVisitor.visit_select_statement(statement)
 }
 
 /// Creates keys from processed query params, gets the select statement binops, and calls
@@ -1770,7 +1762,7 @@ mod tests {
         let parsed_query = nom_sql::parse_query(Dialect::MySQL, query).unwrap();
 
         match parsed_query {
-            SqlQuery::Select(mut select) => verify_no_placeholders(&mut select, query).unwrap(),
+            SqlQuery::Select(select) => verify_no_placeholders(&select).unwrap(),
             _ => panic!(),
         }
     }
@@ -1781,8 +1773,8 @@ mod tests {
         let parsed_query = nom_sql::parse_query(Dialect::MySQL, query).unwrap();
 
         match parsed_query {
-            SqlQuery::Select(mut select) => {
-                verify_no_placeholders(&mut select, query).unwrap_err();
+            SqlQuery::Select(select) => {
+                verify_no_placeholders(&select).unwrap_err();
             }
             _ => panic!(),
         }
