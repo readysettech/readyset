@@ -319,6 +319,15 @@ fn rename_column(
         let (i, _) = whitespace1(i)?;
 
         let (i, name) = dialect.identifier()(i)?;
+
+        let i = if dialect == Dialect::PostgreSQL {
+            let (i, _) = whitespace1(i)?;
+            let (i, _) = tag_no_case("to")(i)?;
+            i
+        } else {
+            i
+        };
+
         let (i, _) = whitespace1(i)?;
         let (i, new_name) = dialect.identifier()(i)?;
 
@@ -1215,6 +1224,23 @@ mod tests {
                         index_name: "asdf".into()
                     }
                 )]
+            );
+        }
+
+        #[test]
+        fn alter_table_rename_column_to() {
+            let res = test_parse!(
+                alter_table_statement(Dialect::PostgreSQL),
+                b"ALTER TABLE t RENAME COLUMN x TO y"
+            );
+
+            assert_eq!(res.table, "t".into());
+            assert_eq!(
+                res.definitions.unwrap(),
+                vec![AlterTableDefinition::RenameColumn {
+                    name: "x".into(),
+                    new_name: "y".into()
+                }]
             );
         }
     }
