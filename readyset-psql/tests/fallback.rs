@@ -1,9 +1,12 @@
+use std::panic::AssertUnwindSafe;
+
 use chrono::NaiveDate;
 use readyset_adapter::backend::{MigrationMode, UnsupportedSetMode};
 use readyset_adapter::BackendBuilder;
 use readyset_client_test_helpers::psql_helpers::{upstream_config, PostgreSQLAdapter};
 use readyset_client_test_helpers::{sleep, Adapter, TestBuilder};
 use readyset_server::Handle;
+use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
 use serial_test::serial;
 
@@ -571,6 +574,70 @@ async fn drop_column_then_read() {
         .get::<_, i32>(0);
 
     assert_eq!(result, 1);
+
+    shutdown_tx.shutdown().await;
+}
+
+#[ignore = "ENG-2655 Test reproduces deletion failure due to known bug"]
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn deletion_propagation_after_alter() {
+    readyset_tracing::init_test_logging();
+
+    let (config, _handle, shutdown_tx) = setup().await;
+    let client = connect(config).await;
+
+    client
+        .simple_query("CREATE TABLE cats (id INT)")
+        .await
+        .unwrap();
+
+    client
+        .simple_query("CREATE TABLE dogs (id INT)")
+        .await
+        .unwrap();
+
+    client
+        .simple_query("INSERT INTO cats VALUES (1)")
+        .await
+        .unwrap();
+
+    // Note that although we don't actually write or read rows in the "dogs" table, running the
+    // ALTER against a separate table from the one we're querying seems to be necessary to
+    // replicate this bug.
+    client
+        .simple_query("ALTER TABLE dogs ADD COLUMN bark VARCHAR")
+        .await
+        .unwrap();
+
+    // I'd rather use eventually! but can't use it twice in the same function due to weird
+    // namespacing issues that I haven't figured out yet, so sleep() will have to do here for now.
+    sleep().await;
+
+    let result = client
+        .query_one("SELECT * FROM cats", &[])
+        .await
+        .unwrap()
+        .get::<_, i32>(0);
+
+    assert_eq!(result, 1);
+
+    client
+        .simple_query("DELETE FROM cats WHERE id = 1")
+        .await
+        .unwrap();
+
+    // Since we just deleted the row, running query_one should result in a RowCount error, but due
+    // to the bug described in ENG-2655 this never seems to happen, and we get back the stale row
+    // forever (causing unwrap_err() to repeatedly panic).
+    eventually!(run_test: {
+        let result = client
+            .query_one("SELECT * FROM cats", &[])
+            .await;
+        AssertUnwindSafe(|| result)
+    }, then_assert: |result| {
+        result().unwrap_err();
+    });
 
     shutdown_tx.shutdown().await;
 }
