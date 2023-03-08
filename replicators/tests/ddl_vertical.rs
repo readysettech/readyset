@@ -110,7 +110,7 @@ impl Arbitrary for ColumnSpec {
 enum Operation {
     /// Create a new table with the given name and columns
     CreateTable(String, Vec<ColumnSpec>),
-    /// Drop a table or view with the given name
+    /// Drop the table with the given name
     DropTable(String),
     /// Write a random row to a random table with the given primary key
     /// (The [`SqlTypes`] values are just to check preconditions so that we don't try to write a
@@ -135,6 +135,8 @@ enum Operation {
     },
     /// Creates a simple view that does a SELECT * on a given table
     CreateSimpleView { name: String, table_source: String },
+    /// Drops the view with the given name
+    DropView(String),
 }
 
 impl Operation {
@@ -198,6 +200,7 @@ impl Operation {
                     && !state.tables.contains_key(name)
                     && !state.views.contains_key(name)
             }
+            Self::DropView(name) => state.views.contains_key(name),
         }
     }
 }
@@ -314,6 +317,12 @@ prop_compose! {
     }
 }
 
+prop_compose! {
+    fn gen_drop_view(views: Vec<String>)(name in sample::select(views)) -> Operation {
+        Operation::DropView(name)
+    }
+}
+
 /// A model of the current test state, used to help generate operations in a way that we expect to
 /// succeed, as well as to assist in shrinking, and to determine postconditions to check during
 /// test runtime.
@@ -371,6 +380,12 @@ impl TestModel {
                 ]
                 .into_iter(),
             );
+        }
+
+        // If we have at least one view in existence, we can drop one:
+        if !self.views.is_empty() {
+            let drop_view_strategy = gen_drop_view(self.views.keys().cloned().collect()).boxed();
+            possible_ops.push(drop_view_strategy);
         }
 
         // If we have a table with at least one (non-pkey) column, we can rename or drop a column:
@@ -472,6 +487,9 @@ impl TestModel {
             Operation::DeleteRow(..) => (),
             Operation::CreateSimpleView { name, table_source } => {
                 self.views.insert(name.clone(), table_source.clone());
+            }
+            Operation::DropView(name) => {
+                self.views.remove(name);
             }
         }
     }
@@ -777,6 +795,11 @@ async fn run(ops: Vec<Operation>) {
                 }, then_assert: |result| {
                     result().unwrap()
                 });
+            }
+            Operation::DropView(name) => {
+                let query = format!("DROP VIEW \"{name}\"");
+                rs_conn.simple_query(&query).await.unwrap();
+                pg_conn.simple_query(&query).await.unwrap();
             }
         }
 
