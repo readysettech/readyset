@@ -453,6 +453,7 @@ impl TestModel {
             Operation::CreateTable(name, cols) => {
                 self.tables.insert(name.clone(), cols.clone());
                 self.pkeys.insert(name.clone(), vec![]);
+                self.deleted_tables.remove(name);
             }
             Operation::DropTable(name) => {
                 self.tables.remove(name);
@@ -487,6 +488,10 @@ impl TestModel {
             Operation::DeleteRow(..) => (),
             Operation::CreateSimpleView { name, table_source } => {
                 self.views.insert(name.clone(), table_source.clone());
+                // Also remove the name from deleted_tables if it exists, since we should no longer
+                // expect "SELECT * FROM name" to return an error and can stop checking that
+                // postcondition:
+                self.deleted_tables.remove(name);
             }
             Operation::DropView(name) => {
                 self.views.remove(name);
