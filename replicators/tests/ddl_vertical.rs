@@ -115,7 +115,12 @@ enum Operation {
     /// Write a random row to a random table with the given primary key
     /// (The [`SqlTypes`] values are just to check preconditions so that we don't try to write a
     /// row to a table whose column types don't match the row we originally generated.)
-    WriteRow(String, i32, Vec<DfValue>, Vec<SqlType>),
+    WriteRow {
+        table: String,
+        pkey: i32,
+        col_vals: Vec<DfValue>,
+        col_types: Vec<SqlType>,
+    },
     /// Delete rows to a given table that match a given key
     DeleteRow(String, i32),
     /// Adds a new column to an existing table
@@ -129,7 +134,7 @@ enum Operation {
         new_name: String,
     },
     /// Creates a simple view that does a SELECT * on a given table
-    CreateSimpleView(String, String),
+    CreateSimpleView { name: String, table_source: String },
 }
 
 impl Operation {
@@ -149,14 +154,19 @@ impl Operation {
         match self {
             Self::CreateTable(name, _cols) => !state.tables.contains_key(name),
             Self::DropTable(name) => state.tables.contains_key(name),
-            Self::WriteRow(table, key, _col_vals, col_types) => {
+            Self::WriteRow {
+                table,
+                pkey,
+                col_vals: _,
+                col_types,
+            } => {
                 // Make sure that the table doesn't already contain a row with this key, and also
                 // make sure that the column types in the table also match up with the types in the
                 // row that we're trying to write:
                 state
                     .pkeys
                     .get(table)
-                    .map_or(false, |table_keys| !table_keys.contains(key))
+                    .map_or(false, |table_keys| !table_keys.contains(pkey))
                     && state.tables.get(table).map_or(false, |table_cols| {
                         table_cols
                             .iter()
@@ -183,7 +193,7 @@ impl Operation {
             } => state.tables.get(table).map_or(false, |t| {
                 t.iter().any(|cs| cs.name == *col_name) && t.iter().all(|cs| cs.name != *new_name)
             }),
-            Self::CreateSimpleView(name, table_source) => {
+            Self::CreateSimpleView { name, table_source } => {
                 !state.column_named_changed
                     && state.tables.contains_key(table_source)
                     && !state.tables.contains_key(name)
@@ -217,13 +227,14 @@ prop_compose! {
 prop_compose! {
     fn gen_write_row(tables: HashMap<String, Vec<ColumnSpec>>, pkeys: HashMap<String, Vec<i32>>)
                     (t in sample::select(tables.keys().cloned().collect::<Vec<_>>()))
-                    (cols in tables[&t].iter().map(|cs| cs.gen.clone()).collect::<Vec<_>>(),
-                     types in Just(tables[&t].iter().map(|cs| cs.sql_type.clone()).collect()),
-                     t in Just(t))
+                    (col_vals in tables[&t].iter().map(|cs| cs.gen.clone()).collect::<Vec<_>>(),
+                     col_types in Just(tables[&t].iter().map(|cs| cs.sql_type.clone()).collect()),
+                     table in Just(t))
                     -> Operation {
-        let table_keys = &pkeys[&t];
-        let first_free_key = (0..).find(|k| !table_keys.contains(k)).unwrap();
-        Operation::WriteRow(t, first_free_key, cols, types)
+        let table_keys = &pkeys[&table];
+        // Find the first unused key:
+        let pkey = (0..).find(|k| !table_keys.contains(k)).unwrap();
+        Operation::WriteRow { table, pkey, col_vals, col_types }
     }
 }
 
@@ -300,7 +311,7 @@ prop_compose! {
                              (name in SQL_NAME_REGEX,
                               table_source in sample::select(tables))
                              -> Operation {
-        Operation::CreateSimpleView(name, table_source)
+        Operation::CreateSimpleView { name, table_source }
     }
 }
 
@@ -444,7 +455,7 @@ impl TestModel {
                 self.views
                     .retain(|_view_name, table_source| name != table_source);
             }
-            Operation::WriteRow(table, pkey, _col_vals, _col_types) => {
+            Operation::WriteRow { table, pkey, .. } => {
                 self.pkeys.get_mut(table).unwrap().push(*pkey);
             }
             Operation::AddColumn(table, col_spec) => {
@@ -469,7 +480,7 @@ impl TestModel {
                 self.column_named_changed = true;
             }
             Operation::DeleteRow(..) => (),
-            Operation::CreateSimpleView(name, table_source) => {
+            Operation::CreateSimpleView { name, table_source } => {
                 self.views.insert(name.clone(), table_source.clone());
             }
         }
@@ -718,12 +729,17 @@ async fn run(ops: Vec<Operation>) {
                 rs_conn.simple_query(&query).await.unwrap();
                 pg_conn.simple_query(&query).await.unwrap();
             }
-            Operation::WriteRow(table_name, pk, col_vals, _col_types) => {
-                let pk = DfValue::from(*pk);
-                let params: Vec<&DfValue> = once(&pk).chain(col_vals.iter()).collect();
+            Operation::WriteRow {
+                table,
+                pkey,
+                col_vals,
+                ..
+            } => {
+                let pkey = DfValue::from(*pkey);
+                let params: Vec<&DfValue> = once(&pkey).chain(col_vals.iter()).collect();
                 let placeholders: Vec<_> = (1..=params.len()).map(|n| format!("${n}")).collect();
                 let placeholders = placeholders.join(", ");
-                let query = format!("INSERT INTO \"{table_name}\" VALUES ({placeholders})");
+                let query = format!("INSERT INTO \"{table}\" VALUES ({placeholders})");
                 rs_conn.query_raw(&query, &params).await.unwrap();
                 pg_conn.query_raw(&query, &params).await.unwrap();
             }
@@ -760,7 +776,7 @@ async fn run(ops: Vec<Operation>) {
                 rs_conn.simple_query(&query).await.unwrap();
                 pg_conn.simple_query(&query).await.unwrap();
             }
-            Operation::CreateSimpleView(name, table_source) => {
+            Operation::CreateSimpleView { name, table_source } => {
                 let query = format!("CREATE VIEW \"{name}\" AS SELECT * FROM \"{table_source}\"");
                 rs_conn.simple_query(&query).await.unwrap();
                 pg_conn.simple_query(&query).await.unwrap();
