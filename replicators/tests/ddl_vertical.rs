@@ -194,8 +194,7 @@ impl Operation {
                 t.iter().any(|cs| cs.name == *col_name) && t.iter().all(|cs| cs.name != *new_name)
             }),
             Self::CreateSimpleView { name, table_source } => {
-                !state.column_named_changed
-                    && state.tables.contains_key(table_source)
+                state.tables.contains_key(table_source)
                     && !state.tables.contains_key(name)
                     && !state.views.contains_key(name)
             }
@@ -333,8 +332,6 @@ struct TestModel {
     pkeys: HashMap<String, Vec<i32>>, // Primary keys in use for each table
     // Map of view name to view definition (right now just a table that we do a SELECT * from)
     views: HashMap<String, String>,
-    // Hack to avoid CREATE VIEW after changing a column name (since this triggers ENG-2627)
-    column_named_changed: bool,
 }
 
 impl TestModel {
@@ -370,16 +367,10 @@ impl TestModel {
                     drop_strategy,
                     write_strategy,
                     add_col_strat,
-                    // create_simple_view_strat,
+                    create_simple_view_strat,
                 ]
                 .into_iter(),
             );
-            // Temporary hack for ENG-2627: only create views if we haven't altered any column
-            // names (this could be more specific and track tables that have had their columns
-            // renamed, but that is probably more trouble than it's worth right now)
-            if !self.column_named_changed {
-                possible_ops.push(create_simple_view_strat);
-            }
         }
 
         // If we have a table with at least one (non-pkey) column, we can rename or drop a column:
@@ -477,7 +468,6 @@ impl TestModel {
                     .find(|cs| cs.name == *col_name)
                     .unwrap();
                 spec.name = new_name.clone();
-                self.column_named_changed = true;
             }
             Operation::DeleteRow(..) => (),
             Operation::CreateSimpleView { name, table_source } => {
