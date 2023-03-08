@@ -642,6 +642,47 @@ async fn deletion_propagation_after_alter() {
     shutdown_tx.shutdown().await;
 }
 
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn rename_column_then_create_view() {
+    readyset_tracing::init_test_logging();
+
+    let (config, _handle, shutdown_tx) = setup().await;
+    let client = connect(config).await;
+
+    client
+        .simple_query("CREATE TABLE t (i int);")
+        .await
+        .unwrap();
+    client
+        .simple_query("INSERT INTO t (i) VALUES (1)")
+        .await
+        .unwrap();
+    client
+        .simple_query("ALTER TABLE t RENAME COLUMN i TO j;")
+        .await
+        .unwrap();
+    client
+        .simple_query("CREATE VIEW v AS SELECT * FROM t;")
+        .await
+        .unwrap();
+
+    eventually! {
+        let res = client
+            .query("SELECT * FROM v;", &[])
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|r| r.get::<_, i32>(0))
+            .collect::<Vec<_>>();
+
+        last_statement_matches("readyset", "ok", &client).await
+            && res == vec![1]
+    }
+
+    shutdown_tx.shutdown().await;
+}
+
 #[allow(dead_code)]
 async fn last_statement_matches(dest: &str, status: &str, client: &Client) -> bool {
     match &client

@@ -594,6 +594,44 @@ mod tests {
 
     #[parallel_group(GROUP)]
     #[tokio::test]
+    async fn alter_table_rename_column() {
+        readyset_tracing::init_test_logging();
+        let client = setup("alter_table_rename_column").await;
+        client.simple_query("create table t (x int)").await.unwrap();
+
+        let _ = get_last_ddl(&client, "alter_table_rename_column").await;
+
+        client
+            .simple_query("alter table t rename column x to y")
+            .await
+            .unwrap();
+
+        let ddl = get_last_ddl(&client, "alter_table_rename_column")
+            .await
+            .unwrap();
+        assert_eq!(ddl.schema, "public");
+
+        match ddl.data {
+            DdlEventData::AlterTable { name, statement } => {
+                assert_eq!(name, "t");
+                let stmt = statement.unwrap();
+                assert_eq!(stmt.table.name, "t");
+                assert_eq!(
+                    stmt.definitions.unwrap(),
+                    vec![nom_sql::AlterTableDefinition::RenameColumn {
+                        name: "x".into(),
+                        new_name: "y".into()
+                    },]
+                );
+            }
+            _ => panic!("Unexpected DDL event data: {:?}", ddl.data),
+        }
+
+        client.teardown().await;
+    }
+
+    #[parallel_group(GROUP)]
+    #[tokio::test]
     async fn create_view() {
         let client = setup("create_view").await;
         client

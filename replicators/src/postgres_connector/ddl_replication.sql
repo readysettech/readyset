@@ -146,7 +146,7 @@ BEGIN
     INTO alter_message
     FROM pg_event_trigger_ddl_commands() object
     JOIN pg_class cls ON object.objid = cls.oid
-    WHERE object.object_type = 'table';
+    WHERE object.object_type in ('table', 'table column');
 
     IF readyset.is_pre14() THEN
         UPDATE readyset.ddl_replication_log SET "ddl" = alter_message;
