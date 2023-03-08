@@ -22,7 +22,7 @@
 //! Note that this test suite requires the *exact* configuration specified in that docker-compose
 //! configuration, including the port, username, and password.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter, Result};
 use std::iter::once;
 use std::panic::AssertUnwindSafe;
@@ -337,7 +337,7 @@ prop_compose! {
 #[derive(Clone, Debug, Default)]
 struct TestModel {
     tables: HashMap<String, Vec<ColumnSpec>>,
-    deleted_tables: Vec<String>,
+    deleted_tables: HashSet<String>,
     pkeys: HashMap<String, Vec<i32>>, // Primary keys in use for each table
     // Map of view name to view definition (right now just a table that we do a SELECT * from)
     views: HashMap<String, String>,
@@ -456,7 +456,7 @@ impl TestModel {
             }
             Operation::DropTable(name) => {
                 self.tables.remove(name);
-                self.deleted_tables.push(name.clone());
+                self.deleted_tables.insert(name.clone());
                 self.pkeys.remove(name);
                 self.views
                     .retain(|_view_name, table_source| name != table_source);
