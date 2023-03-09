@@ -720,6 +720,18 @@ impl DfValue {
             )
         })
     }
+
+    /// Return a "normalized" version of `self`, for use in serializing lookup keys to rocksdb.
+    ///
+    /// Normalization may lose data, but it will always be the case that `(x == y) ==
+    /// (serialize(x.normalize()) == serialize(y.normalize()))`.
+    #[inline]
+    pub fn normalize(self) -> Self {
+        match self {
+            DfValue::Numeric(d) => DfValue::from(d.normalize()),
+            _ => self,
+        }
+    }
 }
 
 impl PartialEq for DfValue {

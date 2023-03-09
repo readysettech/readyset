@@ -1991,6 +1991,7 @@ mod tests {
 
     use pretty_assertions::assert_eq;
     use readyset_data::Collation;
+    use rust_decimal::Decimal;
 
     use super::*;
 
@@ -2130,6 +2131,29 @@ mod tests {
             .unwrap();
 
         assert_eq!(res, abc.into())
+    }
+
+    #[test]
+    fn lookup_numeric_with_different_precision() {
+        let mut state = setup_persistent("lookup_numeric_with_different_precision", None);
+        state.add_key(Index::btree_map(vec![0]), None);
+
+        let records = vec![vec![DfValue::from(Decimal::from_str_exact("4.0").unwrap())]];
+
+        state
+            .process_records(&mut records.clone().into(), None, None)
+            .unwrap();
+
+        let res = state
+            .lookup(
+                &[0],
+                &PointKey::Single(DfValue::from(Decimal::from_str_exact("4").unwrap())),
+            )
+            .unwrap();
+
+        assert_eq!(res, records.into());
+        let val = Decimal::try_from(&res.into_iter().next().unwrap()[0]).unwrap();
+        assert_eq!(val.scale(), 1);
     }
 
     #[test]

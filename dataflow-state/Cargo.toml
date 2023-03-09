@@ -40,6 +40,7 @@ readyset-tracing = { path = "../readyset-tracing" }
 pretty_assertions = "0.7.2"
 lazy_static = "1.0.0"
 criterion = { version = "0.3", features=['real_blackbox', 'async_tokio'] }
+rust_decimal = { version = "1.26", features = ["db-tokio-postgres", "serde-str"] }
 
 [[bench]]
 name = "persistent_state"

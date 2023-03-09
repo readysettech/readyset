@@ -54,7 +54,7 @@ impl PointKey {
     {
         let mut iter = iter.into_iter();
         let len = iter.len();
-        let mut more = move || iter.next().unwrap();
+        let mut more = move || iter.next().unwrap().normalize();
         match len {
             0 => panic!("Empty iterator passed to PointKey::from_iter"),
             1 => PointKey::Single(more()),
