@@ -341,6 +341,7 @@ struct TestModel {
     pkeys: HashMap<String, Vec<i32>>, // Primary keys in use for each table
     // Map of view name to view definition (right now just a table that we do a SELECT * from)
     views: HashMap<String, String>,
+    deleted_views: HashSet<String>,
 }
 
 impl TestModel {
@@ -454,6 +455,10 @@ impl TestModel {
                 self.tables.insert(name.clone(), cols.clone());
                 self.pkeys.insert(name.clone(), vec![]);
                 self.deleted_tables.remove(name);
+                // Also remove the name from deleted_views if it exists, since we should no longer
+                // expect "SELECT * FROM name" to return an error and can stop checking that
+                // postcondition:
+                self.deleted_views.remove(name);
             }
             Operation::DropTable(name) => {
                 self.tables.remove(name);
@@ -495,6 +500,7 @@ impl TestModel {
             }
             Operation::DropView(name) => {
                 self.views.remove(name);
+                self.deleted_views.insert(name.clone());
             }
         }
     }
@@ -852,6 +858,13 @@ async fn run(ops: Vec<Operation>) {
         for table in &runtime_state.deleted_tables {
             rs_conn
                 .query(&format!("DROP TABLE \"{table}\""), &[])
+                .await
+                .unwrap_err();
+        }
+        // And then do the same for views:
+        for view in &runtime_state.deleted_views {
+            rs_conn
+                .query(&format!("DROP VIEW \"{view}\""), &[])
                 .await
                 .unwrap_err();
         }
