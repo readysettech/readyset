@@ -14,6 +14,7 @@ use error::{ConnectionType, DatabaseTypeParseError};
 use futures::{StreamExt, TryStreamExt};
 use mysql_async::prelude::Queryable;
 use mysql_async::OptsBuilder;
+use native_tls::TlsConnectorBuilder;
 use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_util::redacted::RedactedString;
 use serde::{Deserialize, Serialize};
@@ -247,14 +248,26 @@ impl From<mysql_async::OptsBuilder> for DatabaseURL {
 }
 
 impl DatabaseURL {
-    /// Create a new [`DatabaseConnection`] by connecting to the database at this database URL
-    pub async fn connect(&self) -> Result<DatabaseConnection, DatabaseError<!>> {
+    /// Create a new [`DatabaseConnection`] by connecting to the database at this database URL. For
+    /// postgres connections, optionally provide the `TlsConnectorBuilder` for Postgres.
+    pub async fn connect(
+        &self,
+        tls_connector_builder: Option<TlsConnectorBuilder>,
+    ) -> Result<DatabaseConnection, DatabaseError<!>> {
         match self {
-            DatabaseURL::MySQL(opts) => Ok(DatabaseConnection::MySQL(
-                mysql::Conn::new(opts.clone()).await?,
-            )),
+            DatabaseURL::MySQL(opts) => {
+                if tls_connector_builder.is_some() {
+                    Err(DatabaseError::TlsUnsupported)
+                } else {
+                    Ok(DatabaseConnection::MySQL(
+                        mysql::Conn::new(opts.clone()).await?,
+                    ))
+                }
+            }
             DatabaseURL::PostgreSQL(config) => {
-                let connector = native_tls::TlsConnector::builder().build().unwrap(); // Never returns an error
+                let connector = tls_connector_builder
+                    .unwrap_or_else(native_tls::TlsConnector::builder)
+                    .build()?;
                 let tls = postgres_native_tls::MakeTlsConnector::new(connector);
                 let (client, connection) = config.connect(tls).await?;
                 let connection_handle =
@@ -293,7 +306,7 @@ impl DatabaseURL {
                 ))
             }
             DatabaseURL::PostgreSQL(config) => {
-                let connector = native_tls::TlsConnector::builder().build().unwrap(); // Never returns an error
+                let connector = native_tls::TlsConnector::builder().build()?;
                 let tls = postgres_native_tls::MakeTlsConnector::new(connector);
                 // Drop and recreate the test db
                 {

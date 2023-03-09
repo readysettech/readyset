@@ -522,7 +522,7 @@ impl Drop for PerfHandle {
 /// Creates a new database for benchmarking, installs the given schema and generates data for it
 async fn prepare_db<P: Into<PathBuf>>(path: P) -> anyhow::Result<()> {
     let generator = DataGenerator::new(path);
-    let mut conn = DatabaseURL::from_str(&mysql_url(""))?.connect().await?;
+    let mut conn = DatabaseURL::from_str(&mysql_url(""))?.connect(None).await?;
     conn.query_drop(format!("DROP DATABASE IF EXISTS {DB_NAME}"))
         .await?;
     conn.query_drop(format!("CREATE DATABASE {DB_NAME}"))

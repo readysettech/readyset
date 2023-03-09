@@ -58,7 +58,7 @@ impl ReplContext {
     async fn new(options: Options) -> Result<Self> {
         let connection = options
             .database_url
-            .connect()
+            .connect(None)
             .await
             .context("Connecting to database")?;
 

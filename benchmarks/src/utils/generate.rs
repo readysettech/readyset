@@ -61,7 +61,7 @@ impl DataGenerator {
     }
 
     pub async fn install(&self, conn_str: &str) -> anyhow::Result<()> {
-        let mut conn = DatabaseURL::from_str(conn_str)?.connect().await?;
+        let mut conn = DatabaseURL::from_str(conn_str)?.connect(None).await?;
         let ddl = std::fs::read_to_string(&benchmark_path(&self.schema)?)?;
 
         let parsed = multi_ddl(LocatedSpan::new(ddl.as_bytes()))

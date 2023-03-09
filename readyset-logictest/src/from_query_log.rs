@@ -224,7 +224,7 @@ impl FromQueryLog {
         while let Some((session_number, mut session)) = input.next().await {
             // It is intentional to spin up a new connection for each session, so that we match the
             // logged behavior as closely as possible.
-            let mut conn = self.database.connect().await.unwrap();
+            let mut conn = self.database.connect(None).await.unwrap();
             let mut output = OpenOptions::new()
                 .read(false)
                 .write(true)

@@ -25,7 +25,7 @@ async fn main() -> anyhow::Result<()> {
 
     let mut tasks = Vec::with_capacity(opts.parallelism + 2);
     for _i in 0..opts.parallelism {
-        let mut conn = opts.database_url.connect().await?;
+        let mut conn = opts.database_url.connect(None).await?;
         let counter = counter;
         let handle = tokio::task::spawn(async move {
             let mut i = 600000;

@@ -339,7 +339,7 @@ impl MySqlExecutor {
                 .into_boxed_str(),
         );
         Self {
-            conn: opts.database_url.unwrap().connect().await.unwrap(),
+            conn: opts.database_url.unwrap().connect(None).await.unwrap(),
             query,
         }
     }

@@ -234,7 +234,7 @@ impl Seed {
     pub async fn run(&mut self, opts: GenerateOpts) -> anyhow::Result<&TestScript> {
         let mut conn = opts
             .compare_to
-            .connect()
+            .connect(None)
             .await
             .context("Connecting to comparison database")?;
 

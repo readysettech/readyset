@@ -162,7 +162,7 @@ impl TestScript {
         if let Some(upstream_url) = &opts.upstream_database_url {
             self.recreate_test_database(upstream_url).await?;
             let mut conn = upstream_url
-                .connect()
+                .connect(None)
                 .await
                 .with_context(|| "connecting to upstream database")?;
 
@@ -190,7 +190,7 @@ impl TestScript {
             DatabaseType::MySQL => "mysql".to_owned(),
         });
         let mut admin_conn = admin_url
-            .connect()
+            .connect(None)
             .await
             .with_context(|| "connecting to upstream")?;
 
@@ -219,7 +219,7 @@ impl TestScript {
         let (adapter_task, db_url) = self.setup_adapter(opts, noria_opts.authority.clone()).await;
 
         let mut conn = db_url
-            .connect()
+            .connect(None)
             .await
             .with_context(|| "connecting to adapter")?;
 

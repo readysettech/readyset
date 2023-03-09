@@ -13,11 +13,17 @@ pub enum DatabaseError<ValueError: Debug + Error> {
     #[error(transparent)]
     MySQL(#[from] mysql::Error),
 
+    #[error(transparent)]
+    NativeTls(#[from] native_tls::Error),
+
     #[error("Error converting value from result set")]
     ValueConversion(ValueError),
 
     #[error("DatabaseConnection is not a {0} connection variant")]
     WrongConnection(ConnectionType),
+
+    #[error("TLS not supported for MySQL")]
+    TlsUnsupported,
 }
 
 #[derive(Debug)]

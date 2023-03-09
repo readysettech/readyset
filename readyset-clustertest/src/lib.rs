@@ -1102,7 +1102,7 @@ impl DeploymentHandle {
 
         DatabaseURL::from_str(addr)
             .unwrap()
-            .connect()
+            .connect(None)
             .await
             .unwrap()
     }
@@ -1114,7 +1114,7 @@ impl DeploymentHandle {
         let addr = self.upstream_addr.as_ref().unwrap();
         DatabaseURL::from_str(addr)
             .unwrap()
-            .connect()
+            .connect(None)
             .await
             .unwrap()
     }
