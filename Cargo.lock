@@ -5101,6 +5101,7 @@ dependencies = [
  "nom-sql",
  "nom_locate",
  "postgres-native-tls",
+ "postgres-protocol",
  "postgres-types",
  "proptest",
  "rand 0.8.5",

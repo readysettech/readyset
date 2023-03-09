@@ -4,7 +4,9 @@ use database_utils::UpstreamConfig;
 use failpoint_macros::set_failpoint;
 use futures::FutureExt;
 use nom_sql::Relation;
+use pgsql::SimpleQueryMessage;
 use postgres_native_tls::MakeTlsConnector;
+use postgres_protocol::escape::escape_literal;
 #[cfg(feature = "failure_injection")]
 use readyset_client::failpoints;
 use readyset_client::replication::ReplicationOffset;
@@ -126,7 +128,12 @@ impl PostgresWalConnector {
 
     async fn create_publication_and_slot(&mut self, repl_slot_name: &str) -> ReadySetResult<()> {
         let system = self.identify_system().await?;
-        debug!(?system);
+        debug!(
+            id = %system.id,
+            timeline = %system.timeline,
+            xlogpos = %PostgresPosition::from(system.xlogpos),
+            dbname = ?system.dbname
+        );
 
         match self.create_publication(PUBLICATION_NAME).await {
             Ok(()) => {
@@ -274,6 +281,23 @@ impl PostgresWalConnector {
         publication: &str,
         version: u32,
     ) -> ReadySetResult<()> {
+        // Load the confirmed flush LSN for this replication slot so we can log it before starting
+        // replication
+        let confirmed_flush_lsn = self
+            .client
+            .simple_query(&format!(
+                "SELECT confirmed_flush_lsn FROM pg_replication_slots WHERE slot_name = {}",
+                escape_literal(slot),
+            ))
+            .await?
+            .into_iter()
+            .next()
+            .and_then(|m| match m {
+                SimpleQueryMessage::Row(r) => r.get(0).map(|v| v.to_owned()),
+                _ => None,
+            })
+            .unwrap_or_default();
+
         let inner_client = self.client.inner();
         let wal_position = self.next_position.unwrap_or_default();
         let messages_support = if version >= 140000 {
@@ -282,7 +306,7 @@ impl PostgresWalConnector {
             ""
         };
 
-        debug!("Postgres version {version}");
+        debug!(%wal_position, %slot, postgres_version = %version, %confirmed_flush_lsn, "Starting replication");
 
         let query = format!(
             "START_REPLICATION SLOT {slot} LOGICAL {wal_position} (
@@ -391,10 +415,11 @@ impl PostgresWalConnector {
         }
 
         match (rows.remove(0), rows.remove(0)) {
-            (
-                pgsql::SimpleQueryMessage::Row(row),
-                pgsql::SimpleQueryMessage::CommandComplete(_),
-            ) if row.len() == n_cols => Ok(row),
+            (SimpleQueryMessage::Row(row), SimpleQueryMessage::CommandComplete(_))
+                if row.len() == n_cols =>
+            {
+                Ok(row)
+            }
             _ => Err(ReadySetError::ReplicationFailed(format!(
                 "Incorrect response to query {:?}",
                 query
@@ -403,10 +428,7 @@ impl PostgresWalConnector {
     }
 
     /// Perform a simple query and return the resulting rows
-    async fn simple_query(
-        &mut self,
-        query: &str,
-    ) -> ReadySetResult<Vec<pgsql::SimpleQueryMessage>> {
+    async fn simple_query(&mut self, query: &str) -> ReadySetResult<Vec<SimpleQueryMessage>> {
         Ok(self.client.simple_query(query).await?)
     }
 }
