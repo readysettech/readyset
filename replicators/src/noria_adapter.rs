@@ -519,7 +519,17 @@ impl NoriaAdapter {
                     .await?;
 
             select! {
-                snapshot_result = replicator.snapshot_to_noria(&replication_slot, &mut create_schema, snapshot_report_interval_secs).fuse() =>  {
+                snapshot_result = replicator.snapshot_to_noria(
+                    &replication_slot,
+                    &mut create_schema,
+                    snapshot_report_interval_secs,
+                    // If we don't have a consistent replication offset from ReadySet, that might be
+                    // because only *some* tables are missing a replication offset - in that case we
+                    // need to resnapshot *all* tables, because we just dropped the replication slot
+                    // above, which prevents us from replicating any writes to tables we do have a
+                    // replication offset for that happened while we weren't running.
+                    /* full_snapshot = */ pos.is_none()
+                ).fuse() =>  {
                     let status = if snapshot_result.is_err() {
                         SnapshotStatusTag::Failed.value()
                     } else {

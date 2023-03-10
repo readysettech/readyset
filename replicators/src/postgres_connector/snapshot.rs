@@ -619,13 +619,17 @@ impl<'a> PostgresReplicator<'a> {
             })
     }
 
-    /// Begin the replication process, starting with the recipe for the database, followed
-    /// by each table's contents
+    /// Snapshoht the contents of the upstream database to ReadySet, starting with the DDL, followed
+    /// by each table's contents.
+    ///
+    /// If `full_snapshot` is set to `true`, *all* tables will be snapshotted, even those that
+    /// already have replication offsets in ReadySet.
     pub(crate) async fn snapshot_to_noria(
         &mut self,
         replication_slot: &CreatedSlot,
         create_schema: &mut CreateSchema,
         snapshot_report_interval_secs: u16,
+        full_snapshot: bool,
     ) -> ReadySetResult<()> {
         let wal_position = PostgresPosition::from(replication_slot.consistent_point).into();
         self.set_snapshot(&replication_slot.snapshot_name).await?;
@@ -718,9 +722,21 @@ impl<'a> PostgresReplicator<'a> {
                         create_table.name.display(Dialect::PostgreSQL).to_string(),
                         create_table.to_string(),
                     );
+                    let mut changes = if full_snapshot {
+                        // If we're doing a full snapshot, drop the table before creating it, to
+                        // clear out any old data.
+                        vec![Change::Drop {
+                            name: create_table.name.clone(),
+                            if_exists: true,
+                        }]
+                    } else {
+                        vec![]
+                    };
+                    changes.push(change);
+
                     self.noria
-                        .extend_recipe_no_leader_ready(ChangeList::from_change(
-                            change,
+                        .extend_recipe_no_leader_ready(ChangeList::from_changes(
+                            changes,
                             DataDialect::DEFAULT_POSTGRESQL,
                         ))
                         .map_ok(|_| create_table)
@@ -799,14 +815,16 @@ impl<'a> PostgresReplicator<'a> {
 
         let replication_offsets = self.noria.replication_offsets().await?;
 
-        tables
-            .drain_filter(|t| replication_offsets.has_table(&t.name))
-            .for_each(|t| {
-                info!(
-                    table = %t.name.display(Dialect::PostgreSQL),
-                    "Replication offset already exists for table, skipping snapshot"
-                )
-            });
+        if !full_snapshot {
+            tables
+                .drain_filter(|t| replication_offsets.has_table(&t.name))
+                .for_each(|t| {
+                    info!(
+                        table = %t.name.display(Dialect::PostgreSQL),
+                        "Replication offset already exists for table, skipping snapshot"
+                    )
+                });
+        }
 
         // Commit the transaction we were using to snapshot the schema. This is important since that
         // transaction holds onto locks for tables which we now need to load data from.

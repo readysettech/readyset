@@ -578,7 +578,6 @@ async fn drop_column_then_read() {
     shutdown_tx.shutdown().await;
 }
 
-#[ignore = "ENG-2655 Test reproduces deletion failure due to known bug"]
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn deletion_propagation_after_alter() {
@@ -627,9 +626,6 @@ async fn deletion_propagation_after_alter() {
         .await
         .unwrap();
 
-    // Since we just deleted the row, running query_one should result in a RowCount error, but due
-    // to the bug described in ENG-2655 this never seems to happen, and we get back the stale row
-    // forever (causing unwrap_err() to repeatedly panic).
     eventually!(run_test: {
         let result = client
             .query_one("SELECT * FROM cats", &[])

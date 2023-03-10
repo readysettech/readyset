@@ -118,6 +118,10 @@ impl PostgresWalConnector {
         };
 
         if next_position.is_none() {
+            // If we don't have a consistent replication offset to start replicating from, drop and
+            // recreate our replication slot.
+            //
+            // Note that later on, this means we'll need to make sure we resnapshot *all* tables!
             connector
                 .create_publication_and_slot(repl_slot_name)
                 .await?;
