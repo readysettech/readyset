@@ -61,7 +61,7 @@ impl From<Records> for BaseWrite {
 /// forward them to interested downstream operators. A base node should only be sent updates of the
 /// type corresponding to the node's type.
 #[must_use]
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Base {
     primary_key: Option<Box<[usize]>>,
     unique_keys: Vec<Box<[usize]>>,
@@ -445,22 +445,6 @@ impl Base {
             )])
         } else {
             HashMap::new()
-        }
-    }
-}
-
-/// A Base clone must have a different unique_id so that no two copies write to the same file.
-/// Resetting the writer to None in the original copy is not enough to guarantee that, as the
-/// original object can still re-open the log file on-demand from Base::persist_to_log.
-impl Clone for Base {
-    fn clone(&self) -> Base {
-        Base {
-            primary_key: self.primary_key.clone(),
-            unique_keys: self.unique_keys.clone(),
-            defaults: self.defaults.clone(),
-            dropped: self.dropped.clone(),
-            unmodified: self.unmodified,
-            permissive_writes: self.permissive_writes,
         }
     }
 }
