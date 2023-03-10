@@ -619,7 +619,7 @@ impl<'a> PostgresReplicator<'a> {
             })
     }
 
-    /// Snapshoht the contents of the upstream database to ReadySet, starting with the DDL, followed
+    /// Snapshot the contents of the upstream database to ReadySet, starting with the DDL, followed
     /// by each table's contents.
     ///
     /// If `full_snapshot` is set to `true`, *all* tables will be snapshotted, even those that

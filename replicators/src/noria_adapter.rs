@@ -663,6 +663,15 @@ impl NoriaAdapter {
 
         changelist = changelist.with_schema_search_path(vec![schema.into()]);
 
+        // Collect a list of all tables we're creating for later
+        let tables = changelist
+            .changes()
+            .filter_map(|change| match change {
+                Change::CreateTable(t) => Some(t.table.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
         match self
             .noria
             .extend_recipe_with_offset(changelist.clone(), &pos, false)
@@ -691,8 +700,25 @@ impl NoriaAdapter {
             }
             Ok(_) => {}
         }
-        self.replication_offsets.schema = Some(pos);
+
+        self.replication_offsets.schema = Some(pos.clone());
         self.clear_mutator_cache();
+
+        // Set the replication offset for each table we just created to this replication offset
+        // (since otherwise they'll get initialized without an offset)
+        for table in &tables {
+            self.replication_offsets
+                .tables
+                .insert(table.clone(), Some(pos.clone()));
+            if let Some(mutator) = self.mutator_for_table(table).await? {
+                mutator.set_replication_offset(pos.clone()).await?;
+            } else {
+                warn!(
+                    table = %table.display_unquoted(),
+                    "Just-created table missing replication offset"
+                )
+            }
+        }
 
         Ok(())
     }
