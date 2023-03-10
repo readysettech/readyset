@@ -682,6 +682,7 @@ async fn correct_data_after_restart() {
         .unwrap();
 
     let mut adapter = deployment.first_adapter().await;
+
     adapter
         .query_drop(
             r"CREATE TABLE t1 (
@@ -696,9 +697,15 @@ async fn correct_data_after_restart() {
         .await
         .unwrap();
 
+    adapter
+        .query_drop(r"CREATE CACHE FROM SELECT * FROM t1")
+        .await
+        .unwrap();
+
     assert!(
-        query_until_expected(
+        query_until_expected_from_noria(
             &mut adapter,
+            deployment.metrics(),
             QueryExecution::PrepareExecute("SELECT * FROM t1", ()),
             &EventuallyConsistentResults::empty_or(&[(1, 4)]),
             PROPAGATION_DELAY_TIMEOUT,
@@ -720,6 +727,13 @@ async fn correct_data_after_restart() {
         .unwrap();
     deployment
         .start_server(ServerParams::default().with_volume(&volume_id), false)
+        .await
+        .unwrap();
+
+    // Ensure that workers are ready before issuing queries, since the graph may need to be rebuilt.
+    deployment.leader_handle().ready().await.unwrap();
+    deployment
+        .wait_for_workers(PROPAGATION_DELAY_TIMEOUT)
         .await
         .unwrap();
 
@@ -883,6 +897,16 @@ async fn update_during_failure() {
     // Wait for the deployment to completely recover from the failure.
     deployment
         .start_server(ServerParams::default(), true)
+        .await
+        .unwrap();
+
+    adapter
+        .query_drop(r"CREATE CACHE FROM SELECT * FROM t1 WHERE uid = 1")
+        .await
+        .unwrap();
+
+    adapter
+        .query_drop(r"CREATE CACHE FROM SELECT * FROM t2 WHERE uid = 1")
         .await
         .unwrap();
 
@@ -1408,13 +1432,17 @@ async fn correct_deployment_permissions() {
         .unwrap();
 
     let mut adapter = deployment.first_adapter().await;
+    adapter
+        .query_drop(r"CREATE CACHE FROM SELECT * FROM t1 WHERE uid = ?")
+        .await
+        .unwrap();
     assert!(
         query_until_expected_from_noria(
             &mut adapter,
             deployment.metrics(),
             QueryExecution::PrepareExecute(r"SELECT * FROM t1 where uid = ?", (2,)),
             &EventuallyConsistentResults::empty_or(&[(2, 5)]),
-            Duration::from_secs(5),
+            PROPAGATION_DELAY_TIMEOUT,
         )
         .await
     );

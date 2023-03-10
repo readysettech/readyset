@@ -161,15 +161,13 @@ where
 {
     let mut last: Option<(Vec<T>, bool)> = None;
     let start = Instant::now();
-    let mut first_query = true;
     loop {
-        // Check if we have timed out, if we have not execute the query against the connection
-        // with up to as long as we have left in the timeout. We timeout any query after 5
-        // seconds to quickly retry due to failures.
+        // Check if we have exceeded the given timeout. Otherwise, attempt query execution again.
         if start.elapsed() > timeout {
             println!("query_until_expected timed out, last: {:?}", last);
             return false;
         }
+        // Set the timeout for this query execution, which may take at most 5 seconds.
         let remaining = std::cmp::min(Duration::from_secs(5), timeout - start.elapsed());
         let num_noria_queries_before = if let ResultSource::FromNoria(metrics) = &mut source {
             get_num_view_queries(metrics).await
@@ -204,8 +202,7 @@ where
                 let correct_source = match &mut source {
                     ResultSource::FromAnywhere => true,
                     ResultSource::FromNoria(metrics) => {
-                        first_query
-                            || get_num_view_queries(metrics).await > num_noria_queries_before
+                        get_num_view_queries(metrics).await > num_noria_queries_before
                     }
                 };
                 let has_expected_result = equal_rows(&r, &results.expected);
@@ -232,7 +229,6 @@ where
             }
         }
 
-        first_query = false;
         sleep(Duration::from_millis(100)).await;
     }
 }
