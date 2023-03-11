@@ -790,12 +790,11 @@ async fn replication_failure_ignores_table() {
     use mysql::serde_json;
     use nom_sql::Relation;
     use readyset_adapter::backend::MigrationMode;
-    use readyset_client_test_helpers::Adapter;
     use readyset_errors::ReadySetError;
 
     let (config, mut handle, shutdown_tx) = TestBuilder::default()
         .recreate_database(false)
-        .fallback_url(MySQLAdapter::url())
+        .fallback(true)
         .migration_mode(MigrationMode::OutOfBand)
         .build::<MySQLAdapter>()
         .await;

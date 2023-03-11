@@ -70,16 +70,19 @@ impl Adapter for MySQLAdapter {
 
     const EXPR_DIALECT: readyset_data::Dialect = readyset_data::Dialect::DEFAULT_MYSQL;
 
-    fn connection_opts_with_port(port: u16) -> Self::ConnectionOpts {
-        mysql_async::OptsBuilder::default().tcp_port(port).into()
+    fn connection_opts_with_port(db: Option<&str>, port: u16) -> Self::ConnectionOpts {
+        mysql_async::OptsBuilder::default()
+            .tcp_port(port)
+            .db_name(db)
+            .into()
     }
 
-    fn url() -> String {
-        MySQLAdapter::url_with_db("noria")
+    fn upstream_url(db_name: &str) -> String {
+        MySQLAdapter::url_with_db(db_name)
     }
 
-    async fn recreate_database() {
-        recreate_database("noria").await;
+    async fn recreate_database(db_name: &str) {
+        recreate_database(db_name).await;
     }
 
     async fn run_backend(

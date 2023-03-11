@@ -5,8 +5,6 @@ publish = false
 authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 async-trait = "0.1.49"
 tokio = { workspace = true, features = ["full"] }
@@ -21,6 +19,7 @@ readyset-adapter = { path = "../readyset-adapter" }
 readyset-server = { path = "../readyset-server/" }
 readyset-data = { path = "../readyset-data" }
 readyset-tracing = { path = "../readyset-tracing" }
+database-utils = { path = "../database-utils" }
 readyset-mysql = { path = "../readyset-mysql", optional = true }
 readyset-psql = { path = "../readyset-psql", optional = true }
 readyset-util = { path = "../readyset-util" }

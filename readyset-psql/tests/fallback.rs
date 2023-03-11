@@ -405,7 +405,7 @@ async fn generated_columns() {
 
     let (opts, _handle, shutdown_tx) = TestBuilder::default()
         .recreate_database(false)
-        .fallback_url(PostgreSQLAdapter::url())
+        .fallback_url(PostgreSQLAdapter::upstream_url("noria"))
         .migration_mode(MigrationMode::OutOfBand)
         .build::<PostgreSQLAdapter>()
         .await;
@@ -499,7 +499,7 @@ async fn unsuported_numeric_scale() {
 
     let (opts, _handle, shutdown_tx) = TestBuilder::default()
         .recreate_database(false)
-        .fallback_url(PostgreSQLAdapter::url())
+        .fallback_url(PostgreSQLAdapter::upstream_url("noria"))
         .migration_mode(MigrationMode::OutOfBand)
         .build::<PostgreSQLAdapter>()
         .await;
@@ -964,7 +964,7 @@ async fn replication_failure_ignores_table(failpoint: &str) {
 
     let (config, mut handle, shutdown_tx) = TestBuilder::default()
         .recreate_database(false)
-        .fallback_url(PostgreSQLAdapter::url())
+        .fallback(true)
         .migration_mode(MigrationMode::OutOfBand)
         .build::<PostgreSQLAdapter>()
         .await;
@@ -1036,7 +1036,7 @@ async fn replication_failure_retries_if_failed_to_drop(failpoint: &str) {
 
     let (config, mut handle, shutdown_tx) = TestBuilder::default()
         .recreate_database(false)
-        .fallback_url(PostgreSQLAdapter::url())
+        .fallback(true)
         .migration_mode(MigrationMode::OutOfBand)
         .build::<PostgreSQLAdapter>()
         .await;

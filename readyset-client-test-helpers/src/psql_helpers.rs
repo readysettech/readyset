@@ -40,33 +40,43 @@ impl Adapter for PostgreSQLAdapter {
 
     const EXPR_DIALECT: readyset_data::Dialect = readyset_data::Dialect::DEFAULT_POSTGRESQL;
 
-    fn connection_opts_with_port(port: u16) -> Self::ConnectionOpts {
+    fn connection_opts_with_port(db_name: Option<&str>, port: u16) -> Self::ConnectionOpts {
         let mut config = tokio_postgres::Config::new();
-        config.host("127.0.0.1").port(port).dbname("noria");
+        config
+            .host("127.0.0.1")
+            .port(port)
+            .dbname(db_name.unwrap_or("noria"));
         config
     }
 
-    fn url() -> String {
+    fn upstream_url(db_name: &str) -> String {
         format!(
-            "postgresql://{}:{}@{}:{}/noria",
+            "postgresql://{}:{}@{}:{}/{}",
             env::var("PGUSER").unwrap_or_else(|_| "postgres".into()),
             env::var("PGPASSWORD").unwrap_or_else(|_| "noria".into()),
             env::var("PGHOST").unwrap_or_else(|_| "localhost".into()),
             env::var("PGPORT").unwrap_or_else(|_| "5432".into()),
+            db_name
         )
     }
 
-    async fn recreate_database() {
+    async fn recreate_database(db_name: &str) {
         let mut config = upstream_config();
 
         let (client, connection) = config.dbname("postgres").connect(NoTls).await.unwrap();
         tokio::spawn(connection);
-        while let Err(error) = client.simple_query("DROP DATABASE IF EXISTS noria").await {
+        while let Err(error) = client
+            .simple_query(&format!("DROP DATABASE IF EXISTS {db_name}"))
+            .await
+        {
             error!(%error, "Error dropping database");
             sleep().await
         }
 
-        client.simple_query("CREATE DATABASE noria").await.unwrap();
+        client
+            .simple_query(&format!("CREATE DATABASE {db_name}"))
+            .await
+            .unwrap();
     }
 
     async fn run_backend(backend: Backend<Self::Upstream, Self::Handler>, s: TcpStream) {

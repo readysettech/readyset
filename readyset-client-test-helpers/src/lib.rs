@@ -2,11 +2,13 @@
 
 use std::collections::HashMap;
 use std::env;
+use std::str::FromStr;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use database_utils::DatabaseURL;
 use nom_sql::Relation;
 use readyset_adapter::backend::noria_connector::{NoriaConnector, ReadBehavior};
 use readyset_adapter::backend::{BackendBuilder, MigrationMode};
@@ -37,8 +39,11 @@ pub trait Adapter: Send {
 
     const EXPR_DIALECT: readyset_data::Dialect;
 
-    fn connection_opts_with_port(port: u16) -> Self::ConnectionOpts;
-    fn url() -> String;
+    fn connection_opts_with_port(db_name: Option<&str>, port: u16) -> Self::ConnectionOpts;
+
+    /// Return the URL for connecting to the upstream database for this adapter with the given DB
+    /// name.
+    fn upstream_url(_db_name: &str) -> String;
 
     async fn make_upstream(addr: String) -> Self::Upstream {
         Self::Upstream::connect(UpstreamConfig::from_url(addr), None)
@@ -46,9 +51,18 @@ pub trait Adapter: Send {
             .unwrap()
     }
 
-    async fn recreate_database();
+    async fn recreate_database(db_name: &str);
 
     async fn run_backend(backend: Backend<Self::Upstream, Self::Handler>, s: TcpStream);
+}
+
+#[derive(Debug, Clone, Default)]
+enum Fallback {
+    #[default]
+    None,
+    Url(String),
+    DB(String),
+    DefaultURL,
 }
 
 /// A builder for an adapter integration test case.
@@ -57,8 +71,7 @@ pub trait Adapter: Send {
 /// MySQL or PostgreSQL) adapter for use in integration tests.
 pub struct TestBuilder {
     backend_builder: BackendBuilder,
-    fallback: bool,
-    fallback_url: Option<String>,
+    fallback: Fallback,
     partial: bool,
     wait_for_backend: bool,
     read_behavior: ReadBehavior,
@@ -77,8 +90,7 @@ impl TestBuilder {
     pub fn new(backend_builder: BackendBuilder) -> Self {
         Self {
             backend_builder,
-            fallback: false,
-            fallback_url: None,
+            fallback: Default::default(),
             partial: true,
             wait_for_backend: true,
             read_behavior: ReadBehavior::Blocking,
@@ -89,13 +101,21 @@ impl TestBuilder {
     }
 
     pub fn fallback(mut self, fallback: bool) -> Self {
-        self.fallback = fallback;
+        self.fallback = if fallback {
+            Fallback::DefaultURL
+        } else {
+            Fallback::None
+        };
         self
     }
 
     pub fn fallback_url(mut self, fallback_url: String) -> Self {
-        self.fallback = true;
-        self.fallback_url = Some(fallback_url);
+        self.fallback = Fallback::Url(fallback_url);
+        self
+    }
+
+    pub fn fallback_db(mut self, db_name: String) -> Self {
+        self.fallback = Fallback::DB(db_name);
         self
     }
 
@@ -137,12 +157,27 @@ impl TestBuilder {
             .query_status_cache
             .unwrap_or_else(|| Box::leak(Box::new(QueryStatusCache::new())));
 
-        let fallback_url = self
-            .fallback
-            .then(|| self.fallback_url.unwrap_or_else(A::url));
+        let fallback_url_and_db_name = match self.fallback {
+            Fallback::None => None,
+            Fallback::Url(url) => {
+                let db_name = DatabaseURL::from_str(&url)
+                    .unwrap()
+                    .db_name()
+                    .unwrap()
+                    .to_owned();
+                Some((url, db_name))
+            }
+            Fallback::DB(db) => Some((A::upstream_url(&db), db.to_owned())),
+            Fallback::DefaultURL => {
+                let db_name = "noria";
+                Some((A::upstream_url(db_name), db_name.to_owned()))
+            }
+        };
 
-        if self.fallback && self.recreate_database {
-            A::recreate_database().await;
+        if self.recreate_database {
+            if let Some((_, db_name)) = &fallback_url_and_db_name {
+                A::recreate_database(db_name).await;
+            }
         }
 
         let authority = Arc::new(Authority::from(LocalAuthority::new_with_store(Arc::new(
@@ -157,7 +192,7 @@ impl TestBuilder {
             builder.disable_partial();
         }
 
-        if let Some(f) = &fallback_url {
+        if let Some((f, _)) = &fallback_url_and_db_name {
             builder.set_replication_url(f.clone());
         }
         let (mut handle, shutdown_tx) = builder.start(authority.clone()).await.unwrap();
@@ -171,6 +206,7 @@ impl TestBuilder {
         let addr = listener.local_addr().unwrap();
 
         let mut backend_shutdown_rx = shutdown_tx.subscribe();
+        let fallback_url = fallback_url_and_db_name.as_ref().map(|(f, _)| f.clone());
         tokio::spawn(async move {
             let backend_shutdown_rx_connection = backend_shutdown_rx.clone();
             let connection_fut = async move {
@@ -230,7 +266,10 @@ impl TestBuilder {
         });
 
         (
-            A::connection_opts_with_port(addr.port()),
+            A::connection_opts_with_port(
+                fallback_url_and_db_name.as_ref().map(|(_, db)| db.as_str()),
+                addr.port(),
+            ),
             handle,
             shutdown_tx,
         )
