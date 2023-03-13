@@ -22,10 +22,12 @@
 //! Note that this test suite requires the *exact* configuration specified in that docker-compose
 //! configuration, including the port, username, and password.
 
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter, Result};
 use std::iter::once;
 use std::panic::AssertUnwindSafe;
+use std::rc::Rc;
 
 use itertools::Itertools;
 use nom_sql::SqlType;
@@ -342,6 +344,10 @@ struct TestModel {
     // Map of view name to view definition (right now just a table that we do a SELECT * from)
     views: HashMap<String, String>,
     deleted_views: HashSet<String>,
+
+    // Just cloned into [`TestTree`] and used for shrinking, not part of the model used for testing
+    // itself:
+    next_step_idx: Rc<Cell<usize>>,
 }
 
 impl TestModel {
@@ -539,6 +545,11 @@ struct TestTree {
     /// The last operation we removed via shrinking (which may or may not end up needing to be
     /// added back in, depending on whether the test continues to fail with that operation removed)
     last_shrank_idx: usize,
+    /// The index of the next step we're planning to run. If the test fails, the last successful
+    /// step will thus be `next_step_idx - 1`.
+    next_step_idx: Rc<Cell<usize>>,
+    /// Whether we've already used next_step_idx to trim out steps after the failure.
+    have_trimmed_after_failure: bool,
 }
 
 impl ValueTree for TestTree {
@@ -561,13 +572,11 @@ impl ValueTree for TestTree {
     ///
     /// There are some limitations in the current approach that I'd like to address at some point:
     ///  * It is inefficient to only remove one element at a time.
-    ///    * At a minimum, we should be able to immediately remove all elements that are past the
-    ///      point at which the test failed.
-    ///    * Beyond that it is also likely that we can randomly try removing multiple elements at
-    ///      once since most minimal failing cases are much smaller than the original failing cases
-    ///      that produced them. The math around this is trickier though, as the ideal number of
-    ///      elements to try removing at any given time depends on how big we expect a typical
-    ///      minimal failing test case to be.
+    ///    * It is likely that we can randomly try removing multiple elements at once, since most
+    ///    minimal failing cases are much smaller than the original failing cases that produced
+    ///    them. The math around this is a bit tricky though, as the ideal number of elements to try
+    ///    removing at any given time depends on how big we expect a typical minimal failing test
+    ///    case to be.
     ///  * Removing only one element at a time may prevent us from fully shrinking down to the
     ///    minimal failing case
     ///    * For example, if we create a table A, then drop A, then create A again with different
@@ -583,6 +592,23 @@ impl ValueTree for TestTree {
     /// standpoint, so that is all that I've implemented for now. Designing and implementing a
     /// better shrinking algorithm could definitely be useful in other tests in the future, though.
     fn simplify(&mut self) -> bool {
+        if !self.have_trimmed_after_failure {
+            self.have_trimmed_after_failure = true; // Only run this block once per test case
+
+            let next_step_idx = self.next_step_idx.get();
+
+            // next_step_idx is the failing step, and we want to exclude steps *beyond* the failing
+            // step, hence adding 1 to the start of the range:
+            let steps_after_failure = next_step_idx + 1..self.ops.len();
+            for i in steps_after_failure {
+                self.currently_included[i] = false;
+            }
+            // Setting last_shrank_idx to next_step_idx causes us to skip trying to shrink the step
+            // that failed, which should be good since the step that triggers the failure is
+            // presumably needed to reproduce the failure:
+            self.last_shrank_idx = next_step_idx;
+        }
+
         // More efficient to iterate backward, since we only need to go over the list once
         // (preconditions are based only on the state changes caused by previous ops, so if we're
         // moving backward through the list then the only time we'll be unable to remove an op
@@ -650,6 +676,8 @@ impl Strategy for TestModel {
             ops,
             currently_included,
             last_shrank_idx: size, // 1 past the end of the ops vec
+            next_step_idx: self.next_step_idx.clone(),
+            have_trimmed_after_failure: false,
         })
     }
 }
@@ -705,7 +733,7 @@ fn rows_to_dfvalue_vec(rows: Vec<Row>) -> Vec<Vec<DfValue>> {
 ///  * Running each step in `ops`, and checking afterward that:
 ///    * The contents of the tables tracked by our model match across both ReadySet and Postgres
 ///    * Any deleted tables appear as deleted in both ReadySet and Postgres
-async fn run(ops: Vec<Operation>) {
+async fn run(ops: Vec<Operation>, next_step_idx: Rc<Cell<usize>>) {
     readyset_tracing::init_test_logging();
 
     let (opts, _handle, shutdown_tx) = TestBuilder::default()
@@ -719,8 +747,8 @@ async fn run(ops: Vec<Operation>) {
 
     let mut runtime_state = TestModel::default();
 
-    for op in ops {
-        println!("Running op: {op:?}");
+    for (idx, op) in ops.into_iter().enumerate() {
+        println!("Running op {idx}: {op:?}");
         match &op {
             Operation::CreateTable(table_name, cols) => {
                 let non_pkey_cols = cols.iter().map(|ColumnSpec { name, sql_type, .. }| {
@@ -873,27 +901,45 @@ async fn run(ops: Vec<Operation>) {
                 .await
                 .unwrap_err();
         }
+
+        // This must always happen last in this loop so that we don't increment this if something
+        // triggers a test failure earlier in the iteration:
+        next_step_idx.set(next_step_idx.get() + 1);
     }
 
     shutdown_tx.shutdown().await;
 }
 
-proptest! {
-    #![proptest_config(ProptestConfig {
+#[test]
+#[cfg_attr(not(feature = "ddl_vertical_tests"), ignore)]
+fn run_cases() {
+    let config = ProptestConfig {
         max_shrink_iters: MAX_OPS as u32 * 2,
-        .. ProptestConfig::default()
-    })]
-    #[test]
-    #[cfg_attr(not(feature = "ddl_vertical_tests"), ignore)]
-    fn run_cases(steps in TestModel::default()) {
+        ..ProptestConfig::default()
+    };
+
+    // Used for optimizing shrinking by letting us immediately discard any steps after the failing
+    // step. To enable this, we need to be able to mutate the value from the test itself, and then
+    // access it from within the [`TestModel`], which is not easily doable within the constraints
+    // of the proptest API, since the test passed to [`TestRunner`] is [`Fn`] (not [`FnMut`]).
+    // Hence the need for interior mutability.
+    let next_step_idx = Rc::new(Cell::new(0));
+
+    let model = TestModel {
+        next_step_idx: next_step_idx.clone(),
+        ..TestModel::default()
+    };
+    proptest!(config, |(steps in model)| {
         prop_assume!(preconditions_hold(&steps));
         let rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
             .unwrap();
-        rt.block_on(run(steps));
-    }
+        rt.block_on(run(steps, next_step_idx.clone()));
+    });
+}
 
+proptest! {
     #[test]
     #[ignore]
     fn print_cases(steps in TestModel::default()) {
