@@ -8978,6 +8978,44 @@ async fn drop_view() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn drop_view_schema_qualified() {
+    readyset_tracing::init_test_logging();
+    let (mut g, shutdown_tx) = start_simple_unsharded("drop_view_schema_qualified").await;
+
+    g.extend_recipe(
+        ChangeList::from_str(
+            "CREATE TABLE public.t1 (id int);
+             CREATE VIEW public.t1_view AS SELECT * FROM public.t1;",
+            Dialect::DEFAULT_MYSQL,
+        )
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+
+    g.extend_recipe(
+        ChangeList::from_str(
+            "CREATE CACHE t1_select FROM SELECT * FROM t1_view",
+            Dialect::DEFAULT_MYSQL,
+        )
+        .unwrap()
+        .with_schema_search_path(vec!["public".into()]),
+    )
+    .await
+    .unwrap();
+
+    g.extend_recipe(
+        ChangeList::from_str("DROP VIEW public.t1_view;", Dialect::DEFAULT_MYSQL).unwrap(),
+    )
+    .await
+    .unwrap();
+
+    g.view("t1_select").await.unwrap_err();
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn read_from_dropped_query() {
     let (mut g, shutdown_tx) = start_simple_unsharded("read_from_dropped_query").await;
 

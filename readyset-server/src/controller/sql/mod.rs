@@ -60,6 +60,12 @@ impl Default for Config {
 /// [`SqlIncorporator::uncompiled_views`].
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct UncompiledView {
+    /// The name of the view.
+    ///
+    /// This exists here in addition to as the key in `SqlIncorporator.uncompiled_views` because it
+    /// makes it easier to make sure view names are always schema-qualified
+    name: Relation,
+
     /// The definition of the view itself
     definition: SelectSpecification,
 
@@ -493,8 +499,9 @@ impl SqlIncorporator {
         trace!(name = %name.display_unquoted(), "Adding uncompiled view");
         self.remove_non_replicated_relation(&name);
         self.uncompiled_views.insert(
-            name,
+            name.clone(),
             UncompiledView {
+                name,
                 definition,
                 schema_search_path,
             },
@@ -903,26 +910,24 @@ impl SqlIncorporator {
                     return Ok(mir_leaf);
                 }
                 Err(e) => {
-                    if let Some((view, name)) = e
+                    if let Some(view) = e
                         .table_not_found_cause()
                         .map(|(name, schema)| Relation {
                             schema: schema.map(Into::into),
                             name: name.into(),
                         })
-                        .and_then(|rel| Some((self.take_uncompiled_view(search_path, &rel)?, rel)))
+                        .and_then(|rel| self.take_uncompiled_view(search_path, &rel))
                     {
                         trace!(
-                            name = %name.display_unquoted(),
+                            name = %view.name.display_unquoted(),
                             "Query referenced uncompiled view; compiling"
                         );
-                        if let Err(e) =
-                            self.compile_uncompiled_view(name.clone(), view.clone(), mig)
-                        {
+                        if let Err(e) = self.compile_uncompiled_view(view.clone(), mig) {
                             trace!(%e, "Compiling uncompiled view failed");
                             // The view *might* have failed to migrate for a transient reason - put
                             // it back in the map of uncompiled views so we can try again later if
                             // the user asks us to
-                            self.uncompiled_views.insert(name, view);
+                            self.uncompiled_views.insert(view.name.clone(), view);
                             return Err(on_err(e));
                         }
                     } else {
@@ -1037,11 +1042,11 @@ impl SqlIncorporator {
     /// Compile the given uncompiled view all the way to dataflow
     fn compile_uncompiled_view(
         &mut self,
-        name: Relation,
         uncompiled_view: UncompiledView,
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<()> {
         let UncompiledView {
+            name,
             mut definition,
             schema_search_path,
         } = uncompiled_view;
