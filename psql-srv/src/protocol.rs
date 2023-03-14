@@ -20,7 +20,7 @@ use crate::message::{CommandCompleteTag, FieldDescription};
 use crate::response::Response;
 use crate::value::Value;
 use crate::QueryResponse::*;
-use crate::{Backend, Column, PrepareResponse};
+use crate::{Backend, Column, Credentials, PrepareResponse};
 
 const ATTTYPMOD_NONE: i32 = -1;
 const TRANSFER_FORMAT_PLACEHOLDER: TransferFormat = TransferFormat::Text;
@@ -217,7 +217,7 @@ impl Protocol {
                         }
                         crate::CredentialsNeeded::Cleartext => {
                             self.state = State::Authenticating {
-                                user: user.ok_or(Error::AuthenticationFailure(String::new()))?,
+                                user: user.ok_or(Error::NoUserSpecified)?,
                             };
                             smallvec![AuthenticationCleartextPassword]
                         }
@@ -236,11 +236,17 @@ impl Protocol {
             State::Authenticating { ref user } => match message {
                 PasswordMessage { ref password } => {
                     backend
-                        .on_auth(crate::Credentials::Cleartext {
-                            user: user.to_string(),
-                            password: password.to_string(),
+                        .credentials_for_user(user.borrow())
+                        .filter(|c| match c {
+                            Credentials::Any => true,
+                            Credentials::CleartextPassword(expected_password) => {
+                                password == *expected_password
+                            }
                         })
-                        .await?;
+                        .ok_or_else(|| Error::AuthenticationFailure {
+                            username: user.to_string(),
+                        })?;
+
                     self.state = State::Ready;
 
                     Ok(Response::Messages(get_ready_message(backend.version())))
@@ -791,7 +797,7 @@ mod tests {
         last_close: Option<u32>,
         last_execute_id: Option<u32>,
         last_execute_params: Option<Vec<DataValue>>,
-        needed_credentials: Option<Credentials>,
+        needed_credentials: Option<Credentials<'static>>,
     }
 
     impl Backend {
@@ -829,18 +835,8 @@ mod tests {
             }
         }
 
-        async fn on_auth(&mut self, provided: Credentials) -> Result<(), Error> {
-            let needed_credentials = match &self.needed_credentials {
-                Some(n) => n,
-                None => return Ok(()),
-            };
-
-            match (needed_credentials, &provided) {
-                (needed, provided) if needed == provided => Ok(()),
-                (Credentials::Cleartext { .. }, Credentials::Cleartext { user, .. }) => {
-                    Err(Error::AuthenticationFailure(user.to_owned()))
-                }
-            }
+        fn credentials_for_user(&self, _user: &str) -> Option<Credentials> {
+            self.needed_credentials
         }
 
         async fn on_query(&mut self, query: &str) -> Result<QueryResponse<Self::Resultset>, Error> {
@@ -1046,7 +1042,7 @@ mod tests {
     #[test]
     fn authentication_flow_successful() {
         let expected_username = bytes_str("user_name");
-        let expected_password = bytes_str("password");
+        let expected_password = "password";
         let mut protocol = Protocol::new();
         assert_eq!(protocol.state, State::StartingUp);
         let request = FrontendMessage::StartupMessage {
@@ -1055,10 +1051,7 @@ mod tests {
             database: Some(bytes_str("database_name")),
         };
         let mut backend = Backend::new();
-        backend.needed_credentials = Some(Credentials::Cleartext {
-            user: expected_username.to_string(),
-            password: expected_password.to_string(),
-        });
+        backend.needed_credentials = Some(Credentials::CleartextPassword(expected_password));
         let mut channel = Channel::<NullBytestream, Vec<Value>>::new(NullBytestream);
         match block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap() {
             Response::Messages(ms) => assert_eq!(
@@ -1075,7 +1068,7 @@ mod tests {
         );
 
         let auth_request = FrontendMessage::PasswordMessage {
-            password: expected_password,
+            password: bytes_str(expected_password),
         };
 
         match block_on(protocol.on_request(auth_request, &mut backend, &mut channel)).unwrap() {
@@ -1113,7 +1106,7 @@ mod tests {
     #[test]
     fn authentication_flow_failure() {
         let expected_username = bytes_str("user_name");
-        let expected_password = bytes_str("password");
+        let expected_password = "password";
         let provided_password = bytes_str("incorrect password");
         let mut protocol = Protocol::new();
         assert_eq!(protocol.state, State::StartingUp);
@@ -1123,10 +1116,7 @@ mod tests {
             database: Some(bytes_str("database_name")),
         };
         let mut backend = Backend::new();
-        backend.needed_credentials = Some(Credentials::Cleartext {
-            user: expected_username.to_string(),
-            password: expected_password.to_string(),
-        });
+        backend.needed_credentials = Some(Credentials::CleartextPassword(expected_password));
         let mut channel = Channel::<NullBytestream, Vec<Value>>::new(NullBytestream);
         match block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap() {
             Response::Messages(ms) => assert_eq!(
@@ -1148,9 +1138,11 @@ mod tests {
 
         let output =
             block_on(protocol.on_request(auth_request, &mut backend, &mut channel)).unwrap_err();
-        assert!(
-            matches!(output, Error::AuthenticationFailure(x) if x == expected_username.to_string())
-        );
+        assert!(matches!(
+            output,
+            Error::AuthenticationFailure { username }
+            if username == expected_username.to_string()
+        ));
     }
 
     #[test]

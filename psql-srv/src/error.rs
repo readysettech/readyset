@@ -9,8 +9,11 @@ use crate::message::{BackendMessage, ErrorSeverity, FrontendMessage};
 
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("password authentication failed for user \"{0}\"")]
-    AuthenticationFailure(String),
+    #[error("password authentication failed for user \"username\"")]
+    AuthenticationFailure { username: String },
+
+    #[error("no user specified in connection")]
+    NoUserSpecified,
 
     #[error("decode error: {0}")]
     DecodeError(#[from] DecodeError),
@@ -64,7 +67,8 @@ pub enum Error {
 impl<R> From<Error> for BackendMessage<R> {
     fn from(error: Error) -> Self {
         let sqlstate = match error {
-            Error::AuthenticationFailure(_) => SqlState::INVALID_PASSWORD,
+            Error::AuthenticationFailure { .. } => SqlState::INVALID_PASSWORD,
+            Error::NoUserSpecified => SqlState::INVALID_PASSWORD,
             Error::DecodeError(_) => SqlState::IO_ERROR,
             Error::EncodeError(_) => SqlState::IO_ERROR,
             Error::IncorrectFormatCount(_) => SqlState::IO_ERROR,

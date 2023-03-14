@@ -1,5 +1,6 @@
 use std::borrow::Borrow;
 use std::convert::TryFrom;
+use std::ops::Deref;
 use std::{fmt, str};
 
 use bytes::Bytes;
@@ -9,6 +10,13 @@ use bytes::Bytes;
 /// [`Bytes`]: https://docs.rs/bytes/0.5.6/bytes/struct.Bytes.html
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct BytesStr(Bytes);
+
+impl BytesStr {
+    fn as_str(&self) -> &str {
+        // SAFETY: BytesStr is always validated on construction (in the TryFrom impl)
+        unsafe { std::str::from_utf8_unchecked(&self.0) }
+    }
+}
 
 impl TryFrom<Bytes> for BytesStr {
     type Error = std::str::Utf8Error;
@@ -21,7 +29,27 @@ impl TryFrom<Bytes> for BytesStr {
 
 impl Borrow<str> for BytesStr {
     fn borrow(&self) -> &str {
-        unsafe { std::str::from_utf8_unchecked(&self.0) }
+        self.as_str()
+    }
+}
+
+impl AsRef<str> for BytesStr {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl Deref for BytesStr {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        self.as_str()
+    }
+}
+
+impl PartialEq<str> for BytesStr {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
     }
 }
 

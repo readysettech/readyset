@@ -45,10 +45,12 @@ pub enum CredentialsNeeded {
     Cleartext,
 }
 
-/// Represents different forms of credentials provided by the client as part of authorization
-#[derive(PartialEq, Eq)]
-pub enum Credentials {
-    Cleartext { user: String, password: String },
+/// Authentication credentials required for a given user
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum Credentials<'a> {
+    /// Any credentials are accepted for this user
+    Any,
+    CleartextPassword(&'a str),
 }
 
 /// A trait for implementing a SQL backend that produces responses to SQL query statements. This
@@ -81,10 +83,8 @@ pub trait Backend {
     ///   instance.
     async fn on_init(&mut self, database: &str) -> Result<CredentialsNeeded, Error>;
 
-    /// Validate authentication credentials provided by connected client
-    ///
-    /// * `credentials` - Authentication info provided by the client
-    async fn on_auth(&mut self, credentials: Credentials) -> Result<(), Error>;
+    /// Look up authentication credentials for the given user
+    fn credentials_for_user(&self, user: &str) -> Option<Credentials>;
 
     /// Performs the specified SQL query.
     ///

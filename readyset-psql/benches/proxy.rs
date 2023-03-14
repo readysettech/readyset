@@ -136,12 +136,12 @@ impl psql_srv::Backend for Backend {
         "14".into()
     }
 
-    async fn on_init(&mut self, _database: &str) -> Result<CredentialsNeeded, psql_srv::Error> {
-        Ok(CredentialsNeeded::None)
+    fn credentials_for_user(&self, _user: &str) -> Option<Credentials> {
+        Some(Credentials::Any)
     }
 
-    async fn on_auth(&mut self, _credentials: Credentials) -> Result<(), psql_srv::Error> {
-        Ok(())
+    async fn on_init(&mut self, _database: &str) -> Result<CredentialsNeeded, psql_srv::Error> {
+        Ok(CredentialsNeeded::None)
     }
 
     async fn on_query(

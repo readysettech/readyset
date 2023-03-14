@@ -54,6 +54,12 @@ impl ps::Backend for Backend {
         self.0.version()
     }
 
+    fn credentials_for_user(&self, user: &str) -> Option<ps::Credentials> {
+        self.users
+            .get(user)
+            .map(|pw| ps::Credentials::CleartextPassword(pw))
+    }
+
     async fn on_init(&mut self, _database: &str) -> Result<ps::CredentialsNeeded, ps::Error> {
         match self.does_require_authentication() {
             true => Ok(ps::CredentialsNeeded::Cleartext),
@@ -84,17 +90,6 @@ impl ps::Backend for Backend {
 
     async fn on_close(&mut self, _statement_id: u32) -> Result<(), ps::Error> {
         Ok(())
-    }
-
-    async fn on_auth(&mut self, credentials: ps::Credentials) -> Result<(), ps::Error> {
-        match credentials {
-            ps::Credentials::Cleartext { user, password } => {
-                if self.users.get(&user) == Some(&password) {
-                    return Ok(());
-                }
-                return Err(ps::Error::AuthenticationFailure(user));
-            }
-        }
     }
 }
 

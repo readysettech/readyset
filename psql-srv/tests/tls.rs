@@ -4,7 +4,7 @@ use std::vec;
 use async_trait::async_trait;
 use database_utils::DatabaseURL;
 use futures::stream;
-use psql_srv::{run_backend, Backend, CredentialsNeeded, Error};
+use psql_srv::{run_backend, Backend, Credentials, CredentialsNeeded, Error};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio_native_tls::{native_tls, TlsAcceptor};
@@ -28,18 +28,15 @@ impl Backend for TestBackend {
     type Row = Vec<Self::Value>;
     type Resultset = stream::Iter<vec::IntoIter<Result<Self::Row, Error>>>;
 
+    fn credentials_for_user(&self, _user: &str) -> Option<Credentials> {
+        Some(Credentials::Any)
+    }
+
     async fn on_init(
         &mut self,
         _database: &str,
     ) -> Result<psql_srv::CredentialsNeeded, psql_srv::Error> {
         Ok(CredentialsNeeded::None)
-    }
-
-    async fn on_auth(
-        &mut self,
-        _credentials: psql_srv::Credentials,
-    ) -> Result<(), psql_srv::Error> {
-        Ok(())
     }
 
     async fn on_query(

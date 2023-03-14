@@ -41,12 +41,12 @@ impl Backend for ErrorBackend {
     type Row = Vec<Value>;
     type Resultset = stream::Iter<vec::IntoIter<Result<Self::Row, psql_srv::Error>>>;
 
-    async fn on_init(&mut self, _database: &str) -> Result<CredentialsNeeded, Error> {
-        Ok(CredentialsNeeded::None)
+    fn credentials_for_user(&self, _user: &str) -> Option<Credentials> {
+        Some(Credentials::Any)
     }
 
-    async fn on_auth(&mut self, _credentials: Credentials) -> Result<(), Error> {
-        Ok(())
+    async fn on_init(&mut self, _database: &str) -> Result<CredentialsNeeded, Error> {
+        Ok(CredentialsNeeded::None)
     }
 
     async fn on_query(&mut self, _query: &str) -> Result<QueryResponse<Self::Resultset>, Error> {
