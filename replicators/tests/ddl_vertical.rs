@@ -616,23 +616,20 @@ impl ValueTree for TestTree {
         // depends on it due to failing to remove the later op via shrinking; in that case we'll
         // never be able to remove the current op either, so there's no need to check it more than
         // once).
-        let mut next_idx_to_try = self.last_shrank_idx;
-        while next_idx_to_try > 0 {
-            next_idx_to_try -= 1;
+        while self.last_shrank_idx > 0 {
+            self.last_shrank_idx -= 1;
 
             // try removing next idx to try, and see if preconditions still hold
-            self.currently_included[next_idx_to_try] = false;
+            self.currently_included[self.last_shrank_idx] = false;
             let candidate_ops = self.current();
             // if they still hold, leave it as removed, and we're done
             if preconditions_hold(&candidate_ops) {
-                self.last_shrank_idx = next_idx_to_try;
                 return true;
             }
             // if they don't still hold, add it back and try another run through the loop
-            self.currently_included[next_idx_to_try] = true;
+            self.currently_included[self.last_shrank_idx] = true;
         }
         // We got all the way through and didn't remove anything
-        self.last_shrank_idx = 0; // To make sure future calls to simplify also return false
         false
     }
 
