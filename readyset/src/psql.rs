@@ -4,7 +4,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use clap::Parser;
 use readyset_errors::ReadySetResult;
-use readyset_psql::{PostgreSqlQueryHandler, PostgreSqlUpstream};
+use readyset_psql::{AuthenticationMethod, PostgreSqlQueryHandler, PostgreSqlUpstream};
 use tokio::net;
 use tokio_native_tls::{native_tls, TlsAcceptor};
 use tracing::{error, instrument};
@@ -20,6 +20,7 @@ pub struct Options {
     /// ReadySet will not accept TLS connections if there is no identity file specified.
     #[clap(long, env = "READYSET_IDENTITY_FILE")]
     readyset_identity_file: Option<String>,
+
     /// Password for the pkcs12 identity file used by ReadySet for establishing TLS connections as
     /// the server.
     ///
@@ -27,6 +28,15 @@ pub struct Options {
     /// file.
     #[clap(long, requires = "readyset-identity-file")]
     readyset_identity_file_password: Option<String>,
+
+    /// Authentication method to use for PostgreSQL clients
+    #[clap(
+        long,
+        env = "POSTGRES_AUTHENTICATION_METHOD",
+        possible_values = &["cleartext", "scram-sha-256"],
+        default_value = "scram-sha-256",
+    )]
+    postgres_authentication_method: AuthenticationMethod,
 }
 
 /// Contains psql-srv specific `Options` and whether to enable statement logging.
@@ -39,6 +49,8 @@ pub struct Config {
 pub struct PsqlHandler {
     /// Whether to log statements received from the client
     pub enable_statement_logging: bool,
+    /// Authentication method to use for clients
+    pub authentication_method: AuthenticationMethod,
     /// Optional struct to accept a TLS handshake and return a `TlsConnection`.
     pub tls_acceptor: Option<Arc<TlsAcceptor>>,
 }
@@ -74,6 +86,7 @@ impl PsqlHandler {
 
         Ok(PsqlHandler {
             enable_statement_logging: config.enable_statement_logging,
+            authentication_method: config.options.postgres_authentication_method,
             tls_acceptor,
         })
     }
@@ -91,7 +104,8 @@ impl ConnectionHandler for PsqlHandler {
         backend: readyset_adapter::Backend<PostgreSqlUpstream, PostgreSqlQueryHandler>,
     ) {
         psql_srv::run_backend(
-            readyset_psql::Backend(backend),
+            readyset_psql::Backend::new(backend)
+                .with_authentication_method(self.authentication_method),
             stream,
             self.enable_statement_logging,
             self.tls_acceptor.clone(),

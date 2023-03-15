@@ -1,5 +1,6 @@
 use std::convert::{TryFrom, TryInto};
 use std::ops::Deref;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -7,6 +8,7 @@ use eui48::MacAddressFormat;
 use psql_srv as ps;
 use readyset_adapter::backend as cl;
 use readyset_data::DfValue;
+use thiserror::Error;
 
 use crate::error::Error;
 use crate::query_handler::PostgreSqlQueryHandler;
@@ -16,31 +18,73 @@ use crate::row::Row;
 use crate::value::Value;
 use crate::PostgreSqlUpstream;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AuthenticationMethod {
+    Cleartext,
+    #[default]
+    ScramSha256,
+}
+
+#[derive(Debug, Error, Clone, Copy)]
+#[error("Invalid authentication method")]
+pub struct InvalidAuthenticationMethod;
+
+impl FromStr for AuthenticationMethod {
+    type Err = InvalidAuthenticationMethod;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "cleartext" => Ok(Self::Cleartext),
+            "scram-sha-256" => Ok(Self::ScramSha256),
+            _ => Err(InvalidAuthenticationMethod),
+        }
+    }
+}
+
 /// A `noria_client` `Backend` wrapper that implements `psql_srv::Backend`. PostgreSQL client
 /// requests provided to `psql_srv::Backend` trait function implementations are forwared to the
 /// wrapped `noria_client` `Backend`. All request parameters and response results are forwarded
 /// using type conversion.
-pub struct Backend(pub cl::Backend<PostgreSqlUpstream, PostgreSqlQueryHandler>);
+pub struct Backend {
+    inner: cl::Backend<PostgreSqlUpstream, PostgreSqlQueryHandler>,
+    authentication_method: AuthenticationMethod,
+}
+
+impl Backend {
+    pub fn new(inner: cl::Backend<PostgreSqlUpstream, PostgreSqlQueryHandler>) -> Self {
+        Self {
+            inner,
+            authentication_method: Default::default(),
+        }
+    }
+
+    pub fn with_authentication_method(self, authentication_method: AuthenticationMethod) -> Self {
+        Self {
+            authentication_method,
+            ..self
+        }
+    }
+}
 
 impl Deref for Backend {
     type Target = cl::Backend<PostgreSqlUpstream, PostgreSqlQueryHandler>;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.inner
     }
 }
 
 impl Backend {
     async fn query<'a>(&'a mut self, query: &'a str) -> Result<QueryResponse<'_>, Error> {
-        Ok(QueryResponse(self.0.query(query).await?))
+        Ok(QueryResponse(self.inner.query(query).await?))
     }
 
     async fn prepare(&mut self, query: &str) -> Result<PrepareResponse<'_>, Error> {
-        Ok(PrepareResponse(self.0.prepare(query).await?))
+        Ok(PrepareResponse(self.inner.prepare(query).await?))
     }
 
     async fn execute(&mut self, id: u32, params: &[DfValue]) -> Result<QueryResponse<'_>, Error> {
-        Ok(QueryResponse(self.0.execute(id, params).await?))
+        Ok(QueryResponse(self.inner.execute(id, params).await?))
     }
 }
 
@@ -51,7 +95,7 @@ impl ps::Backend for Backend {
     type Resultset = Resultset;
 
     fn version(&self) -> String {
-        self.0.version()
+        self.inner.version()
     }
 
     fn credentials_for_user(&self, user: &str) -> Option<ps::Credentials> {
@@ -61,9 +105,13 @@ impl ps::Backend for Backend {
     }
 
     async fn on_init(&mut self, _database: &str) -> Result<ps::CredentialsNeeded, ps::Error> {
-        match self.does_require_authentication() {
-            true => Ok(ps::CredentialsNeeded::Cleartext),
-            false => Ok(ps::CredentialsNeeded::None),
+        if self.does_require_authentication() {
+            match self.authentication_method {
+                AuthenticationMethod::Cleartext => Ok(ps::CredentialsNeeded::Cleartext),
+                AuthenticationMethod::ScramSha256 => Ok(ps::CredentialsNeeded::ScramSha256),
+            }
+        } else {
+            Ok(ps::CredentialsNeeded::None)
         }
     }
 

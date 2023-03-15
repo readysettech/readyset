@@ -70,7 +70,7 @@ impl Adapter for PostgreSQLAdapter {
     }
 
     async fn run_backend(backend: Backend<Self::Upstream, Self::Handler>, s: TcpStream) {
-        psql_srv::run_backend(readyset_psql::Backend(backend), s, false, None).await
+        psql_srv::run_backend(readyset_psql::Backend::new(backend), s, false, None).await
     }
 }
 

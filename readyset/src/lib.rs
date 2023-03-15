@@ -269,9 +269,9 @@ pub struct Options {
     #[clap(flatten)]
     pub tracing: readyset_tracing::Options,
 
-    /// TLS options for readyset-psql
+    /// readyset-psql-specific options
     #[clap(flatten)]
-    pub tls: psql::Options,
+    pub psql_options: psql::Options,
 
     /// Test feature to fail invalidated queries in the serving path instead of going
     /// to fallback.

@@ -573,7 +573,7 @@ impl TestScript {
                 .unwrap(),
                 DatabaseType::PostgreSQL => {
                     psql_srv::run_backend(
-                        readyset_psql::Backend(make_backend!(
+                        readyset_psql::Backend::new(make_backend!(
                             PostgreSqlUpstream,
                             PostgreSqlQueryHandler,
                             Dialect::PostgreSQL,
