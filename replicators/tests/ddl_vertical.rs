@@ -609,6 +609,21 @@ impl ValueTree for TestTree {
             self.last_shrank_idx = next_step_idx;
         }
 
+        self.try_removing_op()
+    }
+
+    /// Undoes the last call to [`simplify`], and attempts to remove another element instead.
+    fn complicate(&mut self) -> bool {
+        self.currently_included[self.last_shrank_idx] = true;
+        self.try_removing_op()
+    }
+}
+
+impl TestTree {
+    /// Used by both [`simplify`] and [`complicate`] to attempt the removal of another operation
+    /// during shrinking. If we are able to find another operation we can remove without violating
+    /// any preconditions, this returns `true`; otherwise, this function returns `false`.
+    fn try_removing_op(&mut self) -> bool {
         // More efficient to iterate backward, since we only need to go over the list once
         // (preconditions are based only on the state changes caused by previous ops, so if we're
         // moving backward through the list then the only time we'll be unable to remove an op
@@ -631,17 +646,6 @@ impl ValueTree for TestTree {
         }
         // We got all the way through and didn't remove anything
         false
-    }
-
-    /// Just undoes the last call to [`simplify`].
-    fn complicate(&mut self) -> bool {
-        if self.currently_included[self.last_shrank_idx] {
-            // Second time being called in a row, can't complicate any further
-            false
-        } else {
-            self.currently_included[self.last_shrank_idx] = true;
-            true
-        }
     }
 }
 
