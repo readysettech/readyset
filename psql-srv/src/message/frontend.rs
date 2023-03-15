@@ -1,5 +1,6 @@
 use std::fmt;
 
+use bytes::Bytes;
 use postgres_types::Type;
 
 use crate::bytes::BytesStr;
@@ -21,6 +22,11 @@ use crate::value::Value;
 /// [`Bytes`]: https://docs.rs/bytes/0.5.6/bytes/struct.Bytes.html
 #[derive(Debug, PartialEq)]
 pub enum FrontendMessage {
+    Authenticate {
+        /// The message itself doesn't give us enough context to know which *kind* of authenticate
+        /// response this is - we have to interpret it according to the context
+        body: Bytes,
+    },
     Bind {
         portal_name: BytesStr,
         prepared_statement_name: BytesStr,
@@ -42,9 +48,6 @@ pub enum FrontendMessage {
         query: BytesStr,
         parameter_data_types: Vec<Type>,
     },
-    PasswordMessage {
-        password: BytesStr,
-    },
     Query {
         query: BytesStr,
     },
@@ -53,6 +56,9 @@ pub enum FrontendMessage {
         protocol_version: i32,
         user: Option<BytesStr>,
         database: Option<BytesStr>,
+    },
+    SaslResponse {
+        scram_data: Bytes,
     },
     Sync,
     Flush,
@@ -68,18 +74,28 @@ pub enum StatementName {
 impl fmt::Display for FrontendMessage {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            Self::Authenticate { .. } => write!(f, "Authenticate"),
             Self::Bind { .. } => write!(f, "Bind"),
             Self::Close { .. } => write!(f, "Close"),
             Self::Describe { .. } => write!(f, "Describe"),
             Self::Execute { .. } => write!(f, "Execute"),
             Self::Parse { .. } => write!(f, "Parse"),
-            Self::PasswordMessage { .. } => write!(f, "PasswordMessage"),
             Self::Query { .. } => write!(f, "Query"),
             Self::SSLRequest => write!(f, "SSLRequest"),
             Self::StartupMessage { .. } => write!(f, "StartupMessage"),
+            Self::SaslResponse { .. } => write!(f, "SASLResponse"),
             Self::Sync => write!(f, "Sync"),
             Self::Flush => write!(f, "Flush"),
             Self::Terminate => write!(f, "Terminate"),
         }
     }
+}
+
+/// Parsed body for the SASLInitialResponse message
+///
+/// This is its own type because it can't be parsed during regular message parsing without context
+/// about which kind of authentication we're doing.
+pub struct SaslInitialResponse {
+    pub authentication_mechanism: BytesStr,
+    pub scram_data: Bytes,
 }

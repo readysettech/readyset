@@ -29,6 +29,15 @@ const SSL_RESPONSE_WILLING: u8 = b'S';
 #[derive(Debug, PartialEq, Eq)]
 pub enum BackendMessage<R> {
     AuthenticationCleartextPassword,
+    AuthenticationSasl {
+        allow_channel_binding: bool,
+    },
+    AuthenticationSaslContinue {
+        sasl_data: Bytes,
+    },
+    AuthenticationSaslFinal {
+        sasl_data: Bytes,
+    },
     AuthenticationOk,
     BindComplete,
     CloseComplete,

@@ -11,13 +11,17 @@ use tokio_postgres::CommandCompleteContents;
 
 use crate::bytes::BytesStr;
 use crate::channel::Channel;
+use crate::codec::decoder;
 use crate::error::Error;
 use crate::message::BackendMessage::{self, *};
 use crate::message::FrontendMessage::{self, *};
 use crate::message::StatementName::*;
 use crate::message::TransferFormat::{self, *};
-use crate::message::{CommandCompleteTag, FieldDescription};
+use crate::message::{CommandCompleteTag, FieldDescription, SaslInitialResponse};
 use crate::response::Response;
+use crate::scram::{
+    ClientFinalMessage, ClientFirstMessage, ServerFirstMessage, SCRAM_SHA_256_AUTHENTICATION_METHOD,
+};
 use crate::value::Value;
 use crate::QueryResponse::*;
 use crate::{Backend, Column, Credentials, PrepareResponse};
@@ -38,6 +42,23 @@ const TYPLEN_CSTRING: i16 = -2; // Null-terminated C string
 const UNKNOWN_COLUMN: i16 = 0;
 const UNKNOWN_TABLE: i32 = 0;
 
+/// State machine for an ongoing SASL authentication flow
+///
+/// See [RFC5802](https://www.rfc-editor.org/rfc/rfc5802) for full documentation of the SCRAM
+/// authentication protocol
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SaslState {
+    /// The server has requested authentication from the client
+    RequestedAuthentication { user: BytesStr },
+    /// The client has sent its initial message, and the server has replied with a challenge
+    ChallengeSent {
+        user: BytesStr,
+        salted_password: Vec<u8>,
+        client_first_message_bare: String,
+        server_first_message: String,
+    },
+}
+
 /// Enum representing the state machine of the request-response flow of a [`Protocol`]
 ///
 /// The state transitions are:
@@ -45,8 +66,11 @@ const UNKNOWN_TABLE: i32 = 0;
 /// * StartingUp -> SslHandshake
 /// * SslHandshake -> StartingUp
 /// * StartingUp -> Ready
-/// * StartingUp -> Authenticating
-/// * Authenticating -> Ready
+/// * StartingUp -> AuthenticatingCleartext
+/// * StartingUp -> AuthenticatingSasl
+/// * AuthenticatingCleartext -> Ready
+/// * AuthenticatingSasl -> AuthenticatingSasl
+/// * AuthenticatingSasl -> Ready
 /// * Ready -> Extended
 /// * Extended -> Error
 /// * Error -> Ready
@@ -55,8 +79,11 @@ pub(crate) enum State {
     /// The server is starting up
     StartingUp,
 
-    /// The client is performing authentication
-    Authenticating { user: BytesStr },
+    /// The client is performing authentication using the cleartext password protocol
+    AuthenticatingCleartext { user: BytesStr },
+
+    /// The client is performing authentication using the SASL authentication protocol
+    AuthenticatingSasl(SaslState),
 
     /// The server is ready to accept queries
     Ready,
@@ -216,10 +243,20 @@ impl Protocol {
                             get_ready_message(backend.version())
                         }
                         crate::CredentialsNeeded::Cleartext => {
-                            self.state = State::Authenticating {
+                            self.state = State::AuthenticatingCleartext {
                                 user: user.ok_or(Error::NoUserSpecified)?,
                             };
                             smallvec![AuthenticationCleartextPassword]
+                        }
+                        crate::CredentialsNeeded::ScramSha256 => {
+                            self.state =
+                                State::AuthenticatingSasl(SaslState::RequestedAuthentication {
+                                    user: user.ok_or(Error::NoUserSpecified)?,
+                                });
+                            smallvec![AuthenticationSasl {
+                                // TODO(ENG-2698)
+                                allow_channel_binding: false
+                            }]
                         }
                     };
 
@@ -233,14 +270,15 @@ impl Protocol {
                 }
             },
 
-            State::Authenticating { ref user } => match message {
-                PasswordMessage { ref password } => {
+            State::AuthenticatingCleartext { ref user } => match message {
+                Authenticate { mut body } => {
+                    let password = decoder::decode_password_message_body(&mut body)?;
                     backend
-                        .credentials_for_user(user.borrow())
+                        .credentials_for_user(user)
                         .filter(|c| match c {
                             Credentials::Any => true,
                             Credentials::CleartextPassword(expected_password) => {
-                                password == *expected_password
+                                &password == *expected_password
                             }
                         })
                         .ok_or_else(|| Error::AuthenticationFailure {
@@ -254,6 +292,87 @@ impl Protocol {
 
                 m => Err(Error::UnsupportedMessage(m)),
             },
+
+            State::AuthenticatingSasl(SaslState::RequestedAuthentication { ref user }) => {
+                let Authenticate { mut body } = message else {
+                   return Err(Error::UnsupportedMessage(message))
+                };
+
+                let password = match backend.credentials_for_user(user) {
+                    None => {
+                        return Err(Error::AuthenticationFailure {
+                            username: user.to_string(),
+                        })
+                    }
+                    Some(Credentials::Any) => {
+                        self.state = State::Ready;
+                        return Ok(Response::Messages(get_ready_message(backend.version())));
+                    }
+                    Some(Credentials::CleartextPassword(pw)) => pw,
+                };
+
+                let SaslInitialResponse {
+                    authentication_mechanism,
+                    scram_data,
+                } = decoder::decode_sasl_initial_response_body(&mut body)?;
+                let client_first_message = ClientFirstMessage::parse(&scram_data)?;
+
+                if authentication_mechanism != *SCRAM_SHA_256_AUTHENTICATION_METHOD {
+                    // TODO(ENG-2698)
+                    return Err(Error::Unsupported("SCRAM-SHA-256-PLUS".into()));
+                }
+                if client_first_message.channel_binding_support().is_required() {
+                    return Err(Error::Unsupported("channel binding".into()));
+                }
+
+                let client_first_message_bare = client_first_message.bare().to_owned();
+
+                let server_first_message =
+                    ServerFirstMessage::new(client_first_message, password.as_bytes())?;
+                let sasl_data = server_first_message.to_string();
+
+                self.state = State::AuthenticatingSasl(SaslState::ChallengeSent {
+                    user: user.clone(),
+                    salted_password: server_first_message.salted_password().to_owned(),
+                    client_first_message_bare,
+                    server_first_message: sasl_data.clone(),
+                });
+
+                Ok(Response::Message(
+                    BackendMessage::AuthenticationSaslContinue {
+                        sasl_data: sasl_data.into(),
+                    },
+                ))
+            }
+
+            State::AuthenticatingSasl(SaslState::ChallengeSent {
+                ref user,
+                ref salted_password,
+                ref client_first_message_bare,
+                ref server_first_message,
+            }) => {
+                let Authenticate { body } = message else {
+                   return Err(Error::UnsupportedMessage(message))
+                };
+
+                let client_final_message = ClientFinalMessage::parse(&body)?;
+                if let Some(server_final_message) = client_final_message.verify(
+                    salted_password,
+                    client_first_message_bare,
+                    server_first_message,
+                )? {
+                    self.state = State::Ready;
+                    let mut messages = vec![BackendMessage::AuthenticationSaslFinal {
+                        sasl_data: server_final_message.to_string().into(),
+                    }];
+                    messages.extend(get_ready_message(backend.version()));
+                    Ok(Response::Messages(messages.into()))
+                } else {
+                    Err(Error::AuthenticationFailure {
+                        username: user.to_string(),
+                    })
+                }
+            }
 
             _ => match message {
                 // A request to bind parameters to a prepared statement, creating a portal.
@@ -1062,13 +1181,13 @@ mod tests {
         }
         assert_eq!(
             protocol.state,
-            State::Authenticating {
+            State::AuthenticatingCleartext {
                 user: expected_username
             }
         );
 
-        let auth_request = FrontendMessage::PasswordMessage {
-            password: bytes_str(expected_password),
+        let auth_request = FrontendMessage::Authenticate {
+            body: format!("{expected_password}\x00").into(),
         };
 
         match block_on(protocol.on_request(auth_request, &mut backend, &mut channel)).unwrap() {
@@ -1107,7 +1226,7 @@ mod tests {
     fn authentication_flow_failure() {
         let expected_username = bytes_str("user_name");
         let expected_password = "password";
-        let provided_password = bytes_str("incorrect password");
+        let provided_password = "incorrect password";
         let mut protocol = Protocol::new();
         assert_eq!(protocol.state, State::StartingUp);
         let request = FrontendMessage::StartupMessage {
@@ -1127,22 +1246,25 @@ mod tests {
         }
         assert_eq!(
             protocol.state,
-            State::Authenticating {
+            State::AuthenticatingCleartext {
                 user: expected_username.clone()
             }
         );
 
-        let auth_request = FrontendMessage::PasswordMessage {
-            password: provided_password,
+        let auth_request = FrontendMessage::Authenticate {
+            body: format!("{provided_password}\x00").into(),
         };
 
         let output =
             block_on(protocol.on_request(auth_request, &mut backend, &mut channel)).unwrap_err();
-        assert!(matches!(
-            output,
-            Error::AuthenticationFailure { username }
-            if username == expected_username.to_string()
-        ));
+        assert!(
+            matches!(
+                &output,
+                Error::AuthenticationFailure { username }
+                if *username == expected_username.to_string()
+            ),
+            "output = {output:?}"
+        );
     }
 
     #[test]

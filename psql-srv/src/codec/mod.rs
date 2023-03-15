@@ -1,4 +1,4 @@
-mod decoder;
+pub(crate) mod decoder;
 mod encoder;
 mod error;
 

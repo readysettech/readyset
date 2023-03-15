@@ -12,6 +12,7 @@ use crate::message::BackendMessage::{self, *};
 use crate::message::CommandCompleteTag::*;
 use crate::message::ErrorSeverity;
 use crate::message::TransferFormat::{self, *};
+use crate::scram::{SCRAM_SHA_256_AUTHENTICATION_METHOD, SCRAM_SHA_256_SSL_AUTHENTICATION_METHOD};
 use crate::value::Value;
 
 const ID_AUTHENTICATION_REQUEST: u8 = b'R';
@@ -28,6 +29,9 @@ const ID_ROW_DESCRIPTION: u8 = b'T';
 
 const AUTHENTICATION_OK_SUCCESS: i32 = 0;
 const AUTHENTICATION_CLEARTEXT_REQUIRED: i32 = 3;
+const AUTHENTICATION_SASL_REQUIRED: i32 = 10;
+const AUTHENTICATION_SASL_CHALLENGE: i32 = 11;
+const AUTHENTICATION_SASL_COMPLETED: i32 = 12;
 
 const COMMAND_COMPLETE_DELETE_TAG: &str = "DELETE";
 const COMMAND_COMPLETE_INSERT_TAG: &str = "INSERT";
@@ -92,6 +96,33 @@ where
             put_u8(ID_AUTHENTICATION_REQUEST, dst);
             put_i32(LENGTH_PLACEHOLDER, dst);
             put_i32(AUTHENTICATION_CLEARTEXT_REQUIRED, dst);
+        }
+
+        AuthenticationSasl {
+            allow_channel_binding,
+        } => {
+            put_u8(ID_AUTHENTICATION_REQUEST, dst);
+            put_i32(LENGTH_PLACEHOLDER, dst);
+            put_i32(AUTHENTICATION_SASL_REQUIRED, dst);
+            if allow_channel_binding {
+                put_str(SCRAM_SHA_256_SSL_AUTHENTICATION_METHOD, dst);
+            }
+            put_str(SCRAM_SHA_256_AUTHENTICATION_METHOD, dst);
+            put_u8(NUL_BYTE, dst);
+        }
+
+        AuthenticationSaslContinue { sasl_data } => {
+            put_u8(ID_AUTHENTICATION_REQUEST, dst);
+            put_i32(LENGTH_PLACEHOLDER, dst);
+            put_i32(AUTHENTICATION_SASL_CHALLENGE, dst);
+            dst.extend_from_slice(&sasl_data);
+        }
+
+        AuthenticationSaslFinal { sasl_data } => {
+            put_u8(ID_AUTHENTICATION_REQUEST, dst);
+            put_i32(LENGTH_PLACEHOLDER, dst);
+            put_i32(AUTHENTICATION_SASL_COMPLETED, dst);
+            dst.extend_from_slice(&sasl_data);
         }
 
         AuthenticationOk => {

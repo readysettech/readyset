@@ -1,4 +1,4 @@
-#![feature(associated_type_bounds)]
+#![feature(associated_type_bounds, let_else)]
 //! Bindings for emulating a PostgreSQL server.
 //!
 //! When developing new databases or caching layers, it can be immensely useful to test your system
@@ -22,6 +22,7 @@ mod message;
 mod protocol;
 mod response;
 mod runner;
+mod scram;
 pub mod util;
 mod value;
 
@@ -43,6 +44,7 @@ pub use crate::value::Value;
 pub enum CredentialsNeeded {
     None,
     Cleartext,
+    ScramSha256,
 }
 
 /// Authentication credentials required for a given user

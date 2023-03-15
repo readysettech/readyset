@@ -20,6 +20,7 @@ use crate::codec::error::DecodeError::InvalidTextByteArrayValue;
 use crate::codec::{Codec, DecodeError};
 use crate::error::Error as BackendError;
 use crate::message::FrontendMessage::{self, *};
+use crate::message::SaslInitialResponse;
 use crate::message::StatementName::*;
 use crate::message::TransferFormat::{self, *};
 use crate::value::Value;
@@ -130,9 +131,11 @@ impl<R: IntoIterator<Item: TryInto<Value, Error = BackendError>>> Decoder for Co
         let _length = get_i32(msg)?;
 
         let ret = match id {
-            ID_AUTHENTICATE => Ok(Some(PasswordMessage {
-                password: get_str(msg)?,
-            })),
+            ID_AUTHENTICATE => {
+                let body = msg.clone();
+                msg.clear(); // Take the rest of the buffer
+                Ok(Some(Authenticate { body }))
+            }
 
             ID_BIND => {
                 let portal_name = get_str(msg)?;
@@ -256,6 +259,21 @@ impl<R: IntoIterator<Item: TryInto<Value, Error = BackendError>>> Decoder for Co
     }
 }
 
+pub(crate) fn decode_password_message_body(src: &mut Bytes) -> Result<BytesStr, Error> {
+    get_str(src)
+}
+
+pub(crate) fn decode_sasl_initial_response_body(
+    src: &mut Bytes,
+) -> Result<SaslInitialResponse, Error> {
+    let authentication_mechanism = get_str(src)?;
+    let scram_data = get_lenenc_bytes(src)?;
+    Ok(SaslInitialResponse {
+        authentication_mechanism,
+        scram_data,
+    })
+}
+
 fn get_u8(src: &mut Bytes) -> Result<u8, Error> {
     if src.remaining() >= 1 {
         Ok(src.get_u8())
@@ -288,6 +306,14 @@ fn get_str(src: &mut Bytes) -> Result<BytesStr, Error> {
     let ret = BytesStr::try_from(src.split_to(nul_pos))?;
     src.advance(1); // skip the nul byte
     Ok(ret)
+}
+
+fn get_lenenc_bytes(src: &mut Bytes) -> Result<Bytes, Error> {
+    let len = get_i32(src)?;
+    if len <= 0 {
+        return Ok(Bytes::new());
+    }
+    Ok(src.split_to(len as usize))
 }
 
 fn get_format(src: &mut Bytes) -> Result<TransferFormat, Error> {

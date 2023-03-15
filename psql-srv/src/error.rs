@@ -6,6 +6,7 @@ use thiserror::Error;
 
 use crate::codec::{DecodeError, EncodeError};
 use crate::message::{BackendMessage, ErrorSeverity, FrontendMessage};
+use crate::scram;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -60,6 +61,9 @@ pub enum Error {
     #[error("unsupported type: {0}")]
     UnsupportedType(Type),
 
+    #[error("SCRAM error: {0}")]
+    Scram(#[from] scram::Error),
+
     #[error(transparent)]
     PostgresError(#[from] tokio_postgres::error::Error),
 }
@@ -84,6 +88,7 @@ impl<R> From<Error> for BackendMessage<R> {
             Error::Unsupported(_) => SqlState::FEATURE_NOT_SUPPORTED,
             Error::UnsupportedMessage(_) => SqlState::FEATURE_NOT_SUPPORTED,
             Error::UnsupportedType(_) => SqlState::FEATURE_NOT_SUPPORTED,
+            Error::Scram(_) => SqlState::PROTOCOL_VIOLATION,
             Error::PostgresError(ref e) => e.code().cloned().unwrap_or(SqlState::INTERNAL_ERROR),
         };
 
