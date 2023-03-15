@@ -59,7 +59,9 @@ pub use dataflow_expression::{
     BinaryOperator, BuiltinFunction, Expr, LowerContext, PostLookup, PostLookupAggregate,
     PostLookupAggregateFunction, PostLookupAggregates, ReaderProcessing,
 };
-pub use dataflow_state::{DurabilityMode, PersistenceParameters};
+pub use dataflow_state::{
+    DurabilityMode, MaterializedNodeState, PersistenceParameters, PersistentState,
+};
 
 pub use crate::domain::{Domain, DomainBuilder, DomainIndex};
 pub use crate::node_map::NodeMap;

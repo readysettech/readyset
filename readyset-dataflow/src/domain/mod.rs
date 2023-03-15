@@ -8,7 +8,7 @@ use std::fmt::Debug;
 use std::ops::Bound;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::{cell, cmp, mem, time};
+use std::{cell, cmp, mem, process, time};
 
 use ahash::RandomState;
 use dataflow_state::{
@@ -17,6 +17,7 @@ use dataflow_state::{
 use failpoint_macros::failpoint;
 use futures_util::future::FutureExt;
 use futures_util::stream::StreamExt;
+use futures_util::TryFutureExt;
 pub use internal::{DomainIndex, ReplicaAddress};
 use merging_interval_tree::IntervalTreeSet;
 use petgraph::graph::NodeIndex;
@@ -24,19 +25,23 @@ use readyset_client::internal::Index;
 use readyset_client::replication::ReplicationOffsetState;
 use readyset_client::{channel, internal, KeyComparison, KeyCount, ReaderAddress};
 use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
+use readyset_util::futures::abort_on_panic;
 use readyset_util::redacted::Sensitive;
 use readyset_util::Indices;
 use serde::{Deserialize, Serialize};
 use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
+use tokio::sync::mpsc::Sender;
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, error, info, trace, warn, Instrument};
 use vec1::Vec1;
 
 pub(crate) use self::replay_paths::ReplayPath;
 use self::replay_paths::{Destination, ReplayPathSpec, ReplayPaths, Target};
 use crate::node::special::EgressTx;
 use crate::node::{NodeProcessingResult, ProcessEnv};
-use crate::payload::{PrepareStateKind, PrettyReplayPath, ReplayPieceContext, SourceSelection};
+use crate::payload::{
+    MaterializedState, PrepareStateKind, PrettyReplayPath, ReplayPieceContext, SourceSelection,
+};
 use crate::prelude::*;
 use crate::processing::ColumnMiss;
 use crate::{backlog, DomainRequest, Readers};
@@ -380,6 +385,7 @@ impl DomainBuilder {
         readers: Readers,
         channel_coordinator: Arc<ChannelCoordinator>,
         state_size: Arc<AtomicUsize>,
+        init_state_tx: Sender<MaterializedState>,
     ) -> Domain {
         // initially, all nodes are not ready
         let not_ready = self
@@ -431,6 +437,8 @@ impl DomainBuilder {
 
             eviction_kind: self.config.eviction_kind,
             remapped_keys: Default::default(),
+
+            init_state_tx,
         }
     }
 }
@@ -632,6 +640,47 @@ pub struct Domain {
 
     metrics: domain_metrics::DomainMetrics,
     eviction_kind: crate::EvictionKind,
+
+    /// This channel is used to notify the replica that a base node has its persistent state
+    /// initialized.
+    /// This allow us to asynchronously run that process, and avoid any bottlenecks on the
+    /// initialization of their state.
+    init_state_tx: tokio::sync::mpsc::Sender<MaterializedState>,
+}
+
+/// Creates the materialized node state for the given node.
+/// This is used to deferred the creation of the persistent state to a separate thread, as we know
+/// it takes a lot of time for large tables.
+/// Upon completion, this method will send the node index and the pointer to the new
+/// `PersistentState` through the `sender`.
+async fn initialize_state(
+    node_idx: LocalNodeIndex,
+    indices: HashSet<Index>,
+    base_name: String,
+    unique_keys: Vec<Box<[usize]>>,
+    persistence_params: PersistenceParameters,
+    sender: Sender<MaterializedState>,
+) -> ReadySetResult<()> {
+    trace!("running separate thread to initialize base node persistent state");
+    let mut s = MaterializedNodeState::Persistent(
+        PersistentState::new(base_name.clone(), unique_keys, &persistence_params)
+            .map_err(|e| ReadySetError::from(e))?,
+    );
+    for idx in indices {
+        s.add_key(idx, None);
+    }
+    trace!("done initializing persistent state! notifying replica");
+    sender
+        .send(MaterializedState {
+            node: node_idx,
+            state: Box::new(s),
+        })
+        .await
+        .map_err(|_| {
+            internal_err!(
+                "an error occurred while sending materialized state to replica for node {node_idx}"
+            )
+        })
 }
 
 impl Domain {
@@ -1775,6 +1824,19 @@ impl Domain {
                 Ok(None)
             }
             DomainRequest::StartReplay { tag, from } => {
+                // if the node's state was not initialized yet, then just return and do nothing.
+                // we should only hit this for base nodes which are in the process of having their
+                // persistent state initialized.
+                // it is ok to do nothing as this will cause the reader to keep on retrying later
+                // on, so that will act as a polling mechanism.
+                // this should also rarely happen, since the persistent state is initialized almost
+                // instantly (when opening a table for the first time, likely during runtime), or
+                // might take a huge amount of time but during a period of recovery (where we are
+                // still in a deployment stage).
+                if self.not_ready.contains(&from) {
+                    debug!(%from, "attempted to start a replay, but node is not ready yet");
+                    return Ok(None);
+                }
                 use std::thread;
                 invariant_eq!(
                     self.replay_paths
@@ -1928,71 +1990,98 @@ impl Domain {
                     .rec_chunked_replay_start_time(tag, start.elapsed());
                 Ok(None)
             }
-            DomainRequest::Ready { node, purge, index } => {
+            DomainRequest::Ready {
+                node: node_idx,
+                purge,
+                index,
+            } => {
                 invariant_eq!(self.mode, DomainMode::Forwarding);
 
                 let node_ref = self
                     .nodes
-                    .get(node)
-                    .ok_or_else(|| ReadySetError::NoSuchNode(node.id()))?;
+                    .get(node_idx)
+                    .ok_or_else(|| ReadySetError::NoSuchNode(node_idx.id()))?;
 
                 node_ref.borrow_mut().purge = purge;
 
-                // TODO(fran): This boolean is hardcoded for now. We'll correctly compute
-                //  whether the node is ready in future commits (ENG-2352).
-                let is_ready = true;
-                if !index.is_empty() {
-                    let mut s = {
-                        match (
-                            node_ref.borrow().get_base(),
-                            &self.persistence_parameters.mode,
-                        ) {
-                            (Some(base), &DurabilityMode::DeleteOnExit)
-                            | (Some(base), &DurabilityMode::Permanent) => {
-                                let node = node_ref.borrow();
-                                let node_name = node.name();
-                                let base_name = format!(
-                                    "{}-{}{}-{}",
-                                    &self
-                                        .persistence_parameters
-                                        .db_filename_prefix
-                                        .replace('-', "_"),
-                                    match &node_name.schema {
-                                        Some(schema) => format!("{schema}-"),
-                                        _ => "".into(),
-                                    },
-                                    node_name.name,
-                                    self.shard.unwrap_or(0),
-                                );
+                let is_ready = if !index.is_empty() {
+                    match (
+                        node_ref.borrow().get_base(),
+                        &self.persistence_parameters.mode,
+                    ) {
+                        (Some(base), &DurabilityMode::DeleteOnExit)
+                        | (Some(base), &DurabilityMode::Permanent) => {
+                            let node = node_ref.borrow();
+                            let node_name = node.name();
+                            let base_name = format!(
+                                "{}-{}{}-{}",
+                                &self
+                                    .persistence_parameters
+                                    .db_filename_prefix
+                                    .replace('-', "_"),
+                                match &node_name.schema {
+                                    Some(schema) => format!("{schema}-"),
+                                    _ => "".into(),
+                                },
+                                node_name.name,
+                                self.shard.unwrap_or(0),
+                            );
 
-                                MaterializedNodeState::Persistent(PersistentState::new(
-                                    base_name,
-                                    base.all_unique_keys(),
-                                    &self.persistence_parameters,
-                                )?)
-                            }
-                            _ => MaterializedNodeState::Memory(MemoryState::default()),
+                            let persistence_params = self.persistence_parameters.clone();
+                            let init_state_tx = self.init_state_tx.clone();
+                            let unique_keys = base.all_unique_keys();
+
+                            // run the base table initialization in a separate thread, as we know
+                            // this might take a lot of time for large
+                            // tables. upon completion, we'll notify the
+                            // domain and set the materialized state for
+                            // this node.
+                            // TODO(fran): Avoid panicking the whole process and instead just fail
+                            //  the domain thread (ENG-2752).
+                            tokio::spawn(abort_on_panic(
+                                initialize_state(
+                                    node_idx,
+                                    index,
+                                    base_name.clone(),
+                                    unique_keys,
+                                    persistence_params,
+                                    init_state_tx)
+                                    .instrument(tracing::trace_span!(
+                                        "initialize_state",
+                                        name = %base_name,
+                                    ))
+                                    .map_err(move |e| {
+                                error!(error = %e, "Domain failed while initializing base table");
+                                process::abort();
+                            })));
+                            false
                         }
-                    };
-                    for idx in index {
-                        s.add_key(idx, None);
+                        _ => {
+                            let mut s = MaterializedNodeState::Memory(MemoryState::default());
+                            for idx in index {
+                                s.add_key(idx, None);
+                            }
+                            assert!(self.state.insert(node_idx, s).is_none());
+                            true
+                        }
                     }
-                    assert!(self.state.insert(node, s).is_none());
                 } else {
                     // NOTE: just because index_on is None does *not* mean we're not
                     // materialized
-                }
+                    true
+                };
 
-                if self.not_ready.remove(&node) {
-                    trace!(local = node.id(), "readying empty node");
+                if is_ready && self.not_ready.remove(&node_idx) {
+                    trace!(local = node_idx.id(), "readying empty node");
                 }
 
                 // swap replayed reader nodes to expose new state
-                if let Some(state) = self.reader_write_handles.get_mut(node) {
-                    trace!(local = %node, "swapping state");
+                if let Some(state) = self.reader_write_handles.get_mut(node_idx) {
+                    trace!(local = %node_idx, "swapping state");
                     state.swap();
-                    trace!(local = %node, "state swapped");
+                    trace!(local = %node_idx, "state swapped");
                 }
+                info!("ready message is all done!");
 
                 Ok(Some(bincode::serialize(&is_ready)?))
             }
@@ -4057,6 +4146,43 @@ impl Domain {
 
         if !self.wait_time.is_running() {
             self.wait_time.start();
+        }
+
+        Ok(())
+    }
+
+    /// Sets the [`MaterializedNodeState`] for the given node, and
+    /// makes sure to:
+    /// 1. Remove the node from the `not_ready` set.
+    /// 2. Set the state for the node
+    /// 3. Process any message that was meant for the node but couldn't be processed
+    /// since the its state was not ready yet.
+    ///
+    /// NOTE: If the node was removed while we were initializing its persistent state, then
+    /// we make sure to just tear it down here.
+    pub fn process_state_for_node(
+        &mut self,
+        local_idx: LocalNodeIndex,
+        state: MaterializedNodeState,
+    ) -> ReadySetResult<()> {
+        if let Some(node) = self.nodes.get(local_idx) {
+            if node.borrow().is_dropped() {
+                warn!(
+                    local = local_idx.id(),
+                    "tried to set state for node, but node does not exist anymore"
+                );
+                state.tear_down()?;
+                return Ok(());
+            }
+            if self.not_ready.remove(&local_idx) {
+                trace!(local = local_idx.id(), "readying empty node");
+            }
+            assert!(self.state.insert(local_idx, state).is_none());
+        } else {
+            warn!(
+                local = local_idx.id(),
+                "tried to set state for non-existent node"
+            );
         }
 
         Ok(())

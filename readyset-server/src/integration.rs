@@ -8782,8 +8782,8 @@ async fn simple_drop_tables_with_persisted_data() {
     table_1_path.push("simple_drop_tables_with_persisted_data-table_1-0.db");
     let mut table_2_path = path.clone();
     table_2_path.push("simple_drop_tables_with_persisted_data-table_2-0.db");
-    assert!(table_1_path.exists());
-    assert!(table_2_path.exists());
+    eventually!(table_1_path.exists());
+    eventually!(table_2_path.exists());
 
     let mut table_1 = g.table("table_1").await.unwrap();
     table_1.insert(vec![11.into()]).await.unwrap();
@@ -8803,8 +8803,8 @@ async fn simple_drop_tables_with_persisted_data() {
     assert_table_not_found(g.table("table_2").await, "table_2");
     assert_view_not_found(g.view("t1").await, "t1");
 
-    assert!(!table_1_path.exists());
-    assert!(!table_2_path.exists());
+    eventually!(!table_1_path.exists());
+    eventually!(!table_2_path.exists());
 
     let recreate_table = "CREATE TABLE table_1 (column_1 INT);";
     g.extend_recipe(ChangeList::from_str(recreate_table, Dialect::DEFAULT_MYSQL).unwrap())

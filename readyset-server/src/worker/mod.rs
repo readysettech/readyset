@@ -268,9 +268,18 @@ impl Worker {
                 let mut bind_external = bind_actual;
                 bind_external.set_ip(self.domain_external);
 
+                // this channel is used for async persistent state initialization.
+                // since domains can have at most one base table, there's no need to have a
+                // buffer with a size bigger than one.
+                let (init_state_tx, init_state_rx) = tokio::sync::mpsc::channel(1);
+
                 let state_size = Arc::new(AtomicUsize::new(0));
-                let domain =
-                    builder.build(self.readers.clone(), self.coord.clone(), state_size.clone());
+                let domain = builder.build(
+                    self.readers.clone(),
+                    self.coord.clone(),
+                    state_size.clone(),
+                    init_state_tx,
+                );
 
                 // this channel is used for in-process domain traffic, to avoid going through the
                 // network stack unnecessarily
@@ -290,7 +299,14 @@ impl Worker {
                     .await
                     .insert(replica_addr, state_size);
 
-                let replica = Replica::new(domain, listener, local_rx, req_rx, self.coord.clone());
+                let replica = Replica::new(
+                    domain,
+                    listener,
+                    local_rx,
+                    req_rx,
+                    init_state_rx,
+                    self.coord.clone(),
+                );
                 // Each domain is single threaded in nature, so we spawn each one in a separate
                 // thread, so we can avoid running blocking operations on the multi
                 // threaded tokio runtime

@@ -109,11 +109,13 @@ impl Base {
 
     /// Return the list of all unique indices in this base, including the primary key and
     /// the unique keys. If primary key is set it will be the first in the list.
-    pub fn all_unique_keys(&self) -> impl Iterator<Item = &[usize]> {
+    pub fn all_unique_keys(&self) -> Vec<Box<[usize]>> {
         self.primary_key
             .iter()
             .map(AsRef::as_ref)
             .chain(self.unique_keys.iter().map(AsRef::as_ref))
+            .map(|key| key.into())
+            .collect()
     }
 
     /// Add a new column to this base node.

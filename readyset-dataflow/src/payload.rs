@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::fmt::{self, Display};
 
+use dataflow_state::MaterializedNodeState;
 use itertools::Itertools;
 use readyset_client::{self, KeyComparison, PacketData, PacketTrace};
 use readyset_data::DfType;
@@ -10,6 +11,16 @@ use vec1::Vec1;
 
 use crate::node::Column;
 use crate::prelude::*;
+
+/// A message containing a pointer to the given node's materialized state.
+/// This is meant to be used to defer the creation of the [`MaterializedNodeState`] for base
+/// tables.
+pub struct MaterializedState {
+    /// Index of the node whose state just got materialized.
+    pub node: LocalNodeIndex,
+    /// A pointer to the node's materialized state.
+    pub state: Box<MaterializedNodeState>,
+}
 
 /// A single segment (node that is passed through) of a replay path within a particular domain
 #[derive(Clone, Debug, Serialize, Deserialize)]

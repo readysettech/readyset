@@ -733,7 +733,7 @@ async fn correct_data_after_restart() {
     // Ensure that workers are ready before issuing queries, since the graph may need to be rebuilt.
     deployment.leader_handle().ready().await.unwrap();
     deployment
-        .wait_for_workers(PROPAGATION_DELAY_TIMEOUT)
+        .wait_for_workers(PROPAGATION_DELAY_TIMEOUT * 2)
         .await
         .unwrap();
 
@@ -890,7 +890,7 @@ async fn update_during_failure() {
     // Wait until we detect that the worker has failed before trying to perform
     // a migration. Migrations involving failed workers currently fail the leader.
     deployment
-        .wait_for_workers(PROPAGATION_DELAY_TIMEOUT)
+        .wait_for_workers(PROPAGATION_DELAY_TIMEOUT * 2)
         .await
         .unwrap();
 

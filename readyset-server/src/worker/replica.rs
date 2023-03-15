@@ -7,7 +7,7 @@ use std::time;
 use ahash::AHashMap;
 use anyhow::{self, Context as AnyhowContext};
 use async_bincode::AsyncDestination;
-use dataflow::payload::SourceChannelIdentifier;
+use dataflow::payload::{MaterializedState, SourceChannelIdentifier};
 use dataflow::prelude::Executor;
 use dataflow::{Domain, DomainRequest, Packet};
 use futures_util::sink::{Sink, SinkExt};
@@ -65,6 +65,8 @@ pub struct Replica {
     /// A receiver for domain messages
     requests: mpsc::Receiver<WrappedDomainRequest>,
 
+    init_state_reqs: mpsc::Receiver<MaterializedState>,
+
     /// Stores pending outgoing messages
     out: Outboxes,
 }
@@ -75,6 +77,7 @@ impl Replica {
         on: TcpListener,
         locals: mpsc::UnboundedReceiver<Box<Packet>>,
         requests: mpsc::Receiver<WrappedDomainRequest>,
+        init_state_reqs: mpsc::Receiver<MaterializedState>,
         cc: Arc<ChannelCoordinator>,
     ) -> Self {
         Replica {
@@ -85,6 +88,7 @@ impl Replica {
             out: Outboxes::new(),
             refresh_sizes: IntervalStream::new(tokio::time::interval(Duration::from_millis(500))),
             requests,
+            init_state_reqs,
         }
     }
 }
@@ -340,6 +344,7 @@ impl Replica {
             locals,
             requests,
             out,
+            init_state_reqs,
         } = &mut self;
 
         loop {
@@ -376,6 +381,14 @@ impl Replica {
                     },
                     None => {
                         span.in_scope(|| warn!("domain request stream ended"));
+                        return Ok(())
+                    }
+                },
+
+                init_state = init_state_reqs.recv() => match init_state {
+                    Some(MaterializedState{ node, state }) => domain.process_state_for_node(node, *state)?,
+                    None => {
+                        span.in_scope(|| warn!("domain state initialization stream ended"));
                         return Ok(())
                     }
                 },

@@ -1176,6 +1176,9 @@ impl PersistentState {
         unique_keys: K,
         params: &PersistenceParameters,
     ) -> Result<Self> {
+        let unique_keys: Vec<Box<[usize]>> =
+            unique_keys.into_iter().map(|c| c.as_ref().into()).collect();
+
         if !name.ends_with(".db") {
             name.push_str(".db");
         }
@@ -1198,8 +1201,6 @@ impl PersistentState {
         };
 
         let name = SqlIdentifier::from(name);
-        let unique_keys: Vec<Box<[usize]>> =
-            unique_keys.into_iter().map(|c| c.as_ref().into()).collect();
 
         match Self::new_inner(name.clone(), full_path.clone(), unique_keys.clone(), params) {
             Ok(ps) => Ok(Self {
