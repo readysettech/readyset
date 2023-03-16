@@ -325,6 +325,13 @@ prop_compose! {
     }
 }
 
+/// A definition for a test view. Currently one of:
+///  - Simple (SELECT * FROM table)
+#[derive(Clone, Debug)]
+enum TestViewDef {
+    Simple(String),
+}
+
 /// A model of the current test state, used to help generate operations in a way that we expect to
 /// succeed, as well as to assist in shrinking, and to determine postconditions to check during
 /// test runtime.
@@ -341,8 +348,8 @@ struct TestModel {
     tables: HashMap<String, Vec<ColumnSpec>>,
     deleted_tables: HashSet<String>,
     pkeys: HashMap<String, Vec<i32>>, // Primary keys in use for each table
-    // Map of view name to view definition (right now just a table that we do a SELECT * from)
-    views: HashMap<String, String>,
+    // Map of view name to view definition
+    views: HashMap<String, TestViewDef>,
     deleted_views: HashSet<String>,
 
     // Just cloned into [`TestTree`] and used for shrinking, not part of the model used for testing
@@ -470,8 +477,9 @@ impl TestModel {
                 self.tables.remove(name);
                 self.deleted_tables.insert(name.clone());
                 self.pkeys.remove(name);
-                self.views
-                    .retain(|_view_name, table_source| name != table_source);
+                self.views.retain(|_view_name, view_def| match view_def {
+                    TestViewDef::Simple(table_source) => name != table_source,
+                });
             }
             Operation::WriteRow { table, pkey, .. } => {
                 self.pkeys.get_mut(table).unwrap().push(*pkey);
@@ -498,7 +506,8 @@ impl TestModel {
             }
             Operation::DeleteRow(..) => (),
             Operation::CreateSimpleView { name, table_source } => {
-                self.views.insert(name.clone(), table_source.clone());
+                self.views
+                    .insert(name.clone(), TestViewDef::Simple(table_source.clone()));
                 // Also remove the name from deleted_tables if it exists, since we should no longer
                 // expect "SELECT * FROM name" to return an error and can stop checking that
                 // postcondition:
