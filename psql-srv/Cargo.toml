@@ -45,3 +45,4 @@ tokio = { workspace = true, features = ["full"] }
 tokio-test = "0.4.1"
 database-utils = { path = "../database-utils" }
 readyset-tracing = { path = "../readyset-tracing" }
+postgres-native-tls = { workspace = true }

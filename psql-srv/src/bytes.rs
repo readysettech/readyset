@@ -12,7 +12,7 @@ use bytes::Bytes;
 pub struct BytesStr(Bytes);
 
 impl BytesStr {
-    fn as_str(&self) -> &str {
+    pub fn as_str(&self) -> &str {
         // SAFETY: BytesStr is always validated on construction (in the TryFrom impl)
         unsafe { std::str::from_utf8_unchecked(&self.0) }
     }

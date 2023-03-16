@@ -31,6 +31,9 @@ pub enum Error {
     #[error("Invalid escape sequence in username")]
     InvalidEscapeSequence,
 
+    #[error("Invalid channel binding data")]
+    InvalidChannelBindingData,
+
     #[error(transparent)]
     Utf8(#[from] Utf8Error),
 
@@ -123,6 +126,14 @@ pub enum ClientChannelBindingSupport<'a> {
 }
 
 impl<'a> ClientChannelBindingSupport<'a> {
+    /// Returns `true` if the client channel binding support is [`SupportedButNotUsed`].
+    ///
+    /// [`SupportedButNotUsed`]: ClientChannelBindingSupport::SupportedButNotUsed
+    #[must_use]
+    pub fn is_supported_but_not_used(&self) -> bool {
+        matches!(self, Self::SupportedButNotUsed)
+    }
+
     /// Returns `true` if the client channel binding support is [`Required`].
     ///
     /// [`Required`]: ClientChannelBindingSupport::Required
@@ -362,7 +373,21 @@ impl<'a> ClientFinalMessage<'a> {
         salted_password: &[u8],
         client_first_message_bare: &str,
         server_first_message: &str,
+        expected_channel_binding_data: Option<&[u8]>,
     ) -> Result<Option<ServerFinalMessage>> {
+        if let Some(expected_channel_binding_data) = expected_channel_binding_data {
+            const CBIND_INPUT_GS2_HEADER: &[u8] = b"p=tls-server-end-point,,";
+            let cbind_input = BASE64.decode(self.cbind_input_base64)?;
+
+            // cbind_input should be "p=tls-server-end-point,," + expected_channel_binding_data
+            if cbind_input.len() < CBIND_INPUT_GS2_HEADER.len()
+                || &cbind_input[..CBIND_INPUT_GS2_HEADER.len()] != CBIND_INPUT_GS2_HEADER
+                || &cbind_input[CBIND_INPUT_GS2_HEADER.len()..] != expected_channel_binding_data
+            {
+                return Err(Error::InvalidChannelBindingData);
+            }
+        }
+
         let mut hmac = Hmac::<Sha256>::new_from_slice(salted_password)?;
         hmac.update(b"Client Key");
         let expected_client_key = hmac.finalize().into_bytes();

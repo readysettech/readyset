@@ -65,7 +65,12 @@ impl<B: Backend> Runner<B, tokio::net::TcpStream> {
             match stream {
                 Ok(stream) => {
                     info!("Established TLS connection");
-                    protocol.completed_ssl_handshake();
+                    protocol.completed_ssl_handshake(
+                        stream
+                            .get_ref()
+                            .tls_server_end_point()
+                            .expect("Nothing we can do if getting the TLS server endpoint fails")
+                    );
                     let mut runner = Runner {
                         backend,
                         channel: Channel::new(stream),

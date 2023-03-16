@@ -20,7 +20,8 @@ use crate::message::TransferFormat::{self, *};
 use crate::message::{CommandCompleteTag, FieldDescription, SaslInitialResponse};
 use crate::response::Response;
 use crate::scram::{
-    ClientFinalMessage, ClientFirstMessage, ServerFirstMessage, SCRAM_SHA_256_AUTHENTICATION_METHOD,
+    ClientChannelBindingSupport, ClientFinalMessage, ClientFirstMessage, ServerFirstMessage,
+    SCRAM_SHA_256_AUTHENTICATION_METHOD, SCRAM_SHA_256_SSL_AUTHENTICATION_METHOD,
 };
 use crate::value::Value;
 use crate::QueryResponse::*;
@@ -56,6 +57,7 @@ pub(crate) enum SaslState {
         salted_password: Vec<u8>,
         client_first_message_bare: String,
         server_first_message: String,
+        channel_binding_used: bool,
     },
 }
 
@@ -129,6 +131,10 @@ pub struct Protocol {
 
     /// Whether to allow TLS connections.
     allow_tls_connections: bool,
+
+    /// TLS server endpoint data for channel binding as specified by
+    /// [RFC5929](https://www.rfc-editor.org/rfc/rfc5929)
+    tls_server_end_point: Option<Vec<u8>>,
 }
 
 /// A prepared statement allows a frontend to specify the general form of a SQL statement while
@@ -162,6 +168,7 @@ impl Protocol {
             portals: HashMap::new(),
             extended_types: HashMap::new(),
             allow_tls_connections: false,
+            tls_server_end_point: None,
         }
     }
 
@@ -254,8 +261,7 @@ impl Protocol {
                                     user: user.ok_or(Error::NoUserSpecified)?,
                                 });
                             smallvec![AuthenticationSasl {
-                                // TODO(ENG-2698)
-                                allow_channel_binding: false
+                                allow_channel_binding: self.allow_tls_connections
                             }]
                         }
                     };
@@ -317,15 +323,47 @@ impl Protocol {
                 } = decoder::decode_sasl_initial_response_body(&mut body)?;
                 let client_first_message = ClientFirstMessage::parse(&scram_data)?;
 
-                if authentication_mechanism != *SCRAM_SHA_256_AUTHENTICATION_METHOD {
-                    // TODO(ENG-2698)
-                    return Err(Error::Unsupported("SCRAM-SHA-256-PLUS".into()));
+                // > If the flag is set to "y" and the server supports channel binding, the server
+                // > MUST fail authentication.  This is because if the client sets the channel
+                // > binding flag to "y", then the client must have believed that the server did not
+                // > support channel binding -- if the server did in fact support channel binding,
+                // > then this is an indication that there has been a downgrade attack (e.g., an
+                // > attacker changed the server's mechanism list to exclude the -PLUS suffixed
+                // > SCRAM mechanism name(s)).
+                if self.allow_tls_connections
+                    && client_first_message
+                        .channel_binding_support()
+                        .is_supported_but_not_used()
+                {
+                    return Err(Error::Unknown(
+                        "SCRAM supported but not used by client".into(),
+                    ));
                 }
-                if client_first_message.channel_binding_support().is_required() {
-                    return Err(Error::Unsupported("channel binding".into()));
+
+                if ![
+                    SCRAM_SHA_256_AUTHENTICATION_METHOD,
+                    SCRAM_SHA_256_SSL_AUTHENTICATION_METHOD,
+                ]
+                .contains(&authentication_mechanism.as_str())
+                {
+                    return Err(Error::Unsupported(format!(
+                        "Authentication mechanism \"{authentication_mechanism}\""
+                    )));
+                }
+
+                if let ClientChannelBindingSupport::Required(channel_binding_type) =
+                    client_first_message.channel_binding_support()
+                {
+                    if channel_binding_type != "tls-server-end-point" {
+                        return Err(Error::Unsupported(
+                            "channel binding type other than tls-server-end-point".into(),
+                        ));
+                    }
                 }
 
                 let client_first_message_bare = client_first_message.bare().to_owned();
+                let channel_binding_used =
+                    client_first_message.channel_binding_support().is_required();
 
                 let server_first_message =
                     ServerFirstMessage::new(client_first_message, password.as_bytes())?;
@@ -336,6 +374,7 @@ impl Protocol {
                     salted_password: server_first_message.salted_password().to_owned(),
                     client_first_message_bare,
                     server_first_message: sasl_data.clone(),
+                    channel_binding_used,
                 });
 
                 Ok(Response::Message(
@@ -350,6 +389,7 @@ impl Protocol {
                 ref salted_password,
                 ref client_first_message_bare,
                 ref server_first_message,
+                channel_binding_used,
             }) => {
                 let Authenticate { body } = message else {
                    return Err(Error::UnsupportedMessage(message))
@@ -360,6 +400,9 @@ impl Protocol {
                     salted_password,
                     client_first_message_bare,
                     server_first_message,
+                    channel_binding_used
+                        .then_some(self.tls_server_end_point.as_deref())
+                        .flatten(),
                 )? {
                     self.state = State::Ready;
                     let mut messages = vec![BackendMessage::AuthenticationSaslFinal {
@@ -701,9 +744,11 @@ impl Protocol {
         self.state == State::SslHandshake
     }
 
-    /// Informs the `Protocol` that we have initiated a TLS connection with the client.
-    pub fn completed_ssl_handshake(&mut self) {
+    /// Informs the `Protocol` that we have initiated a TLS connection with the client, storing the
+    /// TLS server endpoint for optional use in channel binding later.
+    pub fn completed_ssl_handshake(&mut self, server_end_point: Option<Vec<u8>>) {
         self.state = State::StartingUp;
+        self.tls_server_end_point = server_end_point;
     }
 }
 
@@ -1098,7 +1143,7 @@ mod tests {
             _ => panic!(),
         }
         // After the SSL handshake completes, we return to `State::StartingUp`.
-        protocol.completed_ssl_handshake();
+        protocol.completed_ssl_handshake(None);
         assert_eq!(protocol.state, State::StartingUp);
 
         // Try again with SSL allowed
