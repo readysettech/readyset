@@ -515,6 +515,7 @@ impl TestModel {
             Operation::CreateSimpleView { name, table_source } => {
                 self.views
                     .insert(name.clone(), TestViewDef::Simple(table_source.clone()));
+                self.deleted_views.remove(name);
                 // Also remove the name from deleted_tables if it exists, since we should no longer
                 // expect "SELECT * FROM name" to return an error and can stop checking that
                 // postcondition:
