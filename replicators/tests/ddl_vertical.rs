@@ -137,6 +137,12 @@ enum Operation {
     },
     /// Creates a simple view that does a SELECT * on a given table
     CreateSimpleView { name: String, table_source: String },
+    /// Creates a view that does a SELECT * on a JOIN of two tables
+    CreateJoinView {
+        name: String,
+        table_a: String,
+        table_b: String,
+    },
     /// Drops the view with the given name
     DropView(String),
 }
@@ -199,6 +205,16 @@ impl Operation {
             }),
             Self::CreateSimpleView { name, table_source } => {
                 state.tables.contains_key(table_source)
+                    && !state.tables.contains_key(name)
+                    && !state.views.contains_key(name)
+            }
+            Self::CreateJoinView {
+                name,
+                table_a,
+                table_b,
+            } => {
+                state.tables.contains_key(table_a)
+                    && state.tables.contains_key(table_b)
                     && !state.tables.contains_key(name)
                     && !state.views.contains_key(name)
             }
@@ -320,6 +336,17 @@ prop_compose! {
 }
 
 prop_compose! {
+    fn gen_create_join_view(tables: Vec<String>)
+                           (name in SQL_NAME_REGEX,
+                            source_tables in sample::subsequence(tables, 2..=2))
+                           -> Operation {
+        let table_a = source_tables[0].clone();
+        let table_b = source_tables[1].clone();
+        Operation::CreateJoinView { name, table_a, table_b }
+    }
+}
+
+prop_compose! {
     fn gen_drop_view(views: Vec<String>)(name in sample::select(views)) -> Operation {
         Operation::DropView(name)
     }
@@ -331,11 +358,7 @@ prop_compose! {
 #[derive(Clone, Debug)]
 enum TestViewDef {
     Simple(String),
-    #[allow(dead_code)]
-    Join {
-        table_a: String,
-        table_b: String,
-    },
+    Join { table_a: String, table_b: String },
 }
 
 /// A model of the current test state, used to help generate operations in a way that we expect to
@@ -400,6 +423,13 @@ impl TestModel {
                 ]
                 .into_iter(),
             );
+        }
+
+        // If we have at least two tables, we can create a join view:
+        if self.tables.len() > 1 {
+            let create_join_view_strat =
+                gen_create_join_view(self.tables.keys().cloned().collect()).boxed();
+            possible_ops.push(create_join_view_strat);
         }
 
         // If we have at least one view in existence, we can drop one:
@@ -485,7 +515,7 @@ impl TestModel {
                 self.pkeys.remove(name);
                 self.views.retain(|_view_name, view_def| match view_def {
                     TestViewDef::Simple(table_source) => name != table_source,
-                    TestViewDef::Join { .. } => todo!(),
+                    TestViewDef::Join { table_a, table_b } => name != table_a && name != table_b,
                 });
             }
             Operation::WriteRow { table, pkey, .. } => {
@@ -519,6 +549,19 @@ impl TestModel {
                 // Also remove the name from deleted_tables if it exists, since we should no longer
                 // expect "SELECT * FROM name" to return an error and can stop checking that
                 // postcondition:
+                self.deleted_tables.remove(name);
+            }
+            Operation::CreateJoinView {
+                name,
+                table_a,
+                table_b,
+            } => {
+                let table_a = table_a.clone();
+                let table_b = table_b.clone();
+                let view_def = TestViewDef::Join { table_a, table_b };
+                self.views.insert(name.clone(), view_def);
+                self.deleted_views.remove(name);
+                // See comment in CreateSimpleView clause above for why this is needed:
                 self.deleted_tables.remove(name);
             }
             Operation::DropView(name) => {
@@ -848,6 +891,35 @@ async fn run(ops: Vec<Operation>, next_step_idx: Rc<Cell<usize>>) {
             }
             Operation::CreateSimpleView { name, table_source } => {
                 let query = format!("CREATE VIEW \"{name}\" AS SELECT * FROM \"{table_source}\"");
+                rs_conn.simple_query(&query).await.unwrap();
+                pg_conn.simple_query(&query).await.unwrap();
+                let create_cache = format!("CREATE CACHE ALWAYS FROM SELECT * FROM \"{name}\"");
+                eventually!(run_test: {
+                    let result = rs_conn.simple_query(&create_cache).await;
+                    AssertUnwindSafe(move || result)
+                }, then_assert: |result| {
+                    result().unwrap()
+                });
+            }
+            Operation::CreateJoinView {
+                name,
+                table_a,
+                table_b,
+            } => {
+                // Must give a unique alias to each column in the source tables to avoid issues
+                // with duplicate column names in the resulting view
+                let select_list: Vec<String> = runtime_state.tables[table_a]
+                    .iter()
+                    .chain(runtime_state.tables[table_b].iter())
+                    .enumerate()
+                    .map(|(i, cs)| format!("\"{}\" AS c{}", cs.name, i))
+                    .collect();
+                let select_list = select_list.join(", ");
+                let view_def = format!(
+                    "SELECT {} FROM \"{}\" JOIN \"{}\" ON \"{}\".id = \"{}\".id",
+                    select_list, table_a, table_b, table_a, table_b
+                );
+                let query = format!("CREATE VIEW \"{}\" AS {}", name, view_def);
                 rs_conn.simple_query(&query).await.unwrap();
                 pg_conn.simple_query(&query).await.unwrap();
                 let create_cache = format!("CREATE CACHE ALWAYS FROM SELECT * FROM \"{name}\"");
