@@ -327,9 +327,15 @@ prop_compose! {
 
 /// A definition for a test view. Currently one of:
 ///  - Simple (SELECT * FROM table)
+///  - Join (SELECT * FROM table_a JOIN table_b ON table_a.id = table_b.id)
 #[derive(Clone, Debug)]
 enum TestViewDef {
     Simple(String),
+    #[allow(dead_code)]
+    Join {
+        table_a: String,
+        table_b: String,
+    },
 }
 
 /// A model of the current test state, used to help generate operations in a way that we expect to
@@ -479,6 +485,7 @@ impl TestModel {
                 self.pkeys.remove(name);
                 self.views.retain(|_view_name, view_def| match view_def {
                     TestViewDef::Simple(table_source) => name != table_source,
+                    TestViewDef::Join { .. } => todo!(),
                 });
             }
             Operation::WriteRow { table, pkey, .. } => {
