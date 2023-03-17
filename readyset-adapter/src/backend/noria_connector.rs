@@ -26,9 +26,8 @@ use readyset_errors::{
 };
 use readyset_server::worker::readers::{CallResult, ReadRequestHandler};
 use readyset_sql_passes::anonymize::anonymize_literals;
-use readyset_tracing::{error, info, trace, warn};
 use readyset_util::redacted::Sensitive;
-use tracing::instrument;
+use tracing::{error, info, instrument, trace, warn};
 
 use crate::backend::SelectSchema;
 use crate::rewrite::{self, ProcessedQueryParams};

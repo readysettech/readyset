@@ -27,8 +27,8 @@ use readyset_errors::{
     ReadySetResult,
 };
 use readyset_sql_passes::is_correlated;
-use readyset_tracing::{debug, trace};
 use readyset_util::redacted::Sensitive;
+use tracing::{debug, trace};
 
 use super::query_graph::{extract_limit_offset, JoinPredicate};
 use crate::controller::sql::mir::grouped::{

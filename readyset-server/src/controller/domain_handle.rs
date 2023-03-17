@@ -4,8 +4,8 @@ use array2::Array2;
 use dataflow::prelude::*;
 use dataflow::DomainRequest;
 use futures::{stream, StreamExt, TryStreamExt};
-use readyset_tracing::error;
 use serde::de::DeserializeOwned;
+use tracing::error;
 
 use crate::controller::{Worker, WorkerIdentifier};
 use crate::worker::WorkerRequestKind;

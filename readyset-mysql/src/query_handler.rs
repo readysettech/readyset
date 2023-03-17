@@ -11,7 +11,7 @@ use readyset_client::results::Results;
 use readyset_client::ColumnSchema;
 use readyset_data::{DfType, DfValue};
 use readyset_errors::{ReadySetError, ReadySetResult};
-use readyset_tracing::warn;
+use tracing::warn;
 
 const MAX_ALLOWED_PACKET_VARIABLE_NAME: &str = "max_allowed_packet";
 const MAX_ALLOWED_PACKET_DEFAULT: DfValue = DfValue::UnsignedInt(67108864);

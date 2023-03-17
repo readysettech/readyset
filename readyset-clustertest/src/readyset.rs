@@ -2,11 +2,11 @@ use ::readyset_client::metrics::{recorded, DumpedMetricValue};
 use ::readyset_client::recipe::changelist::ChangeList;
 use ::readyset_client::{failpoints, get_metric};
 use readyset_data::{DfValue, Dialect};
-use readyset_tracing::info;
 use readyset_util::eventually;
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
 use serial_test::serial;
+use tracing::{debug, info};
 
 use crate::readyset_mysql::PROPAGATION_DELAY_TIMEOUT;
 use crate::utils::{query_until_expected, EventuallyConsistentResults, QueryExecution};

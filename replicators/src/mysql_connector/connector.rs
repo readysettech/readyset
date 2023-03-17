@@ -16,7 +16,7 @@ use readyset_client::recipe::ChangeList;
 use readyset_client::replication::ReplicationOffset;
 use readyset_data::{DfValue, Dialect};
 use readyset_errors::{ReadySetError, ReadySetResult};
-use readyset_tracing::{info, warn};
+use tracing::{info, warn};
 
 use super::BinlogPosition;
 use crate::noria_adapter::{Connector, ReplicationAction};

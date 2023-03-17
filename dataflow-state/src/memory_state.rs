@@ -8,7 +8,7 @@ use readyset_client::replication::ReplicationOffset;
 use readyset_client::{KeyComparison, KeyCount};
 use readyset_data::DfValue;
 use readyset_errors::ReadySetResult;
-use readyset_tracing::{self, trace};
+use tracing::trace;
 
 use crate::keyed_state::KeyedState;
 use crate::single_state::SingleState;

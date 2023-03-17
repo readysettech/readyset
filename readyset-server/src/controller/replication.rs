@@ -1,7 +1,7 @@
 use clap::Parser;
 use dataflow::prelude::{Graph, NodeIndex};
-use readyset_tracing::warn;
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 
 // Command-line options for configuring the domain replication strategy
 #[allow(missing_docs)] // Allows us to exclude docs (from doc comments) from --help text

@@ -18,7 +18,6 @@ use readyset_client::channel;
 use readyset_client::internal::ReplicaAddress;
 use readyset_client::metrics::recorded;
 use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
-use readyset_tracing::{debug, error, info, trace, warn};
 use readyset_util::select;
 use readyset_util::shutdown::ShutdownReceiver;
 use serde::{Deserialize, Serialize};
@@ -28,7 +27,7 @@ use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinError;
 use tokio::time::Interval;
-use tracing::info_span;
+use tracing::{debug, error, info, info_span, trace, warn};
 use url::Url;
 
 use self::replica::Replica;

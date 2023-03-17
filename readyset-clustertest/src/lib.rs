@@ -225,10 +225,10 @@ use rand::Rng;
 #[cfg(test)]
 use readyset_clustertest_macros::clustertest;
 use readyset_errors::ReadySetResult;
-use readyset_tracing::{debug, warn};
 use serde::Deserialize;
 use server::{AdapterBuilder, ProcessHandle, ReadysetServerBuilder};
 use tokio::time::sleep;
+use tracing::{debug, warn};
 use url::Url;
 
 /// The set of environment variables that need to be set for the

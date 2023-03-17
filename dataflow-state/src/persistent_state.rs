@@ -81,7 +81,6 @@ use readyset_client::replication::ReplicationOffset;
 use readyset_client::{KeyComparison, KeyCount, SqlIdentifier};
 use readyset_data::DfValue;
 use readyset_errors::{internal_err, invariant, ReadySetError, ReadySetResult};
-use readyset_tracing::{debug, error, info, warn};
 use readyset_util::intervals::BoundPair;
 use rocksdb::{
     self, ColumnFamilyDescriptor, IteratorMode, PlainTableFactoryOptions, SliceTransform,
@@ -92,7 +91,7 @@ use serde::{Deserialize, Serialize};
 use tempfile::{tempdir, TempDir};
 use test_strategy::Arbitrary;
 use thiserror::Error;
-use tracing::instrument;
+use tracing::{debug, error, info, instrument, warn};
 
 use crate::{
     EvictKeysResult, LookupResult, PointKey, RangeKey, RangeLookupResult, RecordResult, State,

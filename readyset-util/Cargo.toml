@@ -19,7 +19,6 @@ uuid = { version = "0.8", features = ["v4"] }
 serde_json = "1"
 bit-vec = { version = "0.6", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
-readyset-tracing = { path = "../readyset-tracing" }
 async-stream = "0.3.2"
 cidr = "0.2.1"
 

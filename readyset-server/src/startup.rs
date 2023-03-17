@@ -58,11 +58,11 @@ use health_reporter::{HealthReporter, State as ServerState};
 use readyset_client::consensus::{Authority, WorkerSchedulingConfig};
 use readyset_client::{ControllerDescriptor, WorkerDescriptor};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
-use readyset_tracing::error;
 use readyset_util::futures::abort_on_panic;
 use readyset_util::shutdown::{self, ShutdownReceiver, ShutdownSender};
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::{Receiver, Sender};
+use tracing::error;
 use url::Url;
 
 use crate::controller::{Controller, ControllerRequest, HandleRequest};

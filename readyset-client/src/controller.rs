@@ -14,12 +14,12 @@ use petgraph::graph::NodeIndex;
 use readyset_errors::{
     internal, internal_err, rpc_err, rpc_err_no_downcast, ReadySetError, ReadySetResult,
 };
-use readyset_tracing::trace;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tower::buffer::Buffer;
 use tower::ServiceExt;
 use tower_service::Service;
+use tracing::trace;
 use url::Url;
 
 use crate::consensus::{Authority, AuthorityControl};

@@ -15,7 +15,6 @@ use backoff::ExponentialBackoffBuilder;
 use blake2::digest::{Update, VariableOutput};
 use blake2::Blake2bVar;
 use lazy_static::lazy_static;
-use readyset_tracing::{debug, info, trace, warn};
 use readyset_util::shutdown::ShutdownReceiver;
 use readyset_version::COMMIT_ID;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
@@ -23,6 +22,7 @@ use reqwest::{Client, RequestBuilder, Response, StatusCode, Url};
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::Mutex;
 use tokio::time::Interval;
+use tracing::info;
 use uuid::Uuid;
 
 use crate::error::{ReporterError as Error, ReporterResult as Result};
@@ -184,7 +184,7 @@ impl TelemetryReporter {
     }
 
     async fn send_event(&self, event: TelemetryEvent, payload: &Telemetry) {
-        debug!(?event, ?payload, "sending event");
+        tracing::debug!(?event, ?payload, "sending event");
         let backoff = ExponentialBackoffBuilder::new()
             .with_max_elapsed_time(Some(TIMEOUT))
             .build();
@@ -207,7 +207,7 @@ impl TelemetryReporter {
         .await;
 
         if res.is_err() {
-            warn!(?res, ?event, ?payload, "failed to send telemetry");
+            tracing::warn!(?res, ?event, ?payload, "failed to send telemetry");
         }
     }
 
@@ -236,7 +236,7 @@ impl TelemetryReporter {
 
     /// Returns true if we are still running, false if we should shut down
     async fn run_once(&mut self, interval: &mut Interval) -> bool {
-        trace!("TelemetryReporter run_once");
+        tracing::trace!("TelemetryReporter run_once");
         tokio::select! {
             // We use `biased` here to ensure that our shutdown signal will be received and
             // acted upon even if the other branches in this `select!` are constantly in a
@@ -247,7 +247,7 @@ impl TelemetryReporter {
             _ = self.shutdown_rx.recv() => {
                 info!("shutting down telemetry reporter. will attempt to drain in-flight metrics");
                 while let Ok((event, telemetry)) = self.rx.try_recv() {
-                    debug!(?event, ?telemetry, "TelemetryEvent received");
+                    tracing::debug!(?event, ?telemetry, "TelemetryEvent received");
                     self.process_event(event, &telemetry).await;
                 }
 
@@ -258,7 +258,7 @@ impl TelemetryReporter {
                 self.process_event(event, &telemetry).await;
             }
             _ = interval.tick() => {
-                debug!("starting periodic report");
+                tracing::debug!("starting periodic report");
                 let periodic_reporters = self.periodic_reporters.lock().await;
 
                 for reporter in periodic_reporters.iter() {
@@ -285,7 +285,7 @@ impl TelemetryReporter {
     }
 
     pub async fn register_periodic_reporter(&mut self, periodic_reporter: PeriodicReporter) {
-        debug!("registering periodic reporter");
+        tracing::debug!("registering periodic reporter");
         let mut periodic_reporters = self.periodic_reporters.lock().await;
         periodic_reporters.push(periodic_reporter);
     }

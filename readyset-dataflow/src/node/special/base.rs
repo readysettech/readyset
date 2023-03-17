@@ -10,10 +10,10 @@ use readyset_client::replication::ReplicationOffset;
 use readyset_client::{Modification, Operation, TableOperation};
 use readyset_data::{DfValue, DfValueKind};
 use readyset_errors::ReadySetResult;
-use readyset_tracing::{debug, error, trace};
 use readyset_util::redacted::Sensitive;
 use readyset_util::Indices;
 use serde::{Deserialize, Serialize};
+use tracing::{debug, error, trace};
 use vec_map::VecMap;
 
 use crate::node::Column;

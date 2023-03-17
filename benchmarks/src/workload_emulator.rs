@@ -17,9 +17,9 @@ use rand::distributions::Uniform;
 use rand_distr::weighted_alias::WeightedAliasIndex;
 use rand_distr::Distribution;
 use readyset_data::{DfType, DfValue, Dialect};
-use readyset_tracing::info;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
+use tracing::info;
 use zipf::ZipfDistribution;
 
 use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters, MetricGoal};

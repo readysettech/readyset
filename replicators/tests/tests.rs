@@ -18,12 +18,12 @@ use readyset_data::{Collation, DfValue, Dialect, TinyText};
 use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_server::Builder;
 use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer, TelemetrySender};
-use readyset_tracing::{error, trace};
 use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
 use replicators::db_util::error_is_slot_not_found;
 use replicators::NoriaAdapter;
 use test_utils::slow;
+use tracing::{error, trace};
 
 const MAX_ATTEMPTS: usize = 40;
 

@@ -12,9 +12,9 @@ use readyset_client::failpoints;
 use readyset_client::replication::ReplicationOffset;
 use readyset_client::TableOperation;
 use readyset_errors::{invariant, set_failpoint_return_err, ReadySetError, ReadySetResult};
-use readyset_tracing::{debug, error, info, trace, warn};
 use readyset_util::select;
 use tokio_postgres as pgsql;
+use tracing::{debug, error, info, trace, warn};
 
 use super::ddl_replication::setup_ddl_replication;
 use super::lsn::Lsn;

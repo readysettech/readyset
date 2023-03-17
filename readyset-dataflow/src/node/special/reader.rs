@@ -5,8 +5,8 @@ use failpoint_macros::failpoint;
 use metrics::histogram;
 use readyset_client::metrics::recorded;
 use readyset_client::{KeyColumnIdx, ViewPlaceholder};
-use readyset_tracing::{trace, warn};
 use serde::{Deserialize, Serialize};
+use tracing::{trace, warn};
 
 use crate::backlog;
 use crate::prelude::*;

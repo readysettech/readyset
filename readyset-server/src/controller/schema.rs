@@ -2,7 +2,7 @@ use dataflow::prelude::*;
 use nom_sql::Column;
 use readyset_client::{ColumnBase, ColumnSchema};
 use readyset_data::DfType;
-use readyset_tracing::trace;
+use tracing::trace;
 
 use super::keys::provenance_of;
 use super::sql::{Recipe, Schema};

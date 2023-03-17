@@ -10,8 +10,8 @@ use readyset_client::recipe::changelist::ChangeList;
 use readyset_client::ViewCreateRequest;
 use readyset_data::Dialect;
 use readyset_errors::ReadySetResult;
-use readyset_tracing::warn;
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 use vec1::Vec1;
 
 use super::registry::{MatchedCache, RecipeExpr};

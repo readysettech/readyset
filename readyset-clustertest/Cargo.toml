@@ -37,6 +37,7 @@ readyset-adapter = { path = "../readyset-adapter" }
 readyset-client-metrics = { path = "../readyset-client-metrics" }
 test-utils = { path = "../test-utils" }
 readyset-clustertest-macros = { path = "./macros" }
+readyset-tracing = { path = "../readyset-tracing" }
 rust_decimal = "1.26"
 
 [[bench]]

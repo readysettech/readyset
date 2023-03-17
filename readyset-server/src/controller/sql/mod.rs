@@ -19,9 +19,8 @@ use readyset_errors::{
 };
 use readyset_sql_passes::alias_removal::TableAliasRewrite;
 use readyset_sql_passes::{AliasRemoval, DetectUnsupportedPlaceholders, Rewrite, RewriteContext};
-use readyset_tracing::{debug, trace};
 use readyset_util::redacted::Sensitive;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 use vec1::Vec1;
 
 use self::mir::{LeafBehavior, NodeIndex as MirNodeIndex, SqlToMirConverter};

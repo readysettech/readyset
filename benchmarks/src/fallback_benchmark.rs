@@ -11,9 +11,9 @@ use clap::Parser;
 use metrics::Unit;
 use mysql_async::prelude::Queryable;
 use mysql_async::{Row, TxOpts};
-use readyset_tracing::{debug, error};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
+use tracing::{debug, error};
 
 use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters, MetricGoal};
 use crate::utils::generate::DataGenerator;

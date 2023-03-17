@@ -2,10 +2,10 @@ use std::ops::DerefMut;
 use std::sync::Arc;
 use std::time::Duration;
 
-use readyset_tracing::{debug, warn};
 use readyset_util::shutdown::ShutdownSender;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::Mutex;
+use tracing::warn;
 
 use crate::error::{SenderError as Error, SenderResult as Result};
 use crate::telemetry::{TelemetryBuilder, TelemetryEvent, *};
@@ -42,9 +42,9 @@ impl TelemetrySender {
     /// reason (eg, not a 4XX or IO error), this function will retry with an exponential
     /// backoff, timing out at [`TIMEOUT`].
     pub fn send_event_with_payload(&self, event: TelemetryEvent, payload: Telemetry) -> Result<()> {
-        debug!("sending {event:?} with payload {payload:?}");
+        tracing::debug!("sending {event:?} with payload {payload:?}");
         if self.no_op {
-            debug!("Ignoring ({event:?} {payload:?}) in no-op mode");
+            tracing::debug!("Ignoring ({event:?} {payload:?}) in no-op mode");
             return Ok(());
         }
 

@@ -23,9 +23,9 @@ use mysql_async::prelude::Queryable;
 use mysql_async::Row;
 use prometheus_parse::Scrape;
 use readyset_client::metrics::recorded;
-use readyset_tracing::{debug, error, info};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
+use tracing::{debug, error, info};
 
 use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters, MetricGoal};
 use crate::utils::generate::DataGenerator;

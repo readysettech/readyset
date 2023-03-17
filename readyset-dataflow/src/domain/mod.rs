@@ -24,12 +24,12 @@ use readyset_client::internal::Index;
 use readyset_client::replication::ReplicationOffset;
 use readyset_client::{channel, internal, KeyComparison, KeyCount, ReaderAddress};
 use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
-use readyset_tracing::{debug, error, trace, warn};
 use readyset_util::redacted::Sensitive;
 use readyset_util::Indices;
 use serde::{Deserialize, Serialize};
 use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
 use tokio_stream::wrappers::UnboundedReceiverStream;
+use tracing::{debug, error, trace, warn};
 use vec1::Vec1;
 
 pub(crate) use self::replay_paths::ReplayPath;

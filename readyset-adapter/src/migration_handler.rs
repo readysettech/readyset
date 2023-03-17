@@ -15,11 +15,10 @@ use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::{ReadySetHandle, ViewCreateRequest};
 use readyset_client_metrics::recorded;
 use readyset_errors::ReadySetResult;
-use readyset_tracing::{debug, error, info};
 use readyset_util::redacted::Sensitive;
 use readyset_util::shutdown::ShutdownReceiver;
 use tokio::select;
-use tracing::instrument;
+use tracing::{debug, error, info, instrument};
 
 use crate::backend::noria_connector::{SelectPrepareResult, SelectPrepareResultInner};
 use crate::backend::{noria_connector, NoriaConnector};

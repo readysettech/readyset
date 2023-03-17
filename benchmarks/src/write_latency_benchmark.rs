@@ -10,8 +10,8 @@ use mysql_async::prelude::Queryable;
 use mysql_async::{Row, Value};
 use nom_sql::{parse_query, Dialect, SqlQuery};
 use query_generator::{ColumnName, TableName};
-use readyset_tracing::{debug, info};
 use serde::{Deserialize, Serialize};
+use tracing::{debug, info};
 
 use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters, MetricGoal};
 use crate::utils::generate::DataGenerator;

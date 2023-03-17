@@ -21,7 +21,6 @@ use readyset_data::DfValue;
 use readyset_errors::{
     internal, internal_err, rpc_err, table_err, unsupported, ReadySetError, ReadySetResult,
 };
-use readyset_tracing::{error, trace};
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 use tokio_tower::multiplex;
@@ -29,6 +28,7 @@ use tower::balance::p2c::Balance;
 use tower::buffer::Buffer;
 use tower::limit::concurrency::ConcurrencyLimit;
 use tower_service::Service;
+use tracing::{debug_span, error, trace, trace_span, Span};
 use vec_map::VecMap;
 
 use crate::channel::CONNECTION_FROM_BASE;
@@ -344,7 +344,7 @@ impl TableBuilder {
                         crate::BUFFER_TO_POOL,
                     );
                     use tracing_futures::Instrument;
-                    tokio::spawn(w.instrument(tracing::debug_span!(
+                    tokio::spawn(w.instrument(debug_span!(
                         "table_worker",
                         addr = %addr,
                         shard = shardi
@@ -419,10 +419,7 @@ impl Table {
         mut i: PacketData,
     ) -> impl Future<Output = Result<Tagged<()>, ReadySetError>> + Send {
         let span = if crate::trace_next_op() {
-            Some(tracing::trace_span!(
-                "table-request",
-                base = self.ni.index()
-            ))
+            Some(trace_span!("table-request", base = self.ni.index()))
         } else {
             None
         };
@@ -497,7 +494,7 @@ impl Table {
         future::Either::Right(match self.shards.first_mut() {
             Some(table_rpc) if nshards == 1 => {
                 let request = Tagged::from(i);
-                let _guard = span.as_ref().map(tracing::Span::enter);
+                let _guard = span.as_ref().map(Span::enter);
                 trace!("submit request");
                 future::Either::Left(future::Either::Right(
                     table_rpc.call(request).map_err(rpc_err!("Table::input")),
@@ -524,7 +521,7 @@ impl Table {
                     Some(&k) => k,
                 };
 
-                let _guard = span.as_ref().map(tracing::Span::enter);
+                let _guard = span.as_ref().map(Span::enter);
                 trace!("shard request");
                 let mut shard_writes = vec![Vec::new(); nshards];
                 let ops: &mut Vec<TableOperation> = match (&mut i.data).try_into() {
@@ -557,11 +554,11 @@ impl Table {
 
                         // make a span per shard
                         let span = if span.is_some() {
-                            Some(tracing::trace_span!("table-shard", s))
+                            Some(trace_span!("table-shard", s))
                         } else {
                             None
                         };
-                        let _guard = span.as_ref().map(tracing::Span::enter);
+                        let _guard = span.as_ref().map(Span::enter);
                         trace!("submit request shard");
 
                         // `s` is within the range of `0..nshards`, so it is not out of bounds

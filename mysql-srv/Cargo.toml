@@ -26,7 +26,6 @@ sha-1 = "0.10.0"
 mysql-time = { path = "../mysql-time" }
 tracing = "0.1.35"
 readyset-data = { path = "../readyset-data" }
-readyset-tracing = { path = "../readyset-tracing" }
 
 [dev-dependencies]
 tokio-postgres = { workspace = true }

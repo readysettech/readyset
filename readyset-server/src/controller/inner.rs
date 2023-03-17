@@ -22,13 +22,13 @@ use readyset_client::status::{ReadySetStatus, SnapshotStatus};
 use readyset_client::WorkerDescriptor;
 use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_telemetry_reporter::TelemetrySender;
-use readyset_tracing::{debug, error, info, warn};
 use readyset_util::futures::abort_on_panic;
 use readyset_util::shutdown::ShutdownReceiver;
 use readyset_version::RELEASE_VERSION;
 use reqwest::Url;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::Notify;
+use tracing::{debug, error, info, warn};
 
 use crate::controller::state::{DfState, DfStateHandle};
 use crate::controller::{ControllerRequest, ControllerState, Worker, WorkerIdentifier};

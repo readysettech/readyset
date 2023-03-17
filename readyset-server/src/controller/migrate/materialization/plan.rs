@@ -15,8 +15,7 @@ use dataflow::payload::{ReplayPathSegment, SourceSelection, TriggerEndpoint};
 use dataflow::prelude::*;
 use dataflow::DomainRequest;
 use readyset_errors::ReadySetError;
-use readyset_tracing::{debug, trace};
-use tracing::instrument;
+use tracing::{debug, instrument, trace};
 use vec1::Vec1;
 
 use crate::controller::keys::{self, IndexRef, RawReplayPath};

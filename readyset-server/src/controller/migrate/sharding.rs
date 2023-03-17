@@ -4,8 +4,7 @@ use dataflow::prelude::*;
 use dataflow::{node, ops};
 use petgraph::graph::NodeIndex;
 use readyset_errors::{internal, invariant, invariant_eq, ReadySetResult};
-use readyset_tracing::{debug, error, trace};
-use tracing::info_span;
+use tracing::{debug, error, info_span, trace};
 
 #[allow(clippy::cognitive_complexity)]
 pub fn shard(

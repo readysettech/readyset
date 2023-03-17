@@ -5,8 +5,8 @@ use std::convert::TryInto;
 use dataflow_expression::Expr;
 use dataflow_state::PointKey;
 use readyset_errors::ReadySetResult;
-use readyset_tracing::error;
 use serde::{Deserialize, Serialize};
+use tracing::error;
 
 use crate::prelude::*;
 use crate::processing::{ColumnSource, IngredientLookupResult, LookupIndex, LookupMode};

@@ -17,14 +17,13 @@ use readyset_client::channel::{self, CONNECTION_FROM_BASE};
 use readyset_client::internal::ReplicaAddress;
 use readyset_client::{KeyComparison, PacketData, PacketPayload, Tagged};
 use readyset_errors::ReadySetResult;
-use readyset_tracing::{debug, error, warn};
 use strawpoll::Strawpoll;
 use time::Duration;
 use tokio::io::{AsyncReadExt, BufReader, BufStream, BufWriter};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio_stream::wrappers::IntervalStream;
-use tracing::{info_span, instrument, Span};
+use tracing::{debug, error, info_span, instrument, warn, Span};
 
 use super::ChannelCoordinator;
 

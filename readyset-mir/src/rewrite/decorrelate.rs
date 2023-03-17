@@ -4,8 +4,7 @@ use itertools::{Either, Itertools};
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::{BinaryOperator, Expr};
 use readyset_errors::{internal, invariant, unsupported, ReadySetResult};
-use readyset_tracing::trace;
-use tracing::instrument;
+use tracing::{instrument, trace};
 
 use crate::node::MirNodeInner;
 use crate::query::MirQuery;

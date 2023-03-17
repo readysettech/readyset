@@ -15,5 +15,4 @@ vec1 = "1.6.0"
 nom-sql = { path = "../nom-sql" }
 readyset-errors = { path = "../readyset-errors" }
 readyset-data = { path = "../readyset-data" }
-readyset-tracing = { path = "../readyset-tracing" }
 dataflow-expression = { path = "../dataflow-expression" }

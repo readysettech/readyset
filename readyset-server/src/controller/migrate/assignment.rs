@@ -1,7 +1,7 @@
 //! Functions for assigning new nodes to thread domains.
 
 use dataflow::prelude::*;
-use readyset_tracing::debug;
+use tracing::debug;
 
 use crate::controller::state::DfState;
 use crate::controller::NodeRestrictionKey;

@@ -27,7 +27,6 @@ use readyset_client::{
     ViewQuery,
 };
 use readyset_errors::internal_err;
-use readyset_tracing::{error, warn};
 use readyset_util::shutdown::ShutdownReceiver;
 use serde::ser::Serializer;
 use serde::Serialize;
@@ -38,7 +37,7 @@ use tokio_stream::wrappers::TcpListenerStream;
 use tokio_stream::StreamExt;
 use tokio_tower::multiplex::server;
 use tower::Service;
-use tracing::instrument;
+use tracing::{error, instrument, warn};
 
 /// Retry consistency missed reads every this often.
 const RETRY_TIMEOUT: Duration = Duration::from_micros(100);

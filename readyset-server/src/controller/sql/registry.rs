@@ -9,10 +9,10 @@ use nom_sql::{
 use readyset_client::PlaceholderIdx;
 use readyset_errors::{internal_err, unsupported_err, ReadySetError, ReadySetResult};
 use readyset_sql_passes::SelectStatementSkeleton;
-use readyset_tracing::debug;
 use readyset_util::hash::hash;
 use readyset_util::redacted::Sensitive;
 use serde::{Deserialize, Serialize};
+use tracing::debug;
 use vec1::Vec1;
 
 use super::QueryID;

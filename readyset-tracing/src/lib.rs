@@ -36,12 +36,8 @@ mod logformat;
 use logformat::LogFormat;
 mod percent;
 use percent::Percent;
-use tracing_wrapper::set_log_field;
 pub mod presampled;
 pub mod propagation;
-pub mod tracing_wrapper;
-#[macro_use]
-mod macros;
 
 pub fn warn_if_debug_build() {
     if cfg!(debug) {
@@ -269,7 +265,6 @@ impl Options {
     /// }
     /// ```
     pub fn init(&self, service_name: &str, deployment: &str) -> Result<(), Error> {
-        set_log_field("deployment".into(), deployment.into());
         if self.tracing_host.is_some() {
             self.init_logging_and_tracing(service_name, deployment)
         } else {

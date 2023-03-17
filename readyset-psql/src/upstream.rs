@@ -20,10 +20,9 @@ use readyset_adapter::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
 use readyset_client::ColumnSchema;
 use readyset_data::DfValue;
 use readyset_errors::{internal_err, invariant_eq, unsupported, ReadySetError, ReadySetResult};
-use readyset_tracing::{debug, info};
 use tokio::process::Command;
 use tokio_postgres as pgsql;
-use tracing::info_span;
+use tracing::{debug, info, info_span};
 use tracing_futures::Instrument;
 
 use crate::schema::type_to_pgsql;

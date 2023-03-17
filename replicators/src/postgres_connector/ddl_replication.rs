@@ -47,9 +47,9 @@ use pgsql::tls::MakeTlsConnect;
 use readyset_client::recipe::changelist::{AlterTypeChange, Change};
 use readyset_data::{DfType, PgEnumMetadata};
 use readyset_errors::ReadySetResult;
-use readyset_tracing::info;
 use serde::{Deserialize, Deserializer};
 use tokio_postgres as pgsql;
+use tracing::info;
 
 /// Setup everything in the database that's necessary for DDL replication.
 ///
@@ -324,10 +324,10 @@ mod tests {
         SelectSpecification, SqlType, TableExpr, TableKey,
     };
     use pgsql::NoTls;
-    use readyset_tracing::error;
     use test_utils::{parallel_group, AsyncParallelGroup};
     use tokio::task::JoinHandle;
     use tokio::time::sleep;
+    use tracing::error;
 
     use super::*;
 

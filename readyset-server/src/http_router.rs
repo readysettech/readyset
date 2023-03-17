@@ -14,12 +14,12 @@ use hyper::{self, Body, Method, Request, Response, StatusCode};
 use readyset_client::consensus::{Authority, AuthorityControl};
 use readyset_client::metrics::recorded;
 use readyset_errors::ReadySetError;
-use readyset_tracing::warn;
 use readyset_util::shutdown::ShutdownReceiver;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::Sender;
 use tokio_stream::wrappers::TcpListenerStream;
 use tower::Service;
+use tracing::warn;
 
 use crate::controller::ControllerRequest;
 use crate::metrics::{get_global_recorder, Clear, RecorderType};

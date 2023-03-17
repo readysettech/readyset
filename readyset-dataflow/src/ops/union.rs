@@ -6,12 +6,12 @@ use std::ops::Bound;
 use itertools::Itertools;
 use readyset_client::KeyComparison;
 use readyset_errors::{invariant, ReadySetResult};
-use readyset_tracing::{debug, error, trace};
 use readyset_util::hash::hash;
 use readyset_util::intervals::{cmp_endbound, cmp_startbound};
 use readyset_util::Indices;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
+use tracing::{debug, error, trace};
 use vec1::Vec1;
 
 use super::Side;

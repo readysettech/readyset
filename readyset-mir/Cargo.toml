@@ -23,5 +23,6 @@ readyset-client = { path = "../readyset-client" }
 readyset-errors = { path = "../readyset-errors" }
 readyset-data = { path = "../readyset-data" }
 fixedbitset = { version = "0.2.0", default-features = false }
-readyset-tracing = { path = "../readyset-tracing" }
 
+[dev-dependencies]
+readyset-tracing = { path = "../readyset-tracing" }

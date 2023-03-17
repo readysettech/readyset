@@ -22,13 +22,13 @@ use readyset_client::ControllerDescriptor;
 use readyset_data::Dialect;
 use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
 use readyset_telemetry_reporter::TelemetrySender;
-use readyset_tracing::{debug, error, info, warn};
 use readyset_util::select;
 use readyset_util::shutdown::ShutdownReceiver;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{Notify, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use tracing::{debug, error, info, info_span, warn};
 use tracing_futures::Instrument;
 use url::Url;
 
@@ -555,7 +555,7 @@ impl Controller {
                 self.permissive_writes,
                 self.shutdown_rx.clone(),
             )
-            .instrument(tracing::info_span!("authority")),
+            .instrument(info_span!("authority")),
         );
 
         let (writer_tx, writer_rx) = tokio::sync::mpsc::channel(16);
@@ -567,7 +567,7 @@ impl Controller {
                 self.shutdown_rx.clone(),
                 self.leader_ready.clone(),
             )
-            .instrument(tracing::info_span!("write_processing")),
+            .instrument(info_span!("write_processing")),
         );
         let (dry_run_tx, dry_run_rx) = tokio::sync::mpsc::channel(16);
         tokio::spawn(
@@ -578,7 +578,7 @@ impl Controller {
                 self.shutdown_rx.clone(),
                 self.leader_ready.clone(),
             )
-            .instrument(tracing::info_span!("dry_run_processing")),
+            .instrument(info_span!("dry_run_processing")),
         );
 
         let leader_ready = self.leader_ready.clone();

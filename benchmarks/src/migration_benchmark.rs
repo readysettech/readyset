@@ -6,8 +6,8 @@ use anyhow::Result;
 use async_trait::async_trait;
 use clap::Parser;
 use metrics::Unit;
-use readyset_tracing::debug;
 use serde::{Deserialize, Serialize};
+use tracing::debug;
 
 use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters, MetricGoal};
 use crate::benchmark_histogram;

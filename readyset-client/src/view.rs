@@ -32,9 +32,9 @@ use readyset_errors::{
     internal, internal_err, rpc_err, unsupported, view_err, ReadySetError, ReadySetResult,
 };
 use readyset_sql_passes::anonymize::{Anonymize, Anonymizer};
+use readyset_tracing::child_span;
 use readyset_tracing::presampled::instrument_if_enabled;
 use readyset_tracing::propagation::Instrumented;
-use readyset_tracing::{error, trace};
 use readyset_util::intervals::{cmp_start_end, BoundPair};
 use readyset_util::redacted::Sensitive;
 use serde::{Deserialize, Serialize};
@@ -44,7 +44,7 @@ use tower::buffer::Buffer;
 use tower::limit::concurrency::ConcurrencyLimit;
 use tower::timeout::Timeout;
 use tower_service::Service;
-use tracing::instrument;
+use tracing::{debug_span, error, instrument, trace};
 use tracing_futures::Instrument;
 use vec1::{vec1, Vec1};
 
@@ -984,7 +984,7 @@ impl ReaderHandleBuilder {
                         ),
                         crate::BUFFER_TO_POOL,
                     );
-                    tokio::spawn(w.instrument(tracing::debug_span!(
+                    tokio::spawn(w.instrument(debug_span!(
                         "view_worker",
                         addr = %shard_addr,
                         shard = shardi
@@ -1175,7 +1175,7 @@ impl Service<ViewQuery> for ReaderHandle {
 
     fn call(&mut self, mut query: ViewQuery) -> Self::Future {
         let ni = self.node;
-        let span = readyset_tracing::child_span!(
+        let span = child_span!(
             INFO,
             "view-request",
             key_comparisons = ?Sensitive(&query.key_comparisons),
@@ -1255,7 +1255,7 @@ impl Service<ViewQuery> for ReaderHandle {
                     // portion of the request, and ensure that its parent is the "view-request"
                     // span.
                     let _guard = tracing::Span::enter(&span);
-                    let span = readyset_tracing::child_span!(INFO, "view-shard", shardi);
+                    let span = child_span!(INFO, "view-shard", shardi);
                     let _guard = tracing::Span::enter(&span);
 
                     // NOTE: Sharded views can't actually work with aggregates, order by, limit or

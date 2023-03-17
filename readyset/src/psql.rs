@@ -5,10 +5,9 @@ use async_trait::async_trait;
 use clap::Parser;
 use readyset_errors::ReadySetResult;
 use readyset_psql::{PostgreSqlQueryHandler, PostgreSqlUpstream};
-use readyset_tracing::error;
 use tokio::net;
 use tokio_native_tls::{native_tls, TlsAcceptor};
-use tracing::instrument;
+use tracing::{error, instrument};
 
 use crate::ConnectionHandler;
 

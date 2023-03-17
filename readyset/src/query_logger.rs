@@ -8,11 +8,10 @@ use readyset_client_metrics::{
     recorded, DatabaseType, EventType, QueryExecutionEvent, SqlQueryType,
 };
 use readyset_sql_passes::anonymize::anonymize_literals;
-use readyset_tracing::info;
 use readyset_util::shutdown::ShutdownReceiver;
 use tokio::select;
 use tokio::sync::mpsc::UnboundedReceiver;
-use tracing::info_span;
+use tracing::{info, info_span};
 
 pub(crate) struct QueryLogger {
     per_id_metrics: BTreeMap<QueryId, QueryMetrics>,

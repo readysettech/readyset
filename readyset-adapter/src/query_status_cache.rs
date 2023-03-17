@@ -10,8 +10,8 @@ use anyhow::anyhow;
 use dashmap::DashMap;
 use readyset_client::query::*;
 use readyset_client::ViewCreateRequest;
-use readyset_tracing::error;
 use readyset_util::hash::hash;
+use tracing::error;
 
 /// A metadata cache for all queries that have been processed by this
 /// adapter. Thread-safe.

@@ -6,8 +6,8 @@ use readyset_sql_passes::anonymize::Anonymizer;
 use readyset_telemetry_reporter::{
     PeriodicReport, ReporterResult as Result, Telemetry, TelemetryBuilder, TelemetryEvent,
 };
-use readyset_tracing::debug;
 use tokio::sync::Mutex;
+use tracing::debug;
 
 use crate::query_status_cache::QueryStatusCache;
 

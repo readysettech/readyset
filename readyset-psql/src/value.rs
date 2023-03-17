@@ -6,9 +6,9 @@ use postgres_types::Kind;
 use ps::util::type_is_oid;
 use psql_srv as ps;
 use readyset_data::DfValue;
-use readyset_tracing::{error, trace};
 use rust_decimal::Decimal;
 use tokio_postgres::types::Type;
+use tracing::{error, trace};
 use uuid::Uuid;
 
 /// An encapsulation of a ReadySet `DfValue` value that facilitates conversion of this `DfValue`

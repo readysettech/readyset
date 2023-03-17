@@ -872,7 +872,7 @@ async fn replication_failure_retries_if_failed_to_drop(failpoint: &str) {
 
     use nom_sql::Relation;
     use readyset_errors::ReadySetError;
-    use readyset_tracing::info;
+    use tracing::info;
 
     let (config, mut handle, shutdown_tx) = TestBuilder::default()
         .recreate_database(false)

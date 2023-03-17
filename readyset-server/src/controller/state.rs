@@ -53,12 +53,11 @@ use readyset_data::Dialect;
 use readyset_errors::{
     internal, internal_err, invariant_eq, NodeType, ReadySetError, ReadySetResult,
 };
-use readyset_tracing::{debug, error, trace, warn};
 use regex::Regex;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, MutexGuard, RwLock, RwLockReadGuard};
-use tracing::instrument;
+use tracing::{debug, error, instrument, trace, warn};
 use vec1::Vec1;
 
 use super::migrate::DomainSettings;

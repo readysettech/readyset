@@ -26,7 +26,6 @@ readyset-adapter = { path = "../readyset-adapter" }
 readyset-client-metrics = { path = "../readyset-client-metrics" }
 readyset-version = { path = "../readyset-version" }
 failpoint-macros = { path = "../failpoint-macros" }
-readyset-tracing = { path = "../readyset-tracing" }
 nom-sql = { path = "../nom-sql" }
 tokio = { workspace = true, features = ["full"] }
 tracing = { version = "0.1", features = ["release_max_level_debug"] }
@@ -49,6 +48,7 @@ paste = "1.0.5"
 proptest = "1.0.0"
 serial_test = "0.5.1"
 test-strategy = "0.2.0"
+readyset-tracing = { path = "../readyset-tracing" }
 
 [features]
 vertical_tests = []

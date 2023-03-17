@@ -10,10 +10,10 @@ use anyhow::anyhow;
 use clap::Parser;
 use prometheus_http_query::{Client, Scheme};
 use readyset_client::consensus::ConsulAuthority;
-use readyset_tracing::info;
 use readyset_util::shutdown;
 use readyset_version::*;
 use tokio::sync::Mutex;
+use tracing::info;
 
 use crate::http_router::MetricsAggregatorHttpRouter;
 

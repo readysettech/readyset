@@ -9,7 +9,7 @@ use mysql_async::prelude::Queryable;
 use mysql_async::ServerError;
 use readyset_client::status::{ReadySetStatus, SnapshotStatus};
 use readyset_errors::ReadySetResult;
-use readyset_tracing::info;
+use tracing::info;
 
 pub mod generate;
 pub mod multi_thread;

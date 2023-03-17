@@ -45,7 +45,6 @@ use readyset_errors::ReadySetError;
 use readyset_server::metrics::{CompositeMetricsRecorder, MetricsRecorder};
 use readyset_server::worker::readers::{retry_misses, Ack, BlockingRead, ReadRequestHandler};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetryInitializer};
-use readyset_tracing::{debug, error, info, warn};
 use readyset_util::futures::abort_on_panic;
 use readyset_util::redacted::RedactedString;
 use readyset_util::shutdown;
@@ -54,7 +53,7 @@ use tokio::net;
 use tokio::net::UdpSocket;
 use tokio::time::timeout;
 use tokio_stream::wrappers::TcpListenerStream;
-use tracing::{debug_span, span, Level};
+use tracing::{debug, debug_span, error, info, span, warn, Level};
 use tracing_futures::Instrument;
 
 // How frequently to try to establish an http registration for the first time or if the last tick

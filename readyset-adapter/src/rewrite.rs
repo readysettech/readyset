@@ -11,7 +11,7 @@ use nom_sql::{
 };
 use readyset_data::{DfType, DfValue};
 use readyset_errors::{invalid_err, unsupported, ReadySetError, ReadySetResult};
-use readyset_tracing::trace;
+use tracing::trace;
 
 /// Struct storing information about parameters processed from a raw user supplied query, which
 /// provides support for converting a user-supplied parameter list into a set of lookup keys to pass
