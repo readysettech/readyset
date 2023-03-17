@@ -2,6 +2,7 @@ use chrono::{NaiveDate, NaiveDateTime};
 use readyset_client_test_helpers::psql_helpers::PostgreSQLAdapter;
 use readyset_client_test_helpers::{self, sleep, TestBuilder};
 use readyset_server::Handle;
+use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
 use tokio_postgres::{CommandCompleteContents, SimpleQueryMessage};
 
@@ -1433,6 +1434,79 @@ async fn schema_search_path() {
     conn.simple_query("SET search_path = s2, s1").await.unwrap();
     conn.simple_query("SELECT b FROM t").await.unwrap();
     conn.simple_query("SELECT c FROM t2").await.unwrap();
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn view_schema_resolution() {
+    readyset_tracing::init_test_logging();
+    let (config, _handle, shutdown_tx) = setup().await;
+    let client = connect(config).await;
+
+    client
+        .simple_query("SET search_path = s1,s2;")
+        .await
+        .unwrap();
+    client
+        .simple_query("CREATE TABLE s1.t (x int);")
+        .await
+        .unwrap();
+    client
+        .simple_query("CREATE TABLE s2.t (x int);")
+        .await
+        .unwrap();
+    client
+        .simple_query("INSERT INTO s1.t (x) VALUES (1);")
+        .await
+        .unwrap();
+    client
+        .simple_query("INSERT INTO s2.t (x) VALUES (2);")
+        .await
+        .unwrap();
+
+    client
+        .simple_query("CREATE VIEW s2.v AS SELECT x FROM s2.t;")
+        .await
+        .unwrap();
+
+    eventually! {
+        let s2_res = client
+            .query_one("SELECT x FROM v", &[])
+            .await
+            .unwrap()
+            .get::<_, i32>(0);
+        s2_res == 2
+    }
+
+    // Once we insert a view earlier in the schema search path, caches should start reading from
+    // that view instead
+    client
+        .simple_query("CREATE VIEW s1.v AS SELECT x FROM s1.t;")
+        .await
+        .unwrap();
+
+    sleep().await;
+
+    // The cache has been dropped, so run the query once to clear the view cache and re-run CREATE
+    // CACHE
+    let _ = client.simple_query("SELECT x FROM v").await;
+
+    client
+        .simple_query("CREATE CACHE FROM SELECT x FROM v")
+        .await
+        .unwrap();
+
+    let _ = client.simple_query("SELECT x FROM v").await;
+
+    eventually! {
+        let s1_res: i32 = client
+            .query_one("SELECT x FROM v", &[])
+            .await
+            .unwrap()
+            .get(0);
+        s1_res == 1
+    }
 
     shutdown_tx.shutdown().await;
 }

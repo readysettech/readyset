@@ -69,6 +69,10 @@ pub struct RewriteContext<'a> {
     /// [`view_schemas`].
     pub base_schemas: &'a HashMap<Relation, CreateTableBody>,
 
+    /// List of views that are known to exist but have not yet been compiled (so we can't know
+    /// their fields yet)
+    pub uncompiled_views: &'a [&'a Relation],
+
     /// Set of relations that are known to exist in the upstream database, but are not being
     /// replicated. Used as part of schema resolution to ensure that queries that would resolve to
     /// these tables if they *were* being replicated correctly return an error
@@ -106,6 +110,7 @@ impl<'a> RewriteContext<'a> {
     ) -> HashMap<&'a SqlIdentifier, HashMap<&'a SqlIdentifier, CanQuery>> {
         self.view_schemas
             .keys()
+            .chain(self.uncompiled_views.iter().copied())
             .map(|t| (t, CanQuery::Yes))
             .chain(
                 self.non_replicated_relations

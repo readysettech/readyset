@@ -176,6 +176,7 @@ impl SqlIncorporator {
         stmt.rewrite(&mut RewriteContext {
             view_schemas: &self.view_schemas,
             base_schemas: &self.base_schemas,
+            uncompiled_views: &self.uncompiled_views.keys().collect::<Vec<_>>(),
             non_replicated_relations: &self.mir_converter.non_replicated_relations,
             custom_types: &self
                 .custom_types
@@ -252,21 +253,7 @@ impl SqlIncorporator {
                             ))
                         }
                         _ => {
-                            let invalidate_queries = self
-                                .registry
-                                .queries_to_invalidate_for_table(&cts.table)
-                                .cloned()
-                                .collect::<Vec<_>>();
-
-                            for invalidate_query in invalidate_queries {
-                                info!(
-                                    table = %cts.table.display_unquoted(),
-                                    query = %invalidate_query.display_unquoted(),
-                                    "Created table invalidates previously-created query due to \
-                                     schema resolution; dropping query"
-                                );
-                                self.remove_expression(&invalidate_query, mig)?;
-                            }
+                            self.invalidate_queries_for_added_relation(&cts.table, mig)?;
                             self.add_table(cts.table.clone(), body.clone(), mig)?;
                             self.registry.add_query(RecipeExpr::Table {
                                 name: cts.table,
@@ -294,6 +281,8 @@ impl SqlIncorporator {
                             Sensitive(&unparsed)
                         ),
                     };
+
+                    self.invalidate_queries_for_added_relation(&stmt.name, mig)?;
                     self.add_view(stmt.name, definition, schema_search_path.clone())?;
                 }
                 Change::CreateCache(ccqs) => {
@@ -469,6 +458,30 @@ impl SqlIncorporator {
                     }
                 }
             }
+        }
+
+        Ok(())
+    }
+
+    fn invalidate_queries_for_added_relation(
+        &mut self,
+        relation: &Relation,
+        mig: &mut Migration<'_>,
+    ) -> ReadySetResult<()> {
+        let invalidate_queries = self
+            .registry
+            .queries_to_invalidate_for_table(relation)
+            .cloned()
+            .collect::<Vec<_>>();
+
+        for invalidate_query in invalidate_queries {
+            info!(
+                table = %relation.display_unquoted(),
+                query = %invalidate_query.display_unquoted(),
+                "Created relation invalidates previously-created query due to schema resolution; \
+                 dropping query"
+            );
+            self.remove_expression(&invalidate_query, mig)?;
         }
 
         Ok(())
@@ -907,21 +920,20 @@ impl SqlIncorporator {
         // TODO(grfn): This is a janky and inefficient way of making this happen. Someday, when
         // SqlIncorporator and SqlToMirConverter are merged into one, this ought to not be
         // necesssary - instead, we can just migrate the view as part of the `get_relation` method
+        let mut tables = vec![];
         loop {
-            let mut tables = invalidating_tables.is_some().then(Vec::new);
-            match self.select_query_to_mir_inner(
+            let compile_res = self.select_query_to_mir_inner(
                 &query_name,
                 stmt,
                 search_path,
-                tables.as_mut(),
+                invalidating_tables.is_some().then_some(&mut tables),
                 leaf_behavior,
                 mig,
-            ) {
+            );
+            match compile_res {
                 Ok(mir_leaf) => {
-                    if let Some(ts) = tables {
-                        if let Some(its) = invalidating_tables.as_mut() {
-                            its.extend(ts);
-                        }
+                    if let Some(its) = invalidating_tables.as_mut() {
+                        its.extend(tables);
                     }
                     return Ok(mir_leaf);
                 }
@@ -932,7 +944,7 @@ impl SqlIncorporator {
                             schema: schema.map(Into::into),
                             name: name.into(),
                         })
-                        .and_then(|rel| self.take_uncompiled_view(search_path, &rel))
+                        .and_then(|rel| self.uncompiled_views.remove(&rel))
                     {
                         trace!(
                             name = %view.name.display_unquoted(),
@@ -1029,30 +1041,6 @@ impl SqlIncorporator {
             &anon_queries,
             leaf_behavior,
         )
-    }
-
-    /// Remove a view with the given `name` from our set of views that have yet to be compiled,
-    /// using the given `schema_search_path` to resolve the schema of the view if `name` is not
-    /// schema-qualified
-    fn take_uncompiled_view(
-        &mut self,
-        schema_search_path: &[SqlIdentifier],
-        name: &Relation,
-    ) -> Option<UncompiledView> {
-        if name.schema.is_some() {
-            self.uncompiled_views.remove(name)
-        } else {
-            // Start out by trying to resolve the name without a schema anyway, to handle
-            // tests which don't have a schema at the moment
-            self.uncompiled_views.remove(name).or_else(|| {
-                schema_search_path.iter().find_map(|schema| {
-                    self.uncompiled_views.remove(&Relation {
-                        schema: Some(schema.clone()),
-                        name: name.name.clone(),
-                    })
-                })
-            })
-        }
     }
 
     /// Compile the given uncompiled view all the way to dataflow
