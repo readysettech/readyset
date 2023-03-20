@@ -145,6 +145,8 @@ enum Operation {
     },
     /// Drops the view with the given name
     DropView(String),
+    /// Creates an ENUM type with the given name and values
+    CreateEnum(String, Vec<String>),
 }
 
 impl Operation {
@@ -219,6 +221,7 @@ impl Operation {
                     && !state.views.contains_key(name)
             }
             Self::DropView(name) => state.views.contains_key(name),
+            Self::CreateEnum(name, _values) => !state.enum_types.contains_key(name),
         }
     }
 }
@@ -230,6 +233,17 @@ fn gen_column_specs() -> impl Strategy<Value = Vec<ColumnSpec>> {
         .prop_filter("duplicate column names not allowed", |specs| {
             specs.iter().map(|cs| &cs.name).all_unique()
         })
+}
+
+prop_compose! {
+    fn gen_enum_values()(values in collection::hash_set(SQL_NAME_REGEX, 1..4)) -> Vec<String> {
+        // Note that order is deterministic based on the HashSet iterator implementation. If we
+        // want the order to be random, we will have to be careful to make the random order
+        // deterministic on the test case being run, which probably means we add a generator for a
+        // random seed then use that to shuffle the resulting Vec below, since that way the
+        // generated seed will be based on the seed for the given test case.
+        values.into_iter().collect()
+    }
 }
 
 prop_compose! {
@@ -352,6 +366,12 @@ prop_compose! {
     }
 }
 
+prop_compose! {
+    fn gen_create_enum()(name in SQL_NAME_REGEX, values in gen_enum_values()) -> Operation {
+        Operation::CreateEnum(name, values)
+    }
+}
+
 /// A definition for a test view. Currently one of:
 ///  - Simple (SELECT * FROM table)
 ///  - Join (SELECT * FROM table_a JOIN table_b ON table_a.id = table_b.id)
@@ -380,6 +400,8 @@ struct TestModel {
     // Map of view name to view definition
     views: HashMap<String, TestViewDef>,
     deleted_views: HashSet<String>,
+    // Map of custom ENUM type names to type definitions (represented by a Vec of ENUM elements)
+    enum_types: HashMap<String, Vec<String>>,
 
     // Just cloned into [`TestTree`] and used for shrinking, not part of the model used for testing
     // itself:
@@ -399,8 +421,10 @@ impl TestModel {
     /// of each test, but it's best to depend on that check as little as possible since test
     /// filters like that can lead to slow and lopsided test generation.)
     fn gen_op(&self, runner: &mut TestRunner) -> impl Strategy<Value = Operation> {
-        // We can always create more tables, so start with just the one operation generator:
-        let mut possible_ops = vec![gen_create_table().boxed()];
+        // We can always create more tables or enum types, so start with those two generators:
+        let create_table_strat = gen_create_table().boxed();
+        let create_enum_strat = gen_create_enum().boxed();
+        let mut possible_ops = vec![create_table_strat, create_enum_strat];
 
         // If we have at least one table, we can do any of:
         //  * delete a table
@@ -567,6 +591,9 @@ impl TestModel {
             Operation::DropView(name) => {
                 self.views.remove(name);
                 self.deleted_views.insert(name.clone());
+            }
+            Operation::CreateEnum(name, values) => {
+                self.enum_types.insert(name.clone(), values.clone());
             }
         }
     }
@@ -932,6 +959,14 @@ async fn run(ops: Vec<Operation>, next_step_idx: Rc<Cell<usize>>) {
             }
             Operation::DropView(name) => {
                 let query = format!("DROP VIEW \"{name}\"");
+                rs_conn.simple_query(&query).await.unwrap();
+                pg_conn.simple_query(&query).await.unwrap();
+            }
+            Operation::CreateEnum(name, elements) => {
+                let elements: Vec<String> = elements.iter().map(|e| format!("'{e}'")).collect();
+                let element_list = elements.join(", ");
+                // Quote the type name to prevent clashes with builtin types or reserved keywords
+                let query = format!("CREATE TYPE \"{}\" AS ENUM ({})", name, element_list);
                 rs_conn.simple_query(&query).await.unwrap();
                 pg_conn.simple_query(&query).await.unwrap();
             }
