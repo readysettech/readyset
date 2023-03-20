@@ -71,12 +71,12 @@ impl Arbitrary for ColumnSpec {
     type Parameters = HashMap<String, Vec<String>>;
     type Strategy = BoxedStrategy<Self>;
 
-    fn arbitrary_with(_enum_types: Self::Parameters) -> Self::Strategy {
+    fn arbitrary_with(enum_types: Self::Parameters) -> Self::Strategy {
         let name_gen = SQL_NAME_REGEX
             .prop_filter("Can't generate additional columns named \"id\"", |s| {
                 s.to_lowercase() != "id"
             });
-        let col_types = vec![
+        let mut col_types = vec![
             (
                 SqlType::Int(None),
                 any::<i32>().prop_map(DfValue::from).boxed(),
@@ -97,6 +97,19 @@ impl Arbitrary for ColumnSpec {
                 any::<TimestampTz>().prop_map(DfValue::TimestampTz).boxed(),
             ),
         ];
+        let enum_col_types: Vec<_> = enum_types
+            .into_iter()
+            .map(|(name, values)| {
+                (
+                    // We use SqlType::Other instead of SqlType::Enum because we want to refer
+                    // directly to the named enum type when we use this SqlType value to create a
+                    // column definition in the corresponding CREATE TABLE statement:
+                    SqlType::Other(name.into()),
+                    sample::select(values).prop_map(DfValue::from).boxed(),
+                )
+            })
+            .collect();
+        col_types.extend_from_slice(&enum_col_types);
         (name_gen, sample::select(col_types))
             .prop_map(|(name, (sql_type, gen))| ColumnSpec {
                 name,
