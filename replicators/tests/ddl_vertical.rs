@@ -68,10 +68,10 @@ impl Debug for ColumnSpec {
 }
 
 impl Arbitrary for ColumnSpec {
-    type Parameters = ();
+    type Parameters = HashMap<String, Vec<String>>;
     type Strategy = BoxedStrategy<Self>;
 
-    fn arbitrary_with((): Self::Parameters) -> Self::Strategy {
+    fn arbitrary_with(_enum_types: Self::Parameters) -> Self::Strategy {
         (
             SQL_NAME_REGEX.prop_filter("Can't generate additional columns named \"id\"", |s| {
                 s.to_lowercase() != "id"
@@ -228,8 +228,10 @@ impl Operation {
 
 // Generators for Operation:
 
-fn gen_column_specs() -> impl Strategy<Value = Vec<ColumnSpec>> {
-    collection::vec(any::<ColumnSpec>(), 1..4)
+fn gen_column_specs(
+    enum_types: HashMap<String, Vec<String>>,
+) -> impl Strategy<Value = Vec<ColumnSpec>> {
+    collection::vec(any_with::<ColumnSpec>(enum_types), 1..4)
         .prop_filter("duplicate column names not allowed", |specs| {
             specs.iter().map(|cs| &cs.name).all_unique()
         })
@@ -247,7 +249,9 @@ prop_compose! {
 }
 
 prop_compose! {
-    fn gen_create_table()(name in SQL_NAME_REGEX, cols in gen_column_specs()) -> Operation {
+    fn gen_create_table(enum_types: HashMap<String, Vec<String>>)
+                       (name in SQL_NAME_REGEX, cols in gen_column_specs(enum_types))
+                       -> Operation {
         Operation::CreateTable(name, cols)
     }
 }
@@ -422,7 +426,7 @@ impl TestModel {
     /// filters like that can lead to slow and lopsided test generation.)
     fn gen_op(&self, runner: &mut TestRunner) -> impl Strategy<Value = Operation> {
         // We can always create more tables or enum types, so start with those two generators:
-        let create_table_strat = gen_create_table().boxed();
+        let create_table_strat = gen_create_table(self.enum_types.clone()).boxed();
         let create_enum_strat = gen_create_enum().boxed();
         let mut possible_ops = vec![create_table_strat, create_enum_strat];
 
