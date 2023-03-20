@@ -72,32 +72,32 @@ impl Arbitrary for ColumnSpec {
     type Strategy = BoxedStrategy<Self>;
 
     fn arbitrary_with(_enum_types: Self::Parameters) -> Self::Strategy {
-        (
-            SQL_NAME_REGEX.prop_filter("Can't generate additional columns named \"id\"", |s| {
+        let name_gen = SQL_NAME_REGEX
+            .prop_filter("Can't generate additional columns named \"id\"", |s| {
                 s.to_lowercase() != "id"
-            }),
-            sample::select(vec![
-                (
-                    SqlType::Int(None),
-                    any::<i32>().prop_map(DfValue::from).boxed(),
-                ),
-                (
-                    SqlType::Real,
-                    any::<f32>()
-                        // unwrap is fine because the f32 Arbitrary impl only yields finite values
-                        .prop_map(|f| DfValue::try_from(f).unwrap())
-                        .boxed(),
-                ),
-                (
-                    SqlType::VarChar(None),
-                    any::<String>().prop_map(DfValue::from).boxed(),
-                ),
-                (
-                    SqlType::TimestampTz,
-                    any::<TimestampTz>().prop_map(DfValue::TimestampTz).boxed(),
-                ),
-            ]),
-        )
+            });
+        let col_types = vec![
+            (
+                SqlType::Int(None),
+                any::<i32>().prop_map(DfValue::from).boxed(),
+            ),
+            (
+                SqlType::Real,
+                any::<f32>()
+                    // unwrap is fine because the f32 Arbitrary impl only yields finite values
+                    .prop_map(|f| DfValue::try_from(f).unwrap())
+                    .boxed(),
+            ),
+            (
+                SqlType::VarChar(None),
+                any::<String>().prop_map(DfValue::from).boxed(),
+            ),
+            (
+                SqlType::TimestampTz,
+                any::<TimestampTz>().prop_map(DfValue::TimestampTz).boxed(),
+            ),
+        ];
+        (name_gen, sample::select(col_types))
             .prop_map(|(name, (sql_type, gen))| ColumnSpec {
                 name,
                 sql_type,
