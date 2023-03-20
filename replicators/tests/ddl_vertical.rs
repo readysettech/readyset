@@ -177,7 +177,16 @@ impl Operation {
     /// save us from a false positive test failure.
     fn preconditions(&self, state: &TestModel) -> bool {
         match self {
-            Self::CreateTable(name, _cols) => !state.tables.contains_key(name),
+            Self::CreateTable(name, cols) => {
+                !state.tables.contains_key(name)
+                    && cols.iter().all(|cs| match cs {
+                        ColumnSpec {
+                            sql_type: SqlType::Other(type_name),
+                            ..
+                        } => state.enum_types.contains_key(type_name.name.as_str()),
+                        _ => true,
+                    })
+            }
             Self::DropTable(name) => state.tables.contains_key(name),
             Self::WriteRow {
                 table,
