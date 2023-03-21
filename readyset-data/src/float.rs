@@ -263,7 +263,7 @@ mod tests {
     use test_strategy::proptest;
 
     use super::*;
-    use crate::{Collation, Dialect};
+    use crate::Collation;
 
     #[proptest]
     fn float_to_tinyint(val: f32) {
@@ -394,10 +394,7 @@ mod tests {
 
         assert_eq!(
             DfValue::Double(1e4)
-                .coerce_to(
-                    &DfType::Char(8, Collation::default(), Dialect::DEFAULT_MYSQL),
-                    &DfType::Unknown
-                )
+                .coerce_to(&DfType::Char(8, Collation::default()), &DfType::Unknown)
                 .unwrap(),
             DfValue::from("10000   ")
         );

@@ -118,7 +118,7 @@ pub enum DfType {
     /// caution must be taken.
     // FIXME(ENG-1839): Should have `Option<u16>` to determine how `cast` is done for MySQL. The
     // dialect field provides context for semantics.
-    Char(u16, Collation, Dialect),
+    Char(u16, Collation),
 
     /// `VARCHAR(n)`/`CHAR VARYING(n)`: max-length character string.
     VarChar(u16, Collation),
@@ -270,7 +270,7 @@ impl DfType {
             // `varchar` by itself is an error in MySQL but synonymous with `text` in PostgreSQL.
             Text | TinyText | MediumText | LongText | VarChar(None) => Self::DEFAULT_TEXT,
             VarChar(Some(len)) => Self::VarChar(len, Collation::default()),
-            Char(len) => Self::Char(len.unwrap_or(1), Collation::default(), dialect),
+            Char(len) => Self::Char(len.unwrap_or(1), Collation::default()),
             QuotedChar => Self::TinyInt,
 
             Blob | TinyBlob | MediumBlob | LongBlob | ByteArray => Self::Blob,
@@ -340,9 +340,7 @@ impl DfType {
             | DfType::Float
             | DfType::Double
             | DfType::Numeric { .. } => PgTypeCategory::Numeric,
-            DfType::Text(_) | DfType::Char(_, _, _) | DfType::VarChar(_, _) => {
-                PgTypeCategory::String
-            }
+            DfType::Text(_) | DfType::Char(..) | DfType::VarChar(..) => PgTypeCategory::String,
             DfType::Blob
             | DfType::Binary(_)
             | DfType::VarBinary(_)

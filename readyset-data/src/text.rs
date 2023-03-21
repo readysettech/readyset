@@ -581,7 +581,7 @@ mod tests {
     use test_strategy::proptest;
 
     use super::*;
-    use crate::{Collation, Dialect};
+    use crate::Collation;
 
     mod len_and_collation {
         use super::*;
@@ -651,19 +651,13 @@ mod tests {
         // TEXT to TEXT coercions
         let text = DfValue::from("abcdefgh");
         assert_eq!(
-            text.coerce_to(
-                &DfType::Char(10, Collation::default(), Dialect::DEFAULT_MYSQL),
-                &DfType::Unknown
-            )
-            .unwrap(),
+            text.coerce_to(&DfType::Char(10, Collation::default()), &DfType::Unknown)
+                .unwrap(),
             DfValue::from("abcdefgh  ")
         );
         assert_eq!(
-            text.coerce_to(
-                &DfType::Char(4, Collation::default(), Dialect::DEFAULT_MYSQL),
-                &DfType::Unknown
-            )
-            .unwrap(),
+            text.coerce_to(&DfType::Char(4, Collation::default()), &DfType::Unknown)
+                .unwrap(),
             DfValue::from("abcd")
         );
         assert_eq!(
