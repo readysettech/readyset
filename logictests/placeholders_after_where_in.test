@@ -1,0 +1,62 @@
+statement ok
+create table t (a int, b int, c int)
+
+statement ok
+insert into t (a,b,c) values
+(1, 2, 3),
+(2, 3, 4),
+(3, 4, 5)
+
+onlyif readyset
+statement ok
+create cache from
+select a from t where b IN ($1, $2) AND c = $3
+
+query I valuesort
+select a from t where b IN ($1, $2) AND c = $3
+? = 3
+? = 4
+? = 5
+----
+3
+
+onlyif readyset
+statement ok
+create cache from
+select a from t where b IN ($3, $1) AND c = $2
+
+query I valuesort
+select a from t where b IN ($3, $1) AND c = $2
+? = 4
+? = 5
+? = 3
+----
+3
+
+onlyif readyset
+statement ok
+create cache from
+select a from t where b IN ($3, $2) AND c = $1
+
+query I valuesort
+select a from t where b IN ($3, $2) AND c = $1
+? = 5
+? = 4
+? = 3
+----
+3
+
+onlyif readyset
+statement ok
+create cache from
+select a from t where a IN ($1, $2) AND b IN ($3, $4) AND c = $5
+
+query I valuesort
+select a from t where a IN ($1, $2) AND b IN ($3, $4) AND c = $5
+? = 2
+? = 3
+? = 3
+? = 4
+? = 5
+----
+3

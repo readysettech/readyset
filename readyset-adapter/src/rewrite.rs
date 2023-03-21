@@ -480,7 +480,6 @@ where
 
 struct NumberPlaceholdersVisitor {
     next_param_number: u32,
-    offset: u32,
 }
 
 impl<'ast> VisitorMut<'ast> for NumberPlaceholdersVisitor {
@@ -490,25 +489,19 @@ impl<'ast> VisitorMut<'ast> for NumberPlaceholdersVisitor {
             // client-provided queries aren't allowed to mix question-mark and dollar-number
             // placeholders, but both autoparameterization and collapse-where-in create question
             // mark placeholders, which in the intermediate state does end up with a
-            // query that has both placeholder styles - we need to make sure we number
-            // those question mark placeholders appropriately to not overlap with
-            // existing dollar-number placeholders.
+            // query that has both placeholder styles.
             match item {
                 ItemPlaceholder::QuestionMark => {
-                    // If we find a dollar-number placeholder, update our index to start numbering
-                    // parameters after that placeholder
                     *item = ItemPlaceholder::DollarNumber(self.next_param_number);
-                    self.next_param_number += 1;
-                    self.offset += 1;
                 }
                 ItemPlaceholder::DollarNumber(n) => {
-                    *n += self.offset;
-                    self.next_param_number = *n + 1
+                    *n = self.next_param_number;
                 }
                 ItemPlaceholder::ColonNumber(_) => {
                     unsupported!("colon-number placeholders aren't supported")
                 }
             }
+            self.next_param_number += 1;
         }
         Ok(())
     }
@@ -517,7 +510,6 @@ impl<'ast> VisitorMut<'ast> for NumberPlaceholdersVisitor {
 pub fn number_placeholders(query: &mut SelectStatement) -> ReadySetResult<()> {
     let mut visitor = NumberPlaceholdersVisitor {
         next_param_number: 1,
-        offset: 0,
     };
     visitor.visit_select_statement(query)?;
     Ok(())
@@ -1387,6 +1379,65 @@ mod tests {
             assert_eq!(
                 keys,
                 vec![vec!["Bob".into(), 1.into()], vec!["Bob".into(), 2.into()]]
+            );
+        }
+
+        #[test]
+        fn numbered_point_following_where_in() {
+            let (keys, query) = process_and_make_keys(
+                "SELECT a FROM t WHERE b IN ($1, $2) AND c = $3",
+                vec![1.into(), 2.into(), 3.into()],
+            );
+
+            assert_eq!(
+                query,
+                parse_select_statement("SELECT a FROM t WHERE b = $1 AND c = $2")
+            );
+
+            assert_eq!(
+                keys,
+                vec![vec![1.into(), 3.into()], vec![2.into(), 3.into()]]
+            );
+        }
+
+        #[test]
+        fn numbered_point_following_where_in_unordered() {
+            let (keys, query) = process_and_make_keys(
+                "SELECT a FROM t WHERE b IN ($3, $1) AND c = $2",
+                vec![2.into(), 3.into(), 1.into()],
+            );
+
+            assert_eq!(
+                query,
+                parse_select_statement("SELECT a FROM t WHERE b = $1 AND c = $2")
+            );
+
+            assert_eq!(
+                keys,
+                vec![vec![1.into(), 3.into()], vec![2.into(), 3.into()]]
+            );
+        }
+
+        #[test]
+        fn numbered_point_following_two_where_in() {
+            let (keys, query) = process_and_make_keys(
+                "SELECT a FROM t WHERE b IN ($1, $2) AND c IN ($3, $4) AND d = $5",
+                vec![1.into(), 2.into(), 3.into(), 4.into(), 5.into()],
+            );
+
+            assert_eq!(
+                query,
+                parse_select_statement("SELECT a FROM t WHERE b = $1 AND c = $2 AND d = $3")
+            );
+
+            assert_eq!(
+                keys,
+                vec![
+                    vec![1.into(), 3.into(), 5.into()],
+                    vec![1.into(), 4.into(), 5.into()],
+                    vec![2.into(), 3.into(), 5.into()],
+                    vec![2.into(), 4.into(), 5.into()]
+                ]
             );
         }
 
