@@ -18,7 +18,7 @@ use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
     BinaryOperator, ColumnSpecification, CompoundSelectOperator, CreateTableBody, Expr,
     FieldDefinitionExpr, FieldReference, FunctionExpr, LimitClause, Literal, OrderClause,
-    OrderType, Relation, SqlIdentifier, TableKey, UnaryOperator,
+    OrderType, Relation, SqlIdentifier, TableKey,
 };
 use petgraph::visit::Reversed;
 use petgraph::Direction;
@@ -1211,10 +1211,6 @@ impl SqlToMirConverter {
                     union::DuplicateMode::BagUnion,
                 )?
             }
-            Expr::UnaryOp {
-                op: UnaryOperator::Not | UnaryOperator::Neg,
-                ..
-            } => internal!("negation should have been removed earlier"),
             Expr::Literal(_) | Expr::Column(_) => self.make_filter_node(
                 query_name,
                 format!(

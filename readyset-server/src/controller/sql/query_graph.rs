@@ -12,7 +12,7 @@ use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
     BinaryOperator, Column, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, InValue,
     ItemPlaceholder, JoinConstraint, JoinOperator, JoinRightSide, LimitClause, Literal, OrderType,
-    Relation, SelectStatement, SqlIdentifier, TableExpr, TableExprInner, UnaryOperator,
+    Relation, SelectStatement, SqlIdentifier, TableExpr, TableExprInner,
 };
 use readyset_client::{PlaceholderIdx, ViewPlaceholder};
 use readyset_errors::{
@@ -687,12 +687,6 @@ fn classify_conditionals(
                     global.push(ce.clone())
                 }
             }
-        }
-        Expr::UnaryOp {
-            op: UnaryOperator::Not,
-            ..
-        } => {
-            internal!("negation should have been removed earlier");
         }
         Expr::Exists(_) => {
             // TODO(grfn): Look into the query for correlated references to see if it's actually a

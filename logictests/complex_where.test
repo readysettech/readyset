@@ -1,0 +1,21 @@
+statement ok
+CREATE TABLE t1 (x int, y int, z bool);
+
+statement ok
+INSERT INTO t1 (x, y, z)
+VALUES
+(1, 1, true),
+(1, 2, false);
+
+query I valuesort
+SELECT y FROM t1 WHERE x = ? AND 1=1
+? = 1
+----
+1
+2
+
+query I valuesort
+SELECT y FROM t1 WHERE x = ? AND NOT z
+? = 1
+----
+2
