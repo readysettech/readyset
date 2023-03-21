@@ -356,6 +356,11 @@ pub enum DomainRequest {
         /// The Tag for the replay path that will be making upqueries *to* this generated index
         tag: Tag,
     },
+
+    /// Requests to know if the given node is ready.
+    /// Used for base table nodes, since the initialization of the persistent state for those nodes
+    /// is done in a different thread.
+    IsReady { node: LocalNodeIndex },
 }
 
 /// The primary unit of communication between nodes in the dataflow graph.
