@@ -10,7 +10,7 @@ use nom_sql::{
     BinaryOperator, Expr, InValue, ItemPlaceholder, LimitClause, Literal, SelectStatement,
 };
 use readyset_data::{DfType, DfValue};
-use readyset_errors::{invalid_err, unsupported, ReadySetError, ReadySetResult};
+use readyset_errors::{internal_err, invalid_err, unsupported, ReadySetError, ReadySetResult};
 use tracing::trace;
 
 /// Struct storing information about parameters processed from a raw user supplied query, which
@@ -458,26 +458,24 @@ fn reorder_numbered_placeholders(query: &mut SelectStatement) -> Option<Vec<usiz
     }
 }
 
-/// Reorder the values in `params` according to `order_map`, which should be a slice of indices
-/// where the position corresponds to the position in `params`, and the value at that position is
-/// the index in the result.
+/// Reorder the values in `params` according to `order_map`. `order_map` is a slice of indices where
+/// each entry corresponds, in order, to each placeholder in the query, and the value is the index
+/// in `params` that should be used for that placeholder.
 ///
-/// If there are any gaps in `order_map` (eg the indices are not contiguous) the [`Default`] value
-/// for T will be used.
+/// The vector returned from this function is the set of parameters to apply to each placeholder in
+/// the query in order.
 fn reorder_params<T>(params: &[T], order_map: &[usize]) -> ReadySetResult<Vec<T>>
 where
-    T: Clone + Default,
+    T: Clone,
 {
-    let mut res = vec![T::default(); params.len()];
-    for (param, idx) in params.iter().zip(order_map) {
-        if *idx > res.len() {
-            unsupported!("Wrong number of parameters supplied");
-        }
-
-        res[*idx] = param.clone();
-    }
-
-    Ok(res)
+    order_map
+        .iter()
+        .map(|idx| {
+            params.get(*idx).cloned().ok_or_else(|| {
+                internal_err!("Should not be making keys with incorrect number of params.")
+            })
+        })
+        .collect()
 }
 
 struct NumberPlaceholdersVisitor {
@@ -1393,10 +1391,27 @@ mod tests {
         }
 
         #[test]
-        fn numbered_not_in_order() {
+        fn numbered_not_in_order_auto_param() {
             let (keys, query) = process_and_make_keys(
                 "SELECT * FROM t WHERE x = $2 AND y = $1 AND z = 'z'",
                 vec!["y".into(), "x".into()],
+            );
+
+            assert_eq!(
+                query,
+                parse_select_statement("SELECT * FROM t WHERE x = $1 AND y = $2 AND z = $3"),
+                "{}",
+                query.display(nom_sql::Dialect::MySQL)
+            );
+
+            assert_eq!(keys, vec![vec!["x".into(), "y".into(), "z".into()]]);
+        }
+
+        #[test]
+        fn numbered_not_in_order() {
+            let (keys, query) = process_and_make_keys(
+                "SELECT * FROM t WHERE x = $3 AND y = $1 AND z = $2",
+                vec!["y".into(), "z".into(), "x".into()],
             );
 
             assert_eq!(
@@ -1532,6 +1547,55 @@ mod tests {
                     &[1.into(), 2.into()]
                 ),
                 (Some(4), Some(2))
+            );
+        }
+
+        #[test]
+        fn reuses_params_basic() {
+            let (keys, query) =
+                process_and_make_keys("SELECT * FROM t WHERE x = $1 AND y = $1", vec![0.into()]);
+
+            assert_eq!(
+                query,
+                parse_select_statement("SELECT * FROM t WHERE x = $1 AND y = $2"),
+                "{}",
+                query.display(nom_sql::Dialect::MySQL)
+            );
+            assert_eq!(keys, vec![vec![0.into(), 0.into()]]);
+        }
+
+        #[test]
+        fn reuses_params_with_auto_param() {
+            let (keys, query) = process_and_make_keys(
+                "SELECT * FROM t WHERE x = $1 AND y = 0 AND z = $1",
+                vec![1.into()],
+            );
+
+            assert_eq!(
+                query,
+                parse_select_statement("SELECT * FROM t WHERE x = $1 AND y = $2 AND z = $3"),
+                "{}",
+                query.display(nom_sql::Dialect::MySQL)
+            );
+            assert_eq!(keys, vec![vec![1.into(), 0.into(), 1.into()]]);
+        }
+
+        #[test]
+        fn reuses_params_with_where_in() {
+            let (keys, query) = process_and_make_keys(
+                "SELECT * FROM t WHERE x = $1 AND y IN ($1, $2)",
+                vec![1.into(), 2.into()],
+            );
+
+            assert_eq!(
+                query,
+                parse_select_statement("SELECT * FROM t WHERE x = $1 AND y = $2"),
+                "{}",
+                query.display(nom_sql::Dialect::MySQL)
+            );
+            assert_eq!(
+                keys,
+                vec![vec![1.into(), 1.into()], vec![1.into(), 2.into()]]
             );
         }
     }
