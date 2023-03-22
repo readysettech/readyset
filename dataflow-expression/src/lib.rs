@@ -10,7 +10,6 @@ pub mod utils;
 use std::fmt::{self, Display, Formatter};
 
 use itertools::Itertools;
-use nom_sql::SqlType;
 pub use readyset_data::Dialect;
 use readyset_data::{DfType, DfValue};
 use serde::{Deserialize, Serialize};
@@ -337,12 +336,7 @@ pub enum Expr {
     Cast {
         /// The `Expr` to cast
         expr: Box<Expr>,
-        /// The `SqlType` that we're attempting to cast to. This is provided
-        /// when `Expr::Cast` is created.
-        to_type: SqlType,
-        /// The `DfType` of the resulting cast. For now, this should be
-        /// `Sql(to_type)`.
-        /// TODO: This field may not be necessary
+        /// The `DfType` to cast to
         ty: DfType,
     },
 
@@ -384,13 +378,7 @@ impl Display for Expr {
             } => {
                 write!(f, "({left} {op} ALL ({right}))")
             }
-            Cast { expr, to_type, .. } => write!(
-                f,
-                "cast({} as {})",
-                expr,
-                // XXX: The `SqlType` isn't used during eval, so this should probably use `DfType`.
-                to_type.display(nom_sql::Dialect::MySQL)
-            ),
+            Cast { expr, ty, .. } => write!(f, "cast({} as {})", expr, ty,),
             Call { func, .. } => write!(f, "{}", func),
             CaseWhen {
                 branches,

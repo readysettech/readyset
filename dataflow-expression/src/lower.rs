@@ -516,7 +516,6 @@ impl Expr {
                 Ok(Self::Cast {
                     expr: Box::new(Self::lower(*expr, dialect, context)?),
                     ty,
-                    to_type,
                 })
             }
             AstExpr::CaseWhen {
@@ -717,7 +716,6 @@ impl Expr {
 pub(crate) mod tests {
     use nom_sql::{
         parse_expr, BinaryOperator as AstBinaryOperator, Dialect as ParserDialect, Float, Literal,
-        SqlType,
     };
     use readyset_data::{Collation, PgEnumMetadata};
 
@@ -838,10 +836,6 @@ pub(crate) mod tests {
                 expr: Box::new(Expr::Literal {
                     val: "foo".into(),
                     ty: DfType::Unknown
-                }),
-                to_type: SqlType::Other(Relation {
-                    schema: Some("something".into()),
-                    name: "custom".into()
                 }),
                 ty: enum_ty
             }
@@ -1209,7 +1203,6 @@ pub(crate) mod tests {
                             val: "2".into(),
                             ty: DfType::Unknown
                         }),
-                        to_type: SqlType::Int(None),
                         ty: DfType::Int
                     },
                     Expr::Literal {

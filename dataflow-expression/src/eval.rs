@@ -352,8 +352,8 @@ mod tests {
     use std::convert::TryInto;
 
     use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
+    use nom_sql::parse_expr;
     use nom_sql::Dialect::*;
-    use nom_sql::{parse_expr, SqlType};
     use readyset_data::{ArrayD, Collation, DfType, IxDyn, PgEnumMetadata};
     use serde_json::json;
     use Expr::*;
@@ -930,7 +930,6 @@ mod tests {
     fn eval_cast() {
         let expr = Cast {
             expr: Box::new(make_column(0)),
-            to_type: SqlType::Int(None),
             ty: DfType::Int,
         };
         assert_eq!(
