@@ -270,10 +270,13 @@ mod tests {
                     ty: DfType::Bool,
                 }),
                 op: BinaryOperator::And,
-                right: Box::new(Op {
-                    left: Box::new(column_with_type(1, DfType::DEFAULT_TEXT)),
-                    op: BinaryOperator::NotEqual,
-                    right: Box::new(make_literal(DfValue::from("a"))),
+                right: Box::new(Expr::Not {
+                    expr: Box::new(Op {
+                        left: Box::new(column_with_type(1, DfType::DEFAULT_TEXT)),
+                        op: BinaryOperator::Equal,
+                        right: Box::new(make_literal(DfValue::from("a"))),
+                        ty: DfType::Bool,
+                    }),
                     ty: DfType::Bool,
                 }),
                 ty: DfType::Bool,

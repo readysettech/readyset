@@ -476,7 +476,8 @@ impl Expr {
             AstExpr::BinaryOp { lhs, op, rhs } => {
                 let mut left = Box::new(Self::lower(*lhs, dialect, context.clone())?);
                 let mut right = Box::new(Self::lower(*rhs, dialect, context)?);
-                let op = BinaryOperator::from_sql_op(op, dialect, left.ty(), right.ty())?;
+                let (op, negated) =
+                    BinaryOperator::from_sql_op(op, dialect, left.ty(), right.ty())?;
 
                 if matches!(
                     op,
@@ -504,12 +505,21 @@ impl Expr {
                     })
                 }
 
-                Ok(Self::Op {
+                let op_node = Self::Op {
                     op,
                     left,
                     right,
                     ty,
-                })
+                };
+
+                if negated {
+                    Ok(Self::Not {
+                        expr: Box::new(op_node),
+                        ty: DfType::Bool,
+                    })
+                } else {
+                    Ok(op_node)
+                }
             }
             AstExpr::OpAny { lhs, op, rhs } | AstExpr::OpSome { lhs, op, rhs } => {
                 Self::lower_op_any_or_all(*lhs, op, *rhs, dialect, context, false)
@@ -537,14 +547,9 @@ impl Expr {
             AstExpr::UnaryOp {
                 op: UnaryOperator::Not,
                 rhs,
-            } => Ok(Self::Op {
-                op: BinaryOperator::NotEqual,
-                left: Box::new(Self::lower(*rhs, dialect, context)?),
-                right: Box::new(Self::Literal {
-                    val: DfValue::Int(1),
-                    ty: DfType::Int,
-                }),
-                ty: DfType::Bool, // type of NE is always bool
+            } => Ok(Self::Not {
+                expr: Box::new(Self::lower(*rhs, dialect, context)?),
+                ty: DfType::Bool, // type of NOT is always bool
             }),
             AstExpr::Cast {
                 expr, ty: to_type, ..
@@ -594,20 +599,28 @@ impl Expr {
             } => {
                 let mut exprs = exprs.into_iter();
                 if let Some(fst) = exprs.next() {
-                    let (comparison_op, logical_op) = if negated {
-                        (BinaryOperator::NotEqual, BinaryOperator::And)
+                    let logical_op = if negated {
+                        BinaryOperator::And
                     } else {
-                        (BinaryOperator::Equal, BinaryOperator::Or)
+                        BinaryOperator::Or
                     };
 
                     let lhs = Self::lower(*lhs, dialect, context.clone())?;
                     let make_comparison = |rhs| -> ReadySetResult<_> {
-                        Ok(Self::Op {
+                        let equal = Self::Op {
                             left: Box::new(lhs.clone()),
-                            op: comparison_op,
+                            op: BinaryOperator::Equal,
                             right: Box::new(Self::lower(rhs, dialect, context.clone())?),
-                            ty: DfType::Bool, // type of =/!= is always bool
-                        })
+                            ty: DfType::Bool, // type of = is always bool
+                        };
+                        if negated {
+                            Ok(Self::Not {
+                                expr: Box::new(equal),
+                                ty: DfType::Bool,
+                            })
+                        } else {
+                            Ok(equal)
+                        }
                     };
 
                     exprs.try_fold(make_comparison(fst)?, |acc, rhs| {
@@ -615,7 +628,7 @@ impl Expr {
                             left: Box::new(acc),
                             op: logical_op,
                             right: Box::new(make_comparison(rhs)?),
-                            ty: DfType::Bool, // type of =/!= is always bool
+                            ty: DfType::Bool, // type of and/or is always bool
                         })
                     })
                 } else if negated {
@@ -698,14 +711,17 @@ impl Expr {
         rhs: AstExpr,
         dialect: Dialect,
         context: C,
-        is_all: bool,
+        mut is_all: bool,
     ) -> ReadySetResult<Expr>
     where
         C: LowerContext,
     {
         let mut left = Box::new(Self::lower(lhs, dialect, context.clone())?);
         let mut right = Box::new(Self::lower(rhs, dialect, context)?);
-        let op = BinaryOperator::from_sql_op(op, dialect, left.ty(), right.ty())?;
+        let (op, negated) = BinaryOperator::from_sql_op(op, dialect, left.ty(), right.ty())?;
+        if negated {
+            is_all = !is_all
+        }
 
         let right_member_ty = if right.ty().is_array() {
             right.ty().innermost_array_type()
@@ -760,7 +776,7 @@ impl Expr {
             });
         }
 
-        Ok(if is_all {
+        let op_node = if is_all {
             Self::OpAll {
                 op,
                 left,
@@ -774,7 +790,16 @@ impl Expr {
                 right,
                 ty,
             }
-        })
+        };
+
+        if negated {
+            Ok(Self::Not {
+                expr: Box::new(op_node),
+                ty: DfType::Bool,
+            })
+        } else {
+            Ok(op_node)
+        }
     }
 }
 

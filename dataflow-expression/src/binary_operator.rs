@@ -23,20 +23,11 @@ pub enum BinaryOperator {
     /// `LIKE`
     Like,
 
-    /// `NOT LIKE`
-    NotLike,
-
     /// `ILIKE`
     ILike,
 
-    /// `NOT ILIKE`
-    NotILike,
-
     /// `=`
     Equal,
-
-    /// `!=` or `<>`
-    NotEqual,
 
     /// `>`
     Greater,
@@ -52,9 +43,6 @@ pub enum BinaryOperator {
 
     /// `IS`
     Is,
-
-    /// `IS NOT`
-    IsNot,
 
     /// `+`
     Add,
@@ -125,70 +113,70 @@ pub enum BinaryOperator {
 }
 
 impl BinaryOperator {
-    /// Converts from a [`nom_sql::BinaryOperator`] within the context of a SQL [`Dialect`].
+    /// Convert a [`nom_sql::BinaryOperator`] to a pair of `BinaryOperator` and a boolean indicating
+    /// whether the result should be negated, within the context of a SQL [`Dialect`].
     pub fn from_sql_op(
         op: SqlBinaryOperator,
         dialect: Dialect,
         left_type: &DfType,
         _right_type: &DfType,
-    ) -> ReadySetResult<Self> {
+    ) -> ReadySetResult<(Self, bool)> {
         use SqlBinaryOperator::*;
-        let res = match op {
-            And => Self::And,
-            Or => Self::Or,
-            Greater => Self::Greater,
-            GreaterOrEqual => Self::GreaterOrEqual,
-            Less => Self::Less,
-            LessOrEqual => Self::LessOrEqual,
-            Add => Self::Add,
+        match op {
+            And => Ok((Self::And, false)),
+            Or => Ok((Self::Or, false)),
+            Greater => Ok((Self::Greater, false)),
+            GreaterOrEqual => Ok((Self::GreaterOrEqual, false)),
+            Less => Ok((Self::Less, false)),
+            LessOrEqual => Ok((Self::LessOrEqual, false)),
+            Add => Ok((Self::Add, false)),
             Subtract => {
                 if left_type.is_jsonb() {
-                    Self::JsonSubtract
+                    Ok((Self::JsonSubtract, false))
                 } else {
-                    Self::Subtract
+                    Ok((Self::Subtract, false))
                 }
             }
-            HashSubtract => Self::JsonSubtractPath,
-            Multiply => Self::Multiply,
-            Divide => Self::Divide,
-            Like => Self::Like,
-            NotLike => Self::NotLike,
-            ILike => Self::ILike,
-            NotILike => Self::NotILike,
-            Equal => Self::Equal,
-            NotEqual => Self::NotEqual,
-            Is => Self::Is,
-            IsNot => Self::IsNot,
-            QuestionMark => Self::JsonExists,
-            QuestionMarkPipe => Self::JsonAnyExists,
-            QuestionMarkAnd => Self::JsonAllExists,
+            HashSubtract => Ok((Self::JsonSubtractPath, false)),
+            Multiply => Ok((Self::Multiply, false)),
+            Divide => Ok((Self::Divide, false)),
+            Like => Ok((Self::Like, false)),
+            NotLike => Ok((Self::Like, true)),
+            ILike => Ok((Self::ILike, false)),
+            NotILike => Ok((Self::ILike, true)),
+            Equal => Ok((Self::Equal, false)),
+            NotEqual => Ok((Self::Equal, true)),
+            Is => Ok((Self::Is, false)),
+            IsNot => Ok((Self::Is, true)),
+            QuestionMark => Ok((Self::JsonExists, false)),
+            QuestionMarkPipe => Ok((Self::JsonAnyExists, false)),
+            QuestionMarkAnd => Ok((Self::JsonAllExists, false)),
             // TODO When we want to implement the double pipe string concat operator, we'll need to
             // look at the types of the arguments to this operator to infer which `BinaryOperator`
             // variant to return. For now we just support the JSON `||` concat though:
             DoublePipe => {
                 if dialect.double_pipe_is_concat() {
-                    Self::JsonConcat
+                    Ok((Self::JsonConcat, false))
                 } else {
-                    Self::Or
+                    Ok((Self::Or, false))
                 }
             }
             Arrow1 => match dialect.engine() {
-                SqlEngine::MySQL => Self::JsonPathExtract,
-                SqlEngine::PostgreSQL => Self::JsonKeyExtract,
+                SqlEngine::MySQL => Ok((Self::JsonPathExtract, false)),
+                SqlEngine::PostgreSQL => Ok((Self::JsonKeyExtract, false)),
             },
             Arrow2 => match dialect.engine() {
-                SqlEngine::MySQL => Self::JsonPathExtractUnquote,
-                SqlEngine::PostgreSQL => Self::JsonKeyExtractText,
+                SqlEngine::MySQL => Ok((Self::JsonPathExtractUnquote, false)),
+                SqlEngine::PostgreSQL => Ok((Self::JsonKeyExtractText, false)),
             },
             HashArrow1 | HashArrow2 if dialect.engine() != SqlEngine::PostgreSQL => {
-                unsupported!("'{op}' not available in {}", dialect.engine())
+                unsupported!("''{op}' not available in {}'", dialect.engine())
             }
-            HashArrow1 => Self::JsonKeyPathExtract,
-            HashArrow2 => Self::JsonKeyPathExtractText,
-            AtArrowRight => Self::JsonContains,
-            AtArrowLeft => Self::JsonContainedIn,
-        };
-        Ok(res)
+            HashArrow1 => Ok((Self::JsonKeyPathExtract, false)),
+            HashArrow2 => Ok((Self::JsonKeyPathExtractText, false)),
+            AtArrowRight => Ok((Self::JsonContains, false)),
+            AtArrowLeft => Ok((Self::JsonContainedIn, false)),
+        }
     }
 
     /// Given the types of the lhs and rhs expressions for this binary operator, if either side
@@ -227,14 +215,14 @@ impl BinaryOperator {
         use BinaryOperator::*;
         match self {
             Add | Subtract | Multiply | Divide | And | Or | Greater | GreaterOrEqual | Less
-            | LessOrEqual | Is | IsNot => Ok((None, None)),
+            | LessOrEqual | Is => Ok((None, None)),
 
-            Like | NotLike | ILike | NotILike => Ok((
+            Like | ILike => Ok((
                 coerce_to_text_type(left_type),
                 coerce_to_text_type(right_type),
             )),
 
-            Equal | NotEqual => Ok((None, Some(left_type.clone()))),
+            Equal => Ok((None, Some(left_type.clone()))),
 
             JsonExists => {
                 if left_type.is_known() && !left_type.is_jsonb() {
@@ -300,17 +288,13 @@ impl BinaryOperator {
         // TODO: What is the correct return type for `And` and `Or`?
         match self {
             Self::Like
-            | Self::NotLike
             | Self::ILike
-            | Self::NotILike
             | Self::Equal
-            | Self::NotEqual
             | Self::Greater
             | Self::GreaterOrEqual
             | Self::Less
             | Self::LessOrEqual
             | Self::Is
-            | Self::IsNot
             | Self::JsonExists
             | Self::JsonAnyExists
             | Self::JsonAllExists
@@ -332,17 +316,13 @@ impl fmt::Display for BinaryOperator {
             Self::And => "AND",
             Self::Or => "OR",
             Self::Like => "LIKE",
-            Self::NotLike => "NOT LIKE",
             Self::ILike => "ILIKE",
-            Self::NotILike => "NOT ILIKE",
             Self::Equal => "=",
-            Self::NotEqual => "!=",
             Self::Greater => ">",
             Self::GreaterOrEqual => ">=",
             Self::Less => "<",
             Self::LessOrEqual => "<=",
             Self::Is => "IS",
-            Self::IsNot => "IS NOT",
             Self::Add => "+",
             Self::Subtract | Self::JsonSubtract => "-",
             Self::JsonSubtractPath => "#-",
@@ -377,7 +357,7 @@ mod tests {
                 &DfType::Int
             )
             .unwrap(),
-            BinaryOperator::JsonSubtract
+            (BinaryOperator::JsonSubtract, false)
         );
     }
 

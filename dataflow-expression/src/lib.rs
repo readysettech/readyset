@@ -302,6 +302,9 @@ pub enum Expr {
         ty: DfType,
     },
 
+    /// Boolean negation
+    Not { expr: Box<Expr>, ty: DfType },
+
     /// Test if the LHS satisfies OP for any element in the RHS, which must evaluate to some kind
     /// of array.
     ///
@@ -363,6 +366,7 @@ impl Display for Expr {
             Op {
                 op, left, right, ..
             } => write!(f, "({} {} {})", left, op, right),
+            Not { expr, .. } => write!(f, "NOT {}", expr),
             OpAny {
                 op, left, right, ..
             } => {
@@ -408,6 +412,7 @@ impl Expr {
             Expr::Column { ty, .. }
             | Expr::Literal { ty, .. }
             | Expr::Op { ty, .. }
+            | Expr::Not { ty, .. }
             | Expr::OpAny { ty, .. }
             | Expr::OpAll { ty, .. }
             | Expr::Call { ty, .. }

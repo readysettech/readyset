@@ -22,7 +22,7 @@ mod json;
 fn eval_binary_op(op: BinaryOperator, left: &DfValue, right: &DfValue) -> ReadySetResult<DfValue> {
     use BinaryOperator::*;
 
-    let like = |case_sensitivity, negated| -> ReadySetResult<DfValue> {
+    let like = |case_sensitivity| -> ReadySetResult<DfValue> {
         let (Some(left), Some(right)) = (non_null!(left).as_str(), non_null!(right).as_str()) else {
             return Ok(false.into())
         };
@@ -32,9 +32,7 @@ fn eval_binary_op(op: BinaryOperator, left: &DfValue, right: &DfValue) -> ReadyS
         // LikePattern can be kinda slow.
         let pat = LikePattern::new(right, case_sensitivity);
 
-        let matches = pat.matches(left);
-
-        Ok(if negated { !matches } else { matches }.into())
+        Ok(pat.matches(left).into())
     };
 
     match op {
@@ -45,17 +43,13 @@ fn eval_binary_op(op: BinaryOperator, left: &DfValue, right: &DfValue) -> ReadyS
         And => Ok((non_null!(left).is_truthy() && non_null!(right).is_truthy()).into()),
         Or => Ok((non_null!(left).is_truthy() || non_null!(right).is_truthy()).into()),
         Equal => Ok((non_null!(left) == non_null!(right)).into()),
-        NotEqual => Ok((non_null!(left) != non_null!(right)).into()),
         Greater => Ok((non_null!(left) > non_null!(right)).into()),
         GreaterOrEqual => Ok((non_null!(left) >= non_null!(right)).into()),
         Less => Ok((non_null!(left) < non_null!(right)).into()),
         LessOrEqual => Ok((non_null!(left) <= non_null!(right)).into()),
         Is => Ok((left == right).into()),
-        IsNot => Ok((left != right).into()),
-        Like => like(CaseSensitive, false),
-        NotLike => like(CaseSensitive, true),
-        ILike => like(CaseInsensitive, false),
-        NotILike => like(CaseInsensitive, true),
+        Like => like(CaseSensitive),
+        ILike => like(CaseInsensitive),
 
         // JSON operators:
         JsonExists => {
@@ -248,6 +242,7 @@ impl Expr {
                 let right_val = right.eval(record)?;
                 eval_binary_op(*op, &left_val, &right_val)
             }
+            Expr::Not { expr, .. } => Ok((!non_null!(expr.eval(record)?).is_truthy()).into()),
             Expr::OpAny {
                 op, left, right, ..
             } => {

@@ -1569,19 +1569,30 @@ impl ReaderHandle {
 
                 filter_op_idx = Some(idx);
 
-                // LIKE/ILIKE resolve to bool
-                Ok(DfExpr::Op {
+                let (op, negated) =
+                    DfBinaryOperator::from_sql_op(*op, dialect, key_type, key_type)?;
+                let op = DfExpr::Op {
                     left: Box::new(DfExpr::Column {
                         index: column,
                         ty: key_type.clone(),
                     }),
-                    op: DfBinaryOperator::from_sql_op(*op, dialect, key_type, key_type)?,
+                    op,
                     right: Box::new(DfExpr::Literal {
                         val: value,
                         ty: key_type.clone(),
                     }),
+                    // LIKE/ILIKE resolve to bool
                     ty: DfType::Bool,
-                })
+                };
+
+                if negated {
+                    Ok(DfExpr::Not {
+                        expr: Box::new(op),
+                        ty: DfType::Bool,
+                    })
+                } else {
+                    Ok(op)
+                }
             })
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -1660,17 +1671,27 @@ impl ReaderHandle {
 
                                 let value = remap_key(key.as_ref(), idx, key_type)?;
 
-                                let make_op = |op: DfBinaryOperator| DfExpr::Op {
-                                    left: Box::new(DfExpr::Column {
-                                        index: *key_column_idx,
-                                        ty: key_type.clone(),
-                                    }),
-                                    op,
-                                    right: Box::new(DfExpr::Literal {
-                                        val: value.clone(),
-                                        ty: key_type.clone(),
-                                    }),
-                                    ty: DfType::Bool, // TODO: infer type
+                                let make_op = |(op, negated): (DfBinaryOperator, bool)| {
+                                    let op = DfExpr::Op {
+                                        left: Box::new(DfExpr::Column {
+                                            index: *key_column_idx,
+                                            ty: key_type.clone(),
+                                        }),
+                                        op,
+                                        right: Box::new(DfExpr::Literal {
+                                            val: value.clone(),
+                                            ty: key_type.clone(),
+                                        }),
+                                        ty: DfType::Bool, // TODO: infer type
+                                    };
+                                    if negated {
+                                        DfExpr::Not {
+                                            expr: Box::new(op),
+                                            ty: DfType::Bool,
+                                        }
+                                    } else {
+                                        op
+                                    }
                                 };
 
                                 if let Some((lower_bound, upper_bound)) = &mut bounds {
@@ -1688,22 +1709,29 @@ impl ReaderHandle {
                                             upper_bound.push(value);
                                         }
                                         BinaryOperator::GreaterOrEqual => {
-                                            filters.push(make_op(DfBinaryOperator::GreaterOrEqual));
+                                            filters.push(make_op((
+                                                DfBinaryOperator::GreaterOrEqual,
+                                                false,
+                                            )));
                                             lower_bound.push(value);
                                             upper_bound.push(DfValue::Max);
                                         }
                                         BinaryOperator::LessOrEqual => {
-                                            filters.push(make_op(DfBinaryOperator::LessOrEqual));
+                                            filters.push(make_op((
+                                                DfBinaryOperator::LessOrEqual,
+                                                false,
+                                            )));
                                             lower_bound.push(DfValue::None); // NULL is the minimum DfValue
                                             upper_bound.push(value);
                                         }
                                         BinaryOperator::Greater => {
-                                            filters.push(make_op(DfBinaryOperator::Greater));
+                                            filters
+                                                .push(make_op((DfBinaryOperator::Greater, false)));
                                             lower_bound.push(value);
                                             upper_bound.push(DfValue::Max);
                                         }
                                         BinaryOperator::Less => {
-                                            filters.push(make_op(DfBinaryOperator::Less));
+                                            filters.push(make_op((DfBinaryOperator::Less, false)));
                                             lower_bound.push(DfValue::None); // NULL is the minimum DfValue
                                             upper_bound.push(value);
                                         }

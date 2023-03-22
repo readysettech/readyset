@@ -32,4 +32,4 @@ SELECT NOT id FROM notes;
 query I nosort
 SELECT NOT -id FROM notes;
 ----
-1
+0
