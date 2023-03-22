@@ -1165,6 +1165,8 @@ dependencies = [
  "serde",
  "serde_json",
  "test-strategy",
+ "tokio",
+ "tokio-postgres",
  "vec1",
 ]
 
