@@ -1284,6 +1284,7 @@ impl Domain {
         req: DomainRequest,
         executor: &mut dyn Executor,
     ) -> ReadySetResult<Option<Vec<u8>>> {
+        trace!(?req, "processing domain request");
         let ret = match req {
             DomainRequest::AddNode { node, parents } => {
                 let addr = node.local_addr();
@@ -1937,6 +1938,9 @@ impl Domain {
 
                 node_ref.borrow_mut().purge = purge;
 
+                // TODO(fran): This boolean is hardcoded for now. We'll correctly compute
+                //  whether the node is ready in future commits (ENG-2352).
+                let is_ready = true;
                 if !index.is_empty() {
                     let mut s = {
                         match (
@@ -1990,7 +1994,7 @@ impl Domain {
                     trace!(local = %node, "state swapped");
                 }
 
-                Ok(None)
+                Ok(Some(bincode::serialize(&is_ready)?))
             }
             DomainRequest::GetStatistics => {
                 let domain_stats = readyset_client::debug::stats::DomainStats {

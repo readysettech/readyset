@@ -43,6 +43,8 @@ use nom_sql::Relation;
 use readyset_client::metrics::recorded;
 use readyset_client::{KeyColumnIdx, ViewPlaceholder};
 use readyset_data::{DfType, Dialect};
+use tokio::time::sleep;
+use tokio_retry::strategy::ExponentialBackoff;
 use tracing::{debug, debug_span, error, info, info_span, instrument, trace};
 
 use crate::controller::migrate::materialization::InvalidEdge;
@@ -59,6 +61,13 @@ pub(in crate::controller) mod routing;
 pub(in crate::controller) mod scheduling;
 mod sharding;
 
+/// The initial delay used when sending follow up requests
+/// to a domain, for the exponential backoff strategy
+const DOMAIN_REQUEST_INITIAL_DELAY_IN_MS: u64 = 200;
+/// The max possible delay used when sending follow up requests
+/// to a domain, for the exponential backoff strategy
+const DOMAIN_REQUEST_MAX_DELAY_IN_MS: u64 = 1_800_000; // 30 min
+
 /// A [`DomainRequest`] with associated domain/shard information describing which domain it's for.
 ///
 /// Used as part of [`DomainMigrationPlan`].
@@ -73,7 +82,13 @@ pub struct StoredDomainRequest {
 }
 
 impl StoredDomainRequest {
-    pub async fn apply(self, mainline: &mut DfState) -> ReadySetResult<()> {
+    /// Sends the request to the domain.
+    /// Returns an `Option` with another request, that is meant to be sent
+    /// afterwards as a follow up (up to the caller to decide when to send it).
+    pub async fn apply(
+        self,
+        mainline: &mut DfState,
+    ) -> ReadySetResult<Option<StoredDomainRequest>> {
         trace!(req=?self, "Applying domain request");
         let dom =
             mainline
@@ -117,6 +132,35 @@ impl StoredDomainRequest {
                     Err(e) => return Err(e),
                 }
             }
+            DomainRequest::Ready { node, .. } | DomainRequest::IsReady { node } => {
+                trace!(request = ?self.req.clone(), node = node.id(), "sending domain ready/is_ready request");
+                let req = self.req.clone();
+                let is_ready = if let Some(shard) = self.shard {
+                    dom.send_to_healthy_shard::<bool>(shard, req, &mainline.workers)
+                        .await?
+                        .into_iter()
+                        .all(|t| t)
+                } else {
+                    dom.send_to_healthy::<bool>(req, &mainline.workers)
+                        .await?
+                        .into_iter()
+                        .all(|v| v.into_iter().all(|t| t))
+                };
+                trace!(
+                    request = ?self.req,
+                    node = node.id(),
+                    ready = is_ready,
+                    "received response from domain"
+                );
+                if !is_ready {
+                    trace!(node = node.id(), "node is not ready yet");
+                    return Ok(Some(StoredDomainRequest {
+                        domain: self.domain,
+                        shard: self.shard,
+                        req: DomainRequest::IsReady { node },
+                    }));
+                }
+            }
             _ => {
                 if let Some(shard) = self.shard {
                     dom.send_to_healthy_shard::<()>(shard, self.req, &mainline.workers)
@@ -127,7 +171,7 @@ impl StoredDomainRequest {
                 }
             }
         }
-        Ok(())
+        Ok(None)
     }
 }
 
@@ -286,9 +330,35 @@ impl DomainMigrationPlan {
                 .await?;
             mainline.domains.insert(place.idx, d);
         }
-        for req in std::mem::take(&mut self.stored) {
-            req.apply(mainline).await?;
+
+        // Send all the stored requests to the domain.
+        // If a request returned a follow-up request, then we prioritize sending that one,
+        // and we wait a bit, since follow-up requests are meant to poll domains for base table
+        // nodes that might not be ready yet.
+        // TODO(fran): This feels yucky, we should revisit this in the future and think of a better
+        //  abstraction.
+        let mut stored = std::mem::take(&mut self.stored);
+        let create_exponential_backoff = || {
+            ExponentialBackoff::from_millis(DOMAIN_REQUEST_INITIAL_DELAY_IN_MS)
+                // Cap at 30 minutes
+                .max_delay(Duration::from_millis(DOMAIN_REQUEST_MAX_DELAY_IN_MS))
+        };
+        let mut retry_strategy = create_exponential_backoff();
+        while let Some(req) = stored.pop_front() {
+            if let Some(req) = req.apply(mainline).await? {
+                // Initializing base table nodes might take a lot of time, so we try to wait using
+                // an exponential backoff strategy.
+                stored.push_front(req);
+                if let Some(wait) = retry_strategy.next() {
+                    trace!(retry = ?wait, "Got follow-up domain request. Waiting before sending...");
+                    sleep(wait).await;
+                }
+            } else {
+                retry_strategy = create_exponential_backoff();
+            }
         }
+
+        debug!("successfully sent all domain messages for this migration!");
         Ok(())
     }
 
