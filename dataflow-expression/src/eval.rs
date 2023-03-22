@@ -1,6 +1,6 @@
 use std::borrow::Borrow;
 
-use readyset_data::{Array, ArrayD, DfType, DfValue, IxDyn};
+use readyset_data::{Array, ArrayD, DfValue, IxDyn};
 use readyset_errors::{invalid_err, unsupported, ReadySetError, ReadySetResult};
 use serde_json::Value as JsonValue;
 
@@ -19,41 +19,22 @@ macro_rules! non_null {
 mod builtins;
 mod json;
 
-fn eval_binary_op(
-    op: BinaryOperator,
-    (left, left_ty): (&DfValue, &DfType),
-    (right, right_ty): (&DfValue, &DfType),
-) -> ReadySetResult<DfValue> {
+fn eval_binary_op(op: BinaryOperator, left: &DfValue, right: &DfValue) -> ReadySetResult<DfValue> {
     use BinaryOperator::*;
 
-    let like = |case_sensitivity, negated| -> DfValue {
-        match (
-            left.coerce_to(&DfType::DEFAULT_TEXT, left_ty),
-            right.coerce_to(&DfType::DEFAULT_TEXT, right_ty),
-        ) {
-            (Ok(left), Ok(right)) => {
-                let (Some(left), Some(right)) = (left.as_str(), right.as_str()) else {
-                               return DfValue::None;
-                            };
+    let like = |case_sensitivity, negated| -> ReadySetResult<DfValue> {
+        let (Some(left), Some(right)) = (non_null!(left).as_str(), non_null!(right).as_str()) else {
+            return Ok(false.into())
+        };
 
-                // NOTE(grfn): At some point, we may want to optimize this to pre-cache
-                // the LikePattern if the value is constant, since constructing a new
-                // LikePattern can be kinda slow.
-                let pat = LikePattern::new(right, case_sensitivity);
+        // NOTE(grfn): At some point, we may want to optimize this to pre-cache
+        // the LikePattern if the value is constant, since constructing a new
+        // LikePattern can be kinda slow.
+        let pat = LikePattern::new(right, case_sensitivity);
 
-                let matches = pat.matches(left);
+        let matches = pat.matches(left);
 
-                if negated {
-                    !matches
-                } else {
-                    matches
-                }
-            }
-            // Anything that isn't Text or text-coercible can never be LIKE anything, so
-            // we return true if not negated or false otherwise.
-            _ => !negated,
-        }
-        .into()
+        Ok(if negated { !matches } else { matches }.into())
     };
 
     match op {
@@ -63,18 +44,18 @@ fn eval_binary_op(
         Divide => Ok((non_null!(left) / non_null!(right))?),
         And => Ok((non_null!(left).is_truthy() && non_null!(right).is_truthy()).into()),
         Or => Ok((non_null!(left).is_truthy() || non_null!(right).is_truthy()).into()),
-        Equal => Ok((non_null!(left) == &non_null!(right).coerce_to(left_ty, right_ty)?).into()),
-        NotEqual => Ok((non_null!(left) != &non_null!(right).coerce_to(left_ty, right_ty)?).into()),
+        Equal => Ok((non_null!(left) == non_null!(right)).into()),
+        NotEqual => Ok((non_null!(left) != non_null!(right)).into()),
         Greater => Ok((non_null!(left) > non_null!(right)).into()),
         GreaterOrEqual => Ok((non_null!(left) >= non_null!(right)).into()),
         Less => Ok((non_null!(left) < non_null!(right)).into()),
         LessOrEqual => Ok((non_null!(left) <= non_null!(right)).into()),
         Is => Ok((left == right).into()),
         IsNot => Ok((left != right).into()),
-        Like => Ok(like(CaseSensitive, false)),
-        NotLike => Ok(like(CaseSensitive, true)),
-        ILike => Ok(like(CaseInsensitive, false)),
-        NotILike => Ok(like(CaseInsensitive, true)),
+        Like => like(CaseSensitive, false),
+        NotLike => like(CaseSensitive, true),
+        ILike => like(CaseInsensitive, false),
+        NotILike => like(CaseInsensitive, true),
 
         // JSON operators:
         JsonExists => {
@@ -254,7 +235,6 @@ impl Expr {
     where
         D: Borrow<DfValue>,
     {
-        // TODO: Enforce type coercion
         match self {
             Expr::Column { index, .. } => record
                 .get(*index)
@@ -266,23 +246,16 @@ impl Expr {
             } => {
                 let left_val = left.eval(record)?;
                 let right_val = right.eval(record)?;
-                eval_binary_op(*op, (&left_val, left.ty()), (&right_val, right.ty()))
+                eval_binary_op(*op, &left_val, &right_val)
             }
             Expr::OpAny {
                 op, left, right, ..
             } => {
                 let left_val = left.eval(record)?;
-                let right_member_ty = right.ty().innermost_array_type();
-                let mut right_val = non_null!(right.eval(record)?);
-                if right.ty().is_unknown() {
-                    right_val = right_val
-                        .coerce_to(&DfType::Array(Box::new(left.ty().clone())), right.ty())?;
-                }
+                let right_val = non_null!(right.eval(record)?);
                 let mut res = DfValue::from(false);
                 for member in right_val.as_array()?.values() {
-                    if eval_binary_op(*op, (&left_val, left.ty()), (member, right_member_ty))?
-                        .is_truthy()
-                    {
+                    if eval_binary_op(*op, &left_val, member)?.is_truthy() {
                         res = true.into();
                         break;
                     }
@@ -293,17 +266,10 @@ impl Expr {
                 op, left, right, ..
             } => {
                 let left_val = left.eval(record)?;
-                let right_member_ty = right.ty().innermost_array_type();
-                let mut right_val = non_null!(right.eval(record)?);
-                if right.ty().is_unknown() {
-                    right_val = right_val
-                        .coerce_to(&DfType::Array(Box::new(left.ty().clone())), right.ty())?;
-                }
+                let right_val = non_null!(right.eval(record)?);
                 let mut res = DfValue::from(true);
                 for member in right_val.as_array()?.values() {
-                    if !eval_binary_op(*op, (&left_val, left.ty()), (member, right_member_ty))?
-                        .is_truthy()
-                    {
+                    if !eval_binary_op(*op, &left_val, member)?.is_truthy() {
                         res = false.into();
                         break;
                     }
@@ -354,12 +320,13 @@ mod tests {
     use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
     use nom_sql::parse_expr;
     use nom_sql::Dialect::*;
-    use readyset_data::{ArrayD, Collation, DfType, IxDyn, PgEnumMetadata};
+    use readyset_data::{ArrayD, Collation, DfType, Dialect, IxDyn, PgEnumMetadata};
+    use readyset_errors::internal;
     use serde_json::json;
     use Expr::*;
 
     use super::*;
-    use crate::lower::tests::no_op_lower_context;
+    use crate::lower::tests::{no_op_lower_context, resolve_columns};
     use crate::utils::{column_with_type, make_column, make_literal, normalize_json};
 
     /// Returns the value from evaluating an expression, or `ReadySetError` if evaluation fails.
@@ -1048,38 +1015,47 @@ mod tests {
 
     #[test]
     fn like_null() {
-        let expr = Expr::Op {
-            left: Box::new(column_with_type(0, DfType::DEFAULT_TEXT)),
-            op: BinaryOperator::Like,
-            right: Box::new(make_literal("abc".into())),
-            ty: DfType::Bool,
-        };
+        let expr = Expr::lower(
+            parse_expr(nom_sql::Dialect::PostgreSQL, "a LIKE 'abc'").unwrap(),
+            Dialect::DEFAULT_POSTGRESQL,
+            resolve_columns(|c| {
+                if c == "a".into() {
+                    Ok((0, DfType::DEFAULT_TEXT))
+                } else {
+                    internal!()
+                }
+            }),
+        )
+        .unwrap();
         let res = expr.eval(&[DfValue::None]).unwrap();
         assert_eq!(res, DfValue::None)
     }
 
     #[test]
     fn enum_eq_string_postgres() {
-        let expr = Expr::Op {
-            op: BinaryOperator::Equal,
-            left: Box::new(Expr::Column {
-                index: 0,
-                ty: DfType::from_enum_variants(
-                    ["a".into(), "b".into(), "c".into()],
-                    Some(PgEnumMetadata {
-                        name: "abc".into(),
-                        schema: "public".into(),
-                        oid: 12345,
-                        array_oid: 12344,
-                    }),
-                ),
+        let expr = Expr::lower(
+            parse_expr(nom_sql::Dialect::PostgreSQL, "a = 'a'").unwrap(),
+            Dialect::DEFAULT_POSTGRESQL,
+            resolve_columns(|c| {
+                if c == "a".into() {
+                    Ok((
+                        0,
+                        DfType::from_enum_variants(
+                            ["a".into(), "b".into(), "c".into()],
+                            Some(PgEnumMetadata {
+                                name: "abc".into(),
+                                schema: "public".into(),
+                                oid: 12345,
+                                array_oid: 12344,
+                            }),
+                        ),
+                    ))
+                } else {
+                    internal!()
+                }
             }),
-            right: Box::new(Expr::Literal {
-                val: "a".into(),
-                ty: DfType::Unknown,
-            }),
-            ty: DfType::Bool,
-        };
+        )
+        .unwrap();
 
         let true_res = expr.eval(&[DfValue::from(1)]).unwrap();
         assert_eq!(true_res, true.into());

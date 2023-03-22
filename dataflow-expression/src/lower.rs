@@ -454,8 +454,8 @@ impl Expr {
                 Ok(Self::Column { index, ty })
             }
             AstExpr::BinaryOp { lhs, op, rhs } => {
-                let left = Box::new(Self::lower(*lhs, dialect, context.clone())?);
-                let right = Box::new(Self::lower(*rhs, dialect, context)?);
+                let mut left = Box::new(Self::lower(*lhs, dialect, context.clone())?);
+                let mut right = Box::new(Self::lower(*rhs, dialect, context)?);
                 let op = BinaryOperator::from_sql_op(op, dialect, left.ty(), right.ty())?;
 
                 if matches!(
@@ -466,6 +466,15 @@ impl Expr {
                 }
 
                 let ty = op.output_type(left.ty(), right.ty())?;
+                let (left_coerce_target, right_coerce_target) =
+                    op.argument_type_coercions(left.ty(), right.ty())?;
+
+                if let Some(ty) = left_coerce_target {
+                    left = Box::new(Self::Cast { expr: left, ty })
+                }
+                if let Some(ty) = right_coerce_target {
+                    right = Box::new(Self::Cast { expr: right, ty })
+                }
 
                 Ok(Self::Op {
                     op,
@@ -665,8 +674,8 @@ impl Expr {
     where
         C: LowerContext,
     {
-        let left = Box::new(Self::lower(lhs, dialect, context.clone())?);
-        let right = Box::new(Self::lower(rhs, dialect, context)?);
+        let mut left = Box::new(Self::lower(lhs, dialect, context.clone())?);
+        let mut right = Box::new(Self::lower(rhs, dialect, context)?);
         let op = BinaryOperator::from_sql_op(op, dialect, left.ty(), right.ty())?;
 
         let right_member_ty = if right.ty().is_array() {
@@ -692,6 +701,27 @@ impl Expr {
             // LOCATION:  make_scalar_array_op, parse_oper.c:856
             // Time: 0.330 ms
             invalid!("op ANY/ALL (array) requires the operator to yield a boolean")
+        }
+
+        let (left_coerce_target, right_coerce_target) =
+            op.argument_type_coercions(left.ty(), right_member_ty)?;
+
+        if let Some(ty) = left_coerce_target {
+            left = Box::new(Self::Cast { expr: left, ty })
+        }
+        if let Some(ty) = right_coerce_target {
+            right = Box::new(Self::Cast {
+                expr: right,
+                ty: DfType::Array(Box::new(ty)),
+            })
+        } else if !right.ty().is_array() {
+            // Even if we don't need to cast the right member type to a target type, we still need
+            // to cast the rhs to an array (but we can make it an array of UNKNOWN,
+            // since we can leave the values alone)
+            right = Box::new(Self::Cast {
+                expr: right,
+                ty: DfType::Array(Box::new(right_coerce_target.unwrap_or(DfType::Unknown))),
+            });
         }
 
         Ok(if is_all {
@@ -1232,9 +1262,12 @@ pub(crate) mod tests {
                     val: 1u64.into(),
                     ty: DfType::UnsignedBigInt
                 }),
-                right: Box::new(Expr::Literal {
-                    val: "{1,2}".into(),
-                    ty: DfType::Unknown
+                right: Box::new(Expr::Cast {
+                    expr: Box::new(Expr::Literal {
+                        val: "{1,2}".into(),
+                        ty: DfType::Unknown
+                    }),
+                    ty: DfType::Array(Box::new(DfType::UnsignedBigInt))
                 }),
                 ty: DfType::Bool
             }
@@ -1253,9 +1286,12 @@ pub(crate) mod tests {
                     val: 1u64.into(),
                     ty: DfType::UnsignedBigInt
                 }),
-                right: Box::new(Expr::Literal {
-                    val: "{1,1}".into(),
-                    ty: DfType::Unknown
+                right: Box::new(Expr::Cast {
+                    expr: Box::new(Expr::Literal {
+                        val: "{1,1}".into(),
+                        ty: DfType::Unknown
+                    }),
+                    ty: DfType::Array(Box::new(DfType::UnsignedBigInt))
                 }),
                 ty: DfType::Bool
             }

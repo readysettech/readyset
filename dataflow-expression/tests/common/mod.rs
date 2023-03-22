@@ -10,8 +10,18 @@ impl LowerContext for TestLowerContext {
         internal!("Column references not allowed")
     }
 
-    fn resolve_type(&self, _ty: Relation) -> Option<DfType> {
-        None
+    fn resolve_type(&self, ty: Relation) -> Option<DfType> {
+        match ty.name.as_str() {
+            "abc" => Some(DfType::from_enum_variants(
+                vec!["a".to_owned(), "b".to_owned(), "c".to_owned()],
+                None,
+            )),
+            "cba" => Some(DfType::from_enum_variants(
+                vec!["c".to_owned(), "b".to_owned(), "a".to_owned()],
+                None,
+            )),
+            _ => None,
+        }
     }
 }
 

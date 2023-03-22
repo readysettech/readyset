@@ -75,12 +75,12 @@ async fn mysql_eval(expr: &str, conn: &mut Conn) -> DfValue {
 
 #[track_caller]
 async fn compare_eval(expr: &str, conn: &mut Conn) {
+    let mysql_result = mysql_eval(expr, conn).await;
     let our_result = parse_lower_eval(
         expr,
         nom_sql::Dialect::MySQL,
         dataflow_expression::Dialect::DEFAULT_MYSQL,
     );
-    let mysql_result = mysql_eval(expr, conn).await;
     assert_eq!(
         our_result, mysql_result,
         "mismatched results for {expr} (left: us, right: mysql)"
@@ -94,9 +94,16 @@ async fn example_exprs_eval_same_as_mysql() {
     for expr in [
         "1 != 2",
         "1 != 1",
+        "4 + 5",
+        // "4 + '5'", TODO(ENG-2759)
+        "5 > 4",
+        "'5' > 4",
+        // "5 > '4'", TODO(ENG-2759)
         "'a' like 'A'",
         "'a' not like 'a'",
         "1 like 2",
+        "1 = '1'",
+        "'1' = 1",
         "json_overlaps(null, null)",
         "json_overlaps(null, '[]')",
         "json_overlaps('[]', null)",

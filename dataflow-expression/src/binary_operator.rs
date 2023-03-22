@@ -191,17 +191,20 @@ impl BinaryOperator {
         Ok(res)
     }
 
-    /// Checks this operator's input types, returning
-    /// [`ReadySetError::InvalidQuery`](readyset_errors::ReadySetError::InvalidQuery) if either is
-    /// unexpected.
-    fn check_arg_types(&self, left_type: &DfType, right_type: &DfType) -> ReadySetResult<()> {
+    /// Given the types of the lhs and rhs expressions for this binary operator, if either side
+    /// needs to be coerced before evaluation, returns the type that it should be coerced to
+    pub(crate) fn argument_type_coercions(
+        &self,
+        left_type: &DfType,
+        right_type: &DfType,
+    ) -> ReadySetResult<(Option<DfType>, Option<DfType>)> {
         enum Side {
             Left,
             Right,
         }
         use Side::*;
 
-        let error = |side: Side, expected_type: &str| -> ReadySetResult<()> {
+        let error = |side: Side, expected_type: &str| {
             let (side_name, offending_type) = match side {
                 Left => ("left", left_type),
                 Right => ("right", right_type),
@@ -213,60 +216,75 @@ impl BinaryOperator {
             ))
         };
 
-        // TODO: Type-check more operators.
-        // TODO: Proper type unification instead of blindly allowing `Unknown`.
+        let coerce_to_text_type = |ty: &DfType| {
+            if ty.is_any_text() {
+                None
+            } else {
+                Some(DfType::DEFAULT_TEXT)
+            }
+        };
+
+        use BinaryOperator::*;
         match self {
-            // Left type checks:
+            Add | Subtract | Multiply | Divide | And | Or | Greater | GreaterOrEqual | Less
+            | LessOrEqual | Is | IsNot => Ok((None, None)),
 
-            // jsonb, unknown
-            Self::JsonExists
-            | Self::JsonAnyExists
-            | Self::JsonAllExists
-            | Self::JsonSubtractPath
-                if left_type.is_known() && !left_type.is_jsonb() =>
-            {
-                error(Left, "JSONB")
+            Like | NotLike | ILike | NotILike => Ok((
+                coerce_to_text_type(left_type),
+                coerce_to_text_type(right_type),
+            )),
+
+            Equal | NotEqual => Ok((None, Some(left_type.clone()))),
+
+            JsonExists => {
+                if left_type.is_known() && !left_type.is_jsonb() {
+                    return error(Left, "JSONB");
+                }
+                Ok((None, Some(DfType::DEFAULT_TEXT)))
             }
+            JsonAnyExists
+            | JsonAllExists
+            | JsonKeyPathExtract
+            | JsonKeyPathExtractText
+            | JsonSubtractPath => {
+                if left_type.is_known() && !left_type.is_any_json() {
+                    return error(Left, "JSONB");
+                }
 
-            // json, jsonb, unknown
-            Self::JsonPathExtract
-            | Self::JsonKeyExtract
-            | Self::JsonPathExtractUnquote
-            | Self::JsonKeyExtractText
-                if left_type.is_known() && !left_type.is_any_json() =>
-            {
-                error(Left, "JSON")
-            }
-
-            // Right type checks:
-
-            // text, char, varchar, unknown
-            Self::JsonExists if right_type.is_known() && !right_type.is_any_text() => {
-                error(Right, "TEXT")
-            }
-
-            // text[], char[], varchar[], unknown, unknown[]
-            Self::JsonAnyExists
-            | Self::JsonAllExists
-            | Self::JsonKeyPathExtract
-            | Self::JsonKeyPathExtractText
-            | Self::JsonSubtractPath
                 if right_type.innermost_array_type().is_known()
-                    && !(right_type.is_array()
-                        && right_type.innermost_array_type().is_any_text()) =>
-            {
-                error(Right, "TEXT[]")
+                    && !(right_type.is_array() && right_type.innermost_array_type().is_any_text())
+                {
+                    return error(Right, "TEXT[]");
+                }
+                Ok((
+                    Some(DfType::DEFAULT_TEXT),
+                    Some(DfType::Array(Box::new(DfType::DEFAULT_TEXT))),
+                ))
+            }
+            JsonConcat | JsonContains | JsonContainedIn => {
+                if left_type.is_known() && !left_type.is_jsonb() {
+                    return error(Left, "JSONB");
+                }
+
+                if right_type.is_known() && !right_type.is_jsonb() {
+                    return error(Right, "JSONB");
+                }
+
+                Ok((Some(DfType::DEFAULT_TEXT), Some(DfType::DEFAULT_TEXT)))
+            }
+            JsonKeyExtract | JsonKeyExtractText => Ok((Some(DfType::DEFAULT_TEXT), None)),
+
+            JsonSubtract => {
+                if left_type.is_known() && !left_type.is_jsonb() {
+                    return error(Left, "JSONB");
+                }
+
+                Ok((None, None))
             }
 
-            // text, char, varchar, ints, unknown
-            Self::JsonKeyExtract | Self::JsonKeyExtractText
-                if right_type.is_known()
-                    && !(right_type.is_any_text() || right_type.is_any_int()) =>
-            {
-                error(Right, "TEXT or INT")
+            JsonPathExtract | JsonPathExtractUnquote => {
+                unsupported!("'{self}' operator not implemented yet for MySQL")
             }
-
-            _ => Ok(()),
         }
     }
 
@@ -276,10 +294,8 @@ impl BinaryOperator {
     pub(crate) fn output_type(
         &self,
         left_type: &DfType,
-        right_type: &DfType,
+        _right_type: &DfType,
     ) -> ReadySetResult<DfType> {
-        self.check_arg_types(left_type, right_type)?;
-
         // TODO: Maybe consider `right_type` in some cases too.
         // TODO: What is the correct return type for `And` and `Or`?
         match self {

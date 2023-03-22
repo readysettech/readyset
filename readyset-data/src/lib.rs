@@ -711,8 +711,7 @@ impl DfValue {
     /// assert!(DfValue::from("🤯").to_json().is_err()); // Not a valid JSON string
     /// ```
     pub fn to_json(&self) -> ReadySetResult<JsonValue> {
-        let text_val = self.coerce_to(&DfType::DEFAULT_TEXT, &DfType::Unknown)?;
-        let json_str = <&str>::try_from(&text_val)?;
+        let json_str = <&str>::try_from(self)?;
         serde_json::from_str(json_str).map_err(|e| {
             invalid_err!(
                 "Could not convert value to JSON: {}. JSON error: {}",

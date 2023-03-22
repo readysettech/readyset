@@ -48,13 +48,38 @@ async fn example_exprs_eval_same_as_postgres() {
     let (client, conn) = config().connect(NoTls).await.unwrap();
     tokio::spawn(conn);
 
+    client
+        .simple_query("DROP TYPE IF EXISTS abc;")
+        .await
+        .unwrap();
+    client
+        .simple_query("CREATE TYPE abc AS ENUM ('a', 'b', 'c')")
+        .await
+        .unwrap();
+
+    client
+        .simple_query("DROP TYPE IF EXISTS cba;")
+        .await
+        .unwrap();
+    client
+        .simple_query("CREATE TYPE cba AS ENUM ('c', 'b', 'a')")
+        .await
+        .unwrap();
+
     for expr in [
         "1 != 2",
         "1 != 1",
+        "4 + 5",
+        "5 > 4",
         "'a' like 'A'",
         "'a' ilike 'A'",
         "'a' not like 'a'",
         "'a' not ilike 'b'",
+        "'a' ilike all ('{a,A}')",
+        "'a' ilike all ('{a,A,b}')",
+        "'a'::abc = 'a'",
+        "'a'::abc < all('{b,c}')",
+        "'c'::cba < all('{{a,b,a},{b,a,b}}')",
     ] {
         compare_eval(expr, &client).await;
     }
