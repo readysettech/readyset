@@ -246,13 +246,23 @@ impl Operation {
             }
             Self::DropView(name) => state.views.contains_key(name),
             Self::CreateEnum(name, _values) => !state.enum_types.contains_key(name),
-            Self::DropEnum(name) => !state.tables.values().any(|columns| {
-                columns
-                    .iter()
-                    .any(|cs| cs.sql_type == SqlType::Other(name.into()))
-            }),
+            Self::DropEnum(name) => tables_using_type(&state.tables, name).next().is_none(),
         }
     }
+}
+
+/// Returns an iterator that yields names of tables that use the given type.
+fn tables_using_type<'a>(
+    tables: &'a HashMap<String, Vec<ColumnSpec>>,
+    type_name: &'a str,
+) -> impl Iterator<Item = &'a str> {
+    tables.iter().filter_map(move |(name, columns)| {
+        if columns.iter().any(|cs| cs.name == type_name) {
+            Some(name.as_str())
+        } else {
+            None
+        }
+    })
 }
 
 // Generators for Operation:
