@@ -2206,8 +2206,8 @@ mod tests {
             #[test]
             fn null_propagation() {
                 test_nullable("null", "null", None);
-                test_nullable("null", "array[]", None);
-                test_nullable("array[]", "null", None);
+                test_nullable("null", "'[]'", None);
+                test_nullable("'[]'", "null", None);
             }
 
             #[test]
