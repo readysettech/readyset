@@ -1,10 +1,11 @@
 use std::env;
 
-use dataflow_expression::{Expr, LowerContext};
-use nom_sql::{parse_expr, Column, Relation};
-use readyset_data::{DfType, DfValue};
-use readyset_errors::{internal, ReadySetResult};
+use readyset_data::DfValue;
 use tokio_postgres::{Client, NoTls};
+
+use self::common::parse_lower_eval;
+
+mod common;
 
 fn config() -> tokio_postgres::Config {
     let mut config = tokio_postgres::Config::new();
@@ -20,30 +21,6 @@ fn config() -> tokio_postgres::Config {
         .password(env::var("PGPASSWORD").unwrap_or_else(|_| "noria".into()));
     config
 }
-
-#[derive(Debug, Clone, Copy)]
-struct TestLowerContext;
-impl LowerContext for TestLowerContext {
-    fn resolve_column(&self, _col: Column) -> ReadySetResult<(usize, DfType)> {
-        internal!("Column references not allowed")
-    }
-
-    fn resolve_type(&self, _ty: Relation) -> Option<DfType> {
-        None
-    }
-}
-
-fn parse_lower_eval(expr: &str) -> DfValue {
-    let ast = parse_expr(nom_sql::Dialect::PostgreSQL, expr).unwrap();
-    let lowered = Expr::lower(
-        ast,
-        dataflow_expression::Dialect::DEFAULT_POSTGRESQL,
-        TestLowerContext,
-    )
-    .unwrap();
-    lowered.eval::<DfValue>(&[]).unwrap()
-}
-
 async fn postgres_eval(expr: &str, client: &Client) -> DfValue {
     client
         .query_one(&format!("SELECT {expr};"), &[])
@@ -54,7 +31,11 @@ async fn postgres_eval(expr: &str, client: &Client) -> DfValue {
 
 #[track_caller]
 async fn compare_eval(expr: &str, client: &Client) {
-    let our_result = parse_lower_eval(expr);
+    let our_result = parse_lower_eval(
+        expr,
+        nom_sql::Dialect::PostgreSQL,
+        dataflow_expression::Dialect::DEFAULT_POSTGRESQL,
+    );
     let pg_result = postgres_eval(expr, client).await;
     assert_eq!(
         our_result, pg_result,

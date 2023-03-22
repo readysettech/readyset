@@ -1154,6 +1154,7 @@ dependencies = [
  "itertools",
  "lazy_static",
  "mysql-time",
+ "mysql_async",
  "nom-sql",
  "partial-map",
  "proptest",
