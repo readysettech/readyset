@@ -160,6 +160,8 @@ enum Operation {
     DropView(String),
     /// Creates an ENUM type with the given name and values
     CreateEnum(String, Vec<String>),
+    /// Drops an ENUM type with the given name
+    DropEnum(String),
 }
 
 impl Operation {
@@ -244,6 +246,11 @@ impl Operation {
             }
             Self::DropView(name) => state.views.contains_key(name),
             Self::CreateEnum(name, _values) => !state.enum_types.contains_key(name),
+            Self::DropEnum(name) => !state.tables.values().any(|columns| {
+                columns
+                    .iter()
+                    .any(|cs| cs.sql_type == SqlType::Other(name.into()))
+            }),
         }
     }
 }
@@ -398,6 +405,12 @@ prop_compose! {
     }
 }
 
+prop_compose! {
+    fn gen_drop_enum(enum_types: Vec<String>)(name in sample::select(enum_types)) -> Operation {
+        Operation::DropEnum(name)
+    }
+}
+
 /// A definition for a test view. Currently one of:
 ///  - Simple (SELECT * FROM table)
 ///  - Join (SELECT * FROM table_a JOIN table_b ON table_a.id = table_b.id)
@@ -528,6 +541,27 @@ impl TestModel {
             possible_ops.push(delete_strategy);
         }
 
+        // If we have at least one enum type created, and no table is using it, we can drop an enum
+        let unused_enums: Vec<String> = self
+            .enum_types
+            .keys()
+            .filter_map(|name| {
+                if !self.tables.values().any(|columns| {
+                    columns
+                        .iter()
+                        .any(|cs| cs.sql_type == SqlType::Other(name.into()))
+                }) {
+                    Some(name.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        if !unused_enums.is_empty() {
+            let drop_enum_strat = gen_drop_enum(unused_enums).boxed();
+            possible_ops.push(drop_enum_strat);
+        }
+
         // Once generated, we do not shrink individual Operations; all shrinking is done via
         // removing individual operations from the test sequence. Thus, rather than returning a
         // Strategy to generate any of the possible ops from `possible_ops`, it's simpler to
@@ -620,6 +654,9 @@ impl TestModel {
             }
             Operation::CreateEnum(name, values) => {
                 self.enum_types.insert(name.clone(), values.clone());
+            }
+            Operation::DropEnum(name) => {
+                self.enum_types.remove(name);
             }
         }
     }
@@ -993,6 +1030,11 @@ async fn run(ops: Vec<Operation>, next_step_idx: Rc<Cell<usize>>) {
                 let element_list = elements.join(", ");
                 // Quote the type name to prevent clashes with builtin types or reserved keywords
                 let query = format!("CREATE TYPE \"{}\" AS ENUM ({})", name, element_list);
+                rs_conn.simple_query(&query).await.unwrap();
+                pg_conn.simple_query(&query).await.unwrap();
+            }
+            Operation::DropEnum(name) => {
+                let query = format!("DROP TYPE \"{name}\"");
                 rs_conn.simple_query(&query).await.unwrap();
                 pg_conn.simple_query(&query).await.unwrap();
             }
