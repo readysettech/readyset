@@ -492,7 +492,8 @@ impl DfValue {
             // never coerced with `Clone`.
             debug_assert!(self.is_homogenous());
 
-            self.infer_dataflow_type().try_into_known().as_ref() == Some(to_ty)
+            to_ty.is_unknown()
+                || self.infer_dataflow_type().try_into_known().as_ref() == Some(to_ty)
         };
 
         // This lets us avoid repeating this logic in multiple match arms for different int types.
@@ -3780,6 +3781,25 @@ mod tests {
                 let result = DfValue::Int(2).coerce_to(&to_ty, &enum_ty).unwrap();
                 assert_eq!("yellow", result.to_string());
             }
+        }
+
+        #[test]
+        fn int_to_unknown() {
+            assert_eq!(
+                DfValue::from(1u64)
+                    .coerce_to(&DfType::Unknown, &DfType::UnsignedBigInt)
+                    .unwrap(),
+                DfValue::from(1u64)
+            );
+            assert_eq!(
+                DfValue::from(vec![DfValue::from(1u64)])
+                    .coerce_to(
+                        &DfType::Array(Box::new(DfType::Unknown)),
+                        &DfType::Array(Box::new(DfType::UnsignedBigInt))
+                    )
+                    .unwrap(),
+                DfValue::from(vec![DfValue::from(1u64)])
+            );
         }
     }
 }
