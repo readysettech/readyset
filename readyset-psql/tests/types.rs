@@ -244,7 +244,7 @@ mod types {
         use Abc::*;
 
         client
-            .simple_query("CREATE TABLE t (x abc);")
+            .simple_query("CREATE TABLE t (id serial primary key, x abc);")
             .await
             .unwrap();
 
@@ -424,6 +424,25 @@ mod types {
             .unwrap()
             .get::<_, i64>(0);
         assert_eq!(proxied_array_parameter_res, 3);
+
+        client
+            .simple_query("UPDATE t SET x = 'c' WHERE id = 1")
+            .await
+            .unwrap();
+
+        let post_update_res = client
+            .query("SELECT x FROM t ORDER BY x ASC", &[])
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|r| r.get(0))
+            .collect::<Vec<Abc>>();
+        assert_eq!(post_update_res, vec![A, A, C, C]);
+
+        client
+            .simple_query("UPDATE t SET x = 'b' WHERE id = 1")
+            .await
+            .unwrap();
 
         client
             .simple_query("ALTER TYPE abc ADD VALUE 'd'")

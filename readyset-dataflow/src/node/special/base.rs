@@ -492,13 +492,37 @@ fn key_of<'a>(key_cols: &'a [usize], r: &'a TableOperation) -> impl Iterator<Ite
 /// Note that the actual type-specific logic is implemented as a [`DfValue`] method, so as to keep
 /// type logic out of the base node code.
 fn apply_table_op_coercions(op: &mut TableOperation, columns: &[Column]) -> ReadySetResult<()> {
-    if let TableOperation::Insert(vals) = op {
-        for (val, col) in vals.iter_mut().zip(columns) {
+    let coerce_row = |row: &mut Vec<DfValue>| {
+        for (val, col) in row.iter_mut().zip(columns) {
             val.maybe_coerce_for_table_op(col.ty())?;
         }
-    }
+        Ok(())
+    };
 
-    Ok(())
+    let coerce_update = |update: &mut Vec<Modification>| {
+        for (modification, col) in update.iter_mut().zip(columns) {
+            match modification {
+                Modification::Set(val) | Modification::Apply(_, val) => {
+                    val.maybe_coerce_for_table_op(col.ty())?
+                }
+                Modification::None => {}
+            }
+        }
+        Ok(())
+    };
+
+    match op {
+        TableOperation::Insert(row) | TableOperation::DeleteRow { row } => coerce_row(row),
+        TableOperation::InsertOrUpdate { row, update } => {
+            coerce_row(row)?;
+            coerce_update(update)
+        }
+        TableOperation::Update { update, .. } => coerce_update(update),
+        TableOperation::DeleteByKey { .. }
+        | TableOperation::Truncate
+        | TableOperation::SetReplicationOffset(_)
+        | TableOperation::SetSnapshotMode(_) => Ok(()),
+    }
 }
 
 /// A helper to log information about failed table updates without leaking data
