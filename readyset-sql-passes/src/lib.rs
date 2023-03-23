@@ -12,7 +12,7 @@ pub mod anonymize;
 mod count_star_rewrite;
 mod create_table_columns;
 mod detect_problematic_self_joins;
-mod detect_unsupported_placeholders;
+pub mod detect_unsupported_placeholders;
 pub mod expr;
 mod implied_tables;
 mod inline_literals;

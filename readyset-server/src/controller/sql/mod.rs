@@ -536,16 +536,22 @@ impl SqlIncorporator {
         let name = name.unwrap_or_else(|| format!("q_{}", self.num_queries).into());
 
         let mut invalidating_tables = vec![];
-        let mir_query = match stmt.detect_unsupported_placeholders().and_then(|_| {
-            self.select_query_to_mir(
-                name.clone(),
-                &mut stmt,
-                schema_search_path,
-                Some(&mut invalidating_tables),
-                LeafBehavior::Leaf,
-                mig,
-            )
-        }) {
+        let detect_placeholders_config =
+            readyset_sql_passes::detect_unsupported_placeholders::Config {
+                allow_mixed_comparisons: self.mir_converter.config.allow_mixed_comparisons,
+            };
+        let mir_query = match stmt
+            .detect_unsupported_placeholders(detect_placeholders_config)
+            .and_then(|_| {
+                self.select_query_to_mir(
+                    name.clone(),
+                    &mut stmt,
+                    schema_search_path,
+                    Some(&mut invalidating_tables),
+                    LeafBehavior::Leaf,
+                    mig,
+                )
+            }) {
             // Placeholders were supported and we successfully added a query
             Ok(mir_query) => Ok(Some(mir_query)),
             // Placeholder positions were not supported in the query, see if we can reuse an

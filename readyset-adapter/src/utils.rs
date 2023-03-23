@@ -201,7 +201,7 @@ impl<'ast> Visitor<'ast> for BinopsParameterColumnsVisitor<'ast> {
                 op: binop,
             } => self
                 .parameter_cols
-                .push((c, binop.flip_comparison().unwrap_or(*binop))),
+                .push((c, binop.flip_ordering_comparison().unwrap_or(*binop))),
             Expr::In {
                 lhs: box Expr::Column(ref c),
                 rhs: nom_sql::InValue::List(ref exprs),

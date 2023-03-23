@@ -269,14 +269,14 @@ pub enum BinaryOperator {
 
 impl BinaryOperator {
     /// Returns true if this operator represents an ordered comparison
-    pub fn is_comparison(&self) -> bool {
+    pub fn is_ordering_comparison(&self) -> bool {
         use BinaryOperator::*;
         matches!(self, Greater | GreaterOrEqual | Less | LessOrEqual)
     }
 
     /// If this operator is an ordered comparison, invert its meaning. (i.e. Greater becomes
     /// Less)
-    pub fn flip_comparison(self) -> Result<Self, Self> {
+    pub fn flip_ordering_comparison(self) -> Result<Self, Self> {
         use BinaryOperator::*;
         match self {
             Greater => Ok(Less),
