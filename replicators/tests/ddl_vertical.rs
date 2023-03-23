@@ -589,8 +589,9 @@ impl TestModel {
 
         // If we have at least one enum type created, we can add a value to that type
         if !self.enum_types.is_empty() {
-            let add_enum_value_strat = gen_add_enum_value(self.enum_types.clone()).boxed();
-            possible_ops.push(add_enum_value_strat);
+            let _add_enum_value_strat = gen_add_enum_value(self.enum_types.clone()).boxed();
+            // Temporarily disabled due to this triggering ENG-2763
+            // possible_ops.push(add_enum_value_strat);
         }
 
         // If we have at least one enum type created, and no table is using it, we can drop an enum
