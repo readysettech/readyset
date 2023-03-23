@@ -679,6 +679,44 @@ async fn rename_column_then_create_view() {
     shutdown_tx.shutdown().await;
 }
 
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+#[ignore = "ENG-2763 Test causes server panic and hangs due to known bug"]
+async fn alter_enum_after_drop() {
+    readyset_tracing::init_test_logging();
+
+    let (config, _handle, shutdown_tx) = setup().await;
+    let client = connect(config).await;
+
+    client
+        .simple_query("CREATE TYPE et AS ENUM ('a')")
+        .await
+        .unwrap();
+
+    client.simple_query("CREATE TABLE t (e et)").await.unwrap();
+
+    client.simple_query("DROP TABLE t").await.unwrap();
+
+    client
+        .simple_query("ALTER TYPE et ADD VALUE 'b'")
+        .await
+        .unwrap();
+
+    // The rest of the test is not technically needed for triggering the bug, but without it the
+    // test will appear to pass. Creating and querying the table will not cause the test to fail,
+    // but it at least causes the test to hang.
+    client
+        .simple_query("CREATE TABLE t2 (id INT)")
+        .await
+        .unwrap();
+
+    sleep().await;
+
+    client.simple_query("SELECT * FROM t2").await.unwrap();
+
+    shutdown_tx.shutdown().await;
+}
+
 #[allow(dead_code)]
 async fn last_statement_matches(dest: &str, status: &str, client: &Client) -> bool {
     match &client
