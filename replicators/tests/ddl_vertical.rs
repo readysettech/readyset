@@ -162,6 +162,11 @@ enum Operation {
     CreateEnum(String, Vec<String>),
     /// Drops an ENUM type with the given name
     DropEnum(String),
+    /// Adds a value to an existing ENUM type with the given names
+    AddEnumValue {
+        type_name: String,
+        value_name: String,
+    },
 }
 
 impl Operation {
@@ -247,6 +252,13 @@ impl Operation {
             Self::DropView(name) => state.views.contains_key(name),
             Self::CreateEnum(name, _values) => !state.enum_types.contains_key(name),
             Self::DropEnum(name) => tables_using_type(&state.tables, name).next().is_none(),
+            Self::AddEnumValue {
+                type_name,
+                value_name,
+            } => state
+                .enum_types
+                .get(type_name)
+                .map_or(false, |t| !t.contains(value_name)),
         }
     }
 }
@@ -421,6 +433,30 @@ prop_compose! {
     }
 }
 
+fn gen_add_enum_value(
+    enum_types: HashMap<String, Vec<String>>,
+) -> impl Strategy<Value = Operation> {
+    gen_add_enum_value_inner(enum_types.keys().cloned().collect()).prop_filter(
+        "Can't add duplicate value to existing ENUM type",
+        move |op| match op {
+            Operation::AddEnumValue {
+                type_name,
+                value_name,
+            } => !enum_types[type_name].contains(value_name),
+            _ => unreachable!(),
+        },
+    )
+}
+
+prop_compose! {
+    fn gen_add_enum_value_inner(enum_type_names: Vec<String>)
+                               (type_name in sample::select(enum_type_names),
+                                value_name in SQL_NAME_REGEX)
+                               -> Operation {
+        Operation::AddEnumValue { type_name, value_name }
+    }
+}
+
 /// A definition for a test view. Currently one of:
 ///  - Simple (SELECT * FROM table)
 ///  - Join (SELECT * FROM table_a JOIN table_b ON table_a.id = table_b.id)
@@ -551,6 +587,12 @@ impl TestModel {
             possible_ops.push(delete_strategy);
         }
 
+        // If we have at least one enum type created, we can add a value to that type
+        if !self.enum_types.is_empty() {
+            let add_enum_value_strat = gen_add_enum_value(self.enum_types.clone()).boxed();
+            possible_ops.push(add_enum_value_strat);
+        }
+
         // If we have at least one enum type created, and no table is using it, we can drop an enum
         let unused_enums: Vec<String> = self
             .enum_types
@@ -667,6 +709,15 @@ impl TestModel {
             }
             Operation::DropEnum(name) => {
                 self.enum_types.remove(name);
+            }
+            Operation::AddEnumValue {
+                type_name,
+                value_name,
+            } => {
+                self.enum_types
+                    .get_mut(type_name)
+                    .unwrap()
+                    .push(value_name.clone());
             }
         }
     }
@@ -1048,6 +1099,15 @@ async fn run(ops: Vec<Operation>, next_step_idx: Rc<Cell<usize>>) {
                 rs_conn.simple_query(&query).await.unwrap();
                 pg_conn.simple_query(&query).await.unwrap();
             }
+            Operation::AddEnumValue {
+                type_name,
+                value_name,
+            } => {
+                let query = format!("ALTER TYPE \"{type_name}\" ADD VALUE '{value_name}'");
+                rs_conn.simple_query(&query).await.unwrap();
+                pg_conn.simple_query(&query).await.unwrap();
+                recreate_caches_using_type(type_name, &runtime_state.tables, &rs_conn).await;
+            }
         }
 
         // Note that if we were verifying results of any operations directly, it would be better to
@@ -1111,6 +1171,23 @@ async fn run(ops: Vec<Operation>, next_step_idx: Rc<Cell<usize>>) {
     }
 
     shutdown_tx.shutdown().await;
+}
+
+async fn recreate_caches_using_type(
+    type_name: &str,
+    tables: &HashMap<String, Vec<ColumnSpec>>,
+    rs_conn: &Client,
+) {
+    for table in tables_using_type(tables, type_name) {
+        let create_cache = format!("CREATE CACHE ALWAYS FROM SELECT * FROM \"{table}\"");
+
+        eventually!(run_test: {
+            let result = rs_conn.simple_query(&create_cache).await;
+            AssertUnwindSafe(move || result)
+        }, then_assert: |result| {
+            result().unwrap()
+        });
+    }
 }
 
 #[test]
