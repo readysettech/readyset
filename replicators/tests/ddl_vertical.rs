@@ -1211,6 +1211,7 @@ fn run_cases() {
     };
     proptest!(config, |(steps in model)| {
         prop_assume!(preconditions_hold(&steps));
+        next_step_idx.set(0);
         let rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
