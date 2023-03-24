@@ -421,17 +421,21 @@ impl Expr {
                 })
             }
             AstExpr::Call(FunctionExpr::Substring { string, pos, len }) => {
-                let args = iter::once(string)
-                    .chain(pos)
-                    .chain(len)
-                    .map(|arg| Self::lower(*arg, dialect, context.clone()))
-                    .collect::<Result<Vec<_>, _>>()?;
-                let (func, ty) = BuiltinFunction::from_name_and_args("substring", args, dialect)?;
+                let string = Self::lower(*string, dialect, context.clone())?;
+                let ty = if string.ty().is_any_text() {
+                    string.ty().clone()
+                } else {
+                    DfType::DEFAULT_TEXT
+                };
+                let func = Box::new(BuiltinFunction::Substring(
+                    string,
+                    pos.map(|expr| Self::lower(*expr, dialect, context.clone()))
+                        .transpose()?,
+                    len.map(|expr| Self::lower(*expr, dialect, context))
+                        .transpose()?,
+                ));
 
-                Ok(Self::Call {
-                    func: Box::new(func),
-                    ty,
-                })
+                Ok(Self::Call { func, ty })
             }
             AstExpr::Call(call) => internal!(
                 "Unexpected (aggregate?) call node in project expression: {:?}",

@@ -55,6 +55,7 @@ pub enum FunctionExpr {
     ///
     /// `SUBSTR[ING](string FROM pos FOR len)`
     /// `SUBSTR[ING](string FROM pos)`
+    /// `SUBSTR[ING](string FOR len)`
     /// `SUBSTR[ING](string, pos)`
     /// `SUBSTR[ING](string, pos, len)`
     Substring {

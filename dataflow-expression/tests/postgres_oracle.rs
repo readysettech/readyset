@@ -80,6 +80,7 @@ async fn example_exprs_eval_same_as_postgres() {
         "'a'::abc = 'a'",
         "'a'::abc < all('{b,c}')",
         "'c'::cba < all('{{a,b,a},{b,a,b}}')",
+        "substring('abcdef' for 3)",
     ] {
         compare_eval(expr, &client).await;
     }
