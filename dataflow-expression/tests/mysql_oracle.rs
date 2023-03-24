@@ -108,6 +108,9 @@ async fn example_exprs_eval_same_as_mysql() {
         "convert_tz('asdfadsf','asdf','MET')",
         "convert_tz('asdfadsf','asdf',null)",
         // "convert_tz('2004-01-01 12:00:00','+00:00','+10:00')", TODO(ENG-2761)
+        "dayofweek('2022-03-24')",
+        "dayofweek('2022-03-24 12:00:00')",
+        "dayofweek(null)",
         "json_overlaps(null, null)",
         "json_overlaps(null, '[]')",
         "json_overlaps('[]', null)",

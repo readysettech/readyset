@@ -190,7 +190,7 @@ impl BuiltinFunction {
             }
             "dayofweek" => {
                 (
-                    Self::DayOfWeek(next_arg()?),
+                    Self::DayOfWeek(try_cast(next_arg()?, DfType::Date)),
                     DfType::Int, // Day of week is always an int
                 )
             }
