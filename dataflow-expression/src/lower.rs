@@ -203,7 +203,7 @@ impl BuiltinFunction {
             }
             "month" => {
                 (
-                    Self::Month(next_arg()?),
+                    Self::Month(try_cast(next_arg()?, DfType::Date)),
                     DfType::Int, // Month is always an int
                 )
             }

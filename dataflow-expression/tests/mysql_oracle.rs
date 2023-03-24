@@ -111,6 +111,8 @@ async fn example_exprs_eval_same_as_mysql() {
         "dayofweek('2022-03-24')",
         "dayofweek('2022-03-24 12:00:00')",
         "dayofweek(null)",
+        "month('2022-03-24')",
+        "month(null)",
         "json_overlaps(null, null)",
         "json_overlaps(null, '[]')",
         "json_overlaps('[]', null)",

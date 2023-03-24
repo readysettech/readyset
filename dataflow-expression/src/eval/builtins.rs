@@ -378,13 +378,9 @@ impl BuiltinFunction {
                     Ok(param1)
                 }
             }
-            BuiltinFunction::Month(arg) => {
-                let param = arg.eval(record)?;
-                let param_cast = try_cast_or_none!(param, &DfType::Date, arg.ty());
-                Ok(DfValue::UnsignedInt(
-                    month(&(NaiveDate::try_from(non_null!(&param_cast))?)) as u64,
-                ))
-            }
+            BuiltinFunction::Month(arg) => Ok(DfValue::UnsignedInt(month(
+                &(NaiveDate::try_from(non_null!(&arg.eval(record)?))?),
+            ) as u64)),
             BuiltinFunction::Timediff(arg1, arg2) => {
                 let param1 = arg1.eval(record)?;
                 let param2 = arg2.eval(record)?;
