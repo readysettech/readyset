@@ -690,6 +690,79 @@ mod types {
 
     #[tokio::test(flavor = "multi_thread")]
     #[serial_test::serial]
+    async fn enum_as_pk() {
+        readyset_tracing::init_test_logging();
+        let (config, _handle, shutdown_tx) = setup().await;
+        let client = connect(config.clone()).await;
+
+        client
+            .simple_query("CREATE TYPE abc AS ENUM ('a', 'b', 'c');")
+            .await
+            .unwrap();
+
+        #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, ToSql, FromSql)]
+        #[postgres(name = "abc")]
+        enum Abc {
+            #[postgres(name = "a")]
+            A,
+            #[postgres(name = "b")]
+            B,
+            #[postgres(name = "c")]
+            C,
+        }
+        use Abc::*;
+
+        client
+            .simple_query("CREATE TABLE t (id abc primary key, x abc);")
+            .await
+            .unwrap();
+
+        client
+            .simple_query("INSERT INTO t (id, x) VALUES ('a', 'a'), ('b', 'c')")
+            .await
+            .unwrap();
+
+        sleep().await;
+
+        let res = client
+            .query_one("SELECT id, x FROM t WHERE id = $1", &[&B])
+            .await
+            .unwrap();
+        assert_eq!(res.get::<_, Abc>(0), B);
+        assert_eq!(res.get::<_, Abc>(1), C);
+
+        client
+            .simple_query("UPDATE t SET x = 'b' WHERE id = 'b'")
+            .await
+            .unwrap();
+
+        sleep().await;
+
+        let res = client
+            .query_one("SELECT id, x FROM t WHERE id = $1", &[&B])
+            .await
+            .unwrap();
+        assert_eq!(res.get::<_, Abc>(0), B);
+        assert_eq!(res.get::<_, Abc>(1), B);
+
+        client
+            .simple_query("DELETE FROM t WHERE id = 'b'")
+            .await
+            .unwrap();
+
+        sleep().await;
+
+        let res = client
+            .query("SELECT id, x FROM t WHERE id = $1", &[&B])
+            .await
+            .unwrap();
+        assert!(res.is_empty());
+
+        shutdown_tx.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[serial_test::serial]
     async fn alter_enum_complex_variant_changes() {
         readyset_tracing::init_test_logging();
         let (config, _handle, shutdown_tx) = setup().await;

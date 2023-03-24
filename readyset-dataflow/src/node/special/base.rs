@@ -229,7 +229,7 @@ impl Base {
     ) -> ReadySetResult<BaseWrite> {
         trace!(node = %our_index, base_ops = ?ops);
         for op in ops.iter_mut() {
-            apply_table_op_coercions(op, columns)?;
+            apply_table_op_coercions(op, columns, self.primary_key())?;
         }
 
         let db = match state.get(our_index) {
@@ -491,7 +491,11 @@ fn key_of<'a>(key_cols: &'a [usize], r: &'a TableOperation) -> impl Iterator<Ite
 ///
 /// Note that the actual type-specific logic is implemented as a [`DfValue`] method, so as to keep
 /// type logic out of the base node code.
-fn apply_table_op_coercions(op: &mut TableOperation, columns: &[Column]) -> ReadySetResult<()> {
+fn apply_table_op_coercions(
+    op: &mut TableOperation,
+    columns: &[Column],
+    primary_key: Option<&[usize]>,
+) -> ReadySetResult<()> {
     let coerce_row = |row: &mut Vec<DfValue>| {
         for (val, col) in row.iter_mut().zip(columns) {
             val.maybe_coerce_for_table_op(col.ty())?;
@@ -511,15 +515,30 @@ fn apply_table_op_coercions(op: &mut TableOperation, columns: &[Column]) -> Read
         Ok(())
     };
 
+    let coerce_key = |key: &mut Vec<DfValue>| {
+        if let Some(pk) = primary_key {
+            for (val, col_idx) in key.iter_mut().zip(pk) {
+                let col = columns
+                    .get(*col_idx)
+                    .ok_or_else(|| internal_err!("Key column index out of bounds"))?;
+                val.maybe_coerce_for_table_op(col.ty())?;
+            }
+        }
+        Ok(())
+    };
+
     match op {
         TableOperation::Insert(row) | TableOperation::DeleteRow { row } => coerce_row(row),
         TableOperation::InsertOrUpdate { row, update } => {
             coerce_row(row)?;
             coerce_update(update)
         }
-        TableOperation::Update { update, .. } => coerce_update(update),
-        TableOperation::DeleteByKey { .. }
-        | TableOperation::Truncate
+        TableOperation::Update { update, key } => {
+            coerce_update(update)?;
+            coerce_key(key)
+        }
+        TableOperation::DeleteByKey { key } => coerce_key(key),
+        TableOperation::Truncate
         | TableOperation::SetReplicationOffset(_)
         | TableOperation::SetSnapshotMode(_) => Ok(()),
     }
@@ -739,7 +758,11 @@ mod tests {
                     .unwrap()
                     .process_ops(
                         local,
-                        &[],
+                        &[
+                            Column::new("a".into(), DfType::Int, None),
+                            Column::new("a".into(), DfType::DEFAULT_TEXT, None),
+                            Column::new("a".into(), DfType::Int, None),
+                        ],
                         u,
                         &states,
                         SnapshotMode::SnapshotModeDisabled,
@@ -957,7 +980,7 @@ mod tests {
             assert_eq!(
                 b.process_ops(
                     ni,
-                    &[],
+                    &[Column::new("a".into(), DfType::Int, None)],
                     vec![
                         TableOperation::Update {
                             key: vec![2.into()],
