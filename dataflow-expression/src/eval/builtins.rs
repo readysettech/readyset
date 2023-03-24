@@ -356,28 +356,11 @@ impl BuiltinFunction {
         D: Borrow<DfValue>,
     {
         match self {
-            BuiltinFunction::ConvertTZ {
-                args: [arg1, arg2, arg3],
-                subsecond_digits,
-            } => {
-                let param1 = arg1.eval(record)?;
-                let param2 = arg2.eval(record)?;
-                let param3 = arg3.eval(record)?;
-
-                let param1_cast = try_cast_or_none!(
-                    param1,
-                    &DfType::Timestamp {
-                        subsecond_digits: *subsecond_digits
-                    },
-                    arg1.ty()
-                );
-                let param2_cast = try_cast_or_none!(param2, &DfType::DEFAULT_TEXT, arg2.ty());
-                let param3_cast = try_cast_or_none!(param3, &DfType::DEFAULT_TEXT, arg3.ty());
-
+            BuiltinFunction::ConvertTZ([arg1, arg2, arg3]) => {
                 match convert_tz(
-                    &(NaiveDateTime::try_from(&param1_cast))?,
-                    <&str>::try_from(&param2_cast)?,
-                    <&str>::try_from(&param3_cast)?,
+                    &(&non_null!(arg1.eval(record)?)).try_into()?,
+                    (&non_null!(arg2.eval(record)?)).try_into()?,
+                    (&non_null!(arg3.eval(record)?)).try_into()?,
                 ) {
                     Ok(v) => Ok(DfValue::TimestampTz(v.into())),
                     Err(_) => Ok(DfValue::None),

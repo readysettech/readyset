@@ -32,5 +32,10 @@ pub fn parse_lower_eval(
 ) -> DfValue {
     let ast = parse_expr(parser_dialect, expr).unwrap();
     let lowered = Expr::lower(ast, expr_dialect, TestLowerContext).unwrap();
-    lowered.eval::<DfValue>(&[]).unwrap()
+    match lowered.eval::<DfValue>(&[]) {
+        Ok(res) => res,
+        Err(e) => {
+            panic!("Error evaluating `{expr}`: {e}")
+        }
+    }
 }

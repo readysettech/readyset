@@ -156,6 +156,16 @@ impl BuiltinFunction {
         // TODO: Type-check arguments.
         let mut args = args.into_iter();
         let mut next_arg = || args.next().ok_or_else(arity_error);
+        let cast = |expr, ty| Expr::Cast {
+            expr: Box::new(expr),
+            ty,
+            null_on_failure: false,
+        };
+        let try_cast = |expr, ty| Expr::Cast {
+            expr: Box::new(expr),
+            ty,
+            null_on_failure: true,
+        };
 
         let result = match name {
             "convert_tz" => {
@@ -163,12 +173,18 @@ impl BuiltinFunction {
                 let input = next_arg()?;
                 let ty = input.ty().clone();
                 (
-                    Self::ConvertTZ {
-                        args: [input, next_arg()?, next_arg()?],
-                        subsecond_digits: ty
-                            .subsecond_digits()
-                            .unwrap_or_else(|| dialect.default_subsecond_digits()),
-                    },
+                    Self::ConvertTZ([
+                        try_cast(
+                            input,
+                            DfType::Timestamp {
+                                subsecond_digits: ty
+                                    .subsecond_digits()
+                                    .unwrap_or_else(|| dialect.default_subsecond_digits()),
+                            },
+                        ),
+                        cast(next_arg()?, DfType::DEFAULT_TEXT),
+                        cast(next_arg()?, DfType::DEFAULT_TEXT),
+                    ]),
                     ty,
                 )
             }

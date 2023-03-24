@@ -104,6 +104,10 @@ async fn example_exprs_eval_same_as_mysql() {
         "1 like 2",
         "1 = '1'",
         "'1' = 1",
+        "convert_tz('2004-01-01 12:00:00','GMT','MET')",
+        "convert_tz('asdfadsf','asdf','MET')",
+        "convert_tz('asdfadsf','asdf',null)",
+        // "convert_tz('2004-01-01 12:00:00','+00:00','+10:00')", TODO(ENG-2761)
         "json_overlaps(null, null)",
         "json_overlaps(null, '[]')",
         "json_overlaps('[]', null)",
