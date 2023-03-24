@@ -885,22 +885,47 @@ mod tests {
     use lazy_static::lazy_static;
     use nom_sql::parse_expr;
     use nom_sql::Dialect::*;
-    use readyset_errors::internal;
+    use readyset_errors::{internal, internal_err};
     use readyset_util::arbitrary::arbitrary_timestamp_naive_date_time;
     use test_strategy::proptest;
 
     use super::*;
     use crate::eval::tests::{eval_expr, try_eval_expr};
     use crate::lower::tests::resolve_columns;
-    use crate::utils::{make_call, make_column, make_literal, strings_to_array_expr};
-    use crate::Dialect;
+    use crate::utils::strings_to_array_expr;
+    use crate::{Dialect, LowerContext};
+
+    /// Resolves columns with names like `c0`, `c1`, `c2` to the corresponding number, with type
+    /// Unknown
+    fn numbered_columns() -> impl LowerContext {
+        resolve_columns(|c| {
+            if c.table.is_some() {
+                internal!("Qualified columns not allowed")
+            }
+            let Some(number_s) = c.name.strip_prefix('c') else {
+                internal!("Column name must start with 'c'")
+            };
+
+            let column_idx = number_s
+                .parse()
+                .map_err(|e| internal_err!("Could not parse column index: {e}"))?;
+
+            Ok((column_idx, DfType::Unknown))
+        })
+    }
+
+    fn parse_and_lower(expr: &str, dialect: nom_sql::Dialect) -> Expr {
+        let ast = parse_expr(dialect, expr).unwrap();
+        let expr_dialect = match dialect {
+            PostgreSQL => crate::Dialect::DEFAULT_POSTGRESQL,
+            MySQL => crate::Dialect::DEFAULT_MYSQL,
+        };
+        Expr::lower(ast, expr_dialect, numbered_columns()).unwrap()
+    }
 
     #[test]
     fn eval_call_convert_tz() {
-        let expr = make_call(BuiltinFunction::ConvertTZ {
-            args: [make_column(0), make_column(1), make_column(2)],
-            subsecond_digits: Dialect::DEFAULT_MYSQL.default_subsecond_digits(),
-        });
+        let expr = parse_and_lower("convert_tz(c0, c1, c2)", MySQL);
         let datetime = NaiveDateTime::new(
             NaiveDate::from_ymd(2003, 10, 12),
             NaiveTime::from_hms(5, 13, 33),
@@ -972,7 +997,7 @@ mod tests {
 
     #[test]
     fn eval_call_day_of_week() {
-        let expr = make_call(BuiltinFunction::DayOfWeek(make_column(0)));
+        let expr = parse_and_lower("dayofweek(c0)", MySQL);
         let expected = DfValue::Int(2);
 
         let date = NaiveDate::from_ymd(2021, 3, 22); // Monday
@@ -1000,7 +1025,7 @@ mod tests {
 
     #[test]
     fn eval_call_if_null() {
-        let expr = make_call(BuiltinFunction::IfNull(make_column(0), make_column(1)));
+        let expr = parse_and_lower("ifnull(c0, c1)", MySQL);
         let value = DfValue::Int(2);
 
         assert_eq!(
@@ -1012,22 +1037,16 @@ mod tests {
             value
         );
 
-        let expr2 = make_call(BuiltinFunction::IfNull(
-            make_literal(DfValue::None),
-            make_column(0),
-        ));
+        let expr2 = parse_and_lower("ifnull(null, c0)", MySQL);
         assert_eq!(expr2.eval::<DfValue>(&[2.into()]).unwrap(), value);
 
-        let expr3 = make_call(BuiltinFunction::IfNull(
-            make_column(0),
-            make_literal(DfValue::Int(2)),
-        ));
+        let expr3 = parse_and_lower("ifnull(c0, 2)", MySQL);
         assert_eq!(expr3.eval(&[DfValue::None]).unwrap(), value);
     }
 
     #[test]
     fn eval_call_month() {
-        let expr = make_call(BuiltinFunction::Month(make_column(0)));
+        let expr = parse_and_lower("month(c0)", MySQL);
         let datetime = NaiveDateTime::new(
             NaiveDate::from_ymd(2003, 10, 12),
             NaiveTime::from_hms(5, 13, 33),
@@ -1060,7 +1079,7 @@ mod tests {
 
     #[test]
     fn eval_call_timediff() {
-        let expr = make_call(BuiltinFunction::Timediff(make_column(0), make_column(1)));
+        let expr = parse_and_lower("timediff(c0, c1)", MySQL);
         let param1 = NaiveDateTime::new(
             NaiveDate::from_ymd(2003, 10, 12),
             NaiveTime::from_hms(5, 13, 33),
@@ -1183,7 +1202,7 @@ mod tests {
 
     #[test]
     fn eval_call_addtime() {
-        let expr = make_call(BuiltinFunction::Addtime(make_column(0), make_column(1)));
+        let expr = parse_and_lower("addtime(c0, c1)", MySQL);
         let param1 = NaiveDateTime::new(
             NaiveDate::from_ymd(2003, 10, 12),
             NaiveTime::from_hms(5, 13, 33),
@@ -1323,7 +1342,7 @@ mod tests {
 
     #[test]
     fn eval_call_round() {
-        let expr = make_call(BuiltinFunction::Round(make_column(0), make_column(1)));
+        let expr = parse_and_lower("round(c0, c1)", MySQL);
         let number: f64 = 4.12345;
         let precision = 3;
         let param1 = DfValue::try_from(number).unwrap();
@@ -1342,7 +1361,7 @@ mod tests {
 
     #[test]
     fn eval_call_round_with_negative_precision() {
-        let expr = make_call(BuiltinFunction::Round(make_column(0), make_column(1)));
+        let expr = parse_and_lower("round(c0, c1)", MySQL);
         let number: f64 = 52.12345;
         let precision = -1;
         let param1 = DfValue::try_from(number).unwrap();
@@ -1360,7 +1379,7 @@ mod tests {
 
     #[test]
     fn eval_call_round_with_float_precision() {
-        let expr = make_call(BuiltinFunction::Round(make_column(0), make_column(1)));
+        let expr = parse_and_lower("round(c0, c1)", MySQL);
         let number: f32 = 52.12345;
         let precision = -1.0_f64;
         let param1 = DfValue::try_from(number).unwrap();
@@ -1386,7 +1405,7 @@ mod tests {
     // 1 row in set, 2 warnings (0.00 sec)
     #[test]
     fn eval_call_round_with_banana() {
-        let expr = make_call(BuiltinFunction::Round(make_column(0), make_column(1)));
+        let expr = parse_and_lower("round(c0, c1)", MySQL);
         let number: f32 = 52.12345;
         let precision = "banana";
         let param1 = DfValue::try_from(number).unwrap();
@@ -1404,7 +1423,7 @@ mod tests {
 
     #[test]
     fn eval_call_round_with_decimal() {
-        let expr = make_call(BuiltinFunction::Round(make_column(0), make_column(1)));
+        let expr = parse_and_lower("round(c0, c1)", MySQL);
         assert_eq!(
             expr.eval::<DfValue>(&[
                 DfValue::from(Decimal::from_f64(52.123).unwrap()),
@@ -1435,7 +1454,7 @@ mod tests {
 
     #[test]
     fn eval_call_round_with_strings() {
-        let expr = make_call(BuiltinFunction::Round(make_column(0), make_column(1)));
+        let expr = parse_and_lower("round(c0, c1)", MySQL);
         assert_eq!(
             expr.eval::<DfValue>(&[DfValue::from("52.123"), DfValue::from(1)])
                 .unwrap(),
@@ -1467,7 +1486,7 @@ mod tests {
             (r#"{ "hello": "world", "abc": 123 }"#, "object"),
         ];
 
-        let expr = make_call(BuiltinFunction::JsonTypeof(make_column(0)));
+        let expr = parse_and_lower("json_typeof(c0)", PostgreSQL);
 
         for (json, expected_type) in examples {
             let json_type = expr.eval::<DfValue>(&[json.into()]).unwrap();
@@ -1479,7 +1498,7 @@ mod tests {
 
     #[test]
     fn month_null() {
-        let expr = make_call(BuiltinFunction::Month(make_column(0)));
+        let expr = parse_and_lower("month(c0)", MySQL);
         assert_eq!(
             expr.eval::<DfValue>(&[DfValue::None]).unwrap(),
             DfValue::None
@@ -1520,19 +1539,7 @@ mod tests {
 
     #[test]
     fn coalesce() {
-        let expr = Expr::Call {
-            func: Box::new(BuiltinFunction::Coalesce(
-                Expr::Column {
-                    index: 0,
-                    ty: DfType::Unknown,
-                },
-                vec![Expr::Literal {
-                    val: 1.into(),
-                    ty: DfType::Int,
-                }],
-            )),
-            ty: DfType::Unknown,
-        };
+        let expr = parse_and_lower("coalesce(c0, 1)", PostgreSQL);
         let call_with = |val: DfValue| expr.eval(&[val]);
 
         assert_eq!(call_with(DfValue::None).unwrap(), 1.into());
@@ -1541,25 +1548,7 @@ mod tests {
 
     #[test]
     fn coalesce_more_args() {
-        let expr = Expr::Call {
-            func: Box::new(BuiltinFunction::Coalesce(
-                Expr::Column {
-                    index: 0,
-                    ty: DfType::Unknown,
-                },
-                vec![
-                    Expr::Column {
-                        index: 1,
-                        ty: DfType::Unknown,
-                    },
-                    Expr::Literal {
-                        val: 1.into(),
-                        ty: DfType::Int,
-                    },
-                ],
-            )),
-            ty: DfType::Unknown,
-        };
+        let expr = parse_and_lower("coalesce(c0, c1, 1)", PostgreSQL);
         let call_with = |val1: DfValue, val2: DfValue| expr.eval(&[val1, val2]);
 
         assert_eq!(call_with(DfValue::None, DfValue::None).unwrap(), 1.into());
@@ -1573,25 +1562,7 @@ mod tests {
 
     #[test]
     fn concat() {
-        let expr = Expr::Call {
-            func: Box::new(BuiltinFunction::Concat(
-                Expr::Literal {
-                    val: "My".into(),
-                    ty: DfType::DEFAULT_TEXT,
-                },
-                vec![
-                    Expr::Literal {
-                        val: "S".into(),
-                        ty: DfType::DEFAULT_TEXT,
-                    },
-                    Expr::Literal {
-                        val: "QL".into(),
-                        ty: DfType::DEFAULT_TEXT,
-                    },
-                ],
-            )),
-            ty: DfType::DEFAULT_TEXT,
-        };
+        let expr = parse_and_lower("concat('My', 'S', 'QL')", MySQL);
 
         let res = expr.eval::<DfValue>(&[]).unwrap();
         assert_eq!(res, "MySQL".into());
@@ -1599,25 +1570,7 @@ mod tests {
 
     #[test]
     fn concat_with_nulls() {
-        let expr = Expr::Call {
-            func: Box::new(BuiltinFunction::Concat(
-                Expr::Literal {
-                    val: "My".into(),
-                    ty: DfType::DEFAULT_TEXT,
-                },
-                vec![
-                    Expr::Literal {
-                        val: DfValue::None,
-                        ty: DfType::DEFAULT_TEXT,
-                    },
-                    Expr::Literal {
-                        val: "QL".into(),
-                        ty: DfType::DEFAULT_TEXT,
-                    },
-                ],
-            )),
-            ty: DfType::DEFAULT_TEXT,
-        };
+        let expr = parse_and_lower("concat('My', null, 'QL')", MySQL);
 
         let res = expr.eval::<DfValue>(&[]).unwrap();
         assert_eq!(res, DfValue::None);
@@ -1625,23 +1578,7 @@ mod tests {
 
     #[test]
     fn substring_with_from_and_for() {
-        let expr = Expr::Call {
-            func: Box::new(BuiltinFunction::Substring(
-                Expr::Literal {
-                    val: "abcdef".into(),
-                    ty: DfType::DEFAULT_TEXT,
-                },
-                Some(Expr::Column {
-                    index: 0,
-                    ty: DfType::Int,
-                }),
-                Some(Expr::Column {
-                    index: 1,
-                    ty: DfType::Int,
-                }),
-            )),
-            ty: DfType::DEFAULT_TEXT,
-        };
+        let expr = parse_and_lower("substring('abcdef', c0, c1)", MySQL);
         let call_with =
             |from: i64, len: i64| expr.eval::<DfValue>(&[from.into(), len.into()]).unwrap();
 
@@ -1658,63 +1595,21 @@ mod tests {
 
     #[test]
     fn substring_multibyte() {
-        let expr = Expr::Call {
-            func: Box::new(BuiltinFunction::Substring(
-                Expr::Literal {
-                    val: "é".into(),
-                    ty: DfType::DEFAULT_TEXT,
-                },
-                Some(Expr::Literal {
-                    val: 1.into(),
-                    ty: DfType::Int,
-                }),
-                Some(Expr::Literal {
-                    val: 1.into(),
-                    ty: DfType::Int,
-                }),
-            )),
-            ty: DfType::DEFAULT_TEXT,
-        };
+        let expr = parse_and_lower("substring('é' from 1 for 1)", PostgreSQL);
         let res = expr.eval::<DfValue>(&[]).unwrap();
         assert_eq!(res, "é".into());
     }
 
     #[test]
     fn substring_with_from() {
-        let expr = Expr::Call {
-            func: Box::new(BuiltinFunction::Substring(
-                Expr::Literal {
-                    val: "abcdef".into(),
-                    ty: DfType::DEFAULT_TEXT,
-                },
-                Some(Expr::Column {
-                    index: 0,
-                    ty: DfType::Int,
-                }),
-                None,
-            )),
-            ty: DfType::DEFAULT_TEXT,
-        };
+        let expr = parse_and_lower("substring('abcdef' from c0)", PostgreSQL);
         let res = expr.eval::<DfValue>(&[2.into()]).unwrap();
         assert_eq!(res, "bcdef".into());
     }
 
     #[test]
     fn substring_with_for() {
-        let expr = Expr::Call {
-            func: Box::new(BuiltinFunction::Substring(
-                Expr::Literal {
-                    val: "abcdef".into(),
-                    ty: DfType::DEFAULT_TEXT,
-                },
-                None,
-                Some(Expr::Column {
-                    index: 0,
-                    ty: DfType::Int,
-                }),
-            )),
-            ty: DfType::DEFAULT_TEXT,
-        };
+        let expr = parse_and_lower("substring('abcdef' for c0)", PostgreSQL);
         let res = expr.eval::<DfValue>(&[3.into()]).unwrap();
         assert_eq!(res, "abc".into());
     }
