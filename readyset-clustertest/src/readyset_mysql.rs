@@ -1142,9 +1142,15 @@ async fn end_to_end_with_restarts() {
         .await
         .unwrap();
 
+    adapter
+        .query_drop(r"CREATE CACHE FROM SELECT * FROM t1")
+        .await
+        .unwrap();
+
     assert!(
-        query_until_expected(
+        query_until_expected_from_noria(
             &mut adapter,
+            deployment.metrics(),
             QueryExecution::PrepareExecute("SELECT * FROM t1", ()),
             &EventuallyConsistentResults::empty_or(&[(1, 4)]),
             PROPAGATION_DELAY_TIMEOUT,
@@ -1478,11 +1484,15 @@ async fn post_deployment_permissions_lock_table() {
     sleep(Duration::from_secs(20)).await;
 
     let mut adapter = deployment.first_adapter().await;
+    adapter
+        .query_drop(r"CREATE CACHE FROM SELECT * FROM t1 WHERE uid = ?")
+        .await
+        .unwrap();
     assert!(
         query_until_expected_from_noria(
             &mut adapter,
             deployment.metrics(),
-            QueryExecution::PrepareExecute(r"SELECT * FROM t1 where uid = ?", (2,)),
+            QueryExecution::PrepareExecute(r"SELECT * FROM t1 WHERE uid = ?", (2,)),
             &EventuallyConsistentResults::empty_or(&[(2, 5)]),
             Duration::from_secs(20),
         )
