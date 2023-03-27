@@ -681,7 +681,6 @@ async fn rename_column_then_create_view() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
-#[ignore = "ENG-2763 Test causes server panic and hangs due to known bug"]
 async fn alter_enum_after_drop() {
     readyset_tracing::init_test_logging();
 

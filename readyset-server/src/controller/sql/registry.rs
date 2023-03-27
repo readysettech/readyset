@@ -512,6 +512,10 @@ impl ExprRegistry {
                 self.expressions.remove(dependency_id);
             }
         }
+        for deps in self.custom_type_dependencies.values_mut() {
+            deps.remove(&query_id);
+        }
+
         // If we have only removed a reused cache, there is nothing else to clean up because the
         // expression does not exist in the graph.
         if removed_reused_cache.any(|name| expr_aliases.contains(&name)) {
