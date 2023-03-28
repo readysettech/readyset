@@ -14,6 +14,7 @@ port_scanner = "0.1.5"
 rand = "0.8.3"
 url = "2.2.2"
 mysql_async = { workspace = true }
+tokio-postgres = { workspace = true }
 envy = "0.4"
 serde = { version = "1.0.8", features = ["derive"] }
 hyper = "0.14.10"
@@ -46,4 +47,5 @@ harness = false
 
 [features]
 slow_bench = []
+postgres = []
 failure_injection = ["readyset-client/failure_injection"]

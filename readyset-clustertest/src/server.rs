@@ -267,6 +267,10 @@ impl AdapterBuilder {
         self.push_arg("--standalone")
     }
 
+    pub fn cleanup(self) -> Self {
+        self.push_arg("--cleanup")
+    }
+
     pub fn async_migrations(self, migration_task_interval: u64) -> Self {
         self.push_arg("--query-caching=async").push_arg_kv(
             "--migration-task-interval",

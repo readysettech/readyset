@@ -200,10 +200,12 @@
 
 mod server;
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "postgres")))]
 mod readyset;
-#[cfg(test)]
+#[cfg(all(test, not(feature = "postgres")))]
 mod readyset_mysql;
+#[cfg(all(test, feature = "postgres"))]
+mod readyset_postgres;
 #[cfg(test)]
 mod utils;
 
@@ -228,6 +230,7 @@ use readyset_errors::ReadySetResult;
 use serde::Deserialize;
 use server::{AdapterBuilder, ProcessHandle, ReadysetServerBuilder};
 use tokio::time::sleep;
+use tokio_postgres::NoTls;
 use tracing::{debug, warn};
 use url::Url;
 
@@ -250,10 +253,16 @@ struct Env {
     mysql_port: String,
     #[serde(default = "default_postgresql_port")]
     postgresql_port: String,
+    #[serde(default = "default_database_user")]
+    database_user: String,
     #[serde(default = "default_root_password")]
     root_password: String,
     #[serde(default = "default_database_type")]
     database_type: String,
+}
+
+fn default_database_user() -> String {
+    "root".to_string()
 }
 
 fn default_authority_address() -> String {
@@ -386,6 +395,8 @@ pub struct DeploymentBuilder {
     authority: AuthorityType,
     /// The address of the authority.
     authority_address: String,
+    /// The user of the upstream db.
+    upstream_user: String,
     /// The host of the upstream db.
     host: String,
     /// The port of the upstream db.
@@ -426,6 +437,9 @@ pub struct DeploymentBuilder {
     database_type: DatabaseType,
     /// If true, run the adapter in standalone mode, using the default [`ServerStartParams`]
     standalone: bool,
+    /// If true, runs the adapter in cleanup mode, which cleans up deployment related assets for
+    /// the given deployment name.
+    cleanup: bool,
 }
 
 pub enum FailpointDestination {
@@ -452,10 +466,18 @@ impl DeploymentBuilder {
 
         // Depending on what type of upstream we have, use the mysql or posgresql host/ports.
         let database_type = env.database_type;
-        let (database_type, host, port) = match database_type {
-            d if d == *"mysql" => (DatabaseType::MySQL, env.mysql_host, env.mysql_port),
+        let (database_type, user, pass, host, port) = match database_type {
+            d if d == *"mysql" => (
+                DatabaseType::MySQL,
+                env.database_user,
+                env.root_password,
+                env.mysql_host,
+                env.mysql_port,
+            ),
             d if d == *"postgresql" => (
                 DatabaseType::PostgreSQL,
+                env.database_user,
+                env.root_password,
                 env.postgresql_host,
                 env.postgresql_port,
             ),
@@ -475,22 +497,24 @@ impl DeploymentBuilder {
             upstream: false,
             authority: AuthorityType::from_str(&env.authority).unwrap(),
             authority_address: env.authority_address,
+            upstream_user: user.clone(),
             host,
             port,
-            root_password: env.root_password,
+            root_password: pass.clone(),
             async_migration_interval: None,
             dry_run_migration_interval: None,
             query_max_failure_seconds: None,
             fallback_recovery_seconds: None,
             views_polling_interval: Duration::from_secs(300),
-            user: None,
-            pass: None,
+            user: Some(user),
+            pass: Some(pass),
             replicator_restart_timeout_secs: None,
             reader_replicas: None,
             auto_restart: false,
             wait_for_failpoint: FailpointDestination::None,
             database_type,
             standalone: false,
+            cleanup: false,
         }
     }
 
@@ -622,6 +646,13 @@ impl DeploymentBuilder {
         self
     }
 
+    /// Turns on cleanup mode, which cleans up deployment related assets for the given deployment
+    /// name, and then exits.
+    pub fn cleanup(mut self) -> Self {
+        self.cleanup = true;
+        self
+    }
+
     /// Sets whether the adapter, server, both, or neither should wait for an incoming failpoint
     /// request before proceeding with the rest of the startup process.
     pub fn wait_for_failpoint(mut self, wait_for_failpoint: FailpointDestination) -> Self {
@@ -653,6 +684,7 @@ impl DeploymentBuilder {
             auto_restart: self.auto_restart,
             views_polling_interval: self.views_polling_interval,
             wait_for_failpoint,
+            cleanup: self.cleanup,
         }
     }
 
@@ -683,6 +715,7 @@ impl DeploymentBuilder {
         self,
         cmds: &[Q],
         leader_timeout: Duration,
+        wait_for_adapters: bool,
     ) -> anyhow::Result<DeploymentHandle>
     where
         Q: AsRef<str> + Send + Sync + 'a,
@@ -707,21 +740,49 @@ impl DeploymentBuilder {
         let mut upstream_addr = None;
         let server_upstream = if self.upstream {
             let root_addr = format!(
-                "{}://root:{}@{}:{}",
-                self.database_type, &self.root_password, &self.host, &self.port
+                "{}://{}:{}@{}:{}",
+                self.database_type,
+                &self.upstream_user,
+                &self.root_password,
+                &self.host,
+                &self.port,
             );
             upstream_addr = Some(format!("{}/{}", &root_addr, &self.name));
-            let opts = mysql_async::Opts::from_url(&root_addr).unwrap();
-            let mut conn = mysql_async::Conn::new(opts).await.unwrap();
-            conn.query_drop(format!(
-                "CREATE DATABASE {}; USE {}",
-                &self.name, &self.name
-            ))
-            .await
-            .unwrap();
+            match self.database_type {
+                DatabaseType::MySQL => {
+                    let opts = mysql_async::Opts::from_url(&root_addr).unwrap();
+                    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+                    conn.query_drop(format!(
+                        "CREATE DATABASE {}; USE {}",
+                        &self.name, &self.name
+                    ))
+                    .await
+                    .unwrap();
 
-            for c in cmds {
-                conn.query_drop(&c).await?;
+                    for c in cmds {
+                        conn.query_drop(&c).await?;
+                    }
+                }
+
+                DatabaseType::PostgreSQL => {
+                    let (client, connection) =
+                        tokio_postgres::connect(&root_addr, NoTls).await.unwrap();
+                    let handle = tokio::spawn(async move {
+                        if let Err(e) = connection.await {
+                            eprintln!("connection error: {}", e);
+                        }
+                    });
+
+                    client
+                        .query_opt(&format!("CREATE DATABASE {}", &self.name), &[])
+                        .await
+                        .unwrap();
+
+                    // TODO(peter): Support running arbitrary commands for postgres, requires
+                    // changing types and a bit of work to support.
+
+                    drop(handle);
+                }
             }
 
             let user = self.user.clone().unwrap_or_else(|| "root".to_string());
@@ -789,11 +850,13 @@ impl DeploymentBuilder {
             // Sleep to give the adapter time to startup.
             let handle = AdapterHandle {
                 metrics_port,
-                conn_str: format!("{}://127.0.0.1:{}", self.database_type, port),
+                conn_str: format!("{}://127.0.0.1:{}/{}", self.database_type, port, &self.name),
                 process,
             };
 
-            wait_for_adapter_startup(metrics_port, Duration::from_millis(2000)).await?;
+            if wait_for_adapters {
+                wait_for_adapter_startup(metrics_port, Duration::from_millis(2000)).await?;
+            }
 
             adapters.push(handle);
         }
@@ -826,7 +889,14 @@ impl DeploymentBuilder {
     /// Creates the local multi-process deployment from the set of parameters
     /// specified in the builder.
     pub async fn start(self) -> anyhow::Result<DeploymentHandle> {
-        self.start_with_seed::<String>(&[], Duration::from_secs(90))
+        self.start_with_seed::<String>(&[], Duration::from_secs(90), true)
+            .await
+    }
+
+    /// Creates the local multi-process deployment from the set of parameters
+    /// specified in the builder. Does not wait for adapters metric server to come online.
+    pub async fn start_without_waiting(self) -> anyhow::Result<DeploymentHandle> {
+        self.start_with_seed::<String>(&[], Duration::from_secs(90), false)
             .await
     }
 }
@@ -1291,6 +1361,15 @@ impl DeploymentHandle {
         Ok(())
     }
 
+    /// Waits for adapters to die naturally.
+    pub async fn wait_for_adapter_death(&mut self) {
+        for adapter_handle in &mut self.adapters {
+            while adapter_handle.process.check_alive().await {
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            }
+        }
+    }
+
     /// Tears down any resources associated with the deployment.
     pub async fn teardown(&mut self) -> anyhow::Result<()> {
         if self.shutdown {
@@ -1311,7 +1390,9 @@ impl DeploymentHandle {
         }
 
         // Clean up the existing mysql state.
-        if let Some(upstream_mysql_addr) = &self.upstream_addr {
+        if let (Some(upstream_mysql_addr), DatabaseType::MySQL) =
+            (&self.upstream_addr, &self.database_type)
+        {
             let opts = mysql_async::Opts::from_url(upstream_mysql_addr).unwrap();
             let mut conn = mysql_async::Conn::new(opts).await.unwrap();
             conn.query_drop(format!("DROP DATABASE {};", &self.name))
@@ -1410,6 +1491,9 @@ pub struct AdapterStartParams {
     /// with the rest of the startup process. Useful for testing failpoints placed within the
     /// adapter startup flow.
     wait_for_failpoint: bool,
+    /// If true, runs the adapter in cleanup mode, which cleans up deployment related assets for
+    /// the given deployment name.
+    cleanup: bool,
 }
 
 async fn start_server(
@@ -1480,6 +1564,10 @@ async fn start_adapter(
         .authority(params.authority_type.as_str())
         .auto_restart(params.auto_restart)
         .views_polling_interval(params.views_polling_interval);
+
+    if params.cleanup {
+        builder = builder.cleanup();
+    }
 
     // Standalone mode passes in server params as well
     if let Some(standalone_params) = standalone_params {
@@ -1557,6 +1645,7 @@ fn get_next_good_port(port: Option<u16>) -> u16 {
 // with a stateful external component, the docker daemon, each test is
 // responsible for cleaning up its own external state.
 #[cfg(test)]
+#[cfg(not(feature = "postgres"))]
 mod tests {
     use serial_test::serial;
 

@@ -448,6 +448,24 @@ pub async fn drop_replication_slot(client: &mut pgsql::Client, name: &str) -> Re
     }
 }
 
+pub async fn drop_publication(client: &mut pgsql::Client, name: &str) -> ReadySetResult<()> {
+    info!(slot = name, "Dropping publication if exists");
+    client
+        .simple_query(&format!("DROP PUBLICATION IF EXISTS {}", name))
+        .await
+        .map_err(ReadySetError::from)
+        .map(|_| ())
+}
+
+pub async fn drop_readyset_schema(client: &mut pgsql::Client) -> ReadySetResult<()> {
+    info!("Dropping readyset schema if exists");
+    client
+        .simple_query("DROP SCHEMA IF EXISTS readyset CASCADE")
+        .await
+        .map_err(ReadySetError::from)
+        .map(|_| ())
+}
+
 fn parse_wal(wal: &str) -> ReadySetResult<i64> {
     // Internally, an LSN is a 64-bit integer, representing a byte position in the write-ahead log
     // stream. It is printed as two hexadecimal numbers of up to 8 digits each, separated by a

@@ -19,7 +19,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::{anyhow, bail, ensure};
 use async_trait::async_trait;
 use clap::{ArgGroup, Parser};
-use database_utils::{DatabaseType, DatabaseURL};
+use database_utils::{DatabaseType, DatabaseURL, UpstreamConfig};
 use failpoint_macros::set_failpoint;
 use futures_util::future::FutureExt;
 use futures_util::stream::StreamExt;
@@ -456,12 +456,14 @@ where
             .unwrap_or_else(|| PathBuf::from("."))
             .join(&options.deployment);
 
+        let upstream_config = options.server_worker_options.replicator_config.clone();
+
         if options.cleanup {
             info!(?options, "Cleaning up deployment");
-            return self.cleanup(deployment_dir);
+
+            return rt.block_on(async { self.cleanup(upstream_config, deployment_dir).await });
         }
 
-        let upstream_config = options.server_worker_options.replicator_config.clone();
         let mut parsed_upstream_url = None;
 
         let users: &'static HashMap<String, String> =
@@ -1153,8 +1155,15 @@ where
     }
 
     // TODO: Figure out a way to not require as many flags when --cleanup flag is supplied.
-    /// Cleans up the provided deployment assets on disk.
-    fn cleanup(&mut self, deployment_dir: PathBuf) -> anyhow::Result<()> {
+    /// Cleans up the provided deployment, and if an upstream url was provided, will clean up
+    /// replication slot and other deployment related assets in the upstream.
+    async fn cleanup(
+        &mut self,
+        upstream_config: UpstreamConfig,
+        deployment_dir: PathBuf,
+    ) -> anyhow::Result<()> {
+        replicators::cleanup(upstream_config).await?;
+
         if deployment_dir.exists() {
             remove_dir_all(deployment_dir)?;
         }

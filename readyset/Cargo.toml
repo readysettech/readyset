@@ -46,6 +46,7 @@ readyset-sql-passes = { path = "../readyset-sql-passes" }
 readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter" }
 readyset-tracing = { path = "../readyset-tracing" }
 readyset-version = { path = "../readyset-version" }
+replicators = { path = "../replicators" }
 
 [features]
 failure_injection = ["fail/failpoints", "readyset-client/failure_injection", "readyset-server/failure_injection"]

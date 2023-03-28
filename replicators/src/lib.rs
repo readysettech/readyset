@@ -14,7 +14,7 @@ pub(crate) mod table_filter;
 use std::time::Duration;
 
 pub use mysql_connector::BinlogPosition;
-pub use noria_adapter::NoriaAdapter;
+pub use noria_adapter::{cleanup, NoriaAdapter};
 pub use postgres_connector::PostgresPosition;
 
 /// Provide a simplistic human-readable estimate for how much time remains to complete an operation

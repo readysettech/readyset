@@ -1427,7 +1427,7 @@ async fn correct_deployment_permissions() {
             "FLUSH PRIVILEGES",
             "CREATE TABLE t1 (uid INT NOT NULL, value INT NOT NULL);",
             "INSERT INTO t1 VALUES (1, 4), (2, 5);",
-        ], Duration::from_secs(5))
+        ], Duration::from_secs(5), true)
         .await
         .unwrap();
 
@@ -1464,7 +1464,7 @@ async fn post_deployment_permissions_lock_table() {
             "FLUSH PRIVILEGES",
             "CREATE TABLE t1 (uid INT NOT NULL, value INT NOT NULL);",
             "INSERT INTO t1 VALUES (1, 4), (2, 5);",
-        ], Duration::from_secs(5))
+        ], Duration::from_secs(5), true)
         .await
         .unwrap();
 
@@ -1510,6 +1510,7 @@ async fn post_deployment_permissions_replication() {
                 "INSERT INTO t1 VALUES (1, 4), (2, 5);",
             ],
             Duration::from_secs(5),
+            true,
         )
         .await
         .unwrap();

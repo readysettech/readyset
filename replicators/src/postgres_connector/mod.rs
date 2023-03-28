@@ -7,7 +7,9 @@ mod wal_reader;
 
 use std::fmt::{self, Display};
 
-pub use connector::PostgresWalConnector;
+pub use connector::{
+    drop_publication, drop_readyset_schema, drop_replication_slot, PostgresWalConnector,
+};
 use readyset_client::replication::ReplicationOffset;
 pub use snapshot::PostgresReplicator;
 

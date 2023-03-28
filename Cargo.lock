@@ -4294,6 +4294,7 @@ dependencies = [
  "readyset-tracing",
  "readyset-util",
  "readyset-version",
+ "replicators",
  "reqwest",
  "tikv-jemallocator",
  "tokio",
@@ -4507,6 +4508,7 @@ dependencies = [
  "serial_test",
  "test-utils",
  "tokio",
+ "tokio-postgres",
  "tracing",
  "url",
 ]

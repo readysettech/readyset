@@ -33,7 +33,8 @@ use {mysql_async as mysql, tokio_postgres as pgsql};
 use crate::db_util::{CreateSchema, DatabaseSchemas};
 use crate::mysql_connector::{MySqlBinlogConnector, MySqlReplicator};
 use crate::postgres_connector::{
-    PostgresReplicator, PostgresWalConnector, PUBLICATION_NAME, REPLICATION_SLOT,
+    drop_publication, drop_readyset_schema, drop_replication_slot, PostgresReplicator,
+    PostgresWalConnector, PUBLICATION_NAME, REPLICATION_SLOT,
 };
 use crate::table_filter::TableFilter;
 
@@ -79,6 +80,57 @@ pub(crate) trait Connector {
         last_pos: &ReplicationOffset,
         until: Option<&ReplicationOffset>,
     ) -> ReadySetResult<(ReplicationAction, ReplicationOffset)>;
+}
+
+/// Cleans up replication related assets on the upstream database as supplied by the
+/// UpstreamConfig.
+pub async fn cleanup(config: UpstreamConfig) -> ReadySetResult<()> {
+    if let DatabaseURL::PostgreSQL(options) = config
+        .upstream_db_url
+        .as_ref()
+        .ok_or_else(|| internal_err!("Replication URL not supplied"))?
+        .parse()
+        .map_err(|e| invalid_err!("Invalid URL supplied to --upstream-db-url: {e}"))?
+    {
+        let connector = {
+            let mut builder = native_tls::TlsConnector::builder();
+            if config.disable_upstream_ssl_verification {
+                builder.danger_accept_invalid_certs(true);
+            }
+            if let Some(root_cert) = config.get_root_cert().await {
+                builder.add_root_certificate(root_cert?);
+            }
+            builder.build().unwrap() // Never returns an error
+        };
+        let tls_connector = postgres_native_tls::MakeTlsConnector::new(connector);
+
+        let repl_slot_name = match &config.replication_server_id {
+            Some(server_id) => {
+                format!("{}_{}", REPLICATION_SLOT, server_id)
+            }
+            _ => REPLICATION_SLOT.to_string(),
+        };
+
+        let dbname = options.get_dbname().ok_or_else(|| {
+            ReadySetError::ReplicationFailed("No database specified for replication".to_string())
+        })?;
+
+        let mut cleanup_opts = options.clone();
+
+        cleanup_opts
+            .dbname(dbname.as_ref())
+            .set_replication_database();
+        let (mut client, connection) = cleanup_opts.connect(tls_connector).await?;
+        let _connection_handle = tokio::spawn(connection);
+
+        drop_publication(&mut client, &repl_slot_name).await?;
+
+        drop_replication_slot(&mut client, &repl_slot_name).await?;
+
+        drop_readyset_schema(&mut client).await?;
+    }
+
+    Ok(())
 }
 
 /// An adapter that converts database events into ReadySet API calls
