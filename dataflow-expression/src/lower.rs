@@ -474,10 +474,18 @@ impl Expr {
                     op.argument_type_coercions(left.ty(), right.ty())?;
 
                 if let Some(ty) = left_coerce_target {
-                    left = Box::new(Self::Cast { expr: left, ty })
+                    left = Box::new(Self::Cast {
+                        expr: left,
+                        ty,
+                        null_on_failure: false,
+                    })
                 }
                 if let Some(ty) = right_coerce_target {
-                    right = Box::new(Self::Cast { expr: right, ty })
+                    right = Box::new(Self::Cast {
+                        expr: right,
+                        ty,
+                        null_on_failure: false,
+                    })
                 }
 
                 Ok(Self::Op {
@@ -529,6 +537,7 @@ impl Expr {
                 Ok(Self::Cast {
                     expr: Box::new(Self::lower(*expr, dialect, context)?),
                     ty,
+                    null_on_failure: false,
                 })
             }
             AstExpr::CaseWhen {
@@ -711,12 +720,18 @@ impl Expr {
             op.argument_type_coercions(left.ty(), right_member_ty)?;
 
         if let Some(ty) = left_coerce_target {
-            left = Box::new(Self::Cast { expr: left, ty })
+            left = Box::new(Self::Cast {
+                expr: left,
+                ty,
+                null_on_failure: false,
+            })
         }
         if let Some(ty) = right_coerce_target {
             right = Box::new(Self::Cast {
                 expr: right,
                 ty: DfType::Array(Box::new(ty)),
+
+                null_on_failure: false,
             })
         } else if !right.ty().is_array() {
             // Even if we don't need to cast the right member type to a target type, we still need
@@ -725,6 +740,7 @@ impl Expr {
             right = Box::new(Self::Cast {
                 expr: right,
                 ty: DfType::Array(Box::new(right_coerce_target.unwrap_or(DfType::Unknown))),
+                null_on_failure: false,
             });
         }
 
@@ -871,7 +887,8 @@ pub(crate) mod tests {
                     val: "foo".into(),
                     ty: DfType::Unknown
                 }),
-                ty: enum_ty
+                ty: enum_ty,
+                null_on_failure: false
             }
         );
     }
@@ -1237,7 +1254,8 @@ pub(crate) mod tests {
                             val: "2".into(),
                             ty: DfType::Unknown
                         }),
-                        ty: DfType::Int
+                        ty: DfType::Int,
+                        null_on_failure: false
                     },
                     Expr::Literal {
                         val: 3u32.into(),
@@ -1271,7 +1289,8 @@ pub(crate) mod tests {
                         val: "{1,2}".into(),
                         ty: DfType::Unknown
                     }),
-                    ty: DfType::Array(Box::new(DfType::UnsignedBigInt))
+                    ty: DfType::Array(Box::new(DfType::UnsignedBigInt)),
+                    null_on_failure: false
                 }),
                 ty: DfType::Bool
             }
@@ -1295,7 +1314,8 @@ pub(crate) mod tests {
                         val: "{1,1}".into(),
                         ty: DfType::Unknown
                     }),
-                    ty: DfType::Array(Box::new(DfType::UnsignedBigInt))
+                    ty: DfType::Array(Box::new(DfType::UnsignedBigInt)),
+                    null_on_failure: false
                 }),
                 ty: DfType::Bool
             }

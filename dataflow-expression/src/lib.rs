@@ -338,6 +338,9 @@ pub enum Expr {
         expr: Box<Expr>,
         /// The `DfType` to cast to
         ty: DfType,
+        /// If `true`, this expression will evaluate to `NULL` if the cast fails. If `false`, cast
+        /// failure will return an error
+        null_on_failure: bool,
     },
 
     Call {
@@ -378,7 +381,16 @@ impl Display for Expr {
             } => {
                 write!(f, "({left} {op} ALL ({right}))")
             }
-            Cast { expr, ty, .. } => write!(f, "cast({} as {})", expr, ty,),
+            Cast {
+                expr,
+                ty,
+                null_on_failure,
+            } => {
+                if *null_on_failure {
+                    write!(f, "try_")?;
+                }
+                write!(f, "cast({} as {})", expr, ty,)
+            }
             Call { func, .. } => write!(f, "{}", func),
             CaseWhen {
                 branches,

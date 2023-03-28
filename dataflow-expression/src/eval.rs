@@ -276,9 +276,17 @@ impl Expr {
                 }
                 Ok(res)
             }
-            Expr::Cast { expr, ty, .. } => {
-                let res = expr.eval(record)?;
-                Ok(res.coerce_to(ty, expr.ty())?)
+            Expr::Cast {
+                expr,
+                ty,
+                null_on_failure,
+            } => {
+                let res = expr.eval(record)?.coerce_to(ty, expr.ty());
+                if *null_on_failure {
+                    Ok(res.unwrap_or(DfValue::None))
+                } else {
+                    res
+                }
             }
             Expr::Call { func, ty } => func.eval(ty, record),
             Expr::CaseWhen {
@@ -377,6 +385,21 @@ mod tests {
                 .unwrap(),
             1.into()
         )
+    }
+
+    #[test]
+    fn eval_cast_with_null_on_failure() {
+        let expr = Expr::Cast {
+            expr: Box::new(Expr::Literal {
+                val: DfValue::from("asdfasdf"),
+                ty: DfType::Unknown,
+            }),
+            ty: DfType::Timestamp {
+                subsecond_digits: Dialect::DEFAULT_MYSQL.default_subsecond_digits(),
+            },
+            null_on_failure: true,
+        };
+        assert_eq!(expr.eval::<DfValue>(&[]).unwrap(), DfValue::None);
     }
 
     #[test]
@@ -898,6 +921,7 @@ mod tests {
         let expr = Cast {
             expr: Box::new(make_column(0)),
             ty: DfType::Int,
+            null_on_failure: false,
         };
         assert_eq!(
             expr.eval::<DfValue>(&["1".try_into().unwrap(), "2".try_into().unwrap()])
