@@ -777,6 +777,7 @@ impl NoriaAdapter {
     /// Update the log position of the schema and the tables
     async fn handle_log_position(&mut self, pos: ReplicationOffset) -> ReadySetResult<()> {
         // Update the log position for the schema
+        debug!(%pos, "Setting schema replication offset");
         self.noria.set_schema_replication_offset(Some(&pos)).await?;
 
         // Update the log position for the tables that are behind this offset

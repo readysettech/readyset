@@ -806,6 +806,7 @@ impl<'a> PostgresReplicator<'a> {
         }
 
         // The current schema was replicated, assign the current position
+        debug!(%wal_position, "Setting schema replication offset");
         self.noria
             .set_schema_replication_offset(Some(&wal_position))
             .await?;

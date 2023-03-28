@@ -1281,6 +1281,7 @@ impl DfState {
         match self.apply_recipe(recipe_spec.changes, dry_run).await {
             Ok(x) => {
                 if let Some(offset) = &recipe_spec.replication_offset {
+                    debug!(%offset, "Updating schema replication offset");
                     offset.try_max_into(&mut self.schema_replication_offset)?
                 }
 
