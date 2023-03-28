@@ -530,6 +530,10 @@ impl TestScript {
                     DatabaseType::MySQL => readyset_data::Dialect::DEFAULT_MYSQL,
                     DatabaseType::PostgreSQL => readyset_data::Dialect::DEFAULT_POSTGRESQL,
                 },
+                match database_type {
+                    DatabaseType::MySQL => nom_sql::Dialect::MySQL,
+                    DatabaseType::PostgreSQL => nom_sql::Dialect::PostgreSQL,
+                },
                 Default::default(),
                 server_supports_pagination,
             )

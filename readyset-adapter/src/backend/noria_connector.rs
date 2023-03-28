@@ -406,6 +406,10 @@ pub struct NoriaConnector {
     /// SQL Dialect to pass to ReadySet as part of all migration requests
     dialect: Dialect,
 
+    /// Dialect to use to parse and format all SQL strings
+    #[allow(dead_code)]
+    parse_dialect: nom_sql::Dialect,
+
     /// Currently configured search path for schemas.
     ///
     /// Note that the terminology used here is maximally general - while only PostgreSQL truly
@@ -474,12 +478,14 @@ pub(crate) enum ExecuteSelectContext<'ctx> {
 }
 
 impl NoriaConnector {
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         ch: ReadySetHandle,
         auto_increments: Arc<RwLock<HashMap<Relation, atomic::AtomicUsize>>>,
         query_cache: Arc<RwLock<HashMap<ViewCreateRequest, Relation>>>,
         read_behavior: ReadBehavior,
         dialect: Dialect,
+        parse_dialect: nom_sql::Dialect,
         schema_search_path: Vec<SqlIdentifier>,
         server_supports_pagination: bool,
     ) -> Self {
@@ -490,6 +496,7 @@ impl NoriaConnector {
             read_behavior,
             None,
             dialect,
+            parse_dialect,
             schema_search_path,
             server_supports_pagination,
         )
@@ -504,6 +511,7 @@ impl NoriaConnector {
         read_behavior: ReadBehavior,
         read_request_handler: Option<ReadRequestHandler>,
         dialect: Dialect,
+        parse_dialect: nom_sql::Dialect,
         schema_search_path: Vec<SqlIdentifier>,
         server_supports_pagination: bool,
     ) -> Self {
@@ -520,6 +528,7 @@ impl NoriaConnector {
             read_behavior,
             read_request_handler: request_handler::LocalReadHandler::new(read_request_handler),
             dialect,
+            parse_dialect,
             schema_search_path,
         }
     }

@@ -818,6 +818,7 @@ where
             let dry_run = matches!(migration_style, MigrationStyle::Explicit);
             let upstream_config = options.server_worker_options.replicator_config.clone();
             let expr_dialect = self.expr_dialect;
+            let parse_dialect = self.parse_dialect;
             let fallback_cache = fallback_cache.clone();
 
             rs_connect.in_scope(|| info!("Spawning migration handler task"));
@@ -852,6 +853,7 @@ where
                         query_cache.clone(),
                         noria_read_behavior,
                         expr_dialect,
+                        parse_dialect,
                         schema_search_path,
                         server_supports_pagination,
                     )
@@ -977,6 +979,7 @@ where
         rs_connect.in_scope(|| info!(supported = %server_supports_pagination));
 
         let expr_dialect = self.expr_dialect;
+        let parse_dialect = self.parse_dialect;
         while let Some(Ok(s)) = rt.block_on(listener.next()) {
             let connection = span!(Level::DEBUG, "connection", addr = ?s.peer_addr().unwrap());
             connection.in_scope(|| info!("Accepted new connection"));
@@ -1066,6 +1069,7 @@ where
                                     noria_read_behavior,
                                     r,
                                     expr_dialect,
+                                    parse_dialect,
                                     ssp,
                                     server_supports_pagination,
                                 )

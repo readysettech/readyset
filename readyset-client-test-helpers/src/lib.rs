@@ -201,6 +201,7 @@ impl TestBuilder {
                         query_cache,
                         self.read_behavior,
                         A::EXPR_DIALECT,
+                        A::DIALECT,
                         schema_search_path,
                         server_supports_pagination,
                     )

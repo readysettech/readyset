@@ -115,6 +115,7 @@ impl Writer {
             query_cache,
             ReadBehavior::Blocking,
             Dialect::DEFAULT_MYSQL,
+            nom_sql::Dialect::MySQL,
             vec![],
             server_supports_pagination,
         )
