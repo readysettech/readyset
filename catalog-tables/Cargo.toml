@@ -1,0 +1,9 @@
+[package]
+name = "catalog-tables"
+version = "0.0.1"
+publish = false
+authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+edition = "2021"
+
+[dependencies]
+nom-sql = { path = "../nom-sql" }

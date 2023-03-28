@@ -558,6 +558,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "catalog-tables"
+version = "0.0.1"
+dependencies = [
+ "nom-sql",
+]
+
+[[package]]
 name = "cc"
 version = "1.0.79"
 source = "registry+https://github.com/rust-lang/crates.io-index"

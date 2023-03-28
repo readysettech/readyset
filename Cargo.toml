@@ -10,6 +10,7 @@ opentelemetry-semantic-conventions = { git = "https://github.com/open-telemetry/
 members = [
     "array2",
     "benchmarks",
+    "catalog-tables",
     "concrete-iter",
     "database-utils",
     "dataflow-expression",
