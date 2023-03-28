@@ -407,7 +407,6 @@ pub struct NoriaConnector {
     dialect: Dialect,
 
     /// Dialect to use to parse and format all SQL strings
-    #[allow(dead_code)]
     parse_dialect: nom_sql::Dialect,
 
     /// Currently configured search path for schemas.
@@ -598,9 +597,8 @@ impl NoriaConnector {
             .map(|(n, (mut q, always))| {
                 anonymize_literals(&mut q);
                 vec![
-                    // FIXME(ENG-2499): Use correct dialect.
-                    DfValue::from(n.display(nom_sql::Dialect::MySQL).to_string()),
-                    DfValue::from(q.display(nom_sql::Dialect::MySQL).to_string()),
+                    DfValue::from(n.display(self.parse_dialect).to_string()),
+                    DfValue::from(q.display(self.parse_dialect).to_string()),
                     DfValue::from(if always {
                         "no fallback"
                     } else {
@@ -1008,8 +1006,7 @@ impl NoriaConnector {
             .into_iter()
             .map(|(tbl, status)| {
                 vec![
-                    // FIXME(ENG-2499): Use correct dialect.
-                    tbl.display(nom_sql::Dialect::MySQL).to_string().into(),
+                    tbl.display(self.parse_dialect).to_string().into(),
                     status.replication_status.to_string().into(),
                 ]
             })
@@ -1082,16 +1079,15 @@ impl NoriaConnector {
 
                 // add the query to ReadySet
                 if create_if_not_exist {
-                    // FIXME(ENG-2499): Use correct dialect.
                     if prepared {
                         info!(
-                            query = %Sensitive(&q.display(nom_sql::Dialect::MySQL)),
+                            query = %Sensitive(&q.display(self.parse_dialect)),
                             name = %qname.display_unquoted(),
                             "adding parameterized query"
                         );
                     } else {
                         info!(
-                            query = %Sensitive(&q.display(nom_sql::Dialect::MySQL)),
+                            query = %Sensitive(&q.display(self.parse_dialect)),
                             name = %qname.display_unquoted(),
                             "adding ad-hoc query"
                         );
