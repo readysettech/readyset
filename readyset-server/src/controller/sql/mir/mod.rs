@@ -4,6 +4,7 @@ use std::fmt::Debug;
 use std::vec::Vec;
 
 use ::serde::{Deserialize, Serialize};
+use catalog_tables::is_catalog_table;
 use common::{DfValue, IndexType};
 use dataflow::ops::grouped::aggregate::Aggregation;
 use dataflow::ops::union;
@@ -211,7 +212,7 @@ impl SqlToMirConverter {
     /// upstream database but is not being replicated, or [`ReadySetError::TableNotFound`] if the
     /// table is completely unknown
     pub(super) fn table_not_found_err(&self, name: &Relation) -> ReadySetError {
-        if self.non_replicated_relations.contains(name) {
+        if self.non_replicated_relations.contains(name) || is_catalog_table(name) {
             ReadySetError::TableNotReplicated {
                 name: (&name.name).into(),
                 schema: name.schema.as_ref().map(Into::into),

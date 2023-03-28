@@ -4859,6 +4859,7 @@ dependencies = [
  "async-bincode",
  "backtrace",
  "bincode",
+ "catalog-tables",
  "chrono",
  "clap 3.0.4",
  "criterion",
