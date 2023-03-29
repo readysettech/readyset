@@ -265,7 +265,7 @@ impl TryFrom<Literal> for Value {
         }
         Ok(match value {
             Literal::Null => Value::Null,
-            Literal::Boolean(b) => Value::Integer(if b { 1 } else { 0 }),
+            Literal::Boolean(b) => Value::Integer(i64::from(b)),
             Literal::Integer(v) => Value::Integer(v),
             // TODO: Support Value::UnsignedInteger
             Literal::UnsignedInteger(v) => Value::Integer(v as i64),

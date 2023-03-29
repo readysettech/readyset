@@ -490,7 +490,7 @@ impl ToMySqlValue for MySqlTime {
     }
 
     fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
-        let sign = if self.is_positive() { 0 } else { 1 };
+        let sign = u8::from(!self.is_positive());
         match c.coltype {
             ColumnType::MYSQL_TYPE_TIME => {
                 w.write_u8(0x0cu8)?;

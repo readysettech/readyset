@@ -201,7 +201,7 @@ impl<W: AsyncWrite + Unpin> PacketWriter<W> {
         let mut slices = queued_packet_slices(&self.queue);
         let packet_len = &packet.len().to_le_bytes()[0..3];
         let seq = &[self.seq];
-        slices.extend(&[
+        slices.extend([
             IoSlice::new(packet_len),
             IoSlice::new(seq),
             IoSlice::new(packet),

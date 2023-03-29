@@ -296,7 +296,7 @@ impl ReadySetHandle {
             .ready()
             .await
             .map_err(rpc_err!(format_args!("ReadySetHandle::{}", path)))?
-            .call(ControllerRequest::new(path, &(), None)?)
+            .call(ControllerRequest::new(path, (), None)?)
             .await
             .map_err(rpc_err!(format_args!("ReadySetHandle::{}", path)))?;
 

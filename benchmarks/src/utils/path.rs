@@ -21,7 +21,7 @@ fn walk_dirs_for(p: &Path, dir: &Path) -> Option<PathBuf> {
 
     for entry in walk {
         let mut possible_path = entry.into_path();
-        possible_path.push(&p);
+        possible_path.push(p);
 
         if possible_path.exists() {
             return Some(possible_path);

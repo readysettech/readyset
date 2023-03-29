@@ -1,6 +1,6 @@
 //! Inspired by the crate of the same name in rust-analyzer.
 //! https://github.com/rust-analyzer/rust-analyzer/blob/master/crates/test_utils/src/lib.rs
-#![feature(let_else)]
+#![feature(let_chains)]
 
 mod parallel_group;
 

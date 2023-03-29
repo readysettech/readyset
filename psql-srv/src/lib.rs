@@ -1,4 +1,4 @@
-#![feature(associated_type_bounds, let_else)]
+#![feature(associated_type_bounds, let_chains)]
 //! Bindings for emulating a PostgreSQL server.
 //!
 //! When developing new databases or caching layers, it can be immensely useful to test your system

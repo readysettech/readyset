@@ -613,7 +613,7 @@ impl Fuzz {
             script.write_to(&mut file)?;
             if env::var("BUILDKITE").is_ok() {
                 process::Command::new("buildkite-agent")
-                    .args(&["artifact", "upload", file.path().to_str().unwrap()])
+                    .args(["artifact", "upload", file.path().to_str().unwrap()])
                     .spawn()
                     .context("Uploading test script to Buildkite")?;
             }
@@ -657,7 +657,7 @@ impl<'a> From<&'a Fuzz> for test_runner::Config {
     fn from(fuzz: &'a Fuzz) -> Self {
         Self {
             cases: fuzz.num_tests,
-            verbose: if fuzz.verbose { 1 } else { 0 },
+            verbose: u32::from(fuzz.verbose),
             ..Default::default()
         }
     }

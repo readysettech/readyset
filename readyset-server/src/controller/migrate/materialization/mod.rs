@@ -555,7 +555,7 @@ impl Materializations {
                 // Some of these replay paths might start at nodes other than the one we're
                 // passing to replay_paths_for, if generated columns are involved. We need to
                 // materialize those nodes, too.
-                let n_to_skip = if path.target().node == ni { 1 } else { 0 };
+                let n_to_skip = usize::from(path.target().node == ni);
 
                 // Iterate *up* the path (in reverse order) until we either determine that we need
                 // to be fully materialized, or we hit an existing materialization that we need to

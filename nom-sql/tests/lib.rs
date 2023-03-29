@@ -11,7 +11,7 @@ fn parse_queryset(dialect: Dialect, queries: Vec<String>) -> (i32, i32) {
     let mut parsed_err = 0;
     for query in queries.iter() {
         println!("Trying to parse '{}': ", &query);
-        match nom_sql::parser::parse_query(dialect, &query) {
+        match nom_sql::parser::parse_query(dialect, query) {
             Ok(_) => {
                 println!("ok");
                 parsed_ok.push(query);

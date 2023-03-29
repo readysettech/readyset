@@ -63,8 +63,7 @@ pub(super) fn make_expressions_above_grouped(
 ) -> HashMap<Expr, SqlIdentifier> {
     let exprs: Vec<_> = qg
         .aggregates
-        .iter()
-        .map(|(f, _)| f)
+        .keys()
         .filter(|&f| is_aggregate(f))
         .flat_map(|f| f.arguments())
         // We don't need to do any work for bare column expressions

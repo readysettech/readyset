@@ -672,7 +672,7 @@ impl Ingredient for Union {
                         s.insert(from);
                         self.full_wait_state = FullWait::Ongoing {
                             started: s,
-                            finished: if last { 1 } else { 0 },
+                            finished: usize::from(last),
                             buffered: rs,
                         };
                         return Ok(RawProcessingResult::CapturedFull);

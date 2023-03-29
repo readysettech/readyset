@@ -3,7 +3,8 @@
     hash_raw_entry,
     drain_filter,
     string_remove_matches,
-    iter_intersperse
+    iter_intersperse,
+    let_chains
 )]
 pub mod db_util;
 pub(crate) mod mysql_connector;

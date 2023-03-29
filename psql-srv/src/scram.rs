@@ -393,7 +393,7 @@ impl<'a> ClientFinalMessage<'a> {
         let expected_client_key = hmac.finalize().into_bytes();
 
         let mut hash = Sha256::default();
-        hash.update(&expected_client_key);
+        hash.update(expected_client_key);
         let expected_stored_key = hash.finalize_fixed();
 
         let auth_message = format!(
@@ -412,7 +412,7 @@ impl<'a> ClientFinalMessage<'a> {
         }
 
         let mut hash = Sha256::default();
-        hash.update(&client_key);
+        hash.update(client_key);
         let stored_key = hash.finalize_fixed();
 
         if stored_key != expected_stored_key {

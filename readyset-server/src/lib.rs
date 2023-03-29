@@ -394,7 +394,7 @@
     drain_filter,
     entry_insert,
     hash_raw_entry,
-    let_else,
+    let_chains,
     never_type,
     exhaustive_patterns,
     result_flattening,

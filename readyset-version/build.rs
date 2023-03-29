@@ -31,7 +31,7 @@ fn set_release_version() {
 fn set_commit_id() {
     let get_commit_id_from_git = || {
         Command::new("git")
-            .args(&["rev-parse", "HEAD"])
+            .args(["rev-parse", "HEAD"])
             .output()
             .ok()
             .and_then(|output| {
@@ -60,7 +60,7 @@ fn set_platform() {
 fn set_rustc_version() {
     let maybe_rustc_version = || {
         Command::new("rustc")
-            .args(&["--version"])
+            .args(["--version"])
             .output()
             .ok()
             .and_then(|output| {

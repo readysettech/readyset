@@ -760,7 +760,7 @@ impl DeploymentBuilder {
                     .unwrap();
 
                     for c in cmds {
-                        conn.query_drop(&c).await?;
+                        conn.query_drop(c).await?;
                     }
                 }
 

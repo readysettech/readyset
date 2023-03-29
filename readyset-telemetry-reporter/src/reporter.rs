@@ -319,7 +319,7 @@ fn blake2b_string(user_id: String) -> String {
     hasher
         .finalize_variable(&mut buf)
         .expect("8 is a valid output size for Blake2bVar");
-    hex::encode(&buf)
+    hex::encode(buf)
 }
 
 fn make_client(write_key: &str) -> Result<Client> {

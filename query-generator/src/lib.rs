@@ -1339,12 +1339,12 @@ impl GeneratorState {
 
     /// Return an iterator over `CreateTableStatement`s for all the tables in the schema
     pub fn into_ddl(self) -> impl Iterator<Item = CreateTableStatement> {
-        self.tables.into_iter().map(|(_, tbl)| tbl.into())
+        self.tables.into_values().map(|tbl| tbl.into())
     }
 
     /// Return an iterator over clones of `CreateTableStatement`s for all the tables in the schema
     pub fn ddl(&self) -> impl Iterator<Item = CreateTableStatement> + '_ {
-        self.tables.iter().map(|(_, tbl)| tbl.clone().into())
+        self.tables.values().map(|tbl| tbl.clone().into())
     }
 
     /// Generate `num_rows` rows of data for the table given by `table_name`.
@@ -1862,17 +1862,17 @@ pub enum QueryOperation {
     Distinct,
     Join(JoinOperator),
     ProjectLiteral,
-    #[weight(if args.in_subquery { 0 } else { 1 })]
+    #[weight(u32::from(!args.in_subquery))]
     SingleParameter,
-    #[weight(if args.in_subquery { 0 } else { 1 })]
+    #[weight(u32::from(!args.in_subquery))]
     MultipleParameters,
-    #[weight(if args.in_subquery { 0 } else { 1 })]
+    #[weight(u32::from(!args.in_subquery))]
     InParameter {
         num_values: u8,
     },
-    #[weight(if args.in_subquery { 0 } else { 1 })]
+    #[weight(u32::from(!args.in_subquery))]
     RangeParameter,
-    #[weight(if args.in_subquery { 0 } else { 1 })]
+    #[weight(u32::from(!args.in_subquery))]
     MultipleRangeParameters,
     ProjectBuiltinFunction(BuiltinFunction),
     TopK {

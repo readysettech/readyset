@@ -534,7 +534,7 @@ impl<'a> Plan<'a> {
                 }
 
                 // we're not replaying through the starter node
-                let skip_first = if i == 0 { 1 } else { 0 };
+                let skip_first = usize::from(i == 0);
 
                 // use the local index for each node
                 #[allow(clippy::indexing_slicing)] // replay paths contain valid nodes

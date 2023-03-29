@@ -3,7 +3,8 @@
     result_flattening,
     never_type,
     exhaustive_patterns,
-    try_find
+    try_find,
+    let_chains
 )]
 
 pub mod alias_removal;

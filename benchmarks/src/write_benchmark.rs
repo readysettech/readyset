@@ -65,8 +65,8 @@ impl WriteBenchmarkThreadData {
         let database_spec = DatabaseGenerationSpec::new(schema);
         let tables = database_spec
             .tables
-            .into_iter()
-            .map(|(_, v)| Arc::new(Mutex::new(v.table)))
+            .into_values()
+            .map(|v| Arc::new(Mutex::new(v.table)))
             .collect();
 
         Ok(Self {
