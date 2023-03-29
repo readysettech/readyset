@@ -10,6 +10,14 @@ use nom_sql::Relation;
 use readyset_errors::{ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
+/// Enum representing whether a base table node was already initialized (and has a replication
+/// offset assigned), or if it is still pending initialization.
+#[derive(Serialize, Deserialize)]
+pub enum ReplicationOffsetState {
+    Initialized(Option<ReplicationOffset>),
+    Pending,
+}
+
 /// A data type representing an offset in a replication log
 ///
 /// Replication offsets are represented by a single global [offset](ReplicationOffset::offset),

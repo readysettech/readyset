@@ -21,7 +21,7 @@ pub use internal::{DomainIndex, ReplicaAddress};
 use merging_interval_tree::IntervalTreeSet;
 use petgraph::graph::NodeIndex;
 use readyset_client::internal::Index;
-use readyset_client::replication::ReplicationOffset;
+use readyset_client::replication::ReplicationOffsetState;
 use readyset_client::{channel, internal, KeyComparison, KeyCount, ReaderAddress};
 use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
 use readyset_util::redacted::Sensitive;
@@ -3975,10 +3975,25 @@ impl Domain {
             .sum()
     }
 
-    pub fn replication_offsets(&self) -> NodeMap<Option<ReplicationOffset>> {
-        self.state
+    pub fn replication_offsets(&self) -> NodeMap<ReplicationOffsetState> {
+        self.nodes
             .iter()
-            .map(|(ni, state)| (ni, state.replication_offset().cloned()))
+            .filter_map(|(idx, n)| {
+                let node = n.borrow();
+                if !node.is_base() || node.is_dropped() {
+                    None
+                } else {
+                    Some((
+                        idx,
+                        self.state
+                            .get(idx)
+                            .map(|s| {
+                                ReplicationOffsetState::Initialized(s.replication_offset().cloned())
+                            })
+                            .unwrap_or(ReplicationOffsetState::Pending),
+                    ))
+                }
+            })
             .collect()
     }
 

@@ -44,7 +44,7 @@ use readyset_client::internal::{MaterializationStatus, ReplicaAddress};
 use readyset_client::metrics::recorded;
 use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::recipe::ExtendRecipeSpec;
-use readyset_client::replication::{ReplicationOffset, ReplicationOffsets};
+use readyset_client::replication::{ReplicationOffset, ReplicationOffsetState, ReplicationOffsets};
 use readyset_client::{
     NodeSize, TableReplicationStatus, TableStatus, ViewCreateRequest, ViewFilter, ViewRequest,
     ViewSchema,
@@ -778,7 +778,7 @@ impl DfState {
     /// for more information about replication offsets.
     pub(super) async fn replication_offsets(&self) -> ReadySetResult<ReplicationOffsets> {
         let domains = self.domains_with_base_tables().await?;
-        self.query_domains::<_, NodeMap<Option<ReplicationOffset>>>(
+        self.query_domains::<_, NodeMap<ReplicationOffsetState>>(
             domains
                 .into_iter()
                 .map(|domain| (domain, DomainRequest::RequestReplicationOffsets)),
@@ -804,8 +804,15 @@ impl DfState {
 
                             #[allow(clippy::indexing_slicing)] // internal invariant
                             let table_name = self.ingredients[*ni].name();
-                            acc.tables.insert(table_name.clone(), offset); // TODO min of all
-                                                                           // shards
+                            match offset {
+                                ReplicationOffsetState::Initialized(offset) => {
+                                    // TODO min of all shards
+                                    acc.tables.insert(table_name.clone(), offset);
+                                }
+                                ReplicationOffsetState::Pending => {
+                                    internal!("Table {} does not have a replication offset because it is not ready yet. The caller should wait for all tables to be ready before requesting replication offsets", table_name.display_unquoted());
+                                }
+                            }
                         }
                     }
                 }
