@@ -816,7 +816,7 @@ impl<'a> PostgresReplicator<'a> {
             tables
                 .drain_filter(|t| replication_offsets.has_table(&t.name))
                 .for_each(|t| {
-                    info!(
+                    debug!(
                         table = %t.name.display(Dialect::PostgreSQL),
                         "Replication offset already exists for table, skipping snapshot"
                     )
