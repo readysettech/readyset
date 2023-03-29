@@ -1519,21 +1519,19 @@ impl ReaderHandle {
     fn build_view_query(
         &self,
         key_remap: Option<&HashMap<PlaceholderIdx, Literal>>,
-        mut raw_keys: Vec<Cow<'_, [DfValue]>>,
+        raw_keys: Vec<Cow<'_, [DfValue]>>,
         limit: Option<usize>,
         offset: Option<usize>,
         ticket: Option<Timestamp>,
         blocking_read: bool,
         dialect: Dialect,
-        mut binops: Vec<(&Column, BinaryOperator)>,
+        binops: Vec<(&Column, BinaryOperator)>,
     ) -> ReadySetResult<Option<ViewQuery>> {
         let schema = self
             .schema()
             .ok_or_else(|| internal_err!("No schema for view"))?;
 
-        let projected_schema = schema.schema(SchemaType::ProjectedSchema);
-
-        let mut key_types = schema.col_types(
+        let key_types = schema.col_types(
             self.key_map()
                 .iter()
                 .map(|(_, key_column_idx)| *key_column_idx),
@@ -1542,65 +1540,7 @@ impl ReaderHandle {
 
         trace!("select::lookup");
         let bogo = vec![vec1![DfValue::from(0i32)].into()];
-        let mut filter_op_idx = None;
-        let mut filters = binops
-            .iter()
-            .enumerate()
-            .filter(|(_, (_, binop))| matches!(binop, BinaryOperator::Like | BinaryOperator::ILike))
-            .map(|(idx, (col, op))| -> ReadySetResult<_> {
-                let key = raw_keys.drain(0..1).next().ok_or(ReadySetError::EmptyKey)?;
-                if !raw_keys.is_empty() {
-                    unsupported!(
-                        "LIKE/ILIKE not currently supported for more than one lookup key at a time"
-                    );
-                }
-                let column = projected_schema
-                    .iter()
-                    .position(|x| x.column.name == col.name)
-                    .ok_or_else(|| ReadySetError::NoSuchColumn(col.name.to_string()))?;
-
-                let key_type = key_types.remove(idx);
-                let value = key[idx].coerce_to(key_type, &DfType::Unknown)?; // No from_ty, key values are literals
-
-                if !key.is_empty() {
-                    // the LIKE/ILIKE isn't our only key, add the rest back to `keys`
-                    raw_keys.push(key);
-                }
-
-                filter_op_idx = Some(idx);
-
-                let (op, negated) =
-                    DfBinaryOperator::from_sql_op(*op, dialect, key_type, key_type)?;
-                let op = DfExpr::Op {
-                    left: Box::new(DfExpr::Column {
-                        index: column,
-                        ty: key_type.clone(),
-                    }),
-                    op,
-                    right: Box::new(DfExpr::Literal {
-                        val: value,
-                        ty: key_type.clone(),
-                    }),
-                    // LIKE/ILIKE resolve to bool
-                    ty: DfType::Bool,
-                };
-
-                if negated {
-                    Ok(DfExpr::Not {
-                        expr: Box::new(op),
-                        ty: DfType::Bool,
-                    })
-                } else {
-                    Ok(op)
-                }
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        if let Some(filter_op_idx) = filter_op_idx {
-            // if we're using a column for a post-lookup filter, remove it from our list of binops
-            // so we can use the remaining list for our keys
-            binops.remove(filter_op_idx);
-        }
+        let mut filters = Vec::new();
 
         let keys = if raw_keys.is_empty() {
             bogo
@@ -1660,14 +1600,9 @@ impl ReaderHandle {
                         match view_placeholder {
                             ViewPlaceholder::Generated => continue,
                             ViewPlaceholder::OneToOne(idx) => {
-                                // If the key isn't in the list of key types, that means it was
-                                // removed during post-read filter
-                                // construction (for LIKE/ILIKE) above, so just
-                                // skip it in the lookup key.
-                                let key_type = match key_types.get(key_column_idx) {
-                                    Some(&ty) => ty,
-                                    None => continue,
-                                };
+                                let key_type = *key_types
+                                    .get(key_column_idx)
+                                    .ok_or_else(|| internal_err!("No key_type for key"))?;
 
                                 let value = remap_key(key.as_ref(), idx, key_type)?;
 
@@ -1697,13 +1632,6 @@ impl ReaderHandle {
                                 if let Some((lower_bound, upper_bound)) = &mut bounds {
                                     let binop = binops[*idx - 1].1;
                                     match binop {
-                                        BinaryOperator::Like
-                                        | BinaryOperator::NotLike
-                                        | BinaryOperator::ILike
-                                        | BinaryOperator::NotILike => {
-                                            internal!("Already should have matched on LIKE above")
-                                        }
-
                                         BinaryOperator::Equal => {
                                             lower_bound.push(value.clone());
                                             upper_bound.push(value);
@@ -2264,53 +2192,6 @@ mod tests {
                 vec![KeyComparison::from_range(
                     &(vec1![DfValue::from(1)]..=vec1![DfValue::from(2)])
                 )]
-            );
-        }
-
-        #[test]
-        fn ilike_and_equality() {
-            // "SELECT t.x FROM t WHERE t.x = $1 AND t.y ILIKE $2"
-            let query = make_build_query(
-                vec![Cow::Owned(vec![DfValue::from(1), DfValue::from("%a%")])],
-                None,
-                None,
-                &[
-                    (ViewPlaceholder::OneToOne(1), 0),
-                    (ViewPlaceholder::OneToOne(2), 1),
-                ],
-                Dialect::MySQL,
-                vec![
-                    (
-                        &Column {
-                            name: "x".into(),
-                            table: Some("t".into()),
-                        },
-                        BinaryOperator::Equal,
-                    ),
-                    (
-                        &Column {
-                            name: "y".into(),
-                            table: Some("t".into()),
-                        },
-                        BinaryOperator::ILike,
-                    ),
-                ],
-            );
-
-            assert_eq!(
-                query.filter,
-                Some(DfExpr::Op {
-                    left: Box::new(DfExpr::Column {
-                        index: 1,
-                        ty: DfType::DEFAULT_TEXT
-                    }),
-                    op: DfBinaryOperator::ILike,
-                    right: Box::new(DfExpr::Literal {
-                        val: DfValue::from("%a%"),
-                        ty: DfType::DEFAULT_TEXT
-                    }),
-                    ty: DfType::Bool,
-                })
             );
         }
 
