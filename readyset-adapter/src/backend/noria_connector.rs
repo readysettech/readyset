@@ -46,7 +46,6 @@ pub(crate) enum PreparedStatement {
 #[derive(Clone)]
 pub(crate) struct PreparedSelectStatement {
     name: Relation,
-    statement: Box<nom_sql::SelectStatement>,
     processed_query_params: ProcessedQueryParams,
 }
 
@@ -54,14 +53,9 @@ impl fmt::Debug for PreparedStatement {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         // FIXME(ENG-2499): Use correct dialect.
         match self {
-            PreparedStatement::Select(PreparedSelectStatement {
-                name, statement, ..
-            }) => write!(
-                f,
-                "{}: {}",
-                name.display(nom_sql::Dialect::MySQL),
-                statement.display(nom_sql::Dialect::MySQL)
-            ),
+            PreparedStatement::Select(PreparedSelectStatement { name, .. }) => {
+                write!(f, "{}", name.display(nom_sql::Dialect::MySQL),)
+            }
             PreparedStatement::Insert(s) => write!(f, "{}", s.display(nom_sql::Dialect::MySQL)),
             PreparedStatement::Update(s) => write!(f, "{}", s.display(nom_sql::Dialect::MySQL)),
             PreparedStatement::Delete(s) => write!(f, "{}", s.display(nom_sql::Dialect::MySQL)),
@@ -1478,7 +1472,6 @@ impl NoriaConnector {
         trace!(id = statement_id, "select::registered");
         let ps = PreparedSelectStatement {
             name: qname.clone(),
-            statement: Box::new(statement),
             processed_query_params,
         };
         self.prepared_statement_cache
@@ -1517,11 +1510,10 @@ impl NoriaConnector {
         ticket: Option<Timestamp>,
         event: &mut readyset_client_metrics::QueryExecutionEvent,
     ) -> ReadySetResult<QueryResult<'_>> {
-        let (qname, statement, processed_query_params, params) = match ctx {
+        let (qname, processed_query_params, params) = match ctx {
             ExecuteSelectContext::Prepared { q_id, params } => {
                 let PreparedSelectStatement {
                     name,
-                    statement,
                     processed_query_params,
                 } = {
                     match self.prepared_statement_cache.get(&q_id) {
@@ -1532,7 +1524,6 @@ impl NoriaConnector {
                 };
                 (
                     Cow::Borrowed(name),
-                    Cow::Borrowed(statement.as_ref()),
                     Cow::Borrowed(processed_query_params),
                     params,
                 )
@@ -1549,7 +1540,6 @@ impl NoriaConnector {
                     .await?;
                 (
                     Cow::Owned(name),
-                    Cow::Owned(statement),
                     Cow::Owned(processed_query_params),
                     &[][..],
                 )
@@ -1567,7 +1557,6 @@ impl NoriaConnector {
             getter,
             processed_query_params.as_ref(),
             params,
-            statement.as_ref(),
             ticket,
             self.read_behavior,
             self.read_request_handler.as_mut(),
@@ -1630,7 +1619,6 @@ fn build_view_query<'a>(
     getter: &'a mut View,
     processed_query_params: &ProcessedQueryParams,
     params: &[DfValue],
-    q: &nom_sql::SelectStatement,
     ticket: Option<Timestamp>,
     read_behavior: ReadBehavior,
     dialect: Dialect,
@@ -1645,7 +1633,6 @@ fn build_view_query<'a>(
         ticket,
         read_behavior.is_blocking(),
         dialect,
-        utils::get_select_statement_binops(q),
     )
 }
 
@@ -1657,7 +1644,6 @@ async fn do_read<'a>(
     getter: &'a mut View,
     processed_query_params: &ProcessedQueryParams,
     params: &[DfValue],
-    q: &nom_sql::SelectStatement,
     ticket: Option<Timestamp>,
     read_behavior: ReadBehavior,
     read_request_handler: Option<&'a mut ReadRequestHandler>,
@@ -1668,7 +1654,6 @@ async fn do_read<'a>(
         getter,
         processed_query_params,
         params,
-        q,
         ticket,
         read_behavior,
         dialect,

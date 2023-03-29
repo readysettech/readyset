@@ -4293,7 +4293,10 @@ async fn simple_pagination() {
     assert_eq!(
         q.key_map(),
         &[
-            (ViewPlaceholder::OneToOne(1), 1),
+            (
+                ViewPlaceholder::OneToOne(1, nom_sql::BinaryOperator::Equal),
+                1
+            ),
             (
                 ViewPlaceholder::PageNumber {
                     offset_placeholder: 2,
@@ -7459,10 +7462,22 @@ async fn mixed_inclusive_range_and_equality() {
     assert_eq!(
         q.key_map(),
         &[
-            (ViewPlaceholder::OneToOne(4), 3),
-            (ViewPlaceholder::OneToOne(2), 1),
-            (ViewPlaceholder::OneToOne(1), 0),
-            (ViewPlaceholder::OneToOne(3), 2)
+            (
+                ViewPlaceholder::OneToOne(4, nom_sql::BinaryOperator::Equal),
+                3
+            ),
+            (
+                ViewPlaceholder::OneToOne(2, nom_sql::BinaryOperator::Equal),
+                1
+            ),
+            (
+                ViewPlaceholder::OneToOne(1, nom_sql::BinaryOperator::GreaterOrEqual),
+                0
+            ),
+            (
+                ViewPlaceholder::OneToOne(3, nom_sql::BinaryOperator::GreaterOrEqual),
+                2
+            )
         ]
     );
 

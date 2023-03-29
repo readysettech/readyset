@@ -342,7 +342,10 @@ mod tests {
         #[test]
         fn leaf() {
             same_columns_as_parent(MirNodeInner::Leaf {
-                keys: vec![(Column::new(Some("base"), "a"), ViewPlaceholder::OneToOne(1))],
+                keys: vec![(
+                    Column::new(Some("base"), "a"),
+                    ViewPlaceholder::OneToOne(1, BinaryOperator::Equal),
+                )],
                 index_type: IndexType::HashMap,
                 lowered_to_df: false,
                 order_by: None,

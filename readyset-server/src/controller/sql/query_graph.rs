@@ -307,61 +307,84 @@ impl QueryGraph {
                 .then_with(|| param1.col.cmp(&param2.col))
             });
 
-            let mut index_type = None;
-            let mut columns: Vec<(mir::Column, ViewPlaceholder)> = vec![];
-            let mut last_op = None;
-            for param in parameters {
-                let new_index_type = Some(IndexType::for_operator(param.op).ok_or_else(|| {
-                    unsupported_err!("Unsupported binary operator `{}`", param.op)
+            /// Given the current IndexType and the next operator in the query, resolve the
+            /// IndexType for the query
+            fn resolve_index_type(
+                current_index_type: Option<IndexType>,
+                operator: BinaryOperator,
+                config: &mir::Config,
+            ) -> ReadySetResult<Option<IndexType>> {
+                let new_index_type = Some(IndexType::for_operator(operator).ok_or_else(|| {
+                    unsupported_err!("Unsupported binary operator `{}`", operator)
                 })?);
-
                 if !config.allow_mixed_comparisons
-                    && index_type.is_some()
-                    && new_index_type != index_type
+                    && current_index_type.is_some()
+                    && current_index_type != new_index_type
                 {
                     unsupported!("Conflicting binary operators in query");
                 } else {
-                    index_type = new_index_type;
+                    // TODO: resolve index type rather than overwriting the old value
+                    Ok(new_index_type)
                 }
+            }
 
-                if let (Some((last_col, placeholder)), Some(last_op)) =
-                    (columns.last_mut(), last_op)
-                {
-                    if *last_col == param.col {
-                        match (last_op, param.op) {
-                            (op1, op2) if op1 == op2 => {}
-                            (BinaryOperator::GreaterOrEqual, BinaryOperator::LessOrEqual) => {
-                                match (*placeholder, param.placeholder_idx) {
-                                    (ViewPlaceholder::OneToOne(lower_idx), Some(upper_idx)) => {
-                                        *placeholder =
-                                            ViewPlaceholder::Between(lower_idx, upper_idx);
-                                        continue;
-                                    }
-                                    _ => unsupported!("Conflicting binary operators in query"),
-                                }
-                            }
-                            (BinaryOperator::LessOrEqual, BinaryOperator::GreaterOrEqual) => {
-                                match (param.placeholder_idx, *placeholder) {
-                                    (Some(lower_idx), ViewPlaceholder::OneToOne(upper_idx)) => {
-                                        *placeholder =
-                                            ViewPlaceholder::Between(lower_idx, upper_idx);
-                                        continue;
-                                    }
-                                    _ => unsupported!("Conflicting binary operators in query"),
-                                }
-                            }
-                            _ => unsupported!("Conflicting binary operators in query"),
+            /// Combine a `ViewPlaceholder` generated from a column-placeholder comparison and a new
+            /// `Parameter`.
+            ///
+            /// This function should only be called with a `ViewPlaceholder` and `Parameter` that
+            /// refer to the same column.
+            fn combine_comparisons(
+                current_view_placeholder: &ViewPlaceholder,
+                new_param: &Parameter,
+            ) -> ReadySetResult<ViewPlaceholder> {
+                match (current_view_placeholder, new_param) {
+                    (
+                        ViewPlaceholder::OneToOne(idx, BinaryOperator::GreaterOrEqual),
+                        Parameter {
+                            op: BinaryOperator::LessOrEqual,
+                            placeholder_idx: Some(ref placeholder_idx),
+                            ..
+                        },
+                    ) => Ok(ViewPlaceholder::Between(*idx, *placeholder_idx)),
+                    (
+                        ViewPlaceholder::OneToOne(idx, BinaryOperator::LessOrEqual),
+                        Parameter {
+                            op: BinaryOperator::GreaterOrEqual,
+                            placeholder_idx: Some(ref placeholder_idx),
+                            ..
+                        },
+                    ) => Ok(ViewPlaceholder::Between(*placeholder_idx, *idx)),
+                    _ => unsupported!("Conflicting binary operators in query"),
+                }
+            }
+
+            let (index_type, mut columns) = parameters.into_iter().try_fold(
+                (None, vec![]),
+                |(index_type, mut columns), param| -> ReadySetResult<_> {
+                    let index_type = resolve_index_type(index_type, param.op, config)?;
+                    match columns.last_mut() {
+                        // If the last two columns match and have different operators
+                        Some((col, placeholder))
+                            if *col == param.col
+                                && matches!(placeholder, ViewPlaceholder::OneToOne(_, ref op) if *op != param.op) =>
+                        {
+                            *placeholder = combine_comparisons(placeholder, param)?;
+                            Ok((index_type, columns))
+                        }
+                        // Otherwise, add a new ViewPlaceholder and continue
+                        _ => {
+                            columns.push((
+                                mir::Column::from(param.col.clone()),
+                                param
+                                    .placeholder_idx
+                                    .map(|idx| ViewPlaceholder::OneToOne(idx, param.op))
+                                    .unwrap_or(ViewPlaceholder::Generated),
+                            ));
+                            Ok((index_type, columns))
                         }
                     }
-                }
-
-                columns.push((
-                    mir::Column::from(param.col.clone()),
-                    param.placeholder_idx.into(),
-                ));
-
-                last_op = Some(param.op);
-            }
+                },
+            )?;
 
             if let Some(offset) = offset {
                 if index_type == Some(IndexType::BTreeMap) {
@@ -1683,7 +1706,7 @@ mod tests {
                 key.columns,
                 vec![(
                     mir::Column::new(Some("t"), "x"),
-                    ViewPlaceholder::OneToOne(1)
+                    ViewPlaceholder::OneToOne(1, BinaryOperator::Equal)
                 )]
             )
         }
@@ -1700,11 +1723,11 @@ mod tests {
                 vec![
                     (
                         mir::Column::new(Some("t"), "x"),
-                        ViewPlaceholder::OneToOne(2)
+                        ViewPlaceholder::OneToOne(2, BinaryOperator::Equal)
                     ),
                     (
                         mir::Column::new(Some("t"), "x"),
-                        ViewPlaceholder::OneToOne(1)
+                        ViewPlaceholder::OneToOne(1, BinaryOperator::Equal)
                     )
                 ]
             )
@@ -1722,11 +1745,11 @@ mod tests {
                 vec![
                     (
                         mir::Column::new(Some("t"), "x"),
-                        ViewPlaceholder::OneToOne(1)
+                        ViewPlaceholder::OneToOne(1, BinaryOperator::Greater)
                     ),
                     (
                         mir::Column::new(Some("t"), "x"),
-                        ViewPlaceholder::OneToOne(2)
+                        ViewPlaceholder::OneToOne(2, BinaryOperator::Greater)
                     )
                 ]
             )
@@ -1744,11 +1767,11 @@ mod tests {
                 vec![
                     (
                         mir::Column::new(Some("Cats"), "id"),
-                        ViewPlaceholder::OneToOne(2)
+                        ViewPlaceholder::OneToOne(2, BinaryOperator::Equal)
                     ),
                     (
                         mir::Column::new(Some("Cats"), "name"),
-                        ViewPlaceholder::OneToOne(1)
+                        ViewPlaceholder::OneToOne(1, BinaryOperator::Equal)
                     ),
                 ]
             );
@@ -1764,7 +1787,7 @@ mod tests {
                 key.columns,
                 vec![(
                     mir::Column::new(Some("t"), "x"),
-                    ViewPlaceholder::OneToOne(1)
+                    ViewPlaceholder::OneToOne(1, BinaryOperator::Greater)
                 )]
             )
         }
@@ -1815,11 +1838,11 @@ mod tests {
                 vec![
                     (
                         mir::Column::new(Some("t"), "y"),
-                        ViewPlaceholder::OneToOne(2)
+                        ViewPlaceholder::OneToOne(2, BinaryOperator::Equal)
                     ),
                     (
                         mir::Column::new(Some("t"), "x"),
-                        ViewPlaceholder::OneToOne(1)
+                        ViewPlaceholder::OneToOne(1, BinaryOperator::GreaterOrEqual)
                     ),
                 ]
             );
@@ -1842,15 +1865,15 @@ mod tests {
                 vec![
                     (
                         mir::Column::new(Some("t"), "z"),
-                        ViewPlaceholder::OneToOne(3)
+                        ViewPlaceholder::OneToOne(3, BinaryOperator::Equal)
                     ),
                     (
                         mir::Column::new(Some("t"), "x"),
-                        ViewPlaceholder::OneToOne(1)
+                        ViewPlaceholder::OneToOne(1, BinaryOperator::Greater)
                     ),
                     (
                         mir::Column::new(Some("t"), "y"),
-                        ViewPlaceholder::OneToOne(2)
+                        ViewPlaceholder::OneToOne(2, BinaryOperator::LessOrEqual)
                     ),
                 ]
             );
@@ -1873,7 +1896,7 @@ mod tests {
                 vec![
                     (
                         mir::Column::new(Some("t"), "y"),
-                        ViewPlaceholder::OneToOne(3)
+                        ViewPlaceholder::OneToOne(3, BinaryOperator::Equal)
                     ),
                     (
                         mir::Column::new(Some("t"), "x"),
@@ -1901,7 +1924,7 @@ mod tests {
                 vec![
                     (
                         mir::Column::new(Some("t"), "z"),
-                        ViewPlaceholder::OneToOne(4)
+                        ViewPlaceholder::OneToOne(4, BinaryOperator::Equal)
                     ),
                     (
                         mir::Column::new(Some("t"), "x"),
@@ -1909,7 +1932,7 @@ mod tests {
                     ),
                     (
                         mir::Column::new(Some("t"), "y"),
-                        ViewPlaceholder::OneToOne(3)
+                        ViewPlaceholder::OneToOne(3, BinaryOperator::Less)
                     )
                 ]
             );
@@ -1933,7 +1956,7 @@ mod tests {
                 vec![
                     (
                         mir::Column::new(Some("t"), "x"),
-                        ViewPlaceholder::OneToOne(1)
+                        ViewPlaceholder::OneToOne(1, BinaryOperator::Equal)
                     ),
                     (
                         mir::Column::named("__page_number"),

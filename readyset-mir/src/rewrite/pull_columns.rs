@@ -197,7 +197,7 @@ mod tests {
             MirNodeInner::leaf(
                 vec![(
                     Column::named("b").aliased_as_table("unprojected_leaf_key"),
-                    ViewPlaceholder::OneToOne(1),
+                    ViewPlaceholder::OneToOne(1, BinaryOperator::Equal),
                 )],
                 IndexType::HashMap,
             ),
