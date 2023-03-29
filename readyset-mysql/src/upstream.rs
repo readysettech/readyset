@@ -277,8 +277,6 @@ impl MySqlUpstream {
     > {
         // CLIENT_SESSION_TRACK is required for GTID information to be sent in OK packets on commits
         // GTID information is used for RYW
-        // Currently this causes rows affected to return an incorrect result, so this is feature
-        // gated.
         let url = upstream_config
             .upstream_db_url
             .as_deref()
