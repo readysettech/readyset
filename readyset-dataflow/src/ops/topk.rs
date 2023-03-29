@@ -58,7 +58,9 @@ impl<'topk, 'state> PartialEq for CurrentRecord<'topk, 'state> {
 
 impl<'topk, 'state> PartialEq<[DfValue]> for CurrentRecord<'topk, 'state> {
     fn eq(&self, other: &[DfValue]) -> bool {
-        self.partial_cmp(other).contains(&Ordering::Equal)
+        self.partial_cmp(other)
+            .iter()
+            .any(|c| *c == Ordering::Equal)
     }
 }
 

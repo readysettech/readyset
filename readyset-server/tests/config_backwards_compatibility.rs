@@ -1,5 +1,3 @@
-#![feature(option_result_contains)]
-
 use std::ffi::OsStr;
 
 use include_dir::{include_dir, Dir};
@@ -10,7 +8,12 @@ const CONFIG_VERSIONS: Dir = include_dir!("tests/config_versions");
 #[test]
 fn deserialize_old_versions() {
     for file in CONFIG_VERSIONS.files() {
-        if !file.path().extension().contains(&OsStr::new("json")) {
+        if !file
+            .path()
+            .extension()
+            .iter()
+            .any(|ext| *ext == OsStr::new("json"))
+        {
             continue;
         }
 

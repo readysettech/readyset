@@ -9,7 +9,6 @@
     binary_heap_retain,
     trait_alias,
     btree_drain_filter,
-    option_result_contains,
     bound_as_ref,
     bound_map,
     stmt_expr_attributes,
