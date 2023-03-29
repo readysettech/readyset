@@ -188,7 +188,6 @@ impl MirGraph {
             MirNodeInner::Filter { .. }
             | MirNodeInner::Leaf { .. }
             | MirNodeInner::Identity
-            | MirNodeInner::Latest { .. }
             | MirNodeInner::TopK { .. } => parent_columns(),
             MirNodeInner::AliasTable { table } => parent_columns()
                 .iter()

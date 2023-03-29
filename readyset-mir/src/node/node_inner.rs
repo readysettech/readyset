@@ -135,10 +135,6 @@ pub enum MirNodeInner {
         /// Columns (from both parents) to project in the output.
         project: Vec<Column>,
     },
-    /// group columns
-    // currently unused
-    #[allow(dead_code)]
-    Latest { group_by: Vec<Column> },
     /// Node which outputs a subset of columns from its parent in any order, and can evaluate
     /// expressions.
     ///
@@ -447,14 +443,6 @@ impl MirNodeInner {
                         .map(|(l, r)| format!("{}:{}", l.name, r.name))
                         .join(", ")
                 )
-            }
-            MirNodeInner::Latest { ref group_by } => {
-                let key_cols = group_by
-                    .iter()
-                    .map(|k| k.name.clone())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("⧖ γ[{}]", key_cols)
             }
             MirNodeInner::Project {
                 ref emit,

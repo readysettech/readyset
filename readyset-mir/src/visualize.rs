@@ -279,10 +279,6 @@ impl GraphViz for MirNodeInner {
                     on.iter().map(|(l, r)| format!("{}:{}", l, r)).join(", ")
                 )
             }
-            MirNodeInner::Latest { ref group_by } => {
-                let key_cols = group_by.iter().join(", ");
-                write!(f, "⧖ | γ: {}", key_cols)
-            }
             MirNodeInner::Project {
                 ref emit,
                 ref literals,

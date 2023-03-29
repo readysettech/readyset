@@ -13,7 +13,6 @@ use common::DfValue;
 use dataflow::node::Column as DfColumn;
 use dataflow::ops::grouped::concat::GroupConcat;
 use dataflow::ops::join::{Join, JoinType};
-use dataflow::ops::latest::Latest;
 use dataflow::ops::project::Project;
 use dataflow::{node, ops, Expr as DfExpr, PostLookupAggregates, ReaderProcessing};
 use itertools::Itertools;
@@ -29,7 +28,7 @@ use readyset_client::internal::{Index, IndexType};
 use readyset_client::ViewPlaceholder;
 use readyset_data::{Collation, DfType, Dialect};
 use readyset_errors::{
-    internal, internal_err, invariant, invariant_eq, unsupported, ReadySetError, ReadySetResult,
+    internal, internal_err, invariant, invariant_eq, ReadySetError, ReadySetResult,
 };
 
 use crate::controller::Migration;
@@ -196,18 +195,6 @@ pub(super) fn mir_node_to_flow_parts(
                 MirNodeInner::DependentJoin { .. } => {
                     // See the docstring for MirNodeInner::DependentJoin
                     internal!("Encountered dependent join when lowering to dataflow")
-                }
-                MirNodeInner::Latest { ref group_by } => {
-                    invariant_eq!(ancestors.len(), 1);
-                    let parent = ancestors[0];
-                    Some(make_latest_node(
-                        graph,
-                        name,
-                        parent,
-                        &graph.referenced_columns(mir_node),
-                        group_by,
-                        mig,
-                    )?)
                 }
                 MirNodeInner::Leaf {
                     ref keys,
@@ -850,42 +837,6 @@ fn make_join_aggregates_node(
     let n = mig.add_ingredient(name, cols, j);
 
     Ok(DfNodeIndex::new(n))
-}
-
-fn make_latest_node(
-    graph: &MirGraph,
-    name: Relation,
-    parent: MirNodeIndex,
-    columns: &[Column],
-    group_by: &[Column],
-    mig: &mut Migration<'_>,
-) -> ReadySetResult<DfNodeIndex> {
-    let parent_na = graph.resolve_dataflow_node(parent).ok_or_else(|| {
-        ReadySetError::MirNodeMustHaveDfNodeAssigned {
-            mir_node_index: parent.index(),
-        }
-    })?;
-    let mut cols = mig.dataflow_state.ingredients[parent_na.address()]
-        .columns()
-        .to_vec();
-
-    set_names(&column_names(columns), &mut cols)?;
-
-    let group_col_indx = group_by
-        .iter()
-        .map(|c| graph.column_id_for_column(parent, c))
-        .collect::<ReadySetResult<Vec<_>>>()?;
-
-    // latest doesn't support compound group by
-    if group_col_indx.len() != 1 {
-        unsupported!("latest node doesn't support compound GROUP BY")
-    }
-    let na = mig.add_ingredient(
-        name,
-        cols,
-        Latest::new(parent_na.address(), group_col_indx[0]),
-    );
-    Ok(DfNodeIndex::new(na))
 }
 
 #[derive(Clone)]
