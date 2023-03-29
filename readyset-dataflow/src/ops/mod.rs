@@ -12,7 +12,6 @@ pub mod filter;
 pub mod grouped;
 pub mod identity;
 pub mod join;
-pub mod latest;
 pub mod paginate;
 pub mod project;
 pub mod topk;
@@ -49,7 +48,6 @@ pub enum NodeOperator {
     Extremum(grouped::GroupedOperator<grouped::extremum::ExtremumOperator>),
     Concat(grouped::GroupedOperator<GroupConcat>),
     Join(join::Join),
-    Latest(latest::Latest),
     Paginate(paginate::Paginate),
     Project(project::Project),
     Union(union::Union),
@@ -65,7 +63,6 @@ impl ToString for NodeOperator {
             NodeOperator::Extremum(_) => "Extermum",
             NodeOperator::Concat(_) => "Concat",
             NodeOperator::Join(_) => "Join",
-            NodeOperator::Latest(_) => "Latest",
             NodeOperator::Paginate(_) => "Paginate",
             NodeOperator::Project(_) => "Project",
             NodeOperator::Union(_) => "Union",
@@ -84,7 +81,6 @@ macro_rules! impl_ingredient_fn_mut {
             NodeOperator::Extremum(ref mut i) => i.$fn($($arg),*),
             NodeOperator::Concat(ref mut i) => i.$fn($($arg),*),
             NodeOperator::Join(ref mut i) => i.$fn($($arg),*),
-            NodeOperator::Latest(ref mut i) => i.$fn($($arg),*),
             NodeOperator::Paginate(ref mut i) => i.$fn($($arg),*),
             NodeOperator::Project(ref mut i) => i.$fn($($arg),*),
             NodeOperator::Union(ref mut i) => i.$fn($($arg),*),
@@ -102,7 +98,6 @@ macro_rules! impl_ingredient_fn_ref {
             NodeOperator::Extremum(ref i) => i.$fn($($arg),*),
             NodeOperator::Concat(ref i) => i.$fn($($arg),*),
             NodeOperator::Join(ref i) => i.$fn($($arg),*),
-            NodeOperator::Latest(ref i) => i.$fn($($arg),*),
             NodeOperator::Paginate(ref i) => i.$fn($($arg),*),
             NodeOperator::Project(ref i) => i.$fn($($arg),*),
             NodeOperator::Union(ref i) => i.$fn($($arg),*),
