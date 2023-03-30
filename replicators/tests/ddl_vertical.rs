@@ -28,6 +28,7 @@ use std::fmt::{Debug, Formatter, Result};
 use std::iter::once;
 use std::panic::AssertUnwindSafe;
 use std::rc::Rc;
+use std::time::Duration;
 
 use itertools::Itertools;
 use nom_sql::SqlType;
@@ -46,6 +47,7 @@ use tokio_postgres::{Client, Config, NoTls, Row};
 const SQL_NAME_REGEX: &str = "[a-zA-Z_][a-zA-Z0-9_]*";
 const MIN_OPS: usize = 7;
 const MAX_OPS: usize = 13;
+const TEST_CASE_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// This struct is used to generate arbitrary column specifications, both for creating tables, and
 /// potentially for altering them by adding columns and such.
@@ -1216,7 +1218,11 @@ fn run_cases() {
             .enable_all()
             .build()
             .unwrap();
-        rt.block_on(run(steps, next_step_idx.clone()));
+        rt.block_on(
+            async {
+                tokio::time::timeout(TEST_CASE_TIMEOUT, run(steps, next_step_idx.clone())).await
+            }
+        ).unwrap();
     });
 }
 
