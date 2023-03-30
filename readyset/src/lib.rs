@@ -55,7 +55,7 @@ use tokio::net;
 use tokio::net::UdpSocket;
 use tokio::time::timeout;
 use tokio_stream::wrappers::TcpListenerStream;
-use tracing::{debug, debug_span, error, info, span, warn, Level};
+use tracing::{debug, debug_span, error, info, info_span, span, warn, Level};
 use tracing_futures::Instrument;
 
 // How frequently to try to establish an http registration for the first time or if the last tick
@@ -992,7 +992,7 @@ where
         let expr_dialect = self.expr_dialect;
         let parse_dialect = self.parse_dialect;
         while let Some(Ok(s)) = rt.block_on(listener.next()) {
-            let connection = span!(Level::DEBUG, "connection", addr = ?s.peer_addr().unwrap());
+            let connection = info_span!("connection", addr = %s.peer_addr()?);
             connection.in_scope(|| info!("Accepted new connection"));
             s.set_nodelay(true)?;
 
