@@ -211,6 +211,7 @@ mod utils;
 
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
+use std::net::TcpListener;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::{Duration, Instant};
@@ -735,7 +736,7 @@ impl DeploymentBuilder {
             );
         }
 
-        let mut port = get_next_good_port(None);
+        let mut port_allocator = PortAllocator::new();
         // If this deployment includes binlog replication and a mysql instance.
         let mut upstream_addr = None;
         let server_upstream = if self.upstream {
@@ -804,9 +805,8 @@ impl DeploymentBuilder {
         // Create the readyset-server instances.
         let mut handles = HashMap::new();
         for server in &self.servers {
-            port = get_next_good_port(Some(port));
             let handle = start_server(
-                port,
+                port_allocator.get_available_port(),
                 server_upstream.as_ref(),
                 server,
                 &self.server_start_params(),
@@ -835,8 +835,8 @@ impl DeploymentBuilder {
                 }),
                 false => None,
             };
-            let port = get_next_good_port(Some(port));
-            let metrics_port = get_next_good_port(Some(port));
+            let port = port_allocator.get_available_port();
+            let metrics_port = port_allocator.get_available_port();
             let process = start_adapter(
                 server_upstream.clone(),
                 port,
@@ -870,7 +870,7 @@ impl DeploymentBuilder {
             upstream_addr,
             readyset_server_handles: handles,
             shutdown: false,
-            port,
+            port_allocator,
             adapters,
             database_type: self.database_type,
             standalone: self.standalone,
@@ -1121,8 +1121,8 @@ pub struct DeploymentHandle {
     /// A handle to each readyset server in the deployment.
     /// True if this deployment has already been torn down.
     shutdown: bool,
-    /// Next new server port.
-    port: u16,
+    /// A tool that allows us to allocate ports
+    port_allocator: PortAllocator,
     /// The type of the upstream (MySQL or PostgresSQL)
     database_type: DatabaseType,
     /// True if the adapter is running in standalone mode
@@ -1246,8 +1246,7 @@ impl DeploymentHandle {
         params: ServerParams,
         wait_for_startup: bool,
     ) -> anyhow::Result<Url> {
-        let port = get_next_good_port(Some(self.port));
-        self.port = port;
+        let port = self.port_allocator.get_available_port();
         let handle = start_server(
             port,
             self.upstream_addr.clone().as_ref(),
@@ -1268,9 +1267,8 @@ impl DeploymentHandle {
 
     /// Start a new readyset adapter instance in the deployment
     pub async fn start_adapter(&mut self, wait_for_startup: bool) -> anyhow::Result<()> {
-        let port = get_next_good_port(Some(self.port));
-        let metrics_port = get_next_good_port(Some(port));
-        self.port = port;
+        let port = self.port_allocator.get_available_port();
+        let metrics_port = self.port_allocator.get_available_port();
         let database_type = self.database_type;
         // If we are running in standalone, we need to pass both adapter and server parameters.
         let standalone_params = match self.standalone {
@@ -1627,17 +1625,38 @@ async fn start_adapter(
     builder.start().await
 }
 
-/// Finds the next available port after `port` (if supplied).
-/// Otherwise, it returns a random available port in the range of 20000-60000.
-fn get_next_good_port(port: Option<u16>) -> u16 {
-    let mut port = port.map(|p| p + 1).unwrap_or_else(|| {
-        let mut rng = rand::thread_rng();
-        rng.gen_range(20000..60000)
-    });
-    while !port_scanner::local_port_available(port) {
-        port += 1;
+/// A tool that allocates ports in a way that prevents the same port from being allocated more than
+/// once, even if a port previously allocated by this tool is not yet in use.
+struct PortAllocator(HashSet<u16>);
+
+impl PortAllocator {
+    fn new() -> Self {
+        Self(HashSet::new())
     }
-    port
+
+    /// Returns a random available port allocated by the operating system. This method keeps track
+    /// of the ports that it has allocated, which means that you can call this method multiple
+    /// times in succession without having to worry about the same port being returned more than
+    /// once **even if one of the prior ports it has returned is not yet in use**.
+    fn get_available_port(&mut self) -> u16 {
+        loop {
+            // We bind to localhost with a port of 0 here so the OS assigns us an unused port.
+            // We only need the port (since we'll be passing it to a ReadySet server or adapter as
+            // a CLI option) so we keep the unused port and drop the listener
+            let port = TcpListener::bind(("127.0.0.1", 0))
+                .unwrap()
+                .local_addr()
+                .unwrap()
+                .port();
+
+            // We need to check that the given port hasn't been allocated yet because it's possible
+            // for this method to be called several times in succession without the ports being
+            // used yet
+            if !self.0.contains(&port) {
+                return port;
+            }
+        }
+    }
 }
 
 // These tests currently require that a docker daemon is already setup
