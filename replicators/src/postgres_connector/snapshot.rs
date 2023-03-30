@@ -805,15 +805,9 @@ impl<'a> PostgresReplicator<'a> {
             }
         }
 
-        // The current schema was replicated, assign the current position
-        debug!(%wal_position, "Setting schema replication offset");
-        self.noria
-            .set_schema_replication_offset(Some(&wal_position))
-            .await?;
-
         let replication_offsets = self.noria.replication_offsets().await?;
 
-        if !full_snapshot {
+        let requires_catch_up = if !full_snapshot {
             tables
                 .drain_filter(|t| replication_offsets.has_table(&t.name))
                 .for_each(|t| {
@@ -822,6 +816,28 @@ impl<'a> PostgresReplicator<'a> {
                         "Replication offset already exists for table, skipping snapshot"
                     )
                 });
+
+            !tables.is_empty()
+        } else {
+            true
+        };
+
+        // Skip setting the schema offset if this is not the first time ReadySet is deployed and
+        // there were no schema changes happening since the last time it was deployed.
+        // We do this as an optimization, in order to skip the catch up phase (if nothing changed,
+        // there's nothing to catch up to).
+        if requires_catch_up || replication_offsets.schema.is_none() {
+            // The current schema was replicated, assign the current position
+            debug!(
+                catch_up = requires_catch_up,
+                schema_offset = ?replication_offsets.schema,
+                "Setting schema replication offset"
+            );
+            self.noria
+                .set_schema_replication_offset(Some(&wal_position))
+                .await?;
+        } else {
+            debug!("Skipping schema offset update, since no catch up is required");
         }
 
         // Commit the transaction we were using to snapshot the schema. This is important since that
