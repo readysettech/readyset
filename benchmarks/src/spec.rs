@@ -197,18 +197,15 @@ impl WorkloadSpec {
             info!("Generating distribution {name}");
 
             let data: Vec<Vec<DfValue>> = match from {
-                WorkloadDistributionSource::Range { range } => range
-                    .clone()
-                    .into_iter()
-                    .map(|n| vec![DfValue::from(n)])
-                    .collect(),
+                WorkloadDistributionSource::Range { range } => {
+                    range.clone().map(|n| vec![DfValue::from(n)]).collect()
+                }
                 WorkloadDistributionSource::Pair {
                     pair: Pair { range, distance },
                 } => {
                     let mut rng = rand::thread_rng();
                     range
                         .clone()
-                        .into_iter()
                         .map(|n| {
                             vec![
                                 DfValue::from(n),

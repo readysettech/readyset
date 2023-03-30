@@ -246,7 +246,7 @@ mod tests {
         #[test]
         fn parse_byte_vector() {
             let qstring: Vec<u8> = b"INSERT INTO users VALUES (42, \"test\");".to_vec();
-            let res = parse_query_bytes(Dialect::MySQL, &qstring);
+            let res = parse_query_bytes(Dialect::MySQL, qstring);
             res.unwrap();
         }
 
@@ -456,7 +456,7 @@ mod tests {
         #[test]
         fn parse_byte_vector() {
             let qstring: Vec<u8> = b"INSERT INTO users VALUES (42, 'test');".to_vec();
-            let res = parse_query_bytes(Dialect::PostgreSQL, &qstring);
+            let res = parse_query_bytes(Dialect::PostgreSQL, qstring);
             res.unwrap();
         }
 

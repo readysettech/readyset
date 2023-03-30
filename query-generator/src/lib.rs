@@ -344,7 +344,7 @@ fn unique_value_of_type(typ: &SqlType, idx: u32) -> DfValue {
         SqlType::QuotedChar => (idx as i8).into(),
         SqlType::Int(_) => (idx as i32).into(),
         SqlType::BigInt(_) => (idx as i64).into(),
-        SqlType::UnsignedInt(_) => (idx as u32).into(),
+        SqlType::UnsignedInt(_) => idx.into(),
         SqlType::UnsignedBigInt(_) => (idx as u64).into(),
         SqlType::TinyInt(_) => (idx as i8).into(),
         SqlType::UnsignedTinyInt(_) => (idx).into(),
@@ -831,7 +831,7 @@ impl ZipfianGenerator {
             (DfValue::UnsignedInt(i), DfValue::UnsignedInt(j)) => {
                 let mut mapping: Vec<_> = (*i..*j).map(DfValue::UnsignedInt).collect();
                 mapping.shuffle(&mut rand::thread_rng());
-                ((j - i) as u64, mapping)
+                ((j - i), mapping)
             }
             (_, _) => unimplemented!("DfValues unsupported for discrete zipfian value generation"),
         };
@@ -2059,7 +2059,7 @@ fn query_has_aggregate(query: &SelectStatement) -> bool {
     })
 }
 
-fn column_in_query<'state>(state: &mut QueryState<'state>, query: &mut SelectStatement) -> Column {
+fn column_in_query(state: &mut QueryState<'_>, query: &mut SelectStatement) -> Column {
     match query
         .tables
         .iter()
@@ -2114,7 +2114,7 @@ impl QueryOperation {
 
     /// Add this query operation to `query`, recording information about new tables and columns in
     /// `state`.
-    fn add_to_query<'state>(&self, state: &mut QueryState<'state>, query: &mut SelectStatement) {
+    fn add_to_query(&self, state: &mut QueryState<'_>, query: &mut SelectStatement) {
         match self {
             QueryOperation::ColumnAggregate(agg) => {
                 use AggregateType::*;
@@ -2789,7 +2789,7 @@ pub struct Subquery {
 }
 
 impl Subquery {
-    fn add_to_query<'state>(self, state: &mut QueryState<'state>, query: &mut SelectStatement) {
+    fn add_to_query(self, state: &mut QueryState<'_>, query: &mut SelectStatement) {
         // perturb the generator to make a new table, so that we don't get the same table in the
         // subquery that we got in the outer query
         state.fresh_table_mut();
