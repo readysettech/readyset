@@ -382,6 +382,13 @@ pub struct Options {
     #[clap(long, env = "AUTOMATIC_PLACEHOLDER_INLINING", hide = true)]
     automatic_placeholder_inlining: bool,
 
+    /// Don't make connections to the upstream database for new client connections.
+    ///
+    /// If this flag is set queries will never be proxied upstream - even if they are unsupported,
+    /// fail to execute, or are run in a transaction.
+    #[clap(long, env = "NO_UPSTREAM_CONNECTIONS")]
+    no_upstream_connections: bool,
+
     /// If supplied we will clean up assets for the supplied deployment. If an upstream url is
     /// supplied, we will also clean up various assets related to upstream (replication slot, etc.)
     #[clap(long)]
@@ -561,6 +568,7 @@ where
             && options
                 .server_worker_options
                 .enable_experimental_paginate_support;
+        let no_upstream_connections = options.no_upstream_connections;
 
         let rh = rt.block_on(async {
             let authority = authority
@@ -825,7 +833,10 @@ where
             let fut = async move {
                 let connection = span!(Level::INFO, "migration task upstream database connection");
                 let mut upstream =
-                    if upstream_config.upstream_db_url.is_some() && !dry_run {
+                    if upstream_config.upstream_db_url.is_some()
+                        && !no_upstream_connections
+                        && !dry_run
+                    {
                         Some(
                             H::UpstreamDatabase::connect(upstream_config, fallback_cache)
                                 .instrument(connection.in_scope(|| {
@@ -1020,21 +1031,22 @@ where
             let upstream_config = upstream_config.clone();
             let fallback_cache = fallback_cache.clone();
             let fut = async move {
-                let upstream_res = if upstream_config.upstream_db_url.is_some() {
-                    set_failpoint!(failpoints::UPSTREAM);
-                    timeout(
-                        UPSTREAM_CONNECTION_TIMEOUT,
-                        H::UpstreamDatabase::connect(upstream_config, fallback_cache),
-                    )
-                    .instrument(debug_span!("Connecting to upstream database"))
-                    .await
-                    .map_err(|_| "Connection timed out".to_owned())
-                    .and_then(|r| r.map_err(|e| e.to_string()))
-                    .map_err(|e| format!("Error connecting to upstream database: {}", e))
-                    .map(Some)
-                } else {
-                    Ok(None)
-                };
+                let upstream_res =
+                    if upstream_config.upstream_db_url.is_some() && !no_upstream_connections {
+                        set_failpoint!(failpoints::UPSTREAM);
+                        timeout(
+                            UPSTREAM_CONNECTION_TIMEOUT,
+                            H::UpstreamDatabase::connect(upstream_config, fallback_cache),
+                        )
+                        .instrument(debug_span!("Connecting to upstream database"))
+                        .await
+                        .map_err(|_| "Connection timed out".to_owned())
+                        .and_then(|r| r.map_err(|e| e.to_string()))
+                        .map_err(|e| format!("Error connecting to upstream database: {}", e))
+                        .map(Some)
+                    } else {
+                        Ok(None)
+                    };
 
                 match upstream_res {
                     Ok(mut upstream) => {
