@@ -31,7 +31,7 @@
 //!
 //! Beware, Here be slightly smaller dragons™
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
 use array2::Array2;
@@ -160,7 +160,7 @@ pub struct DomainSettings {
 #[derive(Debug)]
 pub struct DomainMigrationPlan {
     /// An (ordered!) list of domain requests to send on application.
-    stored: Vec<StoredDomainRequest>,
+    stored: VecDeque<StoredDomainRequest>,
     /// A list of domains to instantiate on application.
     place: Vec<PlaceRequest>,
     /// A map of valid domain indices to the settings for that domain.
@@ -214,7 +214,7 @@ impl DomainMigrationPlan {
     /// controller.
     pub fn new(mainline: &DfState) -> Self {
         Self {
-            stored: vec![],
+            stored: VecDeque::new(),
             place: vec![],
             domains: mainline
                 .domains
@@ -318,7 +318,7 @@ impl DomainMigrationPlan {
             });
         }
 
-        self.stored.push(StoredDomainRequest {
+        self.stored.push_back(StoredDomainRequest {
             domain,
             shard: Some(shard),
             req,
@@ -332,7 +332,7 @@ impl DomainMigrationPlan {
     /// command should apply.
     pub fn add_message(&mut self, domain: DomainIndex, req: DomainRequest) -> ReadySetResult<()> {
         if self.domains.contains_key(&domain) {
-            self.stored.push(StoredDomainRequest {
+            self.stored.push_back(StoredDomainRequest {
                 domain,
                 shard: None,
                 req,
@@ -1196,7 +1196,7 @@ fn remove_nodes(
             "Storing domain request for node removals",
         );
 
-        dmp.stored.push(StoredDomainRequest {
+        dmp.stored.push_back(StoredDomainRequest {
             domain,
             shard: None,
             req: DomainRequest::RemoveNodes { nodes },
