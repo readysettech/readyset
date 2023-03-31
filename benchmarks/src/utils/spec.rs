@@ -180,7 +180,7 @@ impl DatabaseSchema {
 impl TryFrom<PathBuf> for DatabaseSchema {
     type Error = anyhow::Error;
     fn try_from(path: PathBuf) -> anyhow::Result<Self> {
-        let ddl = read_to_string(path).with_context(|| "Failed to read schema file")?;
+        let ddl = read_to_string(&path).with_context(|| "Failed to read schema file")?;
         DatabaseSchema::new(&ddl, HashMap::new())
     }
 }

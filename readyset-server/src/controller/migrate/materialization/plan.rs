@@ -274,7 +274,6 @@ impl<'a> Plan<'a> {
             // columns
             idx
         } else {
-            #[allow(clippy::redundant_clone)] // clippy bug!
             index_on.clone()
         };
 

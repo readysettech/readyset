@@ -86,12 +86,17 @@ impl Sharding {
     }
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, clap::ArgEnum, Default)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, clap::ArgEnum)]
 pub enum EvictionKind {
-    #[default]
     Random,
     LRU,
     Generational,
+}
+
+impl Default for EvictionKind {
+    fn default() -> Self {
+        EvictionKind::Random
+    }
 }
 
 pub use readyset_client::shard_by;

@@ -34,10 +34,9 @@ pub(crate) struct InvalidEdge {
 ///
 /// Note that no matter what this is set to, all nodes whose name starts with `SHALLOW_` will be
 /// placed beyond the frontier.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum FrontierStrategy {
     /// Place no nodes beyond the frontier (this is the default).
-    #[default]
     None,
     /// Place all partial materializations beyond the frontier.
     AllPartial,
@@ -45,6 +44,12 @@ pub enum FrontierStrategy {
     Readers,
     /// Place all nodes whose name contain the given string beyond the frontier.
     Match(String),
+}
+
+impl Default for FrontierStrategy {
+    fn default() -> Self {
+        FrontierStrategy::None
+    }
 }
 
 #[derive(Debug)]

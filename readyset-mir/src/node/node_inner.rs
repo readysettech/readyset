@@ -452,10 +452,14 @@ impl MirNodeInner {
                 "π [{}]",
                 emit.iter()
                     .map(|c| c.name.clone())
-                    .chain(expressions.iter().map(|(n, e)| {
+                    .chain(expressions.iter().map(|&(ref n, ref e)| {
                         format!("{}: {}", n, e.display(nom_sql::Dialect::MySQL)).into()
                     }))
-                    .chain(literals.iter().map(|(n, v)| format!("{}: {}", n, v).into()))
+                    .chain(
+                        literals
+                            .iter()
+                            .map(|&(ref n, ref v)| format!("{}: {}", n, v).into())
+                    )
                     .collect::<Vec<_>>()
                     .join(", "),
             ),

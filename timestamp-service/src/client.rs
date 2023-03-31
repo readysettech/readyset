@@ -27,10 +27,15 @@ pub enum WriteKey {
 // TODO(andrew): TimestampClient only works with MySQL.
 // https://app.clubhouse.io/readysettech/story/368
 #[allow(dead_code)]
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct TimestampClient {}
 
 impl TimestampClient {
+    /// Creates a timestamp client with no connection information.
+    pub fn default() -> Self {
+        TimestampClient {}
+    }
+
     /// Sends a set of write keys, `keys` for a single write, identifier by `write_id` to
     /// the timestamp server. Returns the updated timestamp for the write.
     // TODO(andrew): Currently only parsing MySql GTID's is supported.

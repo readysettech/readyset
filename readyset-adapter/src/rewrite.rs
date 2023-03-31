@@ -702,9 +702,9 @@ pub fn auto_parametrize_query(query: &mut SelectStatement) -> Vec<(usize, Litera
 ///
 /// `extracted_auto_params` must be sorted by the first index (this is the case with the return
 /// value of [`auto_parametrize_query`]).
-fn splice_auto_parameters<'param, T: Clone>(
+fn splice_auto_parameters<'param, 'a, T: Clone>(
     mut params: &'param [T],
-    extracted_auto_params: &[(usize, T)],
+    extracted_auto_params: &'a [(usize, T)],
 ) -> Cow<'param, [T]> {
     if extracted_auto_params.is_empty() {
         return Cow::Borrowed(params);

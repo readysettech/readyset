@@ -158,15 +158,12 @@ impl ZookeeperAuthority {
 impl AuthorityControl for ZookeeperAuthority {
     async fn init(&self) -> ReadySetResult<()> {
         // Attempt to create the base path in case we are the first worker.
-        let _ = self
-            .zk
-            .create(
-                WORKER_PATH,
-                Vec::new(),
-                Acl::open_unsafe().clone(),
-                CreateMode::Persistent,
-            )
-            .await;
+        let _ = self.zk.create(
+            WORKER_PATH,
+            Vec::new(),
+            Acl::open_unsafe().clone(),
+            CreateMode::Persistent,
+        );
         Ok(())
     }
 

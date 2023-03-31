@@ -73,6 +73,7 @@ async fn mysql_eval(expr: &str, conn: &mut Conn) -> DfValue {
     res.coerce_to(&target_type, &DfType::Unknown).unwrap()
 }
 
+#[track_caller]
 async fn compare_eval(expr: &str, conn: &mut Conn) {
     let mysql_result = mysql_eval(expr, conn).await;
     let our_result = parse_lower_eval(

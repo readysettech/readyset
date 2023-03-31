@@ -150,7 +150,7 @@ where
             .unwrap()
             .with_month(1)
             .unwrap()
-            .num_days_from_ce();
+            .num_days_from_ce() as i32;
         let mut weekday = if monday_first {
             time.weekday().num_days_from_monday()
         } else {
@@ -164,8 +164,8 @@ where
             }
             week_year = true;
             year -= 1;
-            days = days_in_year(year);
-            first_daynr -= days;
+            days = days_in_year(year) as i32;
+            first_daynr -= days as i32;
             weekday = (weekday + 53 * 7 - days) % 7;
         }
 

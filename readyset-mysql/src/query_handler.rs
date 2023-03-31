@@ -104,6 +104,7 @@ impl FromStr for SqlMode {
 fn raw_sql_modes_to_list(sql_modes: &str) -> Result<Vec<SqlMode>, ReadySetError> {
     sql_modes
         .split(',')
+        .into_iter()
         .map(SqlMode::from_str)
         .collect::<Result<Vec<SqlMode>, ReadySetError>>()
 }

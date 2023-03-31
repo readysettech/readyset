@@ -78,8 +78,8 @@ impl<'a> Iterator for Params<'a> {
                 };
                 self.bound_types.clear();
                 for i in 0..self.params as usize {
-                    let bound_type_col = typmap.get(2 * i);
-                    let bound_type_flag = typmap.get(2 * i + 1);
+                    let bound_type_col = typmap.get(2 * i as usize);
+                    let bound_type_flag = typmap.get(2 * i as usize + 1);
                     match (bound_type_col, bound_type_flag) {
                         (None, _) | (_, None) => return Some(Err(MsqlSrvError::IndexingError)),
                         (Some(col), Some(flag)) => {

@@ -55,7 +55,7 @@ impl<'de> Deserialize<'de> for QueryFile {
 impl TryFrom<PathBuf> for QueryFile {
     type Error = anyhow::Error;
     fn try_from(path: PathBuf) -> Result<Self, Self::Error> {
-        let query = fs::read_to_string(benchmark_path(&path)?)
+        let query = fs::read_to_string(&benchmark_path(&path)?)
             .map_err(|e| anyhow!("Could not load query from file: {}", e))?;
         Ok(Self { path, query })
     }

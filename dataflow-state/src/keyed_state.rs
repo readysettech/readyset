@@ -87,22 +87,22 @@ impl KeyedState {
     /// Panics if the length of `key` is different than the length of this `KeyedState`
     pub(super) fn lookup<'a>(&'a self, key: &PointKey) -> Option<&'a Rows> {
         match (self, key) {
-            (KeyedState::SingleBTree(m), PointKey::Single(k)) => m.get(k),
-            (KeyedState::DoubleBTree(m), PointKey::Double(k)) => m.get(k),
-            (KeyedState::TriBTree(m), PointKey::Tri(k)) => m.get(k),
-            (KeyedState::QuadBTree(m), PointKey::Quad(k)) => m.get(k),
-            (KeyedState::QuinBTree(m), PointKey::Quin(k)) => m.get(k),
-            (KeyedState::SexBTree(m), PointKey::Sex(k)) => m.get(k),
-            (&KeyedState::MultiBTree(ref m, len), PointKey::Multi(k)) if k.len() == len => {
+            (&KeyedState::SingleBTree(ref m), &PointKey::Single(ref k)) => m.get(k),
+            (&KeyedState::DoubleBTree(ref m), &PointKey::Double(ref k)) => m.get(k),
+            (&KeyedState::TriBTree(ref m), &PointKey::Tri(ref k)) => m.get(k),
+            (&KeyedState::QuadBTree(ref m), &PointKey::Quad(ref k)) => m.get(k),
+            (&KeyedState::QuinBTree(ref m), &PointKey::Quin(ref k)) => m.get(k),
+            (&KeyedState::SexBTree(ref m), &PointKey::Sex(ref k)) => m.get(k),
+            (&KeyedState::MultiBTree(ref m, len), &PointKey::Multi(ref k)) if k.len() == len => {
                 m.get(k.as_ref())
             }
-            (KeyedState::SingleHash(m), PointKey::Single(k)) => m.get(k),
-            (KeyedState::DoubleHash(m), PointKey::Double(k)) => m.get(k),
-            (KeyedState::TriHash(m), PointKey::Tri(k)) => m.get(k),
-            (KeyedState::QuadHash(m), PointKey::Quad(k)) => m.get(k),
-            (KeyedState::QuinHash(m), PointKey::Quin(k)) => m.get(k),
-            (KeyedState::SexHash(m), PointKey::Sex(k)) => m.get(k),
-            (&KeyedState::MultiHash(ref m, len), PointKey::Multi(k)) if k.len() == len => {
+            (&KeyedState::SingleHash(ref m), &PointKey::Single(ref k)) => m.get(k),
+            (&KeyedState::DoubleHash(ref m), &PointKey::Double(ref k)) => m.get(k),
+            (&KeyedState::TriHash(ref m), &PointKey::Tri(ref k)) => m.get(k),
+            (&KeyedState::QuadHash(ref m), &PointKey::Quad(ref k)) => m.get(k),
+            (&KeyedState::QuinHash(ref m), &PointKey::Quin(ref k)) => m.get(k),
+            (&KeyedState::SexHash(ref m), &PointKey::Sex(ref k)) => m.get(k),
+            (&KeyedState::MultiHash(ref m, len), &PointKey::Multi(ref k)) if k.len() == len => {
                 m.get(k.as_ref())
             }
             _ => {
@@ -384,7 +384,7 @@ impl KeyedState {
         }
 
         match (self, key) {
-            (KeyedState::SingleBTree(m), &RangeKey::Unbounded) => m
+            (&KeyedState::SingleBTree(ref m), &RangeKey::Unbounded) => m
                 .range(&(..))
                 .map_err(|misses| {
                     misses
@@ -393,11 +393,11 @@ impl KeyedState {
                         .collect()
                 })
                 .map(flatten_rows),
-            (KeyedState::DoubleBTree(m), &RangeKey::Unbounded) => full_range!(m),
-            (KeyedState::TriBTree(m), &RangeKey::Unbounded) => full_range!(m),
-            (KeyedState::QuadBTree(m), &RangeKey::Unbounded) => full_range!(m),
-            (KeyedState::SexBTree(m), &RangeKey::Unbounded) => full_range!(m),
-            (KeyedState::SingleBTree(m), RangeKey::Single(range)) => {
+            (&KeyedState::DoubleBTree(ref m), &RangeKey::Unbounded) => full_range!(m),
+            (&KeyedState::TriBTree(ref m), &RangeKey::Unbounded) => full_range!(m),
+            (&KeyedState::QuadBTree(ref m), &RangeKey::Unbounded) => full_range!(m),
+            (&KeyedState::SexBTree(ref m), &RangeKey::Unbounded) => full_range!(m),
+            (&KeyedState::SingleBTree(ref m), RangeKey::Single(range)) => {
                 m.range(range).map(flatten_rows).map_err(|misses| {
                     misses
                         .into_iter()
@@ -405,11 +405,11 @@ impl KeyedState {
                         .collect()
                 })
             }
-            (KeyedState::DoubleBTree(m), RangeKey::Double(range)) => range!(m, range),
-            (KeyedState::TriBTree(m), RangeKey::Tri(range)) => range!(m, range),
-            (KeyedState::QuadBTree(m), RangeKey::Quad(range)) => range!(m, range),
-            (KeyedState::SexBTree(m), RangeKey::Sex(range)) => range!(m, range),
-            (KeyedState::MultiBTree(m, _), RangeKey::Multi(range)) => m
+            (&KeyedState::DoubleBTree(ref m), RangeKey::Double(range)) => range!(m, range),
+            (&KeyedState::TriBTree(ref m), RangeKey::Tri(range)) => range!(m, range),
+            (&KeyedState::QuadBTree(ref m), RangeKey::Quad(range)) => range!(m, range),
+            (&KeyedState::SexBTree(ref m), RangeKey::Sex(range)) => range!(m, range),
+            (&KeyedState::MultiBTree(ref m, _), RangeKey::Multi(range)) => m
                 .range::<_, [DfValue]>(&(
                     range.0.as_ref().map(|b| b.as_ref()),
                     range.1.as_ref().map(|b| b.as_ref()),

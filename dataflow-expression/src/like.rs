@@ -11,16 +11,21 @@ use lazy_static::lazy_static;
 use regex::Regex;
 
 /// Case-sensitivity mode for a [`LikePattern`]
-#[derive(Debug, Eq, PartialEq, Default)]
+#[derive(Debug, Eq, PartialEq)]
 pub enum CaseSensitivityMode {
     /// Match case-sentitively
-    #[default]
     CaseSensitive,
 
     /// Match case-insentitively
     CaseInsensitive,
 }
 pub use CaseSensitivityMode::*;
+
+impl Default for CaseSensitivityMode {
+    fn default() -> Self {
+        CaseSensitive
+    }
+}
 
 struct LikeTokenReplacer;
 impl regex::Replacer for LikeTokenReplacer {

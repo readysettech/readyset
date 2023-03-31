@@ -123,10 +123,10 @@ impl Paginate {
             .expect("page_number_column called before Ingredient::on_connected")
     }
 
-    fn post_group<'op>(
+    fn post_group<'op, 'state>(
         &'op self,
         out: &mut Vec<Record>,
-        current_group: &mut BinaryHeap<CurrentRecord<'op, '_>>,
+        current_group: &mut BinaryHeap<CurrentRecord<'op, 'state>>,
     ) {
         let mut current_page_num = 0u64;
         let mut current_page_size = 0usize;
@@ -175,13 +175,13 @@ impl Ingredient for Paginate {
         self.our_index = Some(remap[&us]);
     }
 
-    fn on_input(
+    fn on_input<'a>(
         &mut self,
         from: LocalNodeIndex,
         rs: Records,
         replay: &ReplayContext,
         _nodes: &DomainNodes,
-        state: &StateMap,
+        state: &'a StateMap,
     ) -> ReadySetResult<ProcessingResult> {
         debug_assert_eq!(from, *self.src);
 

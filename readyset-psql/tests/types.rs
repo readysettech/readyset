@@ -20,6 +20,7 @@ mod types {
 
     use cidr::IpInet;
     use eui48::MacAddress;
+    use proptest::prelude::ProptestConfig;
     use proptest::string::string_regex;
     use readyset_adapter::backend::QueryDestination;
     use readyset_client_test_helpers::psql_helpers::{last_query_info, upstream_config};
@@ -106,7 +107,10 @@ mod types {
 
         (@impl, $(#[$meta:meta])* $test_name: ident, $pg_type_name: expr, $(#[$strategy:meta])* $rust_type: ty) => {
             // these are pretty slow, so we only run a few cases at a time
-            #[test_strategy::proptest(cases = 5)]
+            #[test_strategy::proptest(ProptestConfig {
+                cases: 5,
+                ..ProptestConfig::default()
+            })]
             #[serial_test::serial]
             $(#[$meta])*
             fn $test_name($(#[$strategy])* val: $rust_type) {

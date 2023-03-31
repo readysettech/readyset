@@ -307,7 +307,7 @@ impl TestHandle {
 
         let url = self.url.clone().into();
         let ready_notify = self.ready_notify.clone();
-        drop(runtime.spawn(async move {
+        let _ = runtime.spawn(async move {
             if let Err(error) = NoriaAdapter::start(
                 controller,
                 Config {
@@ -326,7 +326,7 @@ impl TestHandle {
                     notify.notify_one();
                 }
             }
-        }));
+        });
 
         if let Some(rt) = self.replication_rt.replace(runtime) {
             rt.shutdown_background();
@@ -335,6 +335,7 @@ impl TestHandle {
         Ok(())
     }
 
+    #[track_caller]
     async fn check_results(
         &mut self,
         view_name: &str,
@@ -407,6 +408,7 @@ impl TestHandle {
         Ok(results)
     }
 
+    #[track_caller]
     async fn assert_table_exists(&mut self, schema: &str, name: &str) {
         self.noria
             .table(Relation {
@@ -417,6 +419,7 @@ impl TestHandle {
             .unwrap();
     }
 
+    #[track_caller]
     async fn assert_table_missing(&mut self, schema: &str, name: &str) {
         self.noria
             .table(Relation {
@@ -1821,6 +1824,7 @@ async fn postgresql_replicate_copy_from() {
         .unwrap();
 
     let expected_vals = (0..300)
+        .into_iter()
         .map(|i| vec![DfValue::from(i.to_string())])
         .sorted()
         .collect::<Vec<_>>();

@@ -8918,11 +8918,10 @@ async fn simple_dry_run_unsupported() {
     assert!(matches!(
         res,
         Err(RpcFailed {
-            source:
-                box SelectQueryCreationFailed {
-                    source: box ReadySetError::Unsupported(_),
-                    ..
-                },
+            source: box SelectQueryCreationFailed {
+                source: box ReadySetError::Unsupported(_),
+                ..
+            },
             ..
         })
     ));

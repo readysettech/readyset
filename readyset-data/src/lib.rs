@@ -76,10 +76,8 @@ pub struct PassThrough {
 #[warn(variant_size_differences)]
 #[derive(Clone, Debug, EnumKind)]
 #[enum_kind(DfValueKind, derive(Ord, PartialOrd, Hash, Arbitrary))]
-#[derive(Default)]
 pub enum DfValue {
     /// An empty value.
-    #[default]
     None,
     /// A signed integer used to store every SQL integer type up to 64 bits.
     Int(i64),
@@ -760,7 +758,7 @@ impl PartialEq for DfValue {
                 // upstreams forbid it)
                 collation.compare_strs(a, b) == Ordering::Equal
             }
-            (&DfValue::Text(..) | &DfValue::TinyText(..), DfValue::TimestampTz(dt)) => {
+            (&DfValue::Text(..) | &DfValue::TinyText(..), &DfValue::TimestampTz(ref dt)) => {
                 // this unwrap should be safe because no error path in try_from for &str on Text or
                 // TinyText
                 #[allow(clippy::unwrap_used)]
@@ -768,7 +766,7 @@ impl PartialEq for DfValue {
                 let other_dt: Result<TimestampTz, _> = a.parse();
                 other_dt.map(|other_dt| other_dt.eq(dt)).unwrap_or(false)
             }
-            (&DfValue::Text(..) | &DfValue::TinyText(..), DfValue::Time(t)) => {
+            (&DfValue::Text(..) | &DfValue::TinyText(..), &DfValue::Time(ref t)) => {
                 // this unwrap should be safe because no error path in try_from for &str on Text or
                 // TinyText
                 #[allow(clippy::unwrap_used)]
@@ -796,7 +794,7 @@ impl PartialEq for DfValue {
                 // Eq
                 fa.to_bits() == fb.to_bits()
             }
-            (&DfValue::Float(fa), DfValue::Numeric(d)) => {
+            (&DfValue::Float(fa), &DfValue::Numeric(ref d)) => {
                 // We need to compare the *bit patterns* of the floats so that our Hash matches our
                 // Eq
                 d.to_f32()
@@ -814,32 +812,38 @@ impl PartialEq for DfValue {
                 // Eq
                 fa.to_bits() == (fb as f64).to_bits()
             }
-            (&DfValue::Double(fa), DfValue::Numeric(d)) => {
+            (&DfValue::Double(fa), &DfValue::Numeric(ref d)) => {
                 // We need to compare the *bit patterns* of the floats so that our Hash matches our
                 // Eq
                 d.to_f64()
                     .map(|df| fa.to_bits() == df.to_bits())
                     .unwrap_or(false)
             }
-            (DfValue::Numeric(da), DfValue::Numeric(db)) => da == db,
+            (&DfValue::Numeric(ref da), &DfValue::Numeric(ref db)) => da == db,
             (&DfValue::Numeric(_), &DfValue::Float(_) | &DfValue::Double(_)) => other == self,
             (
                 &DfValue::Time(_) | &DfValue::TimestampTz(_),
                 &DfValue::Text(..) | &DfValue::TinyText(..),
             ) => other == self,
             (&DfValue::TimestampTz(tsa), &DfValue::TimestampTz(tsb)) => tsa == tsb,
-            (DfValue::Time(ta), DfValue::Time(tb)) => ta == tb,
-            (DfValue::ByteArray(array_a), DfValue::ByteArray(array_b)) => {
+            (&DfValue::Time(ref ta), &DfValue::Time(ref tb)) => ta == tb,
+            (&DfValue::ByteArray(ref array_a), &DfValue::ByteArray(ref array_b)) => {
                 array_a.as_ref() == array_b.as_ref()
             }
-            (DfValue::BitVector(bits_a), DfValue::BitVector(bits_b)) => {
+            (&DfValue::BitVector(ref bits_a), &DfValue::BitVector(ref bits_b)) => {
                 bits_a.as_ref() == bits_b.as_ref()
             }
-            (DfValue::Array(vs_a), DfValue::Array(vs_b)) => vs_a == vs_b,
+            (&DfValue::Array(ref vs_a), &DfValue::Array(ref vs_b)) => vs_a == vs_b,
             (&DfValue::None, &DfValue::None) => true,
             (&DfValue::Max, &DfValue::Max) => true,
             _ => false,
         }
+    }
+}
+
+impl Default for DfValue {
+    fn default() -> Self {
+        DfValue::None
     }
 }
 
@@ -870,7 +874,7 @@ impl Ord for DfValue {
                 // See [note: heterogenous-collations]
                 collation.compare_strs(a, b)
             }
-            (&DfValue::Text(..) | &DfValue::TinyText(..), DfValue::TimestampTz(other_dt)) => {
+            (&DfValue::Text(..) | &DfValue::TinyText(..), &DfValue::TimestampTz(ref other_dt)) => {
                 // this unwrap should be safe because no error path in try_from for &str on Text or
                 // TinyText
                 #[allow(clippy::unwrap_used)]
@@ -878,7 +882,7 @@ impl Ord for DfValue {
                 let dt: Result<TimestampTz, _> = a.parse();
                 dt.map(|dt| dt.cmp(other_dt)).unwrap_or(Ordering::Greater)
             }
-            (&DfValue::Text(..) | &DfValue::TinyText(..), DfValue::Time(other_t)) => {
+            (&DfValue::Text(..) | &DfValue::TinyText(..), &DfValue::Time(ref other_t)) => {
                 // this unwrap should be safe because no error path in try_from for &str on Text or
                 // TinyText
                 #[allow(clippy::unwrap_used)]
@@ -906,10 +910,10 @@ impl Ord for DfValue {
             }
             (&DfValue::Float(fa), &DfValue::Float(fb)) => fa.total_cmp(&fb),
             (&DfValue::Double(fa), &DfValue::Double(fb)) => fa.total_cmp(&fb),
-            (DfValue::Numeric(da), DfValue::Numeric(db)) => da.cmp(db),
+            (&DfValue::Numeric(ref da), &DfValue::Numeric(ref db)) => da.cmp(db),
             (&DfValue::Float(fa), &DfValue::Double(fb)) => fa.total_cmp(&(fb as f32)),
             (&DfValue::Double(fa), &DfValue::Float(fb)) => fb.total_cmp(&(fa as f32)).reverse(),
-            (&DfValue::Float(fa), DfValue::Numeric(d)) => {
+            (&DfValue::Float(fa), &DfValue::Numeric(ref d)) => {
                 if let Some(da) = Decimal::from_f32_retain(fa) {
                     da.cmp(d)
                 } else {
@@ -919,7 +923,7 @@ impl Ord for DfValue {
                         .unwrap_or(Ordering::Greater)
                 }
             }
-            (&DfValue::Double(fa), DfValue::Numeric(d)) => {
+            (&DfValue::Double(fa), &DfValue::Numeric(ref d)) => {
                 if let Some(da) = Decimal::from_f64_retain(fa) {
                     da.cmp(d)
                 } else {
@@ -932,8 +936,8 @@ impl Ord for DfValue {
             (&DfValue::Numeric(_), &DfValue::Float(_) | &DfValue::Double(_)) => {
                 other.cmp(self).reverse()
             }
-            (DfValue::TimestampTz(tsa), DfValue::TimestampTz(tsb)) => tsa.cmp(tsb),
-            (DfValue::Time(ta), DfValue::Time(tb)) => ta.cmp(tb),
+            (&DfValue::TimestampTz(ref tsa), &DfValue::TimestampTz(ref tsb)) => tsa.cmp(tsb),
+            (&DfValue::Time(ref ta), &DfValue::Time(ref tb)) => ta.cmp(tb),
 
             // Convert ints to f32 and cmp against Float.
             (&DfValue::Int(..), &DfValue::Float(b, ..))
@@ -985,9 +989,13 @@ impl Ord for DfValue {
             }
             (&DfValue::Numeric(_), &DfValue::Int(..))
             | (&DfValue::Numeric(_), &DfValue::UnsignedInt(..)) => other.cmp(self).reverse(),
-            (DfValue::ByteArray(array_a), DfValue::ByteArray(array_b)) => array_a.cmp(array_b),
-            (DfValue::BitVector(bits_a), DfValue::BitVector(bits_b)) => bits_a.cmp(bits_b),
-            (DfValue::Array(vs_a), DfValue::Array(vs_b)) => vs_a.cmp(vs_b),
+            (&DfValue::ByteArray(ref array_a), &DfValue::ByteArray(ref array_b)) => {
+                array_a.cmp(array_b)
+            }
+            (&DfValue::BitVector(ref bits_a), &DfValue::BitVector(ref bits_b)) => {
+                bits_a.cmp(bits_b)
+            }
+            (&DfValue::Array(ref vs_a), &DfValue::Array(ref vs_b)) => vs_a.cmp(vs_b),
 
             // for all other kinds of data types, just compare the variants in order
             (_, _) => DfValueKind::from(self).cmp(&DfValueKind::from(other)),
@@ -2863,7 +2871,10 @@ mod tests {
             u64::try_from(d).unwrap_err();
         }
         fn _data_type_conversion_test_eq_i128(d: &DfValue) {
-            assert_eq!({ i128::try_from(d).unwrap() }, i128::try_from(d).unwrap())
+            assert_eq!(
+                i128::try_from(d).unwrap() as i128,
+                i128::try_from(d).unwrap()
+            )
         }
         fn _data_type_conversion_test_eq_i128_panic(d: &DfValue) {
             i128::try_from(d).unwrap_err();

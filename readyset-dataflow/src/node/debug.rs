@@ -76,13 +76,13 @@ impl Node {
                         } else {
                             "#5CBFF9"
                         },
-                        escape(self.name().display_unquoted().to_string())
+                        escape(&self.name().display_unquoted().to_string())
                     ));
                 }
                 NodeType::Internal(ref i) => {
                     s.push_str(&format!(
                         "[label=\"{}\"]\n",
-                        escape(i.description(detailed))
+                        escape(&i.description(detailed))
                     ));
 
                     match materialization_status {
@@ -228,7 +228,7 @@ impl Node {
                         "{{ {} / {} | {} {} {} {} }}",
                         addr,
                         escape(self.name().display_unquoted()),
-                        escape(i.description(detailed)),
+                        escape(&i.description(detailed)),
                         materialized,
                         key_count_str,
                         node_size_str,
