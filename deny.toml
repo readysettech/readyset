@@ -195,12 +195,14 @@ skip-tree = [
     { name = "fail", version = "0.5.0" },
     { name = "rust_decimal", version = "1.17.0" },
     { name = "prometheus-http-query", version = "0.3.0" },
-    { name = "mysql_common", version = "0.28.0" },
+    { name = "mysql_common", version = "0.29.2" },
     { name = "consulrs", version = "0.1.0" },
     { name = "redox_users", version = "0.3.5" },
     # https://github.com/crossbeam-rs/crossbeam/pull/926
-    { name = "memoffset", version = "0.6.4" },
     { name = "nperf-core", version = "0.1.1" },
+    { name = "metrics-util", version = "0.13.0" },
+    { name = "mysql", version = "23.0.1" },
+    { name = "lru", version = "0.10.0" },
 ]
 
 # This section is considered when running `cargo deny check sources`.

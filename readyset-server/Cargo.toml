@@ -99,11 +99,13 @@ catalog-tables = { path = "../catalog-tables" }
 [dev-dependencies]
 dataflow = { path = "../readyset-dataflow", package = "readyset-dataflow", features = ["bench"] }
 test-utils = { path = "../test-utils" }
-backtrace = { version = "0.3.2", features = ["serialize-serde"] }
+# Exact version dep here is only to avoid duplicate versions of downstream
+# dependencies
+backtrace = { version = "=0.3.65", features = ["serialize-serde"] }
 toml = "0.5"
 diff = "0.1.10"
 tempfile = "3.4"
-mysql = "22.0.0"
+mysql = "23.0.1"
 chrono = "0.4.19"
 serial_test = "0.5.1"
 assert_approx_eq = "1.1.0"

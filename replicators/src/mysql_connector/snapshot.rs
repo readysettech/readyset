@@ -17,7 +17,7 @@ use readyset_client::metrics::recorded;
 use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::replication::{ReplicationOffset, ReplicationOffsets};
 use readyset_data::Dialect;
-use readyset_errors::ReadySetResult;
+use readyset_errors::{internal_err, ReadySetResult};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, info_span, warn};
 use tracing_futures::Instrument;
@@ -100,12 +100,22 @@ pub async fn create_for_table<Q: Queryable>(
             // For SHOW CREATE VIEW the format is the name of the view, the create DDL,
             // character_set_client and collation_connection
             let r: Option<(String, String, String, String)> = q.query_first(query).await?;
-            Ok(r.ok_or("Empty response for SHOW CREATE VIEW")?.1)
+            Ok(r.ok_or_else(|| {
+                mysql_async::Error::Other(Box::new(internal_err!(
+                    "Empty response for SHOW CREATE VIEW"
+                )))
+            })?
+            .1)
         }
         TableKind::BaseTable => {
             // For SHOW CREATE TABLE format is the name of the table and the create DDL
             let r: Option<(String, String)> = q.query_first(query).await?;
-            Ok(r.ok_or("Empty response for SHOW CREATE TABLE")?.1)
+            Ok(r.ok_or_else(|| {
+                mysql_async::Error::Other(Box::new(internal_err!(
+                    "Empty response for SHOW CREATE TABLE"
+                )))
+            })?
+            .1)
         }
     }
 }
@@ -331,11 +341,13 @@ impl MySqlReplicator {
     async fn get_binlog_position(&self) -> mysql::Result<BinlogPosition> {
         let mut conn = self.pool.get_conn().await?;
         let query = "SHOW MASTER STATUS";
-        let pos: mysql::Row = conn.query_first(query).await?.ok_or(
-            "Empty response for SHOW MASTER STATUS. \
-             Ensure the binlog_format parameter is set to ROW and, if using RDS, backup retention \
-             is greater than 0",
-        )?;
+        let pos: mysql::Row = conn.query_first(query).await?.ok_or_else(|| {
+            mysql_async::Error::Other(Box::new(internal_err!(
+                "Empty response for SHOW MASTER STATUS. \
+                 Ensure the binlog_format parameter is set to ROW and, if using RDS, backup \
+                 retention is greater than 0"
+            )))
+        })?;
 
         let file: String = pos.get(0).expect("Binlog file name");
         let offset: u32 = pos.get(1).expect("Binlog offset");

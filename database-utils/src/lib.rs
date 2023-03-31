@@ -12,6 +12,7 @@ use clap::{Parser, ValueEnum};
 use derive_more::From;
 use error::{ConnectionType, DatabaseTypeParseError};
 use futures::{StreamExt, TryStreamExt};
+use mysql::prelude::AsQuery;
 use mysql_async::prelude::Queryable;
 use mysql_async::OptsBuilder;
 use native_tls::TlsConnectorBuilder;
@@ -467,7 +468,7 @@ impl DatabaseConnection {
     /// the never type.
     pub async fn query_drop<Q>(&mut self, stmt: Q) -> Result<(), DatabaseError<!>>
     where
-        Q: AsRef<str> + Send + Sync,
+        Q: AsQuery + AsRef<str> + Send + Sync,
     {
         match self {
             DatabaseConnection::MySQL(conn) => Ok(conn.query_drop(stmt).await?),
@@ -482,7 +483,7 @@ impl DatabaseConnection {
     /// DatabaseConnection variant.
     pub async fn query<Q, V>(&mut self, query: Q) -> Result<Vec<Vec<V>>, DatabaseError<V::Error>>
     where
-        Q: AsRef<str> + Send + Sync,
+        Q: AsQuery + AsRef<str> + Send + Sync,
         V: TryFrom<mysql::Value>,
         <V as TryFrom<mysql::Value>>::Error: std::error::Error + Send + Sync + 'static,
         for<'a> V: pgsql::types::FromSql<'a>,
@@ -506,7 +507,7 @@ impl DatabaseConnection {
     /// DatabaseConnection variant.
     pub async fn prepare<Q>(&mut self, query: Q) -> Result<DatabaseStatement, DatabaseError<!>>
     where
-        Q: AsRef<str> + Send + Sync,
+        Q: AsQuery + AsRef<str> + Send + Sync,
     {
         match self {
             DatabaseConnection::MySQL(conn) => Ok(conn.prep(query).await?.into()),

@@ -15,7 +15,7 @@ use readyset_client::metrics::recorded;
 use readyset_client::recipe::ChangeList;
 use readyset_client::replication::ReplicationOffset;
 use readyset_data::{DfValue, Dialect};
-use readyset_errors::{ReadySetError, ReadySetResult};
+use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
 use tracing::{info, warn};
 
 use super::BinlogPosition;
@@ -246,11 +246,12 @@ impl MySqlBinlogConnector {
 
             self.next_position.position = binlog_event.header().log_pos();
 
-            match binlog_event
-                .header()
-                .event_type()
-                .map_err(|ev| format!("Unknown binlog event type {}", ev))?
-            {
+            match binlog_event.header().event_type().map_err(|ev| {
+                mysql_async::Error::Other(Box::new(internal_err!(
+                    "Unknown binlog event type {}",
+                    ev
+                )))
+            })? {
                 EventType::ROTATE_EVENT => {
                     // Written when mysqld switches to a new binary log file.
                     // This occurs when someone issues a FLUSH LOGS statement or the current binary
@@ -336,10 +337,11 @@ impl MySqlBinlogConnector {
                         info!(target: "replicator_statement", "{:?}", ev);
                     }
                     // Retrieve the corresponding TABLE_MAP_EVENT
-                    let tme = self
-                        .reader
-                        .get_tme(ev.table_id())
-                        .ok_or("TME not found for WRITE_ROWS_EVENT")?;
+                    let tme = self.reader.get_tme(ev.table_id()).ok_or_else(|| {
+                        mysql_async::Error::Other(Box::new(internal_err!(
+                            "TME not found for WRITE_ROWS_EVENT"
+                        )))
+                    })?;
 
                     let mut inserted_rows = Vec::new();
 
@@ -348,7 +350,11 @@ impl MySqlBinlogConnector {
                         // represent that row
                         inserted_rows.push(readyset_client::TableOperation::Insert(
                             binlog_row_to_noria_row(
-                                &row?.1.ok_or("Missing data in WRITE_ROWS_EVENT")?,
+                                &row?.1.ok_or_else(|| {
+                                    mysql_async::Error::Other(Box::new(internal_err!(
+                                        "Missing data in WRITE_ROWS_EVENT"
+                                    )))
+                                })?,
                                 tme,
                             )?,
                         ));
@@ -374,10 +380,12 @@ impl MySqlBinlogConnector {
                         info!(target: "replicator_statement", "{:?}", ev);
                     }
                     // Retrieve the corresponding TABLE_MAP_EVENT
-                    let tme = self
-                        .reader
-                        .get_tme(ev.table_id())
-                        .ok_or_else(|| format!("TME not found for UPDATE_ROWS_EVENT {:?}", ev))?;
+                    let tme = self.reader.get_tme(ev.table_id()).ok_or_else(|| {
+                        mysql_async::Error::Other(Box::new(internal_err!(
+                            "TME not found for UPDATE_ROWS_EVENT {:?}",
+                            ev
+                        )))
+                    })?;
 
                     let mut updated_rows = Vec::new();
 
@@ -389,7 +397,10 @@ impl MySqlBinlogConnector {
                         updated_rows.push(readyset_client::TableOperation::DeleteRow {
                             row: binlog_row_to_noria_row(
                                 row.0.as_ref().ok_or_else(|| {
-                                    format!("Missing before rows in UPDATE_ROWS_EVENT {:?}", row)
+                                    mysql_async::Error::Other(Box::new(internal_err!(
+                                        "Missing before rows in UPDATE_ROWS_EVENT {:?}",
+                                        row
+                                    )))
                                 })?,
                                 tme,
                             )?,
@@ -398,7 +409,10 @@ impl MySqlBinlogConnector {
                         updated_rows.push(readyset_client::TableOperation::Insert(
                             binlog_row_to_noria_row(
                                 row.1.as_ref().ok_or_else(|| {
-                                    format!("Missing after rows in UPDATE_ROWS_EVENT {:?}", row)
+                                    mysql_async::Error::Other(Box::new(internal_err!(
+                                        "Missing after rows in UPDATE_ROWS_EVENT {:?}",
+                                        row
+                                    )))
                                 })?,
                                 tme,
                             )?,
@@ -425,10 +439,12 @@ impl MySqlBinlogConnector {
                         info!(target: "replicator_statement", "{:?}", ev);
                     }
                     // Retrieve the corresponding TABLE_MAP_EVENT
-                    let tme = self
-                        .reader
-                        .get_tme(ev.table_id())
-                        .ok_or_else(|| format!("TME not found for UPDATE_ROWS_EVENT {:?}", ev))?;
+                    let tme = self.reader.get_tme(ev.table_id()).ok_or_else(|| {
+                        mysql_async::Error::Other(Box::new(internal_err!(
+                            "TME not found for UPDATE_ROWS_EVENT {:?}",
+                            ev
+                        )))
+                    })?;
 
                     let mut deleted_rows = Vec::new();
 
@@ -437,7 +453,11 @@ impl MySqlBinlogConnector {
                         // represent that row
                         deleted_rows.push(readyset_client::TableOperation::DeleteRow {
                             row: binlog_row_to_noria_row(
-                                &row?.0.ok_or("Missing data in DELETE_ROWS_EVENT")?,
+                                &row?.0.ok_or_else(|| {
+                                    mysql_async::Error::Other(Box::new(internal_err!(
+                                        "Missing data in DELETE_ROWS_EVENT"
+                                    )))
+                                })?,
                                 tme,
                             )?,
                         });
@@ -558,9 +578,9 @@ fn binlog_val_to_noria_val(
     let buf = match val {
         mysql_common::value::Value::Bytes(b) => b,
         _ => {
-            return Ok(val
-                .try_into()
-                .map_err(|e| format!("Unable to coerce value {}", e))?)
+            return val.try_into().map_err(|e| {
+                mysql_async::Error::Other(Box::new(internal_err!("Unable to coerce value {}", e)))
+            })
         }
     };
 
@@ -590,9 +610,9 @@ fn binlog_val_to_noria_val(
             // Can wrap because we know this maps directly to [`DfValue`]
             Ok(time.try_into().unwrap())
         }
-        _ => Ok(val
-            .try_into()
-            .map_err(|e| format!("Unable to coerce value {}", e))?),
+        _ => Ok(val.try_into().map_err(|e| {
+            mysql_async::Error::Other(Box::new(internal_err!("Unable to coerce value {}", e)))
+        })?),
     }
 }
 
@@ -606,7 +626,12 @@ fn binlog_row_to_noria_row(
                 BinlogValue::Value(val) => {
                     let (kind, meta) = (
                         tme.get_column_type(idx)
-                            .map_err(|e| format!("Unable to get column type {}", e))?
+                            .map_err(|e| {
+                                mysql_async::Error::Other(Box::new(internal_err!(
+                                    "Unable to get column type {}",
+                                    e
+                                )))
+                            })?
                             .unwrap(),
                         tme.get_column_metadata(idx).unwrap(),
                     );
@@ -630,11 +655,15 @@ fn binlog_row_to_noria_row(
                                 }
                             }
                         },
-                        Err(JsonbToJsonError::InvalidUtf8(err)) => Err(err.to_string().into()),
+                        Err(JsonbToJsonError::InvalidUtf8(err)) => {
+                            Err(mysql_async::Error::Other(Box::new(internal_err!("{err}"))))
+                        }
                         Err(JsonbToJsonError::InvalidJsonb(e)) => Err(e.into()),
                     }
                 }
-                _ => Err(format!("Expected a value in WRITE_ROWS_EVENT {:?}", binlog_row).into()),
+                _ => Err(mysql_async::Error::Other(Box::new(internal_err!(
+                    "Expected a value in WRITE_ROWS_EVENT",
+                )))),
             }
         })
         .collect()

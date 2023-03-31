@@ -334,11 +334,8 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         Ok(UpstreamPrepare { statement_id, meta })
     }
 
-    async fn query<'a, S>(&'a mut self, query: S) -> Result<Self::QueryResult<'a>, Error>
-    where
-        S: AsRef<str> + Send + Sync + 'a,
-    {
-        let res = self.client.simple_query(query.as_ref()).await?;
+    async fn query<'a>(&'a mut self, query: &'a str) -> Result<Self::QueryResult<'a>, Error> {
+        let res = self.client.simple_query(query).await?;
         Ok(QueryResult::SimpleQuery(res))
     }
 

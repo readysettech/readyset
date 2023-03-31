@@ -149,9 +149,7 @@ pub trait UpstreamDatabase: Sized + Send {
     ) -> Result<Self::QueryResult<'a>, Self::Error>;
 
     /// Execute a raw, un-prepared query
-    async fn query<'a, S>(&'a mut self, query: S) -> Result<Self::QueryResult<'a>, Self::Error>
-    where
-        S: AsRef<str> + Send + Sync + 'a;
+    async fn query<'a>(&'a mut self, query: &'a str) -> Result<Self::QueryResult<'a>, Self::Error>;
 
     /// Execute a raw, un-prepared write query, constructing and returning a RYW ticket for the
     /// write

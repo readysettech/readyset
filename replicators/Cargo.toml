@@ -32,7 +32,7 @@ postgres-native-tls = { workspace = true }
 postgres-protocol = { workspace = true }
 mysql_async = { workspace = true }
 
-mysql_common = "0.28.0"
+mysql_common = "0.29.2"
 nom-sql = { path = "../nom-sql" }
 readyset-client = { path = "../readyset-client" }
 readyset-errors = { path = "../readyset-errors" }

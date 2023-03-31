@@ -189,7 +189,7 @@ where
             }
             QueryExecution::Query(q) => match conn {
                 DatabaseConnection::MySQL(conn) => {
-                    tokio::time::timeout(remaining, conn.query(q)).await
+                    tokio::time::timeout(remaining, conn.query(*q)).await
                 }
                 DatabaseConnection::PostgreSQL(_, _) => {
                     todo!("TODO(luke): support postgres query_until_expected_inner")

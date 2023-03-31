@@ -755,7 +755,7 @@ where
         if let Some(upstream) = &mut self.upstream {
             upstream
                 .query(
-                    UseStatement {
+                    &UseStatement {
                         database: db.into(),
                     }
                     .to_string(),

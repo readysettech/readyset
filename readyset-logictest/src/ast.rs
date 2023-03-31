@@ -747,7 +747,7 @@ impl From<QueryParams> for mysql_async::Params {
             ),
             QueryParams::NumberedParams(nps) => mysql_async::Params::Named(
                 nps.into_iter()
-                    .map(|(n, v)| (n.to_string(), mysql_async::Value::from(v)))
+                    .map(|(n, v)| (n.to_string().into_bytes(), mysql_async::Value::from(v)))
                     .collect(),
             ),
         }

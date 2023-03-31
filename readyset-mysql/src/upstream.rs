@@ -432,7 +432,7 @@ impl UpstreamDatabase for MySqlUpstream {
     where
         S: AsRef<str> + Send + Sync + 'a,
     {
-        let statement = self.conn.prep(query).await?;
+        let statement = self.conn.prep(query.as_ref()).await?;
         self.prepared_statements
             .insert(statement.id(), statement.clone());
         Ok(UpstreamPrepare {
@@ -511,10 +511,7 @@ impl UpstreamDatabase for MySqlUpstream {
     }
 
     #[cfg(feature = "fallback_cache")]
-    async fn query<'a, S>(&'a mut self, query: S) -> Result<Self::QueryResult<'a>, Error>
-    where
-        S: AsRef<str> + Send + Sync + 'a,
-    {
+    async fn query<'a>(&'a mut self, query: &'a str) -> Result<Self::QueryResult<'a>, Error> {
         if let Some(ref mut cache) = self.fallback_cache {
             if let Some(query_r) = cache.get(query.as_ref()).await {
                 return Ok(query_r.into());
@@ -537,10 +534,7 @@ impl UpstreamDatabase for MySqlUpstream {
     }
 
     #[cfg(not(feature = "fallback_cache"))]
-    async fn query<'a, S>(&'a mut self, query: S) -> Result<Self::QueryResult<'a>, Error>
-    where
-        S: AsRef<str> + Send + Sync + 'a,
-    {
+    async fn query<'a>(&'a mut self, query: &'a str) -> Result<Self::QueryResult<'a>, Error> {
         let result = self.conn.query_iter(query).await?;
         handle_query_result!(result)
     }
@@ -554,7 +548,7 @@ impl UpstreamDatabase for MySqlUpstream {
         S: AsRef<str> + Send + Sync + 'a,
     {
         let mut transaction = self.conn.start_transaction(TxOpts::default()).await?;
-        transaction.query_drop(query).await.map_err(|e| {
+        transaction.query_drop(query.as_ref()).await.map_err(|e| {
             error!("Could not execute query in mysql : {:?}", e);
             e
         })?;

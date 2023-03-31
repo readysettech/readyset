@@ -13,7 +13,7 @@ readyset-util = { path = "../readyset-util" }
 proptest = "1.0.0"
 thiserror = "1.0.26"
 chrono = "0.4"
-mysql_common = "0.28.0"
+mysql_common = "0.29.2"
 
 [dev-dependencies]
 test-strategy = "0.2.0"
