@@ -195,7 +195,7 @@ public.ecr.aws/readyset/readyset:beta-2023-01-18 \
 
 - Deploy to production
 
-    To run ReadySet in a cloud environment, see the [Deploy with ReadySet Cloud](https://docs.readyset.io/guides/deploy-readyset-cloud/) and [Deploy with Kubernetes](https://docs.readyset.io/guides/deploy-readyset-kubernetes/) pages in our docs. You can also run ReadySet yourself using [binaries](https://docs.readyset.io/releases/readyset-core/).
+    To run ReadySet in a cloud environment, see the [Deploy with ReadySet Cloud](https://docs.readyset.io/guides/deploy/deploy-readyset-cloud/) and [Deploy with Kubernetes](https://docs.readyset.io/guides/deploy/deploy-readyset-kubernetes/) pages in our docs. You can also run ReadySet yourself using [binaries](https://docs.readyset.io/releases/readyset-core/).
 
 
 ## FAQs
