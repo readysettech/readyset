@@ -730,20 +730,16 @@ impl BuiltinFunction {
                 Ok(s.into())
             }
             BuiltinFunction::Substring(string, from, len) => {
-                let string = non_null!(string.eval(record)?).coerce_to(ty, string.ty())?;
+                let string = non_null!(string.eval(record)?);
                 let s = <&str>::try_from(&string)?;
 
                 let from = match from {
-                    Some(from) => non_null!(from.eval(record)?)
-                        .coerce_to(&DfType::BigInt, from.ty())?
-                        .try_into()?,
+                    Some(from) => non_null!(from.eval(record)?).try_into()?,
                     None => 1i64,
                 };
 
                 let len = match len {
-                    Some(len) => non_null!(len.eval(record)?)
-                        .coerce_to(&DfType::BigInt, len.ty())?
-                        .try_into()?,
+                    Some(len) => non_null!(len.eval(record)?).try_into()?,
                     None => s.len() as i64 + 1,
                 };
 

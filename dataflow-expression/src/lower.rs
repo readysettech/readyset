@@ -350,7 +350,11 @@ impl BuiltinFunction {
                 };
 
                 (
-                    Self::Substring(string, next_arg().ok(), next_arg().ok()),
+                    Self::Substring(
+                        cast(string, ty.clone()),
+                        next_arg().ok().map(|arg| cast(arg, DfType::BigInt)),
+                        next_arg().ok().map(|arg| cast(arg, DfType::BigInt)),
+                    ),
                     ty,
                 )
             }
@@ -1067,17 +1071,30 @@ pub(crate) mod tests {
             res,
             Expr::Call {
                 func: Box::new(BuiltinFunction::Substring(
-                    Expr::Literal {
-                        val: "abcdefghi".into(),
-                        ty: DfType::DEFAULT_TEXT
+                    Expr::Cast {
+                        expr: Box::new(Expr::Literal {
+                            val: "abcdefghi".into(),
+                            ty: DfType::DEFAULT_TEXT
+                        }),
+                        ty: DfType::DEFAULT_TEXT,
+                        null_on_failure: false
                     },
-                    Some(Expr::Literal {
-                        val: 1.into(),
-                        ty: DfType::UnsignedBigInt
+                    Some(Expr::Cast {
+                        expr: Box::new(Expr::Literal {
+                            val: 1.into(),
+                            ty: DfType::UnsignedBigInt
+                        }),
+                        ty: DfType::BigInt,
+                        null_on_failure: false
                     }),
-                    Some(Expr::Literal {
-                        val: 7.into(),
-                        ty: DfType::UnsignedBigInt
+                    Some(Expr::Cast {
+                        expr: Box::new(Expr::Literal {
+                            val: 7.into(),
+                            ty: DfType::UnsignedBigInt
+                        }),
+
+                        ty: DfType::BigInt,
+                        null_on_failure: false
                     })
                 )),
                 ty: DfType::DEFAULT_TEXT
@@ -1093,17 +1110,30 @@ pub(crate) mod tests {
             res,
             Expr::Call {
                 func: Box::new(BuiltinFunction::Substring(
-                    Expr::Literal {
-                        val: "abcdefghi".into(),
-                        ty: DfType::DEFAULT_TEXT
+                    Expr::Cast {
+                        expr: Box::new(Expr::Literal {
+                            val: "abcdefghi".into(),
+                            ty: DfType::DEFAULT_TEXT
+                        }),
+                        ty: DfType::DEFAULT_TEXT,
+                        null_on_failure: false
                     },
-                    Some(Expr::Literal {
-                        val: 1.into(),
-                        ty: DfType::UnsignedBigInt
+                    Some(Expr::Cast {
+                        expr: Box::new(Expr::Literal {
+                            val: 1.into(),
+                            ty: DfType::UnsignedBigInt
+                        }),
+                        ty: DfType::BigInt,
+                        null_on_failure: false
                     }),
-                    Some(Expr::Literal {
-                        val: 7.into(),
-                        ty: DfType::UnsignedBigInt
+                    Some(Expr::Cast {
+                        expr: Box::new(Expr::Literal {
+                            val: 7.into(),
+                            ty: DfType::UnsignedBigInt
+                        }),
+
+                        ty: DfType::BigInt,
+                        null_on_failure: false
                     })
                 )),
                 ty: DfType::DEFAULT_TEXT
