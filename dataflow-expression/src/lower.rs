@@ -156,10 +156,17 @@ impl BuiltinFunction {
         // TODO: Type-check arguments.
         let mut args = args.into_iter();
         let mut next_arg = || args.next().ok_or_else(arity_error);
-        let cast = |expr, ty| Expr::Cast {
-            expr: Box::new(expr),
-            ty,
-            null_on_failure: false,
+        let cast = |expr: Expr, ty| {
+            if *expr.ty() == ty {
+                // optimization: don't cast if the expr already has the target type
+                expr
+            } else {
+                Expr::Cast {
+                    expr: Box::new(expr),
+                    ty,
+                    null_on_failure: false,
+                }
+            }
         };
         let try_cast = |expr, ty| Expr::Cast {
             expr: Box::new(expr),
@@ -1009,30 +1016,18 @@ pub(crate) mod tests {
             res,
             Expr::Call {
                 func: Box::new(BuiltinFunction::Concat(
-                    Expr::Cast {
-                        expr: Box::new(Expr::Literal {
-                            val: "My".into(),
-                            ty: DfType::DEFAULT_TEXT,
-                        }),
+                    Expr::Literal {
+                        val: "My".into(),
                         ty: DfType::DEFAULT_TEXT,
-                        null_on_failure: false
                     },
                     vec![
-                        Expr::Cast {
-                            expr: Box::new(Expr::Literal {
-                                val: "SQ".into(),
-                                ty: DfType::DEFAULT_TEXT,
-                            }),
+                        Expr::Literal {
+                            val: "SQ".into(),
                             ty: DfType::DEFAULT_TEXT,
-                            null_on_failure: false
                         },
-                        Expr::Cast {
-                            expr: Box::new(Expr::Literal {
-                                val: "L".into(),
-                                ty: DfType::DEFAULT_TEXT,
-                            }),
+                        Expr::Literal {
+                            val: "L".into(),
                             ty: DfType::DEFAULT_TEXT,
-                            null_on_failure: false
                         },
                     ],
                 )),
@@ -1086,13 +1081,9 @@ pub(crate) mod tests {
             res,
             Expr::Call {
                 func: Box::new(BuiltinFunction::Substring(
-                    Expr::Cast {
-                        expr: Box::new(Expr::Literal {
-                            val: "abcdefghi".into(),
-                            ty: DfType::DEFAULT_TEXT
-                        }),
-                        ty: DfType::DEFAULT_TEXT,
-                        null_on_failure: false
+                    Expr::Literal {
+                        val: "abcdefghi".into(),
+                        ty: DfType::DEFAULT_TEXT
                     },
                     Some(Expr::Cast {
                         expr: Box::new(Expr::Literal {
@@ -1125,13 +1116,9 @@ pub(crate) mod tests {
             res,
             Expr::Call {
                 func: Box::new(BuiltinFunction::Substring(
-                    Expr::Cast {
-                        expr: Box::new(Expr::Literal {
-                            val: "abcdefghi".into(),
-                            ty: DfType::DEFAULT_TEXT
-                        }),
-                        ty: DfType::DEFAULT_TEXT,
-                        null_on_failure: false
+                    Expr::Literal {
+                        val: "abcdefghi".into(),
+                        ty: DfType::DEFAULT_TEXT
                     },
                     Some(Expr::Cast {
                         expr: Box::new(Expr::Literal {
@@ -1442,17 +1429,13 @@ pub(crate) mod tests {
             result,
             Expr::Call {
                 func: Box::new(BuiltinFunction::ArrayToString(
-                    Expr::Cast {
-                        expr: Box::new(Expr::Array {
-                            elements: vec![Expr::Literal {
-                                val: 1u64.into(),
-                                ty: DfType::UnsignedBigInt,
-                            }],
-                            shape: vec![1],
-                            ty: DfType::Array(Box::new(DfType::UnsignedBigInt))
-                        }),
-                        ty: DfType::Array(Box::new(DfType::UnsignedBigInt)),
-                        null_on_failure: false
+                    Expr::Array {
+                        elements: vec![Expr::Literal {
+                            val: 1u64.into(),
+                            ty: DfType::UnsignedBigInt,
+                        }],
+                        shape: vec![1],
+                        ty: DfType::Array(Box::new(DfType::UnsignedBigInt))
                     },
                     Expr::Literal {
                         val: ",".into(),
