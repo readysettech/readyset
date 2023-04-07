@@ -804,8 +804,7 @@ impl BuiltinFunction {
                     DfType::Array(t) => t.as_ref(),
                     _ => &DfType::Unknown,
                 };
-                let array = non_null!(array.eval(record)?)
-                    .coerce_to(&DfType::Array(Box::new(elem_type.clone())), array.ty())?;
+                let array = non_null!(array.eval(record)?);
                 let array = array.as_array()?;
                 let delimiter: String = delimiter.eval(record)?.try_into()?;
                 let null_string = null_string

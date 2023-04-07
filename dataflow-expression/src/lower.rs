@@ -406,10 +406,21 @@ impl BuiltinFunction {
                     ty,
                 )
             }
-            "array_to_string" => (
-                Self::ArrayToString(next_arg()?, next_arg()?, next_arg().ok()),
-                DfType::DEFAULT_TEXT,
-            ),
+            "array_to_string" => {
+                let array_arg = next_arg()?;
+                let elem_ty = match array_arg.ty() {
+                    DfType::Array(t) => (**t).clone(),
+                    _ => DfType::Unknown,
+                };
+                (
+                    Self::ArrayToString(
+                        cast(array_arg, DfType::Array(Box::new(elem_ty))),
+                        next_arg()?,
+                        next_arg().ok(),
+                    ),
+                    DfType::DEFAULT_TEXT,
+                )
+            }
             _ => return Err(ReadySetError::NoSuchFunction(name.to_owned())),
         };
 
@@ -1431,13 +1442,17 @@ pub(crate) mod tests {
             result,
             Expr::Call {
                 func: Box::new(BuiltinFunction::ArrayToString(
-                    Expr::Array {
-                        elements: vec![Expr::Literal {
-                            val: 1u64.into(),
-                            ty: DfType::UnsignedBigInt,
-                        }],
-                        shape: vec![1],
-                        ty: DfType::Array(Box::new(DfType::UnsignedBigInt))
+                    Expr::Cast {
+                        expr: Box::new(Expr::Array {
+                            elements: vec![Expr::Literal {
+                                val: 1u64.into(),
+                                ty: DfType::UnsignedBigInt,
+                            }],
+                            shape: vec![1],
+                            ty: DfType::Array(Box::new(DfType::UnsignedBigInt))
+                        }),
+                        ty: DfType::Array(Box::new(DfType::UnsignedBigInt)),
+                        null_on_failure: false
                     },
                     Expr::Literal {
                         val: ",".into(),
