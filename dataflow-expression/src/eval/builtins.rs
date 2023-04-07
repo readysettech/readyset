@@ -766,13 +766,9 @@ impl BuiltinFunction {
                     .into())
             }
             BuiltinFunction::SplitPart(string, delimiter, field) => {
-                let string = non_null!(string.eval(record)?)
-                    .coerce_to(&DfType::DEFAULT_TEXT, string.ty())?;
-                let delimiter = non_null!(delimiter.eval(record)?)
-                    .coerce_to(&DfType::DEFAULT_TEXT, delimiter.ty())?;
-                let field = <i64>::try_from(
-                    non_null!(field.eval(record)?).coerce_to(&DfType::Int, field.ty())?,
-                )?;
+                let string = non_null!(string.eval(record)?);
+                let delimiter = non_null!(delimiter.eval(record)?);
+                let field = <i64>::try_from(non_null!(field.eval(record)?))?;
 
                 let mut parts = <&str>::try_from(&string)?.split(<&str>::try_from(&delimiter)?);
                 match field.cmp(&0) {

@@ -97,6 +97,10 @@ async fn example_exprs_eval_same_as_postgres() {
         "concat('one',2,'three')",
         "concat('a','b')",
         "concat('a')",
+        "split_part('abc~@~def~@~ghi', '~@~', 2)",
+        "split_part('a.b.c', '.', 4)",
+        "split_part('a.b.c', '.', -1)",
+        "split_part('a.b.c', '.', -4)",
     ] {
         compare_eval(expr, &client).await;
     }

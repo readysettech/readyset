@@ -359,7 +359,11 @@ impl BuiltinFunction {
                 )
             }
             "split_part" => (
-                Self::SplitPart(next_arg()?, next_arg()?, next_arg()?),
+                Self::SplitPart(
+                    cast(next_arg()?, DfType::DEFAULT_TEXT),
+                    cast(next_arg()?, DfType::DEFAULT_TEXT),
+                    cast(next_arg()?, DfType::Int),
+                ),
                 DfType::DEFAULT_TEXT,
             ),
             "greatest" | "least" => {
