@@ -329,7 +329,17 @@ impl BuiltinFunction {
                         _ => None,
                     })
                     .unwrap_or_default();
-                (Self::Concat(arg1, rest_args), DfType::Text(collation))
+                let ty = DfType::Text(collation);
+                (
+                    Self::Concat(
+                        cast(arg1, ty.clone()),
+                        rest_args
+                            .into_iter()
+                            .map(|arg| cast(arg, ty.clone()))
+                            .collect(),
+                    ),
+                    ty,
+                )
             }
             "substring" | "substr" => {
                 let string = next_arg()?;
@@ -980,18 +990,30 @@ pub(crate) mod tests {
             res,
             Expr::Call {
                 func: Box::new(BuiltinFunction::Concat(
-                    Expr::Literal {
-                        val: "My".into(),
+                    Expr::Cast {
+                        expr: Box::new(Expr::Literal {
+                            val: "My".into(),
+                            ty: DfType::DEFAULT_TEXT,
+                        }),
                         ty: DfType::DEFAULT_TEXT,
+                        null_on_failure: false
                     },
                     vec![
-                        Expr::Literal {
-                            val: "SQ".into(),
+                        Expr::Cast {
+                            expr: Box::new(Expr::Literal {
+                                val: "SQ".into(),
+                                ty: DfType::DEFAULT_TEXT,
+                            }),
                             ty: DfType::DEFAULT_TEXT,
+                            null_on_failure: false
                         },
-                        Expr::Literal {
-                            val: "L".into(),
+                        Expr::Cast {
+                            expr: Box::new(Expr::Literal {
+                                val: "L".into(),
+                                ty: DfType::DEFAULT_TEXT,
+                            }),
                             ty: DfType::DEFAULT_TEXT,
+                            null_on_failure: false
                         },
                     ],
                 )),

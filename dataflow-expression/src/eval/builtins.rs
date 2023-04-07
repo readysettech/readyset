@@ -720,12 +720,10 @@ impl BuiltinFunction {
                 }
             }
             BuiltinFunction::Concat(arg1, rest_args) => {
-                let mut s =
-                    <&str>::try_from(&non_null!(arg1.eval(record)?).coerce_to(ty, arg1.ty())?)?
-                        .to_owned();
+                let mut s = <&str>::try_from(&non_null!(arg1.eval(record)?))?.to_owned();
 
                 for arg in rest_args {
-                    let val = non_null!(arg.eval(record)?).coerce_to(ty, arg.ty())?;
+                    let val = non_null!(arg.eval(record)?);
                     s.push_str((&val).try_into()?)
                 }
 

@@ -45,7 +45,7 @@ async fn mysql_eval(expr: &str, conn: &mut Conn) -> DfValue {
     // type of that column) and then use that to coerce the result value from actually evaluating
     // the expression
     conn.query_drop("DROP TABLE IF EXISTS t").await.unwrap();
-    conn.query_drop(format!("CREATE TEMPORARY TABLE t AS SELECT {expr}"))
+    conn.query_drop(format!("CREATE TEMPORARY TABLE t AS SELECT {expr} AS r"))
         .await
         .unwrap();
     let col: Row = conn
@@ -123,6 +123,12 @@ async fn example_exprs_eval_same_as_mysql() {
         "json_overlaps('[]', '[]')",
         "json_overlaps('true', 'true')",
         "json_overlaps('[42]', '[0, 42, 0]')",
+        "concat(1,2)",
+        "concat('one',2)",
+        "concat('one',2)",
+        "concat('one',2,'three')",
+        "concat('a','b')",
+        "concat('a')",
     ] {
         compare_eval(expr, &mut conn).await;
     }

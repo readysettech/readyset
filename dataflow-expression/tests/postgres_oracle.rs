@@ -88,6 +88,12 @@ async fn example_exprs_eval_same_as_postgres() {
         "1 = null",
         "null != 1",
         "substring('abcdef' for 3)",
+        "concat(1,2)",
+        "concat('one',2)",
+        "concat('one',2)",
+        "concat('one',2,'three')",
+        "concat('a','b')",
+        "concat('a')",
     ] {
         compare_eval(expr, &client).await;
     }
