@@ -25,7 +25,7 @@ async fn postgres_eval(expr: &str, client: &Client) -> DfValue {
     client
         .query_one(&format!("SELECT {expr};"), &[])
         .await
-        .unwrap()
+        .unwrap_or_else(|e| panic!("Error evaluating `{expr}`: {e}"))
         .get(0)
 }
 
