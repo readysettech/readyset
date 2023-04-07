@@ -167,7 +167,7 @@ async fn main() -> Result<()> {
 
     println!("Welcome to the ReadySet REPL!\n\nType `help` for help.\n");
 
-    let mut rl = Editor::new();
+    let mut rl = Editor::new()?;
     rl.set_helper(Some(WaitForSemicolon));
     let _ = rl.load_history(".readyset-history");
     loop {
@@ -178,7 +178,7 @@ async fn main() -> Result<()> {
                         eprintln!("Error: {:#}", err);
                     }
                     Ok(()) => {
-                        rl.add_history_entry(&cmd);
+                        rl.add_history_entry(&cmd)?;
                     }
                 }
                 println!();

@@ -45,7 +45,7 @@ pub struct WriteBenchmark {
     /// The duration, specified as the number of seconds that the benchmark
     /// should be running. If `None` is provided, the benchmark will run
     /// until it is interrupted.
-    #[clap(long, parse(try_from_str = crate::utils::seconds_as_str_to_duration))]
+    #[clap(long, value_parser = crate::utils::seconds_as_str_to_duration)]
     pub run_for: Option<Duration>,
 }
 

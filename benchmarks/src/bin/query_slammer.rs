@@ -10,7 +10,7 @@ use readyset_data::DfValue;
 #[derive(Parser, Debug)]
 struct Opts {
     /// SQL endpoint to connect to
-    #[clap(env = "DATABASE_URL", parse(try_from_str))]
+    #[clap(env = "DATABASE_URL")]
     database_url: DatabaseURL,
 
     /// Number of greenthreads to run hitting the database

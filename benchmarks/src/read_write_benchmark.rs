@@ -54,7 +54,7 @@ pub struct ReadWriteBenchmark {
 
     /// An query spec passed in as a comma separated list. See
     /// `DistributionAnnotation` for the format for each parameters annotation.
-    #[clap(long, conflicts_with = "query-spec-file")]
+    #[clap(long, conflicts_with = "query_spec_file")]
     update_query_spec: Option<String>,
 
     /// Install and generate from an arbitrary schema.
@@ -64,7 +64,7 @@ pub struct ReadWriteBenchmark {
     /// The duration, specified as the number of seconds that the benchmark
     /// should be running. If `None` is provided, the benchmark will run
     /// until it is interrupted.
-    #[clap(long, parse(try_from_str = crate::utils::seconds_as_str_to_duration))]
+    #[clap(long, value_parser = crate::utils::seconds_as_str_to_duration)]
     pub run_for: Option<Duration>,
 }
 

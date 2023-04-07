@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
+use clap::ValueEnum;
 use dashmap::DashMap;
 use readyset_client::query::*;
 use readyset_client::ViewCreateRequest;
@@ -484,7 +485,7 @@ impl QueryStatusCache {
 }
 
 /// MigrationStyle is used to communicate which style of managing migrations we have configured.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum MigrationStyle {
     /// Async migrations are enabled in the adapter by setting the --query-caching argument to
     /// async

@@ -175,7 +175,7 @@ impl Permute {
         let tests = self.permutation_generator.generate_tests()?;
         let pb = ProgressBar::new(tests.len() as _).with_style(
             ProgressStyle::default_bar()
-                .template("{wide_bar} {msg} {pos}/{len} ({elapsed} / {duration})"),
+                .template("{wide_bar} {msg} {pos}/{len} ({elapsed} / {duration})")?,
         );
         for test in tests {
             pb.inc(1);

@@ -267,7 +267,7 @@ pub async fn parallel_load(db: DatabaseURL, spec: DatabaseGenerationSpec) -> Res
     let multi_progress = MultiProgress::new();
 
     let sty = ProgressStyle::default_bar()
-        .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}")
+        .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}")?
         .progress_chars("##-");
 
     let mut progress_bars: HashMap<String, ProgressBar> = Default::default();
@@ -277,10 +277,6 @@ pub async fn parallel_load(db: DatabaseURL, spec: DatabaseGenerationSpec) -> Res
         new_bar.set_style(sty.clone());
         new_bar.set_message(table_name.to_string());
         progress_bars.insert(table_name.to_string(), new_bar);
-    });
-
-    std::thread::spawn(move || {
-        multi_progress.join().unwrap();
     });
 
     let mut table_tasks =

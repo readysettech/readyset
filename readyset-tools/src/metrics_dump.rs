@@ -2,6 +2,7 @@
 //! Tool to retrieve a metrics dump for the current leader in a
 //! deployment.
 
+use clap::builder::NonEmptyStringValueParser;
 use clap::Parser;
 use readyset_client::consensus::AuthorityType;
 use readyset_client::metrics::client::MetricsClient;
@@ -13,10 +14,10 @@ struct MetricsDump {
     #[clap(short, long, env("AUTHORITY_ADDRESS"), default_value("127.0.0.1:2181"))]
     authority_address: String,
 
-    #[clap(long, env("AUTHORITY"), default_value("zookeeper"), possible_values = &["consul", "zookeeper"])]
+    #[clap(long, env("AUTHORITY"), default_value("zookeeper"), value_parser = ["consul", "zookeeper"])]
     authority: AuthorityType,
 
-    #[clap(short, long, env("DEPLOYMENT"), forbid_empty_values = true)]
+    #[clap(short, long, env("DEPLOYMENT"), value_parser = NonEmptyStringValueParser::new())]
     deployment: String,
 }
 

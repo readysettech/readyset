@@ -24,7 +24,7 @@ redact_sensitive = ["readyset-util/redact_sensitive"]
 tikv-jemallocator = "0.4"
 
 [dependencies]
-clap = { version = "3.0", features = ["derive","env"] }
+clap = { version = "4.2", features = ["derive","env"] }
 anyhow = "1.0"
 thiserror = "1.0.26"
 ahash = "0.7"

@@ -46,7 +46,7 @@ pub struct FallbackBenchmark {
     /// The duration, specified as the number of seconds that the benchmark
     /// should be running. If `None` is provided, the benchmark will run
     /// until it is interrupted.
-    #[clap(long, parse(try_from_str = crate::utils::seconds_as_str_to_duration), default_value="30")]
+    #[clap(long, value_parser = crate::utils::seconds_as_str_to_duration, default_value="30")]
     run_for: Duration,
 
     /// Whether fallback cache should be enabled for this benchmark

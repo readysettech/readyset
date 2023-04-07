@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use std::{env, fs, mem};
 
 use anyhow::Result;
-use clap::{ArgEnum, Parser};
+use clap::{Parser, ValueEnum};
 use database_utils::{DatabaseConnection, DatabaseURL};
 use rand::distributions::{Distribution, Uniform};
 use rand::prelude::*;
@@ -16,7 +16,7 @@ use vec1::Vec1;
 
 static THREAD_UPDATE_INTERVAL: Duration = Duration::from_secs(10);
 
-#[derive(Clone, ArgEnum)]
+#[derive(Clone, ValueEnum)]
 enum Dist {
     Uniform,
     Zipf,
@@ -33,7 +33,13 @@ struct NoriaClientOpts {
     )]
     authority_address: String,
 
-    #[clap(long, env("AUTHORITY"), required_if_eq("database-type", "noria"), default_value("zookeeper"), possible_values = &["consul", "zookeeper"])]
+    #[clap(
+        long,
+        env("AUTHORITY"),
+        required_if_eq("database-type", "noria"),
+        default_value("zookeeper"),
+        value_parser = ["consul", "zookeeper"]
+    )]
     authority: AuthorityType,
 
     #[clap(
@@ -72,7 +78,7 @@ struct MySqlOpts {
     nparams: Option<usize>,
 }
 
-#[derive(Clone, ArgEnum)]
+#[derive(Clone, Copy, ValueEnum)]
 enum DatabaseType {
     Noria,
     MySql,
@@ -104,7 +110,7 @@ struct Reader {
     ///
     /// 'zipf' - sample pattern is skewed such that 90% of accesses are for 10% of the ids (Zipf;
     /// α=1.15)
-    #[clap(arg_enum, default_value = "uniform")]
+    #[clap(default_value = "uniform")]
     distribution: Dist,
 
     /// Override the default alpha parameter for the zipf distribution
@@ -119,7 +125,7 @@ struct Reader {
     /// The type of database the client is connecting to. This determines
     /// the set of opts that should be populated. See `noria_opts` and
     /// `mysql_opts`.
-    #[clap(arg_enum, default_value = "noria")]
+    #[clap(default_value = "noria")]
     database_type: DatabaseType,
 
     /// The set of options to be specified by the user to connect via a

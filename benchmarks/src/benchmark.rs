@@ -94,21 +94,11 @@ pub struct DeploymentParameters {
 
     /// Target database connection string. This is the database in the deployment
     /// we are benchmarking operations against.
-    #[clap(
-        long,
-        env = "TARGET_CONN_STR",
-        default_value = "",
-        required_unless_present("deployment")
-    )]
+    #[clap(long, env = "TARGET_CONN_STR", default_value = "")]
     pub target_conn_str: String,
 
     /// Setup database connection string.
-    #[clap(
-        long,
-        env = "SETUP_CONN_STR",
-        default_value = "",
-        required_unless_present("deployment")
-    )]
+    #[clap(long, env = "SETUP_CONN_STR", default_value = "")]
     pub setup_conn_str: String,
 
     #[clap(long)]

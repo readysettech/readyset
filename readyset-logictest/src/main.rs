@@ -86,7 +86,6 @@ struct InputFileOptions {
     /// Any files whose name ends in `.fail.test` will be run, but will be expected to *fail* for
     /// some reason - if any of them pass, the overall run will fail (and noria-logictest will exit
     /// with a non-zero status code)
-    #[clap(parse(from_str))]
     paths: Vec<PathBuf>,
 
     /// Load input files from subdirectories of the given paths recursively
@@ -243,11 +242,11 @@ struct Verify {
     database_url: Option<DatabaseURL>,
 
     /// Shorthand for `--database-url mysql://root:noria@localhost:3306/sqllogictest`
-    #[clap(long, conflicts_with = "database-url")]
+    #[clap(long, conflicts_with = "database_url")]
     mysql: bool,
 
     /// Shorthand for `--database-url postgresql://postgres:noria@localhost:5432/sqllogictest`
-    #[clap(long, conflicts_with = "database-url")]
+    #[clap(long, conflicts_with = "database_url")]
     postgresql: bool,
 
     /// Enable an upstream database backend for the client, with replication to ReadySet.  All
@@ -261,7 +260,7 @@ struct Verify {
     ///
     /// Ignored if --database-url is passed, must match the database type of --replication-url if
     /// both are passed
-    #[clap(long, default_value="mysql", possible_values=&["mysql", "postgresql"])]
+    #[clap(long, default_value = "mysql", value_enum)]
     database_type: DatabaseType,
 
     /// Enable query graph reuse
@@ -297,7 +296,7 @@ struct Verify {
     authority_address: String,
 
     /// The authority to use. Possible values: zookeeper, consul, local.
-    #[clap(long, env = "AUTHORITY", default_value = "local", possible_values = &["local", "consul", "zookeeper"])]
+    #[clap(long, env = "AUTHORITY", default_value = "local", value_enum)]
     authority: AuthorityType,
 }
 
@@ -581,7 +580,7 @@ pub struct Fuzz {
 
     /// URL of a reference database to compare to. Currently supports `mysql://` URLs, but may be
     /// expanded in the future
-    #[clap(long, parse(try_from_str))]
+    #[clap(long)]
     compare_to: DatabaseURL,
 
     /// Enable verbose log output

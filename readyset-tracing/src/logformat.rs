@@ -1,6 +1,8 @@
 use std::str::FromStr;
 
-#[derive(Debug)]
+use clap::ValueEnum;
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum LogFormat {
     /// Corresponds to [`tracing_subscriber::fmt::format::Compact`]
     Compact,

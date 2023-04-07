@@ -26,15 +26,14 @@ pub struct Options {
     ///
     /// If password is not provided, ReadySet will try using an empty string to unlock the identity
     /// file.
-    #[clap(long, requires = "readyset-identity-file")]
+    #[clap(long, requires = "readyset_identity_file")]
     readyset_identity_file_password: Option<String>,
 
     /// Authentication method to use for PostgreSQL clients
     #[clap(
         long,
         env = "POSTGRES_AUTHENTICATION_METHOD",
-        possible_values = &["cleartext", "scram-sha-256"],
-        default_value = "scram-sha-256",
+        default_value = "scram-sha-256"
     )]
     postgres_authentication_method: AuthenticationMethod,
 }

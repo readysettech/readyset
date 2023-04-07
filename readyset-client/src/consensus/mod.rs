@@ -3,11 +3,13 @@
 //! workers which necessitate changes, and storing cluster wide global state.
 
 use std::collections::{HashMap, HashSet};
+use std::fmt::{self, Display};
 use std::net::SocketAddr;
 use std::str::FromStr;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
+use clap::ValueEnum;
 use enum_dispatch::enum_dispatch;
 use readyset_errors::ReadySetResult;
 use serde::de::DeserializeOwned;
@@ -241,7 +243,7 @@ pub enum Authority {
 }
 
 /// Enum that mirrors Authority that parses command line arguments.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, ValueEnum)]
 pub enum AuthorityType {
     Zookeeper,
     Consul,
@@ -262,13 +264,13 @@ impl FromStr for AuthorityType {
     }
 }
 
-impl ToString for AuthorityType {
-    fn to_string(&self) -> String {
+impl Display for AuthorityType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self {
-            AuthorityType::Zookeeper => "zookeeper".to_string(),
-            AuthorityType::Consul => "consul".to_string(),
-            AuthorityType::Local => "local".to_string(),
-            AuthorityType::Standalone => "standalone".to_string(),
+            AuthorityType::Zookeeper => write!(f, "zookeeper"),
+            AuthorityType::Consul => write!(f, "consul"),
+            AuthorityType::Local => write!(f, "local"),
+            AuthorityType::Standalone => write!(f, "standalone"),
         }
     }
 }

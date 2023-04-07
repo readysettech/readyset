@@ -64,7 +64,7 @@ pub struct EvictionBenchmark {
     /// The duration, specified as the number of seconds that the benchmark
     /// should be running. If `None` is provided, the benchmark will run
     /// until it is interrupted.
-    #[clap(long, parse(try_from_str = crate::utils::seconds_as_str_to_duration))]
+    #[clap(long, value_parser = crate::utils::seconds_as_str_to_duration)]
     run_for: Option<Duration>,
 
     /// Attempt to scale down query range from query_spec in order to hit the desired

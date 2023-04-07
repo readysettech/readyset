@@ -18,7 +18,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, bail, ensure};
 use async_trait::async_trait;
-use clap::{ArgGroup, Parser};
+use clap::builder::NonEmptyStringValueParser;
+use clap::{ArgGroup, Parser, ValueEnum};
 use database_utils::{DatabaseType, DatabaseURL, UpstreamConfig};
 use failpoint_macros::set_failpoint;
 use futures_util::future::FutureExt;
@@ -94,7 +95,7 @@ pub trait ConnectionHandler {
 ///
 /// Corresponds to the variants of [`noria_client::backend::UnsupportedSetMode`] that are exposed to
 /// the user.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
 pub enum UnsupportedSetMode {
     /// Return an error to the client (the default)
     Error,
@@ -149,28 +150,32 @@ where
 #[clap(group(
     ArgGroup::new("metrics")
         .multiple(true)
-        .args(&["prometheus-metrics", "noria-metrics"]),
+        .args(&["prometheus_metrics", "noria_metrics"]),
 ), version = VERSION_STR_PRETTY)]
+#[group(skip)]
 pub struct Options {
     /// IP:PORT to listen on
-    #[clap(long, short = 'a', env = "LISTEN_ADDRESS", parse(try_from_str))]
+    #[clap(long, short = 'a', env = "LISTEN_ADDRESS")]
     address: Option<SocketAddr>,
 
     /// ReadySet deployment ID to attach to
-    #[clap(long, env = "DEPLOYMENT", forbid_empty_values = true)]
+    #[clap(long, env = "DEPLOYMENT", value_parser = NonEmptyStringValueParser::new())]
     deployment: String,
 
     /// Database engine protocol to emulate
-    #[clap(long, env = "DATABASE_TYPE", possible_values=&["mysql", "postgresql", "postgres"])]
+    #[clap(long, env = "DATABASE_TYPE", value_enum)]
     pub database_type: DatabaseType,
 
-    /// The authority to use. Possible values: zookeeper, consul, standalone.
+    /// Run ReadySet in standalone mode, running a readyset-server instance within this adapter.
+    #[clap(long, env = "STANDALONE", conflicts_with = "embedded_readers")]
+    standalone: bool,
+
+    /// The authority to use
     #[clap(
         long,
         env = "AUTHORITY",
-        default_value_if("standalone", None, Some("standalone")),
-        default_value = "consul",
-        possible_values = &["consul", "zookeeper", "standalone"]
+        default_value_if("standalone", "true", Some("standalone")),
+        default_value = "consul"
     )]
     authority: AuthorityType,
 
@@ -180,9 +185,10 @@ pub struct Options {
     #[clap(
         long,
         env = "AUTHORITY_ADDRESS",
-        default_value_if("authority", Some("standalone"), Some(".")),
-        default_value_if("authority", Some("consul"), Some("127.0.0.1:8500")),
-        default_value_if("authority", Some("zookeeper"), Some("127.0.0.1:2181"))
+        default_value_if("authority", "standalone", Some(".")),
+        default_value_if("authority", "consul", Some("127.0.0.1:8500")),
+        default_value_if("authority", "zookeeper", Some("127.0.0.1:2181")),
+        required = false
     )]
     authority_address: String,
 
@@ -195,12 +201,7 @@ pub struct Options {
     allow_unauthenticated_connections: bool,
 
     /// Specify the migration mode for ReadySet to use
-    #[clap(
-        long,
-        env = "QUERY_CACHING",
-        default_value = "explicit",
-        possible_values = &["inrequestpath", "explicit", "async"]
-    )]
+    #[clap(long, env = "QUERY_CACHING", default_value = "explicit")]
     query_caching: MigrationStyle,
 
     /// Sets the maximum time in minutes that we will retry migrations for in the
@@ -224,18 +225,13 @@ pub struct Options {
     #[clap(
         long,
         env = "VALIDATE_QUERIES",
-        requires("upstream-db-url"),
+        requires("upstream_db_url"),
         hide = true
     )]
     validate_queries: bool,
 
     /// IP:PORT to host endpoint for scraping metrics from the adapter.
-    #[clap(
-        long,
-        env = "METRICS_ADDRESS",
-        default_value = "0.0.0.0:6034",
-        parse(try_from_str)
-    )]
+    #[clap(long, env = "METRICS_ADDRESS", default_value = "0.0.0.0:6034")]
     metrics_address: SocketAddr,
 
     /// Allow database connections authenticated as this user. Defaults to the username in
@@ -260,7 +256,7 @@ pub struct Options {
     query_log: bool,
 
     /// Enables logging ad-hoc queries in the query log. Useful for testing.
-    #[clap(long, hide = true, env = "QUERY_LOG_AD_HOC", requires = "query-log")]
+    #[clap(long, hide = true, env = "QUERY_LOG_AD_HOC", requires = "query_log")]
     query_log_ad_hoc: bool,
 
     /// Use the AWS EC2 metadata service to determine the external address of this noria adapter's
@@ -294,13 +290,7 @@ pub struct Options {
     /// * "proxy" - proxy all subsequent statements
     // NOTE: In order to keep `allow_unsupported_set` hidden, we're keeping these two flags separate
     // and *not* marking them as conflicting with each other.
-    #[clap(
-        long,
-        env = "UNSUPPORTED_SET_MODE",
-        default_value = "error",
-        possible_values = &["error", "proxy"],
-        parse(try_from_str)
-    )]
+    #[clap(long, env = "UNSUPPORTED_SET_MODE", default_value = "error")]
     unsupported_set_mode: UnsupportedSetMode,
 
     // TODO(DAN): require explicit migrations
@@ -344,10 +334,6 @@ pub struct Options {
     /// Whether to use non-blocking or blocking reads against the cache.
     #[clap(long, env = "NON_BLOCKING_READS")]
     non_blocking_reads: bool,
-
-    /// Run ReadySet in standalone mode, running a readyset-server instance within this adapter.
-    #[clap(long, env = "STANDALONE", conflicts_with = "embedded-readers")]
-    standalone: bool,
 
     /// Run ReadySet in embedded readers mode, running reader replicas (and only reader replicas)
     /// in the same process as the adapter

@@ -23,6 +23,7 @@ use std::time::{Duration, Instant};
 
 use benchmarks::utils::generate::load_to_backend;
 use benchmarks::utils::spec::{DatabaseGenerationSpec, DatabaseSchema};
+use clap::builder::NonEmptyStringValueParser;
 use clap::{Parser, ValueHint};
 use nom_sql::Relation;
 use query_generator::ColumnGenerationSpec;
@@ -56,10 +57,10 @@ struct Writer {
     #[clap(short, long, env("AUTHORITY_ADDRESS"), default_value("127.0.0.1:2181"))]
     authority_address: String,
 
-    #[clap(long, env("AUTHORITY"), default_value("zookeeper"), possible_values = &["consul", "zookeeper"])]
+    #[clap(long, env("AUTHORITY"), default_value("zookeeper"), value_parser = ["consul", "zookeeper"])]
     authority: AuthorityType,
 
-    #[clap(short, long, env("DEPLOYMENT"), forbid_empty_values = true)]
+    #[clap(short, long, env("DEPLOYMENT"), value_parser = NonEmptyStringValueParser::new())]
     deployment: String,
 
     /// Path to the news app data model SQL schema.

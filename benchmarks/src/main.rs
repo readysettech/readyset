@@ -8,7 +8,7 @@ use benchmarks::benchmark::{Benchmark, BenchmarkControl, DeploymentParameters};
 use benchmarks::benchmark_histogram;
 use benchmarks::reporting::ReportMode;
 use benchmarks::utils::readyset_ready;
-use clap::{AppSettings, Parser, ValueHint};
+use clap::{Parser, ValueHint};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use metrics_util::MetricKindMask;
 use readyset_adapter::backend::noria_connector::ReadBehavior;
@@ -28,7 +28,7 @@ const PUSH_GATEWAY_PUSH_INTERVAL: Duration = Duration::from_secs(5);
 ///
 /// The usage of this command is documented at <http://docs/benchmarking.html>
 #[derive(Parser)]
-#[clap(name = "benchmark_cmd_runner", global_setting = AppSettings::SubcommandsNegateReqs)]
+#[clap(name = "benchmark_cmd_runner", subcommand_negates_reqs = true)]
 struct BenchmarkRunner {
     /// Skips the setup step when executing the `benchmark_cmd`.
     #[clap(long)]
@@ -86,15 +86,15 @@ struct BenchmarkRunner {
     local_with_mysql: Option<String>,
 
     /// Location where benchmark reports are stored, either for validation or storage purposes
-    #[clap(long, env = "REPORT_TARGET", requires_all(&["report-mode", "report-profile"]))]
+    #[clap(long, env = "REPORT_TARGET", requires_all(&["report_mode", "report_profile"]))]
     report_target: Option<String>,
 
     /// Enables storage / validation of benchmark results, when combined with report_target
-    #[clap(long, arg_enum, long, env = "REPORT_MODE", requires_all(&["report-target", "report-profile"]))]
+    #[clap(long, env = "REPORT_MODE", requires_all(&["report_target", "report_profile"]))]
     report_mode: Option<ReportMode>,
 
     /// Profile name to save the report under, distinct tests should have unique profiles
-    #[clap(long, requires_all(&["report-target", "report-mode"]))]
+    #[clap(long, requires_all(&["report_target", "report_mode"]))]
     report_profile: Option<String>,
 
     /// Records the commit id to aid potential future analysis

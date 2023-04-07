@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::str::{self, FromStr};
 use std::time::Duration;
 
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use derive_more::From;
 use error::{ConnectionType, DatabaseTypeParseError};
 use futures::{StreamExt, TryStreamExt};
@@ -64,7 +64,7 @@ pub struct UpstreamConfig {
     pub replication_server_id: Option<u32>,
 
     /// The time to wait before restarting the replicator in seconds.
-    #[clap(long, hide = true, default_value = "30", parse(try_from_str = duration_from_seconds))]
+    #[clap(long, hide = true, default_value = "30", value_parser = duration_from_seconds)]
     #[serde(default = "default_replicator_restart_timeout")]
     pub replicator_restart_timeout: Duration,
 
@@ -139,9 +139,12 @@ impl Default for UpstreamConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum DatabaseType {
+    #[value(name = "mysql")]
     MySQL,
+
+    #[value(name = "postgresql")]
     PostgreSQL,
 }
 

@@ -440,7 +440,7 @@ impl Seed {
 pub struct GenerateOpts {
     /// URL of a reference database to compare to. Currently supports `mysql://` URLs, but may be
     /// expanded in the future
-    #[clap(long, parse(try_from_str))]
+    #[clap(long)]
     pub compare_to: DatabaseURL,
 
     /// Rows of data to generate per table
@@ -478,7 +478,6 @@ pub struct GenerateOpts {
 #[derive(Parser)]
 pub struct Generate {
     /// Test script to use as a seed. Seed scripts should contain DDL and queries, but no data.
-    #[clap(parse(from_str))]
     pub from: Option<PathBuf>,
 
     #[clap(flatten)]

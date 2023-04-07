@@ -3068,7 +3068,7 @@ pub struct GenerateOpts {
     ///
     /// If not specified, queries will all contain a number of operations equal to the length of
     /// `operations`.
-    #[clap(long, parse(try_from_str = parse_num_operations))]
+    #[clap(long, value_parser = parse_num_operations::<usize>)]
     pub num_operations: Option<BoundPair<usize>>,
 }
 

@@ -714,7 +714,7 @@ fn unset_affinity() {
         .expect("failed to execute process");
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 enum MemoryLimit {
     Relative { percent: usize },
     Absolute { mib: usize },

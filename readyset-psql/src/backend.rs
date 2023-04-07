@@ -4,6 +4,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use clap::ValueEnum;
 use eui48::MacAddressFormat;
 use psql_srv as ps;
 use readyset_adapter::backend as cl;
@@ -18,9 +19,11 @@ use crate::row::Row;
 use crate::value::Value;
 use crate::PostgreSqlUpstream;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
 pub enum AuthenticationMethod {
     Cleartext,
+
+    #[value(name = "scram-sha-256")]
     #[default]
     ScramSha256,
 }

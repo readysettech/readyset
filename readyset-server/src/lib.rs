@@ -463,7 +463,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::anyhow;
-use clap::{ArgEnum, Parser};
+use clap::Args;
 use dataflow::DomainConfig;
 use serde::{Deserialize, Serialize};
 
@@ -548,13 +548,14 @@ pub fn resolve_addr(addr: &str) -> anyhow::Result<IpAddr> {
 //
 // This option struct is intended to be embedded inside of a larger option struct using
 // `#[clap(flatten)]`.
-#[derive(Parser, Debug)]
+#[derive(Args, Debug)]
+#[group(skip)]
 pub struct WorkerOptions {
     /// The durability of base tables. `persistent` and `ephemeral` store base tables
     /// on disk, but `ephemeral` deletes the data when the ReadySet Server is stopped.
     /// `memory` stores base tables entirely in memory. `ephemeral` and `memory` are
     /// suitable for testing only. Use `persistent` for production deployments.
-    #[clap(long, default_value = "persistent", possible_values = &["persistent", "ephemeral", "memory"], parse(try_from_str))]
+    #[clap(long, default_value = "persistent")]
     pub durability: DurabilityMode,
 
     /// Number of background threads used by RocksDB
@@ -574,7 +575,7 @@ pub struct WorkerOptions {
     pub memory_check_freq: u64,
 
     /// The strategy to use when memory is freed from reader nodes
-    #[clap(long = "eviction-policy", arg_enum, default_value_t = dataflow::EvictionKind::LRU)]
+    #[clap(long = "eviction-policy", default_value_t = dataflow::EvictionKind::LRU)]
     pub eviction_kind: dataflow::EvictionKind,
 
     /// Disable partial

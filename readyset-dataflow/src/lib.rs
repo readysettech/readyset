@@ -37,6 +37,7 @@ mod domain;
 mod node_map;
 
 use std::collections::HashMap;
+use std::fmt::{self, Display};
 use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Mutex};
 
@@ -86,7 +87,7 @@ impl Sharding {
     }
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, clap::ArgEnum)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, clap::ValueEnum)]
 pub enum EvictionKind {
     Random,
     LRU,
@@ -96,6 +97,16 @@ pub enum EvictionKind {
 impl Default for EvictionKind {
     fn default() -> Self {
         EvictionKind::Random
+    }
+}
+
+impl Display for EvictionKind {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Random => write!(f, "random"),
+            Self::LRU => write!(f, "lru"),
+            Self::Generational => write!(f, "generational"),
+        }
     }
 }
 

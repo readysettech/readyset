@@ -19,7 +19,7 @@ use querylog::{Command, Entry, Session, Stream};
 pub struct FromQueryLog {
     /// URL of a reference database to connect to, execute queries frmo the log, and record the
     /// results.  Currently supports `mysql://` URLs, but may be expanded in the future.
-    #[clap(long, parse(try_from_str))]
+    #[clap(long)]
     pub database: DatabaseURL,
 
     /// Enable verbose output

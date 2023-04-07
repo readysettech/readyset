@@ -120,7 +120,7 @@ pub struct ArbitraryQueryParameters {
     /// format for each parameters annotation.
     ///
     /// Query specs give a specification for how parameters are generated for queries
-    #[clap(long, conflicts_with = "query-spec-file")]
+    #[clap(long, conflicts_with = "query_spec_file")]
     query_spec: Option<String>,
 }
 

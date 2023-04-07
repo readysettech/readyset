@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
+use clap::builder::NonEmptyStringValueParser;
 use clap::Parser;
 use prometheus_http_query::{Client, Scheme};
 use readyset_client::consensus::ConsulAuthority;
@@ -31,7 +32,6 @@ pub struct Options {
         long,
         short = 'a',
         env = "LISTEN_ADDRESS",
-        parse(try_from_str),
         default_value = "0.0.0.0:6035"
     )]
     address: SocketAddr,
@@ -41,11 +41,11 @@ pub struct Options {
     consul_address: String,
 
     /// ReadySet deployment ID to filter by when aggregating metrics.
-    #[clap(long, env = "DEPLOYMENT", forbid_empty_values = true)]
+    #[clap(long, env = "DEPLOYMENT", value_parser = NonEmptyStringValueParser::new())]
     deployment: String,
 
     /// Prometheus connection string.
-    #[clap(long, short = 'p', env = "PROMETHEUS_ADDRESS", parse(try_from_str))]
+    #[clap(long, short = 'p', env = "PROMETHEUS_ADDRESS")]
     prom_address: String,
 
     /// A flag that if set will communicate with prometheus over http rather than https.

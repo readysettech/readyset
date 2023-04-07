@@ -19,7 +19,7 @@
 use std::fs::File;
 use std::sync::Arc;
 
-use clap::Parser;
+use clap::Args;
 use opentelemetry::sdk::trace::{Sampler, Tracer};
 use opentelemetry::sdk::Resource;
 use opentelemetry::KeyValue;
@@ -45,16 +45,11 @@ pub fn warn_if_debug_build() {
     }
 }
 
-#[derive(Debug, Parser)]
+#[derive(Debug, Args)]
+#[group(id = "logging")]
 pub struct Options {
     /// Format to use when emitting log events.
-    #[clap(
-        long,
-        env = "LOG_FORMAT",
-        parse(try_from_str),
-        default_value = "full",
-        possible_values = &["compact", "full", "pretty", "json"]
-    )]
+    #[clap(long, env = "LOG_FORMAT", default_value = "full", value_enum)]
     log_format: LogFormat,
 
     /// Log level filter for spans and events. The log level filter string is a comma separated
@@ -90,7 +85,7 @@ pub struct Options {
 
     /// Optional filename for storing the statement log. Defaults to
     /// <deployment-name>_statements.log.
-    #[clap(long, env = "STATEMENT_LOG_PATH", requires = "statement-logging")]
+    #[clap(long, env = "STATEMENT_LOG_PATH", requires = "statement_logging")]
     pub statement_log_path: Option<String>,
 }
 

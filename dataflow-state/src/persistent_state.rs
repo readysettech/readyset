@@ -72,6 +72,7 @@ use std::time::{Duration, Instant};
 use std::{fmt, fs};
 
 use bincode::Options;
+use clap::ValueEnum;
 use common::{IndexType, Record, Records, SizeOf, Tag};
 use parking_lot::{
     MappedRwLockReadGuard, MappedRwLockWriteGuard, RwLock, RwLockReadGuard, RwLockWriteGuard,
@@ -197,13 +198,16 @@ impl SnapshotMode {
 }
 
 /// Indicates to what degree updates should be persisted.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, ValueEnum)]
 pub enum DurabilityMode {
     /// Don't do any durability
+    #[value(alias("memory"))]
     MemoryOnly,
     /// Delete any log files on exit. Useful mainly for tests.
+    #[value(alias("ephemeral"))]
     DeleteOnExit,
     /// Persist updates to disk, and don't delete them later.
+    #[value(alias("persistent"))]
     Permanent,
 }
 

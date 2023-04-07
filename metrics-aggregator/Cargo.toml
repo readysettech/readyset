@@ -36,7 +36,7 @@ hyper = { version = "0.14.10", features = [ "stream", "server" ] }
 tokio-tower = "0.5.1"
 tower = { version = "0.4.6", features = ["util"] }
 async-trait = "0.1"
-clap = { version = "3.0", features = ["derive","env"] }
+clap = { version = "4.2", features = ["derive","env"] }
 tokio = { workspace = true, features = ["full"] }
 tokio-stream = { version = "0.1.5", features = ["net"] }
 tracing-subscriber = "0.3.9"

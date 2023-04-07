@@ -7,8 +7,8 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.38"
-clap = { version = "3.0", features = ["derive","env"] }
-console = "0.15.0"
+clap = { version = "4.2", features = ["derive","env"] }
+console = "0.15.5"
 derive_more = "0.99.11"
 hex = "0.4.3"
 md5 = "0.7.0"
@@ -33,7 +33,7 @@ enum-display-derive = "0.1.1"
 lazy_static = "1.4.0"
 humantime = "2.1"
 rust_decimal = { version = "1.26", features = ["db-tokio-postgres"] }
-indicatif = "0.16"
+indicatif = "0.17"
 bit-vec = { version = "0.6", features = ["serde"] }
 thiserror = "1.0.30"
 

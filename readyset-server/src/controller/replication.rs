@@ -8,11 +8,11 @@ use tracing::warn;
 #[derive(Debug, Parser, Clone)]
 pub struct ReplicationOptions {
     /// Number of times to replicate domains that contain readers
-    #[clap(long, hide = true, conflicts_with = "non-base-replicas")]
+    #[clap(long, hide = true, conflicts_with = "non_base_replicas")]
     reader_replicas: Option<usize>,
 
     /// Number of times to replicate domains that don't contain base nodes
-    #[clap(long, hide = true, conflicts_with = "reader-replicas")]
+    #[clap(long, hide = true, conflicts_with = "reader_replicas")]
     non_base_replicas: Option<usize>,
 }
 

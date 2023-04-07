@@ -4,6 +4,7 @@ use std::process;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use clap::builder::NonEmptyStringValueParser;
 use clap::Parser;
 use futures_util::future::{self, Either};
 use metrics_exporter_prometheus::PrometheusBuilder;
@@ -49,6 +50,7 @@ pub async fn get_aws_private_ip() -> anyhow::Result<IpAddr> {
 
 #[derive(Parser, Debug)]
 #[clap(version = VERSION_STR_PRETTY)]
+#[group(skip)]
 struct Options {
     /// IP address to listen on
     #[clap(
@@ -56,18 +58,18 @@ struct Options {
         short = 'a',
         env = "LISTEN_ADDRESS",
         default_value = "127.0.0.1",
-        parse(try_from_str = resolve_addr)
+        value_parser = resolve_addr
     )]
     address: IpAddr,
 
     /// IP address to advertise to other noria instances running in the same deployment.
     ///
     /// If not specified, defaults to the value of `address`
-    #[clap(long, env = "EXTERNAL_ADDRESS", parse(try_from_str=resolve_addr))]
+    #[clap(long, env = "EXTERNAL_ADDRESS", value_parser = resolve_addr)]
     external_address: Option<IpAddr>,
 
     /// Port to advertise to other ReadySet instances running in the same deployment.
-    #[clap(long, short = 'p', default_value = "6033", parse(try_from_str))]
+    #[clap(long, short = 'p', default_value = "6033")]
     external_port: u16,
 
     /// Use the AWS EC2 metadata service to determine the external address of this noria instance.
@@ -77,25 +79,38 @@ struct Options {
     use_aws_external_address: bool,
 
     /// ReadySet deployment ID.
-    #[clap(long, env = "DEPLOYMENT", forbid_empty_values = true)]
+    #[clap(long, env = "DEPLOYMENT", value_parser = NonEmptyStringValueParser::new())]
     deployment: String,
 
-    /// Authority connection string.
-    // TODO(justin): The default address should depend on the authority
-    // value.
-    #[clap(long, env = "AUTHORITY_ADDRESS", default_value = "127.0.0.1:8500")]
-    authority_address: String,
-
-    /// The authority to use. Possible values: zookeeper, consul.
-    #[clap(long, env = "AUTHORITY", default_value = "consul", possible_values = &["consul", "zookeeper"])]
+    /// The authority to use
+    #[clap(
+        long,
+        env = "AUTHORITY",
+        value_enum,
+        default_value_if("standalone", "true", Some("standalone")),
+        default_value = "consul"
+    )]
     authority: AuthorityType,
 
+    /// Authority uri
+    // NOTE: `authority_address` should come after `authority` for clap to set default values
+    // properly
+    #[clap(
+        long,
+        env = "AUTHORITY_ADDRESS",
+        default_value_if("authority", "standalone", Some(".")),
+        default_value_if("authority", "consul", Some("127.0.0.1:8500")),
+        default_value_if("authority", "zookeeper", Some("127.0.0.1:2181")),
+        required = false
+    )]
+    authority_address: String,
+
     /// Whether this server should only run reader domains
-    #[clap(long, conflicts_with = "no-readers")]
+    #[clap(long, conflicts_with = "no_readers")]
     reader_only: bool,
 
     /// If set, this server will never run domains containing reader nodes
-    #[clap(long, conflicts_with = "reader-only")]
+    #[clap(long, conflicts_with = "reader_only")]
     no_readers: bool,
 
     /// Prevent this instance from ever being elected as the leader

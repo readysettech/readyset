@@ -10,7 +10,7 @@ use crate::benchmark::{BenchmarkResults, MetricGoal};
 mod analysis;
 mod storage;
 
-#[derive(clap::ArgEnum, Clone, Copy)]
+#[derive(clap::ValueEnum, Clone, Copy)]
 pub enum ReportMode {
     StoreAndValidate,
     ValidateOnly,

@@ -41,7 +41,7 @@ pub struct WorkloadEmulator {
     #[clap(long, short)]
     workers: u64,
     /// Duration of the benchmark in seconds
-    #[clap(long, short, parse(try_from_str = crate::utils::seconds_as_str_to_duration))]
+    #[clap(long, short, value_parser = crate::utils::seconds_as_str_to_duration)]
     run_for: Option<Duration>,
     #[clap(skip)]
     #[serde(skip)]

@@ -21,7 +21,7 @@ vec1 = "1.8.0"
 url = "2.2.2"
 hdrhistogram = "7.4"
 zipf = "7.0.0"
-clap = { version = "3.0", features = ["derive", "env"] }
+clap = { version = "4.2", features = ["derive", "env"] }
 reqwest = { version = "0.11", features = ["stream", "native-tls"] }
 chrono = "0.4"
 atomic-counter = "1.0.1"
@@ -38,7 +38,7 @@ lazy_static = "1.4.0"
 thiserror = "1.0.30"
 async-stream = "0.3.2"
 parking_lot = "0.11.2"
-indicatif = "0.16"
+indicatif = "0.17"
 prometheus-parse = "0.2.2"
 walkdir = "2.3"
 tokio-postgres = { workspace = true }

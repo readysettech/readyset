@@ -23,7 +23,7 @@ readyset-data = { path = "../readyset-data" }
 readyset-mysql = { path = "../readyset-mysql" }
 readyset = { path = "../readyset" }
 
-clap = { version = "3.0", features = ["derive"] }
+clap = { version = "4.2", features = ["derive"] }
 core_affinity = "0.5"
 criterion = { version = "0.3", features = ["async_tokio"] }
 fork = "0.1"
