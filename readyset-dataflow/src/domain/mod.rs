@@ -277,7 +277,6 @@ impl RequestedKeys {
                     .flat_map(|key| {
                         let diff = requested
                             .get_interval_difference(key)
-                            .into_iter()
                             .map(
                                 |(lower, upper): (Bound<&Vec1<DfValue>>, Bound<&Vec1<DfValue>>)| {
                                     (lower.cloned(), upper.cloned())
@@ -3776,7 +3775,7 @@ impl Domain {
                     if n.is_dropped() {
                         continue; // Node was dropped. Skip.
                     } else if let Some(state) = self.reader_write_handles.get_mut(node) {
-                        freed += state.evict_bytes(num_bytes as usize);
+                        freed += state.evict_bytes(num_bytes);
                         state.swap();
                         state.notify_readers_of_eviction()?;
                     } else if let Some(EvictBytesResult {
@@ -3784,7 +3783,7 @@ impl Domain {
                         keys_evicted,
                         bytes_freed,
                         ..
-                    }) = self.state[node].evict_bytes(num_bytes as usize)
+                    }) = self.state[node].evict_bytes(num_bytes)
                     {
                         let keys = keys_evicted
                             .into_iter()

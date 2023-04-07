@@ -270,7 +270,9 @@ impl TableKey {
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)] // NOTE(grfn): do we actually care about this?
+#[derive(Default)]
 pub enum FieldDefinitionExpr {
+    #[default]
     All,
     AllInTable(Relation),
     Expr {
@@ -300,12 +302,6 @@ impl From<Column> for FieldDefinitionExpr {
 impl From<Literal> for FieldDefinitionExpr {
     fn from(lit: Literal) -> Self {
         FieldDefinitionExpr::from(Expr::Literal(lit))
-    }
-}
-
-impl Default for FieldDefinitionExpr {
-    fn default() -> FieldDefinitionExpr {
-        FieldDefinitionExpr::All
     }
 }
 

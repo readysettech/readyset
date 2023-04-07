@@ -322,7 +322,7 @@ mod tests {
                 .expect_err("OOB");
         } else {
             assert_eq!(
-                DfValue::Double(val as f64).coerce_to(&DfType::Int, &DfType::Unknown),
+                DfValue::Double(val).coerce_to(&DfType::Int, &DfType::Unknown),
                 Ok(DfValue::Int(val.round() as i64))
             );
         }
@@ -332,7 +332,7 @@ mod tests {
                 .expect_err("OOB");
         } else {
             assert_eq!(
-                DfValue::Double(val as f64).coerce_to(&DfType::UnsignedInt, &DfType::Unknown),
+                DfValue::Double(val).coerce_to(&DfType::UnsignedInt, &DfType::Unknown),
                 Ok(DfValue::UnsignedInt(val.round() as u64))
             );
         }
@@ -346,7 +346,7 @@ mod tests {
                 .expect_err("OOB");
         } else {
             assert_eq!(
-                DfValue::Double(val as f64).coerce_to(&DfType::BigInt, &DfType::Unknown),
+                DfValue::Double(val).coerce_to(&DfType::BigInt, &DfType::Unknown),
                 Ok(DfValue::Int(val.round() as i64))
             );
         }
@@ -356,7 +356,7 @@ mod tests {
                 .expect_err("OOB");
         } else {
             assert_eq!(
-                DfValue::Double(val as f64).coerce_to(&DfType::UnsignedBigInt, &DfType::Unknown),
+                DfValue::Double(val).coerce_to(&DfType::UnsignedBigInt, &DfType::Unknown),
                 Ok(DfValue::UnsignedInt(val.round() as u64))
             );
         }

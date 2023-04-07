@@ -246,13 +246,13 @@ impl Ingredient for TopK {
     }
 
     #[allow(clippy::cognitive_complexity)]
-    fn on_input<'a>(
+    fn on_input(
         &mut self,
         from: LocalNodeIndex,
         rs: Records,
         replay: &ReplayContext,
         nodes: &DomainNodes,
-        state: &'a StateMap,
+        state: &StateMap,
     ) -> ReadySetResult<ProcessingResult> {
         debug_assert_eq!(from, *self.src);
 

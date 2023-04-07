@@ -87,17 +87,12 @@ impl Sharding {
     }
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, clap::ValueEnum)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, clap::ValueEnum, Default)]
 pub enum EvictionKind {
+    #[default]
     Random,
     LRU,
     Generational,
-}
-
-impl Default for EvictionKind {
-    fn default() -> Self {
-        EvictionKind::Random
-    }
 }
 
 impl Display for EvictionKind {

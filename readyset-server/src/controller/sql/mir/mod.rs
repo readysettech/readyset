@@ -1370,7 +1370,7 @@ impl SqlToMirConverter {
         Ok(if !arith_and_lit_columns_needed.is_empty() {
             let projected_expressions: Vec<(SqlIdentifier, Expr)> = arith_and_lit_columns_needed
                 .iter()
-                .filter_map(|&(_, ref oc)| match oc {
+                .filter_map(|(_, oc)| match oc {
                     OutputColumn::Expr(ref ac) => Some((ac.name.clone(), ac.expression.clone())),
                     OutputColumn::Data { .. } => None,
                     OutputColumn::Literal(_) => None,
@@ -1378,7 +1378,7 @@ impl SqlToMirConverter {
                 .collect();
             let projected_literals: Vec<(SqlIdentifier, DfValue)> = arith_and_lit_columns_needed
                 .iter()
-                .map(|&(_, ref oc)| -> ReadySetResult<_> {
+                .map(|(_, oc)| -> ReadySetResult<_> {
                     match oc {
                         OutputColumn::Expr(_) => Ok(None),
                         OutputColumn::Data { .. } => Ok(None),

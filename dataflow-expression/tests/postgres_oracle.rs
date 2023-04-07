@@ -29,7 +29,6 @@ async fn postgres_eval(expr: &str, client: &Client) -> DfValue {
         .get(0)
 }
 
-#[track_caller]
 async fn compare_eval(expr: &str, client: &Client) {
     let our_result = parse_lower_eval(
         expr,

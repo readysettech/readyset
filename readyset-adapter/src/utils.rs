@@ -60,8 +60,7 @@ fn do_flatten_conditional(
             let with_space = flattened
                 .iter()
                 .find(|key| {
-                    key.len() < pkey.len()
-                        && !key.iter().any(|&(ref name, _)| name == c.name.as_str())
+                    key.len() < pkey.len() && !key.iter().any(|(name, _)| name == c.name.as_str())
                 })
                 .cloned();
 
@@ -415,7 +414,7 @@ where
         if let Some(sets) = q
             .fields
             .iter()
-            .position(|&(ref f, _)| f.name == field.column.name)
+            .position(|(f, _)| f.name == field.column.name)
         {
             match q.fields.swap_remove(sets).1 {
                 Expr::Literal(Literal::Placeholder(_)) => {

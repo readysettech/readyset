@@ -1111,7 +1111,7 @@ fn make_paginate_or_topk_node(
     let cmp_rows = match *order {
         Some(ref o) => {
             o.iter()
-                .map(|&(ref c, ref order_type)| {
+                .map(|(c, order_type)| {
                     // SQL and Soup disagree on what ascending and descending order means, so do the
                     // conversion here.
                     let reversed_order_type = match *order_type {
