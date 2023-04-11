@@ -8,8 +8,6 @@ use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
 
 use crate::graph::MirGraph;
 use crate::node::{MirNode, MirNodeInner};
-use crate::rewrite::decorrelate::eliminate_dependent_joins;
-use crate::rewrite::pull_columns::pull_all_required_columns;
 use crate::{DfNodeIndex, NodeIndex};
 
 /// MIR representation of a base table
@@ -242,14 +240,6 @@ impl MirQuery<'_> {
             return Some(func(&n.inner));
         }
         None
-    }
-
-    /// Run a set of rewrite and optimization passes on this [`MirQuery`],
-    /// and returns the modified query.
-    pub fn rewrite(mut self) -> ReadySetResult<Self> {
-        eliminate_dependent_joins(&mut self)?;
-        pull_all_required_columns(&mut self)?;
-        Ok(self)
     }
 }
 
