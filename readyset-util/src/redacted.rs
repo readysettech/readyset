@@ -8,6 +8,14 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
+/// Constant which is set to `true` if the `redact_sensitive` feature is enabled
+#[cfg(not(feature = "redact_sensitive"))]
+pub const REDACT_SENSITIVE: bool = false;
+
+/// Constant which is set to `true` if the `redact_sensitive` feature is enabled
+#[cfg(feature = "redact_sensitive")]
+pub const REDACT_SENSITIVE: bool = false;
+
 /// Wraps a type that implements Display and Debug, overriding both implementations if the
 /// `redact_literals` feature is enabled
 pub struct Sensitive<'a, T: ?Sized>(pub &'a T);

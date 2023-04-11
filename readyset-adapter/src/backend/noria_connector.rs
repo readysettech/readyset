@@ -26,7 +26,7 @@ use readyset_errors::{
 };
 use readyset_server::worker::readers::{CallResult, ReadRequestHandler};
 use readyset_sql_passes::anonymize::anonymize_literals;
-use readyset_util::redacted::Sensitive;
+use readyset_util::redacted::{Sensitive, REDACT_SENSITIVE};
 use tracing::{error, info, instrument, trace, warn};
 
 use crate::backend::SelectSchema;
@@ -595,7 +595,9 @@ impl NoriaConnector {
         let data = views
             .into_iter()
             .map(|(n, (mut q, always))| {
-                anonymize_literals(&mut q);
+                if REDACT_SENSITIVE {
+                    anonymize_literals(&mut q);
+                }
                 vec![
                     DfValue::from(n.display(self.parse_dialect).to_string()),
                     DfValue::from(q.display(self.parse_dialect).to_string()),
