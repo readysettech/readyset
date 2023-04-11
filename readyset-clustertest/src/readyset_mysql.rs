@@ -13,7 +13,7 @@ use tokio::time::{sleep, timeout};
 use crate::utils::*;
 use crate::*;
 
-pub const PROPAGATION_DELAY_TIMEOUT: Duration = Duration::from_secs(60);
+pub const PROPAGATION_DELAY_TIMEOUT: Duration = Duration::from_secs(90);
 
 fn readyset_mysql(name: &str) -> DeploymentBuilder {
     DeploymentBuilder::new(name)

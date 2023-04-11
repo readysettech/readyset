@@ -73,7 +73,7 @@ where
     /// value. All other values should be rejected.
     pub fn empty_or(expected: &[T]) -> Self {
         Self {
-            intermediate: Vec::new(),
+            intermediate: vec![vec![]],
             expected: expected.to_vec(),
         }
     }
