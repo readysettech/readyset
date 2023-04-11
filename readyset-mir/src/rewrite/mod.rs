@@ -11,6 +11,7 @@ impl<'a> MirQuery<'a> {
     /// query.
     pub fn rewrite(mut self) -> ReadySetResult<Self> {
         decorrelate::eliminate_dependent_joins(&mut self)?;
+        add_bogokey::add_bogokey_if_necessary(&mut self)?;
         pull_columns::pull_all_required_columns(&mut self)?;
         Ok(self)
     }

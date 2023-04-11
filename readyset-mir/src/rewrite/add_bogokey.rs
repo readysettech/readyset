@@ -14,7 +14,6 @@ use crate::Column;
 /// This pass will also handle ensuring that any topk or paginate nodes in leaf position in such
 /// queries have `group_by` columns, by lifting the bogokey project node over those nodes and adding
 /// the bogokey to their `group_by`
-#[allow(dead_code)]
 pub(crate) fn add_bogokey_if_necessary(query: &mut MirQuery<'_>) -> ReadySetResult<()> {
     match &query.leaf_node().inner {
         MirNodeInner::Leaf { keys, .. } if keys.is_empty() => {}

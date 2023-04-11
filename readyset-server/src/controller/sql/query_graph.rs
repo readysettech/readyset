@@ -283,7 +283,7 @@ impl QueryGraph {
                 })
             } else {
                 Ok(ViewKey {
-                    columns: vec![(mir::Column::named("bogokey"), ViewPlaceholder::Generated)],
+                    columns: vec![],
                     index_type: IndexType::HashMap,
                 })
             }
@@ -1683,18 +1683,6 @@ mod tests {
 
     mod view_key {
         use super::*;
-
-        #[test]
-        fn bogokey_key() {
-            let qg = make_query_graph("SELECT t.x FROM t");
-            let key = qg.view_key(&Default::default()).unwrap();
-
-            assert_eq!(key.index_type, IndexType::HashMap);
-            assert_eq!(
-                key.columns,
-                vec![(mir::Column::named("bogokey"), ViewPlaceholder::Generated)]
-            );
-        }
 
         #[test]
         fn one_to_one_equal_key() {

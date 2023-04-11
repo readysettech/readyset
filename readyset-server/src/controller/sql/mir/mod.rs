@@ -1664,11 +1664,6 @@ impl SqlToMirConverter {
             // 10. Get the final node
             let mut final_node = prev_node;
 
-            // Indicates whether the final project should include a bogokey. This is required when
-            // we have a TopK node that groups on a bogokey. However, it is not required for
-            // Paginate nodes that group on a bogokey, as they will project a page number field
-            let mut bogo_in_final_projection = false;
-            let mut create_paginate = false;
             if let Some(Pagination {
                 order,
                 limit,
@@ -1676,46 +1671,19 @@ impl SqlToMirConverter {
             }) = query_graph.pagination.as_ref()
             {
                 let make_topk = offset.is_none();
-                let group_by = if query_graph.parameters().is_empty() {
-                    // need to add another projection to introduce a bogokey to group by if there
-                    // are no query parameters
-                    let cols: Vec<_> = self.mir_graph.columns(final_node);
-                    let name = format!(
-                        "q_{:x}_n{}",
-                        query_graph.signature().hash,
-                        self.mir_graph.node_count()
-                    )
-                    .into();
-                    let bogo_project = self.make_project_node(
-                        query_name,
-                        name,
-                        final_node,
-                        cols,
-                        vec![],
-                        vec![("bogokey".into(), DfValue::from(0i32))],
-                    );
-                    final_node = bogo_project;
-                    // Indicates whether we need a bogokey at the leaf node. This is the case for
-                    // topk nodes that group by a bogokey. However, this is not the case for
-                    // paginate nodes as they will project a page number
-                    bogo_in_final_projection = make_topk;
-                    create_paginate = !make_topk;
-                    vec![Column::named("bogokey")]
-                } else {
-                    // view key will have the offset parameter if it exists. We must filter it out
-                    // of the group by, because the column originates at this node
-                    view_key
-                        .columns
-                        .iter()
-                        .filter_map(|(col, _)| {
-                            if col.name != *PAGE_NUMBER_COL {
-                                Some(col.clone())
-                            } else {
-                                None
-                            }
-                        })
-                        .collect()
-                };
+                // view key will have the offset parameter if it exists. We must filter it out
+                // of the group by, because the column originates at this node
+                let group_by = view_key
+                    .columns
+                    .iter()
+                    .filter_map(|(col, _)| {
+                        if col.name != *PAGE_NUMBER_COL {
+                            Some(col.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
 
                 // Order by expression projections and either a topk or paginate node
                 let paginate_nodes = self.make_paginate_node(
@@ -1773,7 +1741,7 @@ impl SqlToMirConverter {
                     OutputColumn::Literal(_) => None,
                 })
                 .collect();
-            let mut projected_literals: Vec<(SqlIdentifier, DfValue)> = query_graph
+            let projected_literals: Vec<(SqlIdentifier, DfValue)> = query_graph
                 .columns
                 .iter()
                 .map(|oc| -> ReadySetResult<_> {
@@ -1795,22 +1763,10 @@ impl SqlToMirConverter {
                 .flatten()
                 .collect();
 
-            // Bogokey will not be added to post-paginate project nodes
-            if bogo_in_final_projection {
-                projected_columns.push(Column::named("bogokey"));
-            }
-
             if leaf_behavior.should_make_leaf() {
-                if query_graph.parameters().is_empty()
-                    && !create_paginate
-                    && !projected_columns.contains(&Column::named("bogokey"))
-                {
-                    projected_literals.push(("bogokey".into(), DfValue::from(0i32)));
-                } else {
-                    for (column, _) in &view_key.columns {
-                        if !projected_columns.contains(column) {
-                            projected_columns.push(column.clone())
-                        }
+                for (column, _) in &view_key.columns {
+                    if !projected_columns.contains(column) {
+                        projected_columns.push(column.clone())
                     }
                 }
             }
@@ -1856,7 +1812,7 @@ impl SqlToMirConverter {
             if leaf_behavior.should_make_leaf() {
                 // We are supposed to add a `Leaf` node keyed on the query parameters. For purely
                 // internal views (e.g., subqueries), this is not set.
-                let mut returned_cols = query_graph
+                let returned_cols = query_graph
                     .fields
                     .iter()
                     .map(|expression| -> ReadySetResult<_> {
@@ -1877,7 +1833,6 @@ impl SqlToMirConverter {
                         }
                     })
                     .collect::<Result<Vec<_>, _>>()?;
-                returned_cols.retain(|e| e.name != "bogokey");
 
                 // After we have all of our returned columns figured out, find out how they are
                 // projected by this projection, so we can then add another projection that returns
