@@ -53,13 +53,16 @@ impl Anonymize for [SqlIdentifier] {
     }
 }
 
-/// This pass replaces every instance of `Literal`, except Placeholders, in the AST with
-/// `Literal::String("<anonymized>")`
+/// This pass replaces every instance of `Literal` which could contain sensitive data (so excluding
+/// placeholders, booleans, and `NULL`) in the AST with `Literal::String("<anonymized>")`
 struct AnonymizeLiteralsVisitor;
 impl<'ast> VisitorMut<'ast> for AnonymizeLiteralsVisitor {
     type Error = !;
     fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
-        if !matches!(literal, Literal::Placeholder(_)) {
+        if !matches!(
+            literal,
+            Literal::Null | Literal::Placeholder(_) | Literal::Boolean(_)
+        ) {
             *literal = Literal::String("<anonymized>".to_owned());
         }
         Ok(())
