@@ -46,14 +46,21 @@ impl MirGraph {
         }
     }
 
+    fn ensure_node_exists(&self, node: NodeIndex) -> ReadySetResult<()> {
+        if !self.graph.contains_node(node) {
+            Err(ReadySetError::MirNodeNotFound {
+                index: node.index(),
+            })
+        } else {
+            Ok(())
+        }
+    }
+
     /// Swaps a parent node with its child node.
     /// The parent node must have only one child and only one ancestor.
     pub fn swap_with_child(&mut self, parent: NodeIndex) -> ReadySetResult<()> {
-        if !self.graph.contains_node(parent) {
-            return Err(ReadySetError::MirNodeNotFound {
-                index: parent.index(),
-            });
-        }
+        self.ensure_node_exists(parent)?;
+
         // If the invariants are held, we have this situation:
         // grandparent -n-> parent -m-> child -> [ -0-> grandchild_1, ..., -n-1-> grandchild_n]
         //
@@ -107,6 +114,32 @@ impl MirGraph {
             .add_edge(child, parent, grandparent_parent_weight);
         // grandparent -n-> child -m-> parent -> [ -0-> grandchild_1, ..., -n-1-> grandchild_n]
         Ok(())
+    }
+
+    /// Insert a new node above the given child node index.
+    ///
+    /// The given node must have only one ancestor.
+    pub fn insert_above(&mut self, child: NodeIndex, node: MirNode) -> ReadySetResult<NodeIndex> {
+        self.ensure_node_exists(child)?;
+
+        let parent = self
+            .graph
+            .neighbors_directed(child, Direction::Incoming)
+            .exactly_one()
+            .map_err(|_| {
+                internal_err!("can't call insert_above with a child that has more than one parent")
+            })?;
+        let parent_child_edge = self
+            .graph
+            .find_edge(parent, child)
+            .ok_or_else(|| internal_err!("There is no edge between parent and child"))?;
+        self.graph.remove_edge(parent_child_edge);
+
+        let node_idx = self.graph.add_node(node);
+        self.graph.add_edge(parent, node_idx, 0);
+        self.graph.add_edge(node_idx, child, 0);
+
+        Ok(node_idx)
     }
 
     /// Computes the list of columns *referenced* by this node, ie the columns this node requires

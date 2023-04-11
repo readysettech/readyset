@@ -2,6 +2,7 @@ use readyset_errors::ReadySetResult;
 
 use crate::query::MirQuery;
 
+mod add_bogokey;
 mod decorrelate;
 mod pull_columns;
 

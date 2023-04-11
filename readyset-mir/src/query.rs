@@ -41,7 +41,7 @@ pub struct MirQuery<'a> {
     pub graph: &'a mut MirGraph,
 }
 
-impl MirQuery<'_> {
+impl<'a> MirQuery<'a> {
     /// Creates a new [`MirQuery`]
     pub fn new(name: Relation, leaf: NodeIndex, graph: &mut MirGraph) -> MirQuery {
         MirQuery { name, leaf, graph }
@@ -51,8 +51,19 @@ impl MirQuery<'_> {
         &self.name
     }
 
+    /// Returns the index of the leaf node for this query
     pub fn leaf(&self) -> NodeIndex {
         self.leaf
+    }
+
+    /// Returns a reference to the leaf node in this query
+    pub fn leaf_node(&self) -> &MirNode {
+        &self.graph[self.leaf()]
+    }
+
+    /// Returns a mutable reference to the leaf node in this query
+    pub fn leaf_node_mut(&mut self) -> &mut MirNode {
+        &mut self.graph[self.leaf]
     }
 
     /// The names of the fields that this query returns, in the original user-specified order.
@@ -223,6 +234,18 @@ impl MirQuery<'_> {
     /// ```
     pub fn swap_with_child(&mut self, node: NodeIndex) -> ReadySetResult<()> {
         self.graph.swap_with_child(node)
+    }
+
+    /// Insert a new node above the given child node index.
+    ///
+    /// The given node must have only one ancestor.
+    pub fn insert_above(
+        &mut self,
+        child: NodeIndex,
+        mut node: MirNode,
+    ) -> ReadySetResult<NodeIndex> {
+        node.add_owner(self.name.clone());
+        self.graph.insert_above(child, node)
     }
 
     /// Runs the given function on the [`MirNodeInner`] belonging to the given node,
