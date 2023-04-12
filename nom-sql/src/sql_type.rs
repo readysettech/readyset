@@ -13,11 +13,11 @@ use nom::error::{ErrorKind, ParseError};
 use nom::multi::{fold_many0, separated_list0};
 use nom::sequence::{delimited, preceded, terminated, tuple};
 use nom_locate::LocatedSpan;
-use proptest::strategy::Strategy;
+use proptest::arbitrary::Arbitrary;
+use proptest::strategy::{BoxedStrategy, Strategy};
 use proptest::{prelude as prop, prop_oneof};
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
-use test_strategy::Arbitrary;
 use triomphe::ThinArc;
 
 use crate::common::{ws_sep_comma, Sign};
@@ -25,26 +25,22 @@ use crate::table::relation;
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Dialect, NomSqlResult, Relation};
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize, Arbitrary)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum SqlType {
     Bool,
-    Char(#[strategy(proptest::option::of(1..255u16))] Option<u16>),
-    VarChar(#[strategy(proptest::option::of(1..255u16))] Option<u16>),
-    Int(#[strategy(proptest::option::of(1..255u16))] Option<u16>),
-    UnsignedInt(#[strategy(proptest::option::of(1..255u16))] Option<u16>),
-    BigInt(#[strategy(proptest::option::of(1..255u16))] Option<u16>),
-    UnsignedBigInt(#[strategy(proptest::option::of(1..255u16))] Option<u16>),
-    TinyInt(#[strategy(proptest::option::of(1..255u16))] Option<u16>),
-    UnsignedTinyInt(#[strategy(proptest::option::of(1..255u16))] Option<u16>),
-    SmallInt(#[strategy(proptest::option::of(1..255u16))] Option<u16>),
-    UnsignedSmallInt(#[strategy(proptest::option::of(1..255u16))] Option<u16>),
-    #[weight(0)]
+    Char(Option<u16>),
+    VarChar(Option<u16>),
+    Int(Option<u16>),
+    UnsignedInt(Option<u16>),
+    BigInt(Option<u16>),
+    UnsignedBigInt(Option<u16>),
+    TinyInt(Option<u16>),
+    UnsignedTinyInt(Option<u16>),
+    SmallInt(Option<u16>),
+    UnsignedSmallInt(Option<u16>),
     Blob,
-    #[weight(0)]
     LongBlob,
-    #[weight(0)]
     MediumBlob,
-    #[weight(0)]
     TinyBlob,
     Double,
     Float,
@@ -57,19 +53,15 @@ pub enum SqlType {
     Citext,
     QuotedChar,
     Date,
-    DateTime(#[strategy(proptest::option::of(1..=6u16))] Option<u16>),
+    DateTime(Option<u16>),
     // FIXME(ENG-1832): Parse subsecond digit count.
     Time,
     Timestamp,
     TimestampTz,
-    #[weight(0)]
     Binary(Option<u16>),
-    #[weight(0)]
     VarBinary(u16),
-    #[weight(0)]
     Enum(EnumVariants),
-    #[weight(0)]
-    Decimal(#[strategy(1..=30u8)] u8, #[strategy(1..=# 0)] u8),
+    Decimal(u8, u8),
     Json,
     Jsonb,
     ByteArray,
@@ -84,6 +76,96 @@ pub enum SqlType {
 
     /// Any other named type
     Other(Relation),
+}
+
+/// Options for generating arbitrary [`SqlType`]s
+#[derive(Debug, Clone, Copy)]
+pub struct SqlTypeArbitraryOptions {
+    /// Enable generation of [`SqlType::Array`]. Defaults to `true`
+    pub generate_arrays: bool,
+    /// Enable generation of [`SqlType::Other`]. Defaults to `false`
+    pub generate_other: bool,
+}
+
+impl Default for SqlTypeArbitraryOptions {
+    fn default() -> Self {
+        Self {
+            generate_arrays: true,
+            generate_other: false,
+        }
+    }
+}
+
+impl Arbitrary for SqlType {
+    type Parameters = SqlTypeArbitraryOptions;
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
+        use proptest::option;
+        use proptest::prelude::*;
+        use SqlType::*;
+
+        let mut variants = vec![
+            Just(Bool).boxed(),
+            option::of(1..255u16).prop_map(Char).boxed(),
+            option::of(1..255u16).prop_map(VarChar).boxed(),
+            option::of(1..255u16).prop_map(Int).boxed(),
+            option::of(1..255u16).prop_map(UnsignedInt).boxed(),
+            option::of(1..255u16).prop_map(BigInt).boxed(),
+            option::of(1..255u16).prop_map(UnsignedBigInt).boxed(),
+            option::of(1..255u16).prop_map(TinyInt).boxed(),
+            option::of(1..255u16).prop_map(UnsignedTinyInt).boxed(),
+            option::of(1..255u16).prop_map(SmallInt).boxed(),
+            option::of(1..255u16).prop_map(UnsignedSmallInt).boxed(),
+            Just(Double).boxed(),
+            Just(Float).boxed(),
+            Just(Real).boxed(),
+            any::<Option<(u16, Option<u8>)>>().prop_map(Numeric).boxed(),
+            Just(TinyText).boxed(),
+            Just(MediumText).boxed(),
+            Just(LongText).boxed(),
+            Just(Text).boxed(),
+            Just(Citext).boxed(),
+            Just(QuotedChar).boxed(),
+            Just(Date).boxed(),
+            option::of(1..=6u16).prop_map(DateTime).boxed(),
+            Just(Time).boxed(),
+            Just(Timestamp).boxed(),
+            Just(TimestampTz).boxed(),
+            (1..=30u8)
+                .prop_flat_map(|prec| (1..=prec).prop_map(move |scale| Decimal(prec, scale)))
+                .boxed(),
+            Just(Json).boxed(),
+            Just(Jsonb).boxed(),
+            Just(ByteArray).boxed(),
+            Just(MacAddr).boxed(),
+            Just(Inet).boxed(),
+            Just(Uuid).boxed(),
+            any::<Option<u16>>().prop_map(Bit).boxed(),
+            any::<Option<u16>>().prop_map(VarBit).boxed(),
+            Just(Serial).boxed(),
+            Just(BigSerial).boxed(),
+        ];
+
+        if args.generate_arrays {
+            variants.push(
+                any_with::<Box<SqlType>>(SqlTypeArbitraryOptions {
+                    generate_arrays: false,
+                    ..args
+                })
+                .prop_map(Array)
+                .boxed(),
+            );
+        }
+
+        if args.generate_other {
+            variants.push(any::<Relation>().prop_map(Other).boxed())
+        }
+
+        proptest::sample::select(variants)
+            .prop_flat_map(|strat| strat)
+            .boxed()
+    }
 }
 
 impl SqlType {
@@ -731,6 +813,35 @@ pub fn mysql_int_cast_targets() -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    mod arbitrary {
+        use proptest::arbitrary::any_with;
+        use test_strategy::proptest;
+
+        use super::*;
+
+        #[proptest]
+        fn dont_generate_arrays(
+            #[strategy(any_with::<SqlType>(SqlTypeArbitraryOptions {
+                generate_arrays: false,
+                ..Default::default()
+            }))]
+            ty: SqlType,
+        ) {
+            assert!(!matches!(ty, SqlType::Array(..)))
+        }
+
+        #[proptest]
+        fn dont_generate_other(
+            #[strategy(any_with::<SqlType>(SqlTypeArbitraryOptions {
+                generate_other: false,
+                ..Default::default()
+            }))]
+            ty: SqlType,
+        ) {
+            assert!(!matches!(ty, SqlType::Other(..)))
+        }
+    }
 
     #[test]
     fn sql_types() {
