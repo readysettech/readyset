@@ -822,20 +822,15 @@ impl Table {
         })
     }
 
-    async fn quick_n_dirty<Request, R>(
-        &mut self,
-        r: Request,
-    ) -> Result<R, <Self as Service<Request>>::Error>
-    where
-        Request: Send + 'static,
-        Self: Service<Request, Response = Tagged<R>>,
-    {
+    async fn request(&mut self, r: TableRequest) -> ReadySetResult<()> {
         future::poll_fn(|cx| self.poll_ready(cx)).await?;
-        Ok(self.call(r).await?.v)
+        self.call(r).await?;
+
+        Ok(())
     }
 
-    async fn quick_n_dirty_with_timeout(&mut self, r: TableRequest) -> ReadySetResult<()> {
-        tokio::time::timeout(self.request_timeout, self.quick_n_dirty(r))
+    async fn request_with_timeout(&mut self, r: TableRequest) -> ReadySetResult<()> {
+        tokio::time::timeout(self.request_timeout, self.request(r))
             .await
             .map_err(|_| internal_err!("Timeout during table request"))?
     }
@@ -845,7 +840,7 @@ impl Table {
     where
         V: Into<Vec<DfValue>>,
     {
-        self.quick_n_dirty(TableRequest::TableOperations(vec![TableOperation::Insert(
+        self.request(TableRequest::TableOperations(vec![TableOperation::Insert(
             u.into(),
         )]))
         .await
@@ -857,7 +852,7 @@ impl Table {
         I: IntoIterator<Item = V>,
         V: Into<Vec<DfValue>>,
     {
-        self.quick_n_dirty_with_timeout(TableRequest::TableOperations(
+        self.request_with_timeout(TableRequest::TableOperations(
             rows.into_iter()
                 .map(|row| TableOperation::Insert(row.into()))
                 .collect::<Vec<_>>(),
@@ -871,7 +866,7 @@ impl Table {
         I: IntoIterator<Item = V>,
         V: Into<TableOperation>,
     {
-        self.quick_n_dirty_with_timeout(TableRequest::TableOperations(
+        self.request_with_timeout(TableRequest::TableOperations(
             i.into_iter().map(Into::into).collect::<Vec<_>>(),
         ))
         .await
@@ -882,7 +877,7 @@ impl Table {
     where
         I: Into<Vec<DfValue>>,
     {
-        self.quick_n_dirty_with_timeout(TableRequest::TableOperations(vec![
+        self.request_with_timeout(TableRequest::TableOperations(vec![
             TableOperation::DeleteByKey { key: key.into() },
         ]))
         .await
@@ -894,7 +889,7 @@ impl Table {
     where
         I: Into<Vec<DfValue>>,
     {
-        self.quick_n_dirty_with_timeout(TableRequest::TableOperations(vec![
+        self.request_with_timeout(TableRequest::TableOperations(vec![
             TableOperation::DeleteRow { row: row.into() },
         ]))
         .await
@@ -925,7 +920,7 @@ impl Table {
             }
         }
 
-        self.quick_n_dirty_with_timeout(TableRequest::TableOperations(vec![
+        self.request_with_timeout(TableRequest::TableOperations(vec![
             TableOperation::Update { key, update },
         ]))
         .await
@@ -960,7 +955,7 @@ impl Table {
             }
         }
 
-        self.quick_n_dirty_with_timeout(TableRequest::TableOperations(vec![
+        self.request_with_timeout(TableRequest::TableOperations(vec![
             TableOperation::InsertOrUpdate {
                 row: insert,
                 update: set,
@@ -971,7 +966,7 @@ impl Table {
 
     /// Delete all rows from this base table
     pub async fn truncate(&mut self) -> ReadySetResult<()> {
-        self.quick_n_dirty_with_timeout(TableRequest::TableOperations(vec![
+        self.request_with_timeout(TableRequest::TableOperations(vec![
             TableOperation::Truncate,
         ]))
         .await
@@ -979,8 +974,7 @@ impl Table {
 
     /// Updates the timestamp of the base table in the data flow graph.
     pub async fn update_timestamp(&mut self, t: consistency::Timestamp) -> ReadySetResult<()> {
-        self.quick_n_dirty_with_timeout(TableRequest::Timestamp(t))
-            .await
+        self.request_with_timeout(TableRequest::Timestamp(t)).await
     }
 
     /// Set the replication offset for this table to the given value.
@@ -995,7 +989,7 @@ impl Table {
         &mut self,
         offset: ReplicationOffset,
     ) -> ReadySetResult<()> {
-        self.quick_n_dirty(TableRequest::TableOperations(vec![
+        self.request(TableRequest::TableOperations(vec![
             TableOperation::SetReplicationOffset(offset),
         ]))
         .await
@@ -1004,7 +998,7 @@ impl Table {
     /// Enable or disable snapshot mode for this table. In snapshot mode compactions are disabled
     /// and writes don't go into WAL.
     pub async fn set_snapshot_mode(&mut self, snapshot: bool) -> ReadySetResult<()> {
-        self.quick_n_dirty(TableRequest::TableOperations(vec![
+        self.request(TableRequest::TableOperations(vec![
             TableOperation::SetSnapshotMode(snapshot),
         ]))
         .await
