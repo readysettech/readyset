@@ -153,6 +153,9 @@ impl fmt::Display for LimitClause {
                     write!(f, "LIMIT {}", limit)?;
                 }
                 if let Some(offset) = offset {
+                    if limit.is_some() {
+                        write!(f, " ")?;
+                    }
                     write!(f, "OFFSET {}", offset)?;
                 }
             }
@@ -1925,6 +1928,24 @@ mod tests {
                 res,
                 "WITH `foo` AS (SELECT `x` FROM `t`) SELECT `x` FROM `foo`"
             );
+        }
+
+        #[test]
+        fn display_query_with_limit_and_offset() {
+            let query = SelectStatement {
+                fields: vec![FieldDefinitionExpr::Expr {
+                    expr: Expr::Column("x".into()),
+                    alias: None,
+                }],
+                tables: vec![TableExpr::from(Relation::from("t"))],
+                limit_clause: LimitClause::LimitOffset {
+                    limit: Some(10.into()),
+                    offset: Some(0.into()),
+                },
+                ..Default::default()
+            };
+            let res = query.display(Dialect::MySQL).to_string();
+            assert_eq!(res, "SELECT `x` FROM `t` LIMIT 10 OFFSET 0");
         }
 
         #[test]
