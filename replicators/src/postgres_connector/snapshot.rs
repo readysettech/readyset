@@ -485,11 +485,10 @@ impl TableDescription {
         let rows = transaction.copy_out(query.as_str()).await?;
 
         let type_map: Vec<_> = self.columns.iter().map(|c| c.pg_type.clone()).collect();
-        let binary_rows = pgsql::binary_copy::BinaryCopyOutStream::new(rows, &type_map);
+        let binary_row_batches =
+            pgsql::binary_copy::BinaryCopyOutStream::new(rows, &type_map).chunks(BATCH_SIZE);
 
-        pin_mut!(binary_rows);
-
-        let mut noria_rows = Vec::with_capacity(BATCH_SIZE);
+        pin_mut!(binary_row_batches);
 
         info!(rows = %nrows, "Snapshotting started");
         let progress_percentage_metric: metrics::Gauge = register_gauge!(
@@ -501,37 +500,35 @@ impl TableDescription {
         let mut last_report_time = start_time;
         let snapshot_report_interval_secs = snapshot_report_interval_secs as u64;
 
-        while let Some(Ok(row)) = binary_rows.next().await {
-            let noria_row = (0..type_map.len())
-                .map(|i| row.try_get::<DfValue>(i))
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|err| {
-                    progress_percentage_metric.set(0.0);
-                    ReadySetError::ReplicationFailed(format!(
-                        "Failed converting to DfValue, table: {}, row: {}, err: {}",
-                        noria_table.table_name().display(Dialect::PostgreSQL),
-                        cnt,
-                        err
-                    ))
-                })?;
+        while let Some(batch) = binary_row_batches.next().await {
+            let batch_size = batch.len();
+            let noria_rows = batch
+                .into_iter()
+                .enumerate()
+                .map(|(index_within_batch, row)| {
+                    row.map_err(ReadySetError::from).and_then(|row| {
+                        (0..type_map.len())
+                            .map(|i| row.try_get::<DfValue>(i))
+                            .collect::<Result<Vec<_>, _>>()
+                            .map_err(|err| {
+                                progress_percentage_metric.set(0.0);
+                                ReadySetError::ReplicationFailed(format!(
+                                    "Failed converting to DfValue, table: {}, row: {}, err: {}",
+                                    noria_table.table_name().display(Dialect::PostgreSQL),
+                                    cnt + index_within_batch,
+                                    err
+                                ))
+                            })
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
 
-            noria_rows.push(noria_row);
-            cnt += 1;
+            cnt += batch_size;
 
-            // Accumulate as many inserts as possible before calling into noria, as
-            // those calls can be quite expensive
-            if noria_rows.len() >= BATCH_SIZE {
-                noria_table
-                    .insert_many(std::mem::replace(
-                        &mut noria_rows,
-                        Vec::with_capacity(BATCH_SIZE),
-                    ))
-                    .await
-                    .map_err(|err| {
-                        progress_percentage_metric.set(0.0);
-                        err
-                    })?;
-            }
+            noria_table.insert_many(noria_rows).await.map_err(|err| {
+                progress_percentage_metric.set(0.0);
+                err
+            })?;
 
             if snapshot_report_interval_secs != 0
                 && last_report_time.elapsed().as_secs() > snapshot_report_interval_secs
@@ -544,13 +541,6 @@ impl TableDescription {
                 info!(rows_replicated = %cnt, %progress, %estimate, "Snapshotting progress");
                 progress_percentage_metric.set(progress_percent);
             }
-        }
-
-        if !noria_rows.is_empty() {
-            noria_table.insert_many(noria_rows).await.map_err(|err| {
-                progress_percentage_metric.set(0.0);
-                err
-            })?;
         }
 
         info!(rows_replicated = %cnt, "Snapshotting finished");
