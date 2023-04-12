@@ -18,7 +18,7 @@ use dataflow::{node, ops, Expr as DfExpr, PostLookupAggregates, ReaderProcessing
 use itertools::Itertools;
 use mir::graph::MirGraph;
 use mir::node::node_inner::MirNodeInner;
-use mir::node::GroupedNodeType;
+use mir::node::{GroupedNodeType, ViewKeyColumn};
 use mir::query::MirQuery;
 use mir::{Column, DfNodeIndex, NodeIndex as MirNodeIndex};
 use nom_sql::{ColumnConstraint, ColumnSpecification, Expr, OrderType, Relation, SqlIdentifier};
@@ -195,6 +195,15 @@ pub(super) fn mir_node_to_flow_parts(
                 MirNodeInner::DependentJoin { .. } => {
                     // See the docstring for MirNodeInner::DependentJoin
                     internal!("Encountered dependent join when lowering to dataflow")
+                }
+                MirNodeInner::ViewKey { ref key } => {
+                    return Err(ReadySetError::UnsupportedPlaceholders {
+                        placeholders: key.mapped_ref(
+                            |ViewKeyColumn {
+                                 placeholder_idx, ..
+                             }| *placeholder_idx as _,
+                        ),
+                    });
                 }
                 MirNodeInner::Leaf {
                     ref keys,

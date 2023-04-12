@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use std::fmt::{self, Debug, Display};
 
 use common::{DfValue, IndexType};
 use dataflow::ops::grouped::aggregate::Aggregation;
@@ -6,12 +6,34 @@ use dataflow::ops::grouped::extremum::Extremum;
 use dataflow::ops::union;
 use dataflow::PostLookupAggregates;
 use itertools::Itertools;
-use nom_sql::{ColumnSpecification, Expr, OrderType, Relation, SqlIdentifier};
-use readyset_client::ViewPlaceholder;
+use nom_sql::{BinaryOperator, ColumnSpecification, Expr, OrderType, Relation, SqlIdentifier};
+use readyset_client::{PlaceholderIdx, ViewPlaceholder};
 use readyset_errors::{internal, ReadySetResult};
 use serde::{Deserialize, Serialize};
+use vec1::Vec1;
 
 use crate::Column;
+
+/// An individual column in the `key` of a [`ViewKey`]
+///
+/// [`ViewKey`]: MirNodeInner::ViewKey
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ViewKeyColumn {
+    pub column: Column,
+    pub op: BinaryOperator,
+    pub placeholder_idx: PlaceholderIdx,
+}
+
+impl Display for ViewKeyColumn {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let ViewKeyColumn {
+            column,
+            op,
+            placeholder_idx,
+        } = self;
+        write!(f, "{column} {op} {placeholder_idx}")
+    }
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum MirNodeInner {
@@ -135,6 +157,18 @@ pub enum MirNodeInner {
         /// Columns (from both parents) to project in the output.
         project: Vec<Column>,
     },
+    /// Represents view key placeholders in a query that have not yet been added to the [`Leaf`][]
+    /// node of the query.
+    ///
+    /// These nodes are created when we can't trivially convert filters using query parameters to
+    /// keys in the [`Leaf`][] node of the query, eg in subqueries. If any are encountered in the
+    /// final, post-rewrite MIR graph, they will return an error when lowering to dataflow.
+    ///
+    /// Currently, this is limited to only placeholders that appear on one side of an equal
+    /// comparison with a column, but in the future that limitation may be lifted
+    ///
+    /// [`Leaf`]: MirNodeInner::Leaf
+    ViewKey { key: Vec1<ViewKeyColumn> },
     /// Node which outputs a subset of columns from its parent in any order, and can evaluate
     /// expressions.
     ///
@@ -318,6 +352,13 @@ impl MirNodeInner {
         matches!(self, Self::DependentJoin { .. })
     }
 
+    /// Returns `true` if self is a [`ViewKey`].
+    ///
+    /// [`ViewKey`]: MirNodeInner::ViewKey
+    pub fn is_view_key(&self) -> bool {
+        matches!(self, Self::ViewKey { .. })
+    }
+
     pub(crate) fn description(&self) -> String {
         match self {
             MirNodeInner::Aggregation {
@@ -380,6 +421,9 @@ impl MirNodeInner {
             }
             MirNodeInner::Filter { ref conditions, .. } => {
                 format!("σ[{}]", conditions.display(nom_sql::Dialect::MySQL))
+            }
+            MirNodeInner::ViewKey { ref key } => {
+                format!("σ[{}]", key.iter().join(" AND "))
             }
             MirNodeInner::Identity => "≡".to_string(),
             MirNodeInner::Join {

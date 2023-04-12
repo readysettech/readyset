@@ -222,6 +222,7 @@ impl MirGraph {
                 .map(|spec| spec.column.clone().into())
                 .collect(),
             MirNodeInner::Filter { .. }
+            | MirNodeInner::ViewKey { .. }
             | MirNodeInner::Leaf { .. }
             | MirNodeInner::Identity
             | MirNodeInner::TopK { .. } => parent_columns(),

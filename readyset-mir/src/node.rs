@@ -6,7 +6,7 @@ use nom_sql::Relation;
 use readyset_errors::{internal, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
-pub use self::node_inner::MirNodeInner;
+pub use self::node_inner::{MirNodeInner, ViewKeyColumn};
 use crate::DfNodeIndex;
 
 pub mod node_inner;
