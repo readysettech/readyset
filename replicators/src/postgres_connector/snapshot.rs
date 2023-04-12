@@ -5,7 +5,6 @@ use std::future;
 use std::time::Instant;
 
 use futures::future::join_all;
-use futures::stream::FuturesUnordered;
 use futures::{pin_mut, StreamExt, TryFutureExt};
 use itertools::Itertools;
 use metrics::register_gauge;
@@ -16,10 +15,12 @@ use nom_sql::{
 use postgres_types::{accepts, FromSql, Kind, Type};
 use readyset_client::metrics::recorded;
 use readyset_client::recipe::changelist::{Change, ChangeList};
+use readyset_client::replication::ReplicationOffset;
+use readyset_client::TableOperation;
 use readyset_data::{DfType, DfValue, Dialect as DataDialect, PgEnumMetadata};
 use readyset_errors::{internal, internal_err, unsupported, ReadySetError, ReadySetResult};
 use tokio_postgres as pgsql;
-use tracing::{debug, error, info, info_span, trace, warn, Instrument};
+use tracing::{debug, info, info_span, trace, warn, Instrument};
 
 use super::connector::CreatedSlot;
 use super::PostgresPosition;
@@ -460,6 +461,7 @@ impl TableDescription {
         transaction: &'a deadpool_postgres::Transaction<'a>,
         mut noria_table: readyset_client::Table,
         snapshot_report_interval_secs: u16,
+        wal_position: &ReplicationOffset,
     ) -> ReadySetResult<()> {
         let mut cnt = 0;
 
@@ -485,8 +487,9 @@ impl TableDescription {
         let rows = transaction.copy_out(query.as_str()).await?;
 
         let type_map: Vec<_> = self.columns.iter().map(|c| c.pg_type.clone()).collect();
-        let binary_row_batches =
-            pgsql::binary_copy::BinaryCopyOutStream::new(rows, &type_map).chunks(BATCH_SIZE);
+        let binary_row_batches = pgsql::binary_copy::BinaryCopyOutStream::new(rows, &type_map)
+            .chunks(BATCH_SIZE)
+            .peekable();
 
         pin_mut!(binary_row_batches);
 
@@ -499,10 +502,12 @@ impl TableDescription {
         let start_time = Instant::now();
         let mut last_report_time = start_time;
         let snapshot_report_interval_secs = snapshot_report_interval_secs as u64;
+        let mut set_replication_offset_and_snapshot_mode = false;
 
-        while let Some(batch) = binary_row_batches.next().await {
+        while let Some(batch) = binary_row_batches.as_mut().next().await {
+            let cnt_copy = cnt;
             let batch_size = batch.len();
-            let noria_rows = batch
+            let noria_rows_iter = batch
                 .into_iter()
                 .enumerate()
                 .map(|(index_within_batch, row)| {
@@ -515,20 +520,48 @@ impl TableDescription {
                                 ReadySetError::ReplicationFailed(format!(
                                     "Failed converting to DfValue, table: {}, row: {}, err: {}",
                                     noria_table.table_name().display(Dialect::PostgreSQL),
-                                    cnt + index_within_batch,
+                                    cnt_copy + index_within_batch,
                                     err
                                 ))
                             })
                     })
-                })
-                .collect::<Result<Vec<_>, _>>()?;
+                });
 
             cnt += batch_size;
 
-            noria_table.insert_many(noria_rows).await.map_err(|err| {
-                progress_percentage_metric.set(0.0);
-                err
-            })?;
+            if binary_row_batches.as_mut().peek().await.is_none() {
+                // This is the last batch of rows we're adding to the table, so batch the RPCs to
+                // set the replication offset and compact the table along with the insertion
+                let span = info_span!(
+                    "Setting replication offset and compacting table",
+                    table = %noria_table.table_name().display(Dialect::PostgreSQL),
+                    %wal_position
+                );
+
+                let capacity = match noria_rows_iter.size_hint() {
+                    (_, Some(high)) => high,
+                    (low, None) => low,
+                } + 2;
+                let mut actions = Vec::with_capacity(capacity);
+                for row in noria_rows_iter {
+                    actions.push(TableOperation::Insert(row?));
+                }
+
+                actions.push(TableOperation::SetReplicationOffset(wal_position.clone()));
+                actions.push(TableOperation::SetSnapshotMode(false));
+
+                noria_table.perform_all(actions).await?;
+                set_replication_offset_and_snapshot_mode = true;
+                span.in_scope(|| info!("Compacting finished"));
+            } else {
+                noria_table
+                    .insert_many(noria_rows_iter.collect::<Result<Vec<_>, _>>()?)
+                    .await
+                    .map_err(|err| {
+                        progress_percentage_metric.set(0.0);
+                        err
+                    })?;
+            }
 
             if snapshot_report_interval_secs != 0
                 && last_report_time.elapsed().as_secs() > snapshot_report_interval_secs
@@ -541,6 +574,17 @@ impl TableDescription {
                 info!(rows_replicated = %cnt, %progress, %estimate, "Snapshotting progress");
                 progress_percentage_metric.set(progress_percent);
             }
+        }
+
+        // If the table was empty, we didn't set the replication offset or disable snapshot mode
+        // above, so we need to do it here
+        if !set_replication_offset_and_snapshot_mode {
+            noria_table
+                .perform_all([
+                    TableOperation::SetReplicationOffset(wal_position.clone()),
+                    TableOperation::SetSnapshotMode(false),
+                ])
+                .await?;
         }
 
         info!(rows_replicated = %cnt, "Snapshotting finished");
@@ -581,6 +625,7 @@ impl<'a> PostgresReplicator<'a> {
         noria_table: readyset_client::Table,
         snapshot_report_interval_secs: u16,
         snapshot_name: String,
+        wal_position: &ReplicationOffset,
     ) -> ReadySetResult<()> {
         let mut client = pool.get().await?;
 
@@ -597,7 +642,12 @@ impl<'a> PostgresReplicator<'a> {
         transaction.query(query.as_str(), &[]).await?;
 
         table
-            .dump(&transaction, noria_table, snapshot_report_interval_secs)
+            .dump(
+                &transaction,
+                noria_table,
+                snapshot_report_interval_secs,
+                wal_position,
+            )
             .instrument(span.clone())
             .await
             .map_err(|e| ReadySetError::TableError {
@@ -859,6 +909,7 @@ impl<'a> PostgresReplicator<'a> {
                 noria_table,
                 snapshot_report_interval_secs,
                 snapshot_name,
+                &wal_position,
             ))
         }
 
@@ -887,33 +938,6 @@ impl<'a> PostgresReplicator<'a> {
                     _ => Err(e)?,
                 }
             }
-        }
-
-        let mut compacting = FuturesUnordered::new();
-        for table in tables {
-            let mut noria_table = self.noria.table(table.name.clone()).await?;
-            let wal_position = wal_position.clone();
-            compacting.push(async move {
-                let span = info_span!("Compacting table", table = %table.name.display(Dialect::PostgreSQL));
-                span.in_scope(|| info!(%wal_position, "Setting replication offset"));
-                if let Err(error) = noria_table
-                    .set_replication_offset(wal_position)
-                    .instrument(span.clone())
-                    .await
-                {
-                    span.in_scope(|| error!(%error, "Error setting replication offset"));
-                    return Err(error);
-                };
-                span.in_scope(|| info!("Set replication offset"));
-
-                span.in_scope(|| info!("Compacting table"));
-                noria_table.set_snapshot_mode(false).await?;
-                span.in_scope(|| info!("Compacting finished"));
-                ReadySetResult::Ok(())
-            })
-        }
-        while let Some(f) = compacting.next().await {
-            f?;
         }
 
         Ok(())
