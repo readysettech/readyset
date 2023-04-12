@@ -518,7 +518,7 @@ readyset:
     extraEnvironmentVars:
 
       # -- Toggles prometheus metrics for ReadySet adapter containers.
-      PROMETHEUS_METRICS: true
+      PROMETHEUS_METRICS: 'true'
 
       # -- Listening address and port for health check and metric endpoints.
       METRICS_ADDRESS: "0.0.0.0:6034"
@@ -528,10 +528,10 @@ readyset:
 
       # -- Toggles running of migrations exclusively through CREATE CACHE
       # -- statements. Set to 0 (off) or 1 (on). Conflicts with ASYNC_MIGRATIONS.
-      EXPLICIT_MIGRATIONS: true
+      EXPLICIT_MIGRATIONS: 'true'
 
       # -- Toggles query logging. Set to 0 (off) or 1 (on).
-      QUERY_LOG: 1
+      QUERY_LOG: 'true'
 
     resources:
       # -- Resource requests and limits for ReadySet adapters.
