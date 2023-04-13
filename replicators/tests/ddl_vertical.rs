@@ -169,6 +169,12 @@ enum Operation {
         type_name: String,
         value_name: String,
     },
+    /// Renames an existing ENUM type value
+    RenameEnumValue {
+        type_name: String,
+        value_name: String,
+        new_name: String,
+    },
 }
 
 impl Operation {
@@ -261,6 +267,14 @@ impl Operation {
                 .enum_types
                 .get(type_name)
                 .map_or(false, |t| !t.contains(value_name)),
+            Self::RenameEnumValue {
+                type_name,
+                value_name,
+                new_name,
+            } => state
+                .enum_types
+                .get(type_name)
+                .map_or(false, |t| t.contains(value_name) && !t.contains(new_name)),
         }
     }
 }
@@ -459,6 +473,17 @@ prop_compose! {
     }
 }
 
+prop_compose! {
+    fn gen_rename_enum_value(enum_types: HashMap<String, Vec<String>>)
+                            (et in sample::select(enum_types.keys().cloned().collect::<Vec<_>>()))
+                            (value_name in sample::select(enum_types[&et].clone()),
+                             type_name in Just(et),
+                             new_name in SQL_NAME_REGEX)
+                            -> Operation {
+        Operation::RenameEnumValue { type_name, value_name, new_name }
+    }
+}
+
 /// A definition for a test view. Currently one of:
 ///  - Simple (SELECT * FROM table)
 ///  - Join (SELECT * FROM table_a JOIN table_b ON table_a.id = table_b.id)
@@ -589,10 +614,14 @@ impl TestModel {
             possible_ops.push(delete_strategy);
         }
 
-        // If we have at least one enum type created, we can add a value to that type
+        // If we have at least one enum type created, we can add a value or rename a value
         if !self.enum_types.is_empty() {
             let add_enum_value_strat = gen_add_enum_value(self.enum_types.clone()).boxed();
             possible_ops.push(add_enum_value_strat);
+
+            let _rename_enum_value_strat = gen_rename_enum_value(self.enum_types.clone()).boxed();
+            // TODO uncomment after ENG-2823 is fixed
+            //possible_ops.push(rename_enum_value_strat);
         }
 
         // If we have at least one enum type created, and no table is using it, we can drop an enum
@@ -720,6 +749,20 @@ impl TestModel {
                     .get_mut(type_name)
                     .unwrap()
                     .push(value_name.clone());
+            }
+            Operation::RenameEnumValue {
+                type_name,
+                value_name,
+                new_name,
+            } => {
+                let val_ref = self
+                    .enum_types
+                    .get_mut(type_name)
+                    .unwrap()
+                    .iter_mut()
+                    .find(|v| *v == value_name)
+                    .unwrap();
+                *val_ref = new_name.clone();
             }
         }
     }
@@ -1106,6 +1149,19 @@ async fn run(ops: Vec<Operation>, next_step_idx: Rc<Cell<usize>>) {
                 value_name,
             } => {
                 let query = format!("ALTER TYPE \"{type_name}\" ADD VALUE '{value_name}'");
+                rs_conn.simple_query(&query).await.unwrap();
+                pg_conn.simple_query(&query).await.unwrap();
+                recreate_caches_using_type(type_name, &runtime_state.tables, &rs_conn).await;
+            }
+            Operation::RenameEnumValue {
+                type_name,
+                value_name,
+                new_name,
+            } => {
+                let query = format!(
+                    "ALTER TYPE \"{}\" RENAME VALUE '{}' TO '{}'",
+                    type_name, value_name, new_name
+                );
                 rs_conn.simple_query(&query).await.unwrap();
                 pg_conn.simple_query(&query).await.unwrap();
                 recreate_caches_using_type(type_name, &runtime_state.tables, &rs_conn).await;
