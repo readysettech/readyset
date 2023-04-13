@@ -716,6 +716,40 @@ async fn alter_enum_after_drop() {
     shutdown_tx.shutdown().await;
 }
 
+#[ignore = "ENG-2823 Test reproduces error due to known bug"]
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn alter_enum_rename_value() {
+    readyset_tracing::init_test_logging();
+
+    let (config, _handle, shutdown_tx) = setup().await;
+    let client = connect(config).await;
+
+    client
+        .simple_query("CREATE TYPE et AS ENUM ('a')")
+        .await
+        .unwrap();
+
+    client.simple_query("CREATE TABLE t (e et)").await.unwrap();
+
+    client
+        .simple_query("ALTER TYPE et RENAME VALUE 'a' TO 'b'")
+        .await
+        .unwrap();
+
+    client
+        .simple_query("CREATE CACHE ALWAYS FROM SELECT e FROM t")
+        .await
+        .unwrap();
+
+    eventually!(run_test: {
+        let res = client.simple_query("SELECT e FROM t").await;
+        AssertUnwindSafe(|| res)
+    }, then_assert: |res| res().unwrap());
+
+    shutdown_tx.shutdown().await;
+}
+
 #[allow(dead_code)]
 async fn last_statement_matches(dest: &str, status: &str, client: &Client) -> bool {
     match &client
