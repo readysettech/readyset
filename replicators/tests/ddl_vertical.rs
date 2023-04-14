@@ -164,8 +164,8 @@ enum Operation {
     CreateEnum(String, Vec<String>),
     /// Drops an ENUM type with the given name
     DropEnum(String),
-    /// Adds a value to an existing ENUM type with the given names
-    AddEnumValue {
+    /// Adds a value to the end of an existing ENUM type with the given names
+    AppendEnumValue {
         type_name: String,
         value_name: String,
     },
@@ -260,7 +260,7 @@ impl Operation {
             Self::DropView(name) => state.views.contains_key(name),
             Self::CreateEnum(name, _values) => !state.enum_types.contains_key(name),
             Self::DropEnum(name) => tables_using_type(&state.tables, name).next().is_none(),
-            Self::AddEnumValue {
+            Self::AppendEnumValue {
                 type_name,
                 value_name,
             } => state
@@ -449,13 +449,13 @@ prop_compose! {
     }
 }
 
-fn gen_add_enum_value(
+fn gen_append_enum_value(
     enum_types: HashMap<String, Vec<String>>,
 ) -> impl Strategy<Value = Operation> {
-    gen_add_enum_value_inner(enum_types.keys().cloned().collect()).prop_filter(
+    gen_append_enum_value_inner(enum_types.keys().cloned().collect()).prop_filter(
         "Can't add duplicate value to existing ENUM type",
         move |op| match op {
-            Operation::AddEnumValue {
+            Operation::AppendEnumValue {
                 type_name,
                 value_name,
             } => !enum_types[type_name].contains(value_name),
@@ -465,11 +465,11 @@ fn gen_add_enum_value(
 }
 
 prop_compose! {
-    fn gen_add_enum_value_inner(enum_type_names: Vec<String>)
+    fn gen_append_enum_value_inner(enum_type_names: Vec<String>)
                                (type_name in sample::select(enum_type_names),
                                 value_name in SQL_NAME_REGEX)
                                -> Operation {
-        Operation::AddEnumValue { type_name, value_name }
+        Operation::AppendEnumValue { type_name, value_name }
     }
 }
 
@@ -616,8 +616,8 @@ impl TestModel {
 
         // If we have at least one enum type created, we can add a value or rename a value
         if !self.enum_types.is_empty() {
-            let add_enum_value_strat = gen_add_enum_value(self.enum_types.clone()).boxed();
-            possible_ops.push(add_enum_value_strat);
+            let append_enum_value_strat = gen_append_enum_value(self.enum_types.clone()).boxed();
+            possible_ops.push(append_enum_value_strat);
 
             let _rename_enum_value_strat = gen_rename_enum_value(self.enum_types.clone()).boxed();
             // TODO uncomment after ENG-2823 is fixed
@@ -741,7 +741,7 @@ impl TestModel {
             Operation::DropEnum(name) => {
                 self.enum_types.remove(name);
             }
-            Operation::AddEnumValue {
+            Operation::AppendEnumValue {
                 type_name,
                 value_name,
             } => {
@@ -1144,7 +1144,7 @@ async fn run(ops: Vec<Operation>, next_step_idx: Rc<Cell<usize>>) {
                 rs_conn.simple_query(&query).await.unwrap();
                 pg_conn.simple_query(&query).await.unwrap();
             }
-            Operation::AddEnumValue {
+            Operation::AppendEnumValue {
                 type_name,
                 value_name,
             } => {
