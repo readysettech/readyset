@@ -32,7 +32,7 @@ use serde::{Deserialize, Serialize};
 use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
 use tokio::sync::mpsc::Sender;
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{debug, error, info, trace, warn, Instrument};
+use tracing::{debug, error, trace, warn, Instrument};
 use vec1::Vec1;
 
 pub(crate) use self::replay_paths::ReplayPath;
@@ -2081,7 +2081,6 @@ impl Domain {
                     state.swap();
                     trace!(local = %node_idx, "state swapped");
                 }
-                info!("ready message is all done!");
 
                 Ok(Some(bincode::serialize(&is_ready)?))
             }
