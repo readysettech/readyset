@@ -24,7 +24,7 @@
 
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
-use std::fmt::{Debug, Formatter, Result};
+use std::fmt::{Debug, Display, Formatter, Result};
 use std::iter::once;
 use std::panic::AssertUnwindSafe;
 use std::rc::Rc;
@@ -122,6 +122,22 @@ impl Arbitrary for ColumnSpec {
     }
 }
 
+/// Used for the [`Operation::InsertEnumValue`] variant to specify where to add the new enum value.
+#[derive(test_strategy::Arbitrary, Clone, Debug)]
+enum EnumPos {
+    Before,
+    After,
+}
+
+impl Display for EnumPos {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        match self {
+            EnumPos::Before => f.write_str("BEFORE"),
+            EnumPos::After => f.write_str("AFTER"),
+        }
+    }
+}
+
 /// Each Operation represents one step to take in a given test run.
 #[derive(Clone, Debug)]
 enum Operation {
@@ -168,6 +184,12 @@ enum Operation {
     AppendEnumValue {
         type_name: String,
         value_name: String,
+    },
+    InsertEnumValue {
+        type_name: String,
+        value_name: String,
+        position: EnumPos,
+        next_to_value: String,
     },
     /// Renames an existing ENUM type value
     RenameEnumValue {
@@ -267,6 +289,14 @@ impl Operation {
                 .enum_types
                 .get(type_name)
                 .map_or(false, |t| !t.contains(value_name)),
+            Self::InsertEnumValue {
+                type_name,
+                value_name,
+                next_to_value,
+                ..
+            } => state.enum_types.get(type_name).map_or(false, |t| {
+                t.contains(next_to_value) && !t.contains(value_name)
+            }),
             Self::RenameEnumValue {
                 type_name,
                 value_name,
@@ -474,6 +504,18 @@ prop_compose! {
 }
 
 prop_compose! {
+    fn gen_insert_enum_value(enum_types: HashMap<String, Vec<String>>)
+                            (et in sample::select(enum_types.keys().cloned().collect::<Vec<_>>()))
+                            (next_to_value in sample::select(enum_types[&et].clone()),
+                             type_name in Just(et),
+                             position in any::<EnumPos>(),
+                             value_name in SQL_NAME_REGEX)
+                            -> Operation {
+        Operation::InsertEnumValue { type_name, value_name, position, next_to_value }
+    }
+}
+
+prop_compose! {
     fn gen_rename_enum_value(enum_types: HashMap<String, Vec<String>>)
                             (et in sample::select(enum_types.keys().cloned().collect::<Vec<_>>()))
                             (value_name in sample::select(enum_types[&et].clone()),
@@ -619,6 +661,9 @@ impl TestModel {
             let append_enum_value_strat = gen_append_enum_value(self.enum_types.clone()).boxed();
             possible_ops.push(append_enum_value_strat);
 
+            let insert_enum_value_strat = gen_insert_enum_value(self.enum_types.clone()).boxed();
+            possible_ops.push(insert_enum_value_strat);
+
             let _rename_enum_value_strat = gen_rename_enum_value(self.enum_types.clone()).boxed();
             // TODO uncomment after ENG-2823 is fixed
             //possible_ops.push(rename_enum_value_strat);
@@ -749,6 +794,20 @@ impl TestModel {
                     .get_mut(type_name)
                     .unwrap()
                     .push(value_name.clone());
+            }
+            Operation::InsertEnumValue {
+                type_name,
+                value_name,
+                position,
+                next_to_value,
+            } => {
+                let type_values = self.enum_types.get_mut(type_name).unwrap();
+                let next_to_idx = type_values.iter().position(|v| v == next_to_value).unwrap();
+                let insert_idx = match position {
+                    EnumPos::Before => next_to_idx,
+                    EnumPos::After => next_to_idx + 1,
+                };
+                type_values.insert(insert_idx, value_name.clone());
             }
             Operation::RenameEnumValue {
                 type_name,
@@ -1149,6 +1208,20 @@ async fn run(ops: Vec<Operation>, next_step_idx: Rc<Cell<usize>>) {
                 value_name,
             } => {
                 let query = format!("ALTER TYPE \"{type_name}\" ADD VALUE '{value_name}'");
+                rs_conn.simple_query(&query).await.unwrap();
+                pg_conn.simple_query(&query).await.unwrap();
+                recreate_caches_using_type(type_name, &runtime_state.tables, &rs_conn).await;
+            }
+            Operation::InsertEnumValue {
+                type_name,
+                value_name,
+                position,
+                next_to_value,
+            } => {
+                let query = format!(
+                    "ALTER TYPE \"{}\" ADD VALUE '{}' {} '{}'",
+                    type_name, value_name, position, next_to_value
+                );
                 rs_conn.simple_query(&query).await.unwrap();
                 pg_conn.simple_query(&query).await.unwrap();
                 recreate_caches_using_type(type_name, &runtime_state.tables, &rs_conn).await;
