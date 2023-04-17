@@ -5,11 +5,12 @@ use nom_sql::analysis::visit_mut::{walk_select_statement, VisitorMut};
 use nom_sql::{Column, Expr, FunctionExpr, Relation, SelectStatement, SqlIdentifier, SqlQuery};
 use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
 
-use crate::util::outermost_named_tables;
+use crate::util::{self, outermost_named_tables};
 
 #[derive(Debug)]
 pub struct CountStarRewriteVisitor<'schema> {
     schemas: &'schema HashMap<Relation, Vec<SqlIdentifier>>,
+    subquery_schemas: HashMap<SqlIdentifier, Vec<SqlIdentifier>>,
     non_replicated_relations: &'schema HashSet<Relation>,
     tables: Option<Vec<Relation>>,
 }
@@ -25,8 +26,23 @@ impl<'ast, 'schema> VisitorMut<'ast> for CountStarRewriteVisitor<'schema> {
             &mut self.tables,
             Some(outermost_named_tables(select_statement).collect()),
         );
+        let orig_subquery_schemas = mem::replace(
+            &mut self.subquery_schemas,
+            util::subquery_schemas(
+                &select_statement.tables,
+                &select_statement.ctes,
+                &select_statement.join,
+            )
+            .into_iter()
+            .map(|(k, v)| (k.into(), v.into_iter().map(|s| s.into()).collect()))
+            .collect(),
+        );
+
         walk_select_statement(self, select_statement)?;
+
         self.tables = orig_tables;
+        self.subquery_schemas = orig_subquery_schemas;
+
         Ok(())
     }
 
@@ -45,6 +61,13 @@ impl<'ast, 'schema> VisitorMut<'ast> for CountStarRewriteVisitor<'schema> {
             let mut schema_iter = self
                 .schemas
                 .get(&bogo_table)
+                .or_else(|| {
+                    bogo_table
+                        .schema
+                        .is_none()
+                        .then(|| self.subquery_schemas.get(&bogo_table.name))
+                        .flatten()
+                })
                 .ok_or_else(|| {
                     if self.non_replicated_relations.contains(&bogo_table) {
                         ReadySetError::TableNotReplicated {
@@ -102,6 +125,7 @@ impl CountStarRewrite for SelectStatement {
     ) -> ReadySetResult<Self> {
         let mut visitor = CountStarRewriteVisitor {
             schemas,
+            subquery_schemas: Default::default(),
             non_replicated_relations,
             tables: None,
         };
@@ -236,5 +260,21 @@ mod tests {
             }
             _ => panic!(),
         }
+    }
+
+    #[test]
+    fn count_star_from_subquery() {
+        let q = parse_query(
+            Dialect::MySQL,
+            "SELECT count(*) FROM (SELECT t.x FROM t) sq",
+        )
+        .unwrap();
+        let schema = HashMap::from([("t".into(), vec!["x".into()])]);
+
+        let res = q.rewrite_count_star(&schema, &Default::default()).unwrap();
+        assert_eq!(
+            res.display(Dialect::MySQL).to_string(),
+            "SELECT count(coalesce(`sq`.`x`, 0)) FROM (SELECT `t`.`x` FROM `t`) AS `sq`"
+        );
     }
 }
