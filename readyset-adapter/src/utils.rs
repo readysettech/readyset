@@ -269,10 +269,7 @@ impl<'ast> Visitor<'ast> for BinopsParameterColumnsVisitor<'ast> {
 impl BinopsParameterColumns for SelectStatement {
     fn get_binops_parameter_columns(&self) -> Vec<(&Column, BinaryOperator)> {
         let mut visitor = BinopsParameterColumnsVisitor::new();
-        // ReadySet only supports parameter columns in the WHERE clause
-        if let Some(wc) = &self.where_clause {
-            let Ok(_) = visitor.visit_where_clause(wc);
-        }
+        let Ok(_) = visitor.visit_select_statement(self);
         visitor.parameter_cols
     }
 }
