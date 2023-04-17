@@ -55,10 +55,10 @@ impl MirGraph {
             });
         }
         // If the invariants are held, we have this situation:
-        // grandparent -0-> parent -0-> child -> [ -0-> grandchild_1, ..., -n-1-> grandchild_n]
+        // grandparent -n-> parent -m-> child -> [ -0-> grandchild_1, ..., -n-1-> grandchild_n]
         //
         // And we want this:
-        // grandparent -0-> child -0-> parent -> [ -0-> grandchild_1, ..., -n-1-> grandchild_n]
+        // grandparent -n-> child -m-> parent -> [ -0-> grandchild_1, ..., -n-1-> grandchild_n]
         let child = self
             .graph
             .neighbors_directed(parent, Direction::Outgoing)
@@ -71,6 +71,7 @@ impl MirGraph {
             .graph
             .find_edge(parent, child)
             .ok_or_else(|| internal_err!("There is no edge between parent and child"))?;
+        let parent_child_weight = *self.graph.edge_weight(parent_child_edge).unwrap();
         self.graph.remove_edge(parent_child_edge);
         // grandparent -0-> parent, child -> [ -0-> grandchild_1, ..., -n-1-> grandchild_n]
         let grandparent_parent_edge = self
@@ -80,11 +81,12 @@ impl MirGraph {
             .map_err(|_| {
                 internal_err!("can't call swap with a parent that has more than one ancestor.")
             })?;
+        let grandparent_parent_weight = *grandparent_parent_edge.weight();
         let grandparent = grandparent_parent_edge.source();
         self.graph.remove_edge(grandparent_parent_edge.id());
         // grandparent, parent, child -> [ -0-> grandchild_1, ..., -n-1-> grandchild_n]
-        self.graph.add_edge(grandparent, child, 0);
-        // grandparent -0-> child -> [ -0-> grandchild_1, ..., -n-1-> grandchild_n], parent
+        self.graph.add_edge(grandparent, child, parent_child_weight);
+        // grandparent -n-> child -> [ -0-> grandchild_1, ..., -n-1-> grandchild_n], parent
         for (grandchild, grandchild_child_edge, grandchild_child_edge_val) in self
             .graph
             .edges_directed(child, Direction::Outgoing)
@@ -95,14 +97,15 @@ impl MirGraph {
             self.graph
                 .add_edge(parent, grandchild, grandchild_child_edge_val);
             // In the i-th iteration:
-            // grandparent -0-> child -> [ -i-1-> grandchild_i, ..., -n-1-> grandchild_n]
+            // grandparent -n-> child -> [ -i-1-> grandchild_i, ..., -n-1-> grandchild_n]
             // parent child -> [ -0-> grandchild_i, ..., -i-2-> grandchild_i-1]
             self.graph.remove_edge(grandchild_child_edge);
-            // grandparent -0-> child -> [ -i-> grandchild_i+1, ..., -n-1-> grandchild_n]
+            // grandparent -n-> child -> [ -i-> grandchild_i+1, ..., -n-1-> grandchild_n]
             // parent -> [ -0-> grandchild_1, ..., -i-1-> grandchild_i]
         }
-        self.graph.add_edge(child, parent, 0);
-        // grandparent -0-> child -0-> parent -> [ -0-> grandchild_1, ..., -n-1-> grandchild_n]
+        self.graph
+            .add_edge(child, parent, grandparent_parent_weight);
+        // grandparent -n-> child -m-> parent -> [ -0-> grandchild_1, ..., -n-1-> grandchild_n]
         Ok(())
     }
 
@@ -414,5 +417,60 @@ impl Index<NodeIndex> for MirGraph {
 impl IndexMut<NodeIndex> for MirGraph {
     fn index_mut(&mut self, index: NodeIndex) -> &mut MirNode {
         self.graph.node_weight_mut(index).unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn swap_with_child_preserves_edge_weights() {
+        let mut graph = MirGraph::new();
+        let t1 = graph.add_node(MirNode::new(
+            "t1".into(),
+            MirNodeInner::Base {
+                column_specs: vec![],
+                primary_key: None,
+                unique_keys: Default::default(),
+            },
+        ));
+        let t2 = graph.add_node(MirNode::new(
+            "t2".into(),
+            MirNodeInner::Base {
+                column_specs: vec![],
+                primary_key: None,
+                unique_keys: Default::default(),
+            },
+        ));
+        let t2_prj = graph.add_node(MirNode::new(
+            "t2".into(),
+            MirNodeInner::Project {
+                emit: vec![],
+                expressions: vec![],
+                literals: vec![],
+            },
+        ));
+        graph.add_edge(t2, t2_prj, 0);
+
+        let join = graph.add_node(MirNode::new(
+            "join".into(),
+            MirNodeInner::Join {
+                on: vec![],
+                project: vec![],
+            },
+        ));
+        graph.add_edge(t1, join, 0);
+        graph.add_edge(t2_prj, join, 1);
+
+        // setup done
+
+        graph.swap_with_child(t2_prj).unwrap();
+
+        let join_t2_prj_edge = graph.find_edge(join, t2_prj).unwrap();
+        assert_eq!(*graph.edge_weight(join_t2_prj_edge).unwrap(), 0);
+
+        let t2_join_edge = graph.find_edge(t2, join).unwrap();
+        assert_eq!(*graph.edge_weight(t2_join_edge).unwrap(), 1);
     }
 }
