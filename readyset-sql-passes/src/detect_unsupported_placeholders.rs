@@ -1,4 +1,6 @@
-use nom_sql::analysis::visit::{walk_expr, walk_select_statement, Visitor};
+use std::mem;
+
+use nom_sql::analysis::visit::{self, walk_expr, Visitor};
 use nom_sql::{BinaryOperator, Expr, ItemPlaceholder, Literal, SelectStatement};
 use readyset_errors::{ReadySetError, ReadySetResult};
 use vec1::Vec1;
@@ -24,8 +26,6 @@ pub struct Config {
 
 /// State of the Visitor while visiting the query.
 pub struct Context {
-    /// Depth with respect to nested subqueries. The top level of the query is given a depth of 1
-    depth: u32,
     /// Whether we are in the where clause of the query. Only placeholder in the WHERE clause and
     /// in the LIMIT/OFFSET clauses are supported.
     in_where_clause: bool,
@@ -38,7 +38,6 @@ pub struct Context {
 impl Context {
     fn new() -> Self {
         Self {
-            depth: 0,
             in_where_clause: false,
             equality_comparisons: Vec::new(),
             ordering_comparisons: Vec::new(),
@@ -110,15 +109,9 @@ impl UnsupportedPlaceholderVisitor {
 impl<'ast> Visitor<'ast> for UnsupportedPlaceholderVisitor {
     type Error = !;
     fn visit_where_clause(&mut self, expr: &'ast nom_sql::Expr) -> Result<(), Self::Error> {
-        // Only set Context::in_where_clause if we are in the top level query
-        if self.context.depth == 1 {
-            self.context.in_where_clause = true;
-        }
+        self.context.in_where_clause = true;
         let Ok(_) = self.visit_expr(expr);
-        // Only set Context::in_where_clause if we are in the top level query
-        if self.context.depth == 1 {
-            self.context.in_where_clause = false;
-        }
+        self.context.in_where_clause = false;
         Ok(())
     }
 
@@ -138,8 +131,8 @@ impl<'ast> Visitor<'ast> for UnsupportedPlaceholderVisitor {
     /// Otherwise, walk the expression and record any placeholder values we find in
     /// `Self::unsupported_placeholders`.
     fn visit_expr(&mut self, expr: &'ast nom_sql::Expr) -> Result<(), Self::Error> {
-        // Walk expresssion if we're not in the WHERE clause of the top-level query
-        if self.context.depth > 1 || !self.context.in_where_clause {
+        // Walk expresssion if we're not in the WHERE clause of any SELECT statement
+        if !self.context.in_where_clause {
             return walk_expr(self, expr);
         }
 
@@ -216,9 +209,9 @@ impl<'ast> Visitor<'ast> for UnsupportedPlaceholderVisitor {
         &mut self,
         select_statement: &'ast nom_sql::SelectStatement,
     ) -> Result<(), Self::Error> {
-        self.context.depth += 1;
-        walk_select_statement(self, select_statement)?;
-        self.context.depth -= 1;
+        let was_in_where_clause = mem::replace(&mut self.context.in_where_clause, false);
+        visit::walk_select_statement(self, select_statement)?;
+        self.context.in_where_clause = was_in_where_clause;
         Ok(())
     }
 }
@@ -287,11 +280,11 @@ mod tests {
     }
 
     #[test]
-    fn extracts_nested_subquery() {
+    fn ignores_nested_subquery() {
         let select =
             parse_select_statement("SELECT a FROM t1 WHERE b IN (SELECT c FROM t2 WHERE d = $1)");
         let res = select.detect_unsupported_placeholders(Config::default());
-        extracts_placeholders(res, &[1]);
+        extracts_placeholders(res, &[]);
     }
 
     #[test]
@@ -347,7 +340,7 @@ mod tests {
     #[test]
     fn ignores_ordering_comparisons_when_equality_unsupported() {
         let select =
-            parse_select_statement("SELECT a FROM t WHERE b > $1 AND c IN (SELECT * FROM t WHERE d = $2) GROUP BY e HAVING sum(e) = $3");
+            parse_select_statement("SELECT a FROM t WHERE b > $1 AND c IN (SELECT d = $2 FROM t) GROUP BY e HAVING sum(e) = $3");
         let res = select.detect_unsupported_placeholders(Config::default());
         extracts_placeholders(res, &[2, 3]);
     }
