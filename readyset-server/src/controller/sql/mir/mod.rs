@@ -11,7 +11,7 @@ use dataflow::ops::union;
 use lazy_static::lazy_static;
 use mir::graph::MirGraph;
 use mir::node::node_inner::MirNodeInner;
-use mir::node::{GroupedNodeType, MirNode};
+use mir::node::{GroupedNodeType, MirNode, ViewKeyColumn};
 use mir::query::{MirBase, MirQuery};
 use mir::DfNodeIndex;
 pub use mir::{Column, NodeIndex};
@@ -23,6 +23,7 @@ use nom_sql::{
 };
 use petgraph::visit::Reversed;
 use petgraph::Direction;
+use readyset_client::ViewPlaceholder;
 use readyset_errors::{
     internal, internal_err, invalid_err, invariant, invariant_eq, unsupported, ReadySetError,
     ReadySetResult,
@@ -1898,7 +1899,43 @@ impl SqlToMirConverter {
 
                 leaf_node
             } else {
-                leaf_project_node
+                trace!("Making view keys for queries instead of leaf node");
+
+                let mut keys = Vec::with_capacity(view_key.columns.len());
+                let mut unsupported_placeholders = vec![];
+                for (column, vp) in view_key.columns {
+                    match vp {
+                        ViewPlaceholder::OneToOne(placeholder_idx, op) => {
+                            keys.push(ViewKeyColumn {
+                                column,
+                                op,
+                                placeholder_idx,
+                            })
+                        }
+                        ViewPlaceholder::Generated => {}
+                        ViewPlaceholder::Between(lower, upper) => {
+                            unsupported_placeholders.extend([lower as u32, upper as u32])
+                        }
+                        ViewPlaceholder::PageNumber {
+                            offset_placeholder, ..
+                        } => unsupported_placeholders.push(offset_placeholder as u32),
+                    }
+                }
+
+                if let Ok(key) = keys.try_into() {
+                    self.add_query_node(
+                        query_name.clone(),
+                        MirNode::new(
+                            format!("{}_view_key", query_name.display_unquoted()).into(),
+                            MirNodeInner::ViewKey { key },
+                        ),
+                        &[leaf_project_node],
+                    )
+                } else if let Ok(placeholders) = unsupported_placeholders.try_into() {
+                    return Err(ReadySetError::UnsupportedPlaceholders { placeholders });
+                } else {
+                    leaf_project_node
+                }
             }
         };
 
