@@ -311,8 +311,7 @@ impl Benchmark {
             do_bench("no_memory_limit", &mut readyset_pool)?;
 
             let bytes_after_workload = get_allocated_bytes()?;
-            assert!(bytes_after_workload >= bytes_before_workload);
-            let bytes_used = bytes_after_workload - bytes_before_workload;
+            let bytes_used = bytes_after_workload.saturating_sub(bytes_before_workload);
 
             for memory_limit in args.memory_limit.iter() {
                 let param = match memory_limit {
