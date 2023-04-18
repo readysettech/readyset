@@ -41,6 +41,17 @@ impl Column {
         self.aliases.push(alias.clone());
     }
 
+    pub fn add_table_alias<T>(&mut self, table: T)
+    where
+        T: Into<Relation>,
+    {
+        self.aliases.push(Column {
+            table: Some(table.into()),
+            name: self.name.clone(),
+            aliases: vec![],
+        });
+    }
+
     #[must_use]
     pub fn aliased_as(mut self, alias: SqlIdentifier) -> Self {
         let name = mem::replace(&mut self.name, alias);
@@ -72,11 +83,7 @@ impl Column {
     where
         T: Into<Relation>,
     {
-        self.aliases.push(Column {
-            table: Some(table.into()),
-            name: self.name.clone(),
-            aliases: vec![],
-        });
+        self.add_table_alias(table);
         self
     }
 

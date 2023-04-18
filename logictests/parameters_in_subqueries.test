@@ -1,0 +1,68 @@
+statement ok
+create table t1 (x int, y int);
+
+statement ok
+insert into t1 (x, y) values (1, 1), (1, 2), (2, 1), (2, 2);
+
+onlyif readyset
+statement ok
+create cache from select y from (select y from t1 where x = ?) sq;
+
+graphviz
+
+query I rowsort
+select y from (select y from t1 where x = ?) sq;
+? = 1
+----
+1
+2
+
+query I nosort
+select count(*) from (select y from t1 where x = ?) sq;
+? = 1
+----
+2
+
+query I nosort
+select min(y) from (select y from t1 where x = ?) sq;
+? = 1
+----
+1
+
+graphviz
+
+statement ok
+create table t2 (x int, y int);
+
+statement ok
+insert into t2 (x, y) values (1, 1), (1, 2);
+
+query IIII rowsort
+select t1.x, t1.y, sq.x, sq.y from t1
+join (select x, y from t2 where y = ?) sq
+on t1.x = sq.x
+where t1.y = ?
+? = 1
+? = 2
+----
+1
+2
+1
+1
+
+query I rowsort
+select distinct x
+from (select x from t2 where y = ?) sq
+? = 2
+----
+1
+
+query I rowsort
+select x
+from (select x
+      from (select x from t2 where y = ?) sq
+      where x = ?) sq
+? = 2
+? = 1
+----
+1
