@@ -1330,15 +1330,7 @@ mod tests {
 
         #[test]
         fn adds_query() {
-            let mut registry = ExprRegistry {
-                expressions: HashMap::new(),
-                skeletons: ExprSkeletons::new(),
-                dependencies: HashMap::new(),
-                custom_type_dependencies: HashMap::new(),
-                table_to_invalidated_queries: HashMap::new(),
-                aliases: HashMap::new(),
-                reused_caches: HashMap::new(),
-            };
+            let mut registry = ExprRegistry::default();
 
             registry
                 .add_query(
@@ -1390,15 +1382,7 @@ mod tests {
 
         #[test]
         fn removes_query() {
-            let mut registry = ExprRegistry {
-                expressions: HashMap::new(),
-                skeletons: ExprSkeletons::new(),
-                dependencies: HashMap::new(),
-                custom_type_dependencies: HashMap::new(),
-                table_to_invalidated_queries: HashMap::new(),
-                aliases: HashMap::new(),
-                reused_caches: HashMap::new(),
-            };
+            let mut registry = ExprRegistry::default();
 
             registry
                 .add_query(
