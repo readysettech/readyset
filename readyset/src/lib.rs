@@ -1125,14 +1125,15 @@ where
         });
         rt.block_on(shutdown_tx.shutdown_timeout(Duration::from_secs(20)));
 
-        rs_shutdown.in_scope(|| info!("Dropping controller handle"));
-        drop(rh);
+        if let Some((_, server_shutdown_tx)) = internal_server_handle {
+            rs_shutdown.in_scope(|| info!("Shutting down embedded server task"));
+            rt.block_on(server_shutdown_tx.shutdown_timeout(Duration::from_secs(20)));
 
-        // Send shutdown telemetry events
-        if internal_server_handle.is_some() {
+            // Send server shutdown telemetry event
             let _ = telemetry_sender.send_event(TelemetryEvent::ServerStop);
         }
 
+        // Send adapter shutdown telemetry event
         let _ = telemetry_sender.send_event(TelemetryEvent::AdapterStop);
         rs_shutdown.in_scope(|| {
             info!("Waiting up to 5s for telemetry reporter to drain in-flight metrics")
