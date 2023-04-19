@@ -1075,3 +1075,63 @@ async fn replication_failure_retries_if_failed_to_drop(failpoint: &str) {
 
     shutdown_tx.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn replication_of_other_tables_succeeds_even_after_error() {
+    readyset_tracing::init_test_logging();
+    use std::time::Duration;
+
+    let (config, _handle, shutdown_tx) = TestBuilder::default()
+        .recreate_database(false)
+        .fallback_url(PostgreSQLAdapter::url())
+        .migration_mode(MigrationMode::InRequestPath)
+        .build::<PostgreSQLAdapter>()
+        .await;
+
+    let client = connect(config).await;
+
+    client
+        .simple_query("DROP TABLE IF EXISTS cats CASCADE")
+        .await
+        .unwrap();
+    client
+        .simple_query("DROP TABLE IF EXISTS cats2 CASCADE")
+        .await
+        .unwrap();
+    client
+        .simple_query("CREATE TABLE cats (id SERIAL PRIMARY KEY, cuteness int)")
+        .await
+        .unwrap();
+    client
+        .simple_query("CREATE TABLE cats2 (id SERIAL PRIMARY KEY, ts TIMESTAMP)")
+        .await
+        .unwrap();
+
+    sleep().await;
+    sleep().await;
+
+    client
+        .simple_query(
+            "INSERT INTO cats (cuteness) VALUES (100); INSERT INTO cats2 (ts) VALUES ('infinity')",
+        )
+        .await
+        .unwrap();
+
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    sleep().await;
+
+    let result: Vec<u32> = client
+        .simple_query("SELECT * FROM cats")
+        .await
+        .unwrap()
+        .iter()
+        .filter_map(|m| match m {
+            SimpleQueryMessage::Row(r) => Some(r.get(0).unwrap().parse().unwrap()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(result, [1]);
+
+    shutdown_tx.shutdown().await;
+}

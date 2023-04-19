@@ -43,8 +43,8 @@ pub struct PostgresWalConnector {
     connection_handle: tokio::task::JoinHandle<Result<(), pgsql::Error>>,
     /// Reader is a decoder for binlog events
     reader: Option<WalReader>,
-    /// Stores an event that was read but not handled
-    peek: Option<(WalEvent, Lsn)>,
+    /// Stores an event or error that was read but not handled
+    peek: Option<Result<(WalEvent, Lsn), WalError>>,
     /// If we just want to continue reading the log from a previous point
     next_position: Option<PostgresPosition>,
     /// The replication slot if was created for this connector
@@ -514,39 +514,20 @@ impl Connector for PostgresWalConnector {
                 "We should either have no current table, or the current table should have a schema"
             );
 
-            let (mut event, lsn) = match self.peek.take() {
-                Some(event) => event,
-                None => match self.next_event().await {
-                    Ok(ev) => ev,
-                    Err(WalError::TableError {
-                        kind: TableErrorKind::UnsupportedTypeConversion { type_oid },
-                        schema,
-                        table,
-                    }) => {
-                        warn!(
-                            type_oid,
-                            schema = schema,
-                            table = table,
-                            "Ignoring write with value of unsupported type"
-                        );
-                        // ReadySet will skip replicate tables with unsupported types (e.g.
-                        // Postgres's user defined types). RS will leverage the fallback instead.
-                        continue;
-                    }
-                    Err(err) => {
-                        return Err(err.into());
-                    }
-                },
+            // Get the next buffered event or error, or read a new event from the WAL stream.
+            let event = match self.peek.take() {
+                Some(buffered) => buffered,
+                None => self.next_event().await,
             };
 
-            // Try not to accumulate too many actions between calls, but if we're collecting a
-            // series of events that reuse the same LSN we have to make sure they all end up in the
-            // same batch:
+            // If our next event is an error, flush any buffered actions. Otherwise, buffer up to
+            // MAX_QUEUED_INDEPENDENT_ACTIONS unless we're collecting a series of events that reuse
+            // the same LSN, as we have to make sure they all end up in the same batch.
             //
-            // If we have no actions but our offset exceeds the given 'until', report our
+            // If we have no buffered actions but our offset exceeds the given 'until', report our
             // position in the logs.
-            if actions.len() >= MAX_QUEUED_INDEPENDENT_ACTIONS && lsn != cur_lsn.lsn {
-                self.peek = Some((event, lsn));
+            if event.is_err() && !actions.is_empty() || actions.len() >= MAX_QUEUED_INDEPENDENT_ACTIONS && matches!(event, Ok((_, lsn)) if lsn != cur_lsn.lsn) {
+                self.peek = Some(event);
                 return Ok((
                     ReplicationAction::TableAction {
                         table: cur_table,
@@ -565,6 +546,29 @@ impl Connector for PostgresWalConnector {
                 info!(target: "replicator_statement", "{:?}", event);
             }
 
+            // Handle errors or extract the event and LSN.
+            let (mut event, lsn) = match event {
+                Ok(e) => e,
+                // ReadySet will not snapshot tables with unsupported types (e.g., Postgres
+                // user defined types).
+                Err(WalError::TableError {
+                    kind: TableErrorKind::UnsupportedTypeConversion { type_oid },
+                    schema,
+                    table,
+                }) => {
+                    warn!(
+                        type_oid,
+                        schema = schema,
+                        table = table,
+                        "Ignoring write with value of unsupported type"
+                    );
+                    continue;
+                }
+                Err(e) => {
+                    return Err(e.into());
+                }
+            };
+
             // Check if next event is for another table, in which case we have to flush the events
             // accumulated for this table and store the next event in `peek`.
             match &mut event {
@@ -579,12 +583,12 @@ impl Connector for PostgresWalConnector {
                         invariant!(matching.is_empty());
                         if let Some((schema, name)) = other_tables.pop() {
                             if !other_tables.is_empty() {
-                                self.peek = Some((
+                                self.peek = Some(Ok((
                                     WalEvent::Truncate {
                                         tables: other_tables,
                                     },
                                     lsn,
-                                ));
+                                )));
                             }
 
                             actions.push(TableOperation::Truncate);
@@ -605,12 +609,12 @@ impl Connector for PostgresWalConnector {
                         }
                     } else {
                         if !other_tables.is_empty() {
-                            self.peek = Some((
+                            self.peek = Some(Ok((
                                 WalEvent::Truncate {
                                     tables: other_tables,
                                 },
                                 lsn,
-                            ));
+                            )));
                         }
 
                         if !matching.is_empty() {
@@ -636,7 +640,7 @@ impl Connector for PostgresWalConnector {
                         || cur_table.name != table.as_str() =>
                 {
                     if !actions.is_empty() {
-                        self.peek = Some((event, lsn));
+                        self.peek = Some(Ok((event, lsn)));
                         return Ok((
                             ReplicationAction::TableAction {
                                 table: cur_table,
@@ -668,7 +672,7 @@ impl Connector for PostgresWalConnector {
                             PostgresPosition::from(lsn).into(),
                         ));
                     } else {
-                        self.peek = Some((WalEvent::DdlEvent { ddl_event }, lsn));
+                        self.peek = Some(Ok((WalEvent::DdlEvent { ddl_event }, lsn)));
                         return Ok((
                             ReplicationAction::TableAction {
                                 table: cur_table,
