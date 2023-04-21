@@ -86,8 +86,8 @@ use nom_sql::{
     BinaryOperator, Column, ColumnConstraint, ColumnSpecification, CommonTableExpr,
     CreateTableBody, CreateTableStatement, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr,
     InValue, ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, LimitClause,
-    Literal, OrderClause, OrderType, Relation, SelectStatement, SqlIdentifier, SqlType, TableExpr,
-    TableExprInner, TableKey,
+    Literal, OrderClause, OrderType, Relation, SelectStatement, SqlIdentifier, SqlType,
+    SqlTypeArbitraryOptions, TableExpr, TableExprInner, TableKey,
 };
 use parking_lot::Mutex;
 use proptest::arbitrary::{any, any_with, Arbitrary};
@@ -1663,6 +1663,7 @@ impl<'gen> Query<'gen> {
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize, Arbitrary)]
 pub enum AggregateType {
     Count {
+        #[any(generate_arrays = false)]
         column_type: SqlType,
         distinct: bool,
     },
@@ -1678,9 +1679,11 @@ pub enum AggregateType {
     },
     GroupConcat,
     Max {
+        #[any(generate_arrays = false)]
         column_type: SqlType,
     },
     Min {
+        #[any(generate_arrays = false)]
         column_type: SqlType,
     },
 }
@@ -1790,7 +1793,13 @@ impl Arbitrary for Filter {
     type Strategy = BoxedStrategy<Filter>;
 
     fn arbitrary_with((): Self::Parameters) -> Self::Strategy {
-        (any::<SqlType>(), any::<LogicalOp>())
+        (
+            any_with::<SqlType>(SqlTypeArbitraryOptions {
+                generate_arrays: false, // TODO: Set to true once we're targeting Postgres as well
+                generate_other: false,
+            }),
+            any::<LogicalOp>(),
+        )
             .prop_flat_map(|(column_type, extend_where_with)| {
                 any_with::<FilterOp>(FilterRhsArgs {
                     column_type: column_type.clone(),
@@ -1844,6 +1853,10 @@ pub enum SubqueryPosition {
     /// - `negated: bool`
     Exists {
         /// If correlated, contains the type of the column that is compared
+        #[strategy(proptest::option::of(any_with::<SqlType>(SqlTypeArbitraryOptions {
+            generate_arrays: false,
+            ..Default::default()
+        })))]
         correlated: Option<SqlType>,
     },
 }
