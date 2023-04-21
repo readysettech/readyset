@@ -1,0 +1,12 @@
+[package]
+name = "stateful-proptest"
+version = "0.1.0"
+publish = false
+authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+edition = "2021"
+
+[dependencies]
+async-trait = "0.1"
+proptest = "1.0.0"
+rand = "0.8.5"
+tokio = { workspace = true, features = ["full"] }
