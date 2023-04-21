@@ -1103,14 +1103,26 @@ impl TableSpec {
         column_name
     }
 
+    /// Returns the name of *some* column in this table which passes filter, potentially generating
+    /// a new column using `default_type` as the type if necessary
+    pub fn some_column_name_filtered<T, F>(&mut self, default_type: T, mut filter: F) -> ColumnName
+    where
+        F: FnMut(&ColumnSpec) -> bool,
+        T: FnOnce() -> SqlType,
+    {
+        self.columns
+            .iter()
+            .filter(|(_, c)| filter(c))
+            .map(|(n, _)| n)
+            .next()
+            .cloned()
+            .unwrap_or_else(|| self.fresh_column_with_type(default_type()))
+    }
+
     /// Returns the name of *some* column in this table, potentially generating a new column if
     /// necessary
     pub fn some_column_name(&mut self) -> ColumnName {
-        self.columns
-            .keys()
-            .next()
-            .cloned()
-            .unwrap_or_else(|| self.fresh_column())
+        self.some_column_name_filtered(|| SqlType::Int(None), |_| true)
     }
 
     /// Returns the name of *some* column in this table with the given type, potentially generating
@@ -2059,7 +2071,16 @@ fn query_has_aggregate(query: &SelectStatement) -> bool {
     })
 }
 
-fn column_in_query(state: &mut QueryState<'_>, query: &mut SelectStatement) -> Column {
+fn column_in_query_filtered<T, F>(
+    state: &mut QueryState<'_>,
+    query: &mut SelectStatement,
+    default_type: T,
+    filter: F,
+) -> Column
+where
+    F: FnMut(&ColumnSpec) -> bool,
+    T: FnOnce() -> SqlType,
+{
     match query
         .tables
         .iter()
@@ -2075,7 +2096,7 @@ fn column_in_query(state: &mut QueryState<'_>, query: &mut SelectStatement) -> C
                 .gen
                 .table_mut(tbl.name.as_str())
                 .unwrap()
-                .some_column_name();
+                .some_column_name_filtered(default_type, filter);
             Column {
                 name: column.into(),
                 table: Some(tbl.clone()),
@@ -2086,13 +2107,31 @@ fn column_in_query(state: &mut QueryState<'_>, query: &mut SelectStatement) -> C
             query
                 .tables
                 .push(TableExpr::from(Relation::from(table.name.clone())));
-            let colname = table.some_column_name();
+            let colname = table.some_column_name_filtered(default_type, filter);
             Column {
                 name: colname.into(),
                 table: Some(table.name.clone().into()),
             }
         }
     }
+}
+
+fn column_in_query(state: &mut QueryState<'_>, query: &mut SelectStatement) -> Column {
+    column_in_query_filtered(state, query, || SqlType::Int(None), |_| true)
+}
+
+fn parameter_column_in_query(state: &mut QueryState<'_>, query: &mut SelectStatement) -> Column {
+    column_in_query_filtered(
+        state,
+        query,
+        || SqlType::Int(None), /* TODO: generate this! */
+        |col| {
+            !matches!(
+                col.sql_type,
+                SqlType::Bool | SqlType::Array(_) | SqlType::Other(_)
+            )
+        },
+    )
 }
 
 impl QueryOperation {
@@ -2303,7 +2342,7 @@ impl QueryOperation {
             }
 
             QueryOperation::SingleParameter => {
-                let col = column_in_query(state, query);
+                let col = parameter_column_in_query(state, query);
                 and_where(
                     query,
                     Expr::BinaryOp {
@@ -2352,7 +2391,7 @@ impl QueryOperation {
             }
 
             QueryOperation::InParameter { num_values } => {
-                let col = column_in_query(state, query);
+                let col = parameter_column_in_query(state, query);
                 and_where(
                     query,
                     Expr::In {
