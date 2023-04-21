@@ -1450,8 +1450,13 @@ impl<'a> QueryState<'a> {
         }
     }
 
-    /// Returns a mutable reference to some table referenced in the given query
-    pub fn some_table_in_query_mut<'b>(&'b mut self, query: &SelectStatement) -> &'b mut TableSpec {
+    /// Returns a mutable reference to some table referenced in the given query.
+    ///
+    /// Adds a table to the query if none exist
+    pub fn some_table_in_query_mut<'b>(
+        &'b mut self,
+        query: &mut SelectStatement,
+    ) -> &'b mut TableSpec {
         match query
             .tables
             .iter()
@@ -1463,7 +1468,14 @@ impl<'a> QueryState<'a> {
             .next()
         {
             Some(tbl) => self.gen.table_mut(tbl.name.as_str()).unwrap(),
-            None => self.some_table_mut(),
+            None => {
+                let table = self.some_table_mut();
+                query.tables.push(TableExpr {
+                    inner: TableExprInner::Table(table.name.clone().into()),
+                    alias: None,
+                });
+                table
+            }
         }
     }
 
@@ -2424,7 +2436,7 @@ impl QueryOperation {
             QueryOperation::ProjectBuiltinFunction(bif) => {
                 macro_rules! add_builtin {
                     ($fname:ident($($arg:tt)*)) => {{
-                        let table = state.some_table_in_query_mut(&query);
+                        let table = state.some_table_in_query_mut(query);
 
                         if query.tables.is_empty() {
                             query.tables.push(TableExpr::from(Relation::from(table.name.clone())));
