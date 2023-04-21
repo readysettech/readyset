@@ -76,6 +76,7 @@ pub struct RunOptions {
     pub replication_url: Option<String>,
     pub enable_reuse: bool,
     pub time: bool,
+    pub verbose: bool,
 }
 
 impl Default for RunOptions {
@@ -86,6 +87,7 @@ impl Default for RunOptions {
             time: false,
             replication_url: None,
             database_type: DatabaseType::MySQL,
+            verbose: false,
         }
     }
 }
@@ -262,6 +264,9 @@ impl TestScript {
                         continue;
                     }
                     prev_was_statement = true;
+                    if opts.verbose {
+                        eprintln!("     > {}", stmt.command);
+                    }
                     self.run_statement(stmt, conn)
                         .await
                         .with_context(|| format!("Running statement {}", stmt.command))?
@@ -289,6 +294,10 @@ impl TestScript {
                     // is considered a failure.
                     let invert_result = query.conditionals.contains(&Conditional::InvertNoUpstream)
                         && (opts.replication_url.is_none());
+
+                    if opts.verbose {
+                        eprintln!("     > {}", query.query);
+                    }
 
                     match self
                         .run_query(query, conn)
@@ -319,9 +328,17 @@ impl TestScript {
                 }
                 Record::HashThreshold(_) => {}
                 Record::Halt { .. } => break,
-                Record::Sleep(msecs) => sleep(Duration::from_millis(*msecs)).await,
+                Record::Sleep(msecs) => {
+                    if opts.verbose {
+                        eprintln!("     > sleep {msecs}ms");
+                    }
+                    sleep(Duration::from_millis(*msecs)).await
+                }
                 Record::Graphviz => {
                     if let Some(noria) = &mut noria {
+                        if opts.verbose {
+                            eprintln!("     > graphviz");
+                        }
                         println!("{}", noria.graphviz().await?);
                     }
                 }

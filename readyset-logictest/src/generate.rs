@@ -15,7 +15,7 @@ use nom_sql::{
 use query_generator::{GeneratorState, QuerySeed};
 
 use crate::ast::{Query, QueryParams, QueryResults, Record, SortMode, Statement, StatementResult};
-use crate::runner::TestScript;
+use crate::runner::{RunOptions, TestScript};
 
 /// Default value for [`Seed::hash_threshold`]
 const DEFAULT_HASH_THRESHOLD: usize = 20;
@@ -306,7 +306,14 @@ impl Seed {
 
         eprintln!("{}", style("==> Running original test script").bold());
         self.script
-            .run_on_database(&Default::default(), &mut conn, None)
+            .run_on_database(
+                &RunOptions {
+                    verbose: opts.verbose,
+                    ..Default::default()
+                },
+                &mut conn,
+                None,
+            )
             .await?;
 
         eprintln!(

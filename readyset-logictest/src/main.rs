@@ -284,6 +284,10 @@ struct Verify {
     #[clap(long)]
     time: bool,
 
+    /// Enable verbose log output
+    #[clap(long, short = 'v')]
+    verbose: bool,
+
     /// Logging/tracing options
     #[clap(flatten)]
     tracing: readyset_tracing::Options,
@@ -538,6 +542,7 @@ impl From<&Verify> for RunOptions {
             upstream_database_url: verify.database_url().cloned(),
             replication_url: verify.replication_url.clone(),
             time: verify.time,
+            verbose: verify.verbose,
         }
     }
 }
