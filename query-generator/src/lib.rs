@@ -1880,6 +1880,7 @@ pub enum QueryOperation {
     MultipleParameters,
     #[weight(u32::from(!args.in_subquery))]
     InParameter {
+        #[strategy(1..=100u8)]
         num_values: u8,
     },
     #[weight(u32::from(!args.in_subquery))]
@@ -1889,11 +1890,14 @@ pub enum QueryOperation {
     ProjectBuiltinFunction(BuiltinFunction),
     TopK {
         order_type: OrderType,
+        #[strategy(0..=100u64)]
         limit: u64,
     },
     Paginate {
         order_type: OrderType,
+        #[strategy(0..=100u64)]
         limit: u64,
+        #[strategy(0..=100u64)]
         page_number: u64,
     },
     #[weight(0)]
