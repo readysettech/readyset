@@ -590,6 +590,14 @@ impl Operations {
         )
         .await
         .unwrap();
+
+        mysql
+            .query_drop(
+                "ALTER DATABASE vertical DEFAULT CHARACTER SET utf8mb4 DEFAULT COLLATE utf8mb4_bin",
+            )
+            .await
+            .unwrap();
+
         let (opts, _handle, shutdown_tx) = TestBuilder::default().build::<MySQLAdapter>().await;
         let mut noria = mysql_async::Conn::new(opts).await.unwrap();
 
