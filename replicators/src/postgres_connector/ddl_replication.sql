@@ -28,6 +28,7 @@ AS $$
 DECLARE
     create_message text;
     needs_replica_identity bool;
+    alter_stmt record;
 BEGIN
     SELECT count(*) = 0
     INTO needs_replica_identity
@@ -42,13 +43,22 @@ BEGIN
     IF needs_replica_identity THEN
         -- Prevent our ALTER TABLE trigger from running on this command
         SET LOCAL readyset.current_command_is_replica_identity TO true;
-        EXECUTE format(
-            'ALTER TABLE "%s"."%s" REPLICA IDENTITY FULL',
-            (SELECT schema_name FROM pg_event_trigger_ddl_commands()),
-            (SELECT relname
-             FROM pg_class, pg_event_trigger_ddl_commands() object
-             WHERE oid = object.objid)
-        );
+        FOR alter_stmt IN
+            SELECT format(
+                'ALTER TABLE "%s"."%s" REPLICA IDENTITY FULL',
+                object.schema_name, cls.relname
+            ) AS stmt
+            FROM pg_event_trigger_ddl_commands() object
+            JOIN pg_class cls
+            ON oid = object.objid
+            -- CREATE TABLE statements can also create all other kinds of
+            -- rows in pg_class, eg sequences for `SERIAL` columns or foreign
+            -- key constraints. We only want to set replica identities on those
+            -- rows in pg_class that're actual *tables*
+            WHERE cls.relkind = 'r'
+        LOOP
+          EXECUTE alter_stmt.stmt;
+        END LOOP;
         SET LOCAL readyset.current_command_is_replica_identity TO false;
     END IF;
 

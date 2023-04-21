@@ -560,6 +560,38 @@ mod tests {
 
     #[parallel_group(GROUP)]
     #[tokio::test]
+    async fn create_table_with_foreign_key_and_no_pk() {
+        readyset_tracing::init_test_logging();
+        let client = setup("create_table_with_foreign_key_and_no_pk").await;
+
+        client
+            .simple_query("create table t1 (x int primary key)")
+            .await
+            .unwrap();
+
+        get_last_ddl(&client, "create_table_with_foreign_key_and_no_pk")
+            .await
+            .unwrap();
+
+        client
+            .simple_query("create table t2 (x int, foreign key (x) references t1 (x))")
+            .await
+            .unwrap();
+
+        let ddl = get_last_ddl(&client, "create_table_with_foreign_key_and_no_pk")
+            .await
+            .unwrap();
+
+        match ddl.data {
+            DdlEventData::CreateTable { name, .. } => assert_eq!(name, "t2"),
+            _ => panic!(),
+        }
+
+        client.teardown().await;
+    }
+
+    #[parallel_group(GROUP)]
+    #[tokio::test]
     async fn alter_table() {
         let client = setup("alter_table").await;
         client.simple_query("create table t (x int)").await.unwrap();
