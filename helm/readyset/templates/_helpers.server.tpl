@@ -43,7 +43,7 @@ spec:
         {{- end }}
         {{- if .server.annotations }}
       annotations:
-          {{- tpl .server.annotations . | nindent 8 }}
+          {{- toYaml .server.annotations | nindent 8 }}
         {{- end }}
     spec:
     {{- if .server.affinity }}
