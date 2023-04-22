@@ -219,7 +219,7 @@ spec:
         {{- end }}
         {{- if .adapter.annotations }}
       annotations:
-          {{- tpl .adapter.annotations . | nindent 8 }}
+          {{- toYaml .adapter.annotations | nindent 8 }}
         {{- end }}
     spec:
       serviceAccountName: {{ include "readyset.adapter.serviceAccountName" (dict "root" $.Values "releaseName" .Release.Name) }}
