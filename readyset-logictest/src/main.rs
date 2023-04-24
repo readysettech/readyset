@@ -2,7 +2,8 @@
 
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{self, Display};
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
@@ -591,6 +592,12 @@ pub struct Fuzz {
     /// Enable verbose log output
     #[clap(long, short = 'v')]
     verbose: bool,
+
+    /// Write generated test scripts to this file.
+    ///
+    /// If not specified, test scripts will be written to a temporary file
+    #[clap(long, short = 'o')]
+    output: Option<PathBuf>,
 }
 
 impl Fuzz {
@@ -609,15 +616,29 @@ impl Fuzz {
         });
 
         if let Err(TestError::Fail(reason, script)) = result {
-            let mut file = NamedTempFile::new()?;
-            eprintln!(
-                "Writing failing test script to {}",
-                file.path().to_string_lossy()
-            );
+            let (mut file, path): (Box<dyn Write>, _) = match &self.output {
+                Some(path) => (
+                    Box::new(
+                        OpenOptions::new()
+                            .truncate(true)
+                            .create(true)
+                            .write(true)
+                            .open(path)?,
+                    ),
+                    path.clone(),
+                ),
+                None => {
+                    let file = NamedTempFile::new()?;
+                    let path = file.path().to_owned();
+                    (Box::new(file), path)
+                }
+            };
+            eprintln!("Writing failing test script to {}", path.to_string_lossy());
             script.write_to(&mut file)?;
+            file.flush()?;
             if env::var("BUILDKITE").is_ok() {
                 process::Command::new("buildkite-agent")
-                    .args(["artifact", "upload", file.path().to_str().unwrap()])
+                    .args(["artifact", "upload", path.to_str().unwrap()])
                     .spawn()
                     .context("Uploading test script to Buildkite")?;
             }
