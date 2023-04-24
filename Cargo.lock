@@ -4723,7 +4723,6 @@ dependencies = [
  "readyset-tracing",
  "readyset-util",
  "rust_decimal",
- "tempfile",
  "thiserror",
  "tikv-jemallocator",
  "tokio",

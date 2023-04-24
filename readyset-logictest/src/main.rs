@@ -22,7 +22,6 @@ use proptest::strategy::Strategy;
 use proptest::test_runner::{self, TestCaseError, TestError, TestRng, TestRunner};
 use query_generator::QuerySeed;
 use readyset_client::consensus::AuthorityType;
-use tempfile::NamedTempFile;
 use tokio::sync::Mutex;
 use walkdir::WalkDir;
 
@@ -616,23 +615,15 @@ impl Fuzz {
         });
 
         if let Err(TestError::Fail(reason, script)) = result {
-            let (mut file, path): (Box<dyn Write>, _) = match &self.output {
-                Some(path) => (
-                    Box::new(
-                        OpenOptions::new()
-                            .truncate(true)
-                            .create(true)
-                            .write(true)
-                            .open(path)?,
-                    ),
-                    path.clone(),
-                ),
-                None => {
-                    let file = NamedTempFile::new()?;
-                    let path = file.path().to_owned();
-                    (Box::new(file), path)
-                }
-            };
+            let path = self
+                .output
+                .clone()
+                .unwrap_or_else(|| PathBuf::from("/tmp/readyset-logictest-fuzz.test"));
+            let mut file = OpenOptions::new()
+                .truncate(true)
+                .create(true)
+                .write(true)
+                .open(&path)?;
             eprintln!("Writing failing test script to {}", path.to_string_lossy());
             script.write_to(&mut file)?;
             file.flush()?;
