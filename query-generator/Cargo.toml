@@ -34,3 +34,8 @@ zipf = "7.0.0"
 parking_lot = "0.11.2"
 growable-bloom-filter = "2.0.1"
 readyset-sql-passes = { path = "../readyset-sql-passes" }
+
+[dev-dependencies]
+mysql_async = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+serial_test = "0.5"

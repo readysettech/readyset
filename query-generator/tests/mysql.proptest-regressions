@@ -1,0 +1,12 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc ef802439a206c44dcb4e695dc090c5bff8796eec424a239bbfa018b1d60adef7 # shrinks to input = _UniqueValueOfTypeAlwaysValidArgs { ty: Decimal(1, 1), idx: 254 }
+cc d82b6bf38679a10c48ffbbb9ce51976599c71297d46aa601044f61f58150371b # shrinks to input = _UniqueValueOfTypeAlwaysValidArgs { ty: Bool, idx: 0 }
+cc d8245b43ab4c947d50dde6c4eb67dd2a613c432b07e869025e799ccef3886501 # shrinks to input = _UniqueValueOfTypeAlwaysValidArgs { ty: Char(None), idx: 10 }
+cc e36a1e3e39b2d3127a686d74ace75c73ffb8ec9a0b0c759796dd531e93be590e # shrinks to input = _UniqueValueOfTypeAlwaysValidArgs { ty: Char(Some(4)), idx: 0 }
+cc 503d3de2a8892cbea1e7ee142573e9ecac6fc6f448f3d8087d43efee37829087 # shrinks to input = _UniqueValueOfTypeAlwaysValidArgs { ty: Decimal(10, 1), idx: 0 }
+cc 6f65c73f4ef8e0a11b4979a0c43b37371c31f71aa6302cbde45f45814cd46246 # shrinks to input = _ValueOfTypeAlwaysValidArgs { ty: Numeric(Some((8, Some(8)))) }

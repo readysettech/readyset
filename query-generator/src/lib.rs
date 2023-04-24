@@ -62,6 +62,7 @@
 mod distribution_annotation;
 
 use std::borrow::Borrow;
+use std::cmp::min;
 use std::collections::{HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
 use std::error::Error;
@@ -74,7 +75,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use bit_vec::BitVec;
-use chrono::{FixedOffset, NaiveDate, NaiveTime, TimeZone};
+use chrono::{Duration, FixedOffset, NaiveDate, NaiveTime, TimeZone};
 use clap::Parser;
 use derive_more::{Display, From, Into};
 pub use distribution_annotation::DistributionAnnotation;
@@ -94,7 +95,7 @@ use proptest::arbitrary::{any, any_with, Arbitrary};
 use proptest::strategy::{BoxedStrategy, Strategy};
 use rand::distributions::{Distribution, Standard};
 use rand::seq::SliceRandom;
-use rand::Rng;
+use rand::{thread_rng, Rng, RngCore};
 use readyset_data::{DfType, DfValue, Dialect};
 use readyset_sql_passes::outermost_table_exprs;
 use readyset_util::intervals::{BoundPair, IterBoundPair};
@@ -112,7 +113,7 @@ use zipf::ZipfDistribution;
 /// - [`SqlType::Date`]
 /// - [`SqlType::Enum`]
 /// - [`SqlType::Bool`]
-fn value_of_type(typ: &SqlType) -> DfValue {
+pub fn value_of_type(typ: &SqlType) -> DfValue {
     match typ {
         SqlType::Char(_)
         | SqlType::VarChar(_)
@@ -142,10 +143,15 @@ fn value_of_type(typ: &SqlType) -> DfValue {
         SqlType::UnsignedTinyInt(_) => 1u8.into(),
         SqlType::SmallInt(_) => 1i16.into(),
         SqlType::UnsignedSmallInt(_) => 1u16.into(),
-        SqlType::Double | SqlType::Float | SqlType::Real | SqlType::Decimal(_, _) => {
-            1.5.try_into().unwrap()
+        SqlType::Double | SqlType::Float | SqlType::Real => 1.5.try_into().unwrap(),
+        SqlType::Decimal(prec, scale) => {
+            Decimal::new(if *prec == 1 { 1 } else { 15 }, *scale as _).into()
         }
-        SqlType::Numeric(_) => DfValue::from(Decimal::new(15, 1)),
+        SqlType::Numeric(None) => DfValue::from(Decimal::new(15, 1)),
+        SqlType::Numeric(Some((prec, scale))) => DfValue::from(Decimal::new(
+            if *prec == 1 { 1 } else { 15 },
+            (*scale).unwrap_or(1) as _,
+        )),
         SqlType::DateTime(_) | SqlType::Timestamp => {
             NaiveDate::from_ymd(2020, 1, 1).and_hms(12, 30, 45).into()
         }
@@ -179,8 +185,10 @@ fn value_of_type(typ: &SqlType) -> DfValue {
 /// - [`SqlType::Date`]
 /// - [`SqlType::Enum`]
 /// - [`SqlType::Bool`]
-fn random_value_of_type(typ: &SqlType) -> DfValue {
-    let mut rng = rand::thread_rng();
+pub fn random_value_of_type<R>(typ: &SqlType, mut rng: R) -> DfValue
+where
+    R: RngCore,
+{
     match typ {
         SqlType::Char(Some(x)) | SqlType::VarChar(Some(x)) => {
             let length: usize = rng.gen_range(1..=*x).into();
@@ -195,13 +203,13 @@ fn random_value_of_type(typ: &SqlType) -> DfValue {
         SqlType::Blob
         | SqlType::Text
         | SqlType::Citext
-        | SqlType::Char(None)
         | SqlType::VarChar(None)
         | SqlType::Binary(None) => {
             // 2^16 bytes
             let length: usize = rng.gen_range(1..65536);
             "a".repeat(length).into()
         }
+        SqlType::Char(None) => "a".into(),
         SqlType::MediumBlob | SqlType::MediumText => {
             // 2^24 bytes
             // Currently capped at 65536 as these are generated in memory.
@@ -235,10 +243,15 @@ fn random_value_of_type(typ: &SqlType) -> DfValue {
         SqlType::UnsignedTinyInt(_) => rng.gen::<u8>().into(),
         SqlType::SmallInt(_) => rng.gen::<i16>().into(),
         SqlType::UnsignedSmallInt(_) => rng.gen::<u16>().into(),
-        SqlType::Double | SqlType::Float | SqlType::Real | SqlType::Decimal(_, _) => {
-            1.5.try_into().unwrap()
+        SqlType::Double | SqlType::Float | SqlType::Real => 1.5.try_into().unwrap(),
+        SqlType::Decimal(prec, scale) => {
+            Decimal::new(if *prec == 1 { 1 } else { 15 }, *scale as _).into()
         }
-        SqlType::Numeric(_) => DfValue::from(Decimal::new(15, 1)),
+        SqlType::Numeric(None) => DfValue::from(Decimal::new(15, 1)),
+        SqlType::Numeric(Some((prec, scale))) => DfValue::from(Decimal::new(
+            if *prec == 1 { 1 } else { 15 },
+            (*scale).unwrap_or(1) as _,
+        )),
         SqlType::DateTime(_) | SqlType::Timestamp => {
             // Generate a random month and day within the same year.
             NaiveDate::from_ymd(2020, rng.gen_range(1..12), rng.gen_range(1..28))
@@ -325,11 +338,17 @@ fn uniform_random_value(min: &DfValue, max: &DfValue) -> DfValue {
 /// - [`SqlType::Date`]
 /// - [`SqlType::Enum`]
 /// - [`SqlType::Bool`]
-fn unique_value_of_type(typ: &SqlType, idx: u32) -> DfValue {
+pub fn unique_value_of_type(typ: &SqlType, idx: u32) -> DfValue {
+    let clamp_digits = |prec: u32| {
+        10u64
+            .checked_pow(prec)
+            .map(|digits| ((idx + 1) as u64 % digits) as i64)
+            .unwrap_or(i64::MAX)
+    };
+
     match typ {
         // FIXME: Take into account length parameters.
-        SqlType::Char(_)
-        | SqlType::VarChar(_)
+        SqlType::VarChar(_)
         | SqlType::Blob
         | SqlType::LongBlob
         | SqlType::MediumBlob
@@ -341,6 +360,10 @@ fn unique_value_of_type(typ: &SqlType, idx: u32) -> DfValue {
         | SqlType::Citext
         | SqlType::Binary(_)
         | SqlType::VarBinary(_) => idx.to_string().into(),
+        SqlType::Char(len) => {
+            let s = idx.to_string();
+            (&s[..min(s.len(), (*len).unwrap_or(1) as usize)]).into()
+        }
         SqlType::QuotedChar => (idx as i8).into(),
         SqlType::Int(_) => (idx as i32).into(),
         SqlType::BigInt(_) => (idx as i64).into(),
@@ -350,23 +373,29 @@ fn unique_value_of_type(typ: &SqlType, idx: u32) -> DfValue {
         SqlType::UnsignedTinyInt(_) => (idx).into(),
         SqlType::SmallInt(_) => (idx as i16).into(),
         SqlType::UnsignedSmallInt(_) => (idx as u16).into(),
-        SqlType::Double | SqlType::Float | SqlType::Real | SqlType::Decimal(_, _) => {
-            (1.5 + idx as f64).try_into().unwrap()
+        SqlType::Double | SqlType::Float | SqlType::Real => (1.5 + idx as f64).try_into().unwrap(),
+        SqlType::Decimal(prec, scale) => Decimal::new(clamp_digits(*prec as _), *scale as _).into(),
+        SqlType::Numeric(prec_scale) => match prec_scale {
+            Some((prec, None)) => Decimal::new(clamp_digits(*prec as _), 1),
+            Some((prec, Some(scale))) => Decimal::new(clamp_digits(*prec as _), *scale as _),
+            None => Decimal::new((15 + idx) as i64, 2),
         }
-        SqlType::Numeric(_) => DfValue::from(Decimal::new((15 + idx) as i64, 2)),
-        SqlType::DateTime(_) | SqlType::Timestamp => NaiveDate::from_ymd(2020, 1, 1)
-            .and_hms(12, idx as _, 30)
-            .into(),
+        .into(),
+        SqlType::DateTime(_) | SqlType::Timestamp => {
+            (NaiveDate::from_ymd(2020, 1, 1).and_hms(0, 0, 0) + Duration::minutes(idx as _)).into()
+        }
         SqlType::TimestampTz => DfValue::from(
             FixedOffset::west(18_000)
                 .ymd(2020, 1, 1)
                 .and_hms(12, idx as _, 30),
         ),
-        SqlType::Date => unimplemented!(),
+        SqlType::Date => {
+            DfValue::from(NaiveDate::from_ymd(1000, 1, 1) + Duration::days(idx.into()))
+        }
         SqlType::Enum(_) => unimplemented!(),
         SqlType::Bool => unimplemented!(),
         SqlType::ByteArray => unimplemented!(),
-        SqlType::Time => NaiveTime::from_hms(12, idx as _, 30).into(),
+        SqlType::Time => (NaiveTime::from_hms(0, 0, 0) + Duration::seconds(idx as _)).into(),
         SqlType::Json | SqlType::Jsonb => DfValue::from(format!("{{\"k\": {}}}", idx)),
         SqlType::MacAddr => {
             let b1: u8 = ((idx >> 24) & 0xff) as u8;
@@ -873,7 +902,7 @@ impl From<SqlType> for RandomGenerator {
 
 impl RandomGenerator {
     pub fn gen(&self) -> DfValue {
-        random_value_of_type(&self.sql_type)
+        random_value_of_type(&self.sql_type, thread_rng())
     }
 }
 
@@ -1234,7 +1263,7 @@ impl TableSpec {
                             .nth(index / 2 % expected_values.len())
                             .unwrap()
                             .clone(),
-                        _ if random => random_value_of_type(col_type),
+                        _ if random => random_value_of_type(col_type, thread_rng()),
                         ColumnGenerator::Constant(c) => c.gen(),
                         ColumnGenerator::Uniform(u) => u.gen(),
                         ColumnGenerator::Random(r) => r.gen(),
