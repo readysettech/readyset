@@ -1940,9 +1940,7 @@ impl TryFrom<&DfValue> for mysql_common::value::Value {
             DfValue::UnsignedInt(val) => Ok(Value::UInt(*val)),
             DfValue::Float(val) => Ok(Value::Float(*val)),
             DfValue::Double(val) => Ok(Value::Double(*val)),
-            DfValue::Numeric(_) => {
-                internal!("DfValue::Numeric to MySQL DECIMAL is not implemented")
-            }
+            DfValue::Numeric(d) => Ok(Value::from(**d)),
             DfValue::Text(_) | DfValue::TinyText(_) => Ok(Value::Bytes(Vec::<u8>::try_from(dt)?)),
             DfValue::TimestampTz(val) => Ok(val.to_chrono().naive_utc().into()),
             DfValue::Time(val) => Ok(Value::Time(
@@ -2285,11 +2283,8 @@ mod tests {
                 if t.to_chrono().naive_local().date().year() < 1000
                     || t.to_chrono().naive_local().date().year() > 9999 =>
                 false,
-            DfValue::ByteArray(_)
-            | DfValue::Numeric(_)
-            | DfValue::BitVector(_)
-            | DfValue::Array(_)
-            | DfValue::Max => false,
+            DfValue::ByteArray(_) | DfValue::BitVector(_) | DfValue::Array(_) | DfValue::Max =>
+                false,
             _ => true,
         });
 
@@ -2299,6 +2294,10 @@ mod tests {
         ) {
             (DfValue::Float(f1), DfValue::Float(f2)) => assert_eq!(f1, f2),
             (DfValue::Double(f1), DfValue::Double(f2)) => assert_eq!(f1, f2),
+            // Mysql returns Numeric values as Text :(
+            (v @ (DfValue::Text(_) | DfValue::TinyText(_)), DfValue::Numeric(n)) => {
+                assert_eq!(<&str>::try_from(&v).unwrap(), n.to_string())
+            }
             (dt1, dt2) => assert_eq!(dt1, dt2),
         }
     }
