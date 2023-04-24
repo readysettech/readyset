@@ -85,10 +85,11 @@ use lazy_static::lazy_static;
 use nom_sql::analysis::{contains_aggregate, ReferredColumns};
 use nom_sql::{
     BinaryOperator, Column, ColumnConstraint, ColumnSpecification, CommonTableExpr,
-    CreateTableBody, CreateTableStatement, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr,
-    InValue, ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, LimitClause,
-    Literal, OrderClause, OrderType, Relation, SelectStatement, SqlIdentifier, SqlType,
-    SqlTypeArbitraryOptions, TableExpr, TableExprInner, TableKey,
+    CreateTableBody, CreateTableStatement, Dialect as ParseDialect, Expr, FieldDefinitionExpr,
+    FieldReference, FunctionExpr, InValue, ItemPlaceholder, JoinClause, JoinConstraint,
+    JoinOperator, JoinRightSide, LimitClause, Literal, OrderClause, OrderType, Relation,
+    SelectStatement, SqlIdentifier, SqlType, SqlTypeArbitraryOptions, TableExpr, TableExprInner,
+    TableKey,
 };
 use parking_lot::Mutex;
 use proptest::arbitrary::{any, any_with, Arbitrary};
@@ -1692,7 +1693,7 @@ impl<'gen> Query<'gen> {
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize, Arbitrary)]
 pub enum AggregateType {
     Count {
-        #[any(generate_arrays = false)]
+        #[any(generate_arrays = false, dialect = Some(ParseDialect::MySQL))]
         column_type: SqlType,
         distinct: bool,
     },
@@ -1708,11 +1709,11 @@ pub enum AggregateType {
     },
     GroupConcat,
     Max {
-        #[any(generate_arrays = false)]
+        #[any(generate_arrays = false, dialect = Some(ParseDialect::MySQL))]
         column_type: SqlType,
     },
     Min {
-        #[any(generate_arrays = false)]
+        #[any(generate_arrays = false, dialect = Some(ParseDialect::MySQL))]
         column_type: SqlType,
     },
 }
@@ -1772,8 +1773,6 @@ fn filter_op() -> impl Strategy<Value = BinaryOperator> {
     proptest::sample::select(vec![
         Like,
         NotLike,
-        ILike,
-        NotILike,
         Equal,
         NotEqual,
         Greater,
@@ -1826,7 +1825,7 @@ impl Arbitrary for Filter {
             any_with::<SqlType>(SqlTypeArbitraryOptions {
                 generate_arrays: false, // TODO: Set to true once we're targeting Postgres as well
                 generate_other: false,
-                ..Default::default()
+                dialect: Some(ParseDialect::MySQL),
             }),
             any::<LogicalOp>(),
         )
@@ -1885,6 +1884,7 @@ pub enum SubqueryPosition {
         /// If correlated, contains the type of the column that is compared
         #[strategy(proptest::option::of(any_with::<SqlType>(SqlTypeArbitraryOptions {
             generate_arrays: false,
+            dialect: Some(ParseDialect::MySQL),
             ..Default::default()
         })))]
         correlated: Option<SqlType>,
