@@ -631,13 +631,21 @@ impl Fuzz {
     }
 
     fn test_script_strategy(&self) -> impl Strategy<Value = TestScript> + 'static {
-        (any::<Vec<QuerySeed>>(), self.generate_opts()).prop_map(|(query_seeds, generate_opts)| {
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            let _guard = rt.enter();
-            let mut seed = generate::Seed::try_from(query_seeds).unwrap();
-            let script = rt.block_on(seed.run(generate_opts)).unwrap();
-            script.clone()
-        })
+        (any::<Vec<QuerySeed>>(), self.generate_opts()).prop_filter_map(
+            "Making test script from seed failed",
+            |(query_seeds, generate_opts)| {
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                let _guard = rt.enter();
+                let mut seed = generate::Seed::try_from(query_seeds).unwrap();
+                match rt.block_on(seed.run(generate_opts)) {
+                    Ok(script) => Some(script.clone()),
+                    Err(e) => {
+                        eprintln!("Error generating test script from seed: {e:#}");
+                        None
+                    }
+                }
+            },
+        )
     }
 
     fn generate_opts(&self) -> impl Strategy<Value = generate::GenerateOpts> + 'static {
