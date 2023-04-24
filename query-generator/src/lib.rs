@@ -1797,6 +1797,7 @@ impl Arbitrary for Filter {
             any_with::<SqlType>(SqlTypeArbitraryOptions {
                 generate_arrays: false, // TODO: Set to true once we're targeting Postgres as well
                 generate_other: false,
+                ..Default::default()
             }),
             any::<LogicalOp>(),
         )

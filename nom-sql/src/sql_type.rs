@@ -83,8 +83,12 @@ pub enum SqlType {
 pub struct SqlTypeArbitraryOptions {
     /// Enable generation of [`SqlType::Array`]. Defaults to `true`
     pub generate_arrays: bool,
+
     /// Enable generation of [`SqlType::Other`]. Defaults to `false`
     pub generate_other: bool,
+
+    /// Constrain types to only those which are valid for this SQL dialect
+    pub dialect: Option<Dialect>,
 }
 
 impl Default for SqlTypeArbitraryOptions {
@@ -92,6 +96,7 @@ impl Default for SqlTypeArbitraryOptions {
         Self {
             generate_arrays: true,
             generate_other: false,
+            dialect: None,
         }
     }
 }
@@ -108,7 +113,7 @@ impl Arbitrary for SqlType {
         let mut variants = vec![
             Just(Bool).boxed(),
             option::of(1..255u16).prop_map(Char).boxed(),
-            option::of(1..255u16).prop_map(VarChar).boxed(),
+            (1..255u16).prop_map(|l| VarChar(Some(l))).boxed(),
             option::of(1..255u16).prop_map(Int).boxed(),
             option::of(1..255u16).prop_map(UnsignedInt).boxed(),
             option::of(1..255u16).prop_map(BigInt).boxed(),
@@ -120,32 +125,49 @@ impl Arbitrary for SqlType {
             Just(Double).boxed(),
             Just(Float).boxed(),
             Just(Real).boxed(),
-            any::<Option<(u16, Option<u8>)>>().prop_map(Numeric).boxed(),
+            option::of((1..=65u16).prop_flat_map(|n| {
+                (
+                    Just(n),
+                    if n > 30 {
+                        Just(None).boxed()
+                    } else {
+                        option::of(0..=(n as u8)).boxed()
+                    },
+                )
+            }))
+            .prop_map(Numeric)
+            .boxed(),
             Just(TinyText).boxed(),
             Just(MediumText).boxed(),
             Just(LongText).boxed(),
             Just(Text).boxed(),
-            Just(Citext).boxed(),
-            Just(QuotedChar).boxed(),
             Just(Date).boxed(),
             option::of(1..=6u16).prop_map(DateTime).boxed(),
             Just(Time).boxed(),
             Just(Timestamp).boxed(),
-            Just(TimestampTz).boxed(),
-            (1..=30u8)
+            (1..=28u8)
                 .prop_flat_map(|prec| (1..=prec).prop_map(move |scale| Decimal(prec, scale)))
                 .boxed(),
             Just(Json).boxed(),
-            Just(Jsonb).boxed(),
-            Just(ByteArray).boxed(),
-            Just(MacAddr).boxed(),
-            Just(Inet).boxed(),
-            Just(Uuid).boxed(),
-            any::<Option<u16>>().prop_map(Bit).boxed(),
-            any::<Option<u16>>().prop_map(VarBit).boxed(),
-            Just(Serial).boxed(),
-            Just(BigSerial).boxed(),
         ];
+
+        if args.dialect.is_none() || args.dialect == Some(Dialect::PostgreSQL) {
+            variants.extend([
+                Just(VarChar(None)).boxed(),
+                Just(Jsonb).boxed(),
+                Just(ByteArray).boxed(),
+                Just(MacAddr).boxed(),
+                Just(Inet).boxed(),
+                Just(Uuid).boxed(),
+                any::<Option<u16>>().prop_map(Bit).boxed(),
+                any::<Option<u16>>().prop_map(VarBit).boxed(),
+                Just(Serial).boxed(),
+                Just(BigSerial).boxed(),
+                Just(TimestampTz).boxed(),
+                Just(Citext).boxed(),
+                Just(QuotedChar).boxed(),
+            ]);
+        }
 
         if args.generate_arrays {
             variants.push(
