@@ -533,6 +533,9 @@ readyset:
       # -- Toggles query logging. Set to 0 (off) or 1 (on).
       QUERY_LOG: 'true'
 
+      # -- Enable backtraces in panic outputs
+      RUST_BACKTRACE: '1'
+
     resources:
       # -- Resource requests and limits for ReadySet adapters.
       requests:
