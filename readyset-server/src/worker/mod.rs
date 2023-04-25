@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use dataflow::{DomainBuilder, DomainRequest, Packet, Readers};
+use enum_kinds::EnumKind;
 use futures::stream::FuturesUnordered;
 use futures::FutureExt;
 use futures_util::future::TryFutureExt;
@@ -44,7 +45,8 @@ type ChannelCoordinator = channel::ChannelCoordinator<ReplicaAddress, Box<Packet
 /// Some kind of request for a running ReadySet worker.
 ///
 /// Most of these requests return `()`, apart from `DomainRequest`.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, EnumKind, Serialize, Deserialize)]
+#[enum_kind(WorkerRequestType)]
 pub enum WorkerRequestKind {
     /// A new controller has been elected.
     NewController {

@@ -67,6 +67,7 @@ derive_more = "0.99"
 streaming-iterator = "0.1"
 proptest = "1.0.0"
 once_cell = "1.14"
+enum-kinds = "0.5.1"
 
 timekeeper = { version = "0.3.2", default-features = false }
 vec_map = { version = "0.8.0", features = ["eders"] }

@@ -4846,6 +4846,7 @@ dependencies = [
  "database-utils",
  "derive_more",
  "diff",
+ "enum-kinds",
  "fail",
  "failpoint-macros",
  "futures",

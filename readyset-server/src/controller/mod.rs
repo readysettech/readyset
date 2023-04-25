@@ -37,7 +37,7 @@ use crate::controller::migrate::Migration;
 use crate::controller::sql::Recipe;
 use crate::controller::state::DfState;
 use crate::materialization::Materializations;
-use crate::worker::{WorkerRequest, WorkerRequestKind};
+use crate::worker::{WorkerRequest, WorkerRequestKind, WorkerRequestType};
 use crate::{Config, VolumeId};
 
 mod domain_handle;
@@ -182,17 +182,23 @@ impl Worker {
     }
     pub async fn rpc<T: DeserializeOwned>(&self, req: WorkerRequestKind) -> ReadySetResult<T> {
         let body = hyper::Body::from(bincode::serialize(&req)?);
-        let req = self.http.post(self.uri.join("worker_request")?).body(body);
-        let resp = req
+        let http_req = self.http.post(self.uri.join("worker_request")?).body(body);
+        let resp = http_req
             .timeout(self.request_timeout)
             .send()
             .await
-            .map_err(|e| ReadySetError::HttpRequestFailed(e.to_string()))?;
+            .map_err(|e| ReadySetError::HttpRequestFailed {
+                request: format!("{:?}", WorkerRequestType::from(&req)),
+                message: e.to_string(),
+            })?;
         let status = resp.status();
         let body = resp
             .bytes()
             .await
-            .map_err(|e| ReadySetError::HttpRequestFailed(e.to_string()))?;
+            .map_err(|e| ReadySetError::HttpRequestFailed {
+                request: format!("{:?}", WorkerRequestType::from(&req)),
+                message: e.to_string(),
+            })?;
         if !status.is_success() {
             if status == reqwest::StatusCode::SERVICE_UNAVAILABLE {
                 return Err(ReadySetError::ServiceUnavailable);

@@ -473,8 +473,8 @@ pub enum ReadySetError {
     },
 
     /// Making a HTTP request failed.
-    #[error("HTTP request failed: {0}")]
-    HttpRequestFailed(String),
+    #[error("HTTP request {request} failed: {message}")]
+    HttpRequestFailed { request: String, message: String },
 
     /// A shard index was used for a domain that doesn't have that many shards
     #[error("Shard {shard} out of bounds for domain {domain_index} with {num_shards} shards")]
