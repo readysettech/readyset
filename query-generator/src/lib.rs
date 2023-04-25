@@ -349,7 +349,7 @@ pub fn unique_value_of_type(typ: &SqlType, idx: u32) -> DfValue {
 
     match typ {
         // FIXME: Take into account length parameters.
-        SqlType::VarChar(_)
+        SqlType::VarChar(None)
         | SqlType::Blob
         | SqlType::LongBlob
         | SqlType::MediumBlob
@@ -361,10 +361,11 @@ pub fn unique_value_of_type(typ: &SqlType, idx: u32) -> DfValue {
         | SqlType::Citext
         | SqlType::Binary(_)
         | SqlType::VarBinary(_) => idx.to_string().into(),
-        SqlType::Char(len) => {
+        SqlType::VarChar(Some(len)) | SqlType::Char(Some(len)) => {
             let s = idx.to_string();
-            (&s[..min(s.len(), (*len).unwrap_or(1) as usize)]).into()
+            (&s[..min(s.len(), *len as usize)]).into()
         }
+        SqlType::Char(None) => (idx % 10).to_string().into(),
         SqlType::QuotedChar => (idx as i8).into(),
         SqlType::Int(_) => (idx as i32).into(),
         SqlType::BigInt(_) => (idx as i64).into(),
