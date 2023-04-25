@@ -2557,6 +2557,16 @@ impl Domain {
             _ => internal!(),
         };
 
+        if self
+            .nodes
+            .get(*source)
+            .filter(|n| n.borrow().is_dropped())
+            .is_some()
+        {
+            warn!(?tag, node = ?source, domain = ?self.index, "replay path started with removed node; ignoring...");
+            return Ok(());
+        }
+
         let state = self.state.get(*source).ok_or_else(|| {
             internal_err!(
                 "migration replay path (tag {:?}) started with non-materialized node",
