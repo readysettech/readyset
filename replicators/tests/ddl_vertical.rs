@@ -37,6 +37,7 @@ use proptest::{collection, sample};
 use readyset_client_test_helpers::psql_helpers::{self, PostgreSQLAdapter};
 use readyset_client_test_helpers::TestBuilder;
 use readyset_data::{DfValue, TimestampTz};
+use readyset_server::Handle;
 use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
 use stateful_proptest::{ModelState, StatefulProptestConfig};
@@ -424,6 +425,7 @@ struct DDLTestRunContext {
     rs_conn: Client,
     pg_conn: Client,
     shutdown_tx: Option<ShutdownSender>, // Needs to be Option so we can move it out of the struct
+    _handle: Handle,
 }
 
 /// A model of the current test state, used to help generate operations in a way that we expect to
@@ -828,7 +830,7 @@ impl ModelState for DDLModelState {
     async fn init_test_run(&self) -> Self::RunContext {
         readyset_tracing::init_test_logging();
 
-        let (opts, _handle, shutdown_tx) = TestBuilder::default()
+        let (opts, handle, shutdown_tx) = TestBuilder::default()
             .fallback(true)
             .build::<PostgreSQLAdapter>()
             .await;
@@ -840,6 +842,7 @@ impl ModelState for DDLModelState {
         DDLTestRunContext {
             rs_conn,
             pg_conn,
+            _handle: handle,
             shutdown_tx: Some(shutdown_tx),
         }
     }
