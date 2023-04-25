@@ -1151,12 +1151,11 @@ async fn recreate_caches_using_type(
 #[test]
 #[cfg_attr(not(feature = "ddl_vertical_tests"), ignore)]
 fn run_cases() {
-    let _config = StatefulProptestConfig {
+    let config = StatefulProptestConfig {
         min_ops: 7,
         max_ops: 13,
         test_case_timeout: Duration::from_secs(60),
     };
 
-    // TODO uncomment once the rest of the module is converted to use stateful-proptest
-    //stateful_proptest::test::<DDLModelState>(stateful_config);
+    stateful_proptest::test::<DDLModelState>(config);
 }
