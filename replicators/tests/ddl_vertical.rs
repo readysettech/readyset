@@ -22,32 +22,27 @@
 //! Note that this test suite requires the *exact* configuration specified in that docker-compose
 //! configuration, including the port, username, and password.
 
-use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display, Formatter, Result};
 use std::iter::once;
 use std::panic::AssertUnwindSafe;
-use std::rc::Rc;
 use std::time::Duration;
 
+use async_trait::async_trait;
 use itertools::Itertools;
 use nom_sql::SqlType;
 use proptest::prelude::*;
-use proptest::strategy::{BoxedStrategy, Just, NewTree, Strategy, ValueTree};
-use proptest::test_runner::TestRunner;
-use proptest::{collection, proptest, sample};
-use rand::distributions::{Distribution, Uniform};
-use rand::Rng;
+use proptest::strategy::{BoxedStrategy, Just, Strategy};
+use proptest::{collection, sample};
 use readyset_client_test_helpers::psql_helpers::{self, PostgreSQLAdapter};
 use readyset_client_test_helpers::TestBuilder;
 use readyset_data::{DfValue, TimestampTz};
 use readyset_util::eventually;
+use readyset_util::shutdown::ShutdownSender;
+use stateful_proptest::{ModelState, StatefulProptestConfig};
 use tokio_postgres::{Client, Config, NoTls, Row};
 
 const SQL_NAME_REGEX: &str = "[a-zA-Z_][a-zA-Z0-9_]*";
-const MIN_OPS: usize = 7;
-const MAX_OPS: usize = 13;
-const TEST_CASE_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// This struct is used to generate arbitrary column specifications, both for creating tables, and
 /// potentially for altering them by adding columns and such.
@@ -199,33 +194,34 @@ enum Operation {
     },
 }
 
-impl Operation {
-    /// Checks preconditions for this operation given a current test model state.
+impl DDLModelState {
+    /// Checks preconditions for an [`Operation`] given a current test model state.
     ///
     /// These are primarily needed for shrinking, so that we can make sure that we don't do things
-    /// like remove a CreateTable when a later WriteRow operation depends on the corresponding
-    /// table.
+    /// like remove a [`Operation::CreateTable`] when a later [`Operation::WriteRow`] operation
+    /// depends on the corresponding table.
     ///
     /// We also check preconditions during runtime, and throw out any test cases where the
     /// preconditions aren't satisfied. This should be rare, though, because
-    /// [`DDLModelState::gen_op`] should usually only generate cases where the preconditions are
-    /// already satisified. It's possible there are weird corner cases though (such as multiple
-    /// random strings happening to generate the same string value for two different table
-    /// names) where preconditions could save us from a false positive test failure.
-    fn preconditions(&self, state: &DDLModelState) -> bool {
-        match self {
-            Self::CreateTable(name, cols) => {
-                !state.tables.contains_key(name)
+    /// [`DDLModelState::op_generators`] should *usually* only generate cases where the
+    /// preconditions are already satisified. It's possible there are weird corner cases though
+    /// (such as multiple random strings happening to generate the same string value for two
+    /// different table names) where preconditions could save us from a false positive test
+    /// failure.
+    fn preconditions(&self, op: &Operation) -> bool {
+        match op {
+            Operation::CreateTable(name, cols) => {
+                !self.tables.contains_key(name)
                     && cols.iter().all(|cs| match cs {
                         ColumnSpec {
                             sql_type: SqlType::Other(type_name),
                             ..
-                        } => state.enum_types.contains_key(type_name.name.as_str()),
+                        } => self.enum_types.contains_key(type_name.name.as_str()),
                         _ => true,
                     })
             }
-            Self::DropTable(name) => state.tables.contains_key(name),
-            Self::WriteRow {
+            Operation::DropTable(name) => self.tables.contains_key(name),
+            Operation::WriteRow {
                 table,
                 pkey,
                 col_vals: _,
@@ -234,74 +230,73 @@ impl Operation {
                 // Make sure that the table doesn't already contain a row with this key, and also
                 // make sure that the column types in the table also match up with the types in the
                 // row that we're trying to write:
-                state
-                    .pkeys
+                self.pkeys
                     .get(table)
                     .map_or(false, |table_keys| !table_keys.contains(pkey))
-                    && state.tables.get(table).map_or(false, |table_cols| {
+                    && self.tables.get(table).map_or(false, |table_cols| {
                         table_cols
                             .iter()
                             .zip(col_types)
                             .all(|(cs, row_type)| cs.sql_type == *row_type)
                     })
             }
-            Self::DeleteRow(table, key) => state
+            Operation::DeleteRow(table, key) => self
                 .pkeys
                 .get(table)
                 .map_or(false, |table_keys| table_keys.contains(key)),
-            Self::AddColumn(table, column_spec) => state
+            Operation::AddColumn(table, column_spec) => self
                 .tables
                 .get(table)
                 .map_or(false, |t| t.iter().all(|cs| cs.name != *column_spec.name)),
-            Self::DropColumn(table, col_name) => state
+            Operation::DropColumn(table, col_name) => self
                 .tables
                 .get(table)
                 .map_or(false, |t| t.iter().any(|cs| cs.name == *col_name)),
-            Self::AlterColumnName {
+            Operation::AlterColumnName {
                 table,
                 col_name,
                 new_name,
-            } => state.tables.get(table).map_or(false, |t| {
+            } => self.tables.get(table).map_or(false, |t| {
                 t.iter().any(|cs| cs.name == *col_name) && t.iter().all(|cs| cs.name != *new_name)
             }),
-            Self::CreateSimpleView { name, table_source } => {
-                state.tables.contains_key(table_source)
-                    && !state.tables.contains_key(name)
-                    && !state.views.contains_key(name)
+            Operation::CreateSimpleView { name, table_source } => {
+                self.tables.contains_key(table_source)
+                    && !self.tables.contains_key(name)
+                    && !self.views.contains_key(name)
             }
-            Self::CreateJoinView {
+            Operation::CreateJoinView {
                 name,
                 table_a,
                 table_b,
             } => {
-                state.tables.contains_key(table_a)
-                    && state.tables.contains_key(table_b)
-                    && !state.tables.contains_key(name)
-                    && !state.views.contains_key(name)
+                self.tables.contains_key(table_a)
+                    && self.tables.contains_key(table_b)
+                    && !self.tables.contains_key(name)
+                    && !self.views.contains_key(name)
             }
-            Self::DropView(name) => state.views.contains_key(name),
-            Self::CreateEnum(name, _values) => !state.enum_types.contains_key(name),
-            Self::DropEnum(name) => tables_using_type(&state.tables, name).next().is_none(),
-            Self::AppendEnumValue {
+            Operation::DropView(name) => self.views.contains_key(name),
+            Operation::CreateEnum(name, _values) => !self.enum_types.contains_key(name),
+            Operation::DropEnum(name) => tables_using_type(&self.tables, name).next().is_none(),
+            Operation::AppendEnumValue {
                 type_name,
                 value_name,
-            } => state
+            } => self
                 .enum_types
                 .get(type_name)
                 .map_or(false, |t| !t.contains(value_name)),
-            Self::InsertEnumValue {
+            Operation::InsertEnumValue {
                 type_name,
                 value_name,
                 next_to_value,
                 ..
-            } => state.enum_types.get(type_name).map_or(false, |t| {
+            } => self.enum_types.get(type_name).map_or(false, |t| {
                 t.contains(next_to_value) && !t.contains(value_name)
             }),
-            Self::RenameEnumValue {
+            Operation::RenameEnumValue {
                 type_name,
                 value_name,
                 new_name,
-            } => state
+            } => self
                 .enum_types
                 .get(type_name)
                 .map_or(false, |t| t.contains(value_name) && !t.contains(new_name)),
@@ -535,6 +530,12 @@ enum TestViewDef {
     Join { table_a: String, table_b: String },
 }
 
+struct DDLTestRunContext {
+    rs_conn: Client,
+    pg_conn: Client,
+    shutdown_tx: Option<ShutdownSender>, // Needs to be Option so we can move it out of the struct
+}
+
 /// A model of the current test state, used to help generate operations in a way that we expect to
 /// succeed, as well as to assist in shrinking, and to determine postconditions to check during
 /// test runtime.
@@ -556,17 +557,18 @@ struct DDLModelState {
     deleted_views: HashSet<String>,
     // Map of custom ENUM type names to type definitions (represented by a Vec of ENUM elements)
     enum_types: HashMap<String, Vec<String>>,
-
-    // Just cloned into [`TestTree`] and used for shrinking, not part of the model used for testing
-    // itself:
-    next_step_idx: Rc<Cell<usize>>,
 }
 
-impl DDLModelState {
-    /// Each invocation of this function returns a [`BoxedStrategy`] for generating an
-    /// [`Operation`] *given the current state of the test model*. With a brand new model, the only
-    /// possible operation is [`Operation::CreateTable`], but as tables are created and rows are
-    /// written, other operations become possible.
+#[async_trait(?Send)]
+impl ModelState for DDLModelState {
+    type Operation = Operation;
+    type RunContext = DDLTestRunContext;
+    type OperationStrategy = BoxedStrategy<Operation>;
+
+    /// Each invocation of this function returns a [`Vec`] of [`Strategy`]s for generating
+    /// [`Operation`]s *given the current state of the test model*. With a brand new model, the only
+    /// possible operations are [`Operation::CreateTable`] and [`Operation::CreateEnum`], but as
+    /// tables/types are created and rows are written, other operations become possible.
     ///
     /// Note that there is some redundancy between the logic in this function and the logic in
     /// [`Operation::preconditions`](enum.Operation.html#method.preconditions). This is necessary
@@ -574,7 +576,7 @@ impl DDLModelState {
     /// during shrinking. (Technically, we do also check and filter on preconditions at the start
     /// of each test, but it's best to depend on that check as little as possible since test
     /// filters like that can lead to slow and lopsided test generation.)
-    fn gen_op(&self, runner: &mut TestRunner) -> impl Strategy<Value = Operation> {
+    fn op_generators(&self) -> Vec<Self::OperationStrategy> {
         // We can always create more tables or enum types, so start with those two generators:
         let create_table_strat = gen_create_table(self.enum_types.clone()).boxed();
         let create_enum_strat = gen_create_enum().boxed();
@@ -690,12 +692,7 @@ impl DDLModelState {
             possible_ops.push(drop_enum_strat);
         }
 
-        // Once generated, we do not shrink individual Operations; all shrinking is done via
-        // removing individual operations from the test sequence. Thus, rather than returning a
-        // Strategy to generate any of the possible ops from `possible_ops`, it's simpler to
-        // just randomly pick one and return it directly. It's important to use the RNG from
-        // `runner` though to ensure test runs are deterministic based on the seed from proptest.
-        possible_ops.swap_remove(runner.rng().gen_range(0..possible_ops.len()))
+        possible_ops
     }
 
     /// This method is used to update `self` based on the expected results of executing a single
@@ -825,176 +822,27 @@ impl DDLModelState {
             }
         }
     }
-}
 
-/// Tests whether a given sequence of [`Operation`] elements maintains all of the required
-/// preconditions as each step is executed according to [`DDLModelState`].
-fn preconditions_hold(ops: &[Operation]) -> bool {
-    let mut candidate_state = DDLModelState::default();
-    for op in ops {
-        if !op.preconditions(&candidate_state) {
-            return false;
-        } else {
-            candidate_state.next_state(op);
-        }
-    }
-    true
-}
-
-/// This is used to store and shrink a list of [`Operation`] values by implementing the
-/// [`ValueTree`] trait.
-///
-/// Note that shrinking is entirely based around removing elements from the sequence of operations;
-/// the individual operations themselves are not shrunk, as doing so would likely cause
-/// preconditions to be violated later in the sequence of operations (unless we re-generated the
-/// rest of the sequence, but this would likely result in a test case that no longer fails).
-///
-/// In practice, this is not a terrible limitation, as having a minimal sequence of operations
-/// tends to make it relatively easy to understand the cause of a failing case, even if the inputs
-/// to those operations (like table names and column specs) are not necessarily minimal themselves.
-struct TestTree {
-    /// List of all operations initially included in this test case
-    ops: Vec<Operation>,
-    /// List of which operations are still included vs. which have been shrunk out
-    currently_included: Vec<bool>,
-    /// The last operation we removed via shrinking (which may or may not end up needing to be
-    /// added back in, depending on whether the test continues to fail with that operation removed)
-    last_shrank_idx: usize,
-    /// The index of the next step we're planning to run. If the test fails, the last successful
-    /// step will thus be `next_step_idx - 1`.
-    next_step_idx: Rc<Cell<usize>>,
-    /// Whether we've already used next_step_idx to trim out steps after the failure.
-    have_trimmed_after_failure: bool,
-}
-
-impl ValueTree for TestTree {
-    type Value = Vec<Operation>;
-
-    /// Simply returns a [`Vec`] of all [`Operation`] values for this test case that have not been
-    /// shrunk out.
-    fn current(&self) -> Self::Value {
-        self.ops
-            .iter()
-            .zip(self.currently_included.iter())
-            .filter_map(|(v, include)| if *include { Some(v) } else { None })
-            .cloned()
-            .collect()
+    /// TODO move the implementation directly here, but do it in a separate commit to make it
+    /// clearer what code has actually changed vs. what has simply been moved around the file.
+    fn preconditions_met(&self, op: &Self::Operation) -> bool {
+        self.preconditions(op)
     }
 
-    /// Attempts to remove one [`Operation`] for shrinking purposes, starting at the end of the
-    /// list and working backward for each invocation of this method. Operations are only removed
-    /// if it is possible to do so without violating a precondition.
-    ///
-    /// There are some limitations in the current approach that I'd like to address at some point:
-    ///  * It is inefficient to only remove one element at a time.
-    ///    * It is likely that we can randomly try removing multiple elements at once, since most
-    ///    minimal failing cases are much smaller than the original failing cases that produced
-    ///    them. The math around this is a bit tricky though, as the ideal number of elements to try
-    ///    removing at any given time depends on how big we expect a typical minimal failing test
-    ///    case to be.
-    ///  * Removing only one element at a time may prevent us from fully shrinking down to the
-    ///    minimal failing case
-    ///    * For example, if we create a table A, then drop A, then create A again with different
-    ///      columns, then the third step may be the only one necessary to reproduce the failure,
-    ///      but we will not be able to remove the first two steps. Removing the first step alone
-    ///      would violate a precondition for the second step (since the second stop is to drop A),
-    ///      and removing the second step alone would violate a precondition for the third step
-    ///      (since we cannot create A again unless we've dropped the previous table named A). In
-    ///      order to shrink this down completely, we must remove both of the first two steps in one
-    ///      step, which the current shrinking algorithm cannot do.
-    ///
-    /// However, removing only one element at a time is much simpler from an implementation
-    /// standpoint, so that is all that I've implemented for now. Designing and implementing a
-    /// better shrinking algorithm could definitely be useful in other tests in the future, though.
-    fn simplify(&mut self) -> bool {
-        if !self.have_trimmed_after_failure {
-            self.have_trimmed_after_failure = true; // Only run this block once per test case
-
-            let next_step_idx = self.next_step_idx.get();
-
-            // next_step_idx is the failing step, and we want to exclude steps *beyond* the failing
-            // step, hence adding 1 to the start of the range:
-            let steps_after_failure = next_step_idx + 1..self.ops.len();
-            for i in steps_after_failure {
-                self.currently_included[i] = false;
-            }
-            // Setting last_shrank_idx to next_step_idx causes us to skip trying to shrink the step
-            // that failed, which should be good since the step that triggers the failure is
-            // presumably needed to reproduce the failure:
-            self.last_shrank_idx = next_step_idx;
-        }
-
-        self.try_removing_op()
+    async fn init_test_run(&self) -> Self::RunContext {
+        init_test_run().await
     }
 
-    /// Undoes the last call to [`simplify`], and attempts to remove another element instead.
-    fn complicate(&mut self) -> bool {
-        self.currently_included[self.last_shrank_idx] = true;
-        self.try_removing_op()
+    async fn run_op(&self, op: &Self::Operation, ctxt: &mut Self::RunContext) {
+        run_op(self, op, ctxt).await
     }
-}
 
-impl TestTree {
-    /// Used by both [`simplify`] and [`complicate`] to attempt the removal of another operation
-    /// during shrinking. If we are able to find another operation we can remove without violating
-    /// any preconditions, this returns `true`; otherwise, this function returns `false`.
-    fn try_removing_op(&mut self) -> bool {
-        // More efficient to iterate backward, since we only need to go over the list once
-        // (preconditions are based only on the state changes caused by previous ops, so if we're
-        // moving backward through the list then the only time we'll be unable to remove an op
-        // based on a precondition is if we've previously had to add back in a later op that
-        // depends on it due to failing to remove the later op via shrinking; in that case we'll
-        // never be able to remove the current op either, so there's no need to check it more than
-        // once).
-        while self.last_shrank_idx > 0 {
-            self.last_shrank_idx -= 1;
-
-            // try removing next idx to try, and see if preconditions still hold
-            self.currently_included[self.last_shrank_idx] = false;
-            let candidate_ops = self.current();
-            // if they still hold, leave it as removed, and we're done
-            if preconditions_hold(&candidate_ops) {
-                return true;
-            }
-            // if they don't still hold, add it back and try another run through the loop
-            self.currently_included[self.last_shrank_idx] = true;
-        }
-        // We got all the way through and didn't remove anything
-        false
+    async fn check_postconditions(&self, ctxt: &mut Self::RunContext) {
+        check_postconditions(self, ctxt).await
     }
-}
 
-impl Strategy for DDLModelState {
-    type Tree = TestTree;
-    type Value = Vec<Operation>;
-
-    /// Generates a new test case, consisting of a sequence of [`Operation`] values that conform to
-    /// the preconditions defined for [`DDLModelState`].
-    fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
-        let mut symbolic_state = DDLModelState::default();
-
-        let size = Uniform::new_inclusive(MIN_OPS, MAX_OPS).sample(runner.rng());
-        let ops = (0..size)
-            .map(|_| {
-                let next_op = symbolic_state
-                    .gen_op(runner)
-                    .new_tree(runner)
-                    .unwrap()
-                    .current();
-                symbolic_state.next_state(&next_op);
-                next_op
-            })
-            .collect();
-
-        // initially we include everything, then exclude different steps during shrinking:
-        let currently_included = vec![true; size];
-        Ok(TestTree {
-            ops,
-            currently_included,
-            last_shrank_idx: size, // 1 past the end of the ops vec
-            next_step_idx: self.next_step_idx.clone(),
-            have_trimmed_after_failure: false,
-        })
+    async fn clean_up_test_run(&self, ctxt: &mut Self::RunContext) {
+        clean_up_test_run(ctxt).await
     }
 }
 
@@ -1042,14 +890,12 @@ fn rows_to_dfvalue_vec(rows: Vec<Row>) -> Vec<Vec<DfValue>> {
         .collect()
 }
 
-/// Run a single test case by:
+/// TODO: Fold this function into the `impl ModelState` block for [`DDLModelState`].
+/// Get ready to run a single test case by:
 ///  * Setting up a test instance of ReadySet that connects to an upstream instance of Postgres
 ///  * Wiping and recreating a fresh copy of the oracle database directly in Postgres, and setting
 ///    up a connection
-///  * Running each step in `ops`, and checking afterward that:
-///    * The contents of the tables tracked by our model match across both ReadySet and Postgres
-///    * Any deleted tables appear as deleted in both ReadySet and Postgres
-async fn run(ops: Vec<Operation>, next_step_idx: Rc<Cell<usize>>) {
+async fn init_test_run() -> DDLTestRunContext {
     readyset_tracing::init_test_logging();
 
     let (opts, _handle, shutdown_tx) = TestBuilder::default()
@@ -1061,247 +907,254 @@ async fn run(ops: Vec<Operation>, next_step_idx: Rc<Cell<usize>>) {
     recreate_oracle_db().await;
     let pg_conn = connect(oracle_db_config()).await;
 
-    let mut runtime_state = DDLModelState::default();
+    DDLTestRunContext {
+        rs_conn,
+        pg_conn,
+        shutdown_tx: Some(shutdown_tx),
+    }
+}
 
-    for (idx, op) in ops.into_iter().enumerate() {
-        println!("Running op {idx}: {op:?}");
-        match &op {
-            Operation::CreateTable(table_name, cols) => {
-                let non_pkey_cols = cols.iter().map(|ColumnSpec { name, sql_type, .. }| {
-                    format!(
-                        "\"{name}\" {}",
-                        sql_type.display(nom_sql::Dialect::PostgreSQL)
-                    )
-                });
-                let col_defs: Vec<String> = once("id INT PRIMARY KEY".to_string())
-                    .chain(non_pkey_cols)
-                    .collect();
-                let col_defs = col_defs.join(", ");
-                let query = format!("CREATE TABLE \"{table_name}\" ({col_defs})");
-                rs_conn.simple_query(&query).await.unwrap();
-                pg_conn.simple_query(&query).await.unwrap();
+/// TODO: Fold this function into the `impl ModelState` block for [`DDLModelState`].
+/// Run the code to test a single operation:
+///  * Running each step in `ops`, and checking afterward that:
+///    * The contents of the tables tracked by our model match across both ReadySet and Postgres
+///    * Any deleted tables appear as deleted in both ReadySet and Postgres
+async fn run_op(runtime_state: &DDLModelState, op: &Operation, ctxt: &mut DDLTestRunContext) {
+    let DDLTestRunContext {
+        rs_conn, pg_conn, ..
+    } = ctxt;
 
-                let create_cache =
-                    format!("CREATE CACHE ALWAYS FROM SELECT * FROM \"{table_name}\"");
-                eventually!(run_test: {
-                    let result = rs_conn.simple_query(&create_cache).await;
-                    AssertUnwindSafe(move || result)
-                }, then_assert: |result| {
-                    result().unwrap()
-                });
-            }
-            Operation::DropTable(name) => {
-                let query = format!("DROP TABLE \"{name}\" CASCADE");
-                rs_conn.simple_query(&query).await.unwrap();
-                pg_conn.simple_query(&query).await.unwrap();
-            }
-            Operation::WriteRow {
-                table,
-                pkey,
-                col_vals,
-                ..
-            } => {
-                let pkey = DfValue::from(*pkey);
-                let params: Vec<&DfValue> = once(&pkey).chain(col_vals.iter()).collect();
-                let placeholders: Vec<_> = (1..=params.len()).map(|n| format!("${n}")).collect();
-                let placeholders = placeholders.join(", ");
-                let query = format!("INSERT INTO \"{table}\" VALUES ({placeholders})");
-                rs_conn.query_raw(&query, &params).await.unwrap();
-                pg_conn.query_raw(&query, &params).await.unwrap();
-            }
-            Operation::AddColumn(table_name, col_spec) => {
-                let query = format!(
-                    "ALTER TABLE \"{}\" ADD COLUMN \"{}\" {}",
-                    table_name,
-                    col_spec.name,
-                    col_spec.sql_type.display(nom_sql::Dialect::PostgreSQL)
-                );
-                rs_conn.simple_query(&query).await.unwrap();
-                pg_conn.simple_query(&query).await.unwrap();
-            }
-            Operation::DropColumn(table_name, col_name) => {
-                let query = format!(
-                    "ALTER TABLE \"{}\" DROP COLUMN \"{}\"",
-                    table_name, col_name
-                );
-                rs_conn.simple_query(&query).await.unwrap();
-                pg_conn.simple_query(&query).await.unwrap();
-            }
-            Operation::AlterColumnName {
-                table,
-                col_name,
-                new_name,
-            } => {
-                let query = format!(
-                    "ALTER TABLE \"{}\" RENAME COLUMN \"{}\" TO \"{}\"",
-                    table, col_name, new_name
-                );
-                rs_conn.simple_query(&query).await.unwrap();
-                pg_conn.simple_query(&query).await.unwrap();
-            }
-            Operation::DeleteRow(table_name, key) => {
-                let query = format!("DELETE FROM \"{table_name}\" WHERE id = ({key})");
-                rs_conn.simple_query(&query).await.unwrap();
-                pg_conn.simple_query(&query).await.unwrap();
-            }
-            Operation::CreateSimpleView { name, table_source } => {
-                let query = format!("CREATE VIEW \"{name}\" AS SELECT * FROM \"{table_source}\"");
-                rs_conn.simple_query(&query).await.unwrap();
-                pg_conn.simple_query(&query).await.unwrap();
-                let create_cache = format!("CREATE CACHE ALWAYS FROM SELECT * FROM \"{name}\"");
-                eventually!(run_test: {
-                    let result = rs_conn.simple_query(&create_cache).await;
-                    AssertUnwindSafe(move || result)
-                }, then_assert: |result| {
-                    result().unwrap()
-                });
-            }
-            Operation::CreateJoinView {
-                name,
-                table_a,
-                table_b,
-            } => {
-                // Must give a unique alias to each column in the source tables to avoid issues
-                // with duplicate column names in the resulting view
-                let select_list: Vec<String> = runtime_state.tables[table_a]
-                    .iter()
-                    .chain(runtime_state.tables[table_b].iter())
-                    .enumerate()
-                    .map(|(i, cs)| format!("\"{}\" AS c{}", cs.name, i))
-                    .collect();
-                let select_list = select_list.join(", ");
-                let view_def = format!(
-                    "SELECT {} FROM \"{}\" JOIN \"{}\" ON \"{}\".id = \"{}\".id",
-                    select_list, table_a, table_b, table_a, table_b
-                );
-                let query = format!("CREATE VIEW \"{}\" AS {}", name, view_def);
-                rs_conn.simple_query(&query).await.unwrap();
-                pg_conn.simple_query(&query).await.unwrap();
-                let create_cache = format!("CREATE CACHE ALWAYS FROM SELECT * FROM \"{name}\"");
-                eventually!(run_test: {
-                    let result = rs_conn.simple_query(&create_cache).await;
-                    AssertUnwindSafe(move || result)
-                }, then_assert: |result| {
-                    result().unwrap()
-                });
-            }
-            Operation::DropView(name) => {
-                let query = format!("DROP VIEW \"{name}\"");
-                rs_conn.simple_query(&query).await.unwrap();
-                pg_conn.simple_query(&query).await.unwrap();
-            }
-            Operation::CreateEnum(name, elements) => {
-                let elements: Vec<String> = elements.iter().map(|e| format!("'{e}'")).collect();
-                let element_list = elements.join(", ");
-                // Quote the type name to prevent clashes with builtin types or reserved keywords
-                let query = format!("CREATE TYPE \"{}\" AS ENUM ({})", name, element_list);
-                rs_conn.simple_query(&query).await.unwrap();
-                pg_conn.simple_query(&query).await.unwrap();
-            }
-            Operation::DropEnum(name) => {
-                let query = format!("DROP TYPE \"{name}\"");
-                rs_conn.simple_query(&query).await.unwrap();
-                pg_conn.simple_query(&query).await.unwrap();
-            }
-            Operation::AppendEnumValue {
-                type_name,
-                value_name,
-            } => {
-                let query = format!("ALTER TYPE \"{type_name}\" ADD VALUE '{value_name}'");
-                rs_conn.simple_query(&query).await.unwrap();
-                pg_conn.simple_query(&query).await.unwrap();
-                recreate_caches_using_type(type_name, &runtime_state.tables, &rs_conn).await;
-            }
-            Operation::InsertEnumValue {
-                type_name,
-                value_name,
-                position,
-                next_to_value,
-            } => {
-                let query = format!(
-                    "ALTER TYPE \"{}\" ADD VALUE '{}' {} '{}'",
-                    type_name, value_name, position, next_to_value
-                );
-                rs_conn.simple_query(&query).await.unwrap();
-                pg_conn.simple_query(&query).await.unwrap();
-                recreate_caches_using_type(type_name, &runtime_state.tables, &rs_conn).await;
-            }
-            Operation::RenameEnumValue {
-                type_name,
-                value_name,
-                new_name,
-            } => {
-                let query = format!(
-                    "ALTER TYPE \"{}\" RENAME VALUE '{}' TO '{}'",
-                    type_name, value_name, new_name
-                );
-                rs_conn.simple_query(&query).await.unwrap();
-                pg_conn.simple_query(&query).await.unwrap();
-                recreate_caches_using_type(type_name, &runtime_state.tables, &rs_conn).await;
-            }
-        }
+    match &op {
+        Operation::CreateTable(table_name, cols) => {
+            let non_pkey_cols = cols.iter().map(|ColumnSpec { name, sql_type, .. }| {
+                format!(
+                    "\"{name}\" {}",
+                    sql_type.display(nom_sql::Dialect::PostgreSQL)
+                )
+            });
+            let col_defs: Vec<String> = once("id INT PRIMARY KEY".to_string())
+                .chain(non_pkey_cols)
+                .collect();
+            let col_defs = col_defs.join(", ");
+            let query = format!("CREATE TABLE \"{table_name}\" ({col_defs})");
+            rs_conn.simple_query(&query).await.unwrap();
+            pg_conn.simple_query(&query).await.unwrap();
 
-        // Note that if we were verifying results of any operations directly, it would be better to
-        // wait until checking postconditions before we compute the next state; this would
-        // complicate the postcondition code a bit, but would allow us to check that the op result
-        // makes sense given the state *prior* to the operation being run. However, right now we
-        // just check that the database contents match, so it's simpler to update the expected
-        // state right away and then check the table contents based on that.
-        runtime_state.next_state(&op);
-
-        // After each op, check that all table and view contents match
-        for relation in runtime_state
-            .tables
-            .keys()
-            .chain(runtime_state.views.keys())
-        {
+            let create_cache = format!("CREATE CACHE ALWAYS FROM SELECT * FROM \"{table_name}\"");
             eventually!(run_test: {
-                let rs_rows = rs_conn
-                    .query(&format!("SELECT * FROM \"{relation}\""), &[])
-                    .await
-                    .unwrap();
-                let pg_rows = pg_conn
-                    .query(&format!("SELECT * FROM \"{relation}\""), &[])
-                    .await
-                    .unwrap();
-                // Previously, we would run all the result handling in the run_test block, but
-                // doing it in the then_assert block lets us work around a tokio-postgres client
-                // crash caused by ENG-2548 by retrying until ReadySet stops sending us bad
-                // packets.
-                AssertUnwindSafe(move || (rs_rows, pg_rows))
-            }, then_assert: |results| {
-                let (rs_rows, pg_rows) = results();
-
-                let mut rs_results = rows_to_dfvalue_vec(rs_rows);
-                let mut pg_results = rows_to_dfvalue_vec(pg_rows);
-
-                rs_results.sort_unstable();
-                pg_results.sort_unstable();
-
-                assert_eq!(pg_results, rs_results);
+                let result = rs_conn.simple_query(&create_cache).await;
+                AssertUnwindSafe(move || result)
+            }, then_assert: |result| {
+                result().unwrap()
             });
         }
-        // Also make sure all deleted tables were actually deleted:
-        for table in &runtime_state.deleted_tables {
-            rs_conn
-                .query(&format!("DROP TABLE \"{table}\""), &[])
-                .await
-                .unwrap_err();
+        Operation::DropTable(name) => {
+            let query = format!("DROP TABLE \"{name}\" CASCADE");
+            rs_conn.simple_query(&query).await.unwrap();
+            pg_conn.simple_query(&query).await.unwrap();
         }
-        // And then do the same for views:
-        for view in &runtime_state.deleted_views {
-            rs_conn
-                .query(&format!("DROP VIEW \"{view}\""), &[])
-                .await
-                .unwrap_err();
+        Operation::WriteRow {
+            table,
+            pkey,
+            col_vals,
+            ..
+        } => {
+            let pkey = DfValue::from(*pkey);
+            let params: Vec<&DfValue> = once(&pkey).chain(col_vals.iter()).collect();
+            let placeholders: Vec<_> = (1..=params.len()).map(|n| format!("${n}")).collect();
+            let placeholders = placeholders.join(", ");
+            let query = format!("INSERT INTO \"{table}\" VALUES ({placeholders})");
+            rs_conn.query_raw(&query, &params).await.unwrap();
+            pg_conn.query_raw(&query, &params).await.unwrap();
         }
-
-        // This must always happen last in this loop so that we don't increment this if something
-        // triggers a test failure earlier in the iteration:
-        next_step_idx.set(next_step_idx.get() + 1);
+        Operation::AddColumn(table_name, col_spec) => {
+            let query = format!(
+                "ALTER TABLE \"{}\" ADD COLUMN \"{}\" {}",
+                table_name,
+                col_spec.name,
+                col_spec.sql_type.display(nom_sql::Dialect::PostgreSQL)
+            );
+            rs_conn.simple_query(&query).await.unwrap();
+            pg_conn.simple_query(&query).await.unwrap();
+        }
+        Operation::DropColumn(table_name, col_name) => {
+            let query = format!(
+                "ALTER TABLE \"{}\" DROP COLUMN \"{}\"",
+                table_name, col_name
+            );
+            rs_conn.simple_query(&query).await.unwrap();
+            pg_conn.simple_query(&query).await.unwrap();
+        }
+        Operation::AlterColumnName {
+            table,
+            col_name,
+            new_name,
+        } => {
+            let query = format!(
+                "ALTER TABLE \"{}\" RENAME COLUMN \"{}\" TO \"{}\"",
+                table, col_name, new_name
+            );
+            rs_conn.simple_query(&query).await.unwrap();
+            pg_conn.simple_query(&query).await.unwrap();
+        }
+        Operation::DeleteRow(table_name, key) => {
+            let query = format!("DELETE FROM \"{table_name}\" WHERE id = ({key})");
+            rs_conn.simple_query(&query).await.unwrap();
+            pg_conn.simple_query(&query).await.unwrap();
+        }
+        Operation::CreateSimpleView { name, table_source } => {
+            let query = format!("CREATE VIEW \"{name}\" AS SELECT * FROM \"{table_source}\"");
+            rs_conn.simple_query(&query).await.unwrap();
+            pg_conn.simple_query(&query).await.unwrap();
+            let create_cache = format!("CREATE CACHE ALWAYS FROM SELECT * FROM \"{name}\"");
+            eventually!(run_test: {
+                let result = rs_conn.simple_query(&create_cache).await;
+                AssertUnwindSafe(move || result)
+            }, then_assert: |result| {
+                result().unwrap()
+            });
+        }
+        Operation::CreateJoinView {
+            name,
+            table_a,
+            table_b,
+        } => {
+            // Must give a unique alias to each column in the source tables to avoid issues
+            // with duplicate column names in the resulting view
+            let select_list: Vec<String> = runtime_state.tables[table_a]
+                .iter()
+                .chain(runtime_state.tables[table_b].iter())
+                .enumerate()
+                .map(|(i, cs)| format!("\"{}\" AS c{}", cs.name, i))
+                .collect();
+            let select_list = select_list.join(", ");
+            let view_def = format!(
+                "SELECT {} FROM \"{}\" JOIN \"{}\" ON \"{}\".id = \"{}\".id",
+                select_list, table_a, table_b, table_a, table_b
+            );
+            let query = format!("CREATE VIEW \"{}\" AS {}", name, view_def);
+            rs_conn.simple_query(&query).await.unwrap();
+            pg_conn.simple_query(&query).await.unwrap();
+            let create_cache = format!("CREATE CACHE ALWAYS FROM SELECT * FROM \"{name}\"");
+            eventually!(run_test: {
+                let result = rs_conn.simple_query(&create_cache).await;
+                AssertUnwindSafe(move || result)
+            }, then_assert: |result| {
+                result().unwrap()
+            });
+        }
+        Operation::DropView(name) => {
+            let query = format!("DROP VIEW \"{name}\"");
+            rs_conn.simple_query(&query).await.unwrap();
+            pg_conn.simple_query(&query).await.unwrap();
+        }
+        Operation::CreateEnum(name, elements) => {
+            let elements: Vec<String> = elements.iter().map(|e| format!("'{e}'")).collect();
+            let element_list = elements.join(", ");
+            // Quote the type name to prevent clashes with builtin types or reserved keywords
+            let query = format!("CREATE TYPE \"{}\" AS ENUM ({})", name, element_list);
+            rs_conn.simple_query(&query).await.unwrap();
+            pg_conn.simple_query(&query).await.unwrap();
+        }
+        Operation::DropEnum(name) => {
+            let query = format!("DROP TYPE \"{name}\"");
+            rs_conn.simple_query(&query).await.unwrap();
+            pg_conn.simple_query(&query).await.unwrap();
+        }
+        Operation::AppendEnumValue {
+            type_name,
+            value_name,
+        } => {
+            let query = format!("ALTER TYPE \"{type_name}\" ADD VALUE '{value_name}'");
+            rs_conn.simple_query(&query).await.unwrap();
+            pg_conn.simple_query(&query).await.unwrap();
+            recreate_caches_using_type(type_name, &runtime_state.tables, rs_conn).await;
+        }
+        Operation::InsertEnumValue {
+            type_name,
+            value_name,
+            position,
+            next_to_value,
+        } => {
+            let query = format!(
+                "ALTER TYPE \"{}\" ADD VALUE '{}' {} '{}'",
+                type_name, value_name, position, next_to_value
+            );
+            rs_conn.simple_query(&query).await.unwrap();
+            pg_conn.simple_query(&query).await.unwrap();
+            recreate_caches_using_type(type_name, &runtime_state.tables, rs_conn).await;
+        }
+        Operation::RenameEnumValue {
+            type_name,
+            value_name,
+            new_name,
+        } => {
+            let query = format!(
+                "ALTER TYPE \"{}\" RENAME VALUE '{}' TO '{}'",
+                type_name, value_name, new_name
+            );
+            rs_conn.simple_query(&query).await.unwrap();
+            pg_conn.simple_query(&query).await.unwrap();
+            recreate_caches_using_type(type_name, &runtime_state.tables, rs_conn).await;
+        }
     }
+}
 
-    shutdown_tx.shutdown().await;
+async fn check_postconditions(runtime_state: &DDLModelState, ctxt: &mut DDLTestRunContext) {
+    let DDLTestRunContext {
+        rs_conn, pg_conn, ..
+    } = ctxt;
+
+    // After each op, check that all table and view contents match
+    for relation in runtime_state
+        .tables
+        .keys()
+        .chain(runtime_state.views.keys())
+    {
+        eventually!(run_test: {
+            let rs_rows = rs_conn
+                .query(&format!("SELECT * FROM \"{relation}\""), &[])
+                .await
+                .unwrap();
+            let pg_rows = pg_conn
+                .query(&format!("SELECT * FROM \"{relation}\""), &[])
+                .await
+                .unwrap();
+            // Previously, we would run all the result handling in the run_test block, but
+            // doing it in the then_assert block lets us work around a tokio-postgres client
+            // crash caused by ENG-2548 by retrying until ReadySet stops sending us bad
+            // packets.
+            AssertUnwindSafe(move || (rs_rows, pg_rows))
+        }, then_assert: |results| {
+            let (rs_rows, pg_rows) = results();
+
+            let mut rs_results = rows_to_dfvalue_vec(rs_rows);
+            let mut pg_results = rows_to_dfvalue_vec(pg_rows);
+
+            rs_results.sort_unstable();
+            pg_results.sort_unstable();
+
+            assert_eq!(pg_results, rs_results);
+        });
+    }
+    // Also make sure all deleted tables were actually deleted:
+    for table in &runtime_state.deleted_tables {
+        rs_conn
+            .query(&format!("DROP TABLE \"{table}\""), &[])
+            .await
+            .unwrap_err();
+    }
+    // And then do the same for views:
+    for view in &runtime_state.deleted_views {
+        rs_conn
+            .query(&format!("DROP VIEW \"{view}\""), &[])
+            .await
+            .unwrap_err();
+    }
+}
+
+async fn clean_up_test_run(ctxt: &mut DDLTestRunContext) {
+    ctxt.shutdown_tx.take().unwrap().shutdown().await;
 }
 
 async fn recreate_caches_using_type(
@@ -1324,33 +1177,12 @@ async fn recreate_caches_using_type(
 #[test]
 #[cfg_attr(not(feature = "ddl_vertical_tests"), ignore)]
 fn run_cases() {
-    let config = ProptestConfig {
-        max_shrink_iters: MAX_OPS as u32 * 2,
-        ..ProptestConfig::default()
+    let _config = StatefulProptestConfig {
+        min_ops: 7,
+        max_ops: 13,
+        test_case_timeout: Duration::from_secs(60),
     };
 
-    // Used for optimizing shrinking by letting us immediately discard any steps after the failing
-    // step. To enable this, we need to be able to mutate the value from the test itself, and then
-    // access it from within the [`DDLModelState`], which is not easily doable within the
-    // constraints of the proptest API, since the test passed to [`TestRunner`] is [`Fn`] (not
-    // [`FnMut`]). Hence the need for interior mutability.
-    let next_step_idx = Rc::new(Cell::new(0));
-
-    let model = DDLModelState {
-        next_step_idx: next_step_idx.clone(),
-        ..DDLModelState::default()
-    };
-    proptest!(config, |(steps in model)| {
-        prop_assume!(preconditions_hold(&steps));
-        next_step_idx.set(0);
-        let rt = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        rt.block_on(
-            async {
-                tokio::time::timeout(TEST_CASE_TIMEOUT, run(steps, next_step_idx.clone())).await
-            }
-        ).unwrap();
-    });
+    // TODO uncomment once the rest of the module is converted to use stateful-proptest
+    //stateful_proptest::test::<DDLModelState>(stateful_config);
 }
