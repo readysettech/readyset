@@ -194,116 +194,6 @@ enum Operation {
     },
 }
 
-impl DDLModelState {
-    /// Checks preconditions for an [`Operation`] given a current test model state.
-    ///
-    /// These are primarily needed for shrinking, so that we can make sure that we don't do things
-    /// like remove a [`Operation::CreateTable`] when a later [`Operation::WriteRow`] operation
-    /// depends on the corresponding table.
-    ///
-    /// We also check preconditions during runtime, and throw out any test cases where the
-    /// preconditions aren't satisfied. This should be rare, though, because
-    /// [`DDLModelState::op_generators`] should *usually* only generate cases where the
-    /// preconditions are already satisified. It's possible there are weird corner cases though
-    /// (such as multiple random strings happening to generate the same string value for two
-    /// different table names) where preconditions could save us from a false positive test
-    /// failure.
-    fn preconditions(&self, op: &Operation) -> bool {
-        match op {
-            Operation::CreateTable(name, cols) => {
-                !self.tables.contains_key(name)
-                    && cols.iter().all(|cs| match cs {
-                        ColumnSpec {
-                            sql_type: SqlType::Other(type_name),
-                            ..
-                        } => self.enum_types.contains_key(type_name.name.as_str()),
-                        _ => true,
-                    })
-            }
-            Operation::DropTable(name) => self.tables.contains_key(name),
-            Operation::WriteRow {
-                table,
-                pkey,
-                col_vals: _,
-                col_types,
-            } => {
-                // Make sure that the table doesn't already contain a row with this key, and also
-                // make sure that the column types in the table also match up with the types in the
-                // row that we're trying to write:
-                self.pkeys
-                    .get(table)
-                    .map_or(false, |table_keys| !table_keys.contains(pkey))
-                    && self.tables.get(table).map_or(false, |table_cols| {
-                        table_cols
-                            .iter()
-                            .zip(col_types)
-                            .all(|(cs, row_type)| cs.sql_type == *row_type)
-                    })
-            }
-            Operation::DeleteRow(table, key) => self
-                .pkeys
-                .get(table)
-                .map_or(false, |table_keys| table_keys.contains(key)),
-            Operation::AddColumn(table, column_spec) => self
-                .tables
-                .get(table)
-                .map_or(false, |t| t.iter().all(|cs| cs.name != *column_spec.name)),
-            Operation::DropColumn(table, col_name) => self
-                .tables
-                .get(table)
-                .map_or(false, |t| t.iter().any(|cs| cs.name == *col_name)),
-            Operation::AlterColumnName {
-                table,
-                col_name,
-                new_name,
-            } => self.tables.get(table).map_or(false, |t| {
-                t.iter().any(|cs| cs.name == *col_name) && t.iter().all(|cs| cs.name != *new_name)
-            }),
-            Operation::CreateSimpleView { name, table_source } => {
-                self.tables.contains_key(table_source)
-                    && !self.tables.contains_key(name)
-                    && !self.views.contains_key(name)
-            }
-            Operation::CreateJoinView {
-                name,
-                table_a,
-                table_b,
-            } => {
-                self.tables.contains_key(table_a)
-                    && self.tables.contains_key(table_b)
-                    && !self.tables.contains_key(name)
-                    && !self.views.contains_key(name)
-            }
-            Operation::DropView(name) => self.views.contains_key(name),
-            Operation::CreateEnum(name, _values) => !self.enum_types.contains_key(name),
-            Operation::DropEnum(name) => tables_using_type(&self.tables, name).next().is_none(),
-            Operation::AppendEnumValue {
-                type_name,
-                value_name,
-            } => self
-                .enum_types
-                .get(type_name)
-                .map_or(false, |t| !t.contains(value_name)),
-            Operation::InsertEnumValue {
-                type_name,
-                value_name,
-                next_to_value,
-                ..
-            } => self.enum_types.get(type_name).map_or(false, |t| {
-                t.contains(next_to_value) && !t.contains(value_name)
-            }),
-            Operation::RenameEnumValue {
-                type_name,
-                value_name,
-                new_name,
-            } => self
-                .enum_types
-                .get(type_name)
-                .map_or(false, |t| t.contains(value_name) && !t.contains(new_name)),
-        }
-    }
-}
-
 /// Returns an iterator that yields names of tables that use the given type.
 fn tables_using_type<'a>(
     tables: &'a HashMap<String, Vec<ColumnSpec>>,
@@ -823,26 +713,374 @@ impl ModelState for DDLModelState {
         }
     }
 
-    /// TODO move the implementation directly here, but do it in a separate commit to make it
-    /// clearer what code has actually changed vs. what has simply been moved around the file.
+    /// Checks preconditions for an [`Operation`] given a current test model state.
+    ///
+    /// These are primarily needed for shrinking, so that we can make sure that we don't do things
+    /// like remove a [`Operation::CreateTable`] when a later [`Operation::WriteRow`] operation
+    /// depends on the corresponding table.
+    ///
+    /// We also check preconditions during runtime, and throw out any test cases where the
+    /// preconditions aren't satisfied. This should be rare, though, because
+    /// [`DDLModelState::op_generators`] should *usually* only generate cases where the
+    /// preconditions are already satisified. It's possible there are weird corner cases though
+    /// (such as multiple random strings happening to generate the same string value for two
+    /// different table names) where preconditions could save us from a false positive test
+    /// failure.
     fn preconditions_met(&self, op: &Self::Operation) -> bool {
-        self.preconditions(op)
+        match op {
+            Operation::CreateTable(name, cols) => {
+                !self.tables.contains_key(name)
+                    && cols.iter().all(|cs| match cs {
+                        ColumnSpec {
+                            sql_type: SqlType::Other(type_name),
+                            ..
+                        } => self.enum_types.contains_key(type_name.name.as_str()),
+                        _ => true,
+                    })
+            }
+            Operation::DropTable(name) => self.tables.contains_key(name),
+            Operation::WriteRow {
+                table,
+                pkey,
+                col_vals: _,
+                col_types,
+            } => {
+                // Make sure that the table doesn't already contain a row with this key, and also
+                // make sure that the column types in the table also match up with the types in the
+                // row that we're trying to write:
+                self.pkeys
+                    .get(table)
+                    .map_or(false, |table_keys| !table_keys.contains(pkey))
+                    && self.tables.get(table).map_or(false, |table_cols| {
+                        table_cols
+                            .iter()
+                            .zip(col_types)
+                            .all(|(cs, row_type)| cs.sql_type == *row_type)
+                    })
+            }
+            Operation::DeleteRow(table, key) => self
+                .pkeys
+                .get(table)
+                .map_or(false, |table_keys| table_keys.contains(key)),
+            Operation::AddColumn(table, column_spec) => self
+                .tables
+                .get(table)
+                .map_or(false, |t| t.iter().all(|cs| cs.name != *column_spec.name)),
+            Operation::DropColumn(table, col_name) => self
+                .tables
+                .get(table)
+                .map_or(false, |t| t.iter().any(|cs| cs.name == *col_name)),
+            Operation::AlterColumnName {
+                table,
+                col_name,
+                new_name,
+            } => self.tables.get(table).map_or(false, |t| {
+                t.iter().any(|cs| cs.name == *col_name) && t.iter().all(|cs| cs.name != *new_name)
+            }),
+            Operation::CreateSimpleView { name, table_source } => {
+                self.tables.contains_key(table_source)
+                    && !self.tables.contains_key(name)
+                    && !self.views.contains_key(name)
+            }
+            Operation::CreateJoinView {
+                name,
+                table_a,
+                table_b,
+            } => {
+                self.tables.contains_key(table_a)
+                    && self.tables.contains_key(table_b)
+                    && !self.tables.contains_key(name)
+                    && !self.views.contains_key(name)
+            }
+            Operation::DropView(name) => self.views.contains_key(name),
+            Operation::CreateEnum(name, _values) => !self.enum_types.contains_key(name),
+            Operation::DropEnum(name) => tables_using_type(&self.tables, name).next().is_none(),
+            Operation::AppendEnumValue {
+                type_name,
+                value_name,
+            } => self
+                .enum_types
+                .get(type_name)
+                .map_or(false, |t| !t.contains(value_name)),
+            Operation::InsertEnumValue {
+                type_name,
+                value_name,
+                next_to_value,
+                ..
+            } => self.enum_types.get(type_name).map_or(false, |t| {
+                t.contains(next_to_value) && !t.contains(value_name)
+            }),
+            Operation::RenameEnumValue {
+                type_name,
+                value_name,
+                new_name,
+            } => self
+                .enum_types
+                .get(type_name)
+                .map_or(false, |t| t.contains(value_name) && !t.contains(new_name)),
+        }
     }
 
+    /// Get ready to run a single test case by:
+    ///  * Setting up a test instance of ReadySet that connects to an upstream instance of Postgres
+    ///  * Wiping and recreating a fresh copy of the oracle database directly in Postgres, and
+    ///    setting up a connection
     async fn init_test_run(&self) -> Self::RunContext {
-        init_test_run().await
+        readyset_tracing::init_test_logging();
+
+        let (opts, _handle, shutdown_tx) = TestBuilder::default()
+            .fallback(true)
+            .build::<PostgreSQLAdapter>()
+            .await;
+        let rs_conn = connect(opts).await;
+
+        recreate_oracle_db().await;
+        let pg_conn = connect(oracle_db_config()).await;
+
+        DDLTestRunContext {
+            rs_conn,
+            pg_conn,
+            shutdown_tx: Some(shutdown_tx),
+        }
     }
 
+    /// Run the code to test a single operation:
+    ///  * Running each step in `ops`, and checking afterward that:
+    ///    * The contents of the tables tracked by our model match across both ReadySet and Postgres
+    ///    * Any deleted tables appear as deleted in both ReadySet and Postgres
     async fn run_op(&self, op: &Self::Operation, ctxt: &mut Self::RunContext) {
-        run_op(self, op, ctxt).await
+        let DDLTestRunContext {
+            rs_conn, pg_conn, ..
+        } = ctxt;
+
+        match op {
+            Operation::CreateTable(table_name, cols) => {
+                let non_pkey_cols = cols.iter().map(|ColumnSpec { name, sql_type, .. }| {
+                    format!(
+                        "\"{name}\" {}",
+                        sql_type.display(nom_sql::Dialect::PostgreSQL)
+                    )
+                });
+                let col_defs: Vec<String> = once("id INT PRIMARY KEY".to_string())
+                    .chain(non_pkey_cols)
+                    .collect();
+                let col_defs = col_defs.join(", ");
+                let query = format!("CREATE TABLE \"{table_name}\" ({col_defs})");
+                rs_conn.simple_query(&query).await.unwrap();
+                pg_conn.simple_query(&query).await.unwrap();
+
+                let create_cache =
+                    format!("CREATE CACHE ALWAYS FROM SELECT * FROM \"{table_name}\"");
+                eventually!(run_test: {
+                    let result = rs_conn.simple_query(&create_cache).await;
+                    AssertUnwindSafe(move || result)
+                }, then_assert: |result| {
+                    result().unwrap()
+                });
+            }
+            Operation::DropTable(name) => {
+                let query = format!("DROP TABLE \"{name}\" CASCADE");
+                rs_conn.simple_query(&query).await.unwrap();
+                pg_conn.simple_query(&query).await.unwrap();
+            }
+            Operation::WriteRow {
+                table,
+                pkey,
+                col_vals,
+                ..
+            } => {
+                let pkey = DfValue::from(*pkey);
+                let params: Vec<&DfValue> = once(&pkey).chain(col_vals.iter()).collect();
+                let placeholders: Vec<_> = (1..=params.len()).map(|n| format!("${n}")).collect();
+                let placeholders = placeholders.join(", ");
+                let query = format!("INSERT INTO \"{table}\" VALUES ({placeholders})");
+                rs_conn.query_raw(&query, &params).await.unwrap();
+                pg_conn.query_raw(&query, &params).await.unwrap();
+            }
+            Operation::AddColumn(table_name, col_spec) => {
+                let query = format!(
+                    "ALTER TABLE \"{}\" ADD COLUMN \"{}\" {}",
+                    table_name,
+                    col_spec.name,
+                    col_spec.sql_type.display(nom_sql::Dialect::PostgreSQL)
+                );
+                rs_conn.simple_query(&query).await.unwrap();
+                pg_conn.simple_query(&query).await.unwrap();
+            }
+            Operation::DropColumn(table_name, col_name) => {
+                let query = format!(
+                    "ALTER TABLE \"{}\" DROP COLUMN \"{}\"",
+                    table_name, col_name
+                );
+                rs_conn.simple_query(&query).await.unwrap();
+                pg_conn.simple_query(&query).await.unwrap();
+            }
+            Operation::AlterColumnName {
+                table,
+                col_name,
+                new_name,
+            } => {
+                let query = format!(
+                    "ALTER TABLE \"{}\" RENAME COLUMN \"{}\" TO \"{}\"",
+                    table, col_name, new_name
+                );
+                rs_conn.simple_query(&query).await.unwrap();
+                pg_conn.simple_query(&query).await.unwrap();
+            }
+            Operation::DeleteRow(table_name, key) => {
+                let query = format!("DELETE FROM \"{table_name}\" WHERE id = ({key})");
+                rs_conn.simple_query(&query).await.unwrap();
+                pg_conn.simple_query(&query).await.unwrap();
+            }
+            Operation::CreateSimpleView { name, table_source } => {
+                let query = format!("CREATE VIEW \"{name}\" AS SELECT * FROM \"{table_source}\"");
+                rs_conn.simple_query(&query).await.unwrap();
+                pg_conn.simple_query(&query).await.unwrap();
+                let create_cache = format!("CREATE CACHE ALWAYS FROM SELECT * FROM \"{name}\"");
+                eventually!(run_test: {
+                    let result = rs_conn.simple_query(&create_cache).await;
+                    AssertUnwindSafe(move || result)
+                }, then_assert: |result| {
+                    result().unwrap()
+                });
+            }
+            Operation::CreateJoinView {
+                name,
+                table_a,
+                table_b,
+            } => {
+                // Must give a unique alias to each column in the source tables to avoid issues
+                // with duplicate column names in the resulting view
+                let select_list: Vec<String> = self.tables[table_a]
+                    .iter()
+                    .chain(self.tables[table_b].iter())
+                    .enumerate()
+                    .map(|(i, cs)| format!("\"{}\" AS c{}", cs.name, i))
+                    .collect();
+                let select_list = select_list.join(", ");
+                let view_def = format!(
+                    "SELECT {} FROM \"{}\" JOIN \"{}\" ON \"{}\".id = \"{}\".id",
+                    select_list, table_a, table_b, table_a, table_b
+                );
+                let query = format!("CREATE VIEW \"{}\" AS {}", name, view_def);
+                rs_conn.simple_query(&query).await.unwrap();
+                pg_conn.simple_query(&query).await.unwrap();
+                let create_cache = format!("CREATE CACHE ALWAYS FROM SELECT * FROM \"{name}\"");
+                eventually!(run_test: {
+                    let result = rs_conn.simple_query(&create_cache).await;
+                    AssertUnwindSafe(move || result)
+                }, then_assert: |result| {
+                    result().unwrap()
+                });
+            }
+            Operation::DropView(name) => {
+                let query = format!("DROP VIEW \"{name}\"");
+                rs_conn.simple_query(&query).await.unwrap();
+                pg_conn.simple_query(&query).await.unwrap();
+            }
+            Operation::CreateEnum(name, elements) => {
+                let elements: Vec<String> = elements.iter().map(|e| format!("'{e}'")).collect();
+                let element_list = elements.join(", ");
+                // Quote the type name to prevent clashes with builtin types or reserved keywords
+                let query = format!("CREATE TYPE \"{}\" AS ENUM ({})", name, element_list);
+                rs_conn.simple_query(&query).await.unwrap();
+                pg_conn.simple_query(&query).await.unwrap();
+            }
+            Operation::DropEnum(name) => {
+                let query = format!("DROP TYPE \"{name}\"");
+                rs_conn.simple_query(&query).await.unwrap();
+                pg_conn.simple_query(&query).await.unwrap();
+            }
+            Operation::AppendEnumValue {
+                type_name,
+                value_name,
+            } => {
+                let query = format!("ALTER TYPE \"{type_name}\" ADD VALUE '{value_name}'");
+                rs_conn.simple_query(&query).await.unwrap();
+                pg_conn.simple_query(&query).await.unwrap();
+                recreate_caches_using_type(type_name, &self.tables, rs_conn).await;
+            }
+            Operation::InsertEnumValue {
+                type_name,
+                value_name,
+                position,
+                next_to_value,
+            } => {
+                let query = format!(
+                    "ALTER TYPE \"{}\" ADD VALUE '{}' {} '{}'",
+                    type_name, value_name, position, next_to_value
+                );
+                rs_conn.simple_query(&query).await.unwrap();
+                pg_conn.simple_query(&query).await.unwrap();
+                recreate_caches_using_type(type_name, &self.tables, rs_conn).await;
+            }
+            Operation::RenameEnumValue {
+                type_name,
+                value_name,
+                new_name,
+            } => {
+                let query = format!(
+                    "ALTER TYPE \"{}\" RENAME VALUE '{}' TO '{}'",
+                    type_name, value_name, new_name
+                );
+                rs_conn.simple_query(&query).await.unwrap();
+                pg_conn.simple_query(&query).await.unwrap();
+                recreate_caches_using_type(type_name, &self.tables, rs_conn).await;
+            }
+        }
     }
 
     async fn check_postconditions(&self, ctxt: &mut Self::RunContext) {
-        check_postconditions(self, ctxt).await
+        let DDLTestRunContext {
+            rs_conn, pg_conn, ..
+        } = ctxt;
+
+        // After each op, check that all table and view contents match
+        for relation in self.tables.keys().chain(self.views.keys()) {
+            eventually!(run_test: {
+                let rs_rows = rs_conn
+                    .query(&format!("SELECT * FROM \"{relation}\""), &[])
+                    .await
+                    .unwrap();
+                let pg_rows = pg_conn
+                    .query(&format!("SELECT * FROM \"{relation}\""), &[])
+                    .await
+                    .unwrap();
+                // Previously, we would run all the result handling in the run_test block, but
+                // doing it in the then_assert block lets us work around a tokio-postgres client
+                // crash caused by ENG-2548 by retrying until ReadySet stops sending us bad
+                // packets.
+                AssertUnwindSafe(move || (rs_rows, pg_rows))
+            }, then_assert: |results| {
+                let (rs_rows, pg_rows) = results();
+
+                let mut rs_results = rows_to_dfvalue_vec(rs_rows);
+                let mut pg_results = rows_to_dfvalue_vec(pg_rows);
+
+                rs_results.sort_unstable();
+                pg_results.sort_unstable();
+
+                assert_eq!(pg_results, rs_results);
+            });
+        }
+        // Also make sure all deleted tables were actually deleted:
+        for table in &self.deleted_tables {
+            rs_conn
+                .query(&format!("DROP TABLE \"{table}\""), &[])
+                .await
+                .unwrap_err();
+        }
+        // And then do the same for views:
+        for view in &self.deleted_views {
+            rs_conn
+                .query(&format!("DROP VIEW \"{view}\""), &[])
+                .await
+                .unwrap_err();
+        }
     }
 
     async fn clean_up_test_run(&self, ctxt: &mut Self::RunContext) {
-        clean_up_test_run(ctxt).await
+        ctxt.shutdown_tx.take().unwrap().shutdown().await
     }
 }
 
@@ -888,273 +1126,6 @@ fn rows_to_dfvalue_vec(rows: Vec<Row>) -> Vec<Vec<DfValue>> {
                 .collect()
         })
         .collect()
-}
-
-/// TODO: Fold this function into the `impl ModelState` block for [`DDLModelState`].
-/// Get ready to run a single test case by:
-///  * Setting up a test instance of ReadySet that connects to an upstream instance of Postgres
-///  * Wiping and recreating a fresh copy of the oracle database directly in Postgres, and setting
-///    up a connection
-async fn init_test_run() -> DDLTestRunContext {
-    readyset_tracing::init_test_logging();
-
-    let (opts, _handle, shutdown_tx) = TestBuilder::default()
-        .fallback(true)
-        .build::<PostgreSQLAdapter>()
-        .await;
-    let rs_conn = connect(opts).await;
-
-    recreate_oracle_db().await;
-    let pg_conn = connect(oracle_db_config()).await;
-
-    DDLTestRunContext {
-        rs_conn,
-        pg_conn,
-        shutdown_tx: Some(shutdown_tx),
-    }
-}
-
-/// TODO: Fold this function into the `impl ModelState` block for [`DDLModelState`].
-/// Run the code to test a single operation:
-///  * Running each step in `ops`, and checking afterward that:
-///    * The contents of the tables tracked by our model match across both ReadySet and Postgres
-///    * Any deleted tables appear as deleted in both ReadySet and Postgres
-async fn run_op(runtime_state: &DDLModelState, op: &Operation, ctxt: &mut DDLTestRunContext) {
-    let DDLTestRunContext {
-        rs_conn, pg_conn, ..
-    } = ctxt;
-
-    match &op {
-        Operation::CreateTable(table_name, cols) => {
-            let non_pkey_cols = cols.iter().map(|ColumnSpec { name, sql_type, .. }| {
-                format!(
-                    "\"{name}\" {}",
-                    sql_type.display(nom_sql::Dialect::PostgreSQL)
-                )
-            });
-            let col_defs: Vec<String> = once("id INT PRIMARY KEY".to_string())
-                .chain(non_pkey_cols)
-                .collect();
-            let col_defs = col_defs.join(", ");
-            let query = format!("CREATE TABLE \"{table_name}\" ({col_defs})");
-            rs_conn.simple_query(&query).await.unwrap();
-            pg_conn.simple_query(&query).await.unwrap();
-
-            let create_cache = format!("CREATE CACHE ALWAYS FROM SELECT * FROM \"{table_name}\"");
-            eventually!(run_test: {
-                let result = rs_conn.simple_query(&create_cache).await;
-                AssertUnwindSafe(move || result)
-            }, then_assert: |result| {
-                result().unwrap()
-            });
-        }
-        Operation::DropTable(name) => {
-            let query = format!("DROP TABLE \"{name}\" CASCADE");
-            rs_conn.simple_query(&query).await.unwrap();
-            pg_conn.simple_query(&query).await.unwrap();
-        }
-        Operation::WriteRow {
-            table,
-            pkey,
-            col_vals,
-            ..
-        } => {
-            let pkey = DfValue::from(*pkey);
-            let params: Vec<&DfValue> = once(&pkey).chain(col_vals.iter()).collect();
-            let placeholders: Vec<_> = (1..=params.len()).map(|n| format!("${n}")).collect();
-            let placeholders = placeholders.join(", ");
-            let query = format!("INSERT INTO \"{table}\" VALUES ({placeholders})");
-            rs_conn.query_raw(&query, &params).await.unwrap();
-            pg_conn.query_raw(&query, &params).await.unwrap();
-        }
-        Operation::AddColumn(table_name, col_spec) => {
-            let query = format!(
-                "ALTER TABLE \"{}\" ADD COLUMN \"{}\" {}",
-                table_name,
-                col_spec.name,
-                col_spec.sql_type.display(nom_sql::Dialect::PostgreSQL)
-            );
-            rs_conn.simple_query(&query).await.unwrap();
-            pg_conn.simple_query(&query).await.unwrap();
-        }
-        Operation::DropColumn(table_name, col_name) => {
-            let query = format!(
-                "ALTER TABLE \"{}\" DROP COLUMN \"{}\"",
-                table_name, col_name
-            );
-            rs_conn.simple_query(&query).await.unwrap();
-            pg_conn.simple_query(&query).await.unwrap();
-        }
-        Operation::AlterColumnName {
-            table,
-            col_name,
-            new_name,
-        } => {
-            let query = format!(
-                "ALTER TABLE \"{}\" RENAME COLUMN \"{}\" TO \"{}\"",
-                table, col_name, new_name
-            );
-            rs_conn.simple_query(&query).await.unwrap();
-            pg_conn.simple_query(&query).await.unwrap();
-        }
-        Operation::DeleteRow(table_name, key) => {
-            let query = format!("DELETE FROM \"{table_name}\" WHERE id = ({key})");
-            rs_conn.simple_query(&query).await.unwrap();
-            pg_conn.simple_query(&query).await.unwrap();
-        }
-        Operation::CreateSimpleView { name, table_source } => {
-            let query = format!("CREATE VIEW \"{name}\" AS SELECT * FROM \"{table_source}\"");
-            rs_conn.simple_query(&query).await.unwrap();
-            pg_conn.simple_query(&query).await.unwrap();
-            let create_cache = format!("CREATE CACHE ALWAYS FROM SELECT * FROM \"{name}\"");
-            eventually!(run_test: {
-                let result = rs_conn.simple_query(&create_cache).await;
-                AssertUnwindSafe(move || result)
-            }, then_assert: |result| {
-                result().unwrap()
-            });
-        }
-        Operation::CreateJoinView {
-            name,
-            table_a,
-            table_b,
-        } => {
-            // Must give a unique alias to each column in the source tables to avoid issues
-            // with duplicate column names in the resulting view
-            let select_list: Vec<String> = runtime_state.tables[table_a]
-                .iter()
-                .chain(runtime_state.tables[table_b].iter())
-                .enumerate()
-                .map(|(i, cs)| format!("\"{}\" AS c{}", cs.name, i))
-                .collect();
-            let select_list = select_list.join(", ");
-            let view_def = format!(
-                "SELECT {} FROM \"{}\" JOIN \"{}\" ON \"{}\".id = \"{}\".id",
-                select_list, table_a, table_b, table_a, table_b
-            );
-            let query = format!("CREATE VIEW \"{}\" AS {}", name, view_def);
-            rs_conn.simple_query(&query).await.unwrap();
-            pg_conn.simple_query(&query).await.unwrap();
-            let create_cache = format!("CREATE CACHE ALWAYS FROM SELECT * FROM \"{name}\"");
-            eventually!(run_test: {
-                let result = rs_conn.simple_query(&create_cache).await;
-                AssertUnwindSafe(move || result)
-            }, then_assert: |result| {
-                result().unwrap()
-            });
-        }
-        Operation::DropView(name) => {
-            let query = format!("DROP VIEW \"{name}\"");
-            rs_conn.simple_query(&query).await.unwrap();
-            pg_conn.simple_query(&query).await.unwrap();
-        }
-        Operation::CreateEnum(name, elements) => {
-            let elements: Vec<String> = elements.iter().map(|e| format!("'{e}'")).collect();
-            let element_list = elements.join(", ");
-            // Quote the type name to prevent clashes with builtin types or reserved keywords
-            let query = format!("CREATE TYPE \"{}\" AS ENUM ({})", name, element_list);
-            rs_conn.simple_query(&query).await.unwrap();
-            pg_conn.simple_query(&query).await.unwrap();
-        }
-        Operation::DropEnum(name) => {
-            let query = format!("DROP TYPE \"{name}\"");
-            rs_conn.simple_query(&query).await.unwrap();
-            pg_conn.simple_query(&query).await.unwrap();
-        }
-        Operation::AppendEnumValue {
-            type_name,
-            value_name,
-        } => {
-            let query = format!("ALTER TYPE \"{type_name}\" ADD VALUE '{value_name}'");
-            rs_conn.simple_query(&query).await.unwrap();
-            pg_conn.simple_query(&query).await.unwrap();
-            recreate_caches_using_type(type_name, &runtime_state.tables, rs_conn).await;
-        }
-        Operation::InsertEnumValue {
-            type_name,
-            value_name,
-            position,
-            next_to_value,
-        } => {
-            let query = format!(
-                "ALTER TYPE \"{}\" ADD VALUE '{}' {} '{}'",
-                type_name, value_name, position, next_to_value
-            );
-            rs_conn.simple_query(&query).await.unwrap();
-            pg_conn.simple_query(&query).await.unwrap();
-            recreate_caches_using_type(type_name, &runtime_state.tables, rs_conn).await;
-        }
-        Operation::RenameEnumValue {
-            type_name,
-            value_name,
-            new_name,
-        } => {
-            let query = format!(
-                "ALTER TYPE \"{}\" RENAME VALUE '{}' TO '{}'",
-                type_name, value_name, new_name
-            );
-            rs_conn.simple_query(&query).await.unwrap();
-            pg_conn.simple_query(&query).await.unwrap();
-            recreate_caches_using_type(type_name, &runtime_state.tables, rs_conn).await;
-        }
-    }
-}
-
-async fn check_postconditions(runtime_state: &DDLModelState, ctxt: &mut DDLTestRunContext) {
-    let DDLTestRunContext {
-        rs_conn, pg_conn, ..
-    } = ctxt;
-
-    // After each op, check that all table and view contents match
-    for relation in runtime_state
-        .tables
-        .keys()
-        .chain(runtime_state.views.keys())
-    {
-        eventually!(run_test: {
-            let rs_rows = rs_conn
-                .query(&format!("SELECT * FROM \"{relation}\""), &[])
-                .await
-                .unwrap();
-            let pg_rows = pg_conn
-                .query(&format!("SELECT * FROM \"{relation}\""), &[])
-                .await
-                .unwrap();
-            // Previously, we would run all the result handling in the run_test block, but
-            // doing it in the then_assert block lets us work around a tokio-postgres client
-            // crash caused by ENG-2548 by retrying until ReadySet stops sending us bad
-            // packets.
-            AssertUnwindSafe(move || (rs_rows, pg_rows))
-        }, then_assert: |results| {
-            let (rs_rows, pg_rows) = results();
-
-            let mut rs_results = rows_to_dfvalue_vec(rs_rows);
-            let mut pg_results = rows_to_dfvalue_vec(pg_rows);
-
-            rs_results.sort_unstable();
-            pg_results.sort_unstable();
-
-            assert_eq!(pg_results, rs_results);
-        });
-    }
-    // Also make sure all deleted tables were actually deleted:
-    for table in &runtime_state.deleted_tables {
-        rs_conn
-            .query(&format!("DROP TABLE \"{table}\""), &[])
-            .await
-            .unwrap_err();
-    }
-    // And then do the same for views:
-    for view in &runtime_state.deleted_views {
-        rs_conn
-            .query(&format!("DROP VIEW \"{view}\""), &[])
-            .await
-            .unwrap_err();
-    }
-}
-
-async fn clean_up_test_run(ctxt: &mut DDLTestRunContext) {
-    ctxt.shutdown_tx.take().unwrap().shutdown().await;
 }
 
 async fn recreate_caches_using_type(
