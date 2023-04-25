@@ -207,12 +207,12 @@ impl Operation {
     /// table.
     ///
     /// We also check preconditions during runtime, and throw out any test cases where the
-    /// preconditions aren't satisfied. This should be rare, though, because [`TestModel::gen_op`]
-    /// should usually only generate cases where the preconditions are already satisified. It's
-    /// possible there are weird corner cases though (such as multiple random strings happening to
-    /// generate the same string value for two different table names) where preconditions could
-    /// save us from a false positive test failure.
-    fn preconditions(&self, state: &TestModel) -> bool {
+    /// preconditions aren't satisfied. This should be rare, though, because
+    /// [`DDLModelState::gen_op`] should usually only generate cases where the preconditions are
+    /// already satisified. It's possible there are weird corner cases though (such as multiple
+    /// random strings happening to generate the same string value for two different table
+    /// names) where preconditions could save us from a false positive test failure.
+    fn preconditions(&self, state: &DDLModelState) -> bool {
         match self {
             Self::CreateTable(name, cols) => {
                 !state.tables.contains_key(name)
@@ -543,11 +543,11 @@ enum TestViewDef {
 /// results helps inform which operations we are able to test further along in the test case. For
 /// example, when writing a row, we must pick a table to write the row to, so we must look at the
 /// model state to see what tables have been previously created. We don't actually run a test case
-/// until all the steps have been generated, so [`TestModel`] allows us to simulate the expected
-/// state of the system for a given test case without having to actually run any of the steps
-/// against the system under test.
+/// until all the steps have been generated, so [`DDLModelState`] allows us to simulate the
+/// expected state of the system for a given test case without having to actually run any of the
+/// steps against the system under test.
 #[derive(Clone, Debug, Default)]
-struct TestModel {
+struct DDLModelState {
     tables: HashMap<String, Vec<ColumnSpec>>,
     deleted_tables: HashSet<String>,
     pkeys: HashMap<String, Vec<i32>>, // Primary keys in use for each table
@@ -562,7 +562,7 @@ struct TestModel {
     next_step_idx: Rc<Cell<usize>>,
 }
 
-impl TestModel {
+impl DDLModelState {
     /// Each invocation of this function returns a [`BoxedStrategy`] for generating an
     /// [`Operation`] *given the current state of the test model*. With a brand new model, the only
     /// possible operation is [`Operation::CreateTable`], but as tables are created and rows are
@@ -828,9 +828,9 @@ impl TestModel {
 }
 
 /// Tests whether a given sequence of [`Operation`] elements maintains all of the required
-/// preconditions as each step is executed according to [`TestModel`].
+/// preconditions as each step is executed according to [`DDLModelState`].
 fn preconditions_hold(ops: &[Operation]) -> bool {
-    let mut candidate_state = TestModel::default();
+    let mut candidate_state = DDLModelState::default();
     for op in ops {
         if !op.preconditions(&candidate_state) {
             return false;
@@ -964,14 +964,14 @@ impl TestTree {
     }
 }
 
-impl Strategy for TestModel {
+impl Strategy for DDLModelState {
     type Tree = TestTree;
     type Value = Vec<Operation>;
 
     /// Generates a new test case, consisting of a sequence of [`Operation`] values that conform to
-    /// the preconditions defined for [`TestModel`].
+    /// the preconditions defined for [`DDLModelState`].
     fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
-        let mut symbolic_state = TestModel::default();
+        let mut symbolic_state = DDLModelState::default();
 
         let size = Uniform::new_inclusive(MIN_OPS, MAX_OPS).sample(runner.rng());
         let ops = (0..size)
@@ -1061,7 +1061,7 @@ async fn run(ops: Vec<Operation>, next_step_idx: Rc<Cell<usize>>) {
     recreate_oracle_db().await;
     let pg_conn = connect(oracle_db_config()).await;
 
-    let mut runtime_state = TestModel::default();
+    let mut runtime_state = DDLModelState::default();
 
     for (idx, op) in ops.into_iter().enumerate() {
         println!("Running op {idx}: {op:?}");
@@ -1331,14 +1331,14 @@ fn run_cases() {
 
     // Used for optimizing shrinking by letting us immediately discard any steps after the failing
     // step. To enable this, we need to be able to mutate the value from the test itself, and then
-    // access it from within the [`TestModel`], which is not easily doable within the constraints
-    // of the proptest API, since the test passed to [`TestRunner`] is [`Fn`] (not [`FnMut`]).
-    // Hence the need for interior mutability.
+    // access it from within the [`DDLModelState`], which is not easily doable within the
+    // constraints of the proptest API, since the test passed to [`TestRunner`] is [`Fn`] (not
+    // [`FnMut`]). Hence the need for interior mutability.
     let next_step_idx = Rc::new(Cell::new(0));
 
-    let model = TestModel {
+    let model = DDLModelState {
         next_step_idx: next_step_idx.clone(),
-        ..TestModel::default()
+        ..DDLModelState::default()
     };
     proptest!(config, |(steps in model)| {
         prop_assume!(preconditions_hold(&steps));
@@ -1358,7 +1358,7 @@ fn run_cases() {
 proptest! {
     #[test]
     #[ignore]
-    fn print_cases(steps in TestModel::default()) {
+    fn print_cases(steps in DDLModelState::default()) {
         // This is mostly just useful for debugging test generation, hence it being marked ignored.
         for op in steps {
             println!("{:?}", op);
