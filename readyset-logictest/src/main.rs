@@ -3,12 +3,12 @@
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{self, Display};
 use std::fs::{self, File, OpenOptions};
+use std::io;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use std::{env, io, process};
 
 use anyhow::{anyhow, bail, Context};
 use clap::Parser;
@@ -627,13 +627,6 @@ impl Fuzz {
             eprintln!("Writing failing test script to {}", path.to_string_lossy());
             script.write_to(&mut file)?;
             file.flush()?;
-            if env::var("BUILDKITE").is_ok() {
-                process::Command::new("buildkite-agent")
-                    .args(["artifact", "upload", path.to_str().unwrap()])
-                    .spawn()
-                    .context("Uploading test script to Buildkite")?;
-            }
-
             bail!("Found failing set of queries: {}", reason);
         }
 
