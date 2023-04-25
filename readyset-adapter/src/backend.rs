@@ -92,7 +92,7 @@ pub use readyset_client_metrics::QueryDestination;
 use readyset_client_metrics::{recorded, EventType, QueryExecutionEvent, SqlQueryType};
 use readyset_data::{DfType, DfValue};
 use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
-use readyset_errors::{internal, internal_err, unsupported, ReadySetResult};
+use readyset_errors::{internal, internal_err, unsupported, unsupported_err, ReadySetResult};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 use readyset_util::redacted::Sensitive;
 use readyset_version::READYSET_VERSION;
@@ -121,9 +121,9 @@ enum PrepareMeta {
     /// Query could not be parsed
     FailedToParse,
     /// Query could not be rewritten for processing in noria
-    FailedToRewrite,
+    FailedToRewrite(ReadySetError),
     /// ReadySet does not implement this prepared statement. The statement may also be invalid SQL
-    Unimplemented,
+    Unimplemented(ReadySetError),
     /// A write query (Insert, Update, Delete)
     Write { stmt: SqlQuery },
     /// A read (Select; may be extended in the future)
@@ -978,7 +978,7 @@ where
     /// Provides metadata required to prepare a select query
     fn plan_prepare_select(&mut self, stmt: nom_sql::SelectStatement) -> PrepareMeta {
         match self.rewrite_select_and_check_noria(&stmt) {
-            Some((rewritten, should_do_noria)) => {
+            Ok((rewritten, should_do_noria)) => {
                 let status = self
                     .state
                     .query_status_cache
@@ -1001,13 +1001,13 @@ where
                     })
                 }
             }
-            None => {
+            Err(e) => {
                 warn!(
                     // FIXME(ENG-2499): Use correct dialect.
                     statement = %Sensitive(&stmt.display(nom_sql::Dialect::MySQL)),
                     "This statement could not be rewritten by ReadySet"
                 );
-                PrepareMeta::FailedToRewrite
+                PrepareMeta::FailedToRewrite(e)
             }
         }
     }
@@ -1020,23 +1020,19 @@ where
     fn rewrite_select_and_check_noria(
         &mut self,
         stmt: &nom_sql::SelectStatement,
-    ) -> Option<(nom_sql::SelectStatement, bool)> {
+    ) -> ReadySetResult<(nom_sql::SelectStatement, bool)> {
         let mut rewritten = stmt.clone();
-        if rewrite::process_query(&mut rewritten, self.noria.server_supports_pagination()).is_err()
-        {
-            None
-        } else {
-            let should_do_noria = self
-                .state
-                .query_status_cache
-                .query_migration_state(&ViewCreateRequest::new(
-                    rewritten.clone(),
-                    self.noria.schema_search_path().to_owned(),
-                ))
-                .1
-                != MigrationState::Unsupported;
-            Some((rewritten, should_do_noria))
-        }
+        rewrite::process_query(&mut rewritten, self.noria.server_supports_pagination())?;
+        let should_do_noria = self
+            .state
+            .query_status_cache
+            .query_migration_state(&ViewCreateRequest::new(
+                rewritten.clone(),
+                self.noria.schema_search_path().to_owned(),
+            ))
+            .1
+            != MigrationState::Unsupported;
+        Ok((rewritten, should_do_noria))
     }
 
     /// Provides metadata required to prepare a query
@@ -1058,7 +1054,10 @@ where
                     statement = %Sensitive(&pq.display(nom_sql::Dialect::MySQL)),
                     "Statement cannot be prepared by ReadySet"
                 );
-                PrepareMeta::Unimplemented
+                PrepareMeta::Unimplemented(unsupported_err!(
+                    "{} not supported without an upstream",
+                    pq.query_type()
+                ))
             }
             Err(_) => {
                 let mode = if self.state.proxy_state == ProxyState::Never {
@@ -1082,8 +1081,8 @@ where
         match meta {
             PrepareMeta::Proxy
             | PrepareMeta::FailedToParse
-            | PrepareMeta::FailedToRewrite
-            | PrepareMeta::Unimplemented
+            | PrepareMeta::FailedToRewrite(_)
+            | PrepareMeta::Unimplemented(_)
                 if self.upstream.is_some() =>
             {
                 let _t = event.start_upstream_timer();
@@ -1103,7 +1102,11 @@ where
             PrepareMeta::Select(select_meta) => {
                 self.mirror_prepare(select_meta, query, event).await
             }
-            _ => unsupported!(),
+            PrepareMeta::Proxy => unsupported!("No upstream, so query cannot be proxied"),
+            PrepareMeta::FailedToParse => unsupported!("Query failed to parse"),
+            PrepareMeta::FailedToRewrite(e) | PrepareMeta::Unimplemented(e) => {
+                Err(e.clone().into())
+            }
         }
     }
 
