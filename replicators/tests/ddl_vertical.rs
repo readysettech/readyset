@@ -1354,15 +1354,3 @@ fn run_cases() {
         ).unwrap();
     });
 }
-
-proptest! {
-    #[test]
-    #[ignore]
-    fn print_cases(steps in DDLModelState::default()) {
-        // This is mostly just useful for debugging test generation, hence it being marked ignored.
-        for op in steps {
-            println!("{:?}", op);
-        }
-        println!("----------");
-    }
-}
