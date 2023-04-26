@@ -232,13 +232,6 @@ impl Builder {
             .disable_upstream_ssl_verification = value;
     }
 
-    /// Sets whether we should keep the chain of prior recipes when storing a new
-    /// recipe. Setting this to false may have unexpected behavior and should be
-    /// used with caution. It is currently only used in test environments.
-    pub fn set_keep_prior_recipes(&mut self, value: bool) {
-        self.config.keep_prior_recipes = value;
-    }
-
     /// Sets the strategy to use to determine how many times to replicate domains
     pub fn set_replication_strategy(&mut self, replication_strategy: ReplicationStrategy) {
         self.config.replication_strategy = replication_strategy

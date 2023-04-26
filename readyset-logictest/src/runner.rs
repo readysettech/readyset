@@ -481,8 +481,6 @@ impl TestScript {
                 builder.set_replication_url(replication_url.to_owned());
             }
 
-            builder.set_keep_prior_recipes(false);
-
             let persistence = readyset_server::PersistenceParameters {
                 mode: readyset_server::DurabilityMode::DeleteOnExit,
                 ..Default::default()

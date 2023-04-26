@@ -132,12 +132,6 @@ pub struct DfState {
     /// State between migrations
     #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
     pub(super) remap: HashMap<DomainIndex, HashMap<NodeIndex, IndexPair>>,
-
-    /// Whether to keep prior recipes when modifying data flow state. This should
-    /// only be set to true in tests where we are sure it does not break things,
-    /// such as logictests where we may OOM from the recipe size.
-    // TODO(ENG-838): Remove when dataflow state does not keep entire recipe chain.
-    keep_prior_recipes: bool,
 }
 
 impl DfState {
@@ -154,7 +148,6 @@ impl DfState {
         schema_replication_offset: Option<ReplicationOffset>,
         node_restrictions: HashMap<NodeRestrictionKey, DomainPlacementRestriction>,
         channel_coordinator: Arc<ChannelCoordinator>,
-        keep_prior_recipes: bool,
         replication_strategy: ReplicationStrategy,
     ) -> Self {
         Self {
@@ -174,7 +167,6 @@ impl DfState {
             read_addrs: Default::default(),
             workers: Default::default(),
             remap: Default::default(),
-            keep_prior_recipes,
             replication_strategy,
         }
     }

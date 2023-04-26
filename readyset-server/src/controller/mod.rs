@@ -146,7 +146,6 @@ impl ControllerState {
             None,
             HashMap::new(),
             cc,
-            config.keep_prior_recipes,
             config.replication_strategy,
         );
 

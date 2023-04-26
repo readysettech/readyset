@@ -492,7 +492,6 @@ pub struct Config {
     pub(crate) replicator_config: UpstreamConfig,
     #[serde(default)]
     pub(crate) replicator_statement_logging: bool,
-    pub(crate) keep_prior_recipes: bool,
     #[serde(default)]
     pub(crate) replication_strategy: ReplicationStrategy,
     /// The duration to wait before canceling the task waiting on an upquery.
@@ -526,7 +525,6 @@ impl Default for Config {
             mir_config: Default::default(),
             replicator_statement_logging: false,
             replicator_config: Default::default(),
-            keep_prior_recipes: true,
             replication_strategy: Default::default(),
             upquery_timeout: Duration::from_millis(5000),
             worker_request_timeout: Duration::from_millis(1800000),
