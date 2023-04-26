@@ -131,7 +131,7 @@ impl Arbitrary for SqlType {
             option::of((1..=65u16).prop_flat_map(|n| {
                 (
                     Just(n),
-                    if n > 30 {
+                    if n > 28 {
                         Just(None).boxed()
                     } else {
                         option::of(0..=(n as u8)).boxed()
