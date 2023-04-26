@@ -10,7 +10,7 @@ use crate::scram;
 
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("password authentication failed for user \"username\"")]
+    #[error("password authentication failed for user \"{username}\"")]
     AuthenticationFailure { username: String },
 
     #[error("no user specified in connection")]
