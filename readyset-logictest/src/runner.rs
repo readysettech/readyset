@@ -220,13 +220,25 @@ impl TestScript {
             .await;
         let (adapter_task, db_url) = self.setup_adapter(opts, noria_opts.authority.clone()).await;
 
-        let mut conn = db_url
+        let mut conn = match db_url
             .connect(None)
             .await
-            .with_context(|| "connecting to adapter")?;
+            .with_context(|| "connecting to adapter")
+        {
+            Ok(conn) => conn,
+            Err(e) => {
+                shutdown_tx.shutdown().await;
+                return Err(e);
+            }
+        };
 
-        self.run_on_database(opts, &mut conn, noria_handle.c.clone())
-            .await?;
+        if let Err(e) = self
+            .run_on_database(opts, &mut conn, noria_handle.c.clone())
+            .await
+        {
+            shutdown_tx.shutdown().await;
+            return Err(e);
+        }
 
         // After all tests are done, stop the adapter
         adapter_task.abort();
