@@ -232,11 +232,15 @@ impl Literal {
             | SqlType::Text
             | SqlType::Citext => any::<String>().prop_map(Self::String).boxed(),
             SqlType::QuotedChar => any::<i8>().prop_map(|i| Self::Integer(i as _)).boxed(),
-            SqlType::Int(_) => any::<i32>().prop_map(|i| Self::Integer(i as _)).boxed(),
+            SqlType::Int(_) | SqlType::Int4 => {
+                any::<i32>().prop_map(|i| Self::Integer(i as _)).boxed()
+            }
             SqlType::UnsignedInt(_) => any::<u32>()
                 .prop_map(|i| Self::UnsignedInteger(i as _))
                 .boxed(),
-            SqlType::BigInt(_) => any::<i64>().prop_map(|i| Self::Integer(i as _)).boxed(),
+            SqlType::BigInt(_) | SqlType::Int8 => {
+                any::<i64>().prop_map(|i| Self::Integer(i as _)).boxed()
+            }
             SqlType::UnsignedBigInt(_) => any::<u64>()
                 .prop_map(|i| Self::UnsignedInteger(i as _))
                 .boxed(),
@@ -244,7 +248,9 @@ impl Literal {
             SqlType::UnsignedTinyInt(_) => any::<u8>()
                 .prop_map(|i| Self::UnsignedInteger(i as _))
                 .boxed(),
-            SqlType::SmallInt(_) => any::<i16>().prop_map(|i| Self::Integer(i as _)).boxed(),
+            SqlType::SmallInt(_) | SqlType::Int2 => {
+                any::<i16>().prop_map(|i| Self::Integer(i as _)).boxed()
+            }
             SqlType::UnsignedSmallInt(_) => any::<u16>()
                 .prop_map(|i| Self::UnsignedInteger(i as _))
                 .boxed(),

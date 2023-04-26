@@ -8,7 +8,7 @@ use nom::bytes::complete::{tag, tag_no_case};
 use nom::character::complete::digit1;
 #[cfg(feature = "failure_injection")]
 use nom::combinator::fail;
-use nom::combinator::{map, map_parser, opt};
+use nom::combinator::{map, map_parser, opt, value};
 use nom::error::{ErrorKind, ParseError};
 use nom::multi::{fold_many0, separated_list0};
 use nom::sequence::{delimited, preceded, terminated, tuple};
@@ -38,6 +38,9 @@ pub enum SqlType {
     UnsignedTinyInt(Option<u16>),
     SmallInt(Option<u16>),
     UnsignedSmallInt(Option<u16>),
+    Int2,
+    Int4,
+    Int8,
     Blob,
     LongBlob,
     MediumBlob,
@@ -153,6 +156,9 @@ impl Arbitrary for SqlType {
 
         if args.dialect.is_none() || args.dialect == Some(Dialect::PostgreSQL) {
             variants.extend([
+                Just(Int2).boxed(),
+                Just(Int4).boxed(),
+                Just(Int8).boxed(),
                 Just(VarChar(None)).boxed(),
                 Just(Jsonb).boxed(),
                 Just(ByteArray).boxed(),
@@ -287,6 +293,9 @@ impl SqlType {
                     write_with_len(f, "SMALLINT", len)?;
                     write!(f, " UNSIGNED")
                 }
+                SqlType::Int2 => write!(f, "INT2"),
+                SqlType::Int4 => write!(f, "INT4"),
+                SqlType::Int8 => write!(f, "INT8"),
                 SqlType::Blob => write!(f, "BLOB"),
                 SqlType::LongBlob => write!(f, "LONGBLOB"),
                 SqlType::MediumBlob => write!(f, "MEDIUMBLOB"),
@@ -585,6 +594,9 @@ fn type_identifier_part1(
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlType> {
     move |i| {
         alt((
+            value(SqlType::Int2, tag_no_case("int2")),
+            value(SqlType::Int4, tag_no_case("int4")),
+            value(SqlType::Int8, tag_no_case("int8")),
             |i| int_type("tinyint", SqlType::UnsignedTinyInt, SqlType::TinyInt, i),
             |i| int_type("smallint", SqlType::UnsignedSmallInt, SqlType::SmallInt, i),
             |i| int_type("integer", SqlType::UnsignedInt, SqlType::Int, i),
@@ -647,51 +659,51 @@ fn type_identifier_part1(
                 |_| SqlType::TimestampTz,
             ),
             map(tag_no_case("timestamptz"), |_| SqlType::TimestampTz),
-            map(
-                tuple((
-                    tag_no_case("timestamp"),
-                    opt(preceded(whitespace0, delim_digit)),
-                    opt_without_time_zone,
-                )),
-                |_| SqlType::Timestamp,
-            ),
-            map(
-                tuple((
-                    alt((
-                        // The alt expects the same type to be returned for both entries,
-                        // so both have to be tuples with same number of elements
-                        tuple((
-                            map(tag_no_case("varchar"), |i: LocatedSpan<&[u8]>| *i),
-                            map(whitespace0, |_| "".as_bytes()),
-                            map(whitespace0, |_| "".as_bytes()),
-                        )),
-                        tuple((
-                            map(tag_no_case("character"), |i: LocatedSpan<&[u8]>| *i),
-                            map(whitespace1, |_| "".as_bytes()),
-                            map(tag_no_case("varying"), |i: LocatedSpan<&[u8]>| *i),
-                        )),
-                    )),
-                    opt(delim_u16),
-                    whitespace0,
-                    opt(tag_no_case("binary")),
-                )),
-                |t| SqlType::VarChar(t.1),
-            ),
-            map(
-                tuple((
-                    alt((tag_no_case("character"), tag_no_case("char"))),
-                    opt(delim_u16),
-                    whitespace0,
-                    opt(tag_no_case("binary")),
-                )),
-                |t| SqlType::Char(t.1),
-            ),
         ))(i)
     }
 }
 
 fn type_identifier_part2(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlType> {
     alt((
+        map(
+            tuple((
+                tag_no_case("timestamp"),
+                opt(preceded(whitespace0, delim_digit)),
+                opt_without_time_zone,
+            )),
+            |_| SqlType::Timestamp,
+        ),
+        map(
+            tuple((
+                alt((
+                    // The alt expects the same type to be returned for both entries,
+                    // so both have to be tuples with same number of elements
+                    tuple((
+                        map(tag_no_case("varchar"), |i: LocatedSpan<&[u8]>| *i),
+                        map(whitespace0, |_| "".as_bytes()),
+                        map(whitespace0, |_| "".as_bytes()),
+                    )),
+                    tuple((
+                        map(tag_no_case("character"), |i: LocatedSpan<&[u8]>| *i),
+                        map(whitespace1, |_| "".as_bytes()),
+                        map(tag_no_case("varying"), |i: LocatedSpan<&[u8]>| *i),
+                    )),
+                )),
+                opt(delim_u16),
+                whitespace0,
+                opt(tag_no_case("binary")),
+            )),
+            |t| SqlType::VarChar(t.1),
+        ),
+        map(
+            tuple((
+                alt((tag_no_case("character"), tag_no_case("char"))),
+                opt(delim_u16),
+                whitespace0,
+                opt(tag_no_case("binary")),
+            )),
+            |t| SqlType::Char(t.1),
+        ),
         map(
             terminated(tag_no_case("time"), opt_without_time_zone),
             |_| SqlType::Time,
@@ -738,11 +750,6 @@ fn type_identifier_part2(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlType> 
             )),
             |t| SqlType::VarBit(t.1),
         ),
-        map(tuple((tag_no_case("bit"), opt(delim_u16))), |t| {
-            SqlType::Bit(t.1)
-        }),
-        map(tag_no_case("serial"), |_| SqlType::Serial),
-        map(tag_no_case("bigserial"), |_| SqlType::BigSerial),
     ))(i)
 }
 
@@ -751,6 +758,11 @@ fn type_identifier_part3(
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlType> {
     move |i| {
         alt((
+            map(tuple((tag_no_case("bit"), opt(delim_u16))), |t| {
+                SqlType::Bit(t.1)
+            }),
+            map(tag_no_case("serial"), |_| SqlType::Serial),
+            map(tag_no_case("bigserial"), |_| SqlType::BigSerial),
             map(tag_no_case("citext"), |_| SqlType::Citext),
             map(tag("\"char\""), |_| SqlType::QuotedChar),
             map(other_type(dialect), SqlType::Other),
@@ -1195,6 +1207,22 @@ mod tests {
         fn citext() {
             let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"citext");
             assert_eq!(res, SqlType::Citext);
+        }
+
+        #[test]
+        fn int_numeric_aliases() {
+            assert_eq!(
+                test_parse!(type_identifier(Dialect::PostgreSQL), b"int2"),
+                SqlType::Int2
+            );
+            assert_eq!(
+                test_parse!(type_identifier(Dialect::PostgreSQL), b"int4"),
+                SqlType::Int4
+            );
+            assert_eq!(
+                test_parse!(type_identifier(Dialect::PostgreSQL), b"int8"),
+                SqlType::Int8
+            );
         }
     }
 }

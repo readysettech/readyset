@@ -241,10 +241,10 @@ impl DfType {
             Serial => dialect.serial_type(),
             BigSerial => Self::BigInt,
 
-            Int(_) => Self::Int,
+            Int(_) | Int4 => Self::Int,
             TinyInt(_) => Self::TinyInt,
-            SmallInt(_) => Self::SmallInt,
-            BigInt(_) => Self::BigInt,
+            SmallInt(_) | Int2 => Self::SmallInt,
+            BigInt(_) | Int8 => Self::BigInt,
             UnsignedInt(_) => Self::UnsignedInt,
             UnsignedTinyInt(_) => Self::UnsignedTinyInt,
             UnsignedSmallInt(_) => Self::UnsignedSmallInt,
