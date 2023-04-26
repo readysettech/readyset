@@ -1,10 +1,10 @@
 use std::env;
 
+use data_generator::{random_value_of_type, unique_value_of_type, value_of_type};
 use mysql_async::prelude::Queryable;
 use mysql_async::Value;
 use nom_sql::{Dialect, SqlType};
 use proptest::prop_assume;
-use query_generator::{random_value_of_type, unique_value_of_type, value_of_type};
 use rand::rngs::mock::StepRng;
 use serial_test::serial;
 use test_strategy::proptest;

@@ -11,6 +11,7 @@ members = [
     "benchmarks",
     "catalog-tables",
     "concrete-iter",
+    "data-generator",
     "database-utils",
     "dataflow-expression",
     "dataflow-state",

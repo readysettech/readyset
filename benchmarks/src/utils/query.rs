@@ -16,11 +16,11 @@ use std::str::FromStr;
 
 use anyhow::{anyhow, Result};
 use clap::Parser;
+use data_generator::{ColumnGenerator, DistributionAnnotation};
 use mysql_async::consts::ColumnType;
 use mysql_async::prelude::Queryable;
 use mysql_async::{Statement, Value};
 use nom_sql::SqlType;
-use query_generator::{ColumnGenerator, DistributionAnnotation};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::utils::path::benchmark_path;

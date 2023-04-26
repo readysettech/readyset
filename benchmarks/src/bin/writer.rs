@@ -15,8 +15,8 @@ use std::time::{Duration, Instant};
 use benchmarks::utils::generate::parallel_load;
 use benchmarks::utils::spec::{DatabaseGenerationSpec, DatabaseSchema};
 use clap::{Parser, ValueHint};
+use data_generator::ColumnGenerationSpec;
 use database_utils::DatabaseURL;
-use query_generator::ColumnGenerationSpec;
 use readyset_data::DfValue;
 
 static REPORTING_INTERVAL: Duration = Duration::from_secs(10);

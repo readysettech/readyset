@@ -195,7 +195,7 @@ impl TryFrom<(PathBuf, HashMap<String, String>)> for DatabaseSchema {
 
 #[cfg(test)]
 mod tests {
-    use query_generator::ColumnGenerator;
+    use data_generator::ColumnGenerator;
 
     use super::*;
 

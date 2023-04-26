@@ -330,6 +330,7 @@ dependencies = [
  "atomic-counter",
  "chrono",
  "clap 4.2.1",
+ "data-generator",
  "database-utils",
  "enum_dispatch",
  "futures",
@@ -1147,6 +1148,29 @@ dependencies = [
  "cfg-if 1.0.0",
  "hashbrown 0.12.3",
  "lock_api",
+]
+
+[[package]]
+name = "data-generator"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bit-vec",
+ "chrono",
+ "eui48",
+ "growable-bloom-filter",
+ "mysql_async",
+ "nom-sql",
+ "proptest",
+ "rand 0.8.5",
+ "rand_regex",
+ "readyset-data",
+ "rust_decimal",
+ "serial_test",
+ "test-strategy",
+ "tokio",
+ "uuid 0.8.2",
+ "zipf",
 ]
 
 [[package]]
@@ -3978,13 +4002,13 @@ dependencies = [
  "bit-vec",
  "chrono",
  "clap 4.2.1",
+ "data-generator",
  "derive_more",
  "eui48",
  "futures-util",
  "growable-bloom-filter",
  "itertools",
  "lazy_static",
- "mysql_async",
  "nom-sql",
  "parking_lot 0.11.2",
  "proptest",
@@ -3997,12 +4021,10 @@ dependencies = [
  "rust_decimal",
  "serde",
  "serde_json",
- "serial_test",
  "strum",
  "strum_macros",
  "test-strategy",
  "thiserror",
- "tokio",
  "uuid 0.8.2",
  "zipf",
 ]
