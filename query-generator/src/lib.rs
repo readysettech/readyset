@@ -451,6 +451,12 @@ pub fn unique_value_of_type(typ: &SqlType, idx: u32) -> DfValue {
 #[repr(transparent)]
 pub struct TableName(SqlIdentifier);
 
+impl Borrow<SqlIdentifier> for TableName {
+    fn borrow(&self) -> &SqlIdentifier {
+        &self.0
+    }
+}
+
 impl Borrow<str> for TableName {
     fn borrow(&self) -> &str {
         self.0.as_str()
@@ -1138,12 +1144,12 @@ impl TableSpec {
     /// a new column using `default_type` as the type if necessary
     pub fn some_column_name_filtered<T, F>(&mut self, default_type: T, mut filter: F) -> ColumnName
     where
-        F: FnMut(&ColumnSpec) -> bool,
+        F: FnMut(&ColumnName, &ColumnSpec) -> bool,
         T: FnOnce() -> SqlType,
     {
         self.columns
             .iter()
-            .filter(|(_, c)| filter(c))
+            .filter(|(n, c)| filter(n, c))
             .map(|(n, _)| n)
             .next()
             .cloned()
@@ -1153,7 +1159,7 @@ impl TableSpec {
     /// Returns the name of *some* column in this table, potentially generating a new column if
     /// necessary
     pub fn some_column_name(&mut self) -> ColumnName {
-        self.some_column_name_filtered(|| SqlType::Int(None), |_| true)
+        self.some_column_name_filtered(|| SqlType::Int(None), |_, _| true)
     }
 
     /// Returns the name of *some* column in this table with the given type, potentially generating
@@ -2135,10 +2141,10 @@ fn column_in_query_filtered<T, F>(
     state: &mut QueryState<'_>,
     query: &mut SelectStatement,
     default_type: T,
-    filter: F,
+    mut filter: F,
 ) -> Column
 where
-    F: FnMut(&ColumnSpec) -> bool,
+    F: FnMut(TableName, &ColumnName, &ColumnSpec) -> bool,
     T: FnOnce() -> SqlType,
 {
     match query
@@ -2156,7 +2162,9 @@ where
                 .gen
                 .table_mut(tbl.name.as_str())
                 .unwrap()
-                .some_column_name_filtered(default_type, filter);
+                .some_column_name_filtered(default_type, move |column_name, column_spec| {
+                    filter(TableName(tbl.name.clone()), column_name, column_spec)
+                });
             Column {
                 name: column.into(),
                 table: Some(tbl.clone()),
@@ -2167,7 +2175,11 @@ where
             query
                 .tables
                 .push(TableExpr::from(Relation::from(table.name.clone())));
-            let colname = table.some_column_name_filtered(default_type, filter);
+            let table_name = table.name.clone();
+            let colname =
+                table.some_column_name_filtered(default_type, move |column_name, column_spec| {
+                    filter(table_name.clone(), column_name, column_spec)
+                });
             Column {
                 name: colname.into(),
                 table: Some(table.name.clone().into()),
@@ -2177,21 +2189,39 @@ where
 }
 
 fn column_in_query(state: &mut QueryState<'_>, query: &mut SelectStatement) -> Column {
-    column_in_query_filtered(state, query, || SqlType::Int(None), |_| true)
+    column_in_query_filtered(state, query, || SqlType::Int(None), |_, _, _| true)
 }
 
-fn parameter_column_in_query(state: &mut QueryState<'_>, query: &mut SelectStatement) -> Column {
+fn parameter_column_in_query_filtered<F>(
+    state: &mut QueryState<'_>,
+    query: &mut SelectStatement,
+    mut filter: F,
+) -> Column
+where
+    F: FnMut(TableName, &ColumnName, &ColumnSpec) -> bool,
+{
+    let existing_parameters = state
+        .parameters
+        .iter()
+        .map(|param| (param.table_name.clone(), param.column_name.clone()))
+        .collect::<HashSet<_>>();
     column_in_query_filtered(
         state,
         query,
         || SqlType::Int(None), /* TODO: generate this! */
-        |col| {
-            !matches!(
-                col.sql_type,
-                SqlType::Bool | SqlType::Array(_) | SqlType::Other(_)
-            )
+        |table_name, column_name, col| {
+            !existing_parameters.contains(&(table_name.clone(), column_name.clone()))
+                && !matches!(
+                    col.sql_type,
+                    SqlType::Bool | SqlType::Array(_) | SqlType::Other(_)
+                )
+                && filter(table_name, column_name, col)
         },
     )
+}
+
+fn parameter_column_in_query(state: &mut QueryState<'_>, query: &mut SelectStatement) -> Column {
+    parameter_column_in_query_filtered(state, query, |_, _, _| true)
 }
 
 impl QueryOperation {
@@ -2422,27 +2452,32 @@ impl QueryOperation {
             }
 
             QueryOperation::RangeParameter => {
-                let tbl = state.some_table_in_query_mut(query);
-                let col = tbl.some_column_with_type(SqlType::Int(None));
+                let col = parameter_column_in_query_filtered(state, query, |_, _, col| {
+                    col.sql_type == SqlType::Int(None)
+                });
                 and_where(
                     query,
                     Expr::BinaryOp {
-                        lhs: Box::new(Expr::Column(Column {
-                            table: Some(tbl.name.clone().into()),
-                            ..col.clone().into()
-                        })),
+                        lhs: Box::new(Expr::Column(col.clone())),
                         op: BinaryOperator::Greater,
                         rhs: Box::new(Expr::Literal(Literal::Placeholder(
                             ItemPlaceholder::QuestionMark,
                         ))),
                     },
                 );
-                tbl.set_column_generator_spec(
-                    col.clone(),
-                    ColumnGenerationSpec::Uniform(1i32.into(), 20i32.into()),
+                state
+                    .gen
+                    .table_mut(&col.table.as_ref().unwrap().name)
+                    .unwrap()
+                    .set_column_generator_spec(
+                        col.name.clone().into(),
+                        ColumnGenerationSpec::Uniform(1i32.into(), 20i32.into()),
+                    );
+                state.add_parameter_with_value(
+                    col.table.unwrap().name.into(),
+                    col.name.into(),
+                    10i32,
                 );
-                let tbl_name = tbl.name.clone();
-                state.add_parameter_with_value(tbl_name, col, 10i32);
             }
 
             QueryOperation::MultipleRangeParameters => {
@@ -3282,6 +3317,8 @@ impl GenerateOpts {
 
 #[cfg(test)]
 mod tests {
+    use nom_sql::BinaryOperator;
+
     use super::*;
 
     fn generate_query(operations: Vec<QueryOperation>) -> SelectStatement {
@@ -3345,7 +3382,7 @@ mod tests {
     #[test]
     fn single_join() {
         let query = generate_query(vec![QueryOperation::Join(JoinOperator::LeftJoin)]);
-        eprintln!("query: {}", query.display(nom_sql::Dialect::MySQL));
+        eprintln!("query: {}", query.display(ParseDialect::MySQL));
         assert_eq!(query.tables.len(), 1);
         assert_eq!(query.join.len(), 1);
         let join = query.join.first().unwrap();
@@ -3466,5 +3503,36 @@ mod tests {
                 }]
             }
         )
+    }
+
+    #[test]
+    fn double_param_uses_different_col() {
+        let query = generate_query(vec![
+            QueryOperation::SingleParameter,
+            QueryOperation::RangeParameter,
+        ]);
+        eprintln!("query: {}", query.display(ParseDialect::MySQL));
+        match &query.where_clause {
+            Some(
+                expr @ Expr::BinaryOp {
+                    lhs,
+                    op: BinaryOperator::And,
+                    rhs,
+                },
+            ) => match (lhs.as_ref(), rhs.as_ref()) {
+                (Expr::BinaryOp { lhs: lhs1, .. }, Expr::BinaryOp { lhs: lhs2, .. }) => {
+                    assert_ne!(lhs1, lhs2);
+                }
+                _ => panic!(
+                    "Unexpected where clause for query: {}",
+                    expr.display(ParseDialect::MySQL)
+                ),
+            },
+            Some(expr) => panic!(
+                "Unexpected where clause for query: {}",
+                expr.display(ParseDialect::MySQL)
+            ),
+            None => panic!("Expected query to have a where clause!"),
+        }
     }
 }
