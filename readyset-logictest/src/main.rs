@@ -610,8 +610,14 @@ impl Fuzz {
         let result = runner.run(&self.test_script_strategy(), move |mut test_script| {
             let rt = tokio::runtime::Runtime::new().unwrap();
             let _guard = rt.enter();
-            rt.block_on(test_script.run(Default::default(), Default::default()))
-                .map_err(|err| TestCaseError::fail(format!("{:#}", err)))
+            rt.block_on(test_script.run(
+                RunOptions {
+                    verbose: self.verbose,
+                    ..Default::default()
+                },
+                Default::default(),
+            ))
+            .map_err(|err| TestCaseError::fail(format!("{:#}", err)))
         });
 
         if let Err(TestError::Fail(reason, script)) = result {
