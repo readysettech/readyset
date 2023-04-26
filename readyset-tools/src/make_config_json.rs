@@ -13,7 +13,7 @@ fn main() {
         .unwrap()
         .parent()
         .unwrap()
-        .join("server/tests/config_versions");
+        .join("readyset-server/tests/config_versions");
     let commit = Command::new("git")
         .args(["rev-parse", "HEAD"])
         .output()
