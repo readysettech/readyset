@@ -226,10 +226,14 @@ impl RangeKey {
             4 => make!(Quad, |elem| (elem(), elem(), elem(), elem())),
             5 => make!(Quin, |elem| (elem(), elem(), elem(), elem(), elem())),
             6 => make!(Sex, |elem| (elem(), elem(), elem(), elem(), elem(), elem())),
-            n => panic!(
-                "RangeKey cannot be built from keys of length greater than 6 (got {})",
-                n
-            ),
+            _ => RangeKey::Multi((
+                range
+                    .start_bound()
+                    .map(|key| key.clone().into_vec().into_boxed_slice()),
+                range
+                    .end_bound()
+                    .map(|key| key.clone().into_vec().into_boxed_slice()),
+            )),
         }
     }
 

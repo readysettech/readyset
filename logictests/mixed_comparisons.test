@@ -51,3 +51,29 @@ WHERE product_id = ? AND score > ?
 ----
 pretty good
 very good
+
+statement ok
+CREATE TABLE t (c1 int, c2 int, c3 int, c4 int, c5 int, c6 int, c7 int);
+
+statement ok
+INSERT INTO t (c1, c2, c3, c4, c5, c6, c7)
+VALUES (1,2,3,4,5,6,7);
+
+query IIIIIII nosort
+SELECT c1, c2, c3, c4, c5, c6, c7 FROM t
+WHERE c1 = ? AND c2 = ? AND c3 = ? AND c4 = ? AND c5 = ? AND c6 = ? AND c7 > ?
+? = 1
+? = 2
+? = 3
+? = 4
+? = 5
+? = 6
+? = 6
+----
+1
+2
+3
+4
+5
+6
+7
