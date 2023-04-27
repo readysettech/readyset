@@ -17,6 +17,7 @@ struct Options {
     database_url: DatabaseURL,
 }
 
+#[derive(Debug, Clone)]
 enum Command<'a> {
     Help,
     Normal(&'a str),
@@ -27,23 +28,61 @@ enum Command<'a> {
     },
 }
 
-impl<'a> Command<'a> {
-    fn parse(s: &'a str) -> Result<Self> {
-        if s.trim_end_matches(';').trim().to_lowercase() == "help" {
-            Ok(Self::Help)
-        } else if let Some(query) = s.strip_prefix("prepare ") {
-            Ok(Self::Prepare(query))
-        } else if let Some(exec) = s.trim_end_matches(';').strip_prefix("execute ") {
-            let (statement_id, params) = exec.split_once(' ').unwrap_or((exec, ""));
-            let statement_id = statement_id.parse().context("parsing statement ID")?;
-            let params = params.split(", ").filter(|p| !p.is_empty()).collect();
+mod parse {
+    use nom::branch::alt;
+    use nom::bytes::complete::{tag, take_while1};
+    use nom::character::complete::multispace1;
+    use nom::character::is_space;
+    use nom::combinator::{all_consuming, map_res, value};
+    use nom::sequence::terminated;
+    use nom::IResult;
 
-            Ok(Self::ExecutePrepared {
+    use super::Command;
+
+    pub(super) fn command(i: &str) -> IResult<&str, Command> {
+        all_consuming(terminated(alt((help, prepare, execute, normal)), tag(";")))(i)
+    }
+
+    fn help(i: &str) -> IResult<&str, Command> {
+        value(Command::Help, tag("help"))(i)
+    }
+
+    fn prepare(i: &str) -> IResult<&str, Command> {
+        let (i, _) = tag("prepare")(i)?;
+        let (i, _) = multispace1(i)?;
+        Ok(("", Command::Prepare(i.trim_end_matches(';'))))
+    }
+
+    fn execute(i: &str) -> IResult<&str, Command> {
+        let (i, _) = tag("execute")(i)?;
+        let (i, _) = multispace1(i)?;
+        let (i, statement_id) = map_res(take_while1(|c| !is_space(c as u8)), |s: &str| {
+            s.parse::<usize>()
+        })(i)?;
+        let params = i
+            .trim_end_matches(';')
+            .split(", ")
+            .filter(|p| !p.is_empty())
+            .collect();
+        Ok((
+            "",
+            Command::ExecutePrepared {
                 statement_id,
                 params,
-            })
-        } else {
-            Ok(Self::Normal(s))
+            },
+        ))
+    }
+
+    fn normal(i: &str) -> IResult<&str, Command> {
+        Ok(("", Command::Normal(i.trim_end_matches(';'))))
+    }
+}
+
+impl<'a> Command<'a> {
+    fn parse(s: &'a str) -> Result<Self> {
+        match parse::command(s) {
+            Ok((_, cmd)) => Ok(cmd),
+            Err(e) => Err(anyhow!("Error parsing command: {e}")),
         }
     }
 }
