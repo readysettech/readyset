@@ -162,9 +162,15 @@ pub struct Options {
     #[clap(long, env = "DEPLOYMENT", value_parser = NonEmptyStringValueParser::new())]
     deployment: String,
 
-    /// Database engine protocol to emulate
-    #[clap(long, env = "DATABASE_TYPE", value_enum)]
-    pub database_type: DatabaseType,
+    /// Database engine protocol to emulate. If omitted, will be inferred from the
+    /// `upstream-db-url`
+    #[clap(
+        long,
+        env = "DATABASE_TYPE",
+        value_enum,
+        required_unless_present("upstream_db_url")
+    )]
+    pub database_type: Option<DatabaseType>,
 
     /// Run ReadySet in standalone mode, running a readyset-server instance within this adapter.
     #[clap(long, env = "STANDALONE", conflicts_with = "embedded_readers")]
@@ -379,6 +385,33 @@ pub struct Options {
     /// supplied, we will also clean up various assets related to upstream (replication slot, etc.)
     #[clap(long)]
     cleanup: bool,
+}
+
+impl Options {
+    /// Return the configured database type, either explicitly set by the user or inferred from the
+    /// upstream DB URL
+    pub fn database_type(&self) -> anyhow::Result<DatabaseType> {
+        let infer_from_db_url = |db_url: &str| Ok(db_url.parse::<DatabaseURL>()?.database_type());
+
+        match (
+            self.database_type,
+            &self.server_worker_options.replicator_config.upstream_db_url,
+        ) {
+            (None, None) => bail!("One of either --database-type or --upstream-db-url is required"),
+            (None, Some(url)) => infer_from_db_url(url),
+            (Some(dt), None) => Ok(dt),
+            (Some(dt), Some(url)) => {
+                let inferred = infer_from_db_url(url)?;
+                if dt != inferred {
+                    bail!(
+                        "Provided --database-type {dt} does not match database type {inferred} for \
+                         --upstream-db-url"
+                    );
+                }
+                Ok(dt)
+            }
+        }
+    }
 }
 
 // Command-line options for running the experimental fallback_cache.
@@ -1362,5 +1395,56 @@ mod tests {
 
         assert_eq!(opts.max_processing_minutes, 15);
         assert_eq!(opts.migration_task_interval, 20000);
+    }
+
+    #[test]
+    fn infer_database_type() {
+        let opts = Options::parse_from(vec![
+            "readyset",
+            "--deployment",
+            "test",
+            "--address",
+            "0.0.0.0:3306",
+            "--upstream-db-url",
+            "mysql://root:password@mysql:3306/readyset",
+        ]);
+        assert_eq!(opts.database_type().unwrap(), DatabaseType::MySQL);
+
+        let opts = Options::parse_from(vec![
+            "readyset",
+            "--deployment",
+            "test",
+            "--address",
+            "0.0.0.0:3306",
+            "--upstream-db-url",
+            "postgresql://root:password@db/readyset",
+        ]);
+        assert_eq!(opts.database_type().unwrap(), DatabaseType::PostgreSQL);
+
+        let opts = Options::parse_from(vec![
+            "readyset",
+            "--deployment",
+            "test",
+            "--address",
+            "0.0.0.0:3306",
+            "--upstream-db-url",
+            "postgresql://root:password@db/readyset",
+            "--database-type",
+            "postgresql",
+        ]);
+        assert_eq!(opts.database_type().unwrap(), DatabaseType::PostgreSQL);
+
+        let opts = Options::parse_from(vec![
+            "readyset",
+            "--deployment",
+            "test",
+            "--address",
+            "0.0.0.0:3306",
+            "--upstream-db-url",
+            "postgresql://root:password@db/readyset",
+            "--database-type",
+            "mysql",
+        ]);
+        opts.database_type().unwrap_err();
     }
 }

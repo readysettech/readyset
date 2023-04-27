@@ -8,7 +8,8 @@ use readyset::{NoriaAdapter, Options};
 
 fn main() -> anyhow::Result<()> {
     let options = Options::parse();
-    match options.database_type {
+
+    match options.database_type()? {
         DatabaseType::MySQL => NoriaAdapter {
             description: "MySQL adapter for ReadySet.",
             default_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 3306),
