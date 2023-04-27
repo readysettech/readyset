@@ -2141,6 +2141,43 @@ impl<'a> IntoIterator for &'a Operations {
     }
 }
 
+impl Arbitrary for Operations {
+    type Parameters = <Vec<QueryOperation> as Arbitrary>::Parameters;
+
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
+        any_with::<Vec<QueryOperation>>(args)
+            .prop_map(|mut ops| {
+                // Don't generate an aggregate or distinct in the same query as a WHERE IN clause,
+                // since we don't support those queries (ENG-2942)
+                let mut agg_or_distinct_found = false;
+                let mut in_parameter_found = false;
+                ops.retain(|op| match op {
+                    QueryOperation::ColumnAggregate(_) | QueryOperation::Distinct => {
+                        if in_parameter_found {
+                            false
+                        } else {
+                            agg_or_distinct_found = true;
+                            true
+                        }
+                    }
+                    QueryOperation::InParameter { .. } => {
+                        if agg_or_distinct_found {
+                            false
+                        } else {
+                            in_parameter_found = true;
+                            true
+                        }
+                    }
+                    _ => true,
+                });
+                Operations(ops)
+            })
+            .boxed()
+    }
+}
+
 /// Representation of a list of subsets of query operations, as specified by the user on the command
 /// line.
 ///
@@ -2317,12 +2354,12 @@ impl Arbitrary for QuerySeed {
     type Strategy = BoxedStrategy<QuerySeed>;
 
     fn arbitrary_with(op_args: Self::Parameters) -> Self::Strategy {
-        any_with::<Vec<QueryOperation>>((Default::default(), op_args))
-            .prop_map(|operations| Self {
+        any_with::<Operations>((Default::default(), op_args.clone()))
+            .prop_map(|Operations(operations)| Self {
                 operations,
                 subqueries: vec![],
             })
-            .prop_recursive(3, 5, 3, |inner| {
+            .prop_recursive(3, 5, 3, move |inner| {
                 (
                     proptest::collection::vec((any::<SubqueryPosition>(), inner), 0..3).prop_map(
                         |sqs| {
@@ -2331,9 +2368,9 @@ impl Arbitrary for QuerySeed {
                                 .collect()
                         },
                     ),
-                    any::<Vec<QueryOperation>>(),
+                    any_with::<Operations>((Default::default(), op_args.clone())),
                 )
-                    .prop_map(|(subqueries, operations)| Self {
+                    .prop_map(|(subqueries, Operations(operations))| Self {
                         subqueries,
                         operations,
                     })
