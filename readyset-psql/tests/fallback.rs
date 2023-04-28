@@ -1,6 +1,7 @@
 use std::panic::AssertUnwindSafe;
 
 use chrono::NaiveDate;
+use postgres_types::private::BytesMut;
 use readyset_adapter::backend::{MigrationMode, UnsupportedSetMode};
 use readyset_adapter::BackendBuilder;
 use readyset_client_test_helpers::psql_helpers::{upstream_config, PostgreSQLAdapter};
@@ -12,7 +13,7 @@ use serial_test::serial;
 
 mod common;
 use common::connect;
-use postgres_types::{FromSql, ToSql};
+use postgres_types::{accepts, to_sql_checked, FromSql, IsNull, ToSql, Type};
 use tokio_postgres::{Client, CommandCompleteContents, SimpleQueryMessage};
 
 async fn setup() -> (tokio_postgres::Config, Handle, ShutdownSender) {
@@ -117,6 +118,47 @@ async fn delete_case_sensitive() {
 
         shutdown_tx.shutdown().await;
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn prepare_typed_insert() {
+    let (opts, _handle, shutdown_tx) = setup().await;
+    let conn = connect(opts).await;
+
+    // Simulate JDBC's behavior of sending the types it wants to send regardless of the types the
+    // backend responded with by just blindly serializing an i64 as an INT4
+    #[derive(Debug, Clone, Copy)]
+    struct WrongLengthInt(i64);
+
+    impl ToSql for WrongLengthInt {
+        fn to_sql(
+            &self,
+            _: &Type,
+            out: &mut BytesMut,
+        ) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>> {
+            self.0.to_sql(&Type::INT8, out)
+        }
+
+        accepts!(INT4, INT8);
+        to_sql_checked!();
+    }
+
+    conn.simple_query("create table t1 (x int4)").await.unwrap();
+    let stmt = conn
+        .prepare_typed("insert into t1 (x) values ($1)", &[Type::INT8])
+        .await
+        .unwrap();
+    conn.execute(&stmt, &[&WrongLengthInt(1)]).await.unwrap();
+
+    let stmt = conn
+        .prepare_typed("select count(*) from t1 where x = $1", &[Type::INT8])
+        .await
+        .unwrap();
+    let res = conn.query(&stmt, &[&1i64]).await.unwrap();
+    assert_eq!(res.get(0).unwrap().get::<_, i64>(0), 1);
+
+    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

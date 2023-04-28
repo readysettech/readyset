@@ -73,6 +73,11 @@ pub trait UpstreamDatabase: Sized + Send {
     /// [`prepare`](UpstreamDatabase::prepaare)
     type StatementMeta: Debug + Send + Clone + 'static;
 
+    /// Extra data passed to [`prepare`] by the protocol shim
+    ///
+    /// [`prepare`](UpstreamDatabase::prepaare)
+    type PrepareData<'a>: Default + Send;
+
     /// Errors that can be returned from operations on this database
     ///
     /// This type, which must have at least one enum variant that includes a
@@ -119,7 +124,11 @@ pub trait UpstreamDatabase: Sized + Send {
     /// associated with statement IDs, as long as after calling `on_prepare` on one instance of an
     /// UpstreamDatabase a later call of [`on_execute`] on the same UpstreamDatabase with the same
     /// statement ID executes that statement.
-    async fn prepare<'a, S>(&'a mut self, query: S) -> Result<UpstreamPrepare<Self>, Self::Error>
+    async fn prepare<'a, 'b, S>(
+        &'a mut self,
+        query: S,
+        data: Self::PrepareData<'b>,
+    ) -> Result<UpstreamPrepare<Self>, Self::Error>
     where
         S: AsRef<str> + Send + Sync + 'a;
 

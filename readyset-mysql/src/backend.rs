@@ -508,7 +508,7 @@ where
         use noria_connector::PrepareResult::*;
 
         trace!("delegate");
-        let prepare_result = self.prepare(query).await.map(|p| p.upstream_biased());
+        let prepare_result = self.prepare(query, ()).await.map(|p| p.upstream_biased());
         let res = match prepare_result {
             Ok(SinglePrepareResult::Noria(
                 Select(SelectPrepareResult::Schema(SelectPrepareResultInner {

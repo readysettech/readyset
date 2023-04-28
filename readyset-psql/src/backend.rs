@@ -6,6 +6,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use clap::ValueEnum;
 use eui48::MacAddressFormat;
+use postgres_types::Type;
 use psql_srv as ps;
 use readyset_adapter::backend as cl;
 use readyset_data::DfValue;
@@ -82,8 +83,14 @@ impl Backend {
         Ok(QueryResponse(self.inner.query(query).await?))
     }
 
-    async fn prepare(&mut self, query: &str) -> Result<PrepareResponse<'_>, Error> {
-        Ok(PrepareResponse(self.inner.prepare(query).await?))
+    async fn prepare(
+        &mut self,
+        query: &str,
+        parameter_data_types: &[Type],
+    ) -> Result<PrepareResponse<'_>, Error> {
+        Ok(PrepareResponse(
+            self.inner.prepare(query, parameter_data_types).await?,
+        ))
     }
 
     async fn execute(&mut self, id: u32, params: &[DfValue]) -> Result<QueryResponse<'_>, Error> {
@@ -122,9 +129,15 @@ impl ps::Backend for Backend {
         self.query(query).await?.try_into()
     }
 
-    async fn on_prepare(&mut self, query: &str) -> Result<ps::PrepareResponse, ps::Error> {
+    async fn on_prepare(
+        &mut self,
+        query: &str,
+        parameter_data_types: &[Type],
+    ) -> Result<ps::PrepareResponse, ps::Error> {
         let statement_id = self.next_prepared_id(); // If prepare succeeds it will get this id
-        self.prepare(query).await?.try_into_ps(statement_id)
+        self.prepare(query, parameter_data_types)
+            .await?
+            .try_into_ps(statement_id)
     }
 
     async fn on_execute(

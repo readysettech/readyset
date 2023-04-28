@@ -6,6 +6,7 @@ use futures::stream;
 use postgres::config::{ChannelBinding, SslMode};
 use postgres::error::SqlState;
 use postgres::NoTls;
+use postgres_types::Type;
 use psql_srv::{
     run_backend, Backend, Credentials, CredentialsNeeded, Error, PrepareResponse, QueryResponse,
 };
@@ -55,7 +56,11 @@ impl Backend for ScramSha256Backend {
         unreachable!()
     }
 
-    async fn on_prepare(&mut self, _query: &str) -> Result<PrepareResponse, Error> {
+    async fn on_prepare(
+        &mut self,
+        _query: &str,
+        _parameter_data_types: &[Type],
+    ) -> Result<PrepareResponse, Error> {
         unreachable!()
     }
 

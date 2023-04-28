@@ -795,11 +795,12 @@ where
     pub async fn prepare_fallback(
         &mut self,
         query: &str,
+        data: DB::PrepareData<'_>,
     ) -> Result<UpstreamPrepare<DB>, DB::Error> {
         let upstream = self.upstream.as_mut().ok_or_else(|| {
             ReadySetError::Internal("This case requires an upstream connector".to_string())
         })?;
-        upstream.prepare(query).await
+        upstream.prepare(query, data).await
     }
 
     /// Prepares query against ReadySet. If an upstream database exists, the prepare is mirrored to
@@ -811,6 +812,7 @@ where
         &mut self,
         select_meta: &PrepareSelectMeta,
         query: &str,
+        data: DB::PrepareData<'_>,
         event: &mut QueryExecutionEvent,
     ) -> Result<PrepareResult<DB>, DB::Error> {
         let prep_idx = self.next_prepared_id();
@@ -818,7 +820,11 @@ where
         let do_noria = select_meta.should_do_noria;
         let do_migrate = select_meta.must_migrate;
 
-        let up_prep: OptionFuture<_> = self.upstream.as_mut().map(|u| u.prepare(query)).into();
+        let up_prep: OptionFuture<_> = self
+            .upstream
+            .as_mut()
+            .map(|u| u.prepare(query, data))
+            .into();
         let noria_prep: OptionFuture<_> = do_noria
             .then_some(self.noria.prepare_select(
                 select_meta.stmt.clone(),
@@ -911,13 +917,17 @@ where
         &mut self,
         query: &str,
         stmt: &SqlQuery,
+        data: DB::PrepareData<'_>,
         event: &mut QueryExecutionEvent,
     ) -> Result<PrepareResult<DB>, DB::Error> {
         let prep_idx = self.next_prepared_id();
         event.sql_type = SqlQueryType::Write;
         if let Some(ref mut upstream) = self.upstream {
             let _t = event.start_upstream_timer();
-            let res = upstream.prepare(query).await.map(PrepareResult::Upstream);
+            let res = upstream
+                .prepare(query, data)
+                .await
+                .map(PrepareResult::Upstream);
             self.last_query = Some(QueryInfo {
                 destination: QueryDestination::Upstream,
                 noria_error: String::new(),
@@ -1041,6 +1051,7 @@ where
         &mut self,
         meta: &PrepareMeta,
         query: &str,
+        data: DB::PrepareData<'_>,
         event: &mut QueryExecutionEvent,
     ) -> Result<PrepareResult<DB>, DB::Error> {
         match meta {
@@ -1052,7 +1063,7 @@ where
             {
                 let _t = event.start_upstream_timer();
                 let res = self
-                    .prepare_fallback(query)
+                    .prepare_fallback(query, data)
                     .await
                     .map(PrepareResult::Upstream);
 
@@ -1063,9 +1074,9 @@ where
 
                 res
             }
-            PrepareMeta::Write { stmt } => self.prepare_write(query, stmt, event).await,
+            PrepareMeta::Write { stmt } => self.prepare_write(query, stmt, data, event).await,
             PrepareMeta::Select(select_meta) => {
-                self.mirror_prepare(select_meta, query, event).await
+                self.mirror_prepare(select_meta, query, data, event).await
             }
             PrepareMeta::Proxy => unsupported!("No upstream, so query cannot be proxied"),
             PrepareMeta::FailedToParse => unsupported!("Query failed to parse"),
@@ -1079,12 +1090,18 @@ where
     /// to the calling `Backend` struct and adds the prepared query
     /// to the calling struct's map of prepared queries with a unique id.
     #[instrument(skip_all)]
-    pub async fn prepare(&mut self, query: &str) -> Result<&PrepareResult<DB>, DB::Error> {
+    pub async fn prepare(
+        &mut self,
+        query: &str,
+        data: DB::PrepareData<'_>,
+    ) -> Result<&PrepareResult<DB>, DB::Error> {
         self.last_query = None;
         let mut query_event = QueryExecutionEvent::new(EventType::Prepare);
 
         let meta = self.plan_prepare(query).await;
-        let res = self.do_prepare(&meta, query, &mut query_event).await?;
+        let res = self
+            .do_prepare(&meta, query, data, &mut query_event)
+            .await?;
 
         let (id, parsed_query, migration_state, view_request, always) = match meta {
             PrepareMeta::Write { stmt } => (

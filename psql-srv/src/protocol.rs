@@ -678,13 +678,13 @@ impl Protocol {
                 Parse {
                     prepared_statement_name,
                     query,
-                    ..
+                    parameter_data_types,
                 } => {
                     let PrepareResponse {
                         prepared_statement_id,
                         param_schema,
                         row_schema,
-                    } = backend.on_prepare(query.borrow()).await?;
+                    } = backend.on_prepare(&query, &parameter_data_types).await?;
                     channel.set_statement_param_types(
                         prepared_statement_name.borrow() as &str,
                         param_schema.clone(),
@@ -1035,7 +1035,11 @@ mod tests {
             }
         }
 
-        async fn on_prepare(&mut self, query: &str) -> Result<PrepareResponse, Error> {
+        async fn on_prepare(
+            &mut self,
+            query: &str,
+            _parameter_data_types: &[Type],
+        ) -> Result<PrepareResponse, Error> {
             self.last_prepare = Some(query.to_string());
             if self.is_prepare_err {
                 Err(Error::InternalError("error requested".to_string()))

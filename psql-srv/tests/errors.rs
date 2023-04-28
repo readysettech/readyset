@@ -60,7 +60,11 @@ impl Backend for ErrorBackend {
         }
     }
 
-    async fn on_prepare(&mut self, _query: &str) -> Result<PrepareResponse, Error> {
+    async fn on_prepare(
+        &mut self,
+        _query: &str,
+        _parameter_data_types: &[Type],
+    ) -> Result<PrepareResponse, Error> {
         if self.0 == ErrorPosition::Prepare {
             Err(Error::InternalError("trapped in".to_owned()))
         } else {

@@ -22,6 +22,7 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use futures::future::{try_select, Either};
 use futures::stream::Peekable;
 use futures::{ready, Stream, StreamExt, TryStreamExt};
+use postgres_types::Type;
 use psql_srv::{Credentials, CredentialsNeeded, PrepareResponse, QueryResponse};
 use readyset_data::DfValue;
 use readyset_psql::{ParamRef, Value};
@@ -171,7 +172,11 @@ impl psql_srv::Backend for Backend {
         })
     }
 
-    async fn on_prepare(&mut self, query: &str) -> Result<PrepareResponse, psql_srv::Error> {
+    async fn on_prepare(
+        &mut self,
+        query: &str,
+        _parameter_data_types: &[Type],
+    ) -> Result<PrepareResponse, psql_srv::Error> {
         let stmt = self
             .upstream
             .prepare(query)

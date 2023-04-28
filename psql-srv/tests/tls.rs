@@ -4,6 +4,7 @@ use std::vec;
 use async_trait::async_trait;
 use database_utils::DatabaseURL;
 use futures::stream;
+use postgres_types::Type;
 use psql_srv::{run_backend, Backend, Credentials, CredentialsNeeded, Error};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
@@ -50,6 +51,7 @@ impl Backend for TestBackend {
     async fn on_prepare(
         &mut self,
         _query: &str,
+        _parameter_data_types: &[Type],
     ) -> Result<psql_srv::PrepareResponse, psql_srv::Error> {
         panic!() // never called
     }

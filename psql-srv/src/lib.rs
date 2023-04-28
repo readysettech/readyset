@@ -100,7 +100,11 @@ pub trait Backend {
     /// * `query` - The sql query to prepare.
     /// * returns - A `PrepareResponse` containing metadata about the new prepared statement, or an
     ///   `Error` if a failure occurs.
-    async fn on_prepare(&mut self, query: &str) -> Result<PrepareResponse, Error>;
+    async fn on_prepare(
+        &mut self,
+        query: &str,
+        parameter_data_types: &[Type],
+    ) -> Result<PrepareResponse, Error>;
 
     /// Executes a previously prepared SQL query using the provided parameters.
     ///

@@ -291,6 +291,7 @@ impl UpstreamDatabase for MySqlUpstream {
     type QueryResult<'a> = QueryResult<'a>;
     type CachedReadResult = CachedReadResult;
     type StatementMeta = StatementMeta;
+    type PrepareData<'a> = ();
     type Error = Error;
     const DEFAULT_DB_VERSION: &'static str = "8.0.26-readyset\0";
 
@@ -389,7 +390,11 @@ impl UpstreamDatabase for MySqlUpstream {
 
     /// Prepares the given query using the mysql connection. Note, queries are prepared on a
     /// per connection basis. They are not universal.
-    async fn prepare<'a, S>(&'a mut self, query: S) -> Result<UpstreamPrepare<Self>, Error>
+    async fn prepare<'a, 'b, S>(
+        &'a mut self,
+        query: S,
+        _: (),
+    ) -> Result<UpstreamPrepare<Self>, Error>
     where
         S: AsRef<str> + Send + Sync + 'a,
     {

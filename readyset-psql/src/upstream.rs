@@ -175,6 +175,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
     type QueryResult<'a> = QueryResult;
     // TODO: Actually fill this in.
     type CachedReadResult = ();
+    type PrepareData<'a> = &'a [Type];
     type Error = Error;
     const DEFAULT_DB_VERSION: &'static str = "13.4 (ReadySet)";
 
@@ -260,12 +261,19 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         self.version.clone()
     }
 
-    async fn prepare<'a, S>(&'a mut self, query: S) -> Result<UpstreamPrepare<Self>, Error>
+    async fn prepare<'a, S>(
+        &'a mut self,
+        query: S,
+        parameter_data_types: &[Type],
+    ) -> Result<UpstreamPrepare<Self>, Error>
     where
         S: AsRef<str> + Send + Sync + 'a,
     {
         let query = query.as_ref();
-        let statement = self.client.prepare(query).await?;
+        let statement = self
+            .client
+            .prepare_typed(query, parameter_data_types)
+            .await?;
 
         let meta = StatementMeta {
             params: statement.params().to_vec(),
