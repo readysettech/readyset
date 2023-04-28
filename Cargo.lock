@@ -4817,6 +4817,7 @@ dependencies = [
  "console",
  "database-utils",
  "nom",
+ "postgres-types",
  "prettytable",
  "readyset-data",
  "readyset-errors",

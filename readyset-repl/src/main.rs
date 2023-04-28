@@ -1,7 +1,8 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use clap::Parser;
 use console::style;
 use database_utils::{DatabaseConnection, DatabaseStatement, DatabaseType, DatabaseURL};
+use postgres_types::Type;
 use prettytable::Table;
 use readyset_data::DfValue;
 use rustyline::error::ReadlineError;
@@ -21,7 +22,10 @@ struct Options {
 enum Command<'a> {
     Help,
     Normal(&'a str),
-    Prepare(&'a str),
+    Prepare {
+        query: &'a str,
+        type_oids: Option<Vec<u32>>,
+    },
     ExecutePrepared {
         statement_id: usize,
         params: Vec<&'a str>,
@@ -31,16 +35,18 @@ enum Command<'a> {
 mod parse {
     use nom::branch::alt;
     use nom::bytes::complete::{tag, take_while1};
-    use nom::character::complete::multispace1;
+    use nom::character::complete::{multispace0, multispace1};
     use nom::character::is_space;
-    use nom::combinator::{all_consuming, map_res, value};
+    use nom::character::streaming::digit1;
+    use nom::combinator::{all_consuming, map_res, opt, value};
+    use nom::multi::separated_list0;
     use nom::sequence::terminated;
     use nom::IResult;
 
     use super::Command;
 
     pub(super) fn command(i: &str) -> IResult<&str, Command> {
-        all_consuming(terminated(alt((help, prepare, execute, normal)), tag(";")))(i)
+        all_consuming(alt((help, prepare, execute, normal)))(i)
     }
 
     fn help(i: &str) -> IResult<&str, Command> {
@@ -50,7 +56,21 @@ mod parse {
     fn prepare(i: &str) -> IResult<&str, Command> {
         let (i, _) = tag("prepare")(i)?;
         let (i, _) = multispace1(i)?;
-        Ok(("", Command::Prepare(i.trim_end_matches(';'))))
+        let (i, type_oids) = opt(terminated(prepare_params, multispace1))(i)?;
+        let query = i.trim_end_matches(';');
+        Ok(("", Command::Prepare { query, type_oids }))
+    }
+
+    fn prepare_params(i: &str) -> IResult<&str, Vec<u32>> {
+        let (i, _) = tag("(")(i)?;
+        let (i, _) = multispace0(i)?;
+        let (i, params) = separated_list0(
+            terminated(tag(","), multispace0),
+            map_res(digit1, |s: &str| s.parse::<u32>()),
+        )(i)?;
+        let (i, _) = multispace0(i)?;
+        let (i, _) = tag(")")(i)?;
+        Ok((i, params))
     }
 
     fn execute(i: &str) -> IResult<&str, Command> {
@@ -140,7 +160,10 @@ impl ReplContext {
                     preparing the statement, the ID of the statement will be written to standard \
                     output. \n\n\
                     To execute that prepared statement, run:\n\n    \
-                    ❯ execute <statement_id> <param1>, <param2>, <param3>...;\n",
+                    ❯ execute <statement_id> <param1>, <param2>, <param3>...;\n\n\
+                    When running against PostgreSQL, type OIDs can be provided in parentheses to \
+                    `prepare` to provide specific types to the PostgreSQL server, for example:\n\n    \
+                    ❯ prepare (20) insert into t (x) values ($1)",
                         80
                     )
                 )
@@ -149,9 +172,29 @@ impl ReplContext {
                 let res = self.connection.query(query).await?;
                 print_result(res);
             }
-            Command::Prepare(query) => {
+            Command::Prepare { query, type_oids } => {
                 let statement_id = self.prepared_statements.len();
-                let stmt = self.connection.prepare(query).await?;
+                let stmt = match type_oids {
+                    None => self.connection.prepare(query).await?,
+                    Some(type_oids) => match &self.connection {
+                        DatabaseConnection::MySQL(_) => {
+                            bail!("MySQL can't handle prepare with types")
+                        }
+                        DatabaseConnection::PostgreSQL(client, _) => client
+                            .prepare_typed(
+                                query,
+                                &type_oids
+                                    .into_iter()
+                                    .map(|oid| {
+                                        Type::from_oid(oid)
+                                            .ok_or_else(|| anyhow!("Unknown type {oid}"))
+                                    })
+                                    .collect::<Result<Vec<_>, _>>()?,
+                            )
+                            .await?
+                            .into(),
+                    },
+                };
                 self.prepared_statements.push(stmt);
 
                 println!("Prepared statement id: {}", statement_id);
