@@ -27,7 +27,9 @@ use dataflow::{
 };
 use futures::StreamExt;
 use itertools::Itertools;
-use nom_sql::{parse_create_cache, parse_create_view, parse_query, OrderType, Relation, SqlQuery};
+use nom_sql::{
+    parse_create_view, parse_query, parse_select_statement, OrderType, Relation, SqlQuery,
+};
 use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use readyset_client::consistency::Timestamp;
 use readyset_client::internal::LocalNodeIndex;
@@ -9329,12 +9331,10 @@ async fn views_out_of_order() {
     .unwrap();
 
     g.extend_recipe(ChangeList::from_change(
-        Change::CreateCache(
-            parse_create_cache(
-                nom_sql::Dialect::MySQL,
-                "CREATE CACHE q FROM SELECT x FROM v2",
-            )
-            .unwrap(),
+        Change::create_cache(
+            "q",
+            parse_select_statement(nom_sql::Dialect::MySQL, "SELECT x FROM v2").unwrap(),
+            false,
         ),
         Dialect::DEFAULT_MYSQL,
     ))

@@ -39,8 +39,9 @@ use nom_sql::{
     SqlIdentifier, SqlQuery,
 };
 use readyset_data::DfType;
-use readyset_errors::{unsupported, ReadySetError, ReadySetResult};
+use readyset_errors::{internal, unsupported, ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
+use tracing::error;
 
 /// The specification for a list of changes that must be made
 /// to the MIR and dataflow graphs.
@@ -182,7 +183,33 @@ impl ChangeList {
                         match parsed {
                             SqlQuery::CreateTable(cts) => changes.push(Change::CreateTable(cts)),
                             SqlQuery::CreateView(cvs) => changes.push(Change::CreateView(cvs)),
-                            SqlQuery::CreateCache(ccs) => changes.push(Change::CreateCache(ccs)),
+                            SqlQuery::CreateCache(CreateCacheStatement {
+                                name,
+                                inner,
+                                always,
+                            }) => {
+                                let statement = match inner {
+                                    Ok(CacheInner::Statement(stmt)) => stmt,
+                                    Ok(CacheInner::Id(id)) => {
+                                        error!(
+                                            %id,
+                                            "attempted to issue CREATE CACHE with an id"
+                                        );
+                                        internal!(
+                                            "CREATE CACHE should've had its ID resolved by \
+                                             the adapter"
+                                        );
+                                    }
+                                    Err(query) => {
+                                        return Err(ReadySetError::UnparseableQuery { query })
+                                    }
+                                };
+                                changes.push(Change::CreateCache {
+                                    name,
+                                    statement,
+                                    always,
+                                })
+                            }
                             SqlQuery::AlterTable(ats) => changes.push(Change::AlterTable(ats)),
                             SqlQuery::DropTable(dts) => {
                                 let if_exists = dts.if_exists;
@@ -289,8 +316,16 @@ pub enum Change {
     AddNonReplicatedRelation(Relation),
     /// Add a new view to the graph, represented by the given `CREATE VIEW` statement
     CreateView(CreateViewStatement),
-    /// Add a new cached query to the graph, represented by the given `CREATE CACHE` statement
-    CreateCache(CreateCacheStatement),
+    /// Add a new cached query to the graph
+    CreateCache {
+        /// The name of the cache. If not provided, a name will be generated based on the statement
+        name: Option<Relation>,
+        /// The `SELECT` statement for the body of the cache
+        statement: Box<SelectStatement>,
+        /// If set to `true`, execution of this cache will bypass transaction handling in the
+        /// adapter
+        always: bool,
+    },
     /// Alter an existing table in the graph, making changes according to the given `ALTER TABLE`
     /// statement
     AlterTable(AlterTableStatement),
@@ -341,11 +376,11 @@ impl Change {
     where
         N: Into<Relation>,
     {
-        Self::CreateCache(CreateCacheStatement {
+        Self::CreateCache {
             name: Some(name.into()),
-            inner: Ok(CacheInner::Statement(Box::new(statement))),
+            statement: Box::new(statement),
             always,
-        })
+        }
     }
 
     /// Return true if this change requires noria to resnapshot the database in order to properly
@@ -394,7 +429,7 @@ impl Change {
             } => true,
             Change::CreateTable(_)
             | Change::CreateView(_)
-            | Change::CreateCache(_)
+            | Change::CreateCache { .. }
             | Change::CreateType { .. }
             | Change::Drop { .. }
             | Change::AddNonReplicatedRelation(_) => false,
@@ -466,7 +501,7 @@ mod tests {
             changelist
                 .changes
                 .iter()
-                .filter(|c| matches!(c, Change::CreateCache(_)))
+                .filter(|c| matches!(c, Change::CreateCache { .. }))
                 .count(),
             2
         );
@@ -490,7 +525,7 @@ mod tests {
             changelist
                 .changes
                 .iter()
-                .filter(|c| matches!(c, Change::CreateCache(_)))
+                .filter(|c| matches!(c, Change::CreateCache { .. }))
                 .count(),
             2
         );
@@ -513,7 +548,7 @@ mod tests {
             changelist
                 .changes
                 .iter()
-                .filter(|c| matches!(c, Change::CreateCache(_)))
+                .filter(|c| matches!(c, Change::CreateCache { .. }))
                 .count(),
             1
         );

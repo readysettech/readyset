@@ -6,9 +6,8 @@ use ::mir::visualize::GraphViz;
 use ::mir::DfNodeIndex;
 use ::serde::{Deserialize, Serialize};
 use nom_sql::{
-    CacheInner, CompoundSelectOperator, CompoundSelectStatement, CreateTableBody,
-    FieldDefinitionExpr, Relation, SelectSpecification, SelectStatement, SqlIdentifier, SqlType,
-    TableExpr,
+    CompoundSelectOperator, CompoundSelectStatement, CreateTableBody, FieldDefinitionExpr,
+    Relation, SelectSpecification, SelectStatement, SqlIdentifier, SqlType, TableExpr,
 };
 use petgraph::graph::NodeIndex;
 use readyset_client::recipe::changelist::{AlterTypeChange, Change};
@@ -285,17 +284,12 @@ impl SqlIncorporator {
                     self.invalidate_queries_for_added_relation(&stmt.name, mig)?;
                     self.add_view(stmt.name, definition, schema_search_path.clone())?;
                 }
-                Change::CreateCache(ccqs) => {
-                    let statement = match ccqs.inner {
-                        Ok(CacheInner::Statement(stmt)) => *stmt,
-                        Ok(CacheInner::Id(id)) => {
-                            error!("attempted to issue CREATE CACHE with an id: {}", id);
-                            internal!("CREATE CACHE should've had its ID resolved by the adapter");
-                        }
-                        Err(query) => return Err(ReadySetError::UnparseableQuery { query }),
-                    };
-
-                    self.add_query(ccqs.name, statement, ccqs.always, &schema_search_path, mig)?;
+                Change::CreateCache {
+                    name,
+                    statement,
+                    always,
+                } => {
+                    self.add_query(name, *statement, always, &schema_search_path, mig)?;
                 }
                 Change::AlterTable(_) => {
                     // The only ALTER TABLE changes that can end up here (currently) are ones that
