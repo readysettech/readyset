@@ -14,7 +14,9 @@ use nom::multi::{fold_many0, separated_list0};
 use nom::sequence::{delimited, preceded, terminated, tuple};
 use nom_locate::LocatedSpan;
 use proptest::arbitrary::Arbitrary;
-use proptest::strategy::BoxedStrategy;
+use proptest::prelude::any_with;
+use proptest::sample::SizeRange;
+use proptest::strategy::{BoxedStrategy, Strategy};
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use triomphe::ThinArc;
@@ -433,6 +435,21 @@ impl Serialize for EnumVariants {
     {
         <[String]>::serialize(self, serializer)
     }
+}
+
+impl Arbitrary for EnumVariants {
+    type Parameters = (&'static str, SizeRange);
+
+    fn arbitrary_with((regex, len): Self::Parameters) -> Self::Strategy {
+        // NOTE: We are required to provide a regex for Arbitrary, otherwise we would just get empty
+        // strings.
+        // Using hashset to ensure that all variants are unique.
+        proptest::collection::hash_set(any_with::<String>(regex.into()), len)
+            .prop_map(EnumVariants::from)
+            .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
 }
 
 fn digit_as_u16(len: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], u16> {
