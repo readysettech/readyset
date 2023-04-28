@@ -12,7 +12,7 @@ console = "0.15.5"
 rustyline = "11.0"
 rustyline-derive = "0.6.0"
 tokio = { workspace = true, features = ["full"] }
-prettytable-rs = "0.8.0"
+prettytable = "0.10.0"
 textwrap = "0.14"
 nom = "7.1.1"
 

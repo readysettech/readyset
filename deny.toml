@@ -184,6 +184,7 @@ skip = [
     { name = "dashmap", version = "4.0.2" },
     { name = "fixedbitset", version = "0.2.0" },
     { name = "petgraph", version = "0.5.1" },
+    { name = "encode_unicode", version = "0.3.6" },
 ]
 # Similarly to `skip` allows you to skip certain crates during duplicate
 # detection. Unlike skip, it also includes the entire tree of transitive
