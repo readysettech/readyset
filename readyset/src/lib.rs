@@ -227,15 +227,6 @@ pub struct Options {
     #[clap(long, env = "MIGRATION_TASK_INTERVAL", default_value = "20000")]
     migration_task_interval: u64,
 
-    /// Validate queries executing against noria with the upstream db.
-    #[clap(
-        long,
-        env = "VALIDATE_QUERIES",
-        requires("upstream_db_url"),
-        hide = true
-    )]
-    validate_queries: bool,
-
     /// IP:PORT to host endpoint for scraping metrics from the adapter.
     #[clap(long, env = "METRICS_ADDRESS", default_value = "0.0.0.0:6034")]
     metrics_address: SocketAddr,
@@ -276,11 +267,6 @@ pub struct Options {
     /// readyset-psql-specific options
     #[clap(flatten)]
     pub psql_options: psql::Options,
-
-    /// Test feature to fail invalidated queries in the serving path instead of going
-    /// to fallback.
-    #[clap(long, hide = true)]
-    fail_invalidated_queries: bool,
 
     /// Allow executing, but ignore, unsupported `SET` statements.
     ///
@@ -374,7 +360,7 @@ pub struct Options {
     #[clap(long, env = "EXPERIMENTAL_PLACEHOLDER_INLINING")]
     experimental_placeholder_inlining: bool,
 
-    /// Don't make connections to the upstream database for new client connections.
+    /// Don't make connections to the upstream aatabase for new client connections.
     ///
     /// If this flag is set queries will never be proxied upstream - even if they are unsupported,
     /// fail to execute, or are run in a transaction.
@@ -843,7 +829,6 @@ where
             let shutdown_rx = shutdown_rx.clone();
             let loop_interval = options.migration_task_interval;
             let max_retry = options.max_processing_minutes;
-            let validate_queries = options.validate_queries;
             let dry_run = matches!(migration_style, MigrationStyle::Explicit);
             let upstream_config = options.server_worker_options.replicator_config.clone();
             let expr_dialect = self.expr_dialect;
@@ -896,11 +881,9 @@ where
                 let controller_handle = dry_run.then(|| rh.clone());
                 let mut migration_handler = MigrationHandler::new(
                     noria,
-                    upstream,
                     controller_handle,
                     query_status_cache,
                     expr_dialect,
-                    validate_queries,
                     std::time::Duration::from_millis(loop_interval),
                     std::time::Duration::from_secs(max_retry * 60),
                     shutdown_rx.clone(),
@@ -1026,7 +1009,6 @@ where
                 .require_authentication(!options.allow_unauthenticated_connections)
                 .dialect(self.parse_dialect)
                 .query_log(qlog_sender.clone(), options.query_log_ad_hoc)
-                .validate_queries(options.validate_queries, options.fail_invalidated_queries)
                 .unsupported_set_mode(if options.allow_unsupported_set {
                     readyset_adapter::backend::UnsupportedSetMode::Allow
                 } else {

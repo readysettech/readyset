@@ -20,15 +20,13 @@ use pin_project::pin_project;
 use readyset_adapter::fallback_cache::FallbackCache;
 #[cfg(feature = "fallback_cache")]
 use readyset_adapter::fallback_cache::FallbackCacheApi;
-use readyset_adapter::upstream_database::{NoriaCompare, UpstreamDestination};
+use readyset_adapter::upstream_database::UpstreamDestination;
 use readyset_adapter::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
-use readyset_client::ColumnSchema;
 use readyset_client_metrics::QueryDestination;
 use readyset_data::DfValue;
 use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
 use tracing::{error, info, info_span, Instrument};
 
-use crate::schema::{convert_column, is_subtype};
 use crate::Error;
 
 type StatementID = u32;
@@ -163,29 +161,6 @@ pub struct StatementMeta {
     pub schema: Vec<Column>,
 }
 
-fn schema_column_match(schema: &[ColumnSchema], columns: &[Column]) -> Result<(), Error> {
-    if schema.len() != columns.len() {
-        return Err(Error::ReadySet(ReadySetError::WrongColumnCount(
-            columns.len(),
-            schema.len(),
-        )));
-    }
-
-    if cfg!(feature = "schema-check") {
-        for (sch, col) in schema.iter().zip(columns.iter()) {
-            let noria_column_type = convert_column(sch)?.coltype;
-            if !is_subtype(noria_column_type, col.column_type()) {
-                return Err(Error::ReadySet(ReadySetError::WrongColumnType(
-                    format!("{:?}", col.column_type()),
-                    format!("{:?}", noria_column_type),
-                )));
-            }
-        }
-    }
-
-    Ok(())
-}
-
 impl<'a> Stream for ReadResultStream<'a> {
     type Item = Result<Row, mysql_async::Error>;
 
@@ -206,20 +181,6 @@ impl<'a> ReadResultStream<'a> {
             ReadResultStream::Text(s) => s.ok_packet().map(|o| o.status_flags()),
             ReadResultStream::Binary(s) => s.ok_packet().map(|o| o.status_flags()),
         }
-    }
-}
-
-impl NoriaCompare for StatementMeta {
-    type Error = Error;
-    fn compare(
-        &self,
-        columns: &[ColumnSchema],
-        params: &[ColumnSchema],
-    ) -> Result<(), Self::Error> {
-        schema_column_match(params, &self.params)?;
-        schema_column_match(columns, &self.schema)?;
-
-        Ok(())
     }
 }
 
@@ -617,113 +578,5 @@ impl UpstreamDatabase for MySqlUpstream {
 
     async fn schema_search_path(&mut self) -> Result<Vec<SqlIdentifier>, Self::Error> {
         Ok(self.database().into_iter().map(|s| s.into()).collect())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use mysql_srv::ColumnType;
-    use nom_sql::{Column as NomColumn, ColumnSpecification, SqlType};
-    use readyset_data::Dialect;
-
-    use super::*;
-
-    fn test_column() -> NomColumn {
-        NomColumn {
-            name: "t".into(),
-            table: None,
-        }
-    }
-
-    #[test]
-    fn compare_matching_schema() {
-        let s: StatementMeta = StatementMeta {
-            params: vec![
-                Column::new(ColumnType::MYSQL_TYPE_VAR_STRING),
-                Column::new(ColumnType::MYSQL_TYPE_DOUBLE),
-            ],
-            schema: vec![Column::new(ColumnType::MYSQL_TYPE_LONG)],
-        };
-
-        let param_specs = vec![
-            ColumnSchema::from_base(
-                ColumnSpecification::new(test_column(), SqlType::VarChar(Some(10))),
-                "table1".into(),
-                Dialect::DEFAULT_MYSQL,
-            )
-            .unwrap(),
-            ColumnSchema::from_base(
-                ColumnSpecification::new(test_column(), SqlType::Double),
-                "table1".into(),
-                Dialect::DEFAULT_MYSQL,
-            )
-            .unwrap(),
-        ];
-
-        let schema_spec = vec![ColumnSchema::from_base(
-            ColumnSpecification::new(test_column(), SqlType::Int(None)),
-            "table1".into(),
-            Dialect::DEFAULT_MYSQL,
-        )
-        .unwrap()];
-
-        s.compare(&schema_spec, &param_specs).unwrap();
-    }
-
-    #[test]
-    fn compare_different_len_schema() {
-        let s: StatementMeta = StatementMeta {
-            params: vec![
-                Column::new(ColumnType::MYSQL_TYPE_VARCHAR),
-                Column::new(ColumnType::MYSQL_TYPE_DOUBLE),
-            ],
-            schema: vec![Column::new(ColumnType::MYSQL_TYPE_LONG)],
-        };
-
-        let param_specs = vec![ColumnSchema::from_base(
-            ColumnSpecification::new(test_column(), SqlType::VarChar(Some(10))),
-            "table1".into(),
-            Dialect::DEFAULT_MYSQL,
-        )
-        .unwrap()];
-
-        let schema_spec = vec![ColumnSchema::from_base(
-            ColumnSpecification::new(test_column(), SqlType::Int(None)),
-            "table1".into(),
-            Dialect::DEFAULT_MYSQL,
-        )
-        .unwrap()];
-
-        s.compare(&schema_spec, &param_specs).unwrap_err();
-    }
-
-    #[cfg(feature = "schema-check")]
-    #[test]
-    fn compare_different_type_schema() {
-        let s: StatementMeta = StatementMeta {
-            params: vec![
-                Column::new(ColumnType::MYSQL_TYPE_VARCHAR),
-                Column::new(ColumnType::MYSQL_TYPE_DOUBLE),
-            ],
-            schema: vec![Column::new(ColumnType::MYSQL_TYPE_LONG)],
-        };
-
-        let param_specs = vec![
-            ColumnSchema::from_base(
-                ColumnSpecification::new(test_column(), SqlType::Bool),
-                "table1".into(),
-            ),
-            ColumnSchema::from_base(
-                ColumnSpecification::new(test_column(), SqlType::Double),
-                "table1".into(),
-            ),
-        ];
-
-        let schema_spec = vec![ColumnSchema::from_base(
-            ColumnSpecification::new(test_column(), SqlType::VarChar(Some(8))),
-            "table1".into(),
-        )];
-
-        assert!(s.compare(&schema_spec, &param_specs).is_err());
     }
 }

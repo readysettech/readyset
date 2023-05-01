@@ -73,6 +73,5 @@ harness = false
 
 [features]
 ryw = []
-schema-check = []
 fallback_cache = ["readyset-client-metrics/fallback_cache"]
 failure_injection = ["fail/failpoints"]

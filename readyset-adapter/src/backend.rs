@@ -104,14 +104,13 @@ use vec1::Vec1;
 use crate::backend::noria_connector::ExecuteSelectContext;
 use crate::query_handler::SetBehavior;
 use crate::query_status_cache::QueryStatusCache;
-use crate::upstream_database::NoriaCompare;
 pub use crate::upstream_database::UpstreamPrepare;
 use crate::{rewrite, QueryHandler, UpstreamDatabase, UpstreamDestination};
 
 pub mod noria_connector;
 
 pub use self::noria_connector::NoriaConnector;
-use self::noria_connector::{MetaVariable, SelectPrepareResult, SelectPrepareResultInner};
+use self::noria_connector::{MetaVariable, SelectPrepareResult};
 
 /// Query metadata used to plan query prepare
 #[allow(clippy::large_enum_variant)]
@@ -259,8 +258,6 @@ pub struct BackendBuilder {
     timestamp_client: Option<TimestampClient>,
     query_log_sender: Option<UnboundedSender<QueryExecutionEvent>>,
     query_log_ad_hoc_queries: bool,
-    validate_queries: bool,
-    fail_invalidated_queries: bool,
     unsupported_set_mode: UnsupportedSetMode,
     migration_mode: MigrationMode,
     query_max_failure_seconds: u64,
@@ -280,8 +277,6 @@ impl Default for BackendBuilder {
             timestamp_client: None,
             query_log_sender: None,
             query_log_ad_hoc_queries: false,
-            validate_queries: false,
-            fail_invalidated_queries: false,
             unsupported_set_mode: UnsupportedSetMode::Error,
             migration_mode: MigrationMode::InRequestPath,
             query_max_failure_seconds: (i64::MAX / 1000) as u64,
@@ -329,8 +324,6 @@ impl BackendBuilder {
                 slowlog: self.slowlog,
                 dialect: self.dialect,
                 require_authentication: self.require_authentication,
-                validate_queries: self.validate_queries,
-                fail_invalidated_queries: self.fail_invalidated_queries,
                 unsupported_set_mode: self.unsupported_set_mode,
                 migration_mode: self.migration_mode,
                 query_max_failure_duration: Duration::new(self.query_max_failure_seconds, 0),
@@ -382,16 +375,6 @@ impl BackendBuilder {
             self.ticket = Some(Timestamp::default());
             self.timestamp_client = Some(TimestampClient::default())
         }
-        self
-    }
-
-    pub fn validate_queries(
-        mut self,
-        validate_queries: bool,
-        fail_invalidated_queries: bool,
-    ) -> Self {
-        self.validate_queries = validate_queries;
-        self.fail_invalidated_queries = fail_invalidated_queries;
         self
     }
 
@@ -553,8 +536,6 @@ struct BackendSettings {
     require_authentication: bool,
     /// Whether to log ad-hoc queries by full query text in the query logger.
     query_log_ad_hoc_queries: bool,
-    /// Run select statements with query validation.
-    validate_queries: bool,
     /// How to behave when receiving unsupported `SET` statements
     unsupported_set_mode: UnsupportedSetMode,
     /// How this backend handles migrations, See MigrationMode.
@@ -565,7 +546,6 @@ struct BackendSettings {
     /// The recovery period that we enter into for a given query, when that query has
     /// repeatedly failed for query_max_failure_duration.
     fallback_recovery_duration: Duration,
-    fail_invalidated_queries: bool,
     /// Whether to automatically create inlined migrations for queries with unsupported
     /// placeholders.
     enable_experimental_placeholder_inlining: bool,
@@ -864,50 +844,13 @@ where
 
         // Update noria migration state for query
         match &noria_res {
-            Some(Ok(noria_connector::PrepareResult::Select(res))) => {
-                let mut state = MigrationState::Successful;
-
-                let (schema, params) = match res {
-                    SelectPrepareResult::Schema(SelectPrepareResultInner {
-                        schema,
-                        params,
-                        ..
-                    }) => (Some(schema), Some(params)),
-                    _ => (None, None),
-                };
-
-                if let Some(Ok(upstream_res)) = &upstream_res {
-                    // If we are using `validate_queries`, a query that was successfully
-                    // migrated may actually be unsupported if the schema or columns do not
-                    // match up.
-                    if self.settings.validate_queries {
-                        if let (Some(schema), Some(params)) = (schema, params) {
-                            if let Err(e) = upstream_res.meta.compare(schema, params) {
-                                if self.settings.fail_invalidated_queries {
-                                    internal!("Query comparison failed to validate: {}", e);
-                                }
-                                warn!(
-                                    error = %e,
-                                    query = %Sensitive(&select_meta.stmt.display(DB::sql_dialect())),
-                                    "Query compare failed"
-                                );
-                                state = MigrationState::Unsupported;
-                            }
-                        } else if self.settings.fail_invalidated_queries {
-                            internal!("Cannot compare schema for borrowed query");
-                        } else {
-                            warn!("Cannot compare schema for borrowed query");
-                            state = MigrationState::Unsupported;
-                        }
-                    }
-                }
-
+            Some(Ok(noria_connector::PrepareResult::Select(_))) => {
                 self.state.query_status_cache.update_query_migration_state(
                     &ViewCreateRequest::new(
                         select_meta.rewritten.clone(),
                         self.noria.schema_search_path().to_owned(),
                     ),
-                    state,
+                    MigrationState::Successful,
                 );
             }
             Some(Err(e)) => {

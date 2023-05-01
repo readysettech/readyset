@@ -23,13 +23,11 @@ use readyset_util::shutdown::ShutdownReceiver;
 use tokio::select;
 use tracing::{debug, error, info, instrument};
 
-use crate::backend::noria_connector::{SelectPrepareResult, SelectPrepareResultInner};
-use crate::backend::{noria_connector, NoriaConnector};
+use crate::backend::NoriaConnector;
 use crate::query_status_cache::QueryStatusCache;
-use crate::upstream_database::{IsFatalError, NoriaCompare};
-use crate::{utils, UpstreamDatabase};
+use crate::utils;
 
-pub struct MigrationHandler<DB> {
+pub struct MigrationHandler {
     /// Connection used to issue prepare requests to ReadySet.
     noria: NoriaConnector,
 
@@ -39,16 +37,9 @@ pub struct MigrationHandler<DB> {
     /// SQL Dialect to pass to ReadySet as part of all migration requests
     dialect: Dialect,
 
-    /// Connector used to issue prepares to the upstream db.
-    upstream: Option<DB>,
-
     /// The query status cache is polled on a regular interval to
     /// determine which queries require processing.
     query_status_cache: &'static QueryStatusCache,
-
-    /// Whether the queries should be validated against MySQL during
-    /// migration.
-    validate_queries: bool,
 
     /// The minimum interval between subsequent polls to the query
     /// status cache. In practice it may be longer if the queries
@@ -68,29 +59,21 @@ pub struct MigrationHandler<DB> {
     start_time: HashMap<ViewCreateRequest, Instant>,
 }
 
-impl<DB> MigrationHandler<DB>
-where
-    DB: UpstreamDatabase,
-{
-    #[allow(clippy::too_many_arguments)] // Only one over. Designing away that for a single over arg seems like over-engineering.
+impl MigrationHandler {
     pub fn new(
         noria: NoriaConnector,
-        upstream: Option<DB>,
         controller: Option<ReadySetHandle>,
         query_status_cache: &'static QueryStatusCache,
         dialect: Dialect,
-        validate_queries: bool,
         min_poll_interval: std::time::Duration,
         max_retry: std::time::Duration,
         shutdown_recv: ShutdownReceiver,
-    ) -> MigrationHandler<DB> {
+    ) -> MigrationHandler {
         MigrationHandler {
             noria,
-            upstream,
             controller,
             dialect,
             query_status_cache,
-            validate_queries,
             min_poll_interval,
             max_retry,
             shutdown_recv,
@@ -234,63 +217,6 @@ where
             self.start_time.insert(view_request.clone(), Instant::now());
         }
 
-        let upstream_result = match self.upstream {
-            Some(ref mut db) if self.validate_queries => {
-                // TODO(grfn): Set search path here
-                let mut upstream_result = db
-                    .prepare(
-                        view_request
-                            .statement
-                            // FIXME(ENG-2500): Use correct dialect.
-                            .display(nom_sql::Dialect::MySQL)
-                            .to_string(),
-                    )
-                    .await;
-
-                // If we returned an error indicating the connection was closed, we will try to
-                // reconnect. If that fails, we have an unrecoverable error and should wait until
-                // the next reconciliation pass.
-                match upstream_result {
-                    Err(e) if e.is_fatal() => {
-                        if let Err(e) = db.reset().await {
-                            error!(
-                                error = %e,
-                                // FIXME(ENG-2499 + ENG-2500): Use correct dialect.
-                                query = %Sensitive(&view_request.statement.display(nom_sql::Dialect::MySQL)),
-                                "MigrationHandler dropped conn to Upstream and failed to reconnnect",
-                            );
-                            return;
-                        } else {
-                            // Succeeded on reconnecting. Retry prepare.
-                            upstream_result = db
-                                .prepare(
-                                    view_request
-                                        .statement
-                                        // FIXME(ENG-2500): Use correct dialect.
-                                        .display(nom_sql::Dialect::MySQL)
-                                        .to_string(),
-                                )
-                                .await;
-                        }
-                    }
-                    _ => {}
-                };
-
-                if let Err(e) = upstream_result {
-                    debug!(
-                        error = %e,
-                        // FIXME(ENG-2499 + ENG-2500): Use correct dialect.
-                        query = %Sensitive(&view_request.statement.display(nom_sql::Dialect::MySQL)),
-                        "Query failed to be prepared against upstream",
-                    );
-                    return;
-                }
-
-                Some(upstream_result)
-            }
-            _ => None,
-        };
-
         // Check if we can successfully prepare against noria as well.
         match self
             .noria
@@ -302,47 +228,7 @@ where
             )
             .await
         {
-            Ok(n) => {
-                if self.validate_queries {
-                    match n {
-                        noria_connector::PrepareResult::Select(SelectPrepareResult::Schema(
-                            SelectPrepareResultInner {
-                                ref schema,
-                                ref params,
-                                ..
-                            },
-                        )) => {
-                            // Upstream is an Ok value as we check for the error above.
-                            if let Err(e) = upstream_result
-                                .unwrap()
-                                .unwrap()
-                                .meta
-                                .compare(schema, params)
-                            {
-                                debug!(
-                                    error = %e,
-                                    // FIXME(ENG-2499 + ENG-2500): Use correct dialect.
-                                    query = %Sensitive(&view_request.statement.display(nom_sql::Dialect::MySQL)),
-                                    "Query compare failed"
-                                );
-                                // TODO(justin): Fix setting migration state to unsupported with
-                                // validate_queries.
-                                /*self.query_status_cache
-                                .update_query_migration_state(stmt, MigrationState::Unsupported)
-                                .await;*/
-                                return;
-                            }
-                        }
-                        noria_connector::PrepareResult::Select(SelectPrepareResult::NoSchema(
-                            _,
-                        )) => {
-                            debug!("Cannot compare schema for borrowed query");
-                        }
-                        _ => {
-                            return;
-                        }
-                    }
-                }
+            Ok(_) => {
                 counter!(recorded::MIGRATION_HANDLER_ALLOWED, 1);
                 self.start_time.remove(view_request);
                 self.query_status_cache

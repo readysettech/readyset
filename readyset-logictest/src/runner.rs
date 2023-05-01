@@ -585,7 +585,6 @@ impl TestScript {
 
                     BackendBuilder::new()
                         .require_authentication(false)
-                        .validate_queries(true, true)
                         .dialect($dialect)
                         .build::<_, $handler>(noria, upstream, query_status_cache)
                 }};

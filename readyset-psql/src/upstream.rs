@@ -15,9 +15,8 @@ use pgsql::{GenericResult, ResultStream, Row, SimpleQueryMessage};
 use postgres_types::Kind;
 use psql_srv::Column;
 use readyset_adapter::fallback_cache::FallbackCache;
-use readyset_adapter::upstream_database::{NoriaCompare, UpstreamDestination};
+use readyset_adapter::upstream_database::UpstreamDestination;
 use readyset_adapter::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
-use readyset_client::ColumnSchema;
 use readyset_data::DfValue;
 use readyset_errors::{internal_err, invariant_eq, unsupported, ReadySetError, ReadySetResult};
 use tokio::process::Command;
@@ -25,7 +24,6 @@ use tokio_postgres as pgsql;
 use tracing::{debug, info, info_span};
 use tracing_futures::Instrument;
 
-use crate::schema::type_to_pgsql;
 use crate::Error;
 
 /// Indicates the minimum upstream server version that we currently support. Used to error out
@@ -94,50 +92,6 @@ pub struct StatementMeta {
     pub params: Vec<Type>,
     /// Metadata about the types of the columns in the rows returned by this statement
     pub schema: Vec<Column>,
-}
-
-// Returns if the schema plausibly matches the sets of columns.
-fn schema_column_match(schema: &[ColumnSchema], columns: &[Type]) -> Result<(), Error> {
-    if schema.len() != columns.len() {
-        return Err(Error::ReadySet(ReadySetError::WrongColumnCount(
-            columns.len(),
-            schema.len(),
-        )));
-    }
-
-    if cfg!(feature = "schema-check") {
-        for (sch, col) in schema.iter().zip(columns.iter()) {
-            let noria_type = type_to_pgsql(&sch.column_type)?;
-            if &noria_type != col {
-                return Err(Error::ReadySet(ReadySetError::WrongColumnType(
-                    col.to_string(),
-                    noria_type.to_string(),
-                )));
-            }
-        }
-    }
-    Ok(())
-}
-
-impl NoriaCompare for StatementMeta {
-    type Error = Error;
-    fn compare(
-        &self,
-        columns: &[ColumnSchema],
-        params: &[ColumnSchema],
-    ) -> Result<(), Self::Error> {
-        schema_column_match(params, &self.params)?;
-        schema_column_match(
-            columns,
-            &self
-                .schema
-                .iter()
-                .map(|c| c.col_type.clone())
-                .collect::<Vec<_>>(),
-        )?;
-
-        Ok(())
-    }
 }
 
 /// Convert the given list of parameters for a statement that's being proxied upstream to the format
@@ -446,115 +400,5 @@ impl UpstreamDatabase for PostgreSqlUpstream {
                 }
             })
             .collect())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use nom_sql::{Column as NomColumn, ColumnSpecification, SqlType};
-    use readyset_data::Dialect;
-
-    use super::*;
-
-    fn test_column() -> NomColumn {
-        NomColumn {
-            name: "t".into(),
-            table: None,
-        }
-    }
-
-    #[test]
-    fn compare_matching_schema() {
-        let s: StatementMeta = StatementMeta {
-            params: vec![Type::BOOL, Type::INT8],
-            schema: vec![Column {
-                name: "c1".into(),
-                col_type: Type::VARCHAR,
-            }],
-        };
-
-        let param_specs = vec![
-            ColumnSchema::from_base(
-                ColumnSpecification::new(test_column(), SqlType::Bool),
-                "table1".into(),
-                Dialect::DEFAULT_POSTGRESQL,
-            )
-            .unwrap(),
-            ColumnSchema::from_base(
-                ColumnSpecification::new(test_column(), SqlType::BigInt(Some(10))),
-                "table1".into(),
-                Dialect::DEFAULT_POSTGRESQL,
-            )
-            .unwrap(),
-        ];
-
-        let schema_spec = vec![ColumnSchema::from_base(
-            ColumnSpecification::new(test_column(), SqlType::VarChar(Some(8))),
-            "table1".into(),
-            Dialect::DEFAULT_POSTGRESQL,
-        )
-        .unwrap()];
-
-        s.compare(&schema_spec, &param_specs).unwrap();
-    }
-
-    #[test]
-    fn compare_different_len_schema() {
-        let s: StatementMeta = StatementMeta {
-            params: vec![Type::BOOL, Type::INT8],
-            schema: vec![Column {
-                name: "c1".into(),
-                col_type: Type::VARCHAR,
-            }],
-        };
-
-        let param_specs = vec![ColumnSchema::from_base(
-            ColumnSpecification::new(test_column(), SqlType::Bool),
-            "table1".into(),
-            Dialect::DEFAULT_POSTGRESQL,
-        )
-        .unwrap()];
-
-        let schema_spec = vec![ColumnSchema::from_base(
-            ColumnSpecification::new(test_column(), SqlType::VarChar(Some(8))),
-            "table1".into(),
-            Dialect::DEFAULT_POSTGRESQL,
-        )
-        .unwrap()];
-
-        s.compare(&schema_spec, &param_specs).unwrap_err();
-    }
-
-    #[cfg(feature = "schema-check")]
-    #[test]
-    fn compare_different_type_schema() {
-        let s: StatementMeta = StatementMeta {
-            params: vec![Type::BOOL, Type::INT8],
-            schema: vec![Column {
-                name: "c1".into(),
-                col_type: Type::VARCHAR,
-            }],
-        };
-
-        let param_specs = vec![
-            ColumnSchema::from_base(
-                ColumnSpecification::new(test_column(), SqlType::Bool),
-                "table1".into(),
-            )
-            .unwrap(),
-            ColumnSchema::from_base(
-                ColumnSpecification::new(test_column(), SqlType::VarChar(Some(10))),
-                "table1".into(),
-            )
-            .unwrap(),
-        ];
-
-        let schema_spec = vec![ColumnSchema::from_base(
-            ColumnSpecification::new(test_column(), SqlType::VarChar(Some(8))),
-            "table1".into(),
-        )
-        .unwrap()];
-
-        assert!(s.compare(&schema_spec, &param_specs).is_err());
     }
 }

@@ -4,7 +4,6 @@ use std::fmt::Debug;
 use async_trait::async_trait;
 pub use database_utils::UpstreamConfig;
 use nom_sql::SqlIdentifier;
-use readyset_client::ColumnSchema;
 use readyset_client_metrics::QueryDestination;
 use readyset_data::DfValue;
 use readyset_errors::ReadySetError;
@@ -33,18 +32,6 @@ impl<DB: UpstreamDatabase> Clone for UpstreamPrepare<DB> {
             meta: self.meta.clone(),
         }
     }
-}
-
-/// An implementation of this trait allows the statement metadata from a
-/// prepare result to be compared against the schema of the equivalent
-/// noria prepare result. The compare function returns an Ok result if
-/// the query schemas match, and otherwise returns an error with the
-/// reason the schema match failed.
-pub trait NoriaCompare {
-    type Error: From<ReadySetError> + Error + Send + Sync + 'static;
-
-    fn compare(&self, columns: &[ColumnSchema], params: &[ColumnSchema])
-        -> Result<(), Self::Error>;
 }
 
 pub trait IsFatalError {
@@ -84,7 +71,7 @@ pub trait UpstreamDatabase: Sized + Send {
     ///
     /// This type is used as a field of [`UpstreamPrepare`], returned from
     /// [`prepare`](UpstreamDatabase::prepaare)
-    type StatementMeta: NoriaCompare + Debug + Send + Clone + 'static;
+    type StatementMeta: Debug + Send + Clone + 'static;
 
     /// Errors that can be returned from operations on this database
     ///
