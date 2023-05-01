@@ -262,7 +262,11 @@ impl ResultIterator {
                 });
 
                 if let Some(offset) = offset {
-                    results.drain(offset..);
+                    if offset >= results.len() {
+                        results.clear();
+                    } else {
+                        results.drain(offset..);
+                    }
                 }
 
                 return ResultIterator::owned(vec![Results {
