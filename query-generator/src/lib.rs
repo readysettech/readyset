@@ -1222,6 +1222,7 @@ pub enum QueryOperation {
         #[strategy(0..=100u64)]
         limit: u64,
     },
+    #[weight(u32::from(!args.in_subquery))]
     Paginate {
         order_type: OrderType,
         #[strategy(0..=100u64)]
