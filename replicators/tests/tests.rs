@@ -2487,3 +2487,100 @@ async fn pgsql_delete_from_table_without_pk() {
 
     shutdown_tx.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pgsql_dont_replicate_partitioned_table() {
+    readyset_tracing::init_test_logging();
+    let url = pgsql_url();
+    let mut client = DbConnection::connect(&url).await.unwrap();
+
+    client
+        .query(
+            "DROP TABLE IF EXISTS t CASCADE;
+             DROP TABLE IF EXISTS t_true CASCADE;
+             DROP TABLE IF EXISTS t_false CASCADE;
+
+             CREATE TABLE t (key bool not null, val int) PARTITION BY LIST (key);
+             CREATE TABLE t_true PARTITION OF t FOR VALUES IN (true);
+             CREATE TABLE t_false PARTITION OF t FOR VALUES IN (false);
+
+             INSERT INTO t (key, val) VALUES
+             (true, 1),
+             (true, 2),
+             (false, 10),
+             (false, 20);",
+        )
+        .await
+        .unwrap();
+
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
+    ctx.ready_notify.as_ref().unwrap().notified().await;
+
+    ctx.noria.table("t").await.unwrap_err();
+    assert!(ctx
+        .noria
+        .non_replicated_relations()
+        .await
+        .unwrap()
+        .contains(&Relation {
+            schema: Some("public".into()),
+            name: "t".into()
+        }));
+
+    ctx.noria
+        .table(Relation {
+            schema: Some("public".into()),
+            name: "t_true".into(),
+        })
+        .await
+        .unwrap();
+    ctx.noria
+        .table(Relation {
+            schema: Some("public".into()),
+            name: "t_false".into(),
+        })
+        .await
+        .unwrap();
+
+    ctx.check_results(
+        "t_true",
+        "pgsql_dont_replicate_partitioned_table",
+        &[
+            &[DfValue::from(true), DfValue::from(1)],
+            &[DfValue::from(true), DfValue::from(2)],
+        ],
+    )
+    .await
+    .unwrap();
+    ctx.check_results(
+        "t_false",
+        "pgsql_dont_replicate_partitioned_table",
+        &[
+            &[DfValue::from(false), DfValue::from(10)],
+            &[DfValue::from(false), DfValue::from(20)],
+        ],
+    )
+    .await
+    .unwrap();
+
+    client
+        .query("CREATE TABLE t2 (key int, val int) PARTITION BY RANGE (key)")
+        .await
+        .unwrap();
+
+    eventually! {
+        ctx
+            .noria
+            .non_replicated_relations()
+            .await
+            .unwrap()
+            .contains(&Relation {
+                schema: Some("public".into()),
+                name: "t2".into()
+            })
+    }
+
+    shutdown_tx.shutdown().await;
+}

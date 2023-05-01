@@ -52,6 +52,7 @@ pub struct PostgresReplicator<'a> {
 enum TableKind {
     RegularTable,
     View,
+    PartitionedTable,
 }
 
 #[derive(Debug, Clone)]
@@ -675,10 +676,15 @@ impl<'a> PostgresReplicator<'a> {
         let view_list = self.get_table_list(TableKind::View).await?;
         let custom_types = self.get_custom_types().await?;
 
-        let (table_list, non_replicated) = table_list.into_iter().partition::<Vec<_>, _>(|tbl| {
-            self.table_filter
-                .should_be_processed(tbl.schema.as_str(), tbl.name.as_str())
-        });
+        let (table_list, mut non_replicated) =
+            table_list.into_iter().partition::<Vec<_>, _>(|tbl| {
+                self.table_filter
+                    .should_be_processed(tbl.schema.as_str(), tbl.name.as_str())
+            });
+
+        // We don't support partitioned tables (only the partitions themselves) so mark those as
+        // non-replicated as well
+        non_replicated.extend(self.get_table_list(TableKind::PartitionedTable).await?);
 
         // We don't filter the view list by schemas since a view could be in schema 1 (that may not
         // be replicated), but refer to only tables in schema 2 that are all replicated. If we try
@@ -948,6 +954,7 @@ impl<'a> PostgresReplicator<'a> {
         let kind_code = match kind {
             TableKind::RegularTable => 'r',
             TableKind::View => 'v',
+            TableKind::PartitionedTable => 'p',
         } as i8;
 
         // We filter out tables that have any generated columns (pgcatalog.pg_attribute.attgenerated

@@ -63,53 +63,64 @@ BEGIN
     END IF;
 
     SELECT
-    json_build_object(
-        'schema', object.schema_name,
-        'data', json_build_object('CreateTable', json_build_object(
-            'name', (SELECT relname FROM pg_class WHERE oid = object.objid),
-            'columns', (
-                SELECT json_agg(json_build_object(
-                    'name', attr.attname,
-                    'column_type', pg_catalog.format_type(
-                        attr.atttypid,
-                        attr.atttypmod
-                    ),
-                    'not_null', attr.attnotnull
-                ) ORDER BY attr.attnum)
-                FROM pg_catalog.pg_attribute attr
-                WHERE attr.attrelid = object.objid
-                AND attr.attnum > 0
-                AND NOT attr.attisdropped
-            ),
-            'constraints', (
-                SELECT coalesce(
-                    json_agg(json_build_object('definition', def)),
-                    '[]'
+    CASE cls.relkind
+    WHEN 'r' THEN
+        json_build_object(
+            'schema', object.schema_name,
+            'data', json_build_object('CreateTable', json_build_object(
+                'name', cls.relname,
+                'columns', (
+                    SELECT json_agg(json_build_object(
+                        'name', attr.attname,
+                        'column_type', pg_catalog.format_type(
+                            attr.atttypid,
+                            attr.atttypmod
+                        ),
+                        'not_null', attr.attnotnull
+                    ) ORDER BY attr.attnum)
+                    FROM pg_catalog.pg_attribute attr
+                    WHERE attr.attrelid = object.objid
+                    AND attr.attnum > 0
+                    AND NOT attr.attisdropped
+                ),
+                'constraints', (
+                    SELECT coalesce(
+                        json_agg(json_build_object('definition', def)),
+                        '[]'
+                    )
+                    FROM (
+                        SELECT DISTINCT
+                            pg_catalog.pg_get_constraintdef(con.oid, TRUE) AS def
+                        FROM
+                            pg_catalog.pg_class cls_index,
+                            pg_catalog.pg_index idx
+                        LEFT JOIN pg_catalog.pg_constraint con
+                            ON con.conrelid = idx.indrelid
+                            AND con.conindid = idx.indexrelid
+                            AND con.contype IN ('f', 'p', 'u')
+                        WHERE cls.oid = object.objid
+                            AND cls.oid = idx.indrelid
+                            AND idx.indexrelid = cls_index.oid
+                            AND pg_catalog.pg_get_constraintdef(con.oid, TRUE)
+                                IS NOT NULL
+                    ) def
                 )
-                FROM (
-                    SELECT DISTINCT
-                        pg_catalog.pg_get_constraintdef(con.oid, TRUE) AS def
-                    FROM
-                        pg_catalog.pg_class cls,
-                        pg_catalog.pg_class cls_index,
-                        pg_catalog.pg_index idx
-                    LEFT JOIN pg_catalog.pg_constraint con
-                        ON con.conrelid = idx.indrelid
-                        AND con.conindid = idx.indexrelid
-                        AND con.contype IN ('f', 'p', 'u')
-                    WHERE cls.oid = object.objid
-                        AND cls.oid = idx.indrelid
-                        AND idx.indexrelid = cls_index.oid
-                        AND pg_catalog.pg_get_constraintdef(con.oid, TRUE)
-                            IS NOT NULL
-                ) def
-            )
-        ))
-    )
+            ))
+        )
+    WHEN 'p' THEN
+         json_build_object(
+            'schema', object.schema_name,
+            'data', json_build_object('AddNonReplicatedTable', json_build_object(
+                'name', cls.relname
+            ))
+         )
+    END
     INTO create_message
     FROM pg_event_trigger_ddl_commands() object
+    JOIN pg_class cls ON object.objid = cls.oid
     WHERE object.object_type = 'table'
-    AND object.schema_name != 'pg_temp';
+    AND object.schema_name != 'pg_temp'
+    AND cls.relkind in ('r', 'p');
 
     IF readyset.is_pre14() THEN
         UPDATE readyset.ddl_replication_log SET "ddl" = create_message;

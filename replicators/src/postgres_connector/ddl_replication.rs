@@ -145,6 +145,9 @@ pub(crate) enum DdlEventData {
         columns: Vec<DdlCreateTableColumn>,
         constraints: Vec<DdlCreateTableConstraint>,
     },
+    AddNonReplicatedTable {
+        name: String,
+    },
     AlterTable {
         name: String,
         #[serde(deserialize_with = "parse_alter_table_statement")]
@@ -242,6 +245,12 @@ impl DdlEvent {
                     }),
                     Err(_) => Change::AddNonReplicatedRelation(table),
                 }
+            }
+            DdlEventData::AddNonReplicatedTable { name } => {
+                Change::AddNonReplicatedRelation(Relation {
+                    schema: Some(self.schema.into()),
+                    name: name.into(),
+                })
             }
             DdlEventData::AlterTable { name, statement } => {
                 let stmt = match statement {
@@ -588,6 +597,27 @@ mod tests {
         }
 
         client.teardown().await;
+    }
+
+    #[parallel_group(GROUP)]
+    #[tokio::test]
+    async fn create_partitioned_table() {
+        readyset_tracing::init_test_logging();
+        let client = setup("create_partitioned_table").await;
+
+        client
+            .simple_query("create table t1 (key int, val int) partition by range (key)")
+            .await
+            .unwrap();
+
+        let ddl = get_last_ddl(&client, "create_partitioned_table")
+            .await
+            .unwrap();
+
+        match ddl.data {
+            DdlEventData::AddNonReplicatedTable { name } => assert_eq!(name, "t1"),
+            data => panic!("Unexpected DDL event data: {data:?}"),
+        }
     }
 
     #[parallel_group(GROUP)]
