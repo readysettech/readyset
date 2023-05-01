@@ -1772,6 +1772,19 @@ impl SqlToMirConverter {
                 }
             }
 
+            final_node = self.make_project_node(
+                query_name,
+                if leaf_behavior.should_make_leaf() {
+                    format!("q_{:x}_project", query_graph.signature().hash).into()
+                } else {
+                    query_name.clone()
+                },
+                final_node,
+                projected_columns.clone(),
+                projected_expressions,
+                projected_literals,
+            );
+
             if query_graph.distinct {
                 let name = if leaf_behavior.should_make_leaf() {
                     format!(
@@ -1788,27 +1801,12 @@ impl SqlToMirConverter {
                     )
                     .into()
                 };
-                let distinct_node = self.make_distinct_node(
-                    query_name,
-                    name,
-                    final_node,
-                    projected_columns.clone(),
-                );
-                final_node = distinct_node;
+                // This needs to go *after* the leaf project node, so that we get distinct values
+                // for the results of expressions (which might not be injective) rather than for the
+                // *inputs* to those expressions
+                final_node =
+                    self.make_distinct_node(query_name, name, final_node, self.columns(final_node));
             }
-
-            let leaf_project_node = self.make_project_node(
-                query_name,
-                if leaf_behavior.should_make_leaf() {
-                    format!("q_{:x}_project", query_graph.signature().hash).into()
-                } else {
-                    query_name.clone()
-                },
-                final_node,
-                projected_columns,
-                projected_expressions,
-                projected_literals,
-            );
 
             if leaf_behavior.should_make_leaf() {
                 // We are supposed to add a `Leaf` node keyed on the query parameters. For purely
@@ -1839,7 +1837,7 @@ impl SqlToMirConverter {
                 // projected by this projection, so we can then add another projection that returns
                 // the columns in the correct order
                 let mut project_order = Vec::with_capacity(returned_cols.len());
-                let parent_columns = self.mir_graph.columns(leaf_project_node);
+                let parent_columns = self.mir_graph.columns(final_node);
                 for col in returned_cols.iter() {
                     if let Some(c) = parent_columns.iter().find(|c| col.cmp(c).is_eq()) {
                         project_order.push(c.clone());
@@ -1861,7 +1859,7 @@ impl SqlToMirConverter {
                     } else {
                         query_name.clone()
                     },
-                    leaf_project_node,
+                    final_node,
                     project_order,
                     vec![],
                     vec![],
@@ -1929,12 +1927,12 @@ impl SqlToMirConverter {
                             format!("{}_view_key", query_name.display_unquoted()).into(),
                             MirNodeInner::ViewKey { key },
                         ),
-                        &[leaf_project_node],
+                        &[final_node],
                     )
                 } else if let Ok(placeholders) = unsupported_placeholders.try_into() {
                     return Err(ReadySetError::UnsupportedPlaceholders { placeholders });
                 } else {
-                    leaf_project_node
+                    final_node
                 }
             }
         };

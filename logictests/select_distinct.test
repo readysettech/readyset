@@ -23,6 +23,9 @@ CREATE TABLE righttable (
 )
 
 statement ok
+CREATE TABLE date_table (val DATE);
+
+statement ok
 INSERT INTO distinct_test (value, number) VALUES (1, 4)
 
 statement ok
@@ -69,6 +72,9 @@ INSERT INTO righttable (lefttable_id, value) VALUES (1, 20)
 
 statement ok
 INSERT INTO righttable (lefttable_id, value) VALUES (2, 20)
+
+statement ok
+INSERT INTO date_table (val) VALUES ('2020-11-27'), ('2020-07-17');
 
 query II nosort
 SELECT DISTINCT value as v, number as n FROM distinct_test
@@ -143,8 +149,13 @@ SELECT DISTINCT number FROM delete_test
 statement ok
 INSERT INTO delete_test (id, number) VALUES (1, 7)
 
-query I nosort
+query I rowsort
 SELECT DISTINCT number FROM delete_test
 ----
 6
 7
+
+query nosort
+SELECT DISTINCT dayofweek(val) FROM date_table
+----
+6
