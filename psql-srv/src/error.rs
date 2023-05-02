@@ -89,7 +89,22 @@ impl<R> From<Error> for BackendMessage<R> {
             Error::UnsupportedMessage(_) => SqlState::FEATURE_NOT_SUPPORTED,
             Error::UnsupportedType(_) => SqlState::FEATURE_NOT_SUPPORTED,
             Error::Scram(_) => SqlState::PROTOCOL_VIOLATION,
-            Error::PostgresError(ref e) => e.code().cloned().unwrap_or(SqlState::INTERNAL_ERROR),
+            Error::PostgresError(ref e) => {
+                if let Some(db_error) = e.as_db_error() {
+                    return BackendMessage::ErrorResponse {
+                        severity: match db_error.severity() {
+                            "ERROR" => ErrorSeverity::Error,
+                            "FATAL" => ErrorSeverity::Fatal,
+                            "PANIC" => ErrorSeverity::Panic,
+                            _ => ErrorSeverity::Error,
+                        },
+                        sqlstate: db_error.code().clone(),
+                        message: db_error.message().into(),
+                    };
+                } else {
+                    SqlState::INTERNAL_ERROR
+                }
+            }
         };
 
         BackendMessage::ErrorResponse {
