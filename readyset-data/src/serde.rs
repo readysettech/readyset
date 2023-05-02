@@ -7,7 +7,7 @@ use chrono::NaiveDateTime;
 use mysql_time::MySqlTime;
 use rust_decimal::Decimal;
 use serde::de::{DeserializeSeed, EnumAccess, VariantAccess, Visitor};
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_bytes::{ByteBuf, Bytes};
 use strum::VariantNames;
 use strum_macros::{EnumString, EnumVariantNames, FromRepr};
@@ -79,6 +79,22 @@ enum Variant {
 enum TextOrTinyText {
     Text(Text),
     TinyText(TinyText),
+}
+
+/// Wrapper struct that allows serializing a reference to a `str` as if it were a text [`DfValue`]
+pub struct TextRef<'a>(pub &'a str);
+
+impl<'a> Serialize for TextRef<'a> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serialize_variant(
+            serializer,
+            Variant::Text,
+            &(Collation::default(), Bytes::new(self.0.as_bytes())),
+        )
+    }
 }
 
 #[inline(always)]
@@ -406,5 +422,12 @@ mod tests {
             <&str>::try_from(&input).unwrap()
         );
         assert_eq!(rt.collation(), input.collation());
+    }
+
+    #[proptest]
+    fn text_ref_serializes_same_as_text_value(s: String) {
+        let text_ref = bincode::serialize(&TextRef(&s)).unwrap();
+        let text_value = bincode::serialize(&DfValue::from(s)).unwrap();
+        assert_eq!(text_ref, text_value);
     }
 }

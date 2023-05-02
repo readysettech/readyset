@@ -1991,11 +1991,13 @@ impl SizeOf for PersistentState {
 #[cfg(test)]
 #[allow(clippy::unreachable)]
 mod tests {
+    use std::fmt::Debug;
     use std::path::PathBuf;
 
     use pretty_assertions::assert_eq;
     use readyset_data::Collation;
     use rust_decimal::Decimal;
+    use test_strategy::proptest;
 
     use super::*;
 
@@ -2028,6 +2030,28 @@ mod tests {
         let mut state = setup_persistent(name, None);
         state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
         state
+    }
+
+    #[proptest]
+    fn point_key_serialize_round_trip(key: PointKey) {
+        let serialized = PersistentState::serialize_prefix(&key);
+
+        fn check<D>(serialized: &[u8], v: D)
+        where
+            D: DeserializeOwned + Debug + PartialEq,
+        {
+            assert_eq!(deserialize_key::<D>(serialized).1, v);
+        }
+
+        match key {
+            PointKey::Single(x) => check(&serialized, x),
+            PointKey::Double(x) => check(&serialized, x),
+            PointKey::Tri(x) => check(&serialized, x),
+            PointKey::Quad(x) => check(&serialized, x),
+            PointKey::Quin(x) => check(&serialized, x),
+            PointKey::Sex(x) => check(&serialized, x),
+            PointKey::Multi(x) => check(&serialized, x),
+        }
     }
 
     #[test]

@@ -2,14 +2,16 @@ use std::ops::{Bound, RangeBounds};
 
 use common::DfValue;
 use derive_more::From;
+use readyset_data::TextRef;
 use readyset_util::intervals::BoundPair;
 use serde::ser::{SerializeSeq, SerializeTuple};
 use serde::Serialize;
+use test_strategy::Arbitrary;
 use tuple::TupleElements;
 use vec1::Vec1;
 
 /// An internal type used as the key when performing point lookups and inserts into node state.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, From)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, From, Arbitrary)]
 pub enum PointKey {
     Single(DfValue),
     Double((DfValue, DfValue)),
@@ -17,7 +19,7 @@ pub enum PointKey {
     Quad((DfValue, DfValue, DfValue, DfValue)),
     Quin((DfValue, DfValue, DfValue, DfValue, DfValue)),
     Sex((DfValue, DfValue, DfValue, DfValue, DfValue, DfValue)),
-    Multi(Box<[DfValue]>),
+    Multi(#[any(((7usize..100).into(), Default::default()))] Box<[DfValue]>),
 }
 
 #[allow(clippy::len_without_is_empty)]
@@ -118,7 +120,7 @@ impl Serialize for PointKey {
             ($ser: ident, $v: ident) => {{
                 let val = $v.transform_for_serialized_key();
                 match val.as_str() {
-                    Some(s) => $ser.serialize_element(s)?, // Don't serialize collation
+                    Some(s) => $ser.serialize_element(&TextRef(s))?, // Don't serialize collation
                     None => $ser.serialize_element(val.as_ref())?,
                 }
             }};

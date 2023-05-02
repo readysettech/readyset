@@ -261,7 +261,9 @@ impl Arbitrary for Array {
 
         (
             (1_usize..=3_usize),
-            any::<DfValueKind>().prop_filter("Nested Array", |dtk| *dtk != DfValueKind::Array),
+            any::<DfValueKind>().prop_filter("Nested Array or PassThrough", |dtk| {
+                !matches!(*dtk, DfValueKind::Array | DfValueKind::PassThrough)
+            }),
         )
             .prop_flat_map(|(ndims, kind)| {
                 (
