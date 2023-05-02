@@ -100,7 +100,7 @@ pub(crate) enum State {
     Extended,
 
     /// The server has encountered an error while processing an [extended query][0], and should
-    /// (TODO) discard messages until the next [Sync request][1] from a client
+    /// discard messages until the next [Sync request][1] from a client
     ///
     /// [0]: https://www.postgresql.org/docs/13/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
     /// [1]: psql_srv::message::frontend::FrontendMessage::Sync
@@ -199,7 +199,6 @@ impl Protocol {
         backend: &mut B,
         channel: &mut Channel<C, B::Row>,
     ) -> Result<Response<B::Row, B::Resultset>, Error> {
-        // TODO(grfn): Discard if self.state.is_error()?
         let get_ready_message = |version| {
             smallvec![
                 AuthenticationOk,
@@ -416,6 +415,14 @@ impl Protocol {
                     })
                 }
             }
+
+            State::Error => match message {
+                Sync => {
+                    self.state = State::Ready;
+                    Ok(Response::Message(BackendMessage::ready_for_query_idle()))
+                }
+                _ => Ok(Response::Empty),
+            },
 
             _ => match message {
                 // A request to bind parameters to a prepared statement, creating a portal.
@@ -680,6 +687,7 @@ impl Protocol {
                     query,
                     parameter_data_types,
                 } => {
+                    self.state = State::Extended;
                     let PrepareResponse {
                         prepared_statement_id,
                         param_schema,
