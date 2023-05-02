@@ -3,14 +3,18 @@ use std::fmt;
 use enum_kinds::EnumKind;
 use itertools::Itertools;
 use nom_sql::{EnumVariants, Relation, SqlIdentifier, SqlType};
+use proptest::arbitrary::{any, any_with, Arbitrary};
+use proptest::prop_oneof;
+use proptest::strategy::{BoxedStrategy, Just};
 use readyset_errors::{unsupported_err, ReadySetResult};
 use serde::{Deserialize, Serialize};
+use test_strategy::Arbitrary;
 
 use crate::{Collation, Dialect};
 
 /// Metadata about a postgresql enum type, optionally stored inside of `DfType::Enum` for enum types
 /// that originate in postgres
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[derive(Clone, Arbitrary, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct PgEnumMetadata {
     /// The name of the enum type
     pub name: SqlIdentifier,
@@ -542,6 +546,65 @@ impl DfType {
             f()
         }
     }
+}
+
+impl Arbitrary for DfType {
+    type Parameters = ();
+
+    // TODO(fran): Add numeric type. This is tricky since it is dependant on the database
+    //  being used.
+    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+        use proptest::strategy::Strategy;
+
+        let base_type = prop_oneof![
+            Just(DfType::Unknown),
+            Just(DfType::Bool),
+            Just(DfType::Int),
+            Just(DfType::UnsignedInt),
+            Just(DfType::BigInt),
+            Just(DfType::UnsignedBigInt),
+            Just(DfType::TinyInt),
+            Just(DfType::UnsignedTinyInt),
+            Just(DfType::SmallInt),
+            Just(DfType::UnsignedSmallInt),
+            Just(DfType::Float),
+            Just(DfType::Double),
+            any::<Collation>().prop_map(DfType::Text),
+            (1..255_u16, any::<Collation>()).prop_map(|(char, col)| DfType::Char(char, col)),
+            (1..255_u16, any::<Collation>()).prop_map(|(char, col)| DfType::VarChar(char, col)),
+            Just(DfType::Blob),
+            any::<u16>().prop_map(DfType::Binary),
+            any::<u16>().prop_map(DfType::VarBinary),
+            any::<u16>().prop_map(DfType::Bit),
+            any::<u16>().prop_map(DfType::Bit),
+            any::<Option<u16>>().prop_map(DfType::VarBit),
+            Just(DfType::Date),
+            any::<u16>().prop_map(|subsecond_digits| DfType::DateTime { subsecond_digits }),
+            any::<u16>().prop_map(|subsecond_digits| DfType::Time { subsecond_digits }),
+            any::<u16>().prop_map(|subsecond_digits| DfType::Timestamp { subsecond_digits }),
+            any::<u16>().prop_map(|subsecond_digits| DfType::TimestampTz { subsecond_digits }),
+            Just(DfType::MacAddr),
+            Just(DfType::Inet),
+            Just(DfType::Uuid),
+            (
+                any_with::<EnumVariants>((".{0, 32}", (0..=20).into())),
+                proptest::option::of(any::<PgEnumMetadata>())
+            )
+                .prop_map(|(variants, metadata)| DfType::Enum { variants, metadata }),
+            Just(DfType::Json),
+            Just(DfType::Jsonb),
+        ];
+
+        base_type
+            .prop_recursive(4, 6, 1, |df_type_strat| {
+                df_type_strat
+                    .prop_map(|df_type| DfType::Array(Box::new(df_type)))
+                    .boxed()
+            })
+            .boxed()
+    }
+
+    type Strategy = BoxedStrategy<DfType>;
 }
 
 /// Postgresql type category. See [the docs][docs] for more information, and the [official list of
