@@ -9,7 +9,7 @@
 //! new bugs); to run it locally run:
 //!
 //! ```notrust
-//! cargo test -p noria-mysql --features vertical_tests --test vertical
+//! cargo test -p readyset-mysql --features vertical_tests --test vertical
 //! ```
 //!
 //! This test suite will connect to a local mysql database, which can be set up with all the correct
@@ -65,7 +65,8 @@ enum Operation {
         /// *seed* for the node index to evict from.
         ///
         /// Note that we don't know how many nodes a query will have until after we install it in
-        /// noria, so the actual node index will be this modulo the number of non-base-table nodes
+        /// ReadySet, so the actual node index will be this modulo the number of non-base-table
+        /// nodes
         node_seed: usize,
         key: Vec<DfValue>,
     },
@@ -344,7 +345,7 @@ impl Table {
     }
 }
 
-/// The result of running a single [`Operation`] against either mysql or noria.
+/// The result of running a single [`Operation`] against either MySQL or ReadySet.
 #[derive(Debug)]
 pub enum OperationResult {
     Err(mysql_async::Error),
@@ -600,11 +601,11 @@ impl Operations {
             .unwrap();
 
         let (opts, _handle, shutdown_tx) = TestBuilder::default().build::<MySQLAdapter>().await;
-        let mut noria = mysql_async::Conn::new(opts).await.unwrap();
+        let mut readyset = mysql_async::Conn::new(opts).await.unwrap();
 
         for table in tables.values() {
             mysql.query_drop(table.create_statement).await.unwrap();
-            noria.query_drop(table.create_statement).await.unwrap();
+            readyset.query_drop(table.create_statement).await.unwrap();
         }
 
         for op in self.0 {
@@ -616,8 +617,8 @@ impl Operations {
                 mysql_res.err().unwrap()
             );
 
-            let noria_res = op.run(&mut noria, query, tables).await?;
-            assert_eq!(mysql_res, noria_res);
+            let readyset_res = op.run(&mut readyset, query, tables).await?;
+            assert_eq!(mysql_res, readyset_res);
         }
 
         shutdown_tx.shutdown().await;
