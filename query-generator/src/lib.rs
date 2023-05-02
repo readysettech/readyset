@@ -2154,6 +2154,12 @@ impl Arbitrary for Operations {
                 // since we don't support those queries (ENG-2942)
                 let mut agg_or_distinct_found = false;
                 let mut in_parameter_found = false;
+
+                // Don't generate an OR filter in the same query as a parameter of any kind, since
+                // we don't support those queries (ENG-2976)
+                let mut parameter_found = false;
+                let mut or_filter_found = false;
+
                 ops.retain(|op| match op {
                     QueryOperation::ColumnAggregate(_) | QueryOperation::Distinct => {
                         if in_parameter_found {
@@ -2164,10 +2170,33 @@ impl Arbitrary for Operations {
                         }
                     }
                     QueryOperation::InParameter { .. } => {
-                        if agg_or_distinct_found {
+                        if agg_or_distinct_found || or_filter_found {
                             false
                         } else {
                             in_parameter_found = true;
+                            parameter_found = true;
+                            true
+                        }
+                    }
+                    QueryOperation::SingleParameter
+                    | QueryOperation::MultipleParameters
+                    | QueryOperation::RangeParameter
+                    | QueryOperation::MultipleRangeParameters => {
+                        if or_filter_found {
+                            false
+                        } else {
+                            parameter_found = true;
+                            true
+                        }
+                    }
+                    QueryOperation::Filter(Filter {
+                        extend_where_with: LogicalOp::Or,
+                        ..
+                    }) => {
+                        if parameter_found {
+                            false
+                        } else {
+                            or_filter_found = true;
                             true
                         }
                     }
