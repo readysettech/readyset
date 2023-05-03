@@ -1578,7 +1578,7 @@ impl QueryOperation {
                     Avg { distinct, .. } => FunctionExpr::Avg { expr, distinct },
                     GroupConcat => FunctionExpr::GroupConcat {
                         expr,
-                        separator: ", ".to_owned(),
+                        separator: Some(", ".to_owned()),
                     },
                     Max { .. } => FunctionExpr::Max(expr),
                     Min { .. } => FunctionExpr::Min(expr),

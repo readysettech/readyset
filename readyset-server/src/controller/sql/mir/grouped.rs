@@ -307,7 +307,7 @@ pub(super) fn post_lookup_aggregates(
                 Max(_) => PostLookupAggregateFunction::Max,
                 Min(_) => PostLookupAggregateFunction::Min,
                 GroupConcat { separator, .. } => PostLookupAggregateFunction::GroupConcat {
-                    separator: separator.clone(),
+                    separator: separator.clone().unwrap_or_else(|| ",".to_owned()),
                 },
                 Call { .. } | Substring { .. } => continue,
             },

@@ -46,8 +46,11 @@ pub enum FunctionExpr {
     /// `MIN` aggregation
     Min(Box<Expr>),
 
-    /// `GROUP_CONCAT` aggregation. The second argument is the separator
-    GroupConcat { expr: Box<Expr>, separator: String },
+    /// `GROUP_CONCAT` aggregation
+    GroupConcat {
+        expr: Box<Expr>,
+        separator: Option<String>,
+    },
 
     /// The SQL `SUBSTRING`/`SUBSTR` function.
     ///
@@ -118,12 +121,15 @@ impl FunctionExpr {
             FunctionExpr::Max(col) => write!(f, "max({})", col.display(dialect)),
             FunctionExpr::Min(col) => write!(f, "min({})", col.display(dialect)),
             FunctionExpr::GroupConcat { expr, separator } => {
-                write!(
-                    f,
-                    "group_concat({} separator '{}')",
-                    expr.display(dialect),
-                    separator
-                )
+                write!(f, "group_concat({}", expr.display(dialect),)?;
+                if let Some(separator) = separator {
+                    write!(
+                        f,
+                        "separator {}",
+                        separator.replace('\'', "''").replace('\\', "\\\\")
+                    )?;
+                }
+                write!(f, ")")
             }
             FunctionExpr::Call { name, arguments } => {
                 write!(

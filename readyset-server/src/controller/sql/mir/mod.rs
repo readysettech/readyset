@@ -874,7 +874,9 @@ impl SqlToMirConverter {
                 separator,
             } => mknode(
                 Column::from(col),
-                GroupedNodeType::Aggregation(Aggregation::GroupConcat { separator }),
+                GroupedNodeType::Aggregation(Aggregation::GroupConcat {
+                    separator: separator.unwrap_or_else(|| ",".to_owned()),
+                }),
                 false,
             ),
             _ => {

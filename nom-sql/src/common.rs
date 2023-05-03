@@ -555,17 +555,9 @@ pub fn function_expr(
                     tag_no_case("group_concat"),
                     delimited(tag("("), group_concat_fx(dialect), tag(")")),
                 ),
-                |spec| {
-                    let (ref col, sep) = spec;
-                    let separator = match sep {
-                        // default separator is a comma, see MySQL manual §5.7
-                        None => String::from(","),
-                        Some(s) => s,
-                    };
-                    FunctionExpr::GroupConcat {
-                        expr: Box::new(Expr::Column(col.clone())),
-                        separator,
-                    }
+                |(col, separator)| FunctionExpr::GroupConcat {
+                    expr: Box::new(Expr::Column(col)),
+                    separator,
                 },
             ),
             substring(dialect),
@@ -877,7 +869,7 @@ mod tests {
         let qs = b"group_concat(x separator ', ')";
         let expected = FunctionExpr::GroupConcat {
             expr: Box::new(Expr::Column(Column::from("x"))),
-            separator: ", ".to_owned(),
+            separator: Some(", ".to_owned()),
         };
         let res = to_nom_result(function_expr(Dialect::MySQL)(LocatedSpan::new(qs)));
         assert_eq!(res.unwrap().1, expected);
