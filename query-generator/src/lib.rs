@@ -1001,6 +1001,7 @@ pub enum AggregateType {
         column_type: SqlType,
         distinct: bool,
     },
+    #[weight(u32::from(*args == ParseDialect::MySQL))]
     GroupConcat,
     Max {
         #[any(generate_arrays = false, dialect = Some(args.0))]
