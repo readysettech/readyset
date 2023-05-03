@@ -578,6 +578,10 @@ pub struct Fuzz {
     #[clap(long, short = 'n', default_value = "100")]
     num_tests: u32,
 
+    /// Maximum number of iterations to run when shrinking test cases
+    #[clap(long, default_value = "1024")]
+    max_shrink_iters: u32,
+
     /// Hex-encoded seed for the random generator to use when generating test cases. Defaults to a
     /// randomly generated seed.
     #[clap(long)]
@@ -688,6 +692,7 @@ impl<'a> From<&'a Fuzz> for test_runner::Config {
         Self {
             cases: fuzz.num_tests,
             verbose: u32::from(fuzz.verbose),
+            max_shrink_iters: fuzz.max_shrink_iters,
             ..Default::default()
         }
     }
