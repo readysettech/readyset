@@ -15,7 +15,6 @@ use nom::sequence::{delimited, preceded, terminated, tuple};
 use nom_locate::LocatedSpan;
 use proptest::arbitrary::Arbitrary;
 use proptest::strategy::{BoxedStrategy, Strategy};
-use proptest::{prelude as prop, prop_oneof};
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use triomphe::ThinArc;
@@ -117,14 +116,9 @@ impl Arbitrary for SqlType {
             Just(Bool).boxed(),
             option::of(1..255u16).prop_map(Char).boxed(),
             (1..255u16).prop_map(|l| VarChar(Some(l))).boxed(),
-            option::of(1..255u16).prop_map(Int).boxed(),
-            option::of(1..255u16).prop_map(UnsignedInt).boxed(),
-            option::of(1..255u16).prop_map(BigInt).boxed(),
-            option::of(1..255u16).prop_map(UnsignedBigInt).boxed(),
-            option::of(1..255u16).prop_map(TinyInt).boxed(),
-            option::of(1..255u16).prop_map(UnsignedTinyInt).boxed(),
-            option::of(1..255u16).prop_map(SmallInt).boxed(),
-            option::of(1..255u16).prop_map(UnsignedSmallInt).boxed(),
+            Just(Int(None)).boxed(),
+            Just(BigInt(None)).boxed(),
+            Just(SmallInt(None)).boxed(),
             Just(Double).boxed(),
             Just(Float).boxed(),
             Just(Real).boxed(),
@@ -140,12 +134,8 @@ impl Arbitrary for SqlType {
             }))
             .prop_map(Numeric)
             .boxed(),
-            Just(TinyText).boxed(),
-            Just(MediumText).boxed(),
-            Just(LongText).boxed(),
             Just(Text).boxed(),
             Just(Date).boxed(),
-            option::of(1..=6u16).prop_map(DateTime).boxed(),
             Just(Time).boxed(),
             Just(Timestamp).boxed(),
             (1..=28u8)
@@ -175,6 +165,23 @@ impl Arbitrary for SqlType {
             ]);
         }
 
+        if args.dialect.is_none() || args.dialect == Some(Dialect::MySQL) {
+            variants.extend([
+                (1..255u16).prop_map(|p| Int(Some(p))).boxed(),
+                (1..255u16).prop_map(|p| BigInt(Some(p))).boxed(),
+                (1..255u16).prop_map(|p| SmallInt(Some(p))).boxed(),
+                option::of(1..255u16).prop_map(TinyInt).boxed(),
+                option::of(1..255u16).prop_map(UnsignedInt).boxed(),
+                option::of(1..255u16).prop_map(UnsignedSmallInt).boxed(),
+                option::of(1..255u16).prop_map(UnsignedBigInt).boxed(),
+                option::of(1..255u16).prop_map(UnsignedTinyInt).boxed(),
+                Just(TinyText).boxed(),
+                Just(MediumText).boxed(),
+                Just(LongText).boxed(),
+                option::of(1..=6u16).prop_map(DateTime).boxed(),
+            ]);
+        }
+
         if args.generate_arrays {
             variants.push(
                 any_with::<Box<SqlType>>(SqlTypeArbitraryOptions {
@@ -197,24 +204,24 @@ impl Arbitrary for SqlType {
 }
 
 impl SqlType {
-    /// Returns a proptest strategy to generate *numeric* [`SqlType`]s - signed or unsigned, floats
-    /// or reals
-    pub fn arbitrary_numeric_type() -> impl Strategy<Value = SqlType> {
+    /// Returns a proptest strategy to generate *numeric* [`SqlType`]s, optionally filtering to only
+    /// those which are valid for the given SQL dialect
+    pub fn arbitrary_numeric_type(dialect: Option<Dialect>) -> impl Strategy<Value = SqlType> {
         use SqlType::*;
 
-        prop_oneof![
-            prop::Just(Int(None)),
-            prop::Just(UnsignedInt(None)),
-            prop::Just(BigInt(None)),
-            prop::Just(UnsignedBigInt(None)),
-            prop::Just(TinyInt(None)),
-            prop::Just(UnsignedTinyInt(None)),
-            prop::Just(SmallInt(None)),
-            prop::Just(UnsignedSmallInt(None)),
-            prop::Just(Double),
-            prop::Just(Float),
-            prop::Just(Real),
-        ]
+        let mut variants = vec![SmallInt(None), Int(None), BigInt(None), Double, Float, Real];
+
+        if dialect.is_none() || dialect == Some(Dialect::MySQL) {
+            variants.extend([
+                TinyInt(None),
+                UnsignedInt(None),
+                UnsignedBigInt(None),
+                UnsignedTinyInt(None),
+                UnsignedSmallInt(None),
+            ])
+        }
+
+        proptest::sample::select(variants)
     }
 
     /// Creates a [`SqlType::Enum`] instance from a sequence of variant names.

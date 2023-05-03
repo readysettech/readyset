@@ -992,12 +992,12 @@ pub enum AggregateType {
         distinct: bool,
     },
     Sum {
-        #[strategy(SqlType::arbitrary_numeric_type())]
+        #[strategy(SqlType::arbitrary_numeric_type(Some(args.0)))]
         column_type: SqlType,
         distinct: bool,
     },
     Avg {
-        #[strategy(SqlType::arbitrary_numeric_type())]
+        #[strategy(SqlType::arbitrary_numeric_type(Some(args.0)))]
         column_type: SqlType,
         distinct: bool,
     },
