@@ -138,8 +138,12 @@ pub(crate) async fn recreate_test_database(url: &DatabaseURL) -> anyhow::Result<
         .await
         .with_context(|| "dropping database")?;
 
+    let mut create_database_query = format!("CREATE DATABASE {}", db_name);
+    if url.is_mysql() {
+        create_database_query.push_str(" CHARACTER SET 'utf8mb4' COLLATE 'utf8mb4_bin'");
+    }
     admin_conn
-        .query_drop(format!("CREATE DATABASE {}", db_name))
+        .query_drop(create_database_query)
         .await
         .with_context(|| "creating database")?;
 

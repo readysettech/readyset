@@ -411,6 +411,14 @@ impl DatabaseURL {
             }
         }
     }
+
+    /// Returns `true` if this url is a [`MySQL`] URL.
+    ///
+    /// [`MySQL`]: DatabaseURL::MySQL
+    #[must_use]
+    pub fn is_mysql(&self) -> bool {
+        matches!(self, Self::MySQL(..))
+    }
 }
 
 /// An enum wrapper around either a MySQL or PostgreSQL connection.
