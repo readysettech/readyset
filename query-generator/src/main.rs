@@ -9,6 +9,10 @@ struct Opts {
     #[clap(flatten)]
     options: GenerateOpts,
 
+    /// SQL dialect to use for displaying queries
+    #[clap(long, value_enum, default_value = "mysql")]
+    pub dialect: nom_sql::Dialect,
+
     #[clap(long)]
     ddl_only: bool,
 
@@ -29,22 +33,16 @@ impl Opts {
 
         if self.queries_only {
             for query in queries {
-                // FIXME(ENG-2498): Use correct dialect.
-                println!("{}", query.display(nom_sql::Dialect::MySQL));
+                println!("{}", query.display(self.dialect));
             }
         } else {
             let queries = queries.collect::<Vec<_>>();
             for create_table_statement in gen.ddl() {
-                // FIXME(ENG-2498): Use correct dialect.
-                println!(
-                    "{}",
-                    create_table_statement.display(nom_sql::Dialect::MySQL)
-                )
+                println!("{}", create_table_statement.display(self.dialect))
             }
             if !self.ddl_only {
                 for query in queries {
-                    // FIXME(ENG-2498): Use correct dialect.
-                    println!("{}", query.display(nom_sql::Dialect::MySQL));
+                    println!("{}", query.display(self.dialect));
                 }
             }
         }

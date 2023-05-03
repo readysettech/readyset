@@ -11,6 +11,7 @@ repository = "https://github.com/readysettech/readyset/tree/master/nom-sql"
 description = "A SQL parser written using nom."
 
 [dependencies]
+clap = { version = "4.2", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
 nom = "7.1"
 itertools = "0.10"

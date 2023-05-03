@@ -2,6 +2,7 @@ use std::fmt;
 use std::str::{self, FromStr};
 
 use bit_vec::BitVec;
+use clap::ValueEnum;
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case, take, take_while1};
 use nom::character::complete::char;
@@ -66,11 +67,13 @@ fn bits(input: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], BitVec> {
 ///
 /// Currently, Dialect controls the escape characters used for identifiers, and the quotes used to
 /// surround string literals, but may be extended to cover more dialect differences in the future
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize, ValueEnum)]
+#[clap(rename_all = "lower")]
 pub enum Dialect {
     /// The SQL dialect used by PostgreSQL.
     ///
     /// Identifiers are escaped with double quotes (`"`) and strings use only single quotes (`'`)
+    #[value(alias("postgres"))]
     PostgreSQL,
 
     /// The SQL dialect used by MySQL.

@@ -3131,6 +3131,7 @@ dependencies = [
  "assert_approx_eq",
  "bincode",
  "bit-vec",
+ "clap 4.2.1",
  "concrete-iter",
  "criterion",
  "derive_more",

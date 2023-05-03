@@ -647,8 +647,17 @@ impl Fuzz {
             |(query_seeds, generate_opts)| {
                 let rt = tokio::runtime::Runtime::new().unwrap();
                 let _guard = rt.enter();
-                let mut seed = generate::Seed::try_from(query_seeds).unwrap();
-                match rt.block_on(seed.run(generate_opts)) {
+                let mut seed = generate::Seed::from_seeds(
+                    query_seeds,
+                    // TODO(ENG-2958): Make configurable
+                    nom_sql::Dialect::MySQL,
+                )
+                .unwrap();
+                match rt.block_on(seed.run(
+                    generate_opts,
+                    // TODO(ENG-2958): Make configurable
+                    nom_sql::Dialect::MySQL,
+                )) {
                     Ok(script) => Some(script.clone()),
                     Err(e) => {
                         eprintln!("Error generating test script from seed: {e:#}");

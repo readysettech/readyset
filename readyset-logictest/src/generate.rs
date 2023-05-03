@@ -77,78 +77,6 @@ impl TryFrom<PathBuf> for Seed {
     }
 }
 
-impl TryFrom<query_generator::GenerateOpts> for Seed {
-    type Error = anyhow::Error;
-
-    fn try_from(opts: query_generator::GenerateOpts) -> Result<Self, Self::Error> {
-        Self::try_from(opts.into_query_seeds().collect::<Vec<_>>())
-    }
-}
-
-impl TryFrom<Vec<QuerySeed>> for Seed {
-    type Error = anyhow::Error;
-
-    fn try_from(seeds: Vec<QuerySeed>) -> Result<Self, Self::Error> {
-        let mut generator = query_generator::GeneratorState::default();
-        let queries = seeds
-            .into_iter()
-            .map(|seed| -> anyhow::Result<Query> {
-                let query = generator.generate_query(seed);
-
-                // FIXME: Use correct dialect.
-                // NOTE: Without a binding, there is a compile error that `statement` does not live
-                // long enough if this expression is at `query:`.
-                let query_string = query.statement.display(nom_sql::Dialect::MySQL).to_string();
-
-                Ok(Query {
-                    label: None,
-                    column_types: None,
-                    sort_mode: if query.statement.order.is_some() {
-                        Some(SortMode::NoSort)
-                    } else {
-                        Some(SortMode::RowSort)
-                    },
-                    conditionals: vec![],
-                    query: query_string,
-                    results: Default::default(),
-                    params: QueryParams::PositionalParams(
-                        query
-                            .state
-                            .key()
-                            .into_iter()
-                            .map(|dt| dt.try_into())
-                            .collect::<Result<Vec<_>, _>>()?,
-                    ),
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let mut tables = vec![];
-        let mut records = vec![];
-
-        for table in generator.tables_mut().values_mut() {
-            table.primary_key(); // ensure the table has a primary key
-            let create_stmt = CreateTableStatement::from(table.clone());
-
-            records.push(Record::Statement(Statement {
-                result: StatementResult::Ok,
-                // FIXME: Use correct dialect.
-                command: create_stmt.display(nom_sql::Dialect::MySQL).to_string(),
-                conditionals: vec![],
-            }));
-            tables.push(create_stmt);
-        }
-
-        Ok(Seed {
-            tables,
-            queries,
-            generator,
-            hash_threshold: DEFAULT_HASH_THRESHOLD,
-            script: records.into(),
-        })
-    }
-}
-
 async fn run_queries(
     queries: &[Query],
     conn: &mut DatabaseConnection,
@@ -195,7 +123,76 @@ async fn run_queries(
 }
 
 impl Seed {
-    pub async fn run(&mut self, opts: GenerateOpts) -> anyhow::Result<&TestScript> {
+    pub fn from_seeds<I>(seeds: I, dialect: nom_sql::Dialect) -> anyhow::Result<Self>
+    where
+        I: IntoIterator<Item = QuerySeed>,
+    {
+        let mut generator = query_generator::GeneratorState::default();
+        let queries = seeds
+            .into_iter()
+            .map(|seed| -> anyhow::Result<Query> {
+                let query = generator.generate_query(seed);
+                let query_string = query.statement.display(dialect).to_string();
+
+                Ok(Query {
+                    label: None,
+                    column_types: None,
+                    sort_mode: if query.statement.order.is_some() {
+                        Some(SortMode::NoSort)
+                    } else {
+                        Some(SortMode::RowSort)
+                    },
+                    conditionals: vec![],
+                    query: query_string,
+                    results: Default::default(),
+                    params: QueryParams::PositionalParams(
+                        query
+                            .state
+                            .key()
+                            .into_iter()
+                            .map(|dt| dt.try_into())
+                            .collect::<Result<Vec<_>, _>>()?,
+                    ),
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let mut tables = vec![];
+        let mut records = vec![];
+
+        for table in generator.tables_mut().values_mut() {
+            table.primary_key(); // ensure the table has a primary key
+            let create_stmt = CreateTableStatement::from(table.clone());
+
+            records.push(Record::Statement(Statement {
+                result: StatementResult::Ok,
+                command: create_stmt.display(dialect).to_string(),
+                conditionals: vec![],
+            }));
+            tables.push(create_stmt);
+        }
+
+        Ok(Seed {
+            tables,
+            queries,
+            generator,
+            hash_threshold: DEFAULT_HASH_THRESHOLD,
+            script: records.into(),
+        })
+    }
+
+    pub fn from_generate_opts(
+        opts: query_generator::GenerateOpts,
+        dialect: nom_sql::Dialect,
+    ) -> anyhow::Result<Self> {
+        Self::from_seeds(opts.into_query_seeds(), dialect)
+    }
+
+    pub async fn run(
+        &mut self,
+        opts: GenerateOpts,
+        dialect: nom_sql::Dialect,
+    ) -> anyhow::Result<&TestScript> {
         recreate_test_database(&opts.compare_to).await?;
         let mut conn = opts
             .compare_to
@@ -289,12 +286,9 @@ impl Seed {
             })?;
         }
 
-        let new_entries = insert_statements.iter().map(|stmt| {
-            // FIXME: Use correct dialect.
-            Record::Statement(Statement::ok(
-                stmt.display(nom_sql::Dialect::MySQL).to_string(),
-            ))
-        });
+        let new_entries = insert_statements
+            .iter()
+            .map(|stmt| Record::Statement(Statement::ok(stmt.display(dialect).to_string())));
 
         let hash_threshold = self.hash_threshold;
         let queries = mem::take(&mut self.queries);
@@ -387,6 +381,7 @@ impl Seed {
 // shared options for generating tests
 // (not a doc-comment due to https://github.com/clap-rs/clap/issues/2527)
 #[derive(Parser, Debug, Clone)]
+#[group(id = "ScriptOpts")]
 pub struct GenerateOpts {
     /// URL of a reference database to compare to. Currently supports `mysql://` URLs, but may be
     /// expanded in the future
@@ -416,6 +411,15 @@ pub struct GenerateOpts {
     /// specified. Defaults to half of --rows-per-table, rounded down
     #[clap(long)]
     pub rows_to_delete: Option<usize>,
+}
+
+impl GenerateOpts {
+    pub fn dialect(&self) -> nom_sql::Dialect {
+        match self.compare_to {
+            DatabaseURL::MySQL(_) => nom_sql::Dialect::MySQL,
+            DatabaseURL::PostgreSQL(_) => nom_sql::Dialect::PostgreSQL,
+        }
+    }
 }
 
 /// Generate test scripts by comparing results against a reference database
@@ -458,12 +462,13 @@ where
 impl Generate {
     #[tokio::main]
     pub async fn run(mut self) -> anyhow::Result<()> {
+        let dialect = self.script_options.dialect();
         let mut seed = match self.from.take() {
             Some(path) => Seed::try_from(path)?,
-            None => Seed::try_from(self.query_options.clone())?,
+            None => Seed::from_generate_opts(self.query_options.clone(), dialect)?,
         };
 
-        let script = seed.run(self.script_options).await?;
+        let script = seed.run(self.script_options, dialect).await?;
 
         if let Some(out_path) = self.output {
             write_output(
