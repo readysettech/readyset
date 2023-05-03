@@ -1,6 +1,7 @@
 use ::readyset_client::metrics::{recorded, DumpedMetricValue};
 use ::readyset_client::query::QueryId;
 use ::readyset_client::{get_metric, ViewCreateRequest};
+use database_utils::QueryableConnection;
 use mysql_async::prelude::Queryable;
 use readyset_adapter::backend::QueryInfo;
 use readyset_client_metrics::QueryDestination;

@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use anyhow::{anyhow, bail, Context};
 use clap::Parser;
 use console::style;
-use database_utils::{DatabaseConnection, DatabaseURL};
+use database_utils::{DatabaseConnection, DatabaseURL, QueryableConnection};
 use itertools::Itertools;
 use nom_sql::{
     parse_query, BinaryOperator, CreateTableStatement, DeleteStatement, Dialect, Expr, SqlQuery,

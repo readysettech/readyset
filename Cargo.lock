@@ -1177,6 +1177,7 @@ dependencies = [
 name = "database-utils"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "clap 4.2.1",
  "derive_more",
  "futures",

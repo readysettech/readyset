@@ -15,7 +15,7 @@ use benchmarks::utils::path::benchmark_path;
 use benchmarks::QuerySet;
 use clap::Parser;
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
-use database_utils::{DatabaseType, DatabaseURL};
+use database_utils::{DatabaseType, DatabaseURL, QueryableConnection};
 use fork::{fork, Fork};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;

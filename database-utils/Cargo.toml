@@ -20,3 +20,4 @@ clap = { version = "4.2", features = ["derive","env"] }
 serde = { version = "1.0", features = ["derive"] }
 readyset-util = { path = "../readyset-util" }
 readyset-errors = { path = "../readyset-errors" }
+async-trait = "0.1"

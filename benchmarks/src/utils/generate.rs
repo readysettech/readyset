@@ -10,7 +10,7 @@ use std::str::FromStr;
 
 use anyhow::{anyhow, Context, Result};
 use clap::{Parser, ValueHint};
-use database_utils::DatabaseURL;
+use database_utils::{DatabaseURL, QueryableConnection};
 use futures::StreamExt;
 use itertools::Itertools;
 use nom::multi::many1;

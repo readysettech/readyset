@@ -1,7 +1,9 @@
 use anyhow::{anyhow, bail, Context, Result};
 use clap::Parser;
 use console::style;
-use database_utils::{DatabaseConnection, DatabaseStatement, DatabaseType, DatabaseURL};
+use database_utils::{
+    DatabaseConnection, DatabaseStatement, DatabaseType, DatabaseURL, QueryableConnection,
+};
 use postgres_types::Type;
 use prettytable::Table;
 use readyset_data::DfValue;

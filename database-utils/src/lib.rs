@@ -21,7 +21,9 @@ use crate::error::{DatabaseError, DatabaseURLParseError};
 mod connection;
 pub mod error;
 
-pub use connection::{DatabaseConnection, DatabaseStatement, QueryResults};
+pub use connection::{
+    DatabaseConnection, DatabaseStatement, QueryResults, QueryableConnection, Transaction,
+};
 
 #[allow(missing_docs)] // If we add docs they get added into --help binary text which is confusing
 #[derive(Debug, Clone, Parser, PartialEq, Eq, Serialize, Deserialize)]

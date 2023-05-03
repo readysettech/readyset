@@ -5,7 +5,7 @@ use std::{env, fs, mem};
 
 use anyhow::Result;
 use clap::{Parser, ValueEnum};
-use database_utils::{DatabaseConnection, DatabaseURL};
+use database_utils::{DatabaseConnection, DatabaseURL, QueryableConnection};
 use rand::distributions::{Distribution, Uniform};
 use rand::prelude::*;
 use readyset_client::consensus::AuthorityType;

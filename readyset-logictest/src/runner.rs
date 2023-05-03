@@ -11,7 +11,7 @@ use std::{io, mem};
 
 use anyhow::{anyhow, bail, Context};
 use console::style;
-use database_utils::{DatabaseConnection, DatabaseType, DatabaseURL};
+use database_utils::{DatabaseConnection, DatabaseType, DatabaseURL, QueryableConnection};
 use itertools::Itertools;
 use mysql_srv::MySqlIntermediary;
 use nom_sql::{Dialect, Relation};

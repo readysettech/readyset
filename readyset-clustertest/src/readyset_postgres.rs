@@ -1,3 +1,4 @@
+use database_utils::QueryableConnection;
 use serial_test::serial;
 
 use crate::*;

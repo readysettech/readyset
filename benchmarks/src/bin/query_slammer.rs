@@ -3,7 +3,7 @@ use std::time::Duration;
 use atomic_counter::{AtomicCounter, RelaxedCounter};
 use chrono::Utc;
 use clap::Parser;
-use database_utils::DatabaseURL;
+use database_utils::{DatabaseURL, QueryableConnection};
 use futures::future::select_all;
 
 #[derive(Parser, Debug)]

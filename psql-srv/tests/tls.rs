@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::vec;
 
 use async_trait::async_trait;
-use database_utils::DatabaseURL;
+use database_utils::{DatabaseURL, QueryableConnection};
 use futures::stream;
 use postgres_types::Type;
 use psql_srv::{run_backend, Backend, Credentials, CredentialsNeeded, Error};
