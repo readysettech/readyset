@@ -1,0 +1,14 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: readyset-adapter
+  namespace: default
+subjects:
+- kind: ServiceAccount
+  name: readyset-adapter
+  namespace: default
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: readyset-adapter

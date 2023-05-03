@@ -1,19 +1,19 @@
 apiVersion: v2
-appVersion: "0.0.1"
+
 name: readyset
+description: Official ReadySet Chart
 annotations:
   category: Infrastructure
+type: application
+
+# Versions are expected to follow Semantic Versioning (https://semver.org/)
+version: 0.2.0
+
+# appVersion is not expected to follow Semantic Versioning (https://semver.org)
+appVersion: "latest"
+
 dependencies:
 - condition: consul.enabled
   name: consul
   repository: https://helm.releases.hashicorp.com/
-  version: 0.41.0
-description: Official ReadySet Server Chart
-home: https://readyset.io/
-icon: https://readyset.io/favicon.png
-maintainers:
-  - email: support@readyset.io
-    name: ReadySet.io
-kubeVersion: '>=1.18.0-0'
-type: "application"
-version: 0.1.0
+  version: 1.1.1

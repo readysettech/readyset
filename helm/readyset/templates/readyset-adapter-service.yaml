@@ -1,0 +1,25 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: readyset-adapter
+  namespace: default
+  labels: {{ include "readyset.labels" . | nindent 4 }}
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: external
+    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+    service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+spec:
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: "readyset"
+    app.kubernetes.io/component: "adapter"
+  ports:
+    - name: {{ default "mysql" .Values.readyset.adapter.type | quote}}
+      port: {{ .Values.readyset.adapter.port | default (include "readyset.mysqlPort" . ) }}
+      targetPort: {{ .Values.readyset.adapter.port | default (include "readyset.mysqlPort" . ) }}
+      protocol: TCP
+    - name: monitoring
+      port: {{ .Values.readyset.adapter.httpPort | default (include "readyset.adapter.httpPort" . ) }}
+      targetPort: {{ .Values.readyset.adapter.httpPort | default (include "readyset.adapter.httpPort" . ) }}
+      protocol: TCP

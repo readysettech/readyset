@@ -1,3 +1,0 @@
-{{- if .Values.readyset.adapter.enabled }}
-{{ include "readyset.adapter" (dict "root" . "Values" .Values "Chart" .Chart "Release" .Release "adapter" .Values.readyset.adapter "config" .Values.readyset.common.config) }}
-{{- end -}}

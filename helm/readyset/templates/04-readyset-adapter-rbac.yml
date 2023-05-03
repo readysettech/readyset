@@ -1,1 +1,0 @@
-{{ include "readyset.adapter.rbac" (dict "rbac" .Values.readyset.adapter.rbac "Release" .Release "global" .Values.global "Chart" .Chart "root" .Values) }}

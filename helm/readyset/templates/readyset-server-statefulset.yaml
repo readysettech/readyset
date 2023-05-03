@@ -1,0 +1,168 @@
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: readyset-server
+  namespace: default
+  labels: {{ include "readyset.labels" . | nindent 4 }}
+spec:
+  serviceName: readyset-server
+  podManagementPolicy: Parallel
+  replicas: 1
+  selector:
+    matchLabels: {{ include "readyset.selectorLabels" . | nindent 6 }}
+  volumeClaimTemplates:
+    - metadata:
+        name: state
+      spec:
+        accessModes:
+        - ReadWriteOnce
+        resources:
+          requests:
+            storage: {{ default "50Gi" .Values.readyset.server.resources.requests.storage }}
+        storageClassName: {{ .Values.kubernetes.storageClass | default (include "readyset.defaultStorageClass" .) }}
+  template:
+    metadata:
+      labels: {{ include "readyset.labels" . | nindent 8 }}
+    spec:
+      terminationGracePeriodSeconds: 15
+      serviceAccountName: readyset-adapter
+      containers:
+        - name: consul-agent
+          image: hashicorp/consul:1.15.2
+          volumeMounts:
+            - mountPath: /usr/src/app/entrypoint.sh
+              name: init
+              subPath: entrypoint.sh
+          command: [
+            "/bin/sh"
+          ]
+          args:
+            - "/usr/src/app/entrypoint.sh"
+          ports:
+          - containerPort: 8500
+            name: http
+            protocol: TCP
+          - containerPort: 8301
+            name: serflan-tcp
+            protocol: TCP
+          - containerPort: 8301
+            name: serflan-udp
+            protocol: UDP
+          - containerPort: 8600
+            name: dns-tcp
+            protocol: TCP
+          - containerPort: 8600
+            name: dns-udp
+            protocol: UDP
+          env:
+            - name: MY_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: ADVERTISE_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: HOST_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            - name: NODE
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: CONSUL_SERVER_NAMESPACE
+              value: "default"
+          readinessProbe:
+            exec:
+              command:
+              - /bin/sh
+              - -ec
+              - |
+                curl http://127.0.0.1:8500/v1/health/node/$(hostname) \
+                2>/dev/null | grep -E '".+"'
+        - name: readyset-server
+          image: public.ecr.aws/readyset/readyset-server:latest
+          env:
+            # ReadySet Deployment Name (Unique per Consul Cluster)
+            - name: DEPLOYMENT
+              value: "readyset-helm"
+            # ReadySet Server Configs
+            - name: NORIA_QUORUM
+              value: "1"
+            - name: NORIA_MEMORY_BYTES
+              value: "0"
+            # Await Consul Leader Election Before Launching
+            - name: INIT_REQUIRE_LEADER
+              value: "1"
+            # Database ReadySet is proxying to
+            - name: UPSTREAM_DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: readyset-db-url
+                  key: url
+            - name: VOLUME_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: EXTERNAL_ADDRESS
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: LOG_FORMAT
+              value: "json"
+            # Identify this as a Helm deployment to TelemetryReporter
+            - name: DEPLOYMENT_ENV
+              value: "helm"
+            - name: AUTHORITY_ADDRESS
+              value: "readyset-consul-server:8500"
+            - name: AUTHORITY
+              value: "consul"
+            - name: DB_DIR
+              value: "/state"
+            - name: LISTEN_ADDRESS
+              value: "0.0.0.0"
+            - name: MEMORY_CHECK_EVERY
+              value: "1"
+            - name: PROMETHEUS_METRICS
+              value: "true"
+          volumeMounts:
+            - mountPath: /state
+              name: state
+          resources:
+            limits: {}
+            requests:
+              cpu: {{ default 1 .Values.readyset.server.resources.requests.cpu }}
+              memory: {{ default "2Gi" .Values.readyset.server.resources.requests.memory }}
+          ports:
+            - containerPort: {{ .Values.readyset.server.httpPort | default (include "readyset.server.httpPort" . ) }}
+              name: monitoring
+              protocol: TCP
+            - containerPort: {{ .Values.readyset.adapter.port | default (include "readyset.mysqlPort" . ) }}
+              name: {{ default "mysql" .Values.readyset.adapter.type}}
+              protocol: TCP
+          readinessProbe:
+            exec:
+              command:
+              - /bin/sh
+              - -ec
+              - |
+                curl --fail http://127.0.0.1:{{ .Values.readyset.server.httpPort | default (include "readyset.server.httpPort" .) }}/metrics
+      volumes:
+        - configMap:
+            items:
+            - key: entrypoint.sh
+              path: entrypoint.sh
+            name: readyset-consul-agent-cm
+          name: init
+        - configMap:
+            items:
+            - key: entrypoint.sh
+              path: entrypoint.sh
+            name: readyset-consul-agent-cm
+          name: state
