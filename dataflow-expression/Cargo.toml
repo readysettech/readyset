@@ -15,6 +15,7 @@ lazy_static = "1.4.0"
 regex = "1.4.3"
 itertools = "0.10.3"
 vec1 = "1.6"
+proptest = "1.0.0"
 
 # Local deps
 readyset-util = { path = "../readyset-util" }
@@ -26,7 +27,6 @@ partial-map = { path = "../partial-map" }
 
 [dev-dependencies]
 test-strategy = "0.2.0"
-proptest = "1.0.0"
 tokio = { workspace = true, features = ["full"] }
 tokio-postgres = { workspace = true, features = ["with-chrono-0_4", "with-eui48-1", "with-uuid-0_8", "with-serde_json-1", "with-bit-vec-0_6"] }
 mysql_async = { workspace = true }

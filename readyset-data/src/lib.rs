@@ -19,7 +19,6 @@ use eui48::{MacAddress, MacAddressFormat};
 use itertools::Itertools;
 use mysql_time::MySqlTime;
 use nom_sql::{Double, Float, Literal, SqlType};
-use proptest::prelude::{prop_oneof, Arbitrary};
 use readyset_errors::{internal, invalid_err, unsupported, ReadySetError, ReadySetResult};
 use readyset_util::arbitrary::{arbitrary_decimal, arbitrary_duration};
 use readyset_util::redacted::Sensitive;
@@ -42,6 +41,7 @@ mod timestamp;
 mod r#type;
 
 pub use ndarray::{ArrayD, IxDyn};
+use proptest::arbitrary::Arbitrary;
 
 pub use crate::array::Array;
 pub use crate::collation::Collation;
@@ -2108,7 +2108,6 @@ impl Arbitrary for DfValue {
 
     fn arbitrary_with(opt_kind: Self::Parameters) -> Self::Strategy {
         use proptest::prelude::*;
-
         match opt_kind {
             Some(DfValueKind::None) => Just(DfValue::None).boxed(),
             Some(DfValueKind::Max) => Just(DfValue::Max).boxed(),
@@ -2164,6 +2163,110 @@ impl Arbitrary for DfValue {
                 any::<Array>().prop_map(DfValue::from)
             ]
             .boxed(),
+        }
+    }
+}
+
+mod arbitrary {
+    use std::sync::Arc;
+
+    use bit_vec::BitVec;
+    use mysql_time::MySqlTime;
+    use proptest::arbitrary::any;
+    use proptest::collection::vec;
+    use proptest::strategy::{Just, Strategy};
+    use readyset_util::arbitrary::arbitrary_decimal;
+
+    use crate::array::Array;
+    use crate::{DfType, DfValue, TimestampTz};
+
+    #[allow(dead_code)]
+    pub(crate) fn generate_dfvalue(ty: Option<&DfType>) -> impl Strategy<Value = DfValue> {
+        match ty {
+            Some(DfType::Bool) => (0..=1u64).prop_map(DfValue::UnsignedInt).boxed(),
+            // NOTE: Depending on the DfType, this might result in a recursive call
+            Some(DfType::Array(inner)) => vec(generate_dfvalue(Some(inner.as_ref())), 0..=5)
+                .prop_map(|v| DfValue::Array(Arc::new(Array::from(v))))
+                .boxed(),
+            Some(DfType::TinyInt) => any::<i8>().prop_map(|i| DfValue::Int(i as i64)).boxed(),
+            Some(DfType::SmallInt) => any::<i16>().prop_map(|i| DfValue::Int(i as i64)).boxed(),
+            Some(DfType::Int) => any::<i32>().prop_map(|i| DfValue::Int(i as i64)).boxed(),
+            Some(DfType::BigInt) => any::<i64>().prop_map(DfValue::Int).boxed(),
+            Some(DfType::UnsignedTinyInt) => any::<u8>()
+                .prop_map(|u| DfValue::UnsignedInt(u as u64))
+                .boxed(),
+            Some(DfType::UnsignedSmallInt) => any::<u16>()
+                .prop_map(|u| DfValue::UnsignedInt(u as u64))
+                .boxed(),
+            Some(DfType::UnsignedInt) => any::<u32>()
+                .prop_map(|u| DfValue::UnsignedInt(u as u64))
+                .boxed(),
+            Some(DfType::UnsignedBigInt) => any::<u64>().prop_map(DfValue::UnsignedInt).boxed(),
+            Some(DfType::Float) => any::<f32>().prop_map(DfValue::Float).boxed(),
+            Some(DfType::Double) => any::<f64>().prop_map(DfValue::Double).boxed(),
+            // TODO(fran): Numeric might need a more specific generator, based on precision and
+            //  scale
+            Some(DfType::Numeric { .. }) => arbitrary_decimal().prop_map(DfValue::from).boxed(),
+            Some(DfType::Text(_)) => "[^\0]{0, 32}".prop_map(DfValue::from).boxed(),
+            Some(DfType::Char(len, _)) => {
+                proptest::string::string_regex(format!("[^\0]{{{len}}}").as_str())
+                    .expect("error trying to generate strategy for DfValue with DfType::Char")
+                    .prop_map(DfValue::from)
+                    .boxed()
+            }
+            Some(DfType::VarChar(len, _)) => {
+                proptest::string::string_regex(format!("[^\0]{{0, {len}}}").as_str())
+                    .expect("error trying to generate strategy for DfValue with DfType::VarChar")
+                    .prop_map(DfValue::from)
+                    .boxed()
+            }
+            Some(DfType::Blob) => vec(any::<u8>(), 0..=usize::MAX)
+                .prop_map(|b| DfValue::ByteArray(Arc::new(b)))
+                .boxed(),
+            Some(DfType::Binary(len)) => {
+                let len = *len as usize;
+                vec(any::<u8>(), len..=len)
+                    .prop_map(|b| DfValue::ByteArray(Arc::new(b)))
+                    .boxed()
+            }
+            Some(DfType::VarBinary(len)) => {
+                let len = *len as usize;
+                vec(any::<u8>(), 0..=len)
+                    .prop_map(|b| DfValue::ByteArray(Arc::new(b)))
+                    .boxed()
+            }
+            Some(DfType::Bit(len)) => {
+                let len = *len as usize;
+                vec(any::<u8>(), len..=len)
+                    .prop_map(|b| DfValue::BitVector(Arc::new(BitVec::from_bytes(&b))))
+                    .boxed()
+            }
+            Some(DfType::VarBit(len)) => {
+                let len = len.unwrap_or(u16::MAX) as usize;
+                vec(any::<u8>(), 0..=len)
+                    .prop_map(|b| DfValue::BitVector(Arc::new(BitVec::from_bytes(&b))))
+                    .boxed()
+            }
+            // TODO(fran): We are ignoring the config of the dates. Not sure that's the best
+            //  approach...
+            //  We are also using the same strategy for all of them.
+            Some(DfType::Date)
+            | Some(DfType::DateTime { .. })
+            | Some(DfType::Timestamp { .. })
+            | Some(DfType::TimestampTz { .. }) => {
+                any::<TimestampTz>().prop_map(DfValue::TimestampTz).boxed()
+            }
+            Some(DfType::Time { .. }) => any::<MySqlTime>().prop_map(DfValue::Time).boxed(),
+            Some(DfType::Enum { variants, .. }) => proptest::sample::select(variants.to_vec())
+                .prop_map(DfValue::from)
+                .boxed(),
+            Some(DfType::Unknown) | None => Just(DfValue::None).boxed(),
+            // These are ignored for now
+            Some(DfType::Jsonb)
+            | Some(DfType::Json)
+            | Some(DfType::MacAddr)
+            | Some(DfType::Uuid)
+            | Some(DfType::Inet) => Just(DfValue::None).boxed(),
         }
     }
 }
