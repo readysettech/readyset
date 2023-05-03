@@ -583,8 +583,7 @@ pub struct Fuzz {
     #[clap(long)]
     seed: Option<Seed>,
 
-    /// URL of a reference database to compare to. Currently supports `mysql://` URLs, but may be
-    /// expanded in the future
+    /// URL of a reference database to compare to.
     #[clap(long)]
     compare_to: DatabaseURL,
 
@@ -642,22 +641,14 @@ impl Fuzz {
     }
 
     fn test_script_strategy(&self) -> impl Strategy<Value = TestScript> + 'static {
+        let dialect = self.dialect();
         (any::<Vec<QuerySeed>>(), self.generate_opts()).prop_filter_map(
             "Making test script from seed failed",
-            |(query_seeds, generate_opts)| {
+            move |(query_seeds, generate_opts)| {
                 let rt = tokio::runtime::Runtime::new().unwrap();
                 let _guard = rt.enter();
-                let mut seed = generate::Seed::from_seeds(
-                    query_seeds,
-                    // TODO(ENG-2958): Make configurable
-                    nom_sql::Dialect::MySQL,
-                )
-                .unwrap();
-                match rt.block_on(seed.run(
-                    generate_opts,
-                    // TODO(ENG-2958): Make configurable
-                    nom_sql::Dialect::MySQL,
-                )) {
+                let mut seed = generate::Seed::from_seeds(query_seeds, dialect).unwrap();
+                match rt.block_on(seed.run(generate_opts, dialect)) {
                     Ok(script) => Some(script.clone()),
                     Err(e) => {
                         eprintln!("Error generating test script from seed: {e:#}");
@@ -682,6 +673,13 @@ impl Fuzz {
                 rows_to_delete: Some(rows_to_delete),
             })
         })
+    }
+
+    fn dialect(&self) -> nom_sql::Dialect {
+        match self.compare_to {
+            DatabaseURL::MySQL(_) => nom_sql::Dialect::MySQL,
+            DatabaseURL::PostgreSQL(_) => nom_sql::Dialect::PostgreSQL,
+        }
     }
 }
 
