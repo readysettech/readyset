@@ -3,7 +3,7 @@ use std::marker::{Send, Sync};
 use std::str;
 
 use derive_more::From;
-use futures::{StreamExt, TryStreamExt};
+use futures::TryStreamExt;
 use mysql::prelude::AsQuery;
 use mysql_async::prelude::Queryable;
 use readyset_errors::ReadySetError;
@@ -20,43 +20,6 @@ pub enum DatabaseConnection {
         tokio_postgres::Client,
         tokio::task::JoinHandle<Result<(), ReadySetError>>,
     ),
-}
-
-async fn convert_mysql_results<'a, 't, P, V>(
-    mut results: mysql::QueryResult<'a, 't, P>,
-) -> Result<Vec<Vec<V>>, DatabaseError>
-where
-    P: mysql::prelude::Protocol,
-    V: TryFrom<mysql::Value>,
-    <V as TryFrom<mysql::Value>>::Error: std::error::Error + Send + Sync + 'static,
-{
-    results
-        .map(|mut r| {
-            (0..r.columns().len())
-                .map(|c| {
-                    V::try_from(r.take::<mysql::Value, _>(c).unwrap())
-                        .map_err(|e| DatabaseError::ValueConversion(Box::new(e)))
-                })
-                .collect::<Result<Vec<V>, _>>()
-        })
-        .await?
-        .into_iter()
-        .collect::<Result<Vec<Vec<V>>, _>>()
-}
-
-async fn convert_pgsql_results<V>(results: pgsql::RowStream) -> Result<Vec<Vec<V>>, pgsql::Error>
-where
-    for<'a> V: pgsql::types::FromSql<'a>,
-{
-    results
-        .map(|r| {
-            let r = r?;
-            (0..r.len())
-                .map(|c| r.try_get(c))
-                .collect::<Result<Vec<_>, _>>()
-        })
-        .try_collect()
-        .await
 }
 
 impl DatabaseConnection {
@@ -77,24 +40,25 @@ impl DatabaseConnection {
 
     /// Executes query for either mysql or postgres, whichever is the underlying
     /// DatabaseConnection variant.
-    pub async fn query<Q, V>(&mut self, query: Q) -> Result<Vec<Vec<V>>, DatabaseError>
+    pub async fn query<Q>(&mut self, query: Q) -> Result<QueryResults, DatabaseError>
     where
         Q: AsQuery + AsRef<str> + Send + Sync,
-        V: TryFrom<mysql::Value>,
-        <V as TryFrom<mysql::Value>>::Error: std::error::Error + Send + Sync + 'static,
-        for<'a> V: pgsql::types::FromSql<'a>,
     {
         match self {
-            DatabaseConnection::MySQL(conn) => {
-                convert_mysql_results(conn.query_iter(query).await?).await
-            }
+            DatabaseConnection::MySQL(conn) => Ok(QueryResults::MySql(
+                conn.query_iter(query).await?.collect().await?,
+            )),
             DatabaseConnection::PostgreSQL(client, _jh) => {
                 // TODO: We should use simple_query here instead, because query_raw will still
                 // prepare. simple_query returns a different result type, so may take some work to
                 // get it work properly here.
-                convert_pgsql_results(client.query_raw(query.as_ref(), Vec::<i8>::new()).await?)
-                    .await
-                    .map_err(DatabaseError::PostgreSQL)
+                Ok(QueryResults::Postgres(
+                    client
+                        .query_raw(query.as_ref(), Vec::<i8>::new())
+                        .await?
+                        .try_collect()
+                        .await?,
+                ))
             }
         }
     }
@@ -116,11 +80,11 @@ impl DatabaseConnection {
     /// Executes a prepared statement for either mysql or postgres, whichever is the underlying
     /// DatabaseConnection variant. Will also optionally prepare and execute a query string, if
     /// supplied instead.
-    pub async fn execute<P, V>(
+    pub async fn execute<P>(
         &mut self,
         stmt: impl Into<DatabaseStatement>,
         params: P,
-    ) -> Result<Vec<Vec<V>>, DatabaseError>
+    ) -> Result<QueryResults, DatabaseError>
     where
         P: IntoIterator,
         P::IntoIter: ExactSizeIterator,
@@ -128,28 +92,22 @@ impl DatabaseConnection {
         mysql_async::Value: TryFrom<<P as IntoIterator>::Item>,
         <mysql_async::Value as TryFrom<<P as IntoIterator>::Item>>::Error:
             std::error::Error + Send + Sync + 'static,
-        V: TryFrom<mysql::Value>,
-        <V as TryFrom<mysql::Value>>::Error: std::error::Error + Send + Sync + 'static,
-        for<'a> V: pgsql::types::FromSql<'a>,
     {
         match stmt.into() {
-            DatabaseStatement::MySql(s) => {
-                convert_mysql_results(
-                    self.as_mysql_conn()
-                        .ok_or(DatabaseError::WrongConnection(ConnectionType::MySQL))?
-                        .exec_iter(s, convert_mysql_params(params)?)
-                        .await?,
-                )
-                .await
-            }
-            DatabaseStatement::Postgres(s) => convert_pgsql_results(
-                self.as_postgres_conn()
-                    .ok_or(DatabaseError::WrongConnection(ConnectionType::PostgreSQL))?
-                    .query_raw(&s, params)
+            DatabaseStatement::MySql(s) => Ok(QueryResults::MySql(
+                self.as_mysql_conn()?
+                    .exec_iter(s, convert_mysql_params(params)?)
+                    .await?
+                    .collect()
                     .await?,
-            )
-            .await
-            .map_err(DatabaseError::PostgreSQL),
+            )),
+            DatabaseStatement::Postgres(s) => Ok(QueryResults::Postgres(
+                self.as_postgres_conn()?
+                    .query_raw(&s, params)
+                    .await?
+                    .try_collect()
+                    .await?,
+            )),
             DatabaseStatement::Str(s) => self.execute_str(s.as_ref(), params).await,
         }
     }
@@ -158,11 +116,11 @@ impl DatabaseConnection {
     /// That might be an underlying mysql or postgres error, depending on the underlying connection
     /// type, or it may be a value conversion error in the case that the caller is using a custom
     /// value type to convert results into.
-    pub async fn execute_str<P, V>(
+    pub async fn execute_str<P>(
         &mut self,
         stmt: &str,
         params: P,
-    ) -> Result<Vec<Vec<V>>, DatabaseError>
+    ) -> Result<QueryResults, DatabaseError>
     where
         P: IntoIterator,
         P::IntoIter: ExactSizeIterator,
@@ -170,36 +128,33 @@ impl DatabaseConnection {
         mysql_async::Value: TryFrom<<P as IntoIterator>::Item>,
         <mysql_async::Value as TryFrom<<P as IntoIterator>::Item>>::Error:
             std::error::Error + Send + Sync + 'static,
-        V: TryFrom<mysql::Value>,
-        <V as TryFrom<mysql::Value>>::Error: std::error::Error + Send + Sync + 'static,
-        for<'a> V: pgsql::types::FromSql<'a>,
     {
         match self {
-            DatabaseConnection::MySQL(conn) => {
-                convert_mysql_results(conn.exec_iter(stmt, convert_mysql_params(params)?).await?)
-                    .await
-            }
-            DatabaseConnection::PostgreSQL(client, _jh) => {
-                convert_pgsql_results(client.query_raw(stmt, params).await?)
-                    .await
-                    .map_err(DatabaseError::PostgreSQL)
-            }
+            DatabaseConnection::MySQL(conn) => Ok(QueryResults::MySql(
+                conn.exec_iter(stmt, convert_mysql_params(params)?)
+                    .await?
+                    .collect()
+                    .await?,
+            )),
+            DatabaseConnection::PostgreSQL(client, _jh) => Ok(QueryResults::Postgres(
+                client.query_raw(stmt, params).await?.try_collect().await?,
+            )),
         }
     }
 
-    pub fn as_mysql_conn(&mut self) -> Option<&mut mysql_async::Conn> {
+    pub fn as_mysql_conn(&mut self) -> Result<&mut mysql_async::Conn, DatabaseError> {
         if let DatabaseConnection::MySQL(c) = self {
-            Some(c)
+            Ok(c)
         } else {
-            None
+            Err(DatabaseError::WrongConnection(ConnectionType::MySQL))
         }
     }
 
-    pub fn as_postgres_conn(&mut self) -> Option<&mut tokio_postgres::Client> {
+    pub fn as_postgres_conn(&mut self) -> Result<&mut tokio_postgres::Client, DatabaseError> {
         if let DatabaseConnection::PostgreSQL(c, _jh) = self {
-            Some(c)
+            Ok(c)
         } else {
-            None
+            Err(DatabaseError::WrongConnection(ConnectionType::PostgreSQL))
         }
     }
 }
@@ -240,5 +195,45 @@ impl From<&str> for DatabaseStatement {
 impl From<&String> for DatabaseStatement {
     fn from(s: &String) -> DatabaseStatement {
         DatabaseStatement::Str(s.to_owned())
+    }
+}
+
+/// An enum wrapper around the native Postgres and MySQL result types.
+pub enum QueryResults {
+    MySql(Vec<mysql_async::Row>),
+    Postgres(Vec<pgsql::Row>),
+}
+
+impl<V> TryFrom<QueryResults> for Vec<Vec<V>>
+where
+    V: TryFrom<mysql_async::Value>,
+    <V as TryFrom<mysql_async::Value>>::Error: std::error::Error + Send + Sync + 'static,
+    for<'a> V: pgsql::types::FromSql<'a>,
+{
+    type Error = DatabaseError;
+
+    fn try_from(results: QueryResults) -> Result<Self, Self::Error> {
+        match results {
+            QueryResults::MySql(results) => Ok(results
+                .into_iter()
+                .map(|mut r| {
+                    (0..r.columns().len())
+                        .map(|c| {
+                            V::try_from(r.take::<mysql::Value, _>(c).unwrap())
+                                .map_err(|e| DatabaseError::ValueConversion(Box::new(e)))
+                        })
+                        .collect::<Result<Vec<V>, _>>()
+                })
+                .collect::<Result<Vec<Vec<V>>, _>>()?),
+            QueryResults::Postgres(results) => Ok(results
+                .into_iter()
+                .map(|r| {
+                    (0..r.len())
+                        .map(|c| r.try_get(c))
+                        .collect::<Result<Vec<_>, _>>()
+                })
+                .collect::<Result<Vec<Vec<V>>, _>>()
+                .map_err(DatabaseError::PostgreSQL)?),
+        }
     }
 }

@@ -351,7 +351,7 @@ impl MySqlExecutor {
     }
 
     async fn on_query(&mut self, q: BatchedQuery) -> Result<Vec<BatchedQuery>> {
-        let _: Vec<Vec<DfValue>> = self.conn.execute(self.query, &q.key).await.unwrap();
+        self.conn.execute(self.query, &q.key).await.unwrap();
         Ok(vec![q])
     }
 }

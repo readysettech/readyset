@@ -17,6 +17,7 @@ use query_generator::{GeneratorState, ParameterMode, QuerySeed};
 
 use crate::ast::{
     Conditional, Query, QueryParams, QueryResults, Record, SortMode, Statement, StatementResult,
+    Value,
 };
 use crate::runner::{recreate_test_database, RunOptions, TestScript};
 
@@ -92,10 +93,11 @@ async fn run_queries(
 
     let mut ret = Vec::new();
     for q in queries {
-        let mut results = conn
+        let mut results: Vec<Vec<Value>> = conn
             .execute(&q.query, q.params.clone())
             .await
-            .with_context(|| format!("Running query {}", q.query))?;
+            .with_context(|| format!("Running query {}", q.query))?
+            .try_into()?;
 
         let values: Vec<_> = match q.sort_mode.unwrap_or_default() {
             SortMode::NoSort => results.into_iter().flatten().collect(),

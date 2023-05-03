@@ -135,7 +135,12 @@ impl FromQueryLog {
                         conditionals: vec![],
                     })
                 } else {
-                    Record::query(entry.arguments.clone(), parsed.as_ref(), vec![], rows)
+                    Record::query(
+                        entry.arguments.clone(),
+                        parsed.as_ref(),
+                        vec![],
+                        rows.try_into()?,
+                    )
                 }
             }
             Err(_) => Record::Statement(Statement {
@@ -175,7 +180,12 @@ impl FromQueryLog {
         }
 
         if should_validate_results(&stmt_string, &Some(parsed)) {
-            Ok(Some(Record::query(stmt_string, Some(stmt), params, rows)))
+            Ok(Some(Record::query(
+                stmt_string,
+                Some(stmt),
+                params,
+                rows.try_into()?,
+            )))
         } else {
             Ok(Some(Record::Statement(Statement {
                 result: StatementResult::Ok,

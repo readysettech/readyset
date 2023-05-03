@@ -170,7 +170,7 @@ impl ReplContext {
             }
             Command::Normal(query) => {
                 let res = self.connection.query(query).await?;
-                print_result(res);
+                print_result(res.try_into()?);
             }
             Command::Prepare { query, type_oids } => {
                 let statement_id = self.prepared_statements.len();
@@ -208,7 +208,7 @@ impl ReplContext {
                     .get(statement_id)
                     .ok_or_else(|| anyhow!("Prepared statement {} not found", statement_id))?;
                 let res = self.connection.execute(statement.clone(), params).await?;
-                print_result(res);
+                print_result(res.try_into()?);
             }
         }
 

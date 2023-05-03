@@ -390,38 +390,37 @@ impl TestScript {
             conn.execute(&query.query, query.params.clone()).await?
         };
 
-        let mut rows =
-            results
-                .into_iter()
-                .map(|mut row: Vec<Value>| -> anyhow::Result<Vec<Value>> {
-                    if let Some(column_types) = &query.column_types {
-                        let row_len = row.len();
-                        let wrong_columns = || {
-                            anyhow!(
-                                "Row had the wrong number of columns: expected {}, but got {}",
-                                column_types.len(),
-                                row_len
-                            )
-                        };
+        let mut rows = <Vec<Vec<Value>>>::try_from(results)?.into_iter().map(
+            |mut row: Vec<Value>| -> anyhow::Result<Vec<Value>> {
+                if let Some(column_types) = &query.column_types {
+                    let row_len = row.len();
+                    let wrong_columns = || {
+                        anyhow!(
+                            "Row had the wrong number of columns: expected {}, but got {}",
+                            column_types.len(),
+                            row_len
+                        )
+                    };
 
-                        if row.len() > column_types.len() {
-                            return Err(wrong_columns());
-                        }
-
-                        let mut vals = mem::take(&mut row).into_iter();
-                        row = column_types
-                            .iter()
-                            .map(move |col_type| -> anyhow::Result<Value> {
-                                let val = vals.next().ok_or_else(wrong_columns)?;
-                                Ok(val
-                                    .convert_type(col_type)
-                                    .with_context(|| format!("Converting value to {:?}", col_type))?
-                                    .into_owned())
-                            })
-                            .collect::<Result<_, _>>()?;
+                    if row.len() > column_types.len() {
+                        return Err(wrong_columns());
                     }
-                    Ok(row)
-                });
+
+                    let mut vals = mem::take(&mut row).into_iter();
+                    row = column_types
+                        .iter()
+                        .map(move |col_type| -> anyhow::Result<Value> {
+                            let val = vals.next().ok_or_else(wrong_columns)?;
+                            Ok(val
+                                .convert_type(col_type)
+                                .with_context(|| format!("Converting value to {:?}", col_type))?
+                                .into_owned())
+                        })
+                        .collect::<Result<_, _>>()?;
+                }
+                Ok(row)
+            },
+        );
 
         let vals: Vec<Value> = match query.sort_mode.unwrap_or_default() {
             SortMode::NoSort => rows.fold_ok(vec![], |mut acc, row| {

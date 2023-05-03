@@ -5,7 +5,6 @@ use chrono::Utc;
 use clap::Parser;
 use database_utils::DatabaseURL;
 use futures::future::select_all;
-use readyset_data::DfValue;
 
 #[derive(Parser, Debug)]
 struct Opts {
@@ -31,7 +30,7 @@ async fn main() -> anyhow::Result<()> {
             let mut i = 600000;
             loop {
                 let _ = conn
-                    .execute_str::<Vec<u32>, DfValue>("SELECT * FROM t", vec![])
+                    .execute_str::<Vec<u32>>("SELECT * FROM t", vec![])
                     .await
                     .unwrap();
                 counter.inc();
