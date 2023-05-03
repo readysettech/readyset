@@ -4029,6 +4029,7 @@ dependencies = [
  "test-strategy",
  "thiserror",
  "tokio",
+ "tokio-postgres",
  "uuid 0.8.2",
  "zipf",
 ]

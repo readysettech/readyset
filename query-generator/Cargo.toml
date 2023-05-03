@@ -38,6 +38,7 @@ readyset-sql-passes = { path = "../readyset-sql-passes" }
 readyset-util = { path = "../readyset-util" }
 
 [dev-dependencies]
-mysql_async = { workspace = true }
-tokio = { workspace = true, features = ["full"] }
+mysql_async.workspace = true
 serial_test = "0.5"
+tokio = { workspace = true, features = ["full"] }
+tokio-postgres.workspace = true
