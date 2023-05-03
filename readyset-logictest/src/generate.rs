@@ -15,38 +15,13 @@ use nom_sql::{
 use query_generator::{GeneratorState, QuerySeed};
 
 use crate::ast::{Query, QueryParams, QueryResults, Record, SortMode, Statement, StatementResult};
-use crate::runner::{RunOptions, TestScript};
+use crate::runner::{recreate_test_database, RunOptions, TestScript};
 
 /// Default value for [`Seed::hash_threshold`]
 const DEFAULT_HASH_THRESHOLD: usize = 20;
 
 #[derive(Debug)]
-enum Relation {
-    Table(String),
-    View(String),
-}
-
-impl Relation {
-    fn kind(&self) -> &'static str {
-        match self {
-            Relation::Table(_) => "TABLE",
-            Relation::View(_) => "VIEW",
-        }
-    }
-
-    fn name(&self) -> &str {
-        match self {
-            Relation::Table(name) => name,
-            Relation::View(name) => name,
-        }
-    }
-}
-
-#[derive(Debug)]
 pub(crate) struct Seed {
-    /// Relations to drop (if they exist) before seeding the reference db, to account for having
-    /// previously run the test script
-    relations_to_drop: Vec<Relation>,
     tables: Vec<CreateTableStatement>,
     queries: Vec<Query>,
     generator: GeneratorState,
@@ -61,7 +36,6 @@ impl TryFrom<PathBuf> for Seed {
         let mut file = File::open(&path)?;
         let script = TestScript::read(path, &mut file)?;
 
-        let mut relations_to_drop = vec![];
         let mut tables = vec![];
         let mut queries = vec![];
         let mut hash_threshold = DEFAULT_HASH_THRESHOLD;
@@ -70,16 +44,10 @@ impl TryFrom<PathBuf> for Seed {
             match record {
                 Record::Statement(Statement { command, .. }) => {
                     // TODO(grfn): Make dialect configurable
-                    match parse_query(Dialect::MySQL, command).map_err(|s| anyhow!("{}", s))? {
-                        SqlQuery::CreateTable(tbl) => {
-                            relations_to_drop.push(Relation::Table(tbl.table.name.to_string()));
-                            tables.push(tbl)
-                        }
-                        SqlQuery::CreateView(view) => {
-                            relations_to_drop
-                                .push(Relation::View(view.name.display_unquoted().to_string()));
-                        }
-                        _ => {}
+                    if let SqlQuery::CreateTable(tbl) =
+                        parse_query(Dialect::MySQL, command).map_err(|s| anyhow!("{}", s))?
+                    {
+                        tables.push(tbl)
                     }
                 }
                 Record::Query(query) => {
@@ -100,7 +68,6 @@ impl TryFrom<PathBuf> for Seed {
 
         file.seek(SeekFrom::Start(0))?;
         Ok(Seed {
-            relations_to_drop,
             tables,
             queries,
             generator,
@@ -156,11 +123,10 @@ impl TryFrom<Vec<QuerySeed>> for Seed {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        let mut relations_to_drop = vec![];
         let mut tables = vec![];
         let mut records = vec![];
 
-        for (name, table) in generator.tables_mut() {
+        for table in generator.tables_mut().values_mut() {
             table.primary_key(); // ensure the table has a primary key
             let create_stmt = CreateTableStatement::from(table.clone());
 
@@ -171,11 +137,9 @@ impl TryFrom<Vec<QuerySeed>> for Seed {
                 conditionals: vec![],
             }));
             tables.push(create_stmt);
-            relations_to_drop.push(Relation::Table(name.to_string()));
         }
 
         Ok(Seed {
-            relations_to_drop,
             tables,
             queries,
             generator,
@@ -232,33 +196,12 @@ async fn run_queries(
 
 impl Seed {
     pub async fn run(&mut self, opts: GenerateOpts) -> anyhow::Result<&TestScript> {
+        recreate_test_database(&opts.compare_to).await?;
         let mut conn = opts
             .compare_to
             .connect(None)
             .await
             .context("Connecting to comparison database")?;
-
-        eprintln!(
-            "{}",
-            style(format!(
-                "==> Dropping {} relations",
-                self.relations_to_drop.len()
-            ))
-            .bold()
-        );
-        self.relations_to_drop.reverse();
-        for relation in &self.relations_to_drop {
-            if opts.verbose {
-                eprintln!("    > Dropping {} {}", relation.kind(), relation.name());
-            }
-            conn.query_drop(format!(
-                "DROP {} IF EXISTS {}",
-                relation.kind(),
-                relation.name()
-            ))
-            .await
-            .with_context(|| format!("Dropping {} {}", relation.kind(), relation.name()))?;
-        }
 
         let tables_in_order = self
             .tables

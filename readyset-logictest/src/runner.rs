@@ -118,6 +118,34 @@ fn compare_results(results: &[Value], expected: &[Value], type_sensitive: bool) 
         .all(|(res, expected)| res.compare_type_insensitive(expected))
 }
 
+/// Establish a connection to the upstream DB server and recreate the test database
+pub(crate) async fn recreate_test_database(url: &DatabaseURL) -> anyhow::Result<()> {
+    let db_name = url
+        .db_name()
+        .ok_or_else(|| anyhow!("Must specify database name as part of database URL"))?;
+    let mut admin_url = url.clone();
+    admin_url.set_db_name(match url.database_type() {
+        DatabaseType::PostgreSQL => "postgres".to_owned(),
+        DatabaseType::MySQL => "mysql".to_owned(),
+    });
+    let mut admin_conn = admin_url
+        .connect(None)
+        .await
+        .with_context(|| "connecting to upstream")?;
+
+    admin_conn
+        .query_drop(format!("DROP DATABASE IF EXISTS {}", db_name))
+        .await
+        .with_context(|| "dropping database")?;
+
+    admin_conn
+        .query_drop(format!("CREATE DATABASE {}", db_name))
+        .await
+        .with_context(|| "creating database")?;
+
+    Ok(())
+}
+
 impl TestScript {
     pub fn read<R: io::Read>(path: PathBuf, input: R) -> anyhow::Result<Self> {
         let records = parser::read_records(input)?;
@@ -162,7 +190,7 @@ impl TestScript {
         );
 
         if let Some(upstream_url) = &opts.upstream_database_url {
-            self.recreate_test_database(upstream_url).await?;
+            recreate_test_database(upstream_url).await?;
             let mut conn = upstream_url
                 .connect(None)
                 .await
@@ -171,40 +199,11 @@ impl TestScript {
             self.run_on_database(&opts, &mut conn, None).await?;
         } else {
             if let Some(replication_url) = &opts.replication_url {
-                self.recreate_test_database(&replication_url.parse()?)
-                    .await?;
+                recreate_test_database(&replication_url.parse()?).await?;
             }
 
             self.run_on_noria(&opts, &noria_opts).await?;
         };
-
-        Ok(())
-    }
-
-    /// Establish a connection to the upstream DB server and recreate the test database
-    async fn recreate_test_database(&self, url: &DatabaseURL) -> anyhow::Result<()> {
-        let db_name = url
-            .db_name()
-            .ok_or_else(|| anyhow!("Must specify database name as part of database URL"))?;
-        let mut admin_url = url.clone();
-        admin_url.set_db_name(match url.database_type() {
-            DatabaseType::PostgreSQL => "postgres".to_owned(),
-            DatabaseType::MySQL => "mysql".to_owned(),
-        });
-        let mut admin_conn = admin_url
-            .connect(None)
-            .await
-            .with_context(|| "connecting to upstream")?;
-
-        admin_conn
-            .query_drop(format!("DROP DATABASE IF EXISTS {}", db_name))
-            .await
-            .with_context(|| "dropping database")?;
-
-        admin_conn
-            .query_drop(format!("CREATE DATABASE {}", db_name))
-            .await
-            .with_context(|| "creating database")?;
 
         Ok(())
     }
