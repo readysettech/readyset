@@ -11,13 +11,14 @@
 //!     - Add the type's name as a variant `Benchmark`.
 
 use std::collections::HashMap;
+use std::str::FromStr;
 
 use anyhow::Result;
 use async_trait::async_trait;
 use clap::Parser;
+use database_utils::{DatabaseConnection, DatabaseURL};
 use enum_dispatch::enum_dispatch;
 use hdrhistogram::Histogram;
-use mysql_async::{Conn, Opts};
 use serde::{Deserialize, Serialize};
 
 use crate::cache_hit_benchmark::CacheHitBenchmark;
@@ -106,14 +107,16 @@ pub struct DeploymentParameters {
 }
 
 impl DeploymentParameters {
-    pub async fn connect_to_target(&self) -> Result<Conn> {
-        let opts = Opts::from_url(&self.target_conn_str)?;
-        Ok(Conn::new(opts).await?)
+    pub async fn connect_to_target(&self) -> Result<DatabaseConnection> {
+        Ok(DatabaseURL::from_str(&self.target_conn_str)?
+            .connect(None)
+            .await?)
     }
 
-    pub async fn connect_to_setup(&self) -> Result<Conn> {
-        let opts = Opts::from_url(&self.setup_conn_str)?;
-        Ok(Conn::new(opts).await?)
+    pub async fn connect_to_setup(&self) -> Result<DatabaseConnection> {
+        Ok(DatabaseURL::from_str(&self.setup_conn_str)?
+            .connect(None)
+            .await?)
     }
 }
 

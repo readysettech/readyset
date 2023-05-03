@@ -1,10 +1,12 @@
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::str::FromStr;
 use std::time::Instant;
 
 use anyhow::Result;
 use async_trait::async_trait;
 use clap::Parser;
+use database_utils::DatabaseURL;
 use metrics::Unit;
 use serde::{Deserialize, Serialize};
 use tracing::debug;
@@ -50,8 +52,9 @@ impl BenchmarkControl for MigrationBenchmark {
 
     async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<BenchmarkResults> {
         // Prepare the query to retrieve the query schema.
-        let opts = mysql_async::Opts::from_url(&deployment.target_conn_str).unwrap();
-        let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+        let mut conn = DatabaseURL::from_str(&deployment.target_conn_str)?
+            .connect(None)
+            .await?;
 
         let mut hist_create = hdrhistogram::Histogram::<u64>::new(3).unwrap();
         let mut hist_drop = hdrhistogram::Histogram::<u64>::new(3).unwrap();

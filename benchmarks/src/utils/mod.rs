@@ -5,10 +5,9 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use anyhow::Result;
-use mysql_async::prelude::Queryable;
+use database_utils::{DatabaseError, DatabaseURL, QueryableConnection};
 use mysql_async::ServerError;
 use readyset_client::status::{ReadySetStatus, SnapshotStatus};
-use readyset_errors::ReadySetResult;
 use tracing::info;
 
 pub mod generate;
@@ -66,14 +65,14 @@ macro_rules! make_key {
 }
 
 /// Waits for the back-end to return that it is ready to process queries.
-pub async fn readyset_ready(target: &str) -> ReadySetResult<()> {
+pub async fn readyset_ready(target: &str) -> anyhow::Result<()> {
     info!("Waiting for the target database to be ready...");
-    let opts = mysql_async::Opts::from_url(target).unwrap();
-    let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+    let mut conn = DatabaseURL::from_str(target)?.connect(None).await?;
 
     loop {
         let res = conn.query("SHOW READYSET STATUS").await;
-        if let Err(mysql_async::Error::Server(ServerError { code, .. })) = res {
+        if let Err(DatabaseError::MySQL(mysql_async::Error::Server(ServerError { code, .. }))) = res
+        {
             // If it is a syntax error, this is not a ReadySet adapter and does not support this
             // syntax.
             if code == 1064 {
@@ -82,8 +81,7 @@ pub async fn readyset_ready(target: &str) -> ReadySetResult<()> {
             }
         }
 
-        let res: Vec<mysql_async::Row> = res?;
-        let status = ReadySetStatus::try_from(res)?;
+        let status = ReadySetStatus::try_from(res?)?;
         if status.snapshot_status == SnapshotStatus::Completed {
             info!("Database ready!");
             break;

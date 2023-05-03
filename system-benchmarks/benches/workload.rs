@@ -15,17 +15,19 @@ use benchmarks::utils::path::benchmark_path;
 use benchmarks::QuerySet;
 use clap::Parser;
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
-use database_utils::{DatabaseType, DatabaseURL, QueryableConnection};
+use database_utils::{
+    DatabaseConnection, DatabaseStatement, DatabaseType, DatabaseURL, QueryableConnection,
+};
 use fork::{fork, Fork};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
-use mysql_async::prelude::Queryable;
-use mysql_async::Conn;
 use nperf_core::args::{FlamegraphArgs, RecordArgs};
 use readyset::mysql::MySqlHandler;
 use readyset::{NoriaAdapter, Options};
 use readyset_client::get_metric;
 use readyset_client::metrics::{recorded, MetricsDump};
+use readyset_client::status::{ReadySetStatus, SnapshotStatus};
+use readyset_data::DfValue;
 use regex::Regex;
 use structopt::StructOpt;
 use tokio::sync::Mutex;
@@ -63,11 +65,11 @@ fn rpc_url(rpc: &str) -> String {
     format!("{LEADER_URI}/{rpc}")
 }
 
-/// An established connection to MySQL that also holds a list of prepared statements, prepared on
-/// this specific connection
+/// An established connection to the upstream database that also holds a list of prepared
+/// statements, prepared on this specific connection
 struct PreparedConn {
-    conn: mysql_async::Conn,
-    statements: Vec<mysql_async::Statement>,
+    conn: DatabaseConnection,
+    statements: Vec<DatabaseStatement>,
 }
 
 /// A pool of multiple [`PreparedConn`]
@@ -80,7 +82,7 @@ impl PreparedPool {
     async fn try_new(num: usize, url: &str) -> anyhow::Result<Self> {
         let mut conns = Vec::with_capacity(num);
         for _ in 0..num {
-            let conn = Conn::from_url(&url).await?;
+            let conn = DatabaseURL::from_str(url)?.connect(None).await?;
             let statements = Vec::new();
             conns.push(PreparedConn { conn, statements })
         }
@@ -102,11 +104,20 @@ impl PreparedPool {
         workload: &WorkloadSpec,
     ) -> anyhow::Result<QuerySet> {
         let distributions = workload
-            .load_distributions(&mut Conn::from_url(mysql_url(DB_NAME)).await?)
+            .load_distributions(
+                &mut DatabaseURL::from_str(&mysql_url(DB_NAME))?
+                    .connect(None)
+                    .await?,
+            )
             .await?;
 
         let query_set = workload
-            .load_queries(&distributions, &mut Conn::from_url(readyset_url()).await?)
+            .load_queries(
+                &distributions,
+                &mut DatabaseURL::from_str(&readyset_url())?
+                    .connect(None)
+                    .await?,
+            )
             .await?;
 
         self.prepare_pool(&query_set).await?;
@@ -130,10 +141,7 @@ impl PreparedPool {
 
     /// Run the list of provided commands on this pool in parallel, a command is a tuple of query
     /// index, and parameters for that query
-    async fn run_all(
-        &mut self,
-        commands: Arc<Vec<(usize, Vec<mysql_async::Value>)>>,
-    ) -> anyhow::Result<()> {
+    async fn run_all(&mut self, commands: Arc<Vec<(usize, Vec<DfValue>)>>) -> anyhow::Result<()> {
         let cur = Arc::new(AtomicUsize::new(0));
 
         let mut running_statements = FuturesUnordered::new();
@@ -148,7 +156,7 @@ impl PreparedPool {
                 } {
                     while conn
                         .conn
-                        .exec_drop(&conn.statements[command.0], &command.1)
+                        .execute(conn.statements[command.0].clone(), &command.1)
                         .await
                         .is_err()
                     {
@@ -500,7 +508,7 @@ impl AdapterHandle {
                 // Write a byte to indicate database is ready and fork can initiate replication
                 sock2.write_all(&[1u8]).unwrap();
 
-                rt.block_on(wait_adapter_ready());
+                rt.block_on(wait_adapter_ready())?;
                 Ok(AdapterHandle {
                     pid: child_pid,
                     write_hdl: sock2,
@@ -621,10 +629,10 @@ fn start_adapter_with_options(fallback_cache_options: FallbackCacheOptions) {
 }
 
 /// Wait for replication to finish by lazy looping over "SHOW READYSET STATUS"
-async fn wait_adapter_ready() {
+async fn wait_adapter_ready() -> anyhow::Result<()> {
     // First attempt to connect to the readyset adapter at all
     let mut conn = loop {
-        match Conn::from_url(readyset_url()).await {
+        match DatabaseURL::from_str(&readyset_url())?.connect(None).await {
             Ok(conn) => break conn,
             _ => sleep(Duration::from_secs(1)).await,
         }
@@ -633,25 +641,28 @@ async fn wait_adapter_ready() {
     // Then query status until snaphot is completed
     let q = nom_sql::ShowStatement::ReadySetStatus;
     loop {
-        let status: Result<Vec<(String, String)>, _> = conn
+        let res = conn
             .query(q.display(nom_sql::Dialect::MySQL).to_string())
             .await;
-        match status {
-            Ok(data)
-                if data
-                    .iter()
-                    .any(|(s, v)| s == "Snapshot Status" && v == "Completed") =>
+
+        if let Ok(data) = res {
+            if let Ok(ReadySetStatus {
+                snapshot_status: SnapshotStatus::Completed,
+            }) = ReadySetStatus::try_from(data)
             {
-                return
+                return Ok(());
             }
-            _ => sleep(Duration::from_secs(1)).await,
         }
+
+        sleep(Duration::from_secs(1)).await;
     }
 }
 
 /// Drop all currently cached queries
 async fn drop_cached_queries() -> anyhow::Result<()> {
-    let mut conn = Conn::from_url(readyset_url()).await?;
+    let mut conn = DatabaseURL::from_str(&readyset_url())?
+        .connect(None)
+        .await?;
     conn.query_drop(nom_sql::DropAllCachesStatement {}.to_string())
         .await?;
     Ok(())

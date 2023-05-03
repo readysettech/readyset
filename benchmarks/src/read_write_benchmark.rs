@@ -1,15 +1,16 @@
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use async_trait::async_trait;
 use clap::Parser;
+use database_utils::{DatabaseURL, QueryableConnection};
 use metrics::Unit;
-use mysql_async::prelude::Queryable;
-use mysql_async::Row;
 use rand::{thread_rng, Rng};
+use readyset_data::DfValue;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::{debug, error};
@@ -75,7 +76,7 @@ pub struct ReadWriteBenchmarkThreadParams {
     target_read_qps: u64,
     target_update_qps: u64,
     threads: u64,
-    mysql_conn_str: String,
+    upstream_conn_str: String,
 }
 
 #[async_trait]
@@ -96,8 +97,9 @@ impl BenchmarkControl for ReadWriteBenchmark {
 
     async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<BenchmarkResults> {
         // Explicitely migrate the query before benchmarking.
-        let opts = mysql_async::Opts::from_url(&deployment.target_conn_str).unwrap();
-        let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+        let mut conn = DatabaseURL::from_str(&deployment.target_conn_str)?
+            .connect(None)
+            .await?;
         // For now drop the result of migrate as CREATE CACHE does not support
         // non-select queries.
         let _ = self.read_query.migrate(&mut conn).await;
@@ -114,7 +116,7 @@ impl BenchmarkControl for ReadWriteBenchmark {
             target_read_qps: self.target_read_qps,
             target_update_qps: self.target_update_qps,
             threads: self.threads,
-            mysql_conn_str: deployment.target_conn_str.clone(),
+            upstream_conn_str: deployment.target_conn_str.clone(),
         };
         benchmark_counter!(
             "read_write_benchmark.queries_executed",
@@ -265,8 +267,10 @@ impl MultithreadBenchmark for ReadWriteBenchmark {
         sender: UnboundedSender<Self::BenchmarkResult>,
     ) -> Result<()> {
         // Prepare the query to retrieve the query schema.
-        let opts = mysql_async::Opts::from_url(&params.mysql_conn_str).unwrap();
-        let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+        let mut conn = DatabaseURL::from_str(&params.upstream_conn_str)?
+            .connect(None)
+            .await?;
+
         let mut read_prepared_statement = params.read_query.prepared_statement(&mut conn).await?;
         let mut update_prepared_statement =
             params.update_query.prepared_statement(&mut conn).await?;
@@ -306,7 +310,7 @@ impl MultithreadBenchmark for ReadWriteBenchmark {
             };
 
             let start = Instant::now();
-            let res: mysql_async::Result<Vec<Row>> = conn.exec(query, params).await;
+            let res: Result<Vec<Vec<DfValue>>, _> = conn.execute(query, params).await?.try_into();
             if let Err(e) = res {
                 error!(err = %e, "Error on exec");
                 return Err(e.into());

@@ -1,13 +1,12 @@
 use std::collections::HashMap;
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 use std::time::Instant;
 
 use anyhow::{anyhow, bail, Result};
 use async_trait::async_trait;
 use clap::Parser;
+use database_utils::QueryableConnection;
 use metrics::Unit;
-use mysql_async::prelude::Queryable;
-use mysql_async::{Row, Value};
 use nom_sql::{parse_query, Dialect, SqlQuery};
 use query_generator::{ColumnName, TableName};
 use serde::{Deserialize, Serialize};
@@ -78,15 +77,14 @@ impl BenchmarkControl for WriteLatencyBenchmark {
             .generator
             .gen();
         debug!("Keying on {} <= {}", self.key_field, key_value);
-        let key_value: Value = key_value.try_into()?;
 
         let select = db
-            .prep(format!(
+            .prepare(format!(
                 "SELECT * FROM {} WHERE {} <= ?",
                 table, self.key_field
             ))
             .await?;
-        let rows = db.exec::<Row, _, _>(&select, (&key_value,)).await?.len();
+        let rows = db.execute(select, &[key_value]).await?.len();
         debug!("{} rows match", rows);
         debug!("View created");
 
@@ -96,7 +94,7 @@ impl BenchmarkControl for WriteLatencyBenchmark {
         let duration = results.entry("duration", Unit::Microseconds, MetricGoal::Decreasing);
         for _i in 0..self.updates {
             let start = Instant::now();
-            db.exec_drop(&update, prepared_statement.generate_parameters())
+            db.execute(&update, prepared_statement.generate_parameters())
                 .await?;
             let elapsed = start.elapsed();
             duration.push(elapsed.as_micros() as f64);

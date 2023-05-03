@@ -1,8 +1,7 @@
-//! This benchmark generates a mixed load of queries and sends them to MySQL/MySQL adapter.
+//! This benchmark generates a mixed load of queries and sends them to upstream/upstream adapter.
 //! The benchmark accepts a yaml file describing the workload, with the schema described in
 //! [`crate::spec`].
 use std::collections::HashMap;
-use std::convert::TryInto;
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -10,9 +9,8 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use clap::Parser;
+use database_utils::{DatabaseConnection, DatabaseStatement, QueryableConnection};
 use metrics::Unit;
-use mysql_async::prelude::Queryable;
-use mysql_async::Value;
 use rand::distributions::Uniform;
 use rand_distr::weighted_alias::WeightedAliasIndex;
 use rand_distr::Distribution;
@@ -182,11 +180,11 @@ impl Sampler {
 impl QuerySet {
     pub async fn prepare_all(
         &self,
-        conn: &mut mysql_async::Conn,
-    ) -> anyhow::Result<Vec<mysql_async::Statement>> {
+        conn: &mut DatabaseConnection,
+    ) -> anyhow::Result<Vec<DatabaseStatement>> {
         let mut prepared = Vec::with_capacity(self.queries.len());
         for query in self.queries.iter() {
-            prepared.push(conn.prep(query.spec.to_string()).await?);
+            prepared.push(conn.prepare(query.spec.to_string()).await?);
         }
         Ok(prepared)
     }
@@ -203,7 +201,7 @@ impl QuerySet {
 
 impl Query {
     /// Get params for this query in a specific index
-    pub fn get_params_index(&self, index: usize) -> Option<Vec<Value>> {
+    pub fn get_params_index(&self, index: usize) -> Option<Vec<DfValue>> {
         let mut ret = Vec::with_capacity(self.cols.len());
 
         let mut last_row: &Vec<DfValue> = &vec![];
@@ -231,8 +229,6 @@ impl Query {
             ret.push(
                 last_row[*col]
                     .coerce_to(&target_type, &DfType::Unknown) // No from_ty, we're dealing with literal params
-                    .unwrap()
-                    .try_into()
                     .unwrap(),
             )
         }
@@ -240,7 +236,7 @@ impl Query {
         Some(ret)
     }
 
-    pub fn get_params(&self) -> Vec<Value> {
+    pub fn get_params(&self) -> Vec<DfValue> {
         let mut ret = Vec::with_capacity(self.cols.len());
         let mut rng = rand::thread_rng();
 
@@ -269,8 +265,6 @@ impl Query {
             ret.push(
                 last_row[*col]
                     .coerce_to(&target_type, &DfType::Unknown) // No from_ty, we're dealing with literal params
-                    .unwrap()
-                    .try_into()
                     .unwrap(),
             )
         }
@@ -365,7 +359,10 @@ impl MultithreadBenchmark for WorkloadEmulator {
         let mut conn = params.deployment.connect_to_target().await?;
         let query_set = &params.query_set;
 
-        assert!(conn.opts().stmt_cache_size() >= params.query_set.queries.len());
+        // Only some upstream databases support interrogating the number of cached statements
+        if let Some(stmt_cache_size) = conn.cached_statements() {
+            assert!(stmt_cache_size >= params.query_set.queries.len());
+        }
 
         // Generate a prepared version for all of the statements
         let prepared = query_set.prepare_all(&mut conn).await?;
@@ -387,7 +384,7 @@ impl MultithreadBenchmark for WorkloadEmulator {
 
             let start = Instant::now();
             // Execute the prepared satement, with the generated params
-            conn.exec_drop(&prepared[query.idx], params).await?;
+            conn.execute(prepared[query.idx].clone(), params).await?;
             result_batch.queries.push(WorkloadResult {
                 query_id: query.idx as _,
                 latency_us: start.elapsed().as_micros() as _,

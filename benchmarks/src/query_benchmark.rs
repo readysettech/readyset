@@ -4,15 +4,15 @@
 //! evaluate a ReadySet deployment at various loads and request patterns.
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use async_trait::async_trait;
 use clap::Parser;
+use database_utils::{DatabaseURL, QueryableConnection};
 use metrics::Unit;
-use mysql_async::prelude::Queryable;
-use mysql_async::Row;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
@@ -58,7 +58,7 @@ pub struct QueryBenchmark {
 pub struct QueryBenchmarkThreadParams {
     target_qps: Option<u64>,
     threads: u64,
-    mysql_conn_str: String,
+    upstream_conn_str: String,
     prepared_statement: Arc<Mutex<PreparedStatement>>,
 }
 
@@ -73,8 +73,9 @@ impl BenchmarkControl for QueryBenchmark {
             .await?;
 
         // Explicitely migrate the query before benchmarking.
-        let opts = mysql_async::Opts::from_url(&deployment.target_conn_str).unwrap();
-        let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+        let mut conn = DatabaseURL::from_str(&deployment.target_conn_str)?
+            .connect(None)
+            .await?;
         // For now drop the result of migrate as CREATE CACHE does not support
         // non-select queries.
         let _ = self.query.migrate(&mut conn).await;
@@ -84,8 +85,9 @@ impl BenchmarkControl for QueryBenchmark {
 
     async fn reset(&self, deployment: &DeploymentParameters) -> Result<()> {
         // Explicitely migrate the query before benchmarking.
-        let opts = mysql_async::Opts::from_url(&deployment.target_conn_str).unwrap();
-        let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+        let mut conn = DatabaseURL::from_str(&deployment.target_conn_str)?
+            .connect(None)
+            .await?;
         // For now drop the result of migrate as CREATE CACHE does not support
         // non-select queries.
         let _ = self.query.unmigrate(&mut conn).await;
@@ -94,8 +96,9 @@ impl BenchmarkControl for QueryBenchmark {
 
     async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<BenchmarkResults> {
         // Explicitely migrate the query before benchmarking.
-        let opts = mysql_async::Opts::from_url(&deployment.target_conn_str).unwrap();
-        let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+        let mut conn = DatabaseURL::from_str(&deployment.target_conn_str)?
+            .connect(None)
+            .await?;
         // For now drop the result of migrate as CREATE CACHE does not support
         // non-select queries.
         let _ = self.query.migrate(&mut conn).await;
@@ -105,7 +108,7 @@ impl BenchmarkControl for QueryBenchmark {
         let thread_data = QueryBenchmarkThreadParams {
             target_qps: self.target_qps,
             threads: self.threads,
-            mysql_conn_str: deployment.target_conn_str.clone(),
+            upstream_conn_str: deployment.target_conn_str.clone(),
             prepared_statement: prepared_statement.clone(),
         };
         benchmark_counter!(
@@ -210,8 +213,9 @@ impl MultithreadBenchmark for QueryBenchmark {
         sender: UnboundedSender<Self::BenchmarkResult>,
     ) -> Result<()> {
         // Prepare the query to retrieve the query schema.
-        let opts = mysql_async::Opts::from_url(&params.mysql_conn_str).unwrap();
-        let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+        let mut conn = DatabaseURL::from_str(&params.upstream_conn_str)?
+            .connect(None)
+            .await?;
 
         let mut throttle_interval =
             multi_thread::throttle_interval(params.target_qps, params.threads);
@@ -232,7 +236,7 @@ impl MultithreadBenchmark for QueryBenchmark {
 
             let (query, params) = params.prepared_statement.lock().generate_query();
             let start = Instant::now();
-            let res: mysql_async::Result<Vec<Row>> = conn.exec(query, params).await;
+            let res = conn.execute(query, params).await;
             if let Err(e) = res {
                 error!(err = %e, "Error on exec");
                 return Err(e.into());

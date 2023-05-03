@@ -10,7 +10,6 @@
 use std::convert::TryFrom;
 use std::fmt::{self, Display};
 
-use mysql_common::row::Row;
 use readyset_errors::{internal, ReadySetError};
 use serde::{Deserialize, Serialize};
 
@@ -56,11 +55,29 @@ impl From<ReadySetStatus> for Vec<(String, String)> {
     }
 }
 
-impl TryFrom<Vec<Row>> for ReadySetStatus {
+impl TryFrom<Vec<mysql_common::row::Row>> for ReadySetStatus {
     type Error = ReadySetError;
-    /// Convinience wrapper useful for converting a ReadySetStatus returned via a MySQL
-    /// query, as a Vec<Row>.
-    fn try_from(vars: Vec<Row>) -> Result<Self, Self::Error> {
+    fn try_from(vars: Vec<mysql_common::row::Row>) -> Result<Self, Self::Error> {
+        let v = vars
+            .into_iter()
+            .map(|row| {
+                if let (Some(l), Some(v)) = (row.get(0), row.get(1)) {
+                    Ok((l, v))
+                } else {
+                    Err(ReadySetError::Internal(
+                        "Invalid row structure for ReadySetStatus".to_string(),
+                    ))
+                }
+            })
+            .collect::<Result<Vec<(String, String)>, ReadySetError>>()?;
+
+        ReadySetStatus::try_from(v)
+    }
+}
+
+impl TryFrom<Vec<tokio_postgres::Row>> for ReadySetStatus {
+    type Error = ReadySetError;
+    fn try_from(vars: Vec<tokio_postgres::Row>) -> Result<Self, Self::Error> {
         let v = vars
             .into_iter()
             .map(|row| {

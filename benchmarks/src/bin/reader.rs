@@ -63,25 +63,25 @@ struct NoriaClientOpts {
 }
 
 #[derive(Parser, Clone)]
-struct MySqlOpts {
-    /// MySQL database connection string.
-    /// Only one of MySQL database url and zooekeper url can be specified.
-    #[clap(long, required_if_eq("database-type", "mysql"))]
+struct UpstreamOpts {
+    /// Upstream database connection string.
+    /// Only one of upstream database url and zooekeper url can be specified.
+    #[clap(long, required_if_eq("database-type", "upstream"))]
     database_url: Option<DatabaseURL>,
 
     /// The path to the parameterized query.
-    #[clap(long, required_if_eq("database-type", "mysql"))]
+    #[clap(long, required_if_eq("database-type", "upstream"))]
     query: Option<PathBuf>,
 
     /// Number of parameters to generate for a parameterized query.
-    #[clap(long, required_if_eq("database-type", "mysql"))]
+    #[clap(long, required_if_eq("database-type", "upstream"))]
     nparams: Option<usize>,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
 enum DatabaseType {
     Noria,
-    MySql,
+    Upstream,
 }
 
 #[derive(Parser)]
@@ -124,7 +124,7 @@ struct Reader {
 
     /// The type of database the client is connecting to. This determines
     /// the set of opts that should be populated. See `noria_opts` and
-    /// `mysql_opts`.
+    /// `upstream_opts`.
     #[clap(default_value = "noria")]
     database_type: DatabaseType,
 
@@ -134,9 +134,9 @@ struct Reader {
     noria_opts: NoriaClientOpts,
 
     /// The set of options to be specified by a user to connect via a
-    /// mysql client.
+    /// database client.
     #[clap(flatten)]
-    mysql_opts: MySqlOpts,
+    upstream_opts: UpstreamOpts,
 }
 
 #[derive(Debug, Clone)]
@@ -213,7 +213,7 @@ where
 /// subsequent queries.
 enum QueryExecutor {
     Noria(NoriaExecutor),
-    MySql(MySqlExecutor),
+    Upstream(UpstreamExecutor),
 }
 
 impl QueryExecutor {
@@ -223,7 +223,7 @@ impl QueryExecutor {
     async fn on_query(&mut self, q: BatchedQuery) -> Result<Vec<BatchedQuery>> {
         match &mut *self {
             QueryExecutor::Noria(e) => e.on_query(q).await,
-            QueryExecutor::MySql(e) => e.on_query(q).await,
+            QueryExecutor::Upstream(e) => e.on_query(q).await,
         }
     }
 }
@@ -329,13 +329,13 @@ impl NoriaExecutor {
 }
 
 /// Executes queries directly to Noria through the `View` API.
-struct MySqlExecutor {
+struct UpstreamExecutor {
     conn: DatabaseConnection,
     query: &'static str,
 }
 
-impl MySqlExecutor {
-    async fn init(opts: MySqlOpts) -> Self {
+impl UpstreamExecutor {
+    async fn init(opts: UpstreamOpts) -> Self {
         let news_app_query_file = opts.query.clone().unwrap_or_else(|| {
             PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap() + "/news_app_read_query.sql")
         });
@@ -503,9 +503,9 @@ impl Reader {
                 DatabaseType::Noria => {
                     QueryExecutor::Noria(NoriaExecutor::init(self.noria_opts.clone()).await)
                 }
-                DatabaseType::MySql => {
-                    QueryExecutor::MySql(MySqlExecutor::init(self.mysql_opts.clone()).await)
-                }
+                DatabaseType::Upstream => QueryExecutor::Upstream(
+                    UpstreamExecutor::init(self.upstream_opts.clone()).await,
+                ),
             };
 
             threads.push(tokio::spawn(async move {
@@ -514,12 +514,12 @@ impl Reader {
                     Dist::Uniform => Box::new(QueryFactory::new(
                         Uniform::new(0, self.user_table_rows as u64),
                         self.user_offset,
-                        self.mysql_opts.nparams.unwrap_or(1),
+                        self.upstream_opts.nparams.unwrap_or(1),
                     )),
                     Dist::Zipf => Box::new(QueryFactory::new(
                         zipf::ZipfDistribution::new(self.user_table_rows - 1, self.alpha).unwrap(),
                         self.user_offset,
-                        self.mysql_opts.nparams.unwrap_or(1),
+                        self.upstream_opts.nparams.unwrap_or(1),
                     )),
                 };
 

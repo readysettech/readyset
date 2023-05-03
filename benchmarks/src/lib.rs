@@ -10,9 +10,8 @@
 //! use benchmarks::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters};
 //! use benchmarks::benchmark_gauge;
 //! use benchmarks::utils::prometheus::ForwardPrometheusMetrics;
+//! use database_utils::QueryableConnection;
 //! use itertools::{Itertools, Tuples};
-//! use metrics::Unit;
-//! use mysql_async::prelude::*;
 //!
 //! #[derive(clap::Parser, Clone)]
 //! pub struct MyBenchmark {
@@ -27,14 +26,15 @@
 //! impl BenchmarkControl for MyBenchmark {
 //!     async fn setup(&self, deployment: &DeploymentParameters) -> Result<()> {
 //!         let mut conn = deployment.connect_to_setup().await?;
-//!         r"CREATE TABLE integers (id INT UNSIGNED NOT NULL)"
-//!             .ignore(&mut conn)
+//!         conn.query_drop("CREATE TABLE integers (id INT UNSIGNED NOT NULL)")
 //!             .await?;
 //!         let stmt = conn
-//!             .prep(r"INSERT INTO integers VALUES (?), (?), (?), (?)")
+//!             .prepare(r"INSERT INTO integers VALUES (?), (?), (?), (?)")
 //!             .await?;
 //!         let chunks: Tuples<Range<u32>, (_, _, _, _)> = (0..self.row_count).tuples();
-//!         conn.exec_batch(stmt, chunks).await?;
+//!         for (v1, v2, v3, v4) in chunks {
+//!             conn.execute(stmt.clone(), [v1, v2, v3, v4]).await?;
+//!         }
 //!         Ok(())
 //!     }
 //!
@@ -44,9 +44,9 @@
 //!
 //!     async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<BenchmarkResults> {
 //!         let mut conn = deployment.connect_to_target().await?;
-//!         let stmt = conn.prep(r"SELECT * FROM integers WHERE id = ?").await?;
+//!         let stmt = conn.prepare(r"SELECT * FROM integers WHERE id = ?").await?;
 //!         for _ in 0..10_000_000 {
-//!             let _: Vec<u32> = conn.exec(&stmt, (self.where_value,)).await?;
+//!             conn.execute(stmt.clone(), [self.where_value]).await?;
 //!         }
 //!         benchmark_gauge!(
 //!             "my_benchmark.number_of_queries",
@@ -80,7 +80,6 @@
 //!     }
 //! }
 //! ```
-
 #![feature(never_type)]
 #![feature(const_float_bits_conv, type_alias_impl_trait)]
 

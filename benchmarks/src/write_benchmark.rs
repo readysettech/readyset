@@ -1,14 +1,15 @@
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use async_trait::async_trait;
 use clap::{Parser, ValueHint};
+use database_utils::{DatabaseURL, QueryableConnection};
 use metrics::Unit;
-use mysql_async::prelude::Queryable;
 use nom_sql::Expr;
 use parking_lot::Mutex;
 use query_generator::TableSpec;
@@ -51,7 +52,7 @@ pub struct WriteBenchmark {
 
 #[derive(Clone)]
 pub struct WriteBenchmarkThreadData {
-    mysql_conn_str: String,
+    upstream_conn_str: String,
     target_qps: Option<u64>,
     threads: u64,
 
@@ -70,7 +71,7 @@ impl WriteBenchmarkThreadData {
             .collect();
 
         Ok(Self {
-            mysql_conn_str: deployment.target_conn_str.clone(),
+            upstream_conn_str: deployment.target_conn_str.clone(),
             target_qps: w.target_qps,
             threads: w.threads,
             tables,
@@ -81,8 +82,9 @@ impl WriteBenchmarkThreadData {
 #[async_trait]
 impl BenchmarkControl for WriteBenchmark {
     async fn setup(&self, deployment: &DeploymentParameters) -> Result<()> {
-        let opts = mysql_async::Opts::from_url(&deployment.setup_conn_str).unwrap();
-        let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+        let mut conn = DatabaseURL::from_str(&deployment.target_conn_str)?
+            .connect(None)
+            .await?;
         let ddl = std::fs::read_to_string(self.schema.as_path())?;
         conn.query_drop(ddl).await?;
         Ok(())
@@ -195,8 +197,9 @@ impl MultithreadBenchmark for WriteBenchmark {
         params: Self::Parameters,
         sender: UnboundedSender<Self::BenchmarkResult>,
     ) -> Result<()> {
-        let opts = mysql_async::Opts::from_url(&params.mysql_conn_str).unwrap();
-        let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+        let mut conn = DatabaseURL::from_str(&params.upstream_conn_str)?
+            .connect(None)
+            .await?;
 
         let mut last_report = Instant::now();
         let mut result_batch = WriteBenchmarkResultBatch::new();

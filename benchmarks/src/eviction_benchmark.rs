@@ -11,6 +11,7 @@
 //! gamut than needed for the desired hit rate).
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::str::FromStr;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::time::{Duration, Instant};
@@ -18,9 +19,8 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use async_trait::async_trait;
 use clap::Parser;
+use database_utils::{DatabaseURL, QueryableConnection};
 use metrics::Unit;
-use mysql_async::prelude::Queryable;
-use mysql_async::Row;
 use prometheus_parse::Scrape;
 use readyset_client::metrics::recorded;
 use serde::{Deserialize, Serialize};
@@ -79,7 +79,7 @@ pub struct EvictionBenchmark {
 pub struct EvictionBenchmarkParams {
     query: ArbitraryQueryParameters,
     deployment_params: DeploymentParameters,
-    mysql_conn_str: String,
+    upstream_conn_str: String,
     target_hit_rate: f64,
 }
 
@@ -101,8 +101,9 @@ impl BenchmarkControl for EvictionBenchmark {
 
     async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<BenchmarkResults> {
         // Explicitely migrate the query before benchmarking.
-        let opts = mysql_async::Opts::from_url(&deployment.target_conn_str).unwrap();
-        let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+        let mut conn = DatabaseURL::from_str(&deployment.target_conn_str)?
+            .connect(None)
+            .await?;
         // For now drop the result of migrate as CREATE CACHE does not support
         // non-select queries.
         let _ = self.query.migrate(&mut conn).await;
@@ -112,7 +113,7 @@ impl BenchmarkControl for EvictionBenchmark {
         let thread_data = EvictionBenchmarkParams {
             query: self.query.clone(),
             deployment_params: deployment.clone(),
-            mysql_conn_str: deployment.target_conn_str.clone(),
+            upstream_conn_str: deployment.target_conn_str.clone(),
             target_hit_rate: self.target_hit_rate as f64 / 100.0,
         };
 
@@ -398,8 +399,10 @@ impl MultithreadBenchmark for EvictionBenchmark {
         static RUNNING_METRICS: AtomicBool = AtomicBool::new(false);
 
         // Prepare the query to retrieve the query schema.
-        let opts = mysql_async::Opts::from_url(&params.mysql_conn_str).unwrap();
-        let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+        let mut conn = DatabaseURL::from_str(&params.upstream_conn_str)?
+            .connect(None)
+            .await?;
+
         let prepared_statement = params.query.prepared_statement(&mut conn).await?;
         if !RUNNING_METRICS.swap(true, Relaxed) {
             // Spawn (only once) the task that scrapes metrics and adjust the scale
@@ -433,8 +436,7 @@ impl MultithreadBenchmark for EvictionBenchmark {
             }
 
             let start = Instant::now();
-            let res: mysql_async::Result<Vec<Row>> =
-                conn.exec(&query, genset.generate_scaled(scale)).await;
+            let res = conn.execute(&query, genset.generate_scaled(scale)).await;
             if let Err(e) = res {
                 error!(err = %e, "Error on exec");
                 return Err(e.into());

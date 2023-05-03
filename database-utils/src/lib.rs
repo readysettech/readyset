@@ -16,7 +16,7 @@ use readyset_util::redacted::RedactedString;
 use serde::{Deserialize, Serialize};
 use {mysql_async as mysql, tokio_postgres as pgsql};
 
-use crate::error::{DatabaseError, DatabaseURLParseError};
+use crate::error::DatabaseURLParseError;
 
 mod connection;
 pub mod error;
@@ -24,6 +24,7 @@ pub mod error;
 pub use connection::{
     DatabaseConnection, DatabaseStatement, QueryResults, QueryableConnection, Transaction,
 };
+pub use error::DatabaseError;
 
 #[allow(missing_docs)] // If we add docs they get added into --help binary text which is confusing
 #[derive(Debug, Clone, Parser, PartialEq, Eq, Serialize, Deserialize)]

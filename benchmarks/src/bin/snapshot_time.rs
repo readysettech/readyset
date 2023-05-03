@@ -14,7 +14,7 @@ use readyset_server::NoriaMetricsRecorder;
 #[derive(Parser)]
 #[clap(name = "snapshot_time")]
 struct SnapshotBenchmark {
-    /// Sets the MySQL database URL for the snapshot
+    /// Sets the upstream database URL for the snapshot
     #[clap(short, long, value_hint = ValueHint::Url)]
     replication_url: String,
     /// How many times to repeat the benchmark

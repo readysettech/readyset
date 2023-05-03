@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::str::FromStr;
 use std::time::Instant;
 
 use anyhow::Result;
 use async_trait::async_trait;
 use clap::Parser;
+use database_utils::{DatabaseConnection, DatabaseURL, QueryableConnection};
 use metrics::Unit;
-use mysql_async::prelude::Queryable;
-use mysql_async::Row;
 use serde::{Deserialize, Serialize};
 
 use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters, MetricGoal};
@@ -49,16 +49,18 @@ impl BenchmarkControl for CacheHitBenchmark {
     }
 
     async fn reset(&self, deployment: &DeploymentParameters) -> Result<()> {
-        let opts = mysql_async::Opts::from_url(&deployment.target_conn_str).unwrap();
-        let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+        let mut conn = DatabaseURL::from_str(&deployment.target_conn_str)?
+            .connect(None)
+            .await?;
         let _ = self.query.unmigrate(&mut conn).await;
         Ok(())
     }
 
     async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<BenchmarkResults> {
         // Explicitely migrate the query before benchmarking.
-        let opts = mysql_async::Opts::from_url(&deployment.target_conn_str).unwrap();
-        let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+        let mut conn = DatabaseURL::from_str(&deployment.target_conn_str)?
+            .connect(None)
+            .await?;
         self.query.migrate(&mut conn).await?;
 
         let mut gen = CachingQueryGenerator::from(self.query.prepared_statement(&mut conn).await?);
@@ -93,7 +95,7 @@ impl BenchmarkControl for CacheHitBenchmark {
 impl CacheHitBenchmark {
     async fn run_queries(
         &self,
-        conn: &mut mysql_async::Conn,
+        conn: &mut DatabaseConnection,
         gen: &mut CachingQueryGenerator,
         cache_miss: bool,
         results: &mut BenchmarkResults,
@@ -113,7 +115,7 @@ impl CacheHitBenchmark {
                 gen.generate_cache_hit()?
             };
             let start = Instant::now();
-            let _: Vec<Row> = conn.exec(prep, params).await?;
+            conn.execute(prep, params).await?;
             let elapsed = start.elapsed();
             results_data.push(elapsed.as_millis() as f64);
             hist.record(u64::try_from(elapsed.as_micros()).unwrap())

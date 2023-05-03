@@ -2,14 +2,14 @@
 //! QueryBenchmark, which selects different parameters.
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::str::FromStr;
 use std::time::Instant;
 
 use anyhow::Result;
 use async_trait::async_trait;
 use clap::Parser;
+use database_utils::{DatabaseConnection, DatabaseURL, QueryableConnection};
 use metrics::Unit;
-use mysql_async::prelude::Queryable;
-use mysql_async::Row;
 use serde::{Deserialize, Serialize};
 
 use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters, MetricGoal};
@@ -50,16 +50,18 @@ impl BenchmarkControl for SingleQueryBenchmark {
     }
 
     async fn reset(&self, deployment: &DeploymentParameters) -> Result<()> {
-        let opts = mysql_async::Opts::from_url(&deployment.target_conn_str).unwrap();
-        let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+        let mut conn = DatabaseURL::from_str(&deployment.target_conn_str)?
+            .connect(None)
+            .await?;
         let _ = self.query.unmigrate(&mut conn).await;
         Ok(())
     }
 
     async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<BenchmarkResults> {
         // Explicitely migrate the query before benchmarking.
-        let opts = mysql_async::Opts::from_url(&deployment.target_conn_str).unwrap();
-        let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+        let mut conn = DatabaseURL::from_str(&deployment.target_conn_str)?
+            .connect(None)
+            .await?;
         let _ = self.query.migrate(&mut conn).await;
         let mut prepared_statement = self.query.prepared_statement(&mut conn).await?;
 
@@ -85,7 +87,7 @@ impl BenchmarkControl for SingleQueryBenchmark {
 impl SingleQueryBenchmark {
     async fn run_queries(
         &self,
-        conn: &mut mysql_async::Conn,
+        conn: &mut DatabaseConnection,
         statement: &mut PreparedStatement,
     ) -> Result<BenchmarkResults> {
         let mut results = BenchmarkResults::new();
@@ -96,12 +98,12 @@ impl SingleQueryBenchmark {
             let elapsed = if self.ad_hoc {
                 let query = statement.generate_ad_hoc_query();
                 let start = Instant::now();
-                let _: Vec<Row> = conn.query(query).await?;
+                conn.query(query).await?;
                 start.elapsed()
             } else {
                 let (query, params) = statement.generate_query();
                 let start = Instant::now();
-                let _: Vec<Row> = conn.exec(query, params).await?;
+                conn.execute(query, params).await?;
                 start.elapsed()
             };
             duration.push(elapsed.as_micros() as f64);

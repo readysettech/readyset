@@ -50,7 +50,7 @@ struct Writer {
     #[clap(long, default_value = "10")]
     author_table_rows: usize,
 
-    /// MySQL database connection string.
+    /// Upstream database connection string.
     #[clap(long)]
     database_url: String,
 

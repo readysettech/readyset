@@ -78,12 +78,12 @@ struct BenchmarkRunner {
     local: bool,
 
     /// Runs the benchmarks against a noria adapter and server run in the same process with the
-    /// provided external upstream MySQL database. When using `--local` benchmark results may vary
+    /// provided external upstream database. When using `--local` benchmark results may vary
     /// based on compiler optimizations, using `--release` will drastically improve results.
     ///
     /// If this argument is passed, the deployment parameter is ignored.
     #[clap(long)]
-    local_with_mysql: Option<String>,
+    local_with_upstream: Option<String>,
 
     /// Location where benchmark reports are stored, either for validation or storage purposes
     #[clap(long, env = "REPORT_TARGET", requires_all(&["report_mode", "report_profile"]))]
@@ -186,7 +186,7 @@ impl BenchmarkRunner {
     // mutate the upstream database when --skip-setup is passed.
     pub async fn start_local(
         &self,
-        mysql_addr: Option<String>,
+        upstream_addr: Option<String>,
     ) -> (DeploymentParameters, Handle, ShutdownSender) {
         let mut test_builder = TestBuilder::new(
             BackendBuilder::default()
@@ -197,7 +197,7 @@ impl BenchmarkRunner {
         .migration_mode(MigrationMode::OutOfBand)
         .read_behavior(ReadBehavior::Blocking);
 
-        if let Some(addr) = &mysql_addr {
+        if let Some(addr) = &upstream_addr {
             test_builder = test_builder.fallback_url(addr.clone());
         }
 
@@ -209,7 +209,7 @@ impl BenchmarkRunner {
             mysql_opts.tcp_port()
         );
 
-        let setup_conn_str = mysql_addr.unwrap_or_else(|| target_conn_str.clone());
+        let setup_conn_str = upstream_addr.unwrap_or_else(|| target_conn_str.clone());
 
         (
             DeploymentParameters {
@@ -267,9 +267,9 @@ impl BenchmarkRunner {
             self.benchmark_cmd = Some(serde_yaml::from_str(&std::fs::read_to_string(f)?)?);
         }
 
-        let (params, handle) = if self.local_with_mysql.is_some() {
-            self.warn_if_deployment_params("local-with-mysql");
-            let (params, h, shutdown_tx) = self.start_local(self.local_with_mysql.clone()).await;
+        let (params, handle) = if self.local_with_upstream.is_some() {
+            self.warn_if_deployment_params("local-with-upstream");
+            let (params, h, shutdown_tx) = self.start_local(self.local_with_upstream.clone()).await;
             (params, Some((h, shutdown_tx)))
         } else if self.local {
             self.warn_if_deployment_params("local");
@@ -299,7 +299,7 @@ impl BenchmarkRunner {
                 || self.deployment_params.setup_conn_str.is_empty()
             {
                 bail!(
-                    "If --local, --local-with-mysql, --deployment are not supplied, passing \
+                    "If --local, --local-with-upstream, --deployment are not supplied, passing \
                   deployment state through --target-conn-str and --setup-conn-str are required"
                 );
             }

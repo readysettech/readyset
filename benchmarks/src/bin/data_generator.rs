@@ -8,7 +8,7 @@ struct DataGenerator {
     #[clap(flatten)]
     generator: DataGeneratorUtil,
 
-    /// MySQL database connection string.
+    /// Upstream database connection string.
     #[clap(long)]
     database_url: String,
 }

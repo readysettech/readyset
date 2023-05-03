@@ -1,9 +1,11 @@
 use std::collections::HashMap;
+use std::str::FromStr;
 use std::time::Instant;
 
 use anyhow::Result;
 use async_trait::async_trait;
 use clap::Parser;
+use database_utils::DatabaseURL;
 use metrics::Unit;
 use serde::{Deserialize, Serialize};
 use tracing::info;
@@ -45,10 +47,10 @@ impl BenchmarkControl for ScaleConnections {
         let duration_data =
             results.entry("connect_time", Unit::Microseconds, MetricGoal::Decreasing);
         for _ in 0..self.num_connections {
-            let opts = mysql_async::Opts::from_url(&deployment.target_conn_str).unwrap();
+            let url = DatabaseURL::from_str(&deployment.target_conn_str)?;
 
             let start = Instant::now();
-            let conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+            let conn = url.connect(None).await?;
             let connection_time = start.elapsed();
 
             // Keep the state alive by storing it in the struct.

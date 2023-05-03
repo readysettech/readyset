@@ -17,10 +17,9 @@ use std::str::FromStr;
 use anyhow::{anyhow, Result};
 use clap::Parser;
 use data_generator::{ColumnGenerator, DistributionAnnotation};
-use mysql_async::consts::ColumnType;
-use mysql_async::prelude::Queryable;
-use mysql_async::{Statement, Value};
-use nom_sql::SqlType;
+use database_utils::{DatabaseConnection, DatabaseStatement, QueryableConnection};
+use nom_sql::{Literal, SqlType};
+use readyset_data::DfValue;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::utils::path::benchmark_path;
@@ -139,7 +138,7 @@ impl ArbitraryQueryParameters {
 
     pub async fn prepared_statement(
         &self,
-        conn: &mut mysql_async::Conn,
+        conn: &mut DatabaseConnection,
     ) -> anyhow::Result<PreparedStatement> {
         // Mapping against two different parameters.
         #[allow(clippy::manual_map)]
@@ -151,7 +150,7 @@ impl ArbitraryQueryParameters {
             None
         };
         let query = self.query.query();
-        let stmt = conn.prep(query.to_owned()).await?;
+        let stmt = conn.prepare(query.to_owned()).await?;
 
         Ok(match spec {
             None => PreparedStatement::new(query.to_owned(), stmt),
@@ -180,7 +179,7 @@ impl ArbitraryQueryParameters {
         labels
     }
 
-    pub async fn migrate(&self, conn: &mut mysql_async::Conn) -> anyhow::Result<()> {
+    pub async fn migrate(&self, conn: &mut DatabaseConnection) -> anyhow::Result<()> {
         // Remove any query q if it is exists before migration.
         let _ = self.unmigrate(conn).await;
 
@@ -206,7 +205,7 @@ impl ArbitraryQueryParameters {
         Ok(())
     }
 
-    pub async fn unmigrate(&self, conn: &mut mysql_async::Conn) -> anyhow::Result<()> {
+    pub async fn unmigrate(&self, conn: &mut DatabaseConnection) -> anyhow::Result<()> {
         let stmt = "DROP CACHE q";
         conn.query_drop(stmt).await?;
         Ok(())
@@ -242,37 +241,12 @@ impl TryFrom<&Path> for DistributionAnnotations {
     }
 }
 
-/// Converts from a MySQL column type to a nom_sql::SqlType. Most ReadySet
-/// internal utilities use SqlTypes so this utility enables using them for
-/// MySQL types.
-pub(crate) fn column_to_sqltype(c: &ColumnType) -> SqlType {
-    use mysql_async::consts::ColumnType::*;
-    match c {
-        // TODO(justin): Abstract random value generation to utilities crate
-        // TODO(justin): These columns may have fixed sizes.
-        MYSQL_TYPE_VAR_STRING => SqlType::VarChar(None),
-        MYSQL_TYPE_BLOB => SqlType::Text,
-        MYSQL_TYPE_TINY => SqlType::TinyInt(None),
-        MYSQL_TYPE_SHORT => SqlType::SmallInt(None),
-        MYSQL_TYPE_BIT => SqlType::Bool,
-        MYSQL_TYPE_FLOAT => SqlType::Float,
-        MYSQL_TYPE_STRING => SqlType::Char(None),
-        MYSQL_TYPE_LONGLONG | MYSQL_TYPE_LONG => SqlType::UnsignedInt(None),
-        MYSQL_TYPE_DATETIME => SqlType::DateTime(None),
-        MYSQL_TYPE_DATE => SqlType::Date,
-        MYSQL_TYPE_TIMESTAMP => SqlType::Timestamp,
-        MYSQL_TYPE_TIME => SqlType::Time,
-        MYSQL_TYPE_JSON => SqlType::Json,
-        t => unimplemented!("Unsupported type: {:?}", t),
-    }
-}
-
 pub struct ParameterGenerationSpec {
     pub column_type: SqlType,
     pub generator: ColumnGenerator,
 }
 
-/// A query prepared against MySQL and the corresponding specification for
+/// A query prepared against the upstream database and the corresponding specification for
 /// parameters in the prepared statement.
 pub struct PreparedStatement {
     pub query: String,
@@ -280,18 +254,16 @@ pub struct PreparedStatement {
 }
 
 impl PreparedStatement {
-    pub fn new(query: String, stmt: Statement) -> Self {
+    pub fn new(query: String, stmt: DatabaseStatement) -> Self {
         Self {
             query,
             params: stmt
-                .params()
-                .iter()
-                .map(|c| {
-                    let sql_type = column_to_sqltype(&c.column_type());
-                    ParameterGenerationSpec {
-                        column_type: sql_type.clone(),
-                        generator: ColumnGenerator::Random(sql_type.into()),
-                    }
+                .query_param_types()
+                .unwrap()
+                .into_iter()
+                .map(|sql_type| ParameterGenerationSpec {
+                    column_type: sql_type.clone(),
+                    generator: ColumnGenerator::Random(sql_type.into()),
                 })
                 .collect(),
         }
@@ -299,19 +271,17 @@ impl PreparedStatement {
 
     pub fn new_with_annotation(
         query: String,
-        stmt: Statement,
+        stmt: DatabaseStatement,
         spec: DistributionAnnotations,
     ) -> Self {
         let params = stmt
-            .params()
-            .iter()
+            .query_param_types()
+            .unwrap()
+            .into_iter()
             .zip(spec.0.into_iter())
-            .map(|(column, annotation)| {
-                let sql_type = column_to_sqltype(&column.column_type());
-                ParameterGenerationSpec {
-                    column_type: sql_type.clone(),
-                    generator: annotation.spec.generator_for_col(sql_type),
-                }
+            .map(|(sql_type, annotation)| ParameterGenerationSpec {
+                column_type: sql_type.clone(),
+                generator: annotation.spec.generator_for_col(sql_type),
             })
             .collect();
 
@@ -320,7 +290,7 @@ impl PreparedStatement {
 
     /// Returns the query text and a set of parameters that can be used to
     /// execute this prepared statement.
-    pub fn generate_query(&mut self) -> (String, Vec<Value>) {
+    pub fn generate_query(&mut self) -> (String, Vec<DfValue>) {
         (self.query.clone(), self.generate_parameters())
     }
 
@@ -330,7 +300,18 @@ impl PreparedStatement {
             .query
             .split('?')
             .zip(&params)
-            .map(|(text, value)| text.to_owned() + &value.as_sql(false))
+            .map(|(text, value)| {
+                // TODO(ethan): Eventually, we should replace the query construction in this method
+                // with a query builder library of some sort to ensure that all values are escaped
+                // and quoted safely.
+                let value_string = if let Ok(s) = <&str>::try_from(value) {
+                    Literal::String(s.into()).to_string()
+                } else {
+                    value.to_string()
+                };
+
+                text.to_owned() + &value_string
+            })
             .collect::<Vec<String>>()
             .join("");
 
@@ -351,11 +332,8 @@ impl PreparedStatement {
     }
 
     /// Returns just the parameters to execute our prepared statement
-    pub fn generate_parameters(&mut self) -> Vec<Value> {
-        self.params
-            .iter_mut()
-            .map(|t| t.generator.gen().try_into().unwrap())
-            .collect()
+    pub fn generate_parameters(&mut self) -> Vec<DfValue> {
+        self.params.iter_mut().map(|t| t.generator.gen()).collect()
     }
 }
 
@@ -363,11 +341,8 @@ pub struct GeneratorSet(Vec<ColumnGenerator>);
 
 impl GeneratorSet {
     /// Generate a value from each generator into a vector
-    pub fn generate(&mut self) -> Vec<Value> {
-        self.0
-            .iter_mut()
-            .map(|g| g.gen().try_into().unwrap())
-            .collect()
+    pub fn generate(&mut self) -> Vec<DfValue> {
+        self.0.iter_mut().map(|g| g.gen()).collect()
     }
 
     /// Generate a value from each generator into a vector but scaling the output
@@ -376,17 +351,17 @@ impl GeneratorSet {
     /// # Panics
     ///
     /// If scale > 1.0 or scale <= 0.0
-    pub fn generate_scaled(&mut self, scale: f64) -> Vec<Value> {
+    pub fn generate_scaled(&mut self, scale: f64) -> Vec<DfValue> {
         // Can only scale down, scaling integers up doesn't make much sense
         assert!(scale <= 1.0 && scale > 0.0);
         self.0
             .iter_mut()
             .map(|g| {
-                let v = g.gen().try_into().unwrap();
+                let v = g.gen();
                 if matches!(g, ColumnGenerator::Uniform(_) | ColumnGenerator::Zipfian(_)) {
                     match v {
-                        Value::Int(i) => Value::Int((i as f64 * scale) as i64),
-                        Value::UInt(i) => Value::UInt((i as f64 * scale) as u64),
+                        DfValue::Int(i) => DfValue::Int((i as f64 * scale) as i64),
+                        DfValue::UnsignedInt(i) => DfValue::UnsignedInt((i as f64 * scale) as u64),
                         _ => unreachable!("Uniform and Zipfian generate integers"),
                     }
                 } else {
@@ -405,11 +380,11 @@ pub struct Query {
 
 // Values cannot be hashed so we turn them into sql text before putting
 // them in the Query struct.
-impl From<(String, Vec<Value>)> for Query {
-    fn from(v: (String, Vec<Value>)) -> Query {
+impl From<(String, Vec<DfValue>)> for Query {
+    fn from(v: (String, Vec<DfValue>)) -> Query {
         Query {
             prep: v.0,
-            params: v.1.into_iter().map(|s| s.as_sql(false)).collect(),
+            params: v.1.into_iter().map(|s| s.to_string()).collect(),
         }
     }
 }

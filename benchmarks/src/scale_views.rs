@@ -7,14 +7,15 @@
 //! `--param_count` can be specified to modify the number of
 //! parameters in the view.
 use std::collections::HashMap;
+use std::str::FromStr;
 use std::time::Instant;
 
 use anyhow::{bail, Result};
 use async_trait::async_trait;
 use clap::Parser;
+use database_utils::{DatabaseURL, QueryableConnection};
 use itertools::Itertools;
 use metrics::Unit;
-use mysql_async::prelude::Queryable;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
@@ -22,7 +23,7 @@ use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters,
 use crate::utils::prometheus::ForwardPrometheusMetrics;
 use crate::{benchmark_counter, benchmark_histogram};
 
-const MAX_MYSQL_COLUMN_COUNT: usize = 4096;
+const MAX_UPSTREAM_COLUMN_COUNT: usize = 4096;
 
 #[derive(Parser, Clone, Serialize, Deserialize)]
 pub struct ScaleViews {
@@ -57,15 +58,16 @@ impl BenchmarkControl for ScaleViews {
     /// combination of the columns.
     async fn setup(&self, deployment: &DeploymentParameters) -> Result<()> {
         info!("Beginning setup");
-        let opts = mysql_async::Opts::from_url(&deployment.setup_conn_str).unwrap();
-        let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+        let mut conn = DatabaseURL::from_str(&deployment.target_conn_str)?
+            .connect(None)
+            .await?;
 
         let columns = get_columns(self.num_views, self.param_count);
-        if columns.len() > MAX_MYSQL_COLUMN_COUNT {
+        if columns.len() > MAX_UPSTREAM_COLUMN_COUNT {
             bail!(
                 "Too many columns required: {}, the max is: {}",
                 columns.len(),
-                MAX_MYSQL_COLUMN_COUNT
+                MAX_UPSTREAM_COLUMN_COUNT
             );
         }
 
@@ -99,10 +101,10 @@ impl BenchmarkControl for ScaleViews {
         let mut connect_durations = vec![];
         let mut prepare_durations = vec![];
         for c in permutations.iter().take(self.num_views) {
-            let opts = mysql_async::Opts::from_url(&deployment.target_conn_str).unwrap();
+            let url = DatabaseURL::from_str(&deployment.target_conn_str)?;
 
             let start = Instant::now();
-            let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+            let mut conn = url.connect(None).await?;
             let connection_time = start.elapsed();
             connect_durations.push(connection_time.as_micros() as f64);
 
@@ -114,7 +116,7 @@ impl BenchmarkControl for ScaleViews {
 
             let start = Instant::now();
             let _ = conn
-                .prep(format!("SELECT * FROM bigtable WHERE {}", condition))
+                .prepare(format!("SELECT * FROM bigtable WHERE {}", condition))
                 .await
                 .unwrap();
             let prepare_time = start.elapsed();

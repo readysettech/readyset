@@ -92,8 +92,7 @@ use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::Arc;
 
-use mysql_async::prelude::Queryable;
-use mysql_async::{Conn, Row};
+use database_utils::{DatabaseConnection, QueryableConnection};
 use nom_sql::SqlQuery;
 use rand::Rng;
 use rand_distr::{Uniform, WeightedAliasIndex};
@@ -104,8 +103,8 @@ use zipf::ZipfDistribution;
 
 use crate::workload_emulator::{ColGenerator, Distributions, Query, QuerySet, Sampler};
 
-/// A Noria/MySQL workload specification, consisting of a list of distributions that specify how to
-/// generate data for the workload, and a list of weighted queries to run
+/// A Noria/upstream workload specification, consisting of a list of distributions that specify how
+/// to generate data for the workload, and a list of weighted queries to run
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct WorkloadSpec {
     pub distributions: Vec<WorkloadDistribution>,
@@ -185,7 +184,10 @@ impl WorkloadSpec {
         serde_yaml::from_str(yaml)
     }
 
-    pub async fn load_distributions(&self, conn: &mut Conn) -> anyhow::Result<Distributions> {
+    pub async fn load_distributions(
+        &self,
+        conn: &mut DatabaseConnection,
+    ) -> anyhow::Result<Distributions> {
         let mut distributions = HashMap::new();
 
         for WorkloadDistribution {
@@ -218,16 +220,7 @@ impl WorkloadSpec {
                     // Make sure we don't get a timeout when inserting into the database
                     conn.query_drop("SET SESSION MAX_EXECUTION_TIME=0").await?;
 
-                    let data: Vec<Row> = conn.query(query).await?;
-
-                    data.into_iter()
-                        .map(|row| {
-                            row.unwrap()
-                                .into_iter()
-                                .map(DfValue::try_from)
-                                .collect::<Result<Vec<_>, _>>()
-                        })
-                        .collect::<Result<Vec<_>, _>>()?
+                    conn.query(query).await?.try_into()?
                 }
             };
 
@@ -251,7 +244,7 @@ impl WorkloadSpec {
     pub async fn load_queries(
         &self,
         distributions: &Distributions,
-        conn: &mut Conn,
+        conn: &mut DatabaseConnection,
     ) -> anyhow::Result<QuerySet> {
         let weights =
             WeightedAliasIndex::new(self.queries.iter().map(|q| q.weight).collect()).unwrap();

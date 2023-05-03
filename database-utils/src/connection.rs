@@ -7,6 +7,8 @@ use derive_more::From;
 use futures::TryStreamExt;
 use mysql::prelude::AsQuery;
 use mysql_async::prelude::Queryable;
+use nom_sql::SqlType;
+use readyset_client::status::ReadySetStatus;
 use readyset_errors::ReadySetError;
 use {mysql_async as mysql, tokio_postgres as pgsql};
 
@@ -209,6 +211,13 @@ impl DatabaseConnection {
             Err(DatabaseError::WrongConnection(ConnectionType::PostgreSQL))
         }
     }
+
+    pub fn cached_statements(&self) -> Option<usize> {
+        match self {
+            DatabaseConnection::MySQL(conn) => Some(conn.opts().stmt_cache_size()),
+            DatabaseConnection::PostgreSQL(_, _) => None,
+        }
+    }
 }
 
 fn convert_mysql_params<P>(params: P) -> Result<Vec<mysql_async::Value>, DatabaseError>
@@ -238,6 +247,97 @@ pub enum DatabaseStatement {
     Str(String),
 }
 
+impl DatabaseStatement {
+    pub fn query_param_types(&self) -> Result<Vec<SqlType>, DatabaseError> {
+        match self {
+            Self::MySql(stmt) => {
+                fn column_to_sqltype(c: &mysql_async::Column) -> SqlType {
+                    use mysql_async::consts::ColumnType::*;
+                    match c.column_type() {
+                        MYSQL_TYPE_VAR_STRING => SqlType::VarChar(None),
+                        MYSQL_TYPE_BLOB => SqlType::Text,
+                        MYSQL_TYPE_TINY => SqlType::TinyInt(None),
+                        MYSQL_TYPE_SHORT => SqlType::SmallInt(None),
+                        MYSQL_TYPE_BIT => SqlType::Bool,
+                        MYSQL_TYPE_FLOAT => SqlType::Float,
+                        MYSQL_TYPE_STRING => SqlType::Char(None),
+                        MYSQL_TYPE_LONGLONG | MYSQL_TYPE_LONG => SqlType::UnsignedInt(None),
+                        MYSQL_TYPE_DATETIME => SqlType::DateTime(None),
+                        MYSQL_TYPE_DATE => SqlType::Date,
+                        MYSQL_TYPE_TIMESTAMP => SqlType::Timestamp,
+                        MYSQL_TYPE_TIME => SqlType::Time,
+                        MYSQL_TYPE_JSON => SqlType::Json,
+                        t => unimplemented!("Unsupported type: {:?}", t),
+                    }
+                }
+
+                Ok(stmt.params().iter().map(column_to_sqltype).collect())
+            }
+            Self::Postgres(stmt) => {
+                fn pg_type_to_sqltype(c: &tokio_postgres::types::Type) -> SqlType {
+                    use tokio_postgres::types::Type;
+
+                    match c {
+                        &Type::BOOL => SqlType::Bool,
+                        &Type::BYTEA => SqlType::ByteArray,
+                        &Type::CHAR => SqlType::Char(None),
+                        &Type::INT8 => SqlType::Int8,
+                        &Type::INT2 => SqlType::Int2,
+                        &Type::INT4 => SqlType::Int4,
+                        &Type::TEXT => SqlType::Text,
+                        &Type::JSON => SqlType::Json,
+                        &Type::FLOAT4 => SqlType::Float,
+                        &Type::FLOAT8 => SqlType::Double,
+                        &Type::MACADDR8 => SqlType::MacAddr,
+                        &Type::MACADDR8_ARRAY => SqlType::Array(Box::new(SqlType::MacAddr)),
+                        &Type::MACADDR => SqlType::MacAddr,
+                        &Type::INET => SqlType::Inet,
+                        &Type::BOOL_ARRAY => SqlType::Array(Box::new(SqlType::Bool)),
+                        &Type::BYTEA_ARRAY => SqlType::Array(Box::new(SqlType::ByteArray)),
+                        &Type::CHAR_ARRAY => SqlType::Array(Box::new(SqlType::Char(None))),
+                        &Type::INT2_ARRAY => SqlType::Array(Box::new(SqlType::Int2)),
+                        &Type::INT4_ARRAY => SqlType::Array(Box::new(SqlType::Int4)),
+                        &Type::TEXT_ARRAY => SqlType::Array(Box::new(SqlType::Text)),
+                        &Type::VARCHAR_ARRAY => SqlType::Array(Box::new(SqlType::VarChar(None))),
+                        &Type::INT8_ARRAY => SqlType::Array(Box::new(SqlType::Int8)),
+                        &Type::FLOAT4_ARRAY => SqlType::Array(Box::new(SqlType::Float)),
+                        &Type::FLOAT8_ARRAY => SqlType::Array(Box::new(SqlType::Double)),
+                        &Type::MACADDR_ARRAY => SqlType::Array(Box::new(SqlType::MacAddr)),
+                        &Type::INET_ARRAY => SqlType::Array(Box::new(SqlType::Inet)),
+                        &Type::VARCHAR => SqlType::Array(Box::new(SqlType::VarChar(None))),
+                        &Type::DATE => SqlType::Date,
+                        &Type::TIME => SqlType::Time,
+                        &Type::TIMESTAMP => SqlType::Timestamp,
+                        &Type::TIMESTAMP_ARRAY => SqlType::Array(Box::new(SqlType::Timestamp)),
+                        &Type::DATE_ARRAY => SqlType::Array(Box::new(SqlType::Date)),
+                        &Type::TIME_ARRAY => SqlType::Array(Box::new(SqlType::Time)),
+                        &Type::TIMESTAMPTZ => SqlType::TimestampTz,
+                        &Type::TIMESTAMPTZ_ARRAY => SqlType::Array(Box::new(SqlType::TimestampTz)),
+                        &Type::NUMERIC_ARRAY => SqlType::Array(Box::new(SqlType::Numeric(None))),
+                        &Type::TIMETZ => SqlType::Time,
+                        &Type::TIMETZ_ARRAY => SqlType::Array(Box::new(SqlType::Time)),
+                        &Type::BIT => SqlType::Bit(None),
+                        &Type::BIT_ARRAY => SqlType::Array(Box::new(SqlType::Bit(None))),
+                        &Type::VARBIT => SqlType::VarBit(None),
+                        &Type::VARBIT_ARRAY => SqlType::Array(Box::new(SqlType::VarBit(None))),
+                        &Type::NUMERIC => SqlType::Numeric(None),
+                        &Type::UUID => SqlType::Uuid,
+                        &Type::UUID_ARRAY => SqlType::Array(Box::new(SqlType::Uuid)),
+                        &Type::JSONB => SqlType::Jsonb,
+                        &Type::JSONB_ARRAY => SqlType::Array(Box::new(SqlType::Jsonb)),
+                        t => unimplemented!("Unsupported type: {:?}", t),
+                    }
+                }
+
+                Ok(stmt.params().iter().map(pg_type_to_sqltype).collect())
+            }
+            Self::Str(_) => Err(DatabaseError::ValueConversion(
+                "Not possible to retrieve required query parameters for string statement".into(),
+            )),
+        }
+    }
+}
+
 impl From<&str> for DatabaseStatement {
     fn from(s: &str) -> DatabaseStatement {
         DatabaseStatement::Str(s.to_owned())
@@ -254,6 +354,19 @@ impl From<&String> for DatabaseStatement {
 pub enum QueryResults {
     MySql(Vec<mysql_async::Row>),
     Postgres(Vec<pgsql::Row>),
+}
+
+impl QueryResults {
+    pub fn len(&self) -> usize {
+        match self {
+            Self::MySql(results) => results.len(),
+            Self::Postgres(results) => results.len(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 impl<V> TryFrom<QueryResults> for Vec<Vec<V>>
@@ -286,6 +399,21 @@ where
                 })
                 .collect::<Result<Vec<Vec<V>>, _>>()
                 .map_err(DatabaseError::PostgreSQL)?),
+        }
+    }
+}
+
+impl TryFrom<QueryResults> for ReadySetStatus {
+    type Error = DatabaseError;
+
+    fn try_from(results: QueryResults) -> Result<Self, Self::Error> {
+        match results {
+            QueryResults::MySql(results) => results
+                .try_into()
+                .map_err(|e: ReadySetError| DatabaseError::ValueConversion(Box::new(e))),
+            QueryResults::Postgres(results) => results
+                .try_into()
+                .map_err(|e: ReadySetError| DatabaseError::ValueConversion(Box::new(e))),
         }
     }
 }
