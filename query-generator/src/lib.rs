@@ -75,7 +75,7 @@ use data_generator::{
     random_value_of_type, unique_value_of_type, ColumnGenerationSpec, ColumnGenerator,
     DistributionAnnotation,
 };
-use derive_more::{Display, From, Into};
+use derive_more::{Deref, Display, From, Into};
 use itertools::{Either, Itertools};
 use lazy_static::lazy_static;
 use nom_sql::analysis::{contains_aggregate, ReferredColumns};
@@ -89,6 +89,7 @@ use nom_sql::{
 };
 use parking_lot::Mutex;
 use proptest::arbitrary::{any, any_with, Arbitrary};
+use proptest::sample::Select;
 use proptest::strategy::{BoxedStrategy, Strategy};
 use rand::thread_rng;
 use readyset_data::{DfType, DfValue, Dialect};
@@ -98,6 +99,24 @@ use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 use test_strategy::Arbitrary;
+
+/// Query dialect to use when generating queries.
+///
+/// Used as the parameters to the Arbitrary impls for multiple types in this crate
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deref, From, Into)]
+pub struct QueryDialect(pub ParseDialect);
+
+impl Default for QueryDialect {
+    fn default() -> Self {
+        Self(ParseDialect::MySQL)
+    }
+}
+
+impl PartialEq<ParseDialect> for QueryDialect {
+    fn eq(&self, other: &ParseDialect) -> bool {
+        self.0 == *other
+    }
+}
 
 #[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Hash, From, Into, Display, Clone)]
 #[repr(transparent)]
@@ -965,9 +984,10 @@ impl<'gen> Query<'gen> {
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize, Arbitrary)]
+#[arbitrary(args = QueryDialect)]
 pub enum AggregateType {
     Count {
-        #[any(generate_arrays = false, dialect = Some(ParseDialect::MySQL))]
+        #[any(generate_arrays = false, dialect = Some(args.0))]
         column_type: SqlType,
         distinct: bool,
     },
@@ -983,11 +1003,11 @@ pub enum AggregateType {
     },
     GroupConcat,
     Max {
-        #[any(generate_arrays = false, dialect = Some(ParseDialect::MySQL))]
+        #[any(generate_arrays = false, dialect = Some(args.0))]
         column_type: SqlType,
     },
     Min {
-        #[any(generate_arrays = false, dialect = Some(ParseDialect::MySQL))]
+        #[any(generate_arrays = false, dialect = Some(args.0))]
         column_type: SqlType,
     },
 }
@@ -1090,16 +1110,16 @@ pub struct Filter {
 }
 
 impl Arbitrary for Filter {
-    type Parameters = ();
+    type Parameters = QueryDialect;
 
     type Strategy = BoxedStrategy<Filter>;
 
-    fn arbitrary_with((): Self::Parameters) -> Self::Strategy {
+    fn arbitrary_with(dialect: Self::Parameters) -> Self::Strategy {
         (
             any_with::<SqlType>(SqlTypeArbitraryOptions {
                 generate_arrays: false, // TODO: Set to true once we're targeting Postgres as well
                 generate_other: false,
-                dialect: Some(ParseDialect::MySQL),
+                dialect: Some(dialect.0),
             }),
             any::<LogicalOp>(),
         )
@@ -1132,7 +1152,7 @@ impl Filter {
 }
 
 // The names of the built-in functions we can generate for use in a project expression
-#[derive(Debug, Eq, PartialEq, Clone, Copy, EnumIter, Serialize, Deserialize, Arbitrary)]
+#[derive(Debug, Eq, PartialEq, Clone, Copy, EnumIter, Serialize, Deserialize)]
 pub enum BuiltinFunction {
     ConvertTZ,
     DayOfWeek,
@@ -1143,10 +1163,29 @@ pub enum BuiltinFunction {
     Round,
 }
 
+impl Arbitrary for BuiltinFunction {
+    type Parameters = QueryDialect;
+    type Strategy = Select<BuiltinFunction>;
+
+    fn arbitrary_with(dialect: Self::Parameters) -> Self::Strategy {
+        use BuiltinFunction::*;
+
+        let mut variants = vec![Round];
+        if dialect == ParseDialect::MySQL {
+            variants.extend([
+                ConvertTZ, DayOfWeek, IfNull, Month, Timediff, Addtime, Round,
+            ])
+        }
+
+        proptest::sample::select(variants)
+    }
+}
+
 /// A representation for where in a query a subquery is located
 ///
 /// When we support them, subqueries in `IN` clauses should go here as well
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize, Arbitrary)]
+#[arbitrary(args = QueryDialect)]
 pub enum SubqueryPosition {
     Cte(JoinOperator),
     Join(JoinOperator),
@@ -1158,7 +1197,7 @@ pub enum SubqueryPosition {
         /// If correlated, contains the type of the column that is compared
         #[strategy(proptest::option::of(any_with::<SqlType>(SqlTypeArbitraryOptions {
             generate_arrays: false,
-            dialect: Some(ParseDialect::MySQL),
+            dialect: Some(args.0),
             ..Default::default()
         })))]
         correlated: Option<SqlType>,
@@ -1169,6 +1208,7 @@ pub enum SubqueryPosition {
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct QueryOperationArgs {
     in_subquery: bool,
+    pub dialect: QueryDialect,
 }
 
 /// Operations that can be performed as part of a SQL query
@@ -1198,8 +1238,8 @@ pub struct QueryOperationArgs {
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize, Arbitrary)]
 #[arbitrary(args = QueryOperationArgs)]
 pub enum QueryOperation {
-    ColumnAggregate(AggregateType),
-    Filter(Filter),
+    ColumnAggregate(#[any(args.dialect)] AggregateType),
+    Filter(#[any(args.dialect)] Filter),
     Distinct,
     Join(JoinOperator),
     ProjectLiteral,
@@ -1216,7 +1256,7 @@ pub enum QueryOperation {
     RangeParameter,
     #[weight(u32::from(!args.in_subquery))]
     MultipleRangeParameters,
-    ProjectBuiltinFunction(BuiltinFunction),
+    ProjectBuiltinFunction(#[any(args.dialect)] BuiltinFunction),
     TopK {
         order_type: OrderType,
         #[strategy(0..=100u64)]
@@ -2247,12 +2287,13 @@ impl From<Vec<Vec<QueryOperation>>> for OperationList {
 
 /// A specification for a subquery included in a query
 #[derive(Debug, Clone, PartialEq, Eq, Arbitrary)]
+#[arbitrary(args = QueryDialect)]
 pub struct Subquery {
     /// Where does the subquery appear in the query?
     position: SubqueryPosition,
 
     /// The specification for the query itself
-    #[strategy(any_with::<QuerySeed>(QueryOperationArgs { in_subquery: true } ))]
+    #[any(in_subquery = true, dialect = *args)]
     seed: QuerySeed,
 }
 
