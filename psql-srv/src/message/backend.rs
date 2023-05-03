@@ -2,6 +2,7 @@ use std::convert::TryInto;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use postgres::error::ErrorPosition;
 pub use postgres::error::SqlState;
 use postgres::SimpleQueryRow;
 use postgres_types::Type;
@@ -27,6 +28,7 @@ const SSL_RESPONSE_WILLING: u8 = b'S';
 ///   value of type `R` will, upon iteration, emit values that are convertable into type `Value`,
 ///   which can be serialized along with the rest of the `BackendMessage`.
 #[derive(Debug, PartialEq, Eq)]
+#[allow(clippy::large_enum_variant)] // TODO: benchmark if this matters
 pub enum BackendMessage<R> {
     AuthenticationCleartextPassword,
     AuthenticationSasl {
@@ -53,6 +55,18 @@ pub enum BackendMessage<R> {
         severity: ErrorSeverity,
         sqlstate: SqlState,
         message: String,
+        detail: Option<String>,
+        hint: Option<String>,
+        position: Option<ErrorPosition>,
+        where_: Option<String>,
+        schema: Option<String>,
+        table: Option<String>,
+        column: Option<String>,
+        datatype: Option<String>,
+        constraint: Option<String>,
+        file: Option<String>,
+        line: Option<u32>,
+        routine: Option<String>,
     },
     ParameterDescription {
         parameter_data_types: Vec<Type>,

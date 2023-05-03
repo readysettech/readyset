@@ -2280,7 +2280,8 @@ mod tests {
             Response::Message(ErrorResponse {
                 severity: ErrorSeverity::Error,
                 sqlstate: SqlState::INTERNAL_ERROR,
-                message
+                message,
+                ..
             }) if message == "internal error: error requested"
         ));
     }
@@ -2300,7 +2301,19 @@ mod tests {
                     ErrorResponse {
                         severity: ErrorSeverity::Error,
                         sqlstate: SqlState::INTERNAL_ERROR,
-                        message: "internal error: error requested".to_string()
+                        message: "internal error: error requested".to_string(),
+                        detail: None,
+                        hint: None,
+                        position: None,
+                        where_: None,
+                        schema: None,
+                        table: None,
+                        column: None,
+                        datatype: None,
+                        constraint: None,
+                        file: None,
+                        line: None,
+                        routine: None,
                     },
                     BackendMessage::ready_for_query_idle()
                 ]
@@ -2321,7 +2334,8 @@ mod tests {
             Response::Message(ErrorResponse {
                 severity: ErrorSeverity::Error,
                 sqlstate: SqlState::INTERNAL_ERROR,
-                message
+                message,
+                ..
             }) if message == "internal error: error requested"
         ));
         assert_eq!(protocol.state, State::Error);

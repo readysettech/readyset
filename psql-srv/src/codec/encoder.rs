@@ -2,6 +2,7 @@ use std::convert::{TryFrom, TryInto};
 
 use bytes::{BufMut, BytesMut};
 use eui48::MacAddressFormat;
+use postgres::error::ErrorPosition;
 use postgres_types::{ToSql, Type};
 use tokio_util::codec::Encoder;
 
@@ -40,10 +41,27 @@ const COMMAND_COMPLETE_SELECT_TAG: &str = "SELECT";
 const COMMAND_COMPLETE_UPDATE_TAG: &str = "UPDATE";
 const COMMAND_COMPLETE_TAG_BUF_LEN: usize = 32;
 
-const ERROR_RESPONSE_C_FIELD: u8 = b'C';
-const ERROR_RESPONSE_M_FIELD: u8 = b'M';
-const ERROR_RESPONSE_S_FIELD: u8 = b'S';
-const ERROR_RESPONSE_V_FIELD: u8 = b'V';
+// https://www.postgresql.org/docs/current/protocol-error-fields.html
+
+const ERROR_RESPONSE_SEVERITY_FIELD: u8 = b'S';
+const ERROR_RESPONSE_UNLOCALIZED_SEVERITY_FIELD: u8 = b'V';
+const ERROR_RESPONSE_CODE_FIELD: u8 = b'C';
+const ERROR_RESPONSE_MESSAGE_FIELD: u8 = b'M';
+const ERROR_RESPONSE_DETAIL_FIELD: u8 = b'D';
+const ERROR_RESPONSE_HINT_FIELD: u8 = b'H';
+const ERROR_RESPONSE_POSITION_FIELD: u8 = b'P';
+const ERROR_RESPONSE_INTERNAL_POSITION_FIELD: u8 = b'p';
+const ERROR_RESPONSE_INTERNAL_QUERY_FIELD: u8 = b'q';
+const ERROR_RESPONSE_WHERE_FIELD: u8 = b'W';
+const ERROR_RESPONSE_SCHEMA_NAME_FIELD: u8 = b's';
+const ERROR_RESPONSE_TABLE_NAME_FIELD: u8 = b't';
+const ERROR_RESPONSE_COLUMN_NAME_FIELD: u8 = b'c';
+const ERROR_RESPONSE_DATA_TYPE_NAME_FIELD: u8 = b'd';
+const ERROR_RESPONSE_CONSTRAINT_NAME_FIELD: u8 = b'n';
+const ERROR_RESPONSE_FILE_FIELD: u8 = b'F';
+const ERROR_RESPONSE_LINE_FIELD: u8 = b'L';
+const ERROR_RESPONSE_ROUTINE_FIELD: u8 = b'R';
+
 const ERROR_RESPONSE_SEVERITY_ERROR: &str = "ERROR";
 const ERROR_RESPONSE_SEVERITY_FATAL: &str = "FATAL";
 const ERROR_RESPONSE_SEVERITY_PANIC: &str = "PANIC";
@@ -224,6 +242,18 @@ where
             severity,
             sqlstate,
             message,
+            detail,
+            hint,
+            position,
+            where_,
+            schema,
+            table,
+            column,
+            datatype,
+            constraint,
+            file,
+            line,
+            routine,
         } => {
             let severity = match severity {
                 ErrorSeverity::Error => ERROR_RESPONSE_SEVERITY_ERROR,
@@ -232,14 +262,72 @@ where
             };
             put_u8(ID_ERROR_RESPONSE, dst);
             put_i32(LENGTH_PLACEHOLDER, dst);
-            put_u8(ERROR_RESPONSE_S_FIELD, dst);
+            put_u8(ERROR_RESPONSE_SEVERITY_FIELD, dst);
             put_str(severity, dst);
-            put_u8(ERROR_RESPONSE_V_FIELD, dst);
+            put_u8(ERROR_RESPONSE_UNLOCALIZED_SEVERITY_FIELD, dst);
             put_str(severity, dst);
-            put_u8(ERROR_RESPONSE_C_FIELD, dst);
+            put_u8(ERROR_RESPONSE_CODE_FIELD, dst);
             put_str(sqlstate.code(), dst);
-            put_u8(ERROR_RESPONSE_M_FIELD, dst);
+            put_u8(ERROR_RESPONSE_MESSAGE_FIELD, dst);
             put_str(&message, dst);
+            if let Some(detail) = detail {
+                put_u8(ERROR_RESPONSE_DETAIL_FIELD, dst);
+                put_str(&detail, dst);
+            }
+            if let Some(hint) = hint {
+                put_u8(ERROR_RESPONSE_HINT_FIELD, dst);
+                put_str(&hint, dst);
+            }
+            if let Some(position) = position {
+                match position {
+                    ErrorPosition::Original(position) => {
+                        put_u8(ERROR_RESPONSE_POSITION_FIELD, dst);
+                        put_str(&position.to_string(), dst);
+                    }
+                    ErrorPosition::Internal { position, query } => {
+                        put_u8(ERROR_RESPONSE_INTERNAL_POSITION_FIELD, dst);
+                        put_str(&position.to_string(), dst);
+                        put_u8(ERROR_RESPONSE_INTERNAL_QUERY_FIELD, dst);
+                        put_str(&query, dst);
+                    }
+                }
+            }
+            if let Some(where_) = where_ {
+                put_u8(ERROR_RESPONSE_WHERE_FIELD, dst);
+                put_str(&where_, dst);
+            }
+            if let Some(schema) = schema {
+                put_u8(ERROR_RESPONSE_SCHEMA_NAME_FIELD, dst);
+                put_str(&schema, dst);
+            }
+            if let Some(table) = table {
+                put_u8(ERROR_RESPONSE_TABLE_NAME_FIELD, dst);
+                put_str(&table, dst);
+            }
+            if let Some(column) = column {
+                put_u8(ERROR_RESPONSE_COLUMN_NAME_FIELD, dst);
+                put_str(&column, dst);
+            }
+            if let Some(datatype) = datatype {
+                put_u8(ERROR_RESPONSE_DATA_TYPE_NAME_FIELD, dst);
+                put_str(&datatype, dst);
+            }
+            if let Some(constraint) = constraint {
+                put_u8(ERROR_RESPONSE_CONSTRAINT_NAME_FIELD, dst);
+                put_str(&constraint, dst);
+            }
+            if let Some(file) = file {
+                put_u8(ERROR_RESPONSE_FILE_FIELD, dst);
+                put_str(&file, dst);
+            }
+            if let Some(line) = line {
+                put_u8(ERROR_RESPONSE_LINE_FIELD, dst);
+                put_str(&line.to_string(), dst);
+            }
+            if let Some(routine) = routine {
+                put_u8(ERROR_RESPONSE_ROUTINE_FIELD, dst);
+                put_str(&routine, dst);
+            }
             put_u8(ERROR_RESPONSE_TERMINATOR, dst);
         }
 
@@ -857,6 +945,18 @@ mod tests {
                     severity: ErrorSeverity::Error,
                     sqlstate: SqlState::FEATURE_NOT_SUPPORTED,
                     message: "unsupported kringle".to_string(),
+                    detail: None,
+                    hint: None,
+                    position: None,
+                    where_: None,
+                    schema: None,
+                    table: None,
+                    column: None,
+                    datatype: None,
+                    constraint: None,
+                    file: None,
+                    line: None,
+                    routine: None,
                 },
                 &mut buf,
             )
@@ -916,6 +1016,18 @@ mod tests {
                     severity: ErrorSeverity::Error,
                     sqlstate: SqlState::FEATURE_NOT_SUPPORTED,
                     message: "unsupported kringle".to_string(),
+                    detail: None,
+                    hint: None,
+                    position: None,
+                    where_: None,
+                    schema: None,
+                    table: None,
+                    column: None,
+                    datatype: None,
+                    constraint: None,
+                    file: None,
+                    line: None,
+                    routine: None,
                 },
                 &mut buf,
             )

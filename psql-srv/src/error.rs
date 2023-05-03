@@ -100,6 +100,18 @@ impl<R> From<Error> for BackendMessage<R> {
                         },
                         sqlstate: db_error.code().clone(),
                         message: db_error.message().into(),
+                        detail: db_error.detail().map(|s| s.to_owned()),
+                        hint: db_error.hint().map(|s| s.to_owned()),
+                        position: db_error.position().cloned(),
+                        where_: db_error.where_().map(|s| s.to_owned()),
+                        schema: db_error.schema().map(|s| s.to_owned()),
+                        table: db_error.table().map(|s| s.to_owned()),
+                        column: db_error.column().map(|s| s.to_owned()),
+                        datatype: db_error.datatype().map(|s| s.to_owned()),
+                        constraint: db_error.constraint().map(|s| s.to_owned()),
+                        file: db_error.file().map(|s| s.to_owned()),
+                        line: db_error.line(),
+                        routine: db_error.routine().map(|s| s.to_owned()),
                     };
                 } else {
                     SqlState::INTERNAL_ERROR
@@ -111,6 +123,18 @@ impl<R> From<Error> for BackendMessage<R> {
             severity: ErrorSeverity::Error,
             sqlstate,
             message: error.to_string(),
+            detail: None,
+            hint: None,
+            position: None,
+            where_: None,
+            schema: None,
+            table: None,
+            column: None,
+            datatype: None,
+            constraint: None,
+            file: None,
+            line: None,
+            routine: None,
         }
     }
 }
