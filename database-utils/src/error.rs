@@ -1,4 +1,3 @@
-use std::error::Error;
 use std::fmt::{Debug, Display};
 
 use thiserror::Error;
@@ -6,7 +5,7 @@ use {mysql_async as mysql, tokio_postgres as pgsql};
 
 /// Base error enum for this library. Represents many types of potential errors we may encounter.
 #[derive(Debug, Error)]
-pub enum DatabaseError<ValueError: Debug + Error> {
+pub enum DatabaseError {
     #[error(transparent)]
     PostgreSQL(#[from] pgsql::Error),
 
@@ -16,8 +15,8 @@ pub enum DatabaseError<ValueError: Debug + Error> {
     #[error(transparent)]
     NativeTls(#[from] native_tls::Error),
 
-    #[error("Error converting value from result set")]
-    ValueConversion(ValueError),
+    #[error("Error converting value from result set: {0}")]
+    ValueConversion(Box<dyn std::error::Error + Send + Sync>),
 
     #[error("DatabaseConnection is not a {0} connection variant")]
     WrongConnection(ConnectionType),
