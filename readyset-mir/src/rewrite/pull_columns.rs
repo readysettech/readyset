@@ -1,4 +1,5 @@
 use readyset_errors::ReadySetResult;
+use tracing::{trace, trace_span};
 
 use crate::column::Column;
 use crate::query::MirQuery;
@@ -7,6 +8,9 @@ pub(crate) fn pull_all_required_columns(query: &mut MirQuery<'_>) -> ReadySetRes
     let mut queue = vec![query.leaf()];
 
     while let Some(mn) = queue.pop() {
+        let span = trace_span!("pulling columns", node = %mn.index());
+        let _guard = span.enter();
+
         // a node needs all of the columns it projects into its output
         // however, it may also need *additional* columns to perform its functionality; consider,
         // e.g., a filter that filters on a column that it doesn't project
@@ -30,9 +34,21 @@ pub(crate) fn pull_all_required_columns(query: &mut MirQuery<'_>) -> ReadySetRes
             }
 
             for c in &needed_columns {
-                if !found.contains(&c) && query.graph.provides_column(parent_idx, c) {
-                    query.graph.add_column(parent_idx, c.clone())?;
-                    found.push(c);
+                if !found.contains(&c) {
+                    trace!(
+                        column = %c,
+                        parent = %parent_idx.index(),
+                        "Node needs column, looking in parent"
+                    );
+                    if query.graph.provides_column(parent_idx, c) {
+                        trace!(
+                            column = %c,
+                            parent = %parent_idx.index(),
+                            "Found column in parent"
+                        );
+                        query.graph.add_column(parent_idx, c.clone())?;
+                        found.push(c);
+                    }
                 }
             }
             queue.push(parent_idx);
