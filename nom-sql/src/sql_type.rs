@@ -89,6 +89,9 @@ pub struct SqlTypeArbitraryOptions {
     /// Enable generation of [`SqlType::Other`]. Defaults to `false`
     pub generate_other: bool,
 
+    /// Enable generation of [`SqlType::Json`] and [`SqlType::Jsonb`]. Defaults to `true`
+    pub generate_json: bool,
+
     /// Constrain types to only those which are valid for this SQL dialect
     pub dialect: Option<Dialect>,
 }
@@ -98,6 +101,7 @@ impl Default for SqlTypeArbitraryOptions {
         Self {
             generate_arrays: true,
             generate_other: false,
+            generate_json: true,
             dialect: None,
         }
     }
@@ -141,8 +145,11 @@ impl Arbitrary for SqlType {
             (1..=28u8)
                 .prop_flat_map(|prec| (1..=prec).prop_map(move |scale| Decimal(prec, scale)))
                 .boxed(),
-            Just(Json).boxed(),
         ];
+
+        if args.generate_json {
+            variants.push(Just(Json).boxed());
+        }
 
         if args.dialect.is_none() || args.dialect == Some(Dialect::PostgreSQL) {
             variants.extend([
@@ -150,7 +157,6 @@ impl Arbitrary for SqlType {
                 Just(Int4).boxed(),
                 Just(Int8).boxed(),
                 Just(VarChar(None)).boxed(),
-                Just(Jsonb).boxed(),
                 Just(ByteArray).boxed(),
                 Just(MacAddr).boxed(),
                 Just(Inet).boxed(),
@@ -163,6 +169,10 @@ impl Arbitrary for SqlType {
                 Just(Citext).boxed(),
                 Just(QuotedChar).boxed(),
             ]);
+
+            if args.generate_json {
+                variants.push(Just(Jsonb).boxed());
+            }
         }
 
         if args.dialect.is_none() || args.dialect == Some(Dialect::MySQL) {

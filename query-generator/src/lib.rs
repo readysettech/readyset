@@ -1120,6 +1120,8 @@ impl Arbitrary for Filter {
             any_with::<SqlType>(SqlTypeArbitraryOptions {
                 generate_arrays: false, // TODO: Set to true once we're targeting Postgres as well
                 generate_other: false,
+                // PG's json doesn't support comparison operators
+                generate_json: dialect == ParseDialect::MySQL,
                 dialect: Some(dialect.0),
             }),
             any::<LogicalOp>(),
