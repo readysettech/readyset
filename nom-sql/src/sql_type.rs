@@ -307,7 +307,10 @@ impl SqlType {
                 SqlType::LongBlob => write!(f, "LONGBLOB"),
                 SqlType::MediumBlob => write!(f, "MEDIUMBLOB"),
                 SqlType::TinyBlob => write!(f, "TINYBLOB"),
-                SqlType::Double => write!(f, "DOUBLE"),
+                SqlType::Double => match dialect {
+                    Dialect::PostgreSQL => write!(f, "DOUBLE PRECISION"),
+                    Dialect::MySQL => write!(f, "DOUBLE"),
+                },
                 SqlType::Float => write!(f, "FLOAT"),
                 SqlType::Real => write!(f, "REAL"),
                 SqlType::Numeric(precision) => match precision {
