@@ -159,3 +159,10 @@ query nosort
 SELECT DISTINCT dayofweek(val) FROM date_table
 ----
 6
+
+query nosort
+SELECT DISTINCT count(value), count(distinct value)
+FROM distinct_test
+----
+6
+3

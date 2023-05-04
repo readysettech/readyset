@@ -155,6 +155,7 @@ impl MirGraph {
                 }
                 columns
             }
+            MirNodeInner::Distinct { group_by } => group_by.clone(),
             MirNodeInner::Project {
                 emit, expressions, ..
             } => {
