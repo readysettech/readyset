@@ -1850,6 +1850,16 @@ impl Domain {
                 self.total_replay_time.start();
                 debug!(%from, "starting replay");
 
+                if self
+                    .nodes
+                    .get(from)
+                    .filter(|n| n.borrow().is_dropped())
+                    .is_some()
+                {
+                    warn!(node = ?from, domain = ?self.index, "replay path started with removed node; ignoring...");
+                    return Ok(None);
+                }
+
                 // we know that the node is materialized, as the migration coordinator
                 // picks path that originate with materialized nodes. if this weren't the
                 // case, we wouldn't be able to do the replay, and the entire migration
