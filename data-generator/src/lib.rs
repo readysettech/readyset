@@ -441,7 +441,8 @@ pub fn value_of_type(typ: &SqlType) -> DfValue {
         SqlType::UnsignedTinyInt(_) => 1u8.into(),
         SqlType::SmallInt(_) | SqlType::Int2 => 1i16.into(),
         SqlType::UnsignedSmallInt(_) => 1u16.into(),
-        SqlType::Double | SqlType::Float | SqlType::Real => 1.5.try_into().unwrap(),
+        SqlType::Float | SqlType::Double => 1.5f64.try_into().unwrap(),
+        SqlType::Real => 1.5f32.try_into().unwrap(),
         SqlType::Decimal(prec, scale) => {
             Decimal::new(if *prec == 1 { 1 } else { 15 }, *scale as _).into()
         }
@@ -541,7 +542,8 @@ where
         SqlType::UnsignedTinyInt(_) => rng.gen::<u8>().into(),
         SqlType::SmallInt(_) | SqlType::Int2 => rng.gen::<i16>().into(),
         SqlType::UnsignedSmallInt(_) => rng.gen::<u16>().into(),
-        SqlType::Double | SqlType::Float | SqlType::Real => 1.5.try_into().unwrap(),
+        SqlType::Float | SqlType::Double => 1.5f64.try_into().unwrap(),
+        SqlType::Real => 1.5f32.try_into().unwrap(),
         SqlType::Decimal(prec, scale) => {
             Decimal::new(if *prec == 1 { 1 } else { 15 }, *scale as _).into()
         }
@@ -672,7 +674,8 @@ pub fn unique_value_of_type(typ: &SqlType, idx: u32) -> DfValue {
         SqlType::UnsignedTinyInt(_) => (idx).into(),
         SqlType::SmallInt(_) | SqlType::Int2 => (idx as i16).into(),
         SqlType::UnsignedSmallInt(_) => (idx as u16).into(),
-        SqlType::Double | SqlType::Float | SqlType::Real => (1.5 + idx as f64).try_into().unwrap(),
+        SqlType::Float | SqlType::Double => (1.5 + idx as f64).try_into().unwrap(),
+        SqlType::Real => (1.5 + idx as f32).try_into().unwrap(),
         SqlType::Decimal(prec, scale) => Decimal::new(clamp_digits(*prec as _), *scale as _).into(),
         SqlType::Numeric(prec_scale) => match prec_scale {
             Some((prec, None)) => Decimal::new(clamp_digits(*prec as _), 1),
