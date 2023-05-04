@@ -14,7 +14,7 @@ use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters,
 use crate::benchmark_histogram;
 use crate::utils::generate::DataGenerator;
 use crate::utils::prometheus::ForwardPrometheusMetrics;
-use crate::utils::query::{ArbitraryQueryParameters, CachingQueryGenerator, Query};
+use crate::utils::query::{ArbitraryQueryParameters, CachingQueryGenerator};
 
 /// Measure query execution time for both cache hits and cache misses of a single query
 #[derive(Parser, Clone, Serialize, Deserialize)]
@@ -109,13 +109,13 @@ impl CacheHitBenchmark {
         let query_type = if cache_miss { "misses" } else { "hits" };
         let results_data = results.entry(query_type, Unit::Milliseconds, MetricGoal::Decreasing);
         for _ in 0..count {
-            let Query { prep, params } = if cache_miss {
+            let query = if cache_miss {
                 gen.generate_cache_miss()?
             } else {
                 gen.generate_cache_hit()?
             };
             let start = Instant::now();
-            conn.execute(prep, params).await?;
+            conn.execute(&query.prep, query.params).await?;
             let elapsed = start.elapsed();
             results_data.push(elapsed.as_millis() as f64);
             hist.record(u64::try_from(elapsed.as_micros()).unwrap())

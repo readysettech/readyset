@@ -182,19 +182,22 @@ impl ReplContext {
                         DatabaseConnection::MySQL(_) => {
                             bail!("MySQL can't handle prepare with types")
                         }
-                        DatabaseConnection::PostgreSQL(client, _) => client
-                            .prepare_typed(
-                                query,
-                                &type_oids
-                                    .into_iter()
-                                    .map(|oid| {
-                                        Type::from_oid(oid)
-                                            .ok_or_else(|| anyhow!("Unknown type {oid}"))
-                                    })
-                                    .collect::<Result<Vec<_>, _>>()?,
-                            )
-                            .await?
-                            .into(),
+                        DatabaseConnection::PostgreSQL(client, _) => {
+                            let statement = client
+                                .prepare_typed(
+                                    query,
+                                    &type_oids
+                                        .into_iter()
+                                        .map(|oid| {
+                                            Type::from_oid(oid)
+                                                .ok_or_else(|| anyhow!("Unknown type {oid}"))
+                                        })
+                                        .collect::<Result<Vec<_>, _>>()?,
+                                )
+                                .await?;
+
+                            DatabaseStatement::Postgres(statement, query.into())
+                        }
                     },
                 };
                 self.prepared_statements.push(stmt);
@@ -209,7 +212,7 @@ impl ReplContext {
                     .prepared_statements
                     .get(statement_id)
                     .ok_or_else(|| anyhow!("Prepared statement {} not found", statement_id))?;
-                let res = self.connection.execute(statement.clone(), params).await?;
+                let res = self.connection.execute(statement, params).await?;
                 print_result(res.try_into()?);
             }
         }

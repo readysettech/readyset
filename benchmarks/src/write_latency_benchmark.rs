@@ -84,18 +84,17 @@ impl BenchmarkControl for WriteLatencyBenchmark {
                 table, self.key_field
             ))
             .await?;
-        let rows = db.execute(select, &[key_value]).await?.len();
+        let rows = db.execute(&select, &[key_value]).await?.len();
         debug!("{} rows match", rows);
         debug!("View created");
 
         let mut hist = hdrhistogram::Histogram::<u64>::new(3).unwrap();
-        let (update, _) = prepared_statement.generate_query();
         let mut results = BenchmarkResults::new();
         let duration = results.entry("duration", Unit::Microseconds, MetricGoal::Decreasing);
         for _i in 0..self.updates {
             let start = Instant::now();
-            db.execute(&update, prepared_statement.generate_parameters())
-                .await?;
+            let (query, params) = prepared_statement.generate_query();
+            db.execute(query, params).await?;
             let elapsed = start.elapsed();
             duration.push(elapsed.as_micros() as f64);
             hist.record(u64::try_from(elapsed.as_micros()).unwrap())

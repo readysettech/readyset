@@ -5,7 +5,6 @@
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::str::FromStr;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -13,7 +12,6 @@ use async_trait::async_trait;
 use clap::Parser;
 use database_utils::{DatabaseURL, QueryableConnection};
 use metrics::Unit;
-use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::{debug, error};
@@ -22,7 +20,7 @@ use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters,
 use crate::utils::generate::DataGenerator;
 use crate::utils::multi_thread::{self, MultithreadBenchmark};
 use crate::utils::prometheus::ForwardPrometheusMetrics;
-use crate::utils::query::{ArbitraryQueryParameters, PreparedStatement};
+use crate::utils::query::ArbitraryQueryParameters;
 use crate::utils::us_to_ms;
 use crate::{benchmark_counter, benchmark_histogram, benchmark_increment_counter};
 
@@ -59,7 +57,7 @@ pub struct QueryBenchmarkThreadParams {
     target_qps: Option<u64>,
     threads: u64,
     upstream_conn_str: String,
-    prepared_statement: Arc<Mutex<PreparedStatement>>,
+    query: ArbitraryQueryParameters,
 }
 
 #[async_trait]
@@ -102,14 +100,12 @@ impl BenchmarkControl for QueryBenchmark {
         // For now drop the result of migrate as CREATE CACHE does not support
         // non-select queries.
         let _ = self.query.migrate(&mut conn).await;
-        let prepared_statement =
-            Arc::new(Mutex::new(self.query.prepared_statement(&mut conn).await?));
 
         let thread_data = QueryBenchmarkThreadParams {
             target_qps: self.target_qps,
             threads: self.threads,
             upstream_conn_str: deployment.target_conn_str.clone(),
-            prepared_statement: prepared_statement.clone(),
+            query: self.query.clone(),
         };
         benchmark_counter!(
             "query_benchmark.queries_executed",
@@ -221,6 +217,7 @@ impl MultithreadBenchmark for QueryBenchmark {
             multi_thread::throttle_interval(params.target_qps, params.threads);
         let mut last_report = Instant::now();
         let mut result_batch = QueryBenchmarkResultBatch::new();
+        let mut statement = params.query.prepared_statement(&mut conn).await?;
         loop {
             // Report results every REPORT_RESULTS_INTERVAL.
             if last_report.elapsed() > REPORT_RESULTS_INTERVAL {
@@ -234,7 +231,7 @@ impl MultithreadBenchmark for QueryBenchmark {
                 interval.tick().await;
             }
 
-            let (query, params) = params.prepared_statement.lock().generate_query();
+            let (query, params) = statement.generate_query();
             let start = Instant::now();
             let res = conn.execute(query, params).await;
             if let Err(e) = res {

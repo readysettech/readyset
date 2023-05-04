@@ -25,12 +25,13 @@ async fn main() -> anyhow::Result<()> {
     let mut tasks = Vec::with_capacity(opts.parallelism + 2);
     for _i in 0..opts.parallelism {
         let mut conn = opts.database_url.connect(None).await?;
+        let statement = conn.prepare("SELECT * FROM t").await?;
         let counter = counter;
         let handle = tokio::task::spawn(async move {
             let mut i = 600000;
             loop {
                 let _ = conn
-                    .execute_str::<Vec<u32>>("SELECT * FROM t", vec![])
+                    .execute::<_, Vec<u32>>(&statement, vec![])
                     .await
                     .unwrap();
                 counter.inc();

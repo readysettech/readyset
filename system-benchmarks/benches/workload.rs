@@ -156,7 +156,7 @@ impl PreparedPool {
                 } {
                     while conn
                         .conn
-                        .execute(conn.statements[command.0].clone(), &command.1)
+                        .execute(&conn.statements[command.0], &command.1)
                         .await
                         .is_err()
                     {

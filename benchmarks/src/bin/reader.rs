@@ -5,7 +5,7 @@ use std::{env, fs, mem};
 
 use anyhow::Result;
 use clap::{Parser, ValueEnum};
-use database_utils::{DatabaseConnection, DatabaseURL, QueryableConnection};
+use database_utils::{DatabaseConnection, DatabaseStatement, DatabaseURL, QueryableConnection};
 use rand::distributions::{Distribution, Uniform};
 use rand::prelude::*;
 use readyset_client::consensus::AuthorityType;
@@ -331,27 +331,25 @@ impl NoriaExecutor {
 /// Executes queries directly to Noria through the `View` API.
 struct UpstreamExecutor {
     conn: DatabaseConnection,
-    query: &'static str,
+    statement: DatabaseStatement,
 }
 
 impl UpstreamExecutor {
-    async fn init(opts: UpstreamOpts) -> Self {
+    async fn init(opts: UpstreamOpts) -> Result<Self> {
         let news_app_query_file = opts.query.clone().unwrap_or_else(|| {
             PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap() + "/news_app_read_query.sql")
         });
-        let query = Box::leak(
-            fs::read_to_string(news_app_query_file)
-                .unwrap()
-                .into_boxed_str(),
-        );
-        Self {
-            conn: opts.database_url.unwrap().connect(None).await.unwrap(),
-            query,
-        }
+        let query = fs::read_to_string(news_app_query_file).unwrap();
+        let mut conn = opts.database_url.unwrap().connect(None).await.unwrap();
+
+        Ok(Self {
+            statement: conn.prepare(query).await?,
+            conn,
+        })
     }
 
     async fn on_query(&mut self, q: BatchedQuery) -> Result<Vec<BatchedQuery>> {
-        self.conn.execute(self.query, &q.key).await.unwrap();
+        self.conn.execute(&self.statement, &q.key).await.unwrap();
         Ok(vec![q])
     }
 }
@@ -504,7 +502,7 @@ impl Reader {
                     QueryExecutor::Noria(NoriaExecutor::init(self.noria_opts.clone()).await)
                 }
                 DatabaseType::Upstream => QueryExecutor::Upstream(
-                    UpstreamExecutor::init(self.upstream_opts.clone()).await,
+                    UpstreamExecutor::init(self.upstream_opts.clone()).await?,
                 ),
             };
 

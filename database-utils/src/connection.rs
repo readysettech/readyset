@@ -1,4 +1,5 @@
 use std::convert::TryFrom;
+use std::hash::{Hash, Hasher};
 use std::marker::{Send, Sync};
 use std::str;
 
@@ -7,7 +8,7 @@ use derive_more::From;
 use futures::TryStreamExt;
 use mysql::prelude::AsQuery;
 use mysql_async::prelude::Queryable;
-use nom_sql::SqlType;
+use nom_sql::{Dialect, SqlType};
 use readyset_client::status::ReadySetStatus;
 use readyset_errors::ReadySetError;
 use {mysql_async as mysql, tokio_postgres as pgsql};
@@ -28,37 +29,77 @@ pub trait QueryableConnection: Send {
     where
         Q: AsQuery + AsRef<str> + Send + Sync;
 
-    /// Executes a prepared statement for either mysql or postgres. Will also optionally prepare and
-    /// execute a query string, if supplied instead.
-    async fn execute<P>(
-        &mut self,
-        stmt: impl Into<DatabaseStatement> + Send,
-        params: P,
-    ) -> Result<QueryResults, DatabaseError>
+    /// Executes a prepared statement for either mysql or postgres.
+    async fn execute<S, P>(&mut self, stmt: &S, params: P) -> Result<QueryResults, DatabaseError>
     where
         P: IntoIterator + Send,
         P::IntoIter: ExactSizeIterator,
         P::Item: pgsql::types::BorrowToSql,
+        S: DatabaseStatementLike,
+        for<'a> &'a <S as DatabaseStatementLike>::MySqlStatement:
+            mysql_async::prelude::StatementLike,
         mysql_async::Value: TryFrom<<P as IntoIterator>::Item>,
         <mysql_async::Value as TryFrom<<P as IntoIterator>::Item>>::Error:
             std::error::Error + Send + Sync + 'static;
+}
 
-    /// Executes a simple query string, and can potentially return an underlying database error.
-    /// That might be an underlying mysql or postgres error, depending on the underlying connection
-    /// type, or it may be a value conversion error in the case that the caller is using a custom
-    /// value type to convert results into.
-    async fn execute_str<P>(
-        &mut self,
-        stmt: &str,
-        params: P,
-    ) -> Result<QueryResults, DatabaseError>
-    where
-        P: IntoIterator + Send,
-        P::IntoIter: ExactSizeIterator,
-        P::Item: pgsql::types::BorrowToSql,
-        mysql_async::Value: TryFrom<<P as IntoIterator>::Item>,
-        <mysql_async::Value as TryFrom<<P as IntoIterator>::Item>>::Error:
-            std::error::Error + Send + Sync + 'static;
+pub trait DatabaseStatementLike: Send + Sync
+where
+    // `tokio_postgres::ToStatement` is implemented for
+    // `str`, whereas
+    // `mysql_async::prelude::StatementLike` is implemented
+    // for `&str`. In order to keep the
+    // method signatures in this trait consistent (i.e. to
+    // ensure that they both return a reference
+    // to a database statement), we need to require that a
+    // *reference* to
+    // `DatabaseStatementLike::MySqlStatement` implements
+    // `mysql_async::prelude::StatementLike`, whereas we
+    // only need to requre that
+    // `DatabaseStatementLike::PostgresStatement` *itself*
+    // implements `tokio_postgres::ToStatement`.
+    for<'a> &'a Self::MySqlStatement: mysql_async::prelude::StatementLike,
+{
+    type PostgresStatement: tokio_postgres::ToStatement + Send + Sync + ?Sized;
+    type MySqlStatement: ?Sized;
+
+    fn as_postgres_statement(&self) -> Result<&Self::PostgresStatement, DatabaseError>;
+    fn as_mysql_statement(&self) -> Result<&Self::MySqlStatement, DatabaseError>;
+}
+
+impl<T> DatabaseStatementLike for T
+where
+    T: AsRef<str> + Send + Sync,
+{
+    type PostgresStatement = str;
+    type MySqlStatement = str;
+
+    fn as_postgres_statement(&self) -> Result<&Self::PostgresStatement, DatabaseError> {
+        Ok(self.as_ref())
+    }
+
+    fn as_mysql_statement(&self) -> Result<&Self::MySqlStatement, DatabaseError> {
+        Ok(self.as_ref())
+    }
+}
+
+impl DatabaseStatementLike for DatabaseStatement {
+    type PostgresStatement = tokio_postgres::Statement;
+    type MySqlStatement = mysql_async::Statement;
+
+    fn as_postgres_statement(&self) -> Result<&Self::PostgresStatement, DatabaseError> {
+        match self {
+            DatabaseStatement::Postgres(stmt, _) => Ok(stmt),
+            _ => Err(DatabaseError::WrongConnection(ConnectionType::PostgreSQL)),
+        }
+    }
+
+    fn as_mysql_statement(&self) -> Result<&Self::MySqlStatement, DatabaseError> {
+        match self {
+            DatabaseStatement::MySql(stmt) => Ok(stmt),
+            _ => Err(DatabaseError::WrongConnection(ConnectionType::MySQL)),
+        }
+    }
 }
 
 /// An enum wrapper around either a MySQL or PostgreSQL connection.
@@ -110,56 +151,30 @@ impl QueryableConnection for DatabaseConnection {
         }
     }
 
-    async fn execute<P>(
-        &mut self,
-        stmt: impl Into<DatabaseStatement> + Send,
-        params: P,
-    ) -> Result<QueryResults, DatabaseError>
+    async fn execute<S, P>(&mut self, stmt: &S, params: P) -> Result<QueryResults, DatabaseError>
     where
         P: IntoIterator + Send,
         P::IntoIter: ExactSizeIterator,
         P::Item: pgsql::types::BorrowToSql,
-        mysql_async::Value: TryFrom<<P as IntoIterator>::Item>,
-        <mysql_async::Value as TryFrom<<P as IntoIterator>::Item>>::Error:
-            std::error::Error + Send + Sync + 'static,
-    {
-        match stmt.into() {
-            DatabaseStatement::MySql(s) => Ok(QueryResults::MySql(
-                self.as_mysql_conn()?
-                    .exec_iter(s, convert_mysql_params(params)?)
-                    .await?
-                    .collect()
-                    .await?,
-            )),
-            DatabaseStatement::Postgres(s) => Ok(QueryResults::Postgres(
-                self.as_postgres_conn()?
-                    .query_raw(&s, params)
-                    .await?
-                    .try_collect()
-                    .await?,
-            )),
-            DatabaseStatement::Str(s) => self.execute_str(s.as_ref(), params).await,
-        }
-    }
-
-    async fn execute_str<P>(&mut self, stmt: &str, params: P) -> Result<QueryResults, DatabaseError>
-    where
-        P: IntoIterator + Send,
-        P::IntoIter: ExactSizeIterator,
-        P::Item: pgsql::types::BorrowToSql,
+        S: DatabaseStatementLike,
+        for<'a> &'a <S as DatabaseStatementLike>::MySqlStatement:
+            mysql_async::prelude::StatementLike,
         mysql_async::Value: TryFrom<<P as IntoIterator>::Item>,
         <mysql_async::Value as TryFrom<<P as IntoIterator>::Item>>::Error:
             std::error::Error + Send + Sync + 'static,
     {
         match self {
-            DatabaseConnection::MySQL(conn) => Ok(QueryResults::MySql(
-                conn.exec_iter(stmt, convert_mysql_params(params)?)
+            Self::MySQL(conn) => Ok(QueryResults::MySql(
+                conn.exec_iter(stmt.as_mysql_statement()?, convert_mysql_params(params)?)
                     .await?
                     .collect()
                     .await?,
             )),
-            DatabaseConnection::PostgreSQL(client, _jh) => Ok(QueryResults::Postgres(
-                client.query_raw(stmt, params).await?.try_collect().await?,
+            Self::PostgreSQL(conn, _) => Ok(QueryResults::Postgres(
+                conn.query_raw(stmt.as_postgres_statement()?, params)
+                    .await?
+                    .try_collect()
+                    .await?,
             )),
         }
     }
@@ -170,13 +185,14 @@ impl DatabaseConnection {
     /// DatabaseConnection variant.
     pub async fn prepare<Q>(&mut self, query: Q) -> Result<DatabaseStatement, DatabaseError>
     where
-        Q: AsQuery + AsRef<str> + Send + Sync,
+        Q: AsQuery + AsRef<str> + ToString + Send + Sync,
     {
         match self {
             DatabaseConnection::MySQL(conn) => Ok(conn.prep(query).await?.into()),
-            DatabaseConnection::PostgreSQL(client, _jh) => {
-                Ok(client.prepare(query.as_ref()).await?.into())
-            }
+            DatabaseConnection::PostgreSQL(client, _jh) => Ok(DatabaseStatement::Postgres(
+                client.prepare(query.as_ref()).await?,
+                query.to_string(),
+            )),
         }
     }
 
@@ -193,6 +209,14 @@ impl DatabaseConnection {
                 .await
                 .map(Transaction::Postgres)
                 .map_err(DatabaseError::PostgreSQL),
+        }
+    }
+
+    /// Returns the SQL dialect associated with the underlying connection type.
+    pub fn dialect(&self) -> Dialect {
+        match self {
+            Self::PostgreSQL(_, _) => Dialect::PostgreSQL,
+            Self::MySQL(_) => Dialect::MySQL,
         }
     }
 
@@ -241,14 +265,14 @@ where
 pub enum DatabaseStatement {
     /// A MySQL prepared statement returned from a prepare call in `mysql_async`.
     MySql(mysql_async::Statement),
-    /// A PostgreSQL prepared statement returned from a prepare call in `tokio_postgres`.
-    Postgres(tokio_postgres::Statement),
-    /// A simple query string that a user would like to be both prepared and executed.
-    Str(String),
+    /// A PostgreSQL prepared statement returned from a prepare call in `tokio_postgres`. We store
+    /// the query string alongside the prepared statement in order to implement Hash and
+    /// PartialEq/Eq.
+    Postgres(tokio_postgres::Statement, String),
 }
 
 impl DatabaseStatement {
-    pub fn query_param_types(&self) -> Result<Vec<SqlType>, DatabaseError> {
+    pub fn query_param_types(&self) -> Vec<SqlType> {
         match self {
             Self::MySql(stmt) => {
                 fn column_to_sqltype(c: &mysql_async::Column) -> SqlType {
@@ -271,9 +295,9 @@ impl DatabaseStatement {
                     }
                 }
 
-                Ok(stmt.params().iter().map(column_to_sqltype).collect())
+                stmt.params().iter().map(column_to_sqltype).collect()
             }
-            Self::Postgres(stmt) => {
+            Self::Postgres(stmt, _) => {
                 fn pg_type_to_sqltype(c: &tokio_postgres::types::Type) -> SqlType {
                     use tokio_postgres::types::Type;
 
@@ -329,26 +353,44 @@ impl DatabaseStatement {
                     }
                 }
 
-                Ok(stmt.params().iter().map(pg_type_to_sqltype).collect())
+                stmt.params().iter().map(pg_type_to_sqltype).collect()
             }
-            Self::Str(_) => Err(DatabaseError::ValueConversion(
-                "Not possible to retrieve required query parameters for string statement".into(),
-            )),
         }
     }
 }
 
-impl From<&str> for DatabaseStatement {
-    fn from(s: &str) -> DatabaseStatement {
-        DatabaseStatement::Str(s.to_owned())
+// TODO(ethan): It is not possible to implement `Arbitrary` efficiently for `DatabaseStatement`,
+// since it requires connecting to an upstream database and calling `prepare` on the underlying
+// database connection. Consequently, it is not possible for us to use `readyset_util::hash_laws!`
+// or `readyset_util::eq_laws!` to test the below implementations of `Hash` and `Eq`. Eventually,
+// we should add some sort of testing here to ensure these implementations are behaving as
+// expected.
+impl Hash for DatabaseStatement {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        match self {
+            DatabaseStatement::MySql(stmt) => {
+                stmt.id().hash(state);
+            }
+            DatabaseStatement::Postgres(_, query_string) => {
+                query_string.hash(state);
+            }
+        }
     }
 }
 
-impl From<&String> for DatabaseStatement {
-    fn from(s: &String) -> DatabaseStatement {
-        DatabaseStatement::Str(s.to_owned())
+impl PartialEq for DatabaseStatement {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::MySql(self_stmt), Self::MySql(other_stmt)) => self_stmt == other_stmt,
+            (Self::Postgres(_, self_query), Self::Postgres(_, other_query)) => {
+                self_query == other_query
+            }
+            _ => false,
+        }
     }
 }
+
+impl Eq for DatabaseStatement {}
 
 /// An enum wrapper around the native Postgres and MySQL result types.
 pub enum QueryResults {
@@ -462,62 +504,33 @@ impl<'a> QueryableConnection for Transaction<'a> {
         }
     }
 
-    async fn execute<'b, P>(
+    async fn execute<'b, S, P>(
         &'b mut self,
-        stmt: impl Into<DatabaseStatement> + Send,
+        stmt: &S,
         params: P,
     ) -> Result<QueryResults, DatabaseError>
     where
         P: IntoIterator + Send,
         P::IntoIter: ExactSizeIterator,
         P::Item: pgsql::types::BorrowToSql,
-        mysql_async::Value: TryFrom<<P as IntoIterator>::Item>,
-        <mysql_async::Value as TryFrom<<P as IntoIterator>::Item>>::Error:
-            std::error::Error + Send + Sync + 'static,
-    {
-        match stmt.into() {
-            DatabaseStatement::MySql(stmt) => Ok(QueryResults::MySql(
-                self.as_mysql_transaction()?
-                    .exec_iter(stmt, convert_mysql_params(params)?)
-                    .await?
-                    .collect()
-                    .await?,
-            )),
-            DatabaseStatement::Postgres(stmt) => Ok(QueryResults::Postgres(
-                self.as_postgres_transaction()?
-                    .query_raw(&stmt, params)
-                    .await?
-                    .try_collect()
-                    .await?,
-            )),
-            DatabaseStatement::Str(stmt) => self.execute_str(&stmt, params).await,
-        }
-    }
-
-    async fn execute_str<'b, P>(
-        &'b mut self,
-        stmt: &str,
-        params: P,
-    ) -> Result<QueryResults, DatabaseError>
-    where
-        P: IntoIterator + Send,
-        P::IntoIter: ExactSizeIterator,
-        P::Item: pgsql::types::BorrowToSql,
+        S: DatabaseStatementLike,
+        for<'c> &'c <S as DatabaseStatementLike>::MySqlStatement:
+            mysql_async::prelude::StatementLike,
         mysql_async::Value: TryFrom<<P as IntoIterator>::Item>,
         <mysql_async::Value as TryFrom<<P as IntoIterator>::Item>>::Error:
             std::error::Error + Send + Sync + 'static,
     {
         match self {
-            Transaction::MySql(transaction) => Ok(QueryResults::MySql(
+            Self::MySql(transaction) => Ok(QueryResults::MySql(
                 transaction
-                    .exec_iter(stmt, convert_mysql_params(params)?)
+                    .exec_iter(stmt.as_mysql_statement()?, convert_mysql_params(params)?)
                     .await?
                     .collect()
                     .await?,
             )),
-            Transaction::Postgres(transaction) => Ok(QueryResults::Postgres(
+            Self::Postgres(transaction) => Ok(QueryResults::Postgres(
                 transaction
-                    .query_raw(stmt, params)
+                    .query_raw(stmt.as_postgres_statement()?, params)
                     .await?
                     .try_collect()
                     .await?,
@@ -535,26 +548,6 @@ impl<'a> Transaction<'a> {
                 .commit()
                 .await
                 .map_err(DatabaseError::PostgreSQL),
-        }
-    }
-
-    fn as_mysql_transaction<'b>(
-        &'b mut self,
-    ) -> Result<&'b mut mysql_async::Transaction<'a>, DatabaseError> {
-        if let Self::MySql(c) = self {
-            Ok(c)
-        } else {
-            Err(DatabaseError::WrongConnection(ConnectionType::MySQL))
-        }
-    }
-
-    fn as_postgres_transaction<'b>(
-        &'b mut self,
-    ) -> Result<&'b mut tokio_postgres::Transaction<'a>, DatabaseError> {
-        if let Self::Postgres(c) = self {
-            Ok(c)
-        } else {
-            Err(DatabaseError::WrongConnection(ConnectionType::PostgreSQL))
         }
     }
 }

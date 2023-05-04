@@ -384,7 +384,7 @@ impl MultithreadBenchmark for WorkloadEmulator {
 
             let start = Instant::now();
             // Execute the prepared satement, with the generated params
-            conn.execute(prepared[query.idx].clone(), params).await?;
+            conn.execute(&prepared[query.idx], params).await?;
             result_batch.queries.push(WorkloadResult {
                 query_id: query.idx as _,
                 latency_us: start.elapsed().as_micros() as _,

@@ -436,7 +436,7 @@ impl MultithreadBenchmark for EvictionBenchmark {
             }
 
             let start = Instant::now();
-            let res = conn.execute(&query, genset.generate_scaled(scale)).await;
+            let res = conn.execute(query, genset.generate_scaled(scale)).await;
             if let Err(e) = res {
                 error!(err = %e, "Error on exec");
                 return Err(e.into());

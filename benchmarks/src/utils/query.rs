@@ -139,7 +139,7 @@ impl ArbitraryQueryParameters {
     pub async fn prepared_statement(
         &self,
         conn: &mut DatabaseConnection,
-    ) -> anyhow::Result<PreparedStatement> {
+    ) -> Result<PreparedStatement> {
         // Mapping against two different parameters.
         #[allow(clippy::manual_map)]
         let spec = if let Some(f) = &self.query_spec_file {
@@ -150,11 +150,10 @@ impl ArbitraryQueryParameters {
             None
         };
         let query = self.query.query();
-        let stmt = conn.prepare(query.to_owned()).await?;
 
         Ok(match spec {
-            None => PreparedStatement::new(query.to_owned(), stmt),
-            Some(s) => PreparedStatement::new_with_annotation(query.to_owned(), stmt, s),
+            None => PreparedStatement::new(conn, query.to_owned()).await?,
+            Some(s) => PreparedStatement::new_with_annotation(conn, query.to_owned(), s).await?,
         })
     }
 
@@ -179,7 +178,7 @@ impl ArbitraryQueryParameters {
         labels
     }
 
-    pub async fn migrate(&self, conn: &mut DatabaseConnection) -> anyhow::Result<()> {
+    pub async fn migrate(&self, conn: &mut DatabaseConnection) -> Result<()> {
         // Remove any query q if it is exists before migration.
         let _ = self.unmigrate(conn).await;
 
@@ -249,34 +248,36 @@ pub struct ParameterGenerationSpec {
 /// A query prepared against the upstream database and the corresponding specification for
 /// parameters in the prepared statement.
 pub struct PreparedStatement {
+    pub statement: DatabaseStatement,
     pub query: String,
     pub params: Vec<ParameterGenerationSpec>,
 }
 
 impl PreparedStatement {
-    pub fn new(query: String, stmt: DatabaseStatement) -> Self {
-        Self {
-            query,
-            params: stmt
+    pub async fn new(conn: &mut DatabaseConnection, query: String) -> anyhow::Result<Self> {
+        let statement = conn.prepare(&query).await?;
+        Ok(Self {
+            params: statement
                 .query_param_types()
-                .unwrap()
                 .into_iter()
                 .map(|sql_type| ParameterGenerationSpec {
                     column_type: sql_type.clone(),
                     generator: ColumnGenerator::Random(sql_type.into()),
                 })
                 .collect(),
-        }
+            query,
+            statement,
+        })
     }
 
-    pub fn new_with_annotation(
+    pub async fn new_with_annotation(
+        conn: &mut DatabaseConnection,
         query: String,
-        stmt: DatabaseStatement,
         spec: DistributionAnnotations,
-    ) -> Self {
-        let params = stmt
+    ) -> anyhow::Result<Self> {
+        let statement = conn.prepare(&query).await?;
+        let params = statement
             .query_param_types()
-            .unwrap()
             .into_iter()
             .zip(spec.0.into_iter())
             .map(|(sql_type, annotation)| ParameterGenerationSpec {
@@ -285,13 +286,19 @@ impl PreparedStatement {
             })
             .collect();
 
-        Self { query, params }
+        Ok(Self {
+            query,
+            params,
+            statement,
+        })
     }
 
-    /// Returns the query text and a set of parameters that can be used to
+    /// Returns the prepared statement and a set of parameters that can be used to
     /// execute this prepared statement.
-    pub fn generate_query(&mut self) -> (String, Vec<DfValue>) {
-        (self.query.clone(), self.generate_parameters())
+    pub fn generate_query(&mut self) -> (&DatabaseStatement, Vec<DfValue>) {
+        let params = self.generate_parameters();
+
+        (&self.statement, params)
     }
 
     pub fn generate_ad_hoc_query(&mut self) -> String {
@@ -322,11 +329,11 @@ impl PreparedStatement {
         }
     }
 
-    /// Returns the query text and a set of generators that can be used to
+    /// Returns the prepared statement and a set of generators that can be used to
     /// execute this prepared statement.
-    pub fn query_generators(&self) -> (String, GeneratorSet) {
+    pub fn query_generators(&self) -> (&DatabaseStatement, GeneratorSet) {
         (
-            self.query.clone(),
+            &self.statement,
             GeneratorSet(self.params.iter().map(|t| t.generator.clone()).collect()),
         )
     }
@@ -374,16 +381,16 @@ impl GeneratorSet {
 
 #[derive(PartialEq, Eq, Hash, Clone)]
 pub struct Query {
-    pub prep: String,
+    pub prep: DatabaseStatement,
     pub params: Vec<String>,
 }
 
 // Values cannot be hashed so we turn them into sql text before putting
 // them in the Query struct.
-impl From<(String, Vec<DfValue>)> for Query {
-    fn from(v: (String, Vec<DfValue>)) -> Query {
+impl From<(&DatabaseStatement, Vec<DfValue>)> for Query {
+    fn from(v: (&DatabaseStatement, Vec<DfValue>)) -> Query {
         Query {
-            prep: v.0,
+            prep: v.0.clone(),
             params: v.1.into_iter().map(|s| s.to_string()).collect(),
         }
     }

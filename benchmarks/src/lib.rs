@@ -33,7 +33,7 @@
 //!             .await?;
 //!         let chunks: Tuples<Range<u32>, (_, _, _, _)> = (0..self.row_count).tuples();
 //!         for (v1, v2, v3, v4) in chunks {
-//!             conn.execute(stmt.clone(), [v1, v2, v3, v4]).await?;
+//!             conn.execute(&stmt, [v1, v2, v3, v4]).await?;
 //!         }
 //!         Ok(())
 //!     }
@@ -46,7 +46,7 @@
 //!         let mut conn = deployment.connect_to_target().await?;
 //!         let stmt = conn.prepare(r"SELECT * FROM integers WHERE id = ?").await?;
 //!         for _ in 0..10_000_000 {
-//!             conn.execute(stmt.clone(), [self.where_value]).await?;
+//!             conn.execute(&stmt, [self.where_value]).await?;
 //!         }
 //!         benchmark_gauge!(
 //!             "my_benchmark.number_of_queries",
