@@ -125,7 +125,7 @@ impl FunctionExpr {
                 if let Some(separator) = separator {
                     write!(
                         f,
-                        "separator {}",
+                        " separator '{}'",
                         separator.replace('\'', "''").replace('\\', "\\\\")
                     )?;
                 }
@@ -2220,6 +2220,37 @@ mod tests {
                 exp_multiple_branches.display(Dialect::MySQL).to_string(),
                 "CASE WHEN (`foo` = 0) THEN `foo` WHEN (`foo` = 7) THEN `foo` END"
             );
+        }
+
+        #[test]
+        fn display_group_concat() {
+            assert_eq!(
+                FunctionExpr::GroupConcat {
+                    expr: Box::new(Expr::Column("x".into())),
+                    separator: Some("a".into())
+                }
+                .display(Dialect::MySQL)
+                .to_string(),
+                "group_concat(`x` separator 'a')"
+            );
+            assert_eq!(
+                FunctionExpr::GroupConcat {
+                    expr: Box::new(Expr::Column("x".into())),
+                    separator: Some("'".into())
+                }
+                .display(Dialect::MySQL)
+                .to_string(),
+                "group_concat(`x` separator '''')"
+            );
+            assert_eq!(
+                FunctionExpr::GroupConcat {
+                    expr: Box::new(Expr::Column("x".into())),
+                    separator: None
+                }
+                .display(Dialect::MySQL)
+                .to_string(),
+                "group_concat(`x`)"
+            )
         }
 
         mod precedence {
