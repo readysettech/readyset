@@ -90,7 +90,7 @@ use nom_sql::{
 use parking_lot::Mutex;
 use proptest::arbitrary::{any, any_with, Arbitrary};
 use proptest::sample::Select;
-use proptest::strategy::{BoxedStrategy, Strategy};
+use proptest::strategy::{BoxedStrategy, Just, Strategy};
 use rand::thread_rng;
 use readyset_data::{DfType, DfValue, Dialect};
 use readyset_sql_passes::outermost_table_exprs;
@@ -1238,43 +1238,82 @@ pub struct QueryOperationArgs {
 /// each of which should be relatively straightforward to add here.
 ///
 /// [0]: https://docs.google.com/document/d/1rb-AU_PsH2Z40XFLjmLP7DcyeJzlwKI4Aa-GQgEoWKA
-#[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize, Arbitrary)]
-#[arbitrary(args = QueryOperationArgs)]
+#[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
 pub enum QueryOperation {
-    ColumnAggregate(#[any(args.dialect)] AggregateType),
-    Filter(#[any(args.dialect)] Filter),
+    ColumnAggregate(AggregateType),
+    Filter(Filter),
     Distinct,
     Join(JoinOperator),
     ProjectLiteral,
-    #[weight(u32::from(!args.in_subquery))]
     SingleParameter,
-    #[weight(u32::from(!args.in_subquery))]
     MultipleParameters,
-    #[weight(u32::from(!args.in_subquery))]
     InParameter {
-        #[strategy(1..=100u8)]
         num_values: u8,
     },
-    #[weight(u32::from(!args.in_subquery))]
     RangeParameter,
-    #[weight(u32::from(!args.in_subquery))]
     MultipleRangeParameters,
-    ProjectBuiltinFunction(#[any(args.dialect)] BuiltinFunction),
+    ProjectBuiltinFunction(BuiltinFunction),
     TopK {
         order_type: OrderType,
-        #[strategy(0..=100u64)]
         limit: u64,
     },
-    #[weight(u32::from(!args.in_subquery))]
     Paginate {
         order_type: OrderType,
-        #[strategy(0..=100u64)]
         limit: u64,
-        #[strategy(0..=100u64)]
         page_number: u64,
     },
-    #[weight(0)]
     Subquery(SubqueryPosition),
+}
+
+impl Arbitrary for QueryOperation {
+    type Parameters = QueryOperationArgs;
+
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
+        use QueryOperation::*;
+
+        let mut variants = vec![
+            any_with::<AggregateType>(args.dialect)
+                .prop_map(ColumnAggregate)
+                .boxed(),
+            any_with::<crate::Filter>(args.dialect)
+                .prop_map(Filter)
+                .boxed(),
+            Just(Distinct).boxed(),
+            any::<JoinOperator>().prop_map(Join).boxed(),
+            Just(ProjectLiteral).boxed(),
+            any_with::<BuiltinFunction>(args.dialect)
+                .prop_map(ProjectBuiltinFunction)
+                .boxed(),
+            (any::<OrderType>(), (0..=100u64))
+                .prop_map(|(order_type, limit)| TopK { order_type, limit })
+                .boxed(),
+        ];
+
+        if !args.in_subquery {
+            variants.extend([
+                Just(SingleParameter).boxed(),
+                Just(MultipleParameters).boxed(),
+                (1..=100u8)
+                    .prop_map(|num_values| InParameter { num_values })
+                    .boxed(),
+                Just(RangeParameter).boxed(),
+                Just(MultipleRangeParameters).boxed(),
+                (any::<OrderType>(), 0..=100u64, 0..=100u64)
+                    .prop_map(|(order_type, limit, page_number)| Paginate {
+                        order_type,
+                        limit,
+                        page_number,
+                    })
+                    .boxed(),
+            ]);
+        }
+
+        proptest::sample::select(variants)
+            .prop_flat_map(|s| s)
+            .boxed()
+    }
 }
 
 const ALL_FILTER_RHS: &[FilterRHS] = &[FilterRHS::Column, FilterRHS::Constant(Literal::Integer(1))];
