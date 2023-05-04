@@ -160,7 +160,7 @@ impl GraphViz for MirNodeInner {
                     AggregationKind::Sum => format!("𝛴({})", on),
                     AggregationKind::Avg => format!("AVG({})", on),
                     AggregationKind::GroupConcat { separator: s } => {
-                        format!("||({}, \"{}\")", on, s)
+                        format!("\\|\\|({}, \\\"{}\\\")", on, s)
                     }
                 };
                 let group_cols = group_by.iter().join(", ");
