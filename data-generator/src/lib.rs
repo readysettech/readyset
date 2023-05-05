@@ -433,10 +433,10 @@ pub fn value_of_type(typ: &SqlType) -> DfValue {
             // octets.
             DfValue::ByteArray(Arc::new(vec![0u8]))
         }
-        SqlType::Int(_) | SqlType::Int4 => 1i32.into(),
-        SqlType::BigInt(_) | SqlType::Int8 => 1i64.into(),
-        SqlType::UnsignedInt(_) | SqlType::Serial => 1u32.into(),
-        SqlType::UnsignedBigInt(_) | SqlType::BigSerial => 1u64.into(),
+        SqlType::Int(_) | SqlType::Int4 | SqlType::Serial => 1i32.into(),
+        SqlType::BigInt(_) | SqlType::Int8 | SqlType::BigSerial => 1i64.into(),
+        SqlType::UnsignedInt(_) => 1u32.into(),
+        SqlType::UnsignedBigInt(_) => 1u64.into(),
         SqlType::TinyInt(_) => 1i8.into(),
         SqlType::UnsignedTinyInt(_) => 1u8.into(),
         SqlType::SmallInt(_) | SqlType::Int2 => 1i16.into(),
@@ -609,8 +609,8 @@ where
                     .collect::<Vec<bool>>(),
             ))
         }
-        SqlType::Serial => (rng.gen::<u32>() + 1).into(),
-        SqlType::BigSerial => (rng.gen::<u64>() + 1).into(),
+        SqlType::Serial => ((rng.gen::<u32>() + 1) as i32).into(),
+        SqlType::BigSerial => ((rng.gen::<u64>() + 1) as i64).into(),
         SqlType::Array(_) => unimplemented!(),
         SqlType::Other(_) => unimplemented!(),
     }
@@ -740,8 +740,8 @@ pub fn unique_value_of_type(typ: &SqlType, idx: u32) -> DfValue {
             bytes[3] = (idx & 0xff) as u8;
             DfValue::from(BitVec::from_bytes(&bytes[..]))
         }
-        SqlType::Serial => (idx + 1).into(),
-        SqlType::BigSerial => ((idx + 1) as u64).into(),
+        SqlType::Serial => ((idx + 1) as i32).into(),
+        SqlType::BigSerial => ((idx + 1) as i64).into(),
         SqlType::Array(_) => unimplemented!(),
         SqlType::Other(_) => unimplemented!(),
     }
