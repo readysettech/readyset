@@ -1234,7 +1234,6 @@ pub enum SubqueryPosition {
 /// Parameters for generating an arbitrary [`QueryOperation`]
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct QueryOperationArgs {
-    in_subquery: bool,
     pub dialect: QueryDialect,
 }
 
@@ -1270,18 +1269,13 @@ pub enum QueryOperation {
     Distinct,
     Join(JoinOperator),
     ProjectLiteral,
-    #[weight(u32::from(!args.in_subquery))]
     SingleParameter,
-    #[weight(u32::from(!args.in_subquery))]
     MultipleParameters,
-    #[weight(u32::from(!args.in_subquery))]
     InParameter {
         #[strategy(1..=100u8)]
         num_values: u8,
     },
-    #[weight(u32::from(!args.in_subquery))]
     RangeParameter,
-    #[weight(u32::from(!args.in_subquery))]
     MultipleRangeParameters,
     ProjectBuiltinFunction(#[any(args.dialect)] BuiltinFunction),
     TopK {
@@ -1289,7 +1283,6 @@ pub enum QueryOperation {
         #[strategy(0..=100u64)]
         limit: u64,
     },
-    #[weight(u32::from(!args.in_subquery))]
     Paginate {
         order_type: OrderType,
         #[strategy(0..=100u64)]
@@ -2318,14 +2311,12 @@ impl From<Vec<Vec<QueryOperation>>> for OperationList {
 }
 
 /// A specification for a subquery included in a query
-#[derive(Debug, Clone, PartialEq, Eq, Arbitrary)]
-#[arbitrary(args = QueryDialect)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Subquery {
     /// Where does the subquery appear in the query?
     position: SubqueryPosition,
 
     /// The specification for the query itself
-    #[any(in_subquery = true, dialect = *args)]
     seed: QuerySeed,
 }
 
@@ -2500,7 +2491,10 @@ impl Arbitrary for QuerySeed {
                     proptest::collection::vec((any::<SubqueryPosition>(), inner), 0..3).prop_map(
                         |sqs| {
                             sqs.into_iter()
-                                .map(|(position, seed)| Subquery { position, seed })
+                                .map(|(position, mut seed)| {
+                                    seed.operations.retain(|op| op.supported_in_subqueries());
+                                    Subquery { position, seed }
+                                })
                                 .collect()
                         },
                     ),
