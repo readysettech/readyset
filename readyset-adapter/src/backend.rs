@@ -1551,8 +1551,8 @@ where
         })?;
 
         match query {
-            SqlQuery::StartTransaction(_) => {
-                let result = QueryResult::Upstream(upstream.start_tx().await?);
+            SqlQuery::StartTransaction(inner) => {
+                let result = QueryResult::Upstream(upstream.start_tx(inner).await?);
                 proxy_state.start_transaction();
                 Ok(result)
             }

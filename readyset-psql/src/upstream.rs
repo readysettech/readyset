@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::StreamExt;
-use nom_sql::SqlIdentifier;
+use nom_sql::{SqlIdentifier, StartTransactionStatement};
 use pgsql::config::Host;
 use pgsql::types::Type;
 use pgsql::{GenericResult, ResultStream, Row, SimpleQueryMessage};
@@ -343,21 +343,27 @@ impl UpstreamDatabase for PostgreSqlUpstream {
     }
 
     /// Handle starting a transaction with the upstream database.
-    async fn start_tx<'a>(&'a mut self) -> Result<Self::QueryResult<'a>, Error> {
-        self.client.query("START TRANSACTION", &[]).await?;
-        Ok(QueryResult::Command)
+    async fn start_tx<'a>(
+        &'a mut self,
+        stmt: &StartTransactionStatement,
+    ) -> Result<Self::QueryResult<'a>, Error> {
+        Ok(QueryResult::SimpleQuery(
+            self.client.simple_query(&stmt.to_string()).await?,
+        ))
     }
 
     /// Handle committing a transaction to the upstream database.
     async fn commit<'a>(&'a mut self) -> Result<Self::QueryResult<'a>, Error> {
-        self.client.query("COMMIT", &[]).await?;
-        Ok(QueryResult::Command)
+        Ok(QueryResult::SimpleQuery(
+            self.client.simple_query("COMMIT").await?,
+        ))
     }
 
     /// Handle rolling back the ongoing transaction for this connection to the upstream db.
     async fn rollback<'a>(&'a mut self) -> Result<Self::QueryResult<'a>, Error> {
-        self.client.query("ROLLBACK", &[]).await?;
-        Ok(QueryResult::Command)
+        Ok(QueryResult::SimpleQuery(
+            self.client.simple_query("ROLLBACK").await?,
+        ))
     }
 
     async fn schema_dump(&mut self) -> Result<Vec<u8>, anyhow::Error> {

@@ -15,7 +15,7 @@ use mysql_async::prelude::Queryable;
 use mysql_async::{
     Column, Conn, Opts, OptsBuilder, ResultSetStream, Row, SslOpts, TxOpts, UrlError,
 };
-use nom_sql::SqlIdentifier;
+use nom_sql::{SqlIdentifier, StartTransactionStatement};
 use pin_project::pin_project;
 use readyset_adapter::fallback_cache::FallbackCache;
 #[cfg(feature = "fallback_cache")]
@@ -538,8 +538,11 @@ impl UpstreamDatabase for MySqlUpstream {
         ))
     }
 
-    async fn start_tx<'a>(&'a mut self) -> Result<Self::QueryResult<'a>, Error> {
-        self.conn.query_drop("START TRANSACTION").await?;
+    async fn start_tx<'a>(
+        &'a mut self,
+        stmt: &StartTransactionStatement,
+    ) -> Result<Self::QueryResult<'a>, Error> {
+        self.conn.query_drop(stmt.to_string()).await?;
 
         Ok(QueryResult::Command {
             status_flags: self.conn.status(),

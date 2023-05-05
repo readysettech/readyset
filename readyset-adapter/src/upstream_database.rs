@@ -3,7 +3,7 @@ use std::fmt::Debug;
 
 use async_trait::async_trait;
 pub use database_utils::UpstreamConfig;
-use nom_sql::SqlIdentifier;
+use nom_sql::{SqlIdentifier, StartTransactionStatement};
 use readyset_client_metrics::QueryDestination;
 use readyset_data::DfValue;
 use readyset_errors::ReadySetError;
@@ -158,7 +158,10 @@ pub trait UpstreamDatabase: Sized + Send {
         S: AsRef<str> + Send + Sync + 'a;
 
     /// Handle starting a transaction with the upstream database.
-    async fn start_tx<'a>(&'a mut self) -> Result<Self::QueryResult<'a>, Self::Error>;
+    async fn start_tx<'a>(
+        &'a mut self,
+        stmt: &StartTransactionStatement,
+    ) -> Result<Self::QueryResult<'a>, Self::Error>;
 
     /// Handle committing a transaction to the upstream database.
     async fn commit<'a>(&'a mut self) -> Result<Self::QueryResult<'a>, Self::Error>;
