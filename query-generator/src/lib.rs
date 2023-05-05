@@ -1078,19 +1078,15 @@ impl From<LogicalOp> for BinaryOperator {
     }
 }
 
-fn filter_op() -> impl Strategy<Value = BinaryOperator> {
+fn filter_op(ty: &SqlType) -> impl Strategy<Value = BinaryOperator> {
     use BinaryOperator::*;
+    let mut variants = vec![Equal, NotEqual, Greater, GreaterOrEqual, Less, LessOrEqual];
 
-    proptest::sample::select(vec![
-        Like,
-        NotLike,
-        Equal,
-        NotEqual,
-        Greater,
-        GreaterOrEqual,
-        Less,
-        LessOrEqual,
-    ])
+    if ty.is_any_text() {
+        variants.extend([Like, NotLike]);
+    }
+
+    proptest::sample::select(variants)
 }
 
 /// An individual filter operation
@@ -1099,7 +1095,7 @@ fn filter_op() -> impl Strategy<Value = BinaryOperator> {
 pub enum FilterOp {
     /// Compare a column with either another column, or a value
     Comparison {
-        #[strategy(filter_op())]
+        #[strategy(filter_op(&args.column_type))]
         op: BinaryOperator,
 
         #[strategy(any_with::<FilterRHS>((*args).clone()))]
