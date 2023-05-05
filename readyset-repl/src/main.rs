@@ -217,6 +217,10 @@ impl ReplContext {
 }
 
 fn print_result(rows: Vec<Vec<DfValue>>) {
+    if rows.is_empty() {
+        println!("\nEmpty result set");
+        return;
+    }
     let mut table = Table::new();
     table.set_format(*prettytable::format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
     for row in rows {
