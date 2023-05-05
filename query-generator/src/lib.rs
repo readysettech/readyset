@@ -102,7 +102,7 @@ use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 use test_strategy::Arbitrary;
 
-use crate::types::arbitrary_numeric_type;
+use crate::types::{arbitrary_numeric_type, arbitrary_postgres_min_max_arg_type};
 
 /// Query dialect to use when generating queries.
 ///
@@ -987,6 +987,18 @@ impl<'gen> Query<'gen> {
     }
 }
 
+fn min_max_arg_type(dialect: ParseDialect) -> impl Strategy<Value = SqlType> {
+    match dialect {
+        ParseDialect::MySQL => any_with::<SqlType>(SqlTypeArbitraryOptions {
+            generate_arrays: false,
+            dialect: Some(dialect),
+            ..Default::default()
+        })
+        .boxed(),
+        ParseDialect::PostgreSQL => arbitrary_postgres_min_max_arg_type().boxed(),
+    }
+}
+
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize, Arbitrary)]
 #[arbitrary(args = QueryDialect)]
 pub enum AggregateType {
@@ -1008,11 +1020,11 @@ pub enum AggregateType {
     #[weight(u32::from(*args == ParseDialect::MySQL))]
     GroupConcat,
     Max {
-        #[any(generate_arrays = false, dialect = Some(args.0))]
+        #[strategy(min_max_arg_type(args.0))]
         column_type: SqlType,
     },
     Min {
-        #[any(generate_arrays = false, dialect = Some(args.0))]
+        #[strategy(min_max_arg_type(args.0))]
         column_type: SqlType,
     },
 }
