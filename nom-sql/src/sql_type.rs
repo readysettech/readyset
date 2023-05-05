@@ -14,7 +14,7 @@ use nom::multi::{fold_many0, separated_list0};
 use nom::sequence::{delimited, preceded, terminated, tuple};
 use nom_locate::LocatedSpan;
 use proptest::arbitrary::Arbitrary;
-use proptest::strategy::{BoxedStrategy, Strategy};
+use proptest::strategy::BoxedStrategy;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use triomphe::ThinArc;
@@ -214,26 +214,6 @@ impl Arbitrary for SqlType {
 }
 
 impl SqlType {
-    /// Returns a proptest strategy to generate *numeric* [`SqlType`]s, optionally filtering to only
-    /// those which are valid for the given SQL dialect
-    pub fn arbitrary_numeric_type(dialect: Option<Dialect>) -> impl Strategy<Value = SqlType> {
-        use SqlType::*;
-
-        let mut variants = vec![SmallInt(None), Int(None), BigInt(None), Double, Float, Real];
-
-        if dialect.is_none() || dialect == Some(Dialect::MySQL) {
-            variants.extend([
-                TinyInt(None),
-                UnsignedInt(None),
-                UnsignedBigInt(None),
-                UnsignedTinyInt(None),
-                UnsignedSmallInt(None),
-            ])
-        }
-
-        proptest::sample::select(variants)
-    }
-
     /// Creates a [`SqlType::Enum`] instance from a sequence of variant names.
     #[inline]
     pub fn from_enum_variants<I>(variants: I) -> Self

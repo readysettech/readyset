@@ -59,6 +59,8 @@
 //! [2]: TableSpec::fresh_column
 //! [3]: QueryOperation::permute
 
+mod types;
+
 use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
@@ -99,6 +101,8 @@ use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 use test_strategy::Arbitrary;
+
+use crate::types::arbitrary_numeric_type;
 
 /// Query dialect to use when generating queries.
 ///
@@ -992,12 +996,12 @@ pub enum AggregateType {
         distinct: bool,
     },
     Sum {
-        #[strategy(SqlType::arbitrary_numeric_type(Some(args.0)))]
+        #[strategy(arbitrary_numeric_type(Some(args.0)))]
         column_type: SqlType,
         distinct: bool,
     },
     Avg {
-        #[strategy(SqlType::arbitrary_numeric_type(Some(args.0)))]
+        #[strategy(arbitrary_numeric_type(Some(args.0)))]
         column_type: SqlType,
         distinct: bool,
     },
