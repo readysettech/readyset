@@ -589,12 +589,9 @@ where
             IpAddr::V4(Ipv4Addr::new(rng.gen(), rng.gen(), rng.gen(), rng.gen())).to_string(),
         ),
         SqlType::Uuid => {
-            let mut bytes = [0_u8, 16];
+            let mut bytes = [0_u8; 16];
             rng.fill(&mut bytes);
-            // We know the length and format of the bytes, so this should always be parsable as a
-            // `UUID`.
-            #[allow(clippy::unwrap_used)]
-            DfValue::from(uuid::Uuid::from_slice(&bytes[..]).unwrap().to_string())
+            DfValue::from(uuid::Uuid::from_bytes(bytes).to_string())
         }
         SqlType::Bit(size_opt) => DfValue::from(BitVec::from_iter(
             rng.sample_iter(Standard)
