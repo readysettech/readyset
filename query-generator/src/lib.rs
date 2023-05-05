@@ -2362,22 +2362,52 @@ impl Subquery {
         // subquery that we got in the outer query
         state.fresh_table_mut();
         let mut subquery = self.seed.generate(state);
-        // just use the first selected column as the join key (maybe change this later)
-        let right_join_col = match subquery.fields.first_mut() {
-            Some(FieldDefinitionExpr::Expr {
-                alias: Some(alias), ..
-            }) => alias.clone(),
-            Some(FieldDefinitionExpr::Expr {
-                alias: alias @ None,
-                ..
-            }) => alias.insert(state.fresh_alias()).clone(),
-            _ => panic!(
-                "Could not find a join key in subquery: {}",
-                subquery.display(nom_sql::Dialect::MySQL)
-            ),
-        };
+        let right_table = state.some_table_in_query_mut(&mut subquery);
+        let right_table_name = right_table.name.clone();
+        let right_join_col = right_table.some_column_with_type(SqlType::Int(None));
+        let right_join_key = subquery
+            .fields
+            .iter()
+            // First, see if we're already projecting the join column we picked in the subquery
+            .find_map(|f| match f {
+                FieldDefinitionExpr::Expr {
+                    expr:
+                        Expr::Column(Column {
+                            name,
+                            table:
+                                Some(Relation {
+                                    name: table_name, ..
+                                }),
+                        }),
+                    alias,
+                } if *name == right_join_col.0 && *table_name == right_table_name.0 => {
+                    Some(alias.clone().unwrap_or_else(|| name.clone()))
+                }
+                _ => None,
+            })
+            // If we don't find it, add it to the fields with a fresh alias, and use that alias as
+            // our join column
+            .unwrap_or_else(|| {
+                let alias = state.fresh_alias();
+                let col = Column {
+                    name: right_join_col.clone().into(),
+                    table: Some(right_table_name.into()),
+                };
+                subquery.fields.push(FieldDefinitionExpr::Expr {
+                    expr: Expr::Column(col.clone()),
+                    alias: Some(alias.clone()),
+                });
 
-        let left_join_col = column_in_query(state, query);
+                if let Some(gb) = &mut subquery.group_by {
+                    gb.fields.push(FieldReference::Expr(Expr::Column(col)))
+                }
+
+                alias
+            });
+
+        let left_table = state.some_table_in_query_mut(query);
+        let left_table_name = left_table.name.clone();
+        let left_join_key = left_table.some_column_with_type(SqlType::Int(None));
 
         let subquery_name = state.fresh_alias();
         let (join_rhs, operator) = match self.position {
@@ -2457,10 +2487,13 @@ impl Subquery {
             operator,
             right: join_rhs,
             constraint: JoinConstraint::On(Expr::BinaryOp {
-                lhs: Box::new(Expr::Column(left_join_col)),
+                lhs: Box::new(Expr::Column(Column {
+                    name: left_join_key.into(),
+                    table: Some(left_table_name.into()),
+                })),
                 op: BinaryOperator::Equal,
                 rhs: Box::new(Expr::Column(Column {
-                    name: right_join_col,
+                    name: right_join_key,
                     table: Some(subquery_name.into()),
                 })),
             }),
