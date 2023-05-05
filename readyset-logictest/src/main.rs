@@ -17,10 +17,10 @@ use database_utils::{DatabaseType, DatabaseURL};
 use futures::stream::futures_unordered::FuturesUnordered;
 use futures::StreamExt;
 use lazy_static::lazy_static;
-use proptest::arbitrary::any;
+use proptest::prelude::any_with;
 use proptest::strategy::Strategy;
 use proptest::test_runner::{self, TestCaseError, TestError, TestRng, TestRunner};
-use query_generator::QuerySeed;
+use query_generator::{QueryOperationArgs, QuerySeed};
 use readyset_client::consensus::AuthorityType;
 use tokio::sync::Mutex;
 use walkdir::WalkDir;
@@ -616,6 +616,7 @@ impl Fuzz {
             rt.block_on(test_script.run(
                 RunOptions {
                     verbose: self.verbose,
+                    database_type: self.compare_to.database_type(),
                     ..Default::default()
                 },
                 Default::default(),
@@ -646,21 +647,30 @@ impl Fuzz {
 
     fn test_script_strategy(&self) -> impl Strategy<Value = TestScript> + 'static {
         let dialect = self.dialect();
-        (any::<Vec<QuerySeed>>(), self.generate_opts()).prop_filter_map(
-            "Making test script from seed failed",
-            move |(query_seeds, generate_opts)| {
-                let rt = tokio::runtime::Runtime::new().unwrap();
-                let _guard = rt.enter();
-                let mut seed = generate::Seed::from_seeds(query_seeds, dialect).unwrap();
-                match rt.block_on(seed.run(generate_opts, dialect)) {
-                    Ok(script) => Some(script.clone()),
-                    Err(e) => {
-                        eprintln!("Error generating test script from seed: {e:#}");
-                        None
-                    }
-                }
-            },
+        (
+            any_with::<Vec<QuerySeed>>((
+                (1..=1).into(),
+                QueryOperationArgs {
+                    dialect: dialect.into(),
+                },
+            )),
+            self.generate_opts(),
         )
+            .prop_filter_map(
+                "Making test script from seed failed",
+                move |(query_seeds, generate_opts)| {
+                    let rt = tokio::runtime::Runtime::new().unwrap();
+                    let _guard = rt.enter();
+                    let mut seed = generate::Seed::from_seeds(query_seeds, dialect).unwrap();
+                    match rt.block_on(seed.run(generate_opts, dialect)) {
+                        Ok(script) => Some(script.clone()),
+                        Err(e) => {
+                            eprintln!("Error generating test script from seed: {e:#}");
+                            None
+                        }
+                    }
+                },
+            )
     }
 
     fn generate_opts(&self) -> impl Strategy<Value = generate::GenerateOpts> + 'static {

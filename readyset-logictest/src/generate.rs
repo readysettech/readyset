@@ -272,18 +272,14 @@ impl Seed {
                     insert_statement.table.display_unquoted()
                 );
             }
-            conn.query_drop(
-                insert_statement
-                    .display(nom_sql::Dialect::MySQL)
-                    .to_string(),
-            )
-            .await
-            .with_context(|| {
-                format!(
-                    "Inserting seed data for {}",
-                    insert_statement.table.display_unquoted()
-                )
-            })?;
+            conn.query_drop(insert_statement.display(dialect).to_string())
+                .await
+                .with_context(|| {
+                    format!(
+                        "Inserting seed data for {}",
+                        insert_statement.table.display_unquoted()
+                    )
+                })?;
         }
 
         let new_entries = insert_statements
@@ -329,12 +325,10 @@ impl Seed {
                 .flatten()
                 .collect();
 
-            let new_entries = new_entries.chain(delete_statements.iter().map(|stmt| {
-                // FIXME: Use correct dialect.
-                Record::Statement(Statement::ok(
-                    stmt.display(nom_sql::Dialect::MySQL).to_string(),
-                ))
-            }));
+            let new_entries =
+                new_entries.chain(delete_statements.iter().map(|stmt| {
+                    Record::Statement(Statement::ok(stmt.display(dialect).to_string()))
+                }));
 
             eprintln!(
                 "{}",
@@ -354,18 +348,14 @@ impl Seed {
                     );
                 }
 
-                conn.query_drop(
-                    delete_statement
-                        .display(nom_sql::Dialect::MySQL)
-                        .to_string(),
-                )
-                .await
-                .with_context(|| {
-                    format!(
-                        "Deleting seed data for {}",
-                        delete_statement.table.display_unquoted()
-                    )
-                })?;
+                conn.query_drop(delete_statement.display(dialect).to_string())
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "Deleting seed data for {}",
+                            delete_statement.table.display_unquoted()
+                        )
+                    })?;
             }
 
             self.script
