@@ -53,7 +53,12 @@ pub fn arbitrary_naive_date_time() -> impl Strategy<Value = NaiveDateTime> {
 /// Strategy to generate an arbitrary [`Date<FixedOffset>`]
 pub fn arbitrary_date() -> impl Strategy<Value = Date<FixedOffset>> {
     // The numbers correspond to the restrictions of `Date` and `FixedOffset`.
-    (-2000i32..3000, 1u32..365, (-86_399..86_399)).prop_map(|(y, doy, offset)| {
+    (-2000i32..3000, 1u32..365, (-86_399..86_399)).prop_map(|(mut y, doy, offset)| {
+        if y == 0 {
+            // The gregorian calendar has no year zero - postgres complains if you send it dates
+            // with a year zero
+            y = 1;
+        }
         Date::<FixedOffset>::from_utc(
             NaiveDate::from_yo(y, doy),
             FixedOffset::west_opt(offset).unwrap_or_else(|| {
