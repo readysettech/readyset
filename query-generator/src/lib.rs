@@ -1090,8 +1090,16 @@ pub enum FilterOp {
         rhs: FilterRHS,
     },
 
-    /// A BETWEEN comparison on a column and two constant values
-    Between { negated: bool },
+    /// A BETWEEN comparison on a column and two values
+    Between {
+        negated: bool,
+
+        #[strategy(any_with::<FilterRHS>((*args).clone()))]
+        min: FilterRHS,
+
+        #[strategy(any_with::<FilterRHS>((*args).clone()))]
+        max: FilterRHS,
+    },
 
     /// An IS NULL comparison on a column
     IsNull { negated: bool },
@@ -1421,12 +1429,24 @@ lazy_static! {
             .collect()
     };
 
+    static ref ALL_BETWEEN_OPS: Vec<FilterOp> = {
+        [true, false]
+            .into_iter()
+            .map(|negated| {
+                FilterOp::Between {
+                    negated,
+                    min: FilterRHS::Constant(Literal::Integer(1)),
+                    max: FilterRHS::Constant(Literal::Integer(5))
+                }
+            })
+            .collect()
+    };
+
     static ref ALL_FILTER_OPS: Vec<FilterOp> = {
         ALL_COMPARISON_FILTER_OPS
             .iter()
             .cloned()
-            .chain(iter::once(FilterOp::Between { negated: true }))
-            .chain(iter::once(FilterOp::Between { negated: false }))
+            .chain(ALL_BETWEEN_OPS.clone())
             .chain(iter::once(FilterOp::IsNull { negated: true }))
             .chain(iter::once(FilterOp::IsNull { negated: false }))
             .collect()
@@ -1653,35 +1673,31 @@ impl QueryOperation {
                     alias: Some(alias),
                 });
 
-                let cond = match &filter.operation {
-                    FilterOp::Comparison { op, rhs } => {
-                        let rhs = Box::new(match rhs {
-                            FilterRHS::Constant(val) => {
-                                tbl.expect_value(col, val.clone().try_into().unwrap());
-                                Expr::Literal(val.clone())
-                            }
-                            FilterRHS::Column => {
-                                let col = tbl.some_column_with_type_different_than(
-                                    filter.column_type.clone(),
-                                    &col,
-                                );
-                                Expr::Column(Column {
-                                    table: Some(tbl.name.clone().into()),
-                                    ..col.into()
-                                })
-                            }
-                        });
-
-                        Expr::BinaryOp {
-                            op: *op,
-                            lhs: Box::new(col_expr),
-                            rhs,
-                        }
+                let mut filter_rhs_to_expr = |rhs: &FilterRHS| match rhs {
+                    FilterRHS::Constant(val) => {
+                        tbl.expect_value(col.clone(), val.clone().try_into().unwrap());
+                        Expr::Literal(val.clone())
                     }
-                    FilterOp::Between { negated } => Expr::Between {
+                    FilterRHS::Column => {
+                        let col = tbl
+                            .some_column_with_type_different_than(filter.column_type.clone(), &col);
+                        Expr::Column(Column {
+                            table: Some(tbl.name.clone().into()),
+                            ..col.into()
+                        })
+                    }
+                };
+
+                let cond = match &filter.operation {
+                    FilterOp::Comparison { op, rhs } => Expr::BinaryOp {
+                        op: *op,
+                        lhs: Box::new(col_expr),
+                        rhs: Box::new(filter_rhs_to_expr(rhs)),
+                    },
+                    FilterOp::Between { negated, min, max } => Expr::Between {
                         operand: Box::new(col_expr),
-                        min: Box::new(Expr::Literal(Literal::Integer(1))),
-                        max: Box::new(Expr::Literal(Literal::Integer(5))),
+                        min: Box::new(filter_rhs_to_expr(min)),
+                        max: Box::new(filter_rhs_to_expr(max)),
                         negated: *negated,
                     },
                     FilterOp::IsNull { negated } => {
@@ -2135,10 +2151,7 @@ impl FromStr for Operations {
             .map(Filter)
             .collect()),
             "between_filters" => Ok(LogicalOp::iter()
-                .cartesian_product(
-                    iter::once(FilterOp::Between { negated: true })
-                        .chain(iter::once(FilterOp::Between { negated: false })),
-                )
+                .cartesian_product(ALL_BETWEEN_OPS.clone())
                 .map(|(extend_where_with, operation)| crate::Filter {
                     extend_where_with,
                     operation,
