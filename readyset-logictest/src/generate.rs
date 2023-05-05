@@ -11,10 +11,13 @@ use database_utils::{DatabaseConnection, DatabaseURL};
 use itertools::Itertools;
 use nom_sql::{
     parse_query, BinaryOperator, CreateTableStatement, DeleteStatement, Dialect, Expr, SqlQuery,
+    SqlType,
 };
 use query_generator::{GeneratorState, QuerySeed};
 
-use crate::ast::{Query, QueryParams, QueryResults, Record, SortMode, Statement, StatementResult};
+use crate::ast::{
+    Conditional, Query, QueryParams, QueryResults, Record, SortMode, Statement, StatementResult,
+};
 use crate::runner::{recreate_test_database, RunOptions, TestScript};
 
 /// Default value for [`Seed::hash_threshold`]
@@ -159,6 +162,28 @@ impl Seed {
 
         let mut tables = vec![];
         let mut records = vec![];
+
+        // If we're running against postgresql and any of our tables' columns have `citext` (or
+        // `citext[]`) as their type, we need to make sure that the `citext` extension exists in the
+        // database. Let's do that as part of the script itself so that generated test scripts can
+        // always be run against fresh pg databases
+        //
+        // TODO: we might want to generalize this for other types which depend on extensions, or
+        // really any other DDL that's necessary for types (enums, maybe?) in the future, but for
+        // now I'm doing it directly because this is the only thing that needs it
+        if generator
+            .tables()
+            .values()
+            .flat_map(|t| t.columns.values())
+            .any(|col| *col.sql_type.innermost_array_type() == SqlType::Citext)
+        {
+            records.push(Record::Statement(Statement {
+                result: StatementResult::Ok,
+                command: "CREATE EXTENSION IF NOT EXISTS citext;".into(),
+                // Readyset doesn't know about `CREATE EXTENSION`
+                conditionals: vec![Conditional::SkipIf("readyset".into())],
+            }))
+        }
 
         for table in generator.tables_mut().values_mut() {
             table.primary_key(); // ensure the table has a primary key
