@@ -430,4 +430,11 @@ mod tests {
         let text_value = bincode::serialize(&DfValue::from(s)).unwrap();
         assert_eq!(text_ref, text_value);
     }
+
+    #[proptest]
+    fn serialize_round_trip(v: DfValue) {
+        let serialized = bincode::serialize(&v).unwrap();
+        let rt = bincode::deserialize::<DfValue>(&serialized).unwrap();
+        assert_eq!(rt, v);
+    }
 }
