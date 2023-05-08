@@ -32,8 +32,8 @@ fn opts() -> Opts {
 
 async fn mysql_eval(expr: &str, conn: &mut Conn) -> DfValue {
     // We currently don't properly support the default mysql case-insensitive collation, so make
-    // sure we change the collation of the database to case-sensitive
-    conn.query_drop("SET NAMES 'utf8mb4' COLLATE 'utf8mb4_bin'")
+    // sure we change the collation of the database to be case-sensitive and respect padding
+    conn.query_drop("SET NAMES 'utf8mb4' COLLATE 'utf8mb4_0900_bin'")
         .await
         .unwrap();
 

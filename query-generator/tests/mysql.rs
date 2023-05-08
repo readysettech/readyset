@@ -28,14 +28,14 @@ async fn mysql_connection() -> mysql_async::Conn {
 
     admin_conn
         .query_drop(format!(
-            "CREATE DATABASE {db_name} CHARACTER SET 'utf8mb4' COLLATE 'utf8mb4_bin'"
+            "CREATE DATABASE {db_name} CHARACTER SET 'utf8mb4' COLLATE 'utf8mb4_0900_bin'"
         ))
         .await
         .unwrap();
 
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
 
-    conn.query_drop("SET NAMES 'utf8mb4' COLLATE 'utf8mb4_bin'")
+    conn.query_drop("SET NAMES 'utf8mb4' COLLATE 'utf8mb4_0900_bin'")
         .await
         .unwrap();
 
