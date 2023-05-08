@@ -2554,6 +2554,10 @@ impl QuerySeed {
             subquery.add_to_query(state, &mut query);
         }
 
+        if query.tables.is_empty() {
+            state.some_table_in_query_mut(&mut query);
+        }
+
         if query.fields.is_empty() {
             let col = column_in_query(state, &mut query);
             query.fields.push(FieldDefinitionExpr::Expr {
