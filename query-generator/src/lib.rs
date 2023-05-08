@@ -615,13 +615,32 @@ impl TableSpec {
     }
 }
 
+/// How to add parameters to the query during generation
+#[derive(Debug, Clone, Copy, Default)]
+pub enum ParameterMode {
+    /// Add positional (`?`) parameters
+    #[default]
+    Positional,
+    /// Add numbered (`$1`, `$2`, ...) parameters
+    Numbered,
+}
+
 #[derive(Debug, Default)]
 pub struct GeneratorState {
     tables: HashMap<TableName, TableSpec>,
     table_name_counter: u32,
+    parameter_mode: ParameterMode,
 }
 
 impl GeneratorState {
+    /// Create a new [`GeneratorState`] with the given mode for adding new parameters
+    pub fn with_parameter_mode(parameter_mode: ParameterMode) -> Self {
+        Self {
+            parameter_mode,
+            ..Default::default()
+        }
+    }
+
     /// Create a new, unique, empty table, and return a mutable reference to that table
     pub fn fresh_table_mut(&mut self) -> &mut TableSpec {
         self.table_name_counter += 1;
@@ -756,6 +775,16 @@ impl<'a> QueryState<'a> {
             parameters: Vec::new(),
             alias_counter: 0,
             value_counter: 0,
+        }
+    }
+
+    /// Returns the next placeholder that will be used according to the configured parameter mode
+    pub fn next_placeholder(&self) -> ItemPlaceholder {
+        match self.gen.parameter_mode {
+            ParameterMode::Positional => ItemPlaceholder::QuestionMark,
+            ParameterMode::Numbered => {
+                ItemPlaceholder::DollarNumber((self.parameters.len() + 1).try_into().unwrap())
+            }
         }
     }
 
@@ -1771,7 +1800,7 @@ impl QueryOperation {
                         op: BinaryOperator::Equal,
                         lhs: Box::new(Expr::Column(col.clone())),
                         rhs: Box::new(Expr::Literal(Literal::Placeholder(
-                            ItemPlaceholder::QuestionMark,
+                            state.next_placeholder(),
                         ))),
                     },
                 );
@@ -1793,7 +1822,7 @@ impl QueryOperation {
                         lhs: Box::new(Expr::Column(col.clone())),
                         op: BinaryOperator::Greater,
                         rhs: Box::new(Expr::Literal(Literal::Placeholder(
-                            ItemPlaceholder::QuestionMark,
+                            state.next_placeholder(),
                         ))),
                     },
                 );
@@ -1825,24 +1854,24 @@ impl QueryOperation {
                         lhs: Box::new(Expr::Column(col.clone())),
                         rhs: InValue::List(
                             (0..*num_values)
-                                .map(|_| {
-                                    Expr::Literal(Literal::Placeholder(
-                                        ItemPlaceholder::QuestionMark,
-                                    ))
+                                .map(|idx| {
+                                    let p = Expr::Literal(Literal::Placeholder(
+                                        state.next_placeholder(),
+                                    ));
+
+                                    state.add_parameter_with_index(
+                                        col.table.clone().unwrap().name.into(),
+                                        col.name.clone().into(),
+                                        idx as _,
+                                    );
+
+                                    p
                                 })
                                 .collect(),
                         ),
                         negated: false,
                     },
                 );
-
-                for idx in 0..*num_values {
-                    state.add_parameter_with_index(
-                        col.table.clone().unwrap().name.into(),
-                        col.name.clone().into(),
-                        idx as _,
-                    )
-                }
             }
             QueryOperation::ProjectBuiltinFunction(bif) => {
                 macro_rules! add_builtin {

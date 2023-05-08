@@ -13,7 +13,7 @@ use nom_sql::{
     parse_query, BinaryOperator, CreateTableStatement, DeleteStatement, Dialect, Expr, SqlQuery,
     SqlType,
 };
-use query_generator::{GeneratorState, QuerySeed};
+use query_generator::{GeneratorState, ParameterMode, QuerySeed};
 
 use crate::ast::{
     Conditional, Query, QueryParams, QueryResults, Record, SortMode, Statement, StatementResult,
@@ -130,7 +130,10 @@ impl Seed {
     where
         I: IntoIterator<Item = QuerySeed>,
     {
-        let mut generator = query_generator::GeneratorState::default();
+        let mut generator = query_generator::GeneratorState::with_parameter_mode(match dialect {
+            Dialect::MySQL => ParameterMode::Positional,
+            Dialect::PostgreSQL => ParameterMode::Numbered,
+        });
         let queries = seeds
             .into_iter()
             .map(|seed| -> anyhow::Result<Query> {
