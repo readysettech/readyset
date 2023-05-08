@@ -405,12 +405,6 @@ impl NonRepeatingGenerator {
 }
 
 /// Generate a constant value with the given [`SqlType`]
-///
-/// The following SqlTypes do not have a representation as a [`DfValue`] and will panic if passed:
-///
-/// - [`SqlType::Date`]
-/// - [`SqlType::Enum`]
-/// - [`SqlType::Bool`]
 pub fn value_of_type(typ: &SqlType) -> DfValue {
     match typ {
         SqlType::Char(_)
@@ -478,12 +472,6 @@ pub fn value_of_type(typ: &SqlType) -> DfValue {
 
 /// Generate a random value with the given [`SqlType`]. The length of the value
 /// is pulled from a uniform distribution over the set of possible ranges.
-///
-/// The following SqlTypes do not have a representation as a [`DfValue`] and will panic if passed:
-///
-/// - [`SqlType::Date`]
-/// - [`SqlType::Enum`]
-/// - [`SqlType::Bool`]
 pub fn random_value_of_type<R>(typ: &SqlType, mut rng: R) -> DfValue
 where
     R: RngCore,
@@ -629,12 +617,6 @@ fn uniform_random_value(min: &DfValue, max: &DfValue) -> DfValue {
 /// `idx`.
 ///
 /// This is an injective function (from `(idx, typ)` to the resultant [`DfValue`]).
-///
-/// The following SqlTypes do not have a representation as a [`DfValue`] and will panic if passed:
-///
-/// - [`SqlType::Date`]
-/// - [`SqlType::Enum`]
-/// - [`SqlType::Bool`]
 pub fn unique_value_of_type(typ: &SqlType, idx: u32) -> DfValue {
     let clamp_digits = |prec: u32| {
         10u64
