@@ -656,7 +656,8 @@ pub fn unique_value_of_type(typ: &SqlType, idx: u32) -> DfValue {
         | SqlType::Text
         | SqlType::Citext
         | SqlType::Binary(_)
-        | SqlType::VarBinary(_) => idx.to_string().into(),
+        | SqlType::VarBinary(_)
+        | SqlType::ByteArray => idx.to_string().into(),
         SqlType::VarChar(Some(len)) | SqlType::Char(Some(len)) => {
             let s = idx.to_string();
             (&s[..min(s.len(), *len as usize)]).into()
@@ -693,7 +694,6 @@ pub fn unique_value_of_type(typ: &SqlType, idx: u32) -> DfValue {
         }
         SqlType::Enum(_) => unimplemented!(),
         SqlType::Bool => unimplemented!(),
-        SqlType::ByteArray => unimplemented!(),
         SqlType::Time => (NaiveTime::from_hms(0, 0, 0) + Duration::seconds(idx as _)).into(),
         SqlType::Json | SqlType::Jsonb => DfValue::from(format!("{{\"k\": {}}}", idx)),
         SqlType::MacAddr => {
