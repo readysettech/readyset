@@ -39,7 +39,7 @@ pub const DATE_FORMAT: &str = "%Y-%m-%d";
 ///
 /// Sadly the way chrono implements `DateTime<Tz>` occupies at least 16 bytes, and therefore
 /// overflows DfValue. So this type internally stores a [`NaiveDateTime`] with a 3 byte
-/// of extra data. Since 3 bytes allow us to store 24 bytes, this is how we use them:
+/// of extra data. Since 3 bytes allow us to store 24 bits, this is how we use them:
 ///
 /// 17 bits for the timezone offset (0 to 86_400)
 /// 1 bit to signify negative offset
@@ -350,7 +350,11 @@ impl TimestampTz {
                 ts.set_subsecond_digits(subsecond_digits as u8);
                 Ok(DfValue::TimestampTz(ts))
             }
-            DfType::Date => Ok(DfValue::TimestampTz(self.to_chrono().date().into())),
+            DfType::Date => Ok(if self.has_timezone() {
+                DfValue::TimestampTz(self.to_chrono().date().into())
+            } else {
+                DfValue::TimestampTz(self.to_chrono().date_naive().into())
+            }),
             // TODO(ENG-1833): Use `subsecond_digits` value.
             DfType::Time { .. } => Ok(self.to_chrono().naive_local().time().into()),
 

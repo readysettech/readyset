@@ -1,0 +1,18 @@
+statement ok
+CREATE TABLE `table_1` (`column_2` INT, `column_1` DATE, PRIMARY KEY (`column_2`))
+
+
+statement ok
+INSERT INTO `table_1` (`column_2`, `column_1`) VALUES (0, '2020-01-01')
+
+onlyif readyset
+statement ok
+create cache from SELECT dayofweek(`table_1`.`column_1`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` = ?)
+
+graphviz
+
+query  rowsort
+SELECT count(*) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` = ?)
+? = 2020-01-01 00:00:00
+----
+1
