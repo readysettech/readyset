@@ -237,7 +237,7 @@ impl<'a> TryFrom<Value<'a>> for NaiveDateTime {
     type Error = MsqlSrvError;
     fn try_from(val: Value<'a>) -> Result<NaiveDateTime, Self::Error> {
         if let ValueInner::Datetime(mut v) = val.0 {
-            if !(v.len() == 7 || v.len() == 11) {
+            if !(v.len() == 4 || v.len() == 7 || v.len() == 11) {
                 return Err(MsqlSrvError::InvalidDatetime);
             }
             let d = NaiveDate::from_ymd(
@@ -246,15 +246,19 @@ impl<'a> TryFrom<Value<'a>> for NaiveDateTime {
                 u32::from(v.read_u8()?),
             );
 
+            if v.is_empty() {
+                return Ok(d.and_hms(0, 0, 0));
+            }
+
             let h = u32::from(v.read_u8()?);
             let m = u32::from(v.read_u8()?);
             let s = u32::from(v.read_u8()?);
 
-            if v.len() == 11 {
+            if v.is_empty() {
+                Ok(d.and_hms(h, m, s))
+            } else {
                 let us = v.read_u32::<LittleEndian>()?;
                 Ok(d.and_hms_micro(h, m, s, us))
-            } else {
-                Ok(d.and_hms(h, m, s))
             }
         } else {
             Err(MsqlSrvError::InvalidConversion {
@@ -333,13 +337,13 @@ mod tests {
     use std::convert::{TryFrom, TryInto};
     use std::time;
 
-    use chrono::{self, TimeZone};
+    use chrono::{self, NaiveDate, NaiveDateTime, TimeZone};
     use mysql_time::MySqlTime;
 
     use super::Value;
     use crate::myc::io::{ParseBuf, WriteMysqlExt};
     use crate::myc::proto::MySerialize;
-    use crate::{myc, Column, ColumnFlags, ColumnType};
+    use crate::{myc, Column, ColumnFlags, ColumnType, ValueInner};
 
     macro_rules! rt {
         ($name:ident, $t:ty, $v:expr, $ct:expr) => {
@@ -538,4 +542,11 @@ mod tests {
         ColumnType::MYSQL_TYPE_BLOB
     );
     rt!(string, &str, "foobar", ColumnType::MYSQL_TYPE_STRING);
+
+    #[test]
+    fn naive_date_time_midnight() {
+        let val = Value(ValueInner::Datetime(&[228, 7, 1, 1]));
+        let res = NaiveDateTime::try_from(val).unwrap();
+        assert_eq!(res, NaiveDate::from_ymd(2020, 1, 1).and_hms(0, 0, 0))
+    }
 }
