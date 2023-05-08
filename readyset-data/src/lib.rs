@@ -653,13 +653,17 @@ impl DfValue {
     /// `serialize(d1.transform_for_serialized_key()) ==
     /// serialize(d2.transform_for_serialized_key())`, which is not necessarily the case for eg
     /// `serialize(d1) == serialize(d2)`.
+    #[inline]
     pub fn transform_for_serialized_key(&self) -> Cow<Self> {
         match self.as_str_and_collation() {
             Some((s, collation)) => match collation.normalize(s) {
                 Cow::Borrowed(_) => Cow::Borrowed(self),
                 Cow::Owned(s) => Cow::Owned(s.into()),
             },
-            None => Cow::Borrowed(self),
+            None => match self {
+                DfValue::Float(f) => Cow::Owned((*f as f64).try_into().unwrap()),
+                _ => Cow::Borrowed(self),
+            },
         }
     }
 

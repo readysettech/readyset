@@ -1,0 +1,18 @@
+statement ok
+create table t1 (id int, val float);
+
+statement ok
+insert into t1 (id, val) values (1, -0.0), (1, 8.99);
+
+statement ok
+create table t2 (id int, val double);
+
+statement ok
+insert into t2 (id, val) values (2, -0.0), (3, 8.99);
+
+query II nosort
+select t1.id, t2.id from t1 join t2 on t1.val = t2.val where t1.id = ?;
+? = 1
+----
+1
+2
