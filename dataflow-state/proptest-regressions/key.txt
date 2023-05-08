@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 9fdc21001a4a4eae01d80b10fc145596341f20fff2937ab385e04cfd1c90c3a9 # shrinks to input = _SinglePointKeySerializeInjectiveArgs { v1: Double(-0.0), v2: Float(-0.0) }

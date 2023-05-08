@@ -334,6 +334,7 @@ impl RangeKey {
 #[cfg(test)]
 mod tests {
     use readyset_data::Collation;
+    use test_strategy::proptest;
 
     use super::*;
 
@@ -388,5 +389,15 @@ mod tests {
             ])))
             .unwrap(),
         );
+    }
+
+    #[proptest]
+    fn single_point_key_serialize_injective(v1: DfValue, v2: DfValue) {
+        let k1 = PointKey::Single(v1);
+        let k2 = PointKey::Single(v2);
+        assert_eq!(
+            k1 == k2,
+            bincode::serialize(&k1).unwrap() == bincode::serialize(&k2).unwrap()
+        )
     }
 }
