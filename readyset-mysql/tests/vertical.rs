@@ -26,21 +26,25 @@
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::convert::{TryFrom, TryInto};
-use std::ops::Range;
-use std::{cmp, env, iter, mem};
+use std::convert::TryFrom;
+use std::fmt::Debug;
+use std::marker::PhantomData;
+use std::time::Duration;
+use std::{cmp, env};
 
+use async_trait::async_trait;
 use itertools::Itertools;
 use mysql_async::prelude::Queryable;
+use mysql_async::Conn;
 use mysql_common::value::Value;
-use paste::paste;
 use proptest::prelude::*;
 use proptest::sample::select;
-use proptest::test_runner::TestCaseResult;
 use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
 use readyset_client_test_helpers::TestBuilder;
 use readyset_data::DfValue;
-use test_strategy::proptest;
+use readyset_server::Handle;
+use readyset_util::shutdown::ShutdownSender;
+use stateful_proptest::{ModelState, StatefulProptestConfig};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Operation {
@@ -48,16 +52,16 @@ enum Operation {
         key: Vec<DfValue>,
     },
     Insert {
-        table: String,
+        table: &'static str,
         row: Vec<DfValue>,
     },
     Update {
-        table: String,
+        table: &'static str,
         old_row: Vec<DfValue>,
         new_row: Vec<DfValue>,
     },
     Delete {
-        table: String,
+        table: &'static str,
         row: Vec<DfValue>,
     },
     /* TODO: coming soon
@@ -120,214 +124,230 @@ impl RowStrategy {
     }
 }
 
-pub struct OperationParameters<'a> {
-    already_generated: &'a [Operation],
-
-    /// table name, index in table
-    key_columns: Vec<(&'a str, usize)>,
-
-    /// Added on to the end of every key
-    extra_key_strategies: Vec<BoxedStrategy<DfValue>>,
-
-    row_strategies: HashMap<&'static str, RowStrategy>,
+#[derive(Clone, Debug, Default)]
+struct DataflowModelState<T>
+where
+    T: TestDef + 'static,
+{
+    rows: HashMap<&'static str, Vec<Vec<DfValue>>>,
+    _test_def: PhantomData<T>,
 }
 
-impl<'a> OperationParameters<'a> {
-    /// Return an iterator over all the query lookup keys that match rows previously inserted into
-    /// the table
-    fn existing_keys(&'a self) -> impl Iterator<Item = Vec<DfValue>> + 'a {
-        let mut rows: HashMap<&'a str, Vec<&'a Vec<DfValue>>> = HashMap::new();
-        for op in self.already_generated {
-            match op {
-                Operation::Insert { table, row } => {
-                    rows.entry(table).or_default().push(row);
-                }
-                Operation::Update {
-                    table,
-                    old_row,
-                    new_row,
-                } => {
-                    let rows = rows.entry(table).or_default();
-                    rows.retain(|r| *r != old_row);
-                    rows.push(new_row);
-                }
-                Operation::Delete { table, row } => {
-                    rows.entry(table).or_default().retain(|r| *r != row);
-                }
-                Operation::Query { .. } => {}
-            }
-        }
+struct RunContext {
+    mysql: Conn,
+    readyset: Conn,
+    shutdown_tx: Option<ShutdownSender>, // Needs to be Option so we can move it out of the struct
+    _handle: Handle,
+}
 
-        rows.into_iter()
-            .map(|(tbl, rows)| rows.into_iter().map(|r| (tbl, r)).collect::<Vec<_>>())
+impl<'a, T> DataflowModelState<T>
+where
+    T: TestDef,
+{
+    /// Return an iterator over query lookup keys composed of all possible combination of lookup
+    /// keys from existing rows in tables.
+    fn existing_keys(&'a self) -> impl Iterator<Item = Vec<DfValue>> + 'a {
+        // The reason we use [`multi_cartesian_product`] is that we're trying to combine different
+        // rows from different tables to create (potentially) new keys. Keys created in this
+        // way may or may not actually return any results when queried on, but by trying to
+        // specifically query using keys based off of actual rows from existing tables, we
+        // increase our chances of getting interesting query results when using those keys.
+        self.rows
+            .iter()
+            .map(|(tbl, rows)| rows.iter().map(|r| (tbl, r)).collect::<Vec<_>>())
             .multi_cartesian_product()
-            .filter_map(move |vals| {
-                self.key_columns
+            .filter_map(|vals| {
+                T::key_columns()
                     .iter()
-                    .map(|(tbl, idx)| Some(vals.iter().find(|(t, _)| *tbl == *t)?.1[*idx].clone()))
+                    .map(|(tbl, idx)| Some(vals.iter().find(|(t, _)| tbl == *t)?.1[*idx].clone()))
                     .collect::<Option<Vec<_>>>()
             })
     }
 
-    /// If there are any rows previously inserted into the table, return a proptest [`Strategy`] for
-    /// generating one of those keys, otherwise return None
-    fn existing_key_strategy(&'a self) -> Option<impl Strategy<Value = Vec<DfValue>> + 'static> {
-        let keys = self.existing_keys().collect::<Vec<_>>();
-        if keys.is_empty() {
-            return None;
-        }
-
-        let extra_key_strategies = self.extra_key_strategies.clone();
-        Some(select(keys).prop_flat_map(move |key| {
-            key.into_iter()
-                .map(|val| Just(val).boxed())
-                .chain(extra_key_strategies.clone())
-                .collect::<Vec<_>>()
-        }))
-    }
-
-    fn existing_rows(&'a self) -> impl Iterator<Item = (String, Vec<DfValue>)> + 'a {
-        self.already_generated.iter().filter_map(|op| match op {
-            Operation::Insert { table, row } => Some((table.clone(), row.clone())),
-            _ => None,
-        })
-    }
-
     /// Return a proptest [`Strategy`] for generating new keys for the query
-    fn key_strategy(&'a self) -> impl Strategy<Value = Vec<DfValue>> + 'static {
-        self.key_columns
-            .clone()
+    fn key_strategy(&self) -> impl Strategy<Value = Vec<DfValue>> {
+        T::key_columns()
             .into_iter()
             .map(move |(t, idx)| {
-                self.row_strategies[t]
+                T::row_strategies()[t]
                     .clone()
                     .no_foreign_keys()
                     .expect("foreign key can't be a key_column")
                     .prop_map(move |mut r| r.remove(idx))
                     .boxed()
             })
-            .chain(self.extra_key_strategies.clone())
+            .chain(T::extra_key_strategies())
             .collect::<Vec<_>>()
     }
 }
 
-impl Operation {
-    /// Return a proptest [`Strategy`] for generating the *first* [`Operation`] in the sequence (eg
-    /// not dependent on previous operations)
-    fn first_arbitrary(
-        key_columns: Vec<(&str, usize)>,
-        extra_key_strategies: Vec<BoxedStrategy<DfValue>>,
-        row_strategies: HashMap<&'static str, RowStrategy>,
-    ) -> impl Strategy<Value = Self> {
-        Self::arbitrary(OperationParameters {
-            already_generated: &[],
-            key_columns,
-            extra_key_strategies,
-            row_strategies,
-        })
-    }
+#[async_trait(?Send)]
+impl<T> ModelState for DataflowModelState<T>
+where
+    T: TestDef,
+{
+    type Operation = Operation;
+    type RunContext = RunContext;
+    type OperationStrategy = BoxedStrategy<Operation>;
 
-    /// Return a proptest [`Strategy`] for generating all but the first [`Operation`], based on the
-    /// previously generated operations
-    fn arbitrary(params: OperationParameters) -> impl Strategy<Value = Self> + 'static {
-        use Operation::*;
+    fn op_generators(&self) -> Vec<Self::OperationStrategy> {
+        let mut res = vec![];
 
-        let no_fk_strategies = params
-            .row_strategies
+        // We can always insert a row into a table or query a randomly generated key, so include
+        // those two strategies no matter what. Later in this function we may conditionally add more
+        // strategies.
+        let no_fk_strategies = T::row_strategies()
             .iter()
             .filter_map(|(k, v)| Some((*k, v.clone().no_foreign_keys()?)))
             .collect::<Vec<_>>();
-        let non_key_ops = prop_oneof![
-            params.key_strategy().prop_map(|key| Query { key }),
-            select(no_fk_strategies).prop_flat_map(|(table, row_strat)| row_strat.prop_map(
-                move |row| Insert {
-                    table: table.to_string(),
-                    row,
-                }
-            ))
-        ];
 
-        if let Some(existing_key_strategy) = params.existing_key_strategy() {
-            let key_ops = prop_oneof![
-                non_key_ops,
-                existing_key_strategy.prop_map(|key| Query { key })
-            ];
+        let insert_strategy = select(no_fk_strategies)
+            .prop_flat_map(|(table, row_strat)| {
+                row_strat.prop_map(move |row| Operation::Insert { table, row })
+            })
+            .boxed();
 
-            let rows = params.existing_rows().collect::<Vec<_>>();
-            if rows.is_empty() {
-                key_ops.boxed()
-            } else {
-                let fk_rows = rows.clone();
-                let fill_foreign_keys = move |row_strategy: RowStrategy| {
-                    row_strategy.fill_foreign_keys(|table, col| {
-                        let vals = fk_rows
-                            .iter()
-                            .filter(|(t, _)| table == t)
-                            .map(|(_, r)| r[col].clone())
-                            .collect::<Vec<_>>();
-                        if vals.is_empty() {
-                            None
-                        } else {
-                            Some(select(vals))
-                        }
-                    })
-                };
+        res.push(insert_strategy);
 
-                let mk_fk_insert = {
-                    let fk_tables = params
-                        .row_strategies
+        let random_key_query_strat = self
+            .key_strategy()
+            .prop_map(|key| Operation::Query { key })
+            .boxed();
+
+        res.push(random_key_query_strat);
+
+        let existing_keys = self.existing_keys().collect::<Vec<_>>();
+
+        if !existing_keys.is_empty() {
+            // If there are any existing keys we can use to generate queries on those keys, do so:
+            let extra_key_strategies = T::extra_key_strategies();
+            let existing_key_query_strat = select(existing_keys)
+                .prop_flat_map(move |key| {
+                    key.into_iter()
+                        .map(|val| Just(val).boxed())
+                        .chain(extra_key_strategies.clone())
+                        .collect::<Vec<_>>()
+                })
+                .prop_map(|key| Operation::Query { key })
+                .boxed();
+
+            res.push(existing_key_query_strat);
+        }
+
+        let rows_is_empty = self.rows.values().all(|rows| rows.is_empty());
+        if !rows_is_empty {
+            let rows = self
+                .rows
+                .iter()
+                .flat_map(|(table, rows)| rows.iter().map(|r| (*table, r.clone())))
+                .collect::<Vec<_>>();
+            let rows2 = rows.clone(); // Cloned for move into closure
+            let fill_foreign_keys = move |row_strategy: RowStrategy| {
+                row_strategy.fill_foreign_keys(|table, col| {
+                    let vals = rows2
                         .iter()
-                        .filter(|(_, v)| v.has_foreign_keys())
-                        .map(|(t, v)| (*t, v.clone()))
+                        .filter(|(t, _)| table == *t)
+                        .map(|(_, r)| r[col].clone())
                         .collect::<Vec<_>>();
-                    if fk_tables.is_empty() {
+                    if vals.is_empty() {
                         None
                     } else {
-                        let fill_foreign_keys = fill_foreign_keys.clone();
-                        Some(
-                            select(fk_tables)
-                                .prop_filter_map(
-                                    "No previously-generated rows",
-                                    move |(table, row_strat)| {
-                                        Some(fill_foreign_keys(row_strat)?.prop_map(move |row| {
-                                            Insert {
-                                                table: table.to_owned(),
-                                                row,
-                                            }
-                                        }))
-                                    },
-                                )
-                                .prop_flat_map(|s| s),
-                        )
+                        Some(select(vals))
                     }
-                };
+                })
+            };
 
-                let row_strategies = params.row_strategies.clone();
-                let mk_update = select(rows.clone()).prop_flat_map(move |(table, old_row)| {
-                    (fill_foreign_keys(row_strategies[table.as_str()].clone())
+            let fk_tables = T::row_strategies()
+                .iter()
+                .filter(|(_, v)| v.has_foreign_keys())
+                .map(|(t, v)| (*t, v.clone()))
+                .collect::<Vec<_>>();
+            let fill_foreign_keys2 = fill_foreign_keys.clone(); // Cloned for move into closure
+            if !fk_tables.is_empty() {
+                let mk_fk_insert = select(fk_tables)
+                    .prop_filter_map("No previously-generated rows", move |(table, row_strat)| {
+                        Some(
+                            fill_foreign_keys2(row_strat)?
+                                .prop_map(move |row| Operation::Insert { table, row }),
+                        )
+                    })
+                    .prop_flat_map(|s| s)
+                    .boxed();
+                res.push(mk_fk_insert);
+            }
+
+            let mk_update = select(rows.clone())
+                .prop_flat_map(move |(table, old_row)| {
+                    (fill_foreign_keys(T::row_strategies()[table].clone())
                         .unwrap()
                         .into_iter()
                         .zip(old_row.clone())
                         .map(|(new_val, old_val)| prop_oneof![Just(old_val), new_val])
                         .collect::<Vec<_>>())
                     .prop_filter_map("No-op update", move |new_row| {
-                        (old_row != new_row).then(|| Update {
-                            table: table.clone(),
+                        (*old_row != new_row).then(|| Operation::Update {
+                            table,
                             old_row: old_row.clone(),
                             new_row,
                         })
                     })
-                });
-                let mk_delete = select(rows).prop_map(move |(table, row)| Delete { table, row });
-                if let Some(mk_fk_insert) = mk_fk_insert {
-                    prop_oneof![key_ops, mk_fk_insert, mk_update, mk_delete].boxed()
-                } else {
-                    prop_oneof![key_ops, mk_update, mk_delete].boxed()
-                }
-            }
-        } else {
-            non_key_ops.boxed()
+                })
+                .boxed();
+
+            res.push(mk_update);
+
+            let mk_delete = select(rows)
+                .prop_map(move |(table, row)| Operation::Delete { table, row })
+                .boxed();
+
+            res.push(mk_delete);
         }
+
+        res
+    }
+
+    fn preconditions_met(&self, _op: &Self::Operation) -> bool {
+        true // TODO
+    }
+
+    fn next_state(&mut self, op: &Self::Operation) {
+        match op {
+            Operation::Insert { table, row } => {
+                let table_rows = self.rows.entry(table).or_default();
+                table_rows.push(row.clone())
+            }
+            Operation::Update {
+                table,
+                old_row,
+                new_row,
+            } => {
+                let table_rows = self.rows.entry(table).or_default();
+                let old_state_row = table_rows.iter_mut().find(|r| *r == old_row).unwrap();
+                *old_state_row = new_row.clone();
+            }
+            Operation::Delete { table, row } => {
+                let table_rows = self.rows.entry(table).or_default();
+                let row_pos = table_rows.iter().position(|r| r == row).unwrap();
+                table_rows.swap_remove(row_pos);
+            }
+            Operation::Query { .. } => (),
+        }
+    }
+
+    async fn init_test_run(&self) -> Self::RunContext {
+        self.do_init_test_run().await
+    }
+
+    async fn run_op(&self, op: &Self::Operation, ctxt: &mut Self::RunContext) {
+        self.do_run_op(op, ctxt).await
+    }
+
+    async fn check_postconditions(&self, _ctxt: &mut Self::RunContext) {
+        // No universal postconditions defined for this test
+    }
+
+    async fn clean_up_test_run(&self, ctxt: &mut RunContext) {
+        self.do_clean_up_test_run(ctxt).await
     }
 }
 
@@ -463,7 +483,7 @@ impl Operation {
                 old_row,
                 new_row,
             } => {
-                let table = &tables[table_name.as_str()];
+                let table = &tables[table_name];
                 let updates = table
                     .columns
                     .iter()
@@ -499,7 +519,7 @@ impl Operation {
                 table: table_name,
                 row,
             } => {
-                let table = &tables[table_name.as_str()];
+                let table = &tables[table_name];
                 Ok(conn
                     .exec_drop(
                         format!(
@@ -516,65 +536,14 @@ impl Operation {
     }
 }
 
-#[derive(Default)]
-struct TestOptions {
-    /// Added on to the end of every key
-    extra_key_strategies: Vec<BoxedStrategy<DfValue>>,
-}
+impl<T> DataflowModelState<T>
+where
+    T: TestDef,
+{
+    // TODO inline this into the ModelState impl in the next commit
+    async fn do_init_test_run(&self) -> RunContext {
+        let tables = T::test_tables();
 
-struct OperationsParams {
-    size_range: Range<usize>,
-    key_columns: Vec<(&'static str, usize)>,
-    row_strategies: HashMap<&'static str, RowStrategy>,
-    options: TestOptions,
-}
-
-#[derive(Default, Debug, Clone)]
-struct Operations(Vec<Operation>);
-
-impl Operations {
-    fn arbitrary(mut params: OperationsParams) -> impl Strategy<Value = Self> {
-        let key_columns = params.key_columns;
-        let row_strategies = mem::take(&mut params.row_strategies);
-        let extra_key_strategies = mem::take(&mut params.options.extra_key_strategies);
-        params.size_range.prop_flat_map(move |len| {
-            if len == 0 {
-                return Just(Default::default()).boxed();
-            }
-
-            let mut res = Operation::first_arbitrary(
-                key_columns.clone(),
-                extra_key_strategies.clone(),
-                row_strategies.clone(),
-            )
-            .prop_map(|op| vec![op])
-            .boxed();
-            for _ in 0..len {
-                let row_strategies = row_strategies.clone();
-                let extra_key_strategies = extra_key_strategies.clone();
-                let key_columns = key_columns.clone();
-                res = res
-                    .prop_flat_map(move |ops| {
-                        let op_params = OperationParameters {
-                            already_generated: &ops,
-                            key_columns: key_columns.clone(),
-                            extra_key_strategies: extra_key_strategies.clone(),
-                            row_strategies: row_strategies.clone(),
-                        };
-
-                        Operation::arbitrary(op_params).prop_map(move |op| {
-                            ops.clone().into_iter().chain(iter::once(op)).collect()
-                        })
-                    })
-                    .boxed();
-            }
-            res.prop_map(Operations).boxed()
-        })
-    }
-}
-
-impl Operations {
-    async fn run(self, query: &str, tables: &HashMap<&str, Table>) -> TestCaseResult {
         readyset_tracing::init_test_logging();
         readyset_client_test_helpers::mysql_helpers::recreate_database("vertical").await;
         let mut mysql = mysql_async::Conn::new(
@@ -600,7 +569,7 @@ impl Operations {
             .await
             .unwrap();
 
-        let (opts, _handle, shutdown_tx) = TestBuilder::default().build::<MySQLAdapter>().await;
+        let (opts, handle, shutdown_tx) = TestBuilder::default().build::<MySQLAdapter>().await;
         let mut readyset = mysql_async::Conn::new(opts).await.unwrap();
 
         for table in tables.values() {
@@ -608,25 +577,44 @@ impl Operations {
             readyset.query_drop(table.create_statement).await.unwrap();
         }
 
-        for op in self.0 {
-            let mysql_res = op.run(&mut mysql, query, tables).await?;
-            // skip tests where mysql returns an error for the operations
-            prop_assume!(
-                !mysql_res.is_err(),
-                "MySQL returned an error: {}",
-                mysql_res.err().unwrap()
-            );
-
-            let readyset_res = op.run(&mut readyset, query, tables).await?;
-            assert_eq!(mysql_res, readyset_res);
+        RunContext {
+            mysql,
+            readyset,
+            _handle: handle,
+            shutdown_tx: Some(shutdown_tx),
         }
+    }
 
-        shutdown_tx.shutdown().await;
+    // TODO inline this into the ModelState impl in the next commit
+    async fn do_run_op(&self, op: &Operation, ctxt: &mut RunContext) {
+        let query = T::test_query();
+        let tables = T::test_tables();
 
-        Ok(())
+        let RunContext {
+            mysql, readyset, ..
+        } = ctxt;
+
+        let mysql_res = op.run(mysql, query, &tables).await.unwrap();
+
+        /* TODO: figure out a way to reintroduce this logic, if needed:
+        // skip tests where mysql returns an error for the operations
+        prop_assume!(
+            !mysql_res.is_err(),
+            "MySQL returned an error: {}",
+            mysql_res.err().unwrap()
+        );
+        */
+
+        let readyset_res = op.run(readyset, query, &tables).await.unwrap();
+        assert_eq!(mysql_res, readyset_res);
+    }
+
+    async fn do_clean_up_test_run(&self, ctxt: &mut RunContext) {
+        ctxt.shutdown_tx.take().unwrap().shutdown().await
     }
 }
 
+/*
 macro_rules! vertical_tests {
     ($(#[$meta:meta])* $name:ident($($params: tt)*); $($rest: tt)*) => {
         vertical_tests!(@test $(#[$meta])* $name($($params)*));
@@ -744,7 +732,68 @@ macro_rules! vertical_tests {
 
     () => {};
 }
+*/
 
+trait TestDef: Clone + Debug + Default {
+    fn test_query() -> &'static str;
+    fn test_tables() -> HashMap<&'static str, Table>;
+
+    fn key_columns() -> Vec<(&'static str, usize)>;
+    fn row_strategies() -> HashMap<&'static str, RowStrategy>;
+    fn extra_key_strategies() -> Vec<BoxedStrategy<DfValue>>;
+}
+
+#[derive(Clone, Debug, Default)]
+struct SimplePointLookupTestDef {}
+impl TestDef for SimplePointLookupTestDef {
+    fn test_query() -> &'static str {
+        "SELECT id, name FROM users WHERE id = ?"
+    }
+
+    fn test_tables() -> HashMap<&'static str, Table> {
+        HashMap::from([(
+            "users",
+            Table {
+                name: "users",
+                create_statement: "CREATE TABLE users (id INT, name TEXT, PRIMARY KEY (id))",
+                primary_key: 0,
+                columns: vec!["id", "name"],
+            },
+        )])
+    }
+
+    fn key_columns() -> Vec<(&'static str, usize)> {
+        vec![("users", 0)]
+    }
+
+    fn row_strategies() -> HashMap<&'static str, RowStrategy> {
+        HashMap::from([("users", {
+            RowStrategy(vec![
+                (ColumnStrategy::Value(any::<i32>().prop_map_into::<DfValue>().boxed())),
+                (ColumnStrategy::Value(any::<String>().prop_map_into::<DfValue>().boxed())),
+            ])
+        })])
+    }
+
+    fn extra_key_strategies() -> Vec<BoxedStrategy<DfValue>> {
+        vec![]
+    }
+}
+
+#[test]
+#[serial_test::serial]
+#[cfg_attr(not(feature = "vertical_tests"), ignore)]
+fn simple_point_lookup() {
+    let config = StatefulProptestConfig {
+        min_ops: 1,
+        max_ops: 100,
+        test_case_timeout: Duration::from_secs(60),
+    };
+
+    stateful_proptest::test::<DataflowModelState<SimplePointLookupTestDef>>(config);
+}
+
+/*
 vertical_tests! {
     simple_point_lookup(
         "SELECT id, name FROM users WHERE id = ?";
@@ -882,3 +931,4 @@ vertical_tests! {
         )
     );
 }
+*/

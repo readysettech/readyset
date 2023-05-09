@@ -4761,6 +4761,7 @@ dependencies = [
  "readyset-util",
  "readyset-version",
  "serial_test",
+ "stateful-proptest",
  "streaming-iterator",
  "test-strategy",
  "test-utils",
