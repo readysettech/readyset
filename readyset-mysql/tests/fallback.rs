@@ -51,7 +51,6 @@ async fn create_table() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
-#[ignore] // alter table not supported yet
 async fn add_column() {
     let (opts, _handle, shutdown_tx) = setup().await;
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();

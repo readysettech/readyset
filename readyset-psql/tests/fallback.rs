@@ -185,7 +185,6 @@ async fn unsupported_query_ad_hoc() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
-#[ignore] // needs proper detection of reads vs writes through fallback
 async fn prepare_execute_fallback() {
     let (config, _handle, shutdown_tx) = setup().await;
     let client = connect(config).await;
