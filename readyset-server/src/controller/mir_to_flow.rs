@@ -664,30 +664,24 @@ fn make_join_node(
     let left_cols = mig.dataflow_state.ingredients[left_na.address()].columns();
     let right_cols = mig.dataflow_state.ingredients[right_na.address()].columns();
 
-    let mut on_idxs = Vec::with_capacity(on.len());
+    let mut on_idxs = on
+        .iter()
+        .map(|(left_col, right_col)| {
+            Ok((
+                graph.column_id_for_column(left, left_col)?,
+                graph.column_id_for_column(right, right_col)?,
+            ))
+        })
+        .collect::<ReadySetResult<Vec<_>>>()?;
+
     let mut emit = Vec::with_capacity(proj_cols.len());
     let mut cols = Vec::with_capacity(proj_cols.len());
     for c in proj_cols {
-        if let Some(join_key_idx) = on.iter().position(|(left_col, _)| left_col == c) {
-            // Column is a join key - find its index in the left and the index of the corresponding
-            // column in the right, then add it to the join key, and project it from the left
+        if let Ok(l) = graph.column_id_for_column(left, c) {
+            // Column comes from the left.
             //
-            // We check for columns in the left first here because we have to pick a side, but we
-            // don't have to - we could check for the right first if we wanted to
-            let l = graph
-                .column_id_for_column(left, c)
-                .map_err(|_| internal_err!("Left join column must exist in left parent"))?;
-            let r = graph.column_id_for_column(right, &on[join_key_idx].1)?;
-            on_idxs.push((l, r));
-            emit.push((Side::Left, l));
-            cols.push(
-                left_cols
-                    .get(l)
-                    .cloned()
-                    .ok_or_else(|| internal_err!("Invalid index"))?,
-            );
-        } else if let Ok(l) = graph.column_id_for_column(left, c) {
-            // Column isn't a join key, and comes from the left
+            // Note that if it's a join key it might come from the right *as well*, but that's fine
+            // - we only need to project from one side (it's equal, by definition)
             emit.push((Side::Left, l));
             cols.push(
                 left_cols
@@ -696,7 +690,7 @@ fn make_join_node(
                     .ok_or_else(|| internal_err!("Invalid index"))?,
             );
         } else if let Ok(r) = graph.column_id_for_column(right, c) {
-            // Column isn't a join key, and comes from the right
+            // Column comes from the right
             emit.push((Side::Right, r));
             cols.push(
                 right_cols
