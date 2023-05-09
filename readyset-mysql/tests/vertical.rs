@@ -335,11 +335,70 @@ where
     }
 
     async fn init_test_run(&self) -> Self::RunContext {
-        self.do_init_test_run().await
+        let tables = T::test_tables();
+
+        readyset_tracing::init_test_logging();
+        readyset_client_test_helpers::mysql_helpers::recreate_database("vertical").await;
+        let mut mysql = mysql_async::Conn::new(
+            mysql_async::OptsBuilder::default()
+                .user(Some("root"))
+                .pass(Some("noria"))
+                .ip_or_hostname(env::var("MYSQL_HOST").unwrap_or_else(|_| "127.0.0.1".into()))
+                .tcp_port(
+                    env::var("MYSQL_TCP_PORT")
+                        .unwrap_or_else(|_| "3306".into())
+                        .parse()
+                        .unwrap(),
+                )
+                .db_name(Some("vertical")),
+        )
+        .await
+        .unwrap();
+
+        mysql
+            .query_drop(
+                "ALTER DATABASE vertical DEFAULT CHARACTER SET utf8mb4 DEFAULT COLLATE utf8mb4_0900_bin",
+            )
+            .await
+            .unwrap();
+
+        let (opts, handle, shutdown_tx) = TestBuilder::default().build::<MySQLAdapter>().await;
+        let mut readyset = mysql_async::Conn::new(opts).await.unwrap();
+
+        for table in tables.values() {
+            mysql.query_drop(table.create_statement).await.unwrap();
+            readyset.query_drop(table.create_statement).await.unwrap();
+        }
+
+        RunContext {
+            mysql,
+            readyset,
+            _handle: handle,
+            shutdown_tx: Some(shutdown_tx),
+        }
     }
 
     async fn run_op(&self, op: &Self::Operation, ctxt: &mut Self::RunContext) {
-        self.do_run_op(op, ctxt).await
+        let query = T::test_query();
+        let tables = T::test_tables();
+
+        let RunContext {
+            mysql, readyset, ..
+        } = ctxt;
+
+        let mysql_res = op.run(mysql, query, &tables).await.unwrap();
+
+        /* TODO: figure out a way to reintroduce this logic, if needed:
+        // skip tests where mysql returns an error for the operations
+        prop_assume!(
+            !mysql_res.is_err(),
+            "MySQL returned an error: {}",
+            mysql_res.err().unwrap()
+        );
+        */
+
+        let readyset_res = op.run(readyset, query, &tables).await.unwrap();
+        assert_eq!(mysql_res, readyset_res);
     }
 
     async fn check_postconditions(&self, _ctxt: &mut Self::RunContext) {
@@ -347,7 +406,7 @@ where
     }
 
     async fn clean_up_test_run(&self, ctxt: &mut RunContext) {
-        self.do_clean_up_test_run(ctxt).await
+        ctxt.shutdown_tx.take().unwrap().shutdown().await
     }
 }
 
@@ -533,84 +592,6 @@ impl Operation {
                     .into())
             }
         }
-    }
-}
-
-impl<T> DataflowModelState<T>
-where
-    T: TestDef,
-{
-    // TODO inline this into the ModelState impl in the next commit
-    async fn do_init_test_run(&self) -> RunContext {
-        let tables = T::test_tables();
-
-        readyset_tracing::init_test_logging();
-        readyset_client_test_helpers::mysql_helpers::recreate_database("vertical").await;
-        let mut mysql = mysql_async::Conn::new(
-            mysql_async::OptsBuilder::default()
-                .user(Some("root"))
-                .pass(Some("noria"))
-                .ip_or_hostname(env::var("MYSQL_HOST").unwrap_or_else(|_| "127.0.0.1".into()))
-                .tcp_port(
-                    env::var("MYSQL_TCP_PORT")
-                        .unwrap_or_else(|_| "3306".into())
-                        .parse()
-                        .unwrap(),
-                )
-                .db_name(Some("vertical")),
-        )
-        .await
-        .unwrap();
-
-        mysql
-            .query_drop(
-                "ALTER DATABASE vertical DEFAULT CHARACTER SET utf8mb4 DEFAULT COLLATE utf8mb4_0900_bin",
-            )
-            .await
-            .unwrap();
-
-        let (opts, handle, shutdown_tx) = TestBuilder::default().build::<MySQLAdapter>().await;
-        let mut readyset = mysql_async::Conn::new(opts).await.unwrap();
-
-        for table in tables.values() {
-            mysql.query_drop(table.create_statement).await.unwrap();
-            readyset.query_drop(table.create_statement).await.unwrap();
-        }
-
-        RunContext {
-            mysql,
-            readyset,
-            _handle: handle,
-            shutdown_tx: Some(shutdown_tx),
-        }
-    }
-
-    // TODO inline this into the ModelState impl in the next commit
-    async fn do_run_op(&self, op: &Operation, ctxt: &mut RunContext) {
-        let query = T::test_query();
-        let tables = T::test_tables();
-
-        let RunContext {
-            mysql, readyset, ..
-        } = ctxt;
-
-        let mysql_res = op.run(mysql, query, &tables).await.unwrap();
-
-        /* TODO: figure out a way to reintroduce this logic, if needed:
-        // skip tests where mysql returns an error for the operations
-        prop_assume!(
-            !mysql_res.is_err(),
-            "MySQL returned an error: {}",
-            mysql_res.err().unwrap()
-        );
-        */
-
-        let readyset_res = op.run(readyset, query, &tables).await.unwrap();
-        assert_eq!(mysql_res, readyset_res);
-    }
-
-    async fn do_clean_up_test_run(&self, ctxt: &mut RunContext) {
-        ctxt.shutdown_tx.take().unwrap().shutdown().await
     }
 }
 
