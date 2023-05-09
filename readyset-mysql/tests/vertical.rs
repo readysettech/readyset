@@ -37,6 +37,7 @@ use itertools::Itertools;
 use mysql_async::prelude::Queryable;
 use mysql_async::Conn;
 use mysql_common::value::Value;
+use paste::paste;
 use proptest::prelude::*;
 use proptest::sample::select;
 use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
@@ -595,7 +596,6 @@ impl Operation {
     }
 }
 
-/*
 macro_rules! vertical_tests {
     ($(#[$meta:meta])* $name:ident($($params: tt)*); $($rest: tt)*) => {
         vertical_tests!(@test $(#[$meta])* $name($($params)*));
@@ -603,38 +603,44 @@ macro_rules! vertical_tests {
     };
 
     // define the test itself
-    (@test $(#[$meta:meta])* $name:ident($query: expr; $options: expr; $($tables: tt)*)) => {
+    (@test $(#[$meta:meta])* $name:ident($query: expr; $extra_key_strategies: expr; $($tables: tt)*)) => {
         paste! {
-        fn [<$name _generate_ops>]() -> impl Strategy<Value = Operations> {
-            let size_range = 1..100; // TODO make configurable
-            let row_strategies = vertical_tests!(@row_strategies $($tables)*);
-            let key_columns = vertical_tests!(@key_columns $($tables)*);
+            #[derive(Clone, Debug, Default)]
+            struct [<$name:camel TestDef>] {}
+            impl TestDef for [<$name:camel TestDef>] {
+                fn test_query() -> &'static str {
+                    $query
+                }
 
-            let params = OperationsParams {
-                size_range,
-                key_columns,
-                row_strategies,
-                options: $options,
-            };
+                fn test_tables() -> HashMap<&'static str, Table> {
+                    vertical_tests!(@tables $($tables)*)
+                }
 
-            Operations::arbitrary(params)
-        }
+                fn key_columns() -> Vec<(&'static str, usize)> {
+                    vertical_tests!(@key_columns $($tables)*)
+                }
 
-        #[proptest]
-        #[serial_test::serial]
-        #[cfg_attr(not(feature = "vertical_tests"), ignore)]
-        $(#[$meta])*
-        fn $name(
-            #[strategy([<$name _generate_ops>]())]
-            operations: Operations
-        ) {
-            let tables = vertical_tests!(@tables $($tables)*);
-            let rt = tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()
-                .unwrap();
-            rt.block_on(operations.run($query, &tables))?;
-        }
+                fn row_strategies() -> HashMap<&'static str, RowStrategy> {
+                    vertical_tests!(@row_strategies $($tables)*)
+                }
+
+                fn extra_key_strategies() -> Vec<BoxedStrategy<DfValue>> {
+                    $extra_key_strategies
+                }
+            }
+
+            #[test]
+            #[serial_test::serial]
+            #[cfg_attr(not(feature = "vertical_tests"), ignore)]
+            fn $name() {
+                let config = StatefulProptestConfig {
+                    min_ops: 1,
+                    max_ops: 100,
+                    test_case_timeout: Duration::from_secs(60),
+                };
+
+                stateful_proptest::test::<DataflowModelState<[<$name:camel TestDef>]>>(config);
+            }
         }
     };
     (@test $(#[$meta:meta])* $name:ident($query: expr; $($tables: tt)*)) => {
@@ -713,7 +719,6 @@ macro_rules! vertical_tests {
 
     () => {};
 }
-*/
 
 trait TestDef: Clone + Debug + Default {
     fn test_query() -> &'static str;
@@ -724,57 +729,6 @@ trait TestDef: Clone + Debug + Default {
     fn extra_key_strategies() -> Vec<BoxedStrategy<DfValue>>;
 }
 
-#[derive(Clone, Debug, Default)]
-struct SimplePointLookupTestDef {}
-impl TestDef for SimplePointLookupTestDef {
-    fn test_query() -> &'static str {
-        "SELECT id, name FROM users WHERE id = ?"
-    }
-
-    fn test_tables() -> HashMap<&'static str, Table> {
-        HashMap::from([(
-            "users",
-            Table {
-                name: "users",
-                create_statement: "CREATE TABLE users (id INT, name TEXT, PRIMARY KEY (id))",
-                primary_key: 0,
-                columns: vec!["id", "name"],
-            },
-        )])
-    }
-
-    fn key_columns() -> Vec<(&'static str, usize)> {
-        vec![("users", 0)]
-    }
-
-    fn row_strategies() -> HashMap<&'static str, RowStrategy> {
-        HashMap::from([("users", {
-            RowStrategy(vec![
-                (ColumnStrategy::Value(any::<i32>().prop_map_into::<DfValue>().boxed())),
-                (ColumnStrategy::Value(any::<String>().prop_map_into::<DfValue>().boxed())),
-            ])
-        })])
-    }
-
-    fn extra_key_strategies() -> Vec<BoxedStrategy<DfValue>> {
-        vec![]
-    }
-}
-
-#[test]
-#[serial_test::serial]
-#[cfg_attr(not(feature = "vertical_tests"), ignore)]
-fn simple_point_lookup() {
-    let config = StatefulProptestConfig {
-        min_ops: 1,
-        max_ops: 100,
-        test_case_timeout: Duration::from_secs(60),
-    };
-
-    stateful_proptest::test::<DataflowModelState<SimplePointLookupTestDef>>(config);
-}
-
-/*
 vertical_tests! {
     simple_point_lookup(
         "SELECT id, name FROM users WHERE id = ?";
@@ -785,7 +739,9 @@ vertical_tests! {
             key_columns: [0],
         )
     );
+}
 
+/*
     aggregate_with_filter(
         "SELECT count(*) FROM users_groups WHERE group_id = ? AND joined_at IS NOT NULL";
         "users_groups" => (
