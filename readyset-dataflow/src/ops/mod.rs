@@ -25,7 +25,7 @@ use crate::processing::{
 
 /// Enum for distinguishing between the two parents of a union or join
 #[derive(Debug, Eq, PartialEq, Clone, Copy, Hash, Serialize, Deserialize)]
-pub(self) enum Side {
+pub enum Side {
     Left,
     Right,
 }

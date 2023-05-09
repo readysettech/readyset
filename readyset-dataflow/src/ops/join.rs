@@ -25,18 +25,7 @@ pub enum JoinType {
     Inner,
 }
 
-/// Where to source a join column
-#[derive(Debug, Clone)]
-pub enum JoinSource {
-    /// Column in left parent
-    L(usize),
-    /// Column in right parent
-    R(usize),
-    /// Join column that occurs in both parents
-    B(usize, usize),
-}
-
-/// Join provides a left outer join between two views.
+/// Join rows between two nodes based on a (compound) equal join key
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Join {
     left: IndexPair,
@@ -69,20 +58,13 @@ impl Join {
     /// the join columns: (left_parent_column, right_parent_column) and `emit` dictates for each
     /// output colunm, which source and column should be used (true means left parent, and false
     /// means right parent).
-    pub fn new(left: NodeIndex, right: NodeIndex, kind: JoinType, emit: Vec<JoinSource>) -> Self {
-        let mut join_columns = Vec::new();
-        let emit: Vec<_> = emit
-            .into_iter()
-            .map(|join_source| match join_source {
-                JoinSource::L(c) => (Side::Left, c),
-                JoinSource::R(c) => (Side::Right, c),
-                JoinSource::B(lc, rc) => {
-                    join_columns.push((lc, rc));
-                    (Side::Left, lc)
-                }
-            })
-            .collect();
-
+    pub fn new(
+        left: NodeIndex,
+        right: NodeIndex,
+        kind: JoinType,
+        on: Vec<(usize, usize)>,
+        emit: Vec<(Side, usize)>,
+    ) -> Self {
         let (in_place_left_emit, in_place_right_emit) = {
             let compute_in_place_emit = |side| {
                 let num_columns = emit
@@ -121,12 +103,12 @@ impl Join {
             )
         };
 
-        debug_assert!(!join_columns.is_empty());
+        debug_assert!(!on.is_empty());
 
         Self {
             left: left.into(),
             right: right.into(),
-            on: join_columns,
+            on,
             emit,
             in_place_left_emit,
             in_place_right_emit,
@@ -756,12 +738,12 @@ mod tests {
         let l = g.add_base("left", &["l0", "l1"]);
         let r = g.add_base("right", &["r0", "r1"]);
 
-        use self::JoinSource::*;
         let j = Join::new(
             l.as_global(),
             r.as_global(),
             JoinType::Left,
-            vec![B(0, 0), L(1), R(1)],
+            vec![(0, 0)],
+            vec![(Side::Left, 0), (Side::Left, 1), (Side::Right, 1)],
         );
 
         g.set_op("join", &["j0", "j1", "j2"], j, false);
@@ -1138,12 +1120,17 @@ mod tests {
             let l = g.add_base("left", &["l0", "l1", "l2"]);
             let r = g.add_base("right", &["r0", "r1", "r2"]);
 
-            use self::JoinSource::*;
             let j = Join::new(
                 l.as_global(),
                 r.as_global(),
                 JoinType::Left,
-                vec![B(0, 0), B(1, 1), L(2), R(2)],
+                vec![(0, 0), (1, 1)],
+                vec![
+                    (Side::Left, 0),
+                    (Side::Left, 1),
+                    (Side::Left, 2),
+                    (Side::Right, 2),
+                ],
             );
 
             g.set_op("join", &["j0", "j1", "j2", "j3"], j, false);

@@ -919,10 +919,11 @@ mod tests {
                 a,
                 b,
                 ops::join::JoinType::Inner,
+                vec![(1, 0)],
                 vec![
-                    ops::join::JoinSource::L(0),
-                    ops::join::JoinSource::B(1, 0),
-                    ops::join::JoinSource::R(1),
+                    (ops::Side::Left, 0),
+                    (ops::Side::Left, 1),
+                    (ops::Side::Right, 1),
                 ],
             )),
         ));
@@ -1032,10 +1033,11 @@ mod tests {
                 a,
                 b,
                 ops::join::JoinType::Inner,
+                vec![(1, 0)],
                 vec![
-                    ops::join::JoinSource::L(0),
-                    ops::join::JoinSource::B(1, 0),
-                    ops::join::JoinSource::R(1),
+                    (ops::Side::Left, 0),
+                    (ops::Side::Left, 1),
+                    (ops::Side::Right, 1),
                 ],
             )),
         ));

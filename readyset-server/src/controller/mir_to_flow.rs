@@ -14,6 +14,7 @@ use dataflow::node::Column as DfColumn;
 use dataflow::ops::grouped::concat::GroupConcat;
 use dataflow::ops::join::{Join, JoinType};
 use dataflow::ops::project::Project;
+use dataflow::ops::Side;
 use dataflow::{node, ops, Expr as DfExpr, PostLookupAggregates, ReaderProcessing};
 use itertools::Itertools;
 use mir::graph::MirGraph;
@@ -649,8 +650,6 @@ fn make_join_node(
     custom_types: &HashMap<Relation, DfType>,
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<DfNodeIndex> {
-    use dataflow::ops::join::JoinSource;
-
     let mut left_na = graph.resolve_dataflow_node(left).ok_or_else(|| {
         ReadySetError::MirNodeMustHaveDfNodeAssigned {
             mir_node_index: left.index(),
@@ -665,12 +664,13 @@ fn make_join_node(
     let left_cols = mig.dataflow_state.ingredients[left_na.address()].columns();
     let right_cols = mig.dataflow_state.ingredients[right_na.address()].columns();
 
+    let mut on_idxs = Vec::with_capacity(on.len());
     let mut emit = Vec::with_capacity(proj_cols.len());
     let mut cols = Vec::with_capacity(proj_cols.len());
     for c in proj_cols {
         if let Some(join_key_idx) = on.iter().position(|(left_col, _)| left_col == c) {
             // Column is a join key - find its index in the left and the index of the corresponding
-            // column in the right, then add it as a column from both sides.
+            // column in the right, then add it to the join key, and project it from the left
             //
             // We check for columns in the left first here because we have to pick a side, but we
             // don't have to - we could check for the right first if we wanted to
@@ -678,7 +678,8 @@ fn make_join_node(
                 .column_id_for_column(left, c)
                 .map_err(|_| internal_err!("Left join column must exist in left parent"))?;
             let r = graph.column_id_for_column(right, &on[join_key_idx].1)?;
-            emit.push(JoinSource::B(l, r));
+            on_idxs.push((l, r));
+            emit.push((Side::Left, l));
             cols.push(
                 left_cols
                     .get(l)
@@ -687,7 +688,7 @@ fn make_join_node(
             );
         } else if let Ok(l) = graph.column_id_for_column(left, c) {
             // Column isn't a join key, and comes from the left
-            emit.push(JoinSource::L(l));
+            emit.push((Side::Left, l));
             cols.push(
                 left_cols
                     .get(l)
@@ -696,7 +697,7 @@ fn make_join_node(
             );
         } else if let Ok(r) = graph.column_id_for_column(right, c) {
             // Column isn't a join key, and comes from the right
-            emit.push(JoinSource::R(r));
+            emit.push((Side::Right, r));
             cols.push(
                 right_cols
                     .get(r)
@@ -741,7 +742,8 @@ fn make_join_node(
         left_na = make_cross_join_bogokey(graph, left)?;
         right_na = make_cross_join_bogokey(graph, right)?;
 
-        emit.push(JoinSource::B(left_col_idx, right_col_idx));
+        on_idxs.push((left_col_idx, right_col_idx));
+        emit.push((Side::Left, left_col_idx));
         cols.push(DfColumn::new(
             "cross_join_bogokey".into(),
             DfType::BigInt,
@@ -749,7 +751,7 @@ fn make_join_node(
         ));
     }
 
-    let j = Join::new(left_na.address(), right_na.address(), kind, emit);
+    let j = Join::new(left_na.address(), right_na.address(), kind, on_idxs, emit);
     let n = mig.add_ingredient(name, cols, j);
 
     Ok(DfNodeIndex::new(n))
@@ -766,8 +768,6 @@ fn make_join_aggregates_node(
     columns: &[Column],
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<DfNodeIndex> {
-    use dataflow::ops::join::JoinSource;
-
     let left_na = graph.resolve_dataflow_node(left).ok_or_else(|| {
         ReadySetError::MirNodeMustHaveDfNodeAssigned {
             mir_node_index: left.index(),
@@ -781,24 +781,26 @@ fn make_join_aggregates_node(
     let left_cols = mig.dataflow_state.ingredients[left_na.address()].columns();
     let right_cols = mig.dataflow_state.ingredients[right_na.address()].columns();
 
+    let mut on = vec![];
     // We gather up all of the columns from each respective parent. If a column is in both parents,
-    // then we know it was a group_by column and create a JoinSource::B type with the indices from
-    // both parents. Otherwise if the column is exclusively in the left parent (such as the
-    // aggregate column itself), we make a JoinSource::L with the left parent index. We finally
-    // iterate through the right parent and add the columns that were exclusively in the right
-    // parent as JoinSource::R with the right parent index for each given unique column.
-    let join_config = graph
+    // then we know it was a group_by column and add it as a join key. Otherwise if the column is
+    // exclusively in the left parent (such as the aggregate column itself), we make a Side::Left
+    // with the left parent index. We finally iterate through the right parent and add the columns
+    // that were exclusively in the right parent as Side::Right with the right parent index for
+    // each given unique column.
+    let project = graph
         .columns(left)
         .iter()
         .enumerate()
         .map(|(i, c)| {
             if let Ok(j) = graph.column_id_for_column(right, c) {
                 // If the column was found in both, it's a group_by column and gets added as
-                // JoinSource::B.
-                JoinSource::B(i, j)
+                // a join key
+                on.push((i, j));
+                (Side::Left, i)
             } else {
-                // Column exclusively in left parent, so gets added as JoinSource::L.
-                JoinSource::L(i)
+                // Column exclusively in left parent, so gets added as coming from the left.
+                (Side::Left, i)
             }
         })
         .chain(
@@ -812,21 +814,22 @@ fn make_join_aggregates_node(
                     if graph.column_id_for_column(left, c).is_ok() {
                         None
                     } else {
-                        // Column exclusively in right parent, so gets added as JoinSource::R.
-                        Some(JoinSource::R(i))
+                        // Column exclusively in right parent, so gets added as coming from the
+                        // right.
+                        Some((Side::Right, i))
                     }
                 }),
         )
         .collect::<Vec<_>>();
 
-    let mut cols = join_config
+    let mut cols = project
         .iter()
-        .map(|j| match j {
-            JoinSource::B(i, _) | JoinSource::L(i) => left_cols
+        .map(|(side, i)| match side {
+            Side::Left => left_cols
                 .get(*i)
                 .cloned()
                 .ok_or_else(|| internal_err!("Invalid index")),
-            JoinSource::R(i) => right_cols
+            Side::Right => right_cols
                 .get(*i)
                 .cloned()
                 .ok_or_else(|| internal_err!("Invalid index")),
@@ -841,7 +844,8 @@ fn make_join_aggregates_node(
         left_na.address(),
         right_na.address(),
         JoinType::Inner,
-        join_config,
+        on,
+        project,
     );
     let n = mig.add_ingredient(name, cols, j);
 

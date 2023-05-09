@@ -17,10 +17,10 @@ use common::Index;
 use dataflow::node::special::Base;
 use dataflow::ops::grouped::aggregate::Aggregation;
 use dataflow::ops::identity::Identity;
-use dataflow::ops::join::JoinSource::*;
-use dataflow::ops::join::{Join, JoinSource, JoinType};
+use dataflow::ops::join::{Join, JoinType};
 use dataflow::ops::project::Project;
 use dataflow::ops::union::{self, Union};
+use dataflow::ops::Side;
 use dataflow::utils::{dataflow_column, make_columns};
 use dataflow::{
     BinaryOperator, DurabilityMode, Expr as DfExpr, PersistenceParameters, ReaderProcessing,
@@ -384,7 +384,13 @@ async fn broad_recursing_upquery() {
             let join = mig.add_ingredient(
                 "join",
                 make_columns(&["base_col", "join_col", "reader_col"]),
-                Join::new(x, y, JoinType::Left, vec![L(0), B(1, 0), L(2)]),
+                Join::new(
+                    x,
+                    y,
+                    JoinType::Left,
+                    vec![(1, 0)],
+                    vec![(Side::Left, 0), (Side::Left, 1), (Side::Left, 2)],
+                ),
             );
             // reader, sharded by the lookup column, which is the third column on x
             mig.maintain(
@@ -2043,7 +2049,13 @@ async fn votes() {
             mig.maintain_anonymous(vc, &Index::hash_map(vec![0]));
 
             // add final join using first field from article and first from vc
-            let j = Join::new(article, vc, JoinType::Inner, vec![B(0, 0), L(1), R(1)]);
+            let j = Join::new(
+                article,
+                vc,
+                JoinType::Inner,
+                vec![(0, 0)],
+                vec![(Side::Left, 0), (Side::Left, 1), (Side::Right, 1)],
+            );
             let end = mig.add_ingredient("end", make_columns(&["id", "title", "votes"]), j);
             mig.maintain_anonymous(end, &Index::hash_map(vec![0]));
 
@@ -2561,9 +2573,21 @@ async fn replay_during_replay() {
     let (u, _) = g
         .migrate(move |mig| {
             // u = u1 * u2
-            let j = Join::new(u1, u2, JoinType::Inner, vec![B(0, 0), R(1)]);
+            let j = Join::new(
+                u1,
+                u2,
+                JoinType::Inner,
+                vec![(0, 0)],
+                vec![(Side::Left, 0), (Side::Right, 1)],
+            );
             let u = mig.add_ingredient("u", make_columns(&["u", "a"]), j);
-            let j = Join::new(a, u, JoinType::Left, vec![B(0, 1), R(0)]);
+            let j = Join::new(
+                a,
+                u,
+                JoinType::Left,
+                vec![(0, 1)],
+                vec![(Side::Left, 0), (Side::Right, 0)],
+            );
             let end = mig.add_ingredient("end", make_columns(&["a", "u"]), j);
             mig.maintain_anonymous(end, &Index::hash_map(vec![0]));
             (u, end)
@@ -2694,7 +2718,13 @@ async fn cascading_replays_with_sharding() {
                 Base::new().with_default_values(vec!["".into(), "".into()]),
             );
             // add a join
-            let jb = Join::new(f, v, JoinType::Inner, vec![B(0, 0), R(1), L(1)]);
+            let jb = Join::new(
+                f,
+                v,
+                JoinType::Inner,
+                vec![(0, 0)],
+                vec![(Side::Left, 0), (Side::Right, 1), (Side::Left, 1)],
+            );
             let j = mig.add_ingredient("j", make_columns(&["u", "s", "f2"]), jb);
             // aggregate over the join. this will force a shard merger to be inserted because the
             // group-by column ("f2") isn't the same as the join's output sharding column ("f1"/"u")
@@ -2979,7 +3009,13 @@ async fn materialization_frontier() {
             mig.mark_shallow(vc);
 
             // add final join using first field from article and first from vc
-            let j = Join::new(article, vc, JoinType::Left, vec![B(0, 0), L(1), R(1)]);
+            let j = Join::new(
+                article,
+                vc,
+                JoinType::Left,
+                vec![(0, 0)],
+                vec![(Side::Left, 0), (Side::Left, 1), (Side::Right, 1)],
+            );
             let end = mig.add_ingredient("awvc", make_columns(&["id", "title", "votes"]), j);
 
             let ri = mig.maintain_anonymous(end, &Index::hash_map(vec![0]));
@@ -3258,7 +3294,8 @@ async fn migration_depends_on_unchanged_domain() {
             left,
             tmp,
             JoinType::Inner,
-            vec![JoinSource::B(0, 0), JoinSource::R(1)],
+            vec![(0, 0)],
+            vec![(Side::Left, 0), (Side::Right, 1)],
         );
         mig.add_ingredient("join", make_columns(&["a", "b"]), j);
     })
@@ -3299,7 +3336,13 @@ async fn do_full_vote_migration(sharded: bool, old_puts_after: bool) {
             );
 
             // add final join using first field from article and first from vc
-            let j = Join::new(article, vc, JoinType::Left, vec![B(0, 0), L(1), R(1)]);
+            let j = Join::new(
+                article,
+                vc,
+                JoinType::Left,
+                vec![(0, 0)],
+                vec![(Side::Left, 0), (Side::Left, 1), (Side::Right, 1)],
+            );
             let end = mig.add_ingredient("awvc", make_columns(&["id", "title", "votes"]), j);
 
             mig.maintain_anonymous(end, &Index::hash_map(vec![0]));
@@ -3356,7 +3399,13 @@ async fn do_full_vote_migration(sharded: bool, old_puts_after: bool) {
             );
 
             // join vote count and rsum (and in theory, sum them)
-            let j = Join::new(rs, vc, JoinType::Left, vec![B(0, 0), L(1), R(1)]);
+            let j = Join::new(
+                rs,
+                vc,
+                JoinType::Left,
+                vec![(0, 0)],
+                vec![(Side::Left, 0), (Side::Left, 1), (Side::Right, 1)],
+            );
             let total = mig.add_ingredient("total", make_columns(&["id", "ratings", "votes"]), j);
 
             // finally, produce end result
@@ -3364,7 +3413,13 @@ async fn do_full_vote_migration(sharded: bool, old_puts_after: bool) {
                 article,
                 total,
                 JoinType::Inner,
-                vec![B(0, 0), L(1), R(1), R(2)],
+                vec![(0, 0)],
+                vec![
+                    (Side::Left, 0),
+                    (Side::Left, 1),
+                    (Side::Right, 1),
+                    (Side::Right, 2),
+                ],
             );
             let newend =
                 mig.add_ingredient("awr", make_columns(&["id", "title", "ratings", "votes"]), j);
@@ -3573,7 +3628,13 @@ async fn state_replay_migration_query() {
     let _ = g
         .migrate(move |mig| {
             // add join and a reader node
-            let j = Join::new(a, b, JoinType::Inner, vec![B(0, 0), L(1), R(1)]);
+            let j = Join::new(
+                a,
+                b,
+                JoinType::Inner,
+                vec![(0, 0)],
+                vec![(Side::Left, 0), (Side::Left, 1), (Side::Right, 1)],
+            );
             let j = mig.add_ingredient("j", make_columns(&["x", "y", "z"]), j);
 
             // we want to observe what comes out of the join
@@ -4997,7 +5058,13 @@ async fn range_upquery_after_point_queries() {
             let join = mig.add_ingredient(
                 "join",
                 make_columns(&["a", "a_b", "b_c"]),
-                Join::new(a, b, JoinType::Inner, vec![B(0, 0), L(1), R(1)]),
+                Join::new(
+                    a,
+                    b,
+                    JoinType::Inner,
+                    vec![(0, 0)],
+                    vec![(Side::Left, 0), (Side::Left, 1), (Side::Right, 1)],
+                ),
             );
 
             mig.maintain(
