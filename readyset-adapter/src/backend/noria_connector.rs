@@ -36,6 +36,9 @@ use crate::utils;
 type StatementID = u32;
 
 #[derive(Clone)]
+// Due to differences in data type sizes, the large_enum_variant Clippy warning was being emitted
+// for this type, but only when compiling for aarch64 targets.
+#[cfg_attr(target_arch = "aarch64", allow(clippy::large_enum_variant))]
 pub(crate) enum PreparedStatement {
     Select(PreparedSelectStatement),
     Insert(nom_sql::InsertStatement),
