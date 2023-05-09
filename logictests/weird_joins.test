@@ -43,3 +43,25 @@ WHERE t1.x = t2.x
 AND t1.x = t2.y
 ----
 1
+
+query I nosort
+SELECT count(*)
+FROM (
+    SELECT t1.x, t2.y
+    FROM t1, t2
+    WHERE t1.x = t2.x
+) sq
+WHERE x = y
+----
+1
+
+query I nosort
+SELECT count(*)
+FROM (
+    SELECT t1.x AS a, t2.y AS b
+    FROM t1, t2
+    WHERE t1.x = t2.x
+) sq
+WHERE a = b
+----
+1

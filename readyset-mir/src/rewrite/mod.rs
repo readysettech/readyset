@@ -4,6 +4,7 @@ use crate::query::MirQuery;
 
 mod add_bogokey;
 mod decorrelate;
+mod filters_to_join_keys;
 mod pull_columns;
 mod pull_keys;
 
@@ -15,6 +16,7 @@ impl<'a> MirQuery<'a> {
         decorrelate::eliminate_dependent_joins(&mut self)?;
         add_bogokey::add_bogokey_if_necessary(&mut self)?;
         pull_columns::pull_all_required_columns(&mut self)?;
+        filters_to_join_keys::convert_filters_to_join_keys(&mut self)?;
         Ok(self)
     }
 }

@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 
 use itertools::Itertools;
 use nom_sql::{Relation, SqlIdentifier};
-use petgraph::visit::{Bfs, EdgeRef, Reversed};
+use petgraph::visit::{Bfs, EdgeRef, IntoNodeReferences, Reversed};
 use petgraph::Direction;
 use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
 
@@ -83,6 +83,14 @@ impl<'a> MirQuery<'a> {
                 .neighbors_directed(node, Direction::Incoming)
                 .next()
                 .is_none()
+    }
+
+    /// Returns a list of references to all the nodes indices belonging to this query in arbitrary
+    /// order
+    pub fn node_references(&self) -> impl Iterator<Item = (NodeIndex, &MirNode)> + '_ {
+        self.graph
+            .node_references()
+            .filter(move |(_, n)| n.is_owned_by(&self.name))
     }
 
     /// Returns a list of all the node indices belonging to this query,
