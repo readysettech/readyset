@@ -667,9 +667,8 @@ pub fn unique_value_of_type(typ: &SqlType, idx: u32) -> DfValue {
             (NaiveDate::from_ymd(2020, 1, 1).and_hms(0, 0, 0) + Duration::minutes(idx as _)).into()
         }
         SqlType::TimestampTz => DfValue::from(
-            FixedOffset::west(18_000)
-                .ymd(2020, 1, 1)
-                .and_hms(12, idx as _, 30),
+            FixedOffset::west(18_000).ymd(2020, 1, 1).and_hms(12, 0, 0)
+                + Duration::minutes(idx as _),
         ),
         SqlType::Date => {
             DfValue::from(NaiveDate::from_ymd(1000, 1, 1) + Duration::days(idx.into()))
