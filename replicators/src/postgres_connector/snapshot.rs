@@ -466,18 +466,19 @@ impl TableDescription {
     ) -> ReadySetResult<()> {
         let mut cnt = 0;
 
-        let nrows = transaction
+        let approximate_rows = transaction
             .query_one(
-                format!(
-                    "SELECT count(*) AS nrows FROM \"{}\".\"{}\"",
-                    self.schema()?,
-                    &self.name.name,
-                )
-                .as_str(),
-                &[],
+                // Fetch an *approximate estimate* of the number of rows in the table, rather than
+                // an exact count (the latter is *significantly* more expensive, especially for
+                // large tables). We're only using this for reporting snapshotting progress, so an
+                // approximate row count should be fine
+                "SELECT c.reltuples::bigint AS approximate_nrows
+                 FROM pg_class c JOIN pg_namespace n ON c.relnamespace = n.oid
+                 WHERE c.relname = $1 AND n.nspname = $2",
+                &[&self.name.name.as_str(), &self.schema()?.as_str()],
             )
             .await?
-            .try_get::<_, i64>("nrows")?;
+            .try_get::<_, i64>("approximate_nrows")?;
 
         // The most efficient way to copy an entire table is COPY BINARY
         let query = format!(
@@ -494,7 +495,7 @@ impl TableDescription {
 
         pin_mut!(binary_row_batches);
 
-        info!(rows = %nrows, "Snapshotting started");
+        info!(%approximate_rows, "Snapshotting started");
         let progress_percentage_metric: metrics::Gauge = register_gauge!(
             recorded::REPLICATOR_SNAPSHOT_PERCENT,
             "schema" => self.schema()?.to_string(),
@@ -568,9 +569,12 @@ impl TableDescription {
                 && last_report_time.elapsed().as_secs() > snapshot_report_interval_secs
             {
                 last_report_time = Instant::now();
-                let estimate =
-                    crate::estimate_remaining_time(start_time.elapsed(), cnt as f64, nrows as f64);
-                let progress_percent = (cnt as f64 / nrows as f64) * 100.;
+                let estimate = crate::estimate_remaining_time(
+                    start_time.elapsed(),
+                    cnt as f64,
+                    approximate_rows as f64,
+                );
+                let progress_percent = (cnt as f64 / approximate_rows as f64) * 100.;
                 let progress = format!("{:.2}%", progress_percent);
                 info!(rows_replicated = %cnt, %progress, %estimate, "Snapshotting progress");
                 progress_percentage_metric.set(progress_percent);
