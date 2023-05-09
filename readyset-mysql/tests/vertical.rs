@@ -739,9 +739,7 @@ vertical_tests! {
             key_columns: [0],
         )
     );
-}
 
-/*
     aggregate_with_filter(
         "SELECT count(*) FROM users_groups WHERE group_id = ? AND joined_at IS NOT NULL";
         "users_groups" => (
@@ -825,11 +823,9 @@ vertical_tests! {
 
     paginate_grouped(
         "SELECT id FROM posts WHERE author_id = ? ORDER BY score DESC LIMIT 3 OFFSET ?";
-        TestOptions {
-            extra_key_strategies: vec![
-                (0u32..=15u32).prop_map(|i| DfValue::from(i * 3)).boxed()
-            ]
-        };
+        vec![
+            (0u32..=15u32).prop_map(|i| DfValue::from(i * 3)).boxed()
+        ];
         "posts" => (
             "CREATE TABLE posts (id INT, author_id INT, score INT, PRIMARY KEY (id))",
             schema: [id: i32, author_id: i32, score: i32],
@@ -868,4 +864,3 @@ vertical_tests! {
         )
     );
 }
-*/
