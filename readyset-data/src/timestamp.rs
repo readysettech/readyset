@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::fmt;
 use std::hash::Hash;
 use std::str::FromStr;
@@ -233,15 +234,21 @@ impl FromStr for TimestampTz {
     fn from_str(ts: &str) -> anyhow::Result<TimestampTz> {
         match ts.strip_suffix(" BC") {
             Some(str_without_epoch) => {
+                let str_without_epoch = if str_without_epoch.starts_with(['-', '+']) {
+                    Cow::Borrowed(str_without_epoch)
+                } else {
+                    Cow::Owned(format!("+{str_without_epoch}"))
+                };
+
                 // This is a negative year coming from Postgres
                 if let Ok(dt) = DateTime::<FixedOffset>::parse_from_str(
-                    str_without_epoch,
+                    &str_without_epoch,
                     TIMESTAMP_TZ_PARSE_FORMAT,
                 ) {
                     let year = dt.year();
                     Ok(dt.with_year(-year + 1).unwrap_or(dt).into())
                 } else {
-                    let d = NaiveDate::parse_from_str(str_without_epoch, DATE_FORMAT)?;
+                    let d = NaiveDate::parse_from_str(&str_without_epoch, DATE_FORMAT)?;
                     let year = d.year();
                     Ok(d.with_year(-year + 1).unwrap_or(d).into())
                 }
@@ -290,7 +297,6 @@ impl TimestampTz {
     // |                                                200410191 |
     // +----------------------------------------------------------+
     // TODO: actually differentiate between date and datetime
-    #[allow(dead_code)]
     fn date_as_int(&self) -> i64 {
         let date = self.to_chrono().naive_local().date();
 
@@ -303,14 +309,21 @@ impl TimestampTz {
 
     fn from_str_no_bc(ts: &str) -> anyhow::Result<TimestampTz> {
         let ts = ts.trim();
+        let ts = if ts.starts_with(['-', '+']) {
+            Cow::Borrowed(ts)
+        } else {
+            Cow::Owned(format!("+{ts}"))
+        };
+
         // If there is a dot, there is a microseconds field attached
         Ok(
-            if let Ok(dt) = DateTime::<FixedOffset>::parse_from_str(ts, TIMESTAMP_TZ_PARSE_FORMAT) {
+            if let Ok(dt) = DateTime::<FixedOffset>::parse_from_str(&ts, TIMESTAMP_TZ_PARSE_FORMAT)
+            {
                 dt.into()
-            } else if let Ok(dt) = NaiveDateTime::parse_from_str(ts, TIMESTAMP_PARSE_FORMAT) {
+            } else if let Ok(dt) = NaiveDateTime::parse_from_str(&ts, TIMESTAMP_PARSE_FORMAT) {
                 dt.into()
             } else {
-                NaiveDate::parse_from_str(ts, DATE_FORMAT)?.into()
+                NaiveDate::parse_from_str(&ts, DATE_FORMAT)?.into()
             },
         )
     }
@@ -646,6 +659,15 @@ mod tests {
                 .to_chrono(),
             chrono::FixedOffset::east(2 * 60 * 60)
                 .ymd(-2003, 10, 19)
+                .and_hms(10, 23, 54)
+        );
+
+        assert_eq!(
+            TimestampTz::from_str("10000-10-19 10:23:54+02")
+                .unwrap()
+                .to_chrono(),
+            chrono::FixedOffset::east(2 * 60 * 60)
+                .ymd(10000, 10, 19)
                 .and_hms(10, 23, 54)
         );
     }
