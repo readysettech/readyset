@@ -377,6 +377,11 @@ pub struct Options {
     /// supplied, we will also clean up various assets related to upstream (replication slot, etc.)
     #[clap(long)]
     cleanup: bool,
+
+    /// In standalone or embedded-readers mode, the IP address on which the ReadySet controller
+    /// will listen.
+    #[clap(long, env = "CONTROLLER_ADDRESS")]
+    controller_address: Option<IpAddr>,
 }
 
 impl Options {
@@ -982,6 +987,10 @@ where
             builder.set_replicator_statement_logging(options.tracing.statement_logging);
 
             builder.set_telemetry_sender(telemetry_sender.clone());
+
+            if let Some(addr) = options.controller_address {
+                builder.set_listen_addr(addr);
+            }
 
             let server_handle = rt.block_on(async move {
                 let authority = Arc::new(
