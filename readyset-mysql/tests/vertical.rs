@@ -25,7 +25,7 @@
 //! configuration, including the port, username, and password.
 
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::marker::PhantomData;
@@ -101,25 +101,29 @@ impl RowStrategy {
             .collect()
     }
 
-    fn has_foreign_keys(&self) -> bool {
-        self.0
-            .iter()
-            .any(|cs| matches!(cs, ColumnStrategy::ForeignKey { .. }))
-    }
-
-    fn fill_foreign_keys<F, S>(self, foreign_key_strategy: F) -> Option<Vec<BoxedStrategy<DfValue>>>
+    fn fill_foreign_keys<F, S>(self, foreign_key_strategy: F) -> Vec<BoxedStrategy<DfValue>>
     where
-        F: Fn(&'static str, usize) -> Option<S>,
+        F: Fn(&'static str, usize) -> S,
         S: Strategy<Value = DfValue> + Sized + 'static,
     {
         self.0
             .into_iter()
             .map(move |cs| match cs {
-                ColumnStrategy::Value(strat) => Some(strat),
+                ColumnStrategy::Value(strat) => strat.boxed(),
                 ColumnStrategy::ForeignKey {
                     table,
                     foreign_column,
-                } => foreign_key_strategy(table, foreign_column).map(|s| s.boxed()),
+                } => foreign_key_strategy(table, foreign_column).boxed(),
+            })
+            .collect()
+    }
+
+    fn foreign_tables(&self) -> HashSet<&'static str> {
+        self.0
+            .iter()
+            .filter_map(|column_strat| match column_strat {
+                ColumnStrategy::ForeignKey { table, .. } => Some(*table),
+                _ => None,
             })
             .collect()
     }
@@ -179,6 +183,18 @@ where
             })
             .chain(T::extra_key_strategies())
             .collect::<Vec<_>>()
+    }
+
+    /// Return a [`HashMap`] with a key for each test table where the values are other tables that
+    /// the key table contains foreign keys for.
+    ///
+    /// Useful as a helper for other code that does things like decide whether we will be able to
+    /// fill in all the foreign keys on a generated row or not.
+    fn table_dependencies(&self) -> HashMap<&'static str, HashSet<&'static str>> {
+        T::row_strategies()
+            .into_iter()
+            .map(|(table, row_strat)| (table, row_strat.foreign_tables()))
+            .collect()
     }
 }
 
@@ -250,52 +266,72 @@ where
                         .filter(|(t, _)| table == *t)
                         .map(|(_, r)| r[col].clone())
                         .collect::<Vec<_>>();
-                    if vals.is_empty() {
-                        None
-                    } else {
-                        Some(select(vals))
-                    }
+                    select(vals)
                 })
             };
 
-            let fk_tables = T::row_strategies()
+            // Generate the set of all test tables except for ones where we cannot generate valid
+            // rows due to foreign keys that have no valid values due to an empty foreign table:
+            let fk_tables: Vec<&'static str> = self
+                .table_dependencies()
                 .iter()
-                .filter(|(_, v)| v.has_foreign_keys())
-                .map(|(t, v)| (*t, v.clone()))
-                .collect::<Vec<_>>();
-            let fill_foreign_keys2 = fill_foreign_keys.clone(); // Cloned for move into closure
+                .filter_map(|(table, deps)| {
+                    if deps.iter().all(|dep| {
+                        self.rows
+                            .get(dep)
+                            .map_or(false, |dep_rows| !dep_rows.is_empty())
+                    }) {
+                        Some(*table)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
             if !fk_tables.is_empty() {
-                let mk_fk_insert = select(fk_tables)
-                    .prop_filter_map("No previously-generated rows", move |(table, row_strat)| {
-                        Some(
-                            fill_foreign_keys2(row_strat)?
-                                .prop_map(move |row| Operation::Insert { table, row }),
-                        )
+                let fill_foreign_keys = fill_foreign_keys.clone(); // Cloned for move into closure
+                let fill_foreign_keys2 = fill_foreign_keys.clone(); // Cloned for move into closure
+
+                let insertable_tables = T::row_strategies()
+                    .into_iter()
+                    .filter(|(table, _)| fk_tables.contains(table))
+                    .collect::<Vec<_>>();
+
+                let mk_fk_insert = select(insertable_tables)
+                    .prop_map(move |(table, row_strat)| {
+                        fill_foreign_keys(row_strat)
+                            .prop_map(move |row| Operation::Insert { table, row })
                     })
                     .prop_flat_map(|s| s)
                     .boxed();
                 res.push(mk_fk_insert);
-            }
 
-            let mk_update = select(rows.clone())
-                .prop_flat_map(move |(table, old_row)| {
-                    (fill_foreign_keys(T::row_strategies()[table].clone())
-                        .unwrap()
-                        .into_iter()
-                        .zip(old_row.clone())
-                        .map(|(new_val, old_val)| prop_oneof![Just(old_val), new_val])
-                        .collect::<Vec<_>>())
-                    .prop_filter_map("No-op update", move |new_row| {
-                        (*old_row != new_row).then(|| Operation::Update {
-                            table,
-                            old_row: old_row.clone(),
-                            new_row,
+                let updateable_rows = rows
+                    .iter()
+                    .filter(|(table, _)| fk_tables.contains(table))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                if !updateable_rows.is_empty() {
+                    let mk_update = select(updateable_rows)
+                        .prop_flat_map(move |(table, old_row)| {
+                            (fill_foreign_keys2(T::row_strategies()[table].clone())
+                                .into_iter()
+                                .zip(old_row.clone())
+                                .map(|(new_val, old_val)| prop_oneof![Just(old_val), new_val])
+                                .collect::<Vec<_>>())
+                            .prop_filter_map("No-op update", move |new_row| {
+                                (*old_row != new_row).then(|| Operation::Update {
+                                    table,
+                                    old_row: old_row.clone(),
+                                    new_row,
+                                })
+                            })
                         })
-                    })
-                })
-                .boxed();
+                        .boxed();
 
-            res.push(mk_update);
+                    res.push(mk_update);
+                }
+            }
 
             let mk_delete = select(rows)
                 .prop_map(move |(table, row)| Operation::Delete { table, row })
