@@ -2119,6 +2119,7 @@ mod tests {
         }
 
         match key {
+            PointKey::Empty => check(&serialized, ()),
             PointKey::Single(x) => check(&serialized, x),
             PointKey::Double(x) => check(&serialized, x),
             PointKey::Tri(x) => check(&serialized, x),

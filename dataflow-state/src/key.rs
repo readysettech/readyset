@@ -13,6 +13,7 @@ use vec1::Vec1;
 /// An internal type used as the key when performing point lookups and inserts into node state.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, From, Arbitrary)]
 pub enum PointKey {
+    Empty,
     Single(DfValue),
     Double((DfValue, DfValue)),
     Tri((DfValue, DfValue, DfValue)),
@@ -31,6 +32,7 @@ impl PointKey {
     /// * Panics if the index is out-of-bounds
     pub fn get(&self, idx: usize) -> Option<&DfValue> {
         match self {
+            PointKey::Empty => panic!("get() called on PointKey::Empty"),
             PointKey::Single(x) if idx == 0 => Some(x),
             PointKey::Single(_) => None,
             PointKey::Double(x) => TupleElements::get(x, idx),
@@ -42,12 +44,7 @@ impl PointKey {
         }
     }
 
-    /// Construct a [`PointKey`] from an iterator of references to [`DfValue`]s. Clones all values
-    /// for all but one-element keys.
-    ///
-    /// # Panics
-    ///
-    /// * Panics if the iterator returns no results
+    /// Construct a [`PointKey`] from an iterator of [`DfValue`]s
     #[track_caller]
     pub fn from<I>(iter: I) -> Self
     where
@@ -58,7 +55,7 @@ impl PointKey {
         let len = iter.len();
         let mut more = move || iter.next().unwrap().normalize();
         match len {
-            0 => panic!("Empty iterator passed to PointKey::from_iter"),
+            0 => PointKey::Empty,
             1 => PointKey::Single(more()),
             2 => PointKey::Double((more(), more())),
             3 => PointKey::Tri((more(), more(), more())),
@@ -70,12 +67,9 @@ impl PointKey {
     }
 
     /// Return the length of this key
-    ///
-    /// # Invariants
-    ///
-    /// This function will never return 0
     pub fn len(&self) -> usize {
         match self {
+            PointKey::Empty => 0,
             PointKey::Single(_) => 1,
             PointKey::Double(_) => 2,
             PointKey::Tri(_) => 3,
@@ -89,6 +83,7 @@ impl PointKey {
     /// Return true if any of the elements is null
     pub fn has_null(&self) -> bool {
         match self {
+            PointKey::Empty => false,
             PointKey::Single(e) => e.is_none(),
             PointKey::Double((e0, e1)) => e0.is_none() || e1.is_none(),
             PointKey::Tri((e0, e1, e2)) => e0.is_none() || e1.is_none() || e2.is_none(),
@@ -135,6 +130,7 @@ impl Serialize for PointKey {
         }
 
         match self {
+            PointKey::Empty => serializer.serialize_unit(),
             PointKey::Single(v) => v.transform_for_serialized_key().serialize(serializer),
             PointKey::Double((v1, v2)) => serialize!(2, v1, v2),
             PointKey::Tri((v1, v2, v3)) => serialize!(3, v1, v2, v3),
