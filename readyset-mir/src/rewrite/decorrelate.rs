@@ -1,6 +1,3 @@
-use std::iter;
-
-use itertools::{Either, Itertools};
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::{BinaryOperator, Expr};
 use readyset_errors::{internal, invariant, unsupported, ReadySetResult};
@@ -11,14 +8,13 @@ use crate::query::MirQuery;
 use crate::{Column, NodeIndex};
 
 /// Push the given `node`, which should be a [filter][] node with the given `dependency` on columns
-/// on the left-hand side of the given `dependent_join`, one step towards being below that dependent
+/// on the left-hand side of some `dependent_join`, one step towards being below that dependent
 /// join.
 ///
 /// Internally, this uses the following rules to push filters down the graph:
 ///
-/// - [`Project`], [`Join`], [`LeftJoin`], and dependent joins *other* than the one this filter
-///   depends on are all totally commutative with filters, so can be swapped in position with those
-///   filters with impunity
+/// - [`Project`], [`Join`], [`LeftJoin`], and [`DependentJoin`]s are all totally commutative with
+///   filters, so can be swapped in position with those filters with impunity
 /// - Grouped nodes ([`Aggregation`] and [`Extremum`]) require adding any *non* dependent columns
 ///   mentioned in the filter to the group-by of the node.
 /// - All other nodes currently return an [unsupported error][] - it *is* theoretically possible to
@@ -29,7 +25,9 @@ use crate::{Column, NodeIndex};
 ///
 /// [filter]: MirNodeInner::Filter
 /// [`Project`]: MirNodeInner::Project
-/// [`Join`]: MirNodeInner::LeftJoin
+/// [`Join`]: MirNodeInner::Join
+/// [`LeftJoin`]: MirNodeInner::LeftJoin
+/// [`DependentJoin`]: MirNodeInner::DependentJoin
 /// [`Aggregation`]: MirNodeInner::Aggregation
 /// [`Extremum`]: MirNodeInner::Extremum
 /// [unsupported error]: noria_errors::ReadySetError::Unsupported
@@ -37,7 +35,6 @@ use crate::{Column, NodeIndex};
 fn push_dependent_filter(
     query: &mut MirQuery<'_>,
     node_idx: NodeIndex,
-    dependent_join_idx: NodeIndex,
     dependency: DependentCondition,
 ) -> ReadySetResult<()> {
     let children = query.descendants(node_idx)?;
@@ -57,7 +54,7 @@ fn push_dependent_filter(
             MirNodeInner::Filter { conditions } => {
                 for col in conditions.referred_columns_mut() {
                     if dependency
-                        .non_dependent_columns()
+                        .non_dependent_cols
                         .contains(&Column::from(col.clone()))
                     {
                         col.table = Some(table.clone())
@@ -72,7 +69,7 @@ fn push_dependent_filter(
         query.get_node(child_idx).unwrap().inner,
         MirNodeInner::AliasTable { .. }
     ) {
-        for col in dependency.non_dependent_columns() {
+        for col in &dependency.non_dependent_cols {
             query.graph.add_column(child_idx, col.clone())?;
         }
     }
@@ -83,25 +80,14 @@ fn push_dependent_filter(
         child_idx.index()
     );
     let should_insert = match &mut query.get_node_mut(child_idx).unwrap().inner {
-        MirNodeInner::DependentJoin { on, .. } if child_idx == dependent_join_idx => {
-            match dependency {
-                DependentCondition::JoinKey { lhs, rhs } => {
-                    on.push((lhs.clone(), rhs.clone()));
-                    query.graph.add_column(child_idx, lhs)?;
-                    query.graph.add_column(child_idx, rhs)?;
-                    false
-                }
-                DependentCondition::FullyDependent { .. } => true,
-            }
-        }
-        MirNodeInner::Project { .. }
+        MirNodeInner::DependentJoin { .. }
+        | MirNodeInner::Project { .. }
         | MirNodeInner::Filter { .. }
         | MirNodeInner::Join { .. }
         | MirNodeInner::LeftJoin { .. }
-        | MirNodeInner::DependentJoin { .. }
         | MirNodeInner::AliasTable { .. } => true,
         MirNodeInner::Aggregation { .. } | MirNodeInner::Extremum { .. } => {
-            for col in dependency.non_dependent_columns() {
+            for col in &dependency.non_dependent_cols {
                 query.graph.add_column(child_idx, col.clone())?;
             }
             true
@@ -211,20 +197,18 @@ pub(crate) fn eliminate_dependent_joins(query: &mut MirQuery<'_>) -> ReadySetRes
                         match (matches_left, matches_right) {
                             // Both sides are dependent
                             (true, true) => {
-                                return Some(DependentCondition::FullyDependent {
+                                return Some(DependentCondition {
                                     non_dependent_cols: vec![],
                                 })
                             }
                             (true, false) => {
-                                return Some(DependentCondition::JoinKey {
-                                    lhs: left_col.into(),
-                                    rhs: right_col.into(),
+                                return Some(DependentCondition {
+                                    non_dependent_cols: vec![right_col.into()],
                                 });
                             }
                             (false, true) => {
-                                return Some(DependentCondition::JoinKey {
-                                    lhs: right_col.into(),
-                                    rhs: left_col.into(),
+                                return Some(DependentCondition {
+                                    non_dependent_cols: vec![left_col.into()],
                                 });
                             }
                             (false, false) => {}
@@ -235,7 +219,7 @@ pub(crate) fn eliminate_dependent_joins(query: &mut MirQuery<'_>) -> ReadySetRes
                             .referred_columns()
                             .any(|expr_col| left_columns.iter().any(|c| *c == *expr_col))
                         {
-                            return Some(DependentCondition::FullyDependent {
+                            return Some(DependentCondition {
                                 non_dependent_cols: expr
                                     .referred_columns()
                                     .filter(|expr_col| {
@@ -259,7 +243,7 @@ pub(crate) fn eliminate_dependent_joins(query: &mut MirQuery<'_>) -> ReadySetRes
         };
 
         if let Some((node, dependency)) = dependency {
-            push_dependent_filter(query, node, join, dependency)?;
+            push_dependent_filter(query, node, dependency)?;
         } else {
             trace!(
                 dependent_join = %query.get_node(join).unwrap().name().display_unquoted(),
@@ -283,31 +267,10 @@ pub(crate) fn eliminate_dependent_joins(query: &mut MirQuery<'_>) -> ReadySetRes
 /// For a dependent filter, a description of *how* that filter depends on columns from the left side
 /// of a dependent join
 #[derive(Debug)]
-enum DependentCondition {
-    /// This filter can be turned into a equi-join key
-    ///
-    /// TODO: this should be removed at some point in the future and be replaced by a dedicated
-    /// pass that turns filter nodes below joins into join keys
-    JoinKey { lhs: Column, rhs: Column },
-    /// The entire filter is dependent, and must be lifted above the join wholesale
-    FullyDependent {
-        /// A list of the columns mentioned in the condition that do *not* refer to columns on the
-        /// left-hand side of the join
-        non_dependent_cols: Vec<Column>,
-    },
-}
-
-impl DependentCondition {
-    /// Return an iterator over all columns referenced by this dependent condition that are *not* in
-    /// the left-hand side of the dependent join
-    fn non_dependent_columns(&self) -> impl Iterator<Item = &Column> + '_ {
-        match self {
-            DependentCondition::JoinKey { rhs, .. } => Either::Left(iter::once(rhs)),
-            DependentCondition::FullyDependent { non_dependent_cols } => {
-                Either::Right(non_dependent_cols.iter())
-            }
-        }
-    }
+struct DependentCondition {
+    /// A list of the columns mentioned in the condition that do *not* refer to columns on the
+    /// left-hand side of the join
+    non_dependent_cols: Vec<Column>,
 }
 
 #[cfg(test)]
@@ -481,27 +444,30 @@ mod tests {
 
         eprintln!("{}", query.to_graphviz());
 
-        match &query.graph[exists_join].inner {
-            MirNodeInner::Join { on, .. } => {
-                assert_eq!(on.len(), 2);
+        assert!(
+            matches!(&query.graph[exists_join].inner, MirNodeInner::Join { .. }),
+            "should have rewritten dependent to non-dependent join (got: {})",
+            graph[exists_join].name().display_unquoted()
+        );
 
-                let left_pos = on
-                    .iter()
-                    .position(|(col, _)| col.name == "a" && col.table == Some("t1".into()));
-                let right_pos = on
-                    .iter()
-                    .position(|(_, col)| col.name == "a" && col.table == Some("rhs".into()));
-
-                assert!(left_pos.is_some());
-                assert!(right_pos.is_some());
-
-                assert_eq!(left_pos.unwrap(), right_pos.unwrap());
-            }
-            _ => panic!(
-                "should have rewritten dependent to non-dependent join (got: {})",
-                graph[exists_join].name().display_unquoted()
-            ),
-        };
+        assert_eq!(
+            query
+                .graph
+                .neighbors_directed(t2_filter, Direction::Incoming)
+                .next()
+                .unwrap(),
+            exists_join,
+            "Dependent filter should be moved below join"
+        );
+        assert_eq!(
+            query
+                .graph
+                .neighbors_directed(t2_filter, Direction::Outgoing)
+                .next()
+                .unwrap(),
+            leaf,
+            "Dependent filter should be inserted below join"
+        );
 
         assert_eq!(
             query.graph[query
@@ -511,7 +477,7 @@ mod tests {
                 .unwrap()]
             .name(),
             &Relation::from("t2"),
-            "t2_filter should be removed"
+            "t2_filter should be moved"
         );
 
         let pull_result = pull_all_required_columns(&mut query);
@@ -731,27 +697,30 @@ mod tests {
             "should update columns of filters recursively"
         );
 
-        match &query.graph[exists_join].inner {
-            MirNodeInner::Join { on, .. } => {
-                assert_eq!(on.len(), 2);
+        assert!(
+            matches!(&query.graph[exists_join].inner, MirNodeInner::Join { .. }),
+            "should have rewritten dependent to non-dependent join (got: {})",
+            graph[exists_join].name().display_unquoted()
+        );
 
-                let left_pos = on
-                    .iter()
-                    .position(|(col, _)| col.name == "a" && col.table == Some("t1".into()));
-                let right_pos = on
-                    .iter()
-                    .position(|(_, col)| col.name == "a" && col.table == Some("t2".into()));
-
-                assert!(left_pos.is_some());
-                assert!(right_pos.is_some());
-
-                assert_eq!(left_pos.unwrap(), right_pos.unwrap());
-            }
-            _ => panic!(
-                "should have rewritten dependent to non-dependent join (got: {})",
-                graph[exists_join].name().display_unquoted()
-            ),
-        };
+        assert_eq!(
+            query
+                .graph
+                .neighbors_directed(t2_filter, Direction::Incoming)
+                .next()
+                .unwrap(),
+            exists_join,
+            "Dependent filter should be moved below join"
+        );
+        assert_eq!(
+            query
+                .graph
+                .neighbors_directed(t2_filter, Direction::Outgoing)
+                .next()
+                .unwrap(),
+            leaf,
+            "Dependent filter should be inserted below join"
+        );
 
         pull_all_required_columns(&mut query).unwrap();
     }
