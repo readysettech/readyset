@@ -424,16 +424,6 @@ where
         } = ctxt;
 
         let mysql_res = op.run(mysql, query, &tables).await.unwrap();
-
-        /* TODO: figure out a way to reintroduce this logic, if needed:
-        // skip tests where mysql returns an error for the operations
-        prop_assume!(
-            !mysql_res.is_err(),
-            "MySQL returned an error: {}",
-            mysql_res.err().unwrap()
-        );
-        */
-
         let readyset_res = op.run(readyset, query, &tables).await.unwrap();
         assert_eq!(mysql_res, readyset_res);
     }
