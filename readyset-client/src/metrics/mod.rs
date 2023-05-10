@@ -19,7 +19,7 @@ pub mod recorded {
     /// restarts. When available, prefer the metrics scraped by whatever
     /// manages orchestration (such as kube-state-metrics's
     /// kube_pod_container_status_restarts metric)
-    pub const NORIA_STARTUP_TIMESTAMP: &str = "startup_timestamp";
+    pub const NORIA_STARTUP_TIMESTAMP: &str = "readyset_startup_timestamp";
 
     /// Counter: The number of lookup misses that occured during replay
     /// requests. Recorded at the domain on every lookup miss during a
@@ -31,7 +31,7 @@ pub mod recorded {
     /// | shard | The shard the replay miss is recorded in |
     /// | miss_in | The LocalNodeIndex of the data flow node where the miss occured |
     /// | needed_for | The client tag of the request that the replay is required for. |
-    pub const DOMAIN_REPLAY_MISSES: &str = "domain.replay_misses";
+    pub const DOMAIN_REPLAY_MISSES: &str = "readyset_domain.replay_misses";
 
     /// Histogram: The time in microseconds that a domain spends
     /// handling and forwarding a Message or Input packet. Recorded at
@@ -41,7 +41,7 @@ pub mod recorded {
     /// | --- | ----------- |
     /// | from_node | The src node of the packet. |
     /// | to_node |The dst node of the packet. |
-    pub const DOMAIN_FORWARD_TIME: &str = "forward_time_us";
+    pub const DOMAIN_FORWARD_TIME: &str = "readyset_forward_time_us";
 
     /// Counter: The total time the domain spends handling and forwarding
     /// a Message or Input packet. Recorded at the domain following handling
@@ -51,7 +51,7 @@ pub mod recorded {
     /// | --- | ----------- |
     /// | from_node | The src node of the packet. |
     /// | to_node |The dst node of the packet. |
-    pub const DOMAIN_TOTAL_FORWARD_TIME: &str = "total_forward_time_us";
+    pub const DOMAIN_TOTAL_FORWARD_TIME: &str = "readyset_total_forward_time_us";
 
     /// Histogram: The time in microseconds that a domain spends
     /// handling a ReplayPiece packet. Recorded at the domain following
@@ -62,7 +62,7 @@ pub mod recorded {
     /// | domain | The index of the domain the replay miss is recorded in. |
     /// | shard | The shard the replay miss is recorded in. |
     /// | tag | The client tag of the request that the replay is required for. |
-    pub const DOMAIN_REPLAY_TIME: &str = "domain.handle_replay_time";
+    pub const DOMAIN_REPLAY_TIME: &str = "readyset_domain.handle_replay_time";
 
     /// Counter: The total time in microseconds that a domain spends
     /// handling a ReplayPiece packet. Recorded at the domain following
@@ -73,7 +73,7 @@ pub mod recorded {
     /// | domain | The index of the domain the replay miss is recorded in. |
     /// | shard | The shard the replay miss is recorded in. |
     /// | tag | The client tag of the request that the replay is required for. |
-    pub const DOMAIN_TOTAL_REPLAY_TIME: &str = "domain.total_handle_replay_time";
+    pub const DOMAIN_TOTAL_REPLAY_TIME: &str = "readyset_domain.total_handle_replay_time";
 
     /// Histogram: The time in microseconds spent handling a reader replay
     /// request. Recorded at the domain following RequestReaderReplay
@@ -85,7 +85,8 @@ pub mod recorded {
     /// | domain | The index of the domain the reader replay request is recorded in. |
     /// | shard | The shard the reader replay request is recorded in. |
     /// | node | The LocalNodeIndex of the reader node handling the packet. |
-    pub const DOMAIN_READER_REPLAY_REQUEST_TIME: &str = "domain.reader_replay_request_time_us";
+    pub const DOMAIN_READER_REPLAY_REQUEST_TIME: &str =
+        "readyset_domain.reader_replay_request_time_us";
 
     /// Counter: The total time in microseconds spent handling a reader replay
     /// request. Recorded at the domain following RequestReaderReplay
@@ -98,7 +99,7 @@ pub mod recorded {
     /// | shard | The shard the reader replay request is recorded in. |
     /// | node | The LocalNodeIndex of the reader node handling the packet. |
     pub const DOMAIN_READER_TOTAL_REPLAY_REQUEST_TIME: &str =
-        "domain.reader_total_replay_request_time_us";
+        "readyset_domain.reader_total_replay_request_time_us";
 
     /// Histogram: The time in microseconds that a domain spends
     /// handling a RequestPartialReplay packet. Recorded at the domain
@@ -109,7 +110,7 @@ pub mod recorded {
     /// | domain | The index of the domain the replay request is recorded in. |
     /// | shard |The shard the replay request is recorded in. |
     /// | tag | The client tag of the request that the replay is required for. |
-    pub const DOMAIN_SEED_REPLAY_TIME: &str = "domain.seed_replay_time_us";
+    pub const DOMAIN_SEED_REPLAY_TIME: &str = "readyset_domain.seed_replay_time_us";
 
     /// Counter: The total time in microseconds that a domain spends
     /// handling a RequestPartialReplay packet. Recorded at the domain
@@ -120,7 +121,7 @@ pub mod recorded {
     /// | domain | The index of the domain the replay request is recorded in. |
     /// | shard |The shard the replay request is recorded in. |
     /// | tag | The client tag of the request that the replay is required for. |
-    pub const DOMAIN_TOTAL_SEED_REPLAY_TIME: &str = "domain.total_seed_replay_time_us";
+    pub const DOMAIN_TOTAL_SEED_REPLAY_TIME: &str = "readyset_domain.total_seed_replay_time_us";
 
     /// Histogram: The time in microseconds that a domain spawning a state
     /// chunker at a node during the processing of a StartReplay packet.
@@ -132,7 +133,7 @@ pub mod recorded {
     /// | domain | The index of the domain the start replay request is recorded in. |
     /// | shard | The shard the replay request is recorded in. |
     /// | from_node | The first node on the replay path. |
-    pub const DOMAIN_CHUNKED_REPLAY_TIME: &str = "domain.chunked_replay_time_us";
+    pub const DOMAIN_CHUNKED_REPLAY_TIME: &str = "readyset_domain.chunked_replay_time_us";
 
     /// Counter: The total time in microseconds that a domain spawning a state
     /// chunker at a node during the processing of a StartReplay packet.
@@ -144,7 +145,8 @@ pub mod recorded {
     /// | domain | The index of the domain the start replay request is recorded in. |
     /// | shard | The shard the replay request is recorded in. |
     /// | from_node | The first node on the replay path. |
-    pub const DOMAIN_TOTAL_CHUNKED_REPLAY_TIME: &str = "domain.total_chunked_replay_time_us";
+    pub const DOMAIN_TOTAL_CHUNKED_REPLAY_TIME: &str =
+        "readyset_domain.total_chunked_replay_time_us";
 
     /// Histogram: The time in microseconds that a domain spends
     /// handling a StartReplay packet. Recorded at the domain
@@ -155,7 +157,8 @@ pub mod recorded {
     /// | domain | The index of the domain the replay request is recorded in. |
     /// | shard | The shard the replay request is recorded in. |
     /// | tag | The client tag of the request that the replay is required for. |
-    pub const DOMAIN_CHUNKED_REPLAY_START_TIME: &str = "domain.chunked_replay_start_time_us";
+    pub const DOMAIN_CHUNKED_REPLAY_START_TIME: &str =
+        "readyset_domain.chunked_replay_start_time_us";
 
     /// Counter: The total time in microseconds that a domain spends
     /// handling a StartReplay packet. Recorded at the domain
@@ -167,7 +170,7 @@ pub mod recorded {
     /// | shard | The shard the replay request is recorded in. |
     /// | tag | The client tag of the request that the replay is required for. |
     pub const DOMAIN_TOTAL_CHUNKED_REPLAY_START_TIME: &str =
-        "domain.total_chunked_replay_start_time_us";
+        "readyset_domain.total_chunked_replay_start_time_us";
 
     /// Histogram: The time in microseconds that a domain spends
     /// handling a Finish packet for a replay. Recorded at the domain
@@ -178,7 +181,7 @@ pub mod recorded {
     /// | domain | The index of the domain the replay request is recorded in. |
     /// | shard | The shard the replay request is recorded in. |
     /// | tag | The client tag of the request that the Finish packet is required for. |
-    pub const DOMAIN_FINISH_REPLAY_TIME: &str = "domain.finish_replay_time_us";
+    pub const DOMAIN_FINISH_REPLAY_TIME: &str = "readyset_domain.finish_replay_time_us";
 
     /// Counter: The total time in microseconds that a domain spends
     /// handling a Finish packet for a replay. Recorded at the domain
@@ -189,7 +192,7 @@ pub mod recorded {
     /// | domain | The index of the domain the replay request is recorded in. |
     /// | shard | The shard the replay request is recorded in. |
     /// | tag | The client tag of the request that the Finish packet is required for. |
-    pub const DOMAIN_TOTAL_FINISH_REPLAY_TIME: &str = "domain.total_finish_replay_time_us";
+    pub const DOMAIN_TOTAL_FINISH_REPLAY_TIME: &str = "readyset_domain.total_finish_replay_time_us";
 
     /// Histogram: The time in microseconds that the domain spends handling
     /// a buffered replay request. Recorded at the domain following packet
@@ -201,7 +204,7 @@ pub mod recorded {
     /// | shard | The shard the replay request is recorded in. |
     /// | requesting_shard | The shard that is requesting to be seeded. |
     /// | tag | The client tag of the request that the Finish packet is required for. |
-    pub const DOMAIN_SEED_ALL_TIME: &str = "domain.seed_all_time_us";
+    pub const DOMAIN_SEED_ALL_TIME: &str = "readyset_domain.seed_all_time_us";
 
     /// Counter: The total time in microseconds that the domain spends handling
     /// a buffered replay request. Recorded at the domain following packet
@@ -213,20 +216,20 @@ pub mod recorded {
     /// | shard | The shard the replay request is recorded in. |
     /// | requesting_shard | The shard that is requesting to be seeded. |
     /// | tag | The client tag of the request that the Finish packet is required for. |
-    pub const DOMAIN_TOTAL_SEED_ALL_TIME: &str = "domain.total_seed_all_time_us";
+    pub const DOMAIN_TOTAL_SEED_ALL_TIME: &str = "readyset_domain.total_seed_all_time_us";
 
     /// Histogram: The amount of time spent handling an eviction
     /// request.
-    pub const EVICTION_TIME: &str = "eviction_time_us";
+    pub const EVICTION_TIME: &str = "readyset_eviction_time_us";
 
     /// Histogram: The time in microseconds that the controller spent committing
     /// a migration to the soup graph. Recorded at the controller at the end of
     /// the `commit` call.
-    pub const CONTROLLER_MIGRATION_TIME: &str = "controller.migration_time_us";
+    pub const CONTROLLER_MIGRATION_TIME: &str = "readyset_controller.migration_time_us";
 
     /// Gauge: Migration in progress indicator. Set to 1 when a migration
     /// is in progress, 0 otherwise.
-    pub const CONTROLLER_MIGRATION_IN_PROGRESS: &str = "controller.migration_in_progress";
+    pub const CONTROLLER_MIGRATION_IN_PROGRESS: &str = "readyset_controller.migration_in_progress";
 
     /// Counter: The number of evicitons performed at a worker. Incremented each
     /// time `do_eviction` is called at the worker.
@@ -234,21 +237,23 @@ pub mod recorded {
     /// | Tag | Description |
     /// | --- | ----------- |
     /// | domain | The domain that the eviction is performed in. |
-    pub const EVICTION_WORKER_EVICTIONS_REQUESTED: &str = "eviction_worker.evictions_requested";
+    pub const EVICTION_WORKER_EVICTIONS_REQUESTED: &str =
+        "readyset_eviction_worker.evictions_requested";
 
     /// Gauge: The amount of memory allocated in the heap of the full server process
-    pub const EVICTION_WORKER_HEAP_ALLOCATED_BYTES: &str = "eviction_worker.heap_allocated_bytes";
+    pub const EVICTION_WORKER_HEAP_ALLOCATED_BYTES: &str =
+        "readyset_eviction_worker.heap_allocated_bytes";
 
     /// Histogram: The amount of time that the eviction worker spends making an eviction
     /// decision and sending packets.
-    pub const EVICTION_WORKER_EVICTION_TIME: &str = "eviction_worker.eviction_time_us";
+    pub const EVICTION_WORKER_EVICTION_TIME: &str = "readyset_eviction_worker.eviction_time_us";
 
     /// Gauge: The amount of bytes required to store a dataflow node's state./
     ///
     /// | Tag | Description |
     /// | --- | ----------- |
     /// | node | The LocalNodeIndex of the dataflow node. |
-    pub const NODE_STATE_SIZE_BYTES: &str = "node_state_size_bytes";
+    pub const NODE_STATE_SIZE_BYTES: &str = "readyset_node_state_size_bytes";
 
     /// Gauge: The sum of the amount of bytes used to store the dataflow node's
     /// partial state within a domain.
@@ -257,15 +262,15 @@ pub mod recorded {
     /// | --- | ----------- |
     /// | domain | The index of the domain. |
     /// | shard | The shard identifier of the domain. |
-    pub const DOMAIN_PARTIAL_STATE_SIZE_BYTES: &str = "domain.partial_state_size_bytes";
+    pub const DOMAIN_PARTIAL_STATE_SIZE_BYTES: &str = "readyset_domain.partial_state_size_bytes";
 
     /// Gauge: The sum of the amount of bytes used to store a node's reader state
     /// within a domain.
-    pub const READER_STATE_SIZE_BYTES: &str = "reader_state_size_bytes";
+    pub const READER_STATE_SIZE_BYTES: &str = "readyset_reader_state_size_bytes";
 
     /// Gauge: The sum of the amount of bytes used to store a node's base tables
     /// on disk.
-    pub const ESTIMATED_BASE_TABLE_SIZE_BYTES: &str = "base_tables_estimated_size_bytes";
+    pub const ESTIMATED_BASE_TABLE_SIZE_BYTES: &str = "readyset_base_tables_estimated_size_bytes";
 
     /// Gauge: The sum of a domain's total node state and reader state bytes.
     ///
@@ -273,17 +278,18 @@ pub mod recorded {
     /// | --- | ----------- |
     /// | domain | The index of the domain. |
     /// | shard | The shard identifier of the domain. |
-    pub const DOMAIN_TOTAL_NODE_STATE_SIZE_BYTES: &str = "domain.total_node_state_size_bytes";
+    pub const DOMAIN_TOTAL_NODE_STATE_SIZE_BYTES: &str =
+        "readyset_domain.total_node_state_size_bytes";
 
     /// Counter: The number of HTTP requests received at the readyset-server, for either the
     /// controller or worker.
-    pub const SERVER_EXTERNAL_REQUESTS: &str = "server.external_requests";
+    pub const SERVER_EXTERNAL_REQUESTS: &str = "readyset_server.external_requests";
 
     /// Counter: The number of worker HTTP requests received by the readyset-server.
-    pub const SERVER_WORKER_REQUESTS: &str = "server.worker_requests";
+    pub const SERVER_WORKER_REQUESTS: &str = "readyset_server.worker_requests";
 
     /// Counter: The number of controller HTTP requests received by the readyset-server.
-    pub const SERVER_CONTROLLER_REQUESTS: &str = "server.controller_requests";
+    pub const SERVER_CONTROLLER_REQUESTS: &str = "readyset_server.controller_requests";
 
     /// Counter: The number of lookup requests to a base table nodes state.
     ///
@@ -293,7 +299,7 @@ pub mod recorded {
     /// | table_name | The name of the base table. |
     /// | shard | The shard of the base table the lookup is requested in. |
     /// | node | The LocalNodeIndex of the base table node handling the packet. |
-    pub const BASE_TABLE_LOOKUP_REQUESTS: &str = "base_table.lookup_requests";
+    pub const BASE_TABLE_LOOKUP_REQUESTS: &str = "readyset_base_table.lookup_requests";
 
     /// Counter: The number of packets dropped by an egress node.
     ///
@@ -301,7 +307,7 @@ pub mod recorded {
     /// | Tag | Description |
     /// | --- | ----------- |
     /// | node | The NodeIndex of the ingress node that was supposed to receive the packet. |
-    pub const EGRESS_NODE_DROPPED_PACKETS: &str = "egress.dropped_packets";
+    pub const EGRESS_NODE_DROPPED_PACKETS: &str = "readyset_egress.dropped_packets";
 
     /// Counter: The number of packets sent by an egress node.
     ///
@@ -309,23 +315,23 @@ pub mod recorded {
     /// | Tag | Description |
     /// | --- | ----------- |
     /// | node | The NodeIndex of the ingress node were the packet was sent. |
-    pub const EGRESS_NODE_SENT_PACKETS: &str = "egress.sent_packets";
+    pub const EGRESS_NODE_SENT_PACKETS: &str = "readyset_egress.sent_packets";
 
     /// Counter: The number of eviction packets received.
-    pub const EVICTION_REQUESTS: &str = "eviction_requests";
+    pub const EVICTION_REQUESTS: &str = "readyset_eviction_requests";
 
     /// Histogram: The total number of bytes evicted.
-    pub const EVICTION_FREED_MEMORY: &str = "eviction_freed_memory";
+    pub const EVICTION_FREED_MEMORY: &str = "readyset_eviction_freed_memory";
 
     /// Counter: The number of times a query was served entirely from reader cache.
-    pub const SERVER_VIEW_QUERY_HIT: &str = "server.view_query_result_hit";
+    pub const SERVER_VIEW_QUERY_HIT: &str = "readyset_server.view_query_result_hit";
 
     /// Counter: The number of times a query required at least a partial replay.
-    pub const SERVER_VIEW_QUERY_MISS: &str = "server.view_query_result_miss";
+    pub const SERVER_VIEW_QUERY_MISS: &str = "readyset_server.view_query_result_miss";
 
     /// Histogram: The amount of time in microseconds spent waiting for an upquery during a read
     /// request.
-    pub const SERVER_VIEW_UPQUERY_DURATION: &str = "server.view_query_upquery_duration_us";
+    pub const SERVER_VIEW_UPQUERY_DURATION: &str = "readyset_server.view_query_upquery_duration_us";
 
     /// Counter: The number of times a dataflow node type is added to the
     /// dataflow graph. Recorded at the time the new graph is committed.
@@ -334,7 +340,7 @@ pub mod recorded {
     /// | --- | ----------- |
     /// | ntype | The dataflow node type. |
     /// | node  | The index of the dataflow node. |
-    pub const NODE_ADDED: &str = "node_added";
+    pub const NODE_ADDED: &str = "readyset_node_added";
 
     /// Counter: The number of times a dataflow packet has been propagated
     /// for each domain.
@@ -343,10 +349,10 @@ pub mod recorded {
     /// | domain | The index of the domain. |
     /// | shard | The shard of the base table the lookup is requested in. |
     /// | packet_type | The type of packet |
-    pub const DOMAIN_PACKET_SENT: &str = "domain.packet_sent";
+    pub const DOMAIN_PACKET_SENT: &str = "readyset_domain.packet_sent";
 
     /// Histogram: The time a snapshot takes to be performed.
-    pub const REPLICATOR_SNAPSHOT_DURATION: &str = "replicator.snapshot_duration_us";
+    pub const REPLICATOR_SNAPSHOT_DURATION: &str = "readyset_replicator.snapshot_duration_us";
 
     /// How the replicator handled a snapshot.
     pub enum SnapshotStatusTag {
@@ -373,64 +379,64 @@ pub mod recorded {
     ///
     /// | Tag | Description |
     /// | status | SnapshotStatusTag |
-    pub const REPLICATOR_SNAPSHOT_STATUS: &str = "replicator.snapshot_status";
+    pub const REPLICATOR_SNAPSHOT_STATUS: &str = "readyset_replicator.snapshot_status";
 
     /// Gauge: Progress (in percent, 0-100) in snapshotting the given table
     ///
     /// | Tag | Description |
     /// | schema | Schema the relevant table exists in |
     /// | name | Name of the table being snapshot |
-    pub const REPLICATOR_SNAPSHOT_PERCENT: &str = "replicator.snapshot.percent";
+    pub const REPLICATOR_SNAPSHOT_PERCENT: &str = "readyset_replicator.snapshot.percent";
 
     /// Counter: Number of failures encountered when following the replication
     /// log.
-    pub const REPLICATOR_FAILURE: &str = "replicator.update_failure";
+    pub const REPLICATOR_FAILURE: &str = "readyset_replicator.update_failure";
 
     /// Counter: Number of tables that failed to replicate and are ignored
-    pub const TABLE_FAILED_TO_REPLICATE: &str = "replicator.table_failed";
+    pub const TABLE_FAILED_TO_REPLICATE: &str = "readyset_replicator.table_failed";
 
     /// Counter: Number of replication actions performed successfully.
-    pub const REPLICATOR_SUCCESS: &str = "replicator.update_success";
+    pub const REPLICATOR_SUCCESS: &str = "readyset_replicator.update_success";
 
     /// Gauge: Indicates whether a server is the leader. Set to 1 when the
     /// server is leader, 0 for follower.
-    pub const CONTROLLER_IS_LEADER: &str = "controller.is_leader";
+    pub const CONTROLLER_IS_LEADER: &str = "readyset_controller.is_leader";
 
     /// Counter: The total amount of time spent servicing controller RPCs.
     ///
     /// | Tag | Description |
     /// | path | The http path associated with the rpc request. |
-    pub const CONTROLLER_RPC_OVERALL_TIME: &str = "controller.rpc_overall_time";
+    pub const CONTROLLER_RPC_OVERALL_TIME: &str = "readyset_controller.rpc_overall_time";
 
     /// Histogram: The distribution of time spent servicing controller RPCs
     /// for each request.
     ///
     /// | Tag | Description |
     /// | path | The http path associated with the rpc request. |
-    pub const CONTROLLER_RPC_REQUEST_TIME: &str = "controller.rpc_request_time";
+    pub const CONTROLLER_RPC_REQUEST_TIME: &str = "readyset_controller.rpc_request_time";
 
     /// Histgoram: Write propagation time from binlog to reader node. For each
     /// input packet, this is recorded for each reader node that the packet
     /// propagates to. If the packet does not reach the reader because it hits a
     /// hole, the write propagation time is not recorded.
-    pub const PACKET_WRITE_PROPAGATION_TIME: &str = "packet.write_propagation_time_us";
+    pub const PACKET_WRITE_PROPAGATION_TIME: &str = "readyset_packet.write_propagation_time_us";
 
     /// Histogram: The time it takes to clone the dataflow state graph.
-    pub const DATAFLOW_STATE_CLONE_TIME: &str = "dataflow_state.clone_time";
+    pub const DATAFLOW_STATE_CLONE_TIME: &str = "readyset_dataflow_state.clone_time";
 
     /// Gauge: The size of the dataflow state, serialized and compressed, measured when it is
     /// written to the authority. This metric may be recorded even if the state does not
     /// get written to the authority (due to a failure). It is only recorded when the Consul
     /// authority is in use
-    pub const DATAFLOW_STATE_SERIALIZED: &str = "dataflow_state.serialized_size";
+    pub const DATAFLOW_STATE_SERIALIZED: &str = "readyset_dataflow_state.serialized_size";
 
     /// Gauge: A stub gague used to report the version information for the adapter.
     /// Labels are used to convey the version information.
-    pub const READYSET_ADAPTER_VERSION: &str = "readyset.adapter_version";
+    pub const READYSET_ADAPTER_VERSION: &str = "readyset_adapter_version";
 
     /// Gauge: A stub gague used to report the version information for the server.
     /// Labels are used to convey the version information.
-    pub const READYSET_SERVER_VERSION: &str = "readyset.server_version";
+    pub const READYSET_SERVER_VERSION: &str = "readyset_server_version";
 }
 
 /// A dumped metric's kind.
