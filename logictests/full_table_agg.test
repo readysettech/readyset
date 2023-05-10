@@ -1,0 +1,24 @@
+statement ok
+create table t (x int);
+
+statement ok
+insert into t (x) values
+(1),
+(1),
+(1),
+(1),
+(4),
+(3),
+(2);
+
+query I nosort
+select count(*) from t;
+----
+7
+
+query I nosort
+select max(x) from t;
+----
+4
+
+graphviz

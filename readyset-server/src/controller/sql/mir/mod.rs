@@ -1012,23 +1012,6 @@ impl SqlToMirConverter {
         ))
     }
 
-    fn make_projection_helper(
-        &mut self,
-        query_name: &Relation,
-        name: Relation,
-        parent: NodeIndex,
-        fn_cols: Vec<Column>,
-    ) -> NodeIndex {
-        self.make_project_node(
-            query_name,
-            name,
-            parent,
-            fn_cols,
-            vec![],
-            vec![("grp".into(), DfValue::from(0i32))],
-        )
-    }
-
     fn make_project_node(
         &mut self,
         query_name: &Relation,

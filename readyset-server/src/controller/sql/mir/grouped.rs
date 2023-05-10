@@ -111,94 +111,59 @@ pub(super) fn make_grouped(
         return Ok(vec![]);
     }
     for (function, alias) in &qg.aggregates {
-        // We must also push parameter columns through the group by
-        let over_cols = function.referred_columns().peekable();
-
         let name = mir_converter.generate_label(&name);
 
-        let (parent_node, group_cols) = if !qg.group_by.is_empty() {
-            // get any parameter columns that aren't also in the group-by
-            // column set
-            let param_cols: Vec<_> = qg.relations.values().fold(vec![], |acc, rel| {
-                acc.into_iter()
-                    .chain(
-                        rel.parameters
-                            .iter()
-                            .map(|param| &param.col)
-                            .filter(|c| !qg.group_by.contains(c)),
-                    )
-                    .collect()
-            });
-            // combine and dedup
-            #[allow(clippy::needless_collect)] // necessary to avoid cloning param_cols
-            let dedup_gb_cols: Vec<_> = qg
-                .group_by
-                .iter()
-                .filter(|gbc| !param_cols.contains(gbc))
-                .collect();
-            let gb_and_param_cols = dedup_gb_cols
-                .into_iter()
-                .chain(param_cols.into_iter())
-                .map(Column::from);
-
-            let mut have_parent_cols = HashSet::new();
-            // we cannot have duplicate columns at the data-flow level, as it confuses our
-            // migration analysis code.
-            let gb_and_param_cols = gb_and_param_cols
-                .filter_map(|mut c| {
-                    let pc = mir_converter
-                        .columns(*prev_node)
+        // get any parameter columns that aren't also in the group-by
+        // column set
+        let param_cols: Vec<_> = qg.relations.values().fold(vec![], |acc, rel| {
+            acc.into_iter()
+                .chain(
+                    rel.parameters
                         .iter()
-                        .position(|pc| *pc == c);
-                    if let Some(pc) = pc {
-                        if !have_parent_cols.contains(&pc) {
-                            have_parent_cols.insert(pc);
-                            let pc = mir_converter.columns(*prev_node)[pc].clone();
-                            if pc.name != c.name || pc.table != c.table {
-                                // remember the alias with the parent column
-                                c.aliases.push(pc);
-                            }
-                            Some(c)
-                        } else {
-                            // we already have this column, so eliminate duplicate
-                            None
+                        .map(|param| &param.col)
+                        .filter(|c| !qg.group_by.contains(c)),
+                )
+                .collect()
+        });
+        // combine and dedup
+        #[allow(clippy::needless_collect)] // necessary to avoid cloning param_cols
+        let dedup_gb_cols: Vec<_> = qg
+            .group_by
+            .iter()
+            .filter(|gbc| !param_cols.contains(gbc))
+            .collect();
+        let gb_and_param_cols = dedup_gb_cols
+            .into_iter()
+            .chain(param_cols.into_iter())
+            .map(Column::from);
+
+        let mut have_parent_cols = HashSet::new();
+        // we cannot have duplicate columns at the data-flow level, as it confuses our
+        // migration analysis code.
+        let group_cols = gb_and_param_cols
+            .filter_map(|mut c| {
+                let pc = mir_converter
+                    .columns(*prev_node)
+                    .iter()
+                    .position(|pc| *pc == c);
+                if let Some(pc) = pc {
+                    if !have_parent_cols.contains(&pc) {
+                        have_parent_cols.insert(pc);
+                        let pc = mir_converter.columns(*prev_node)[pc].clone();
+                        if pc.name != c.name || pc.table != c.table {
+                            // remember the alias with the parent column
+                            c.aliases.push(pc);
                         }
-                    } else {
                         Some(c)
+                    } else {
+                        // we already have this column, so eliminate duplicate
+                        None
                     }
-                })
-                .collect();
-
-            (*prev_node, gb_and_param_cols)
-        } else {
-            let proj_cols_from_target_table = over_cols
-                .flat_map(|col| &qg.relations[&col.table.clone().unwrap()].columns)
-                .map(Column::from)
-                .collect::<Vec<_>>();
-
-            let (group_cols, parent_node) = if proj_cols_from_target_table.is_empty() {
-                // slightly messy hack: if there are no group columns and the
-                // table on which we compute has no projected columns in the
-                // output, we make one up a group column by adding an extra
-                // projection node
-                let proj_name = format!("{}_prj_hlpr", name.display_unquoted()).into();
-                let fn_cols: Vec<_> = function
-                    .referred_columns()
-                    .map(|c| Column::from(c.clone()))
-                    .collect();
-                let proj = mir_converter
-                    .make_projection_helper(query_name, proj_name, *prev_node, fn_cols);
-
-                agg_nodes.push(proj);
-
-                let bogo_group_col = Column::named("grp");
-                (vec![bogo_group_col], proj)
-            } else {
-                (proj_cols_from_target_table, *prev_node)
-            };
-
-            (parent_node, group_cols)
-        };
+                } else {
+                    Some(c)
+                }
+            })
+            .collect();
 
         let nodes: Vec<NodeIndex> = mir_converter.make_aggregate_node(
             query_name,
@@ -206,7 +171,7 @@ pub(super) fn make_grouped(
             Column::named(alias.clone()),
             function.clone(),
             group_cols,
-            parent_node,
+            *prev_node,
             projected_exprs,
         )?;
 
