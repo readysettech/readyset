@@ -448,7 +448,7 @@ where
         if mapped_cols.len() != cols.len() {
             ColumnSource::RequiresFullReplay(vec1![self.src.as_global()])
         } else {
-            ColumnSource::exact_copy(self.src.as_global(), mapped_cols.try_into().unwrap())
+            ColumnSource::exact_copy(self.src.as_global(), mapped_cols)
         }
     }
 

@@ -319,9 +319,7 @@ impl Ingredient for Paginate {
                 .iter()
                 .copied()
                 .filter(|c| *c != self.page_number_column())
-                .collect::<Vec<_>>()
-                .try_into()
-                .unwrap();
+                .collect::<Vec<_>>();
             ColumnSource::GeneratedFromColumns(vec1![ColumnRef {
                 node: self.our_index.unwrap().as_global(),
                 columns,
@@ -329,7 +327,7 @@ impl Ingredient for Paginate {
         } else {
             ColumnSource::ExactCopy(ColumnRef {
                 node: self.src.as_global(),
-                columns: cols.to_vec().try_into().unwrap(),
+                columns: cols.to_vec(),
             })
         }
     }
@@ -343,7 +341,7 @@ impl Ingredient for Paginate {
 
         Ok(vec![ColumnMiss {
             node: *self.our_index.unwrap(),
-            column_indices: self.group_by.clone().try_into().unwrap(),
+            column_indices: self.group_by.clone(),
             missed_keys: miss.missed_keys.mapped(|k| {
                 k.map_endpoints(|mut r| {
                     r.remove(page_number_column)
@@ -411,7 +409,7 @@ mod tests {
             src,
             ColumnSource::ExactCopy(ColumnRef {
                 node: s.as_global(),
-                columns: vec1![1]
+                columns: vec![1]
             })
         );
     }
@@ -424,7 +422,7 @@ mod tests {
             src,
             ColumnSource::GeneratedFromColumns(vec1![ColumnRef {
                 node: g.node_index().as_global(),
-                columns: vec1![1],
+                columns: vec![1],
             }])
         );
     }
@@ -454,7 +452,7 @@ mod tests {
             .node_mut()
             .handle_upquery(ColumnMiss {
                 node: *g.node_index(),
-                column_indices: vec1![1, 2],
+                column_indices: vec![1, 2],
                 missed_keys: vec1![vec1![DfValue::from("a"), DfValue::from(1)].into()],
             })
             .unwrap();
@@ -464,7 +462,7 @@ mod tests {
             *res.first().unwrap(),
             ColumnMiss {
                 node: *g.node_index(),
-                column_indices: vec1![1],
+                column_indices: vec![1],
                 missed_keys: vec1![vec1![DfValue::from("a")].into()]
             }
         );

@@ -542,7 +542,7 @@ impl RemappedKeys {
             .or_default()
             .entry(upstream_miss.node)
             .or_default()
-            .entry(upstream_miss.column_indices.into_vec())
+            .entry(upstream_miss.column_indices)
             .or_default()
             .entry(upstream_miss.missed_keys.into_vec())
             .or_default()
@@ -873,13 +873,13 @@ impl Domain {
         // Map of replays we need to do, grouped by the set of columns at the *target* of the replay
         // (which in the case of remapped upqueries might be different than the columns we missed
         // on!)
-        let mut needed_replays: HashMap<(Target, Vec1<usize>), Vec<KeyComparison>> =
+        let mut needed_replays: HashMap<(Target, Vec<usize>), Vec<KeyComparison>> =
             Default::default();
 
         for (replay_key, miss_key) in missed_keys {
             let miss = ColumnMiss {
                 node: miss_in,
-                column_indices: Vec1::try_from(miss_columns).unwrap(),
+                column_indices: miss_columns.to_vec(),
                 missed_keys: vec1![miss_key],
             };
             let misses = if is_generated {
@@ -938,7 +938,7 @@ impl Domain {
                 for miss_key in missed_keys {
                     match w.redos.entry(Hole {
                         node,
-                        column_indices: column_indices.clone().into(),
+                        column_indices: column_indices.clone(),
                         key: miss_key.clone(),
                     }) {
                         Entry::Occupied(e) => {

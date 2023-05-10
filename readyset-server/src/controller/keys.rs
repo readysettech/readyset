@@ -631,7 +631,7 @@ mod tests {
                 &g,
                 ColumnRef {
                     node: a,
-                    columns: vec1![0]
+                    columns: vec![0]
                 },
                 IndexType::HashMap
             )
@@ -646,7 +646,7 @@ mod tests {
                 &g,
                 ColumnRef {
                     node: b,
-                    columns: vec1![0]
+                    columns: vec![0]
                 },
                 IndexType::HashMap
             )
@@ -663,7 +663,7 @@ mod tests {
                 &g,
                 ColumnRef {
                     node: a,
-                    columns: vec1![0, 1]
+                    columns: vec![0, 1]
                 },
                 IndexType::HashMap
             )
@@ -679,7 +679,7 @@ mod tests {
                 &g,
                 ColumnRef {
                     node: a,
-                    columns: vec1![1, 0]
+                    columns: vec![1, 0]
                 },
                 IndexType::HashMap
             )
@@ -707,7 +707,7 @@ mod tests {
                 &g,
                 ColumnRef {
                     node: x,
-                    columns: vec1![0]
+                    columns: vec![0]
                 },
                 IndexType::HashMap
             )
@@ -723,7 +723,7 @@ mod tests {
                 &g,
                 ColumnRef {
                     node: x,
-                    columns: vec1![0, 1]
+                    columns: vec![0, 1]
                 },
                 IndexType::HashMap
             )
@@ -751,7 +751,7 @@ mod tests {
                 &g,
                 ColumnRef {
                     node: x,
-                    columns: vec1![0]
+                    columns: vec![0]
                 },
                 IndexType::HashMap
             )
@@ -766,7 +766,7 @@ mod tests {
                 &g,
                 ColumnRef {
                     node: x,
-                    columns: vec1![0, 1]
+                    columns: vec![0, 1]
                 },
                 IndexType::HashMap
             )
@@ -799,7 +799,7 @@ mod tests {
                 &g,
                 ColumnRef {
                     node: x,
-                    columns: vec1![0]
+                    columns: vec![0]
                 },
                 IndexType::HashMap
             )
@@ -814,7 +814,7 @@ mod tests {
                 &g,
                 ColumnRef {
                     node: x,
-                    columns: vec1![1]
+                    columns: vec![1]
                 },
                 IndexType::HashMap
             )
@@ -829,7 +829,7 @@ mod tests {
                 &g,
                 ColumnRef {
                     node: x,
-                    columns: vec1![0, 1]
+                    columns: vec![0, 1]
                 },
                 IndexType::HashMap
             )
@@ -863,7 +863,7 @@ mod tests {
             &g,
             ColumnRef {
                 node: x,
-                columns: vec1![0],
+                columns: vec![0],
             },
             IndexType::HashMap,
         )
@@ -887,7 +887,7 @@ mod tests {
             &g,
             ColumnRef {
                 node: x,
-                columns: vec1![0, 1],
+                columns: vec![0, 1],
             },
             IndexType::HashMap,
         )
@@ -936,7 +936,7 @@ mod tests {
                 &g,
                 ColumnRef {
                     node: x,
-                    columns: vec1![0]
+                    columns: vec![0]
                 },
                 IndexType::HashMap
             )
@@ -953,7 +953,7 @@ mod tests {
                 &g,
                 ColumnRef {
                     node: x,
-                    columns: vec1![2]
+                    columns: vec![2]
                 },
                 IndexType::HashMap
             )
@@ -969,7 +969,7 @@ mod tests {
             &g,
             ColumnRef {
                 node: x,
-                columns: vec1![1],
+                columns: vec![1],
             },
             IndexType::HashMap,
         )
@@ -988,7 +988,7 @@ mod tests {
             &g,
             ColumnRef {
                 node: x,
-                columns: vec1![0, 1],
+                columns: vec![0, 1],
             },
             IndexType::HashMap,
         )
@@ -1007,7 +1007,7 @@ mod tests {
             &g,
             ColumnRef {
                 node: x,
-                columns: vec1![1, 2],
+                columns: vec![1, 2],
             },
             IndexType::HashMap,
         )
@@ -1058,7 +1058,7 @@ mod tests {
             &g,
             ColumnRef {
                 node: x,
-                columns: vec1![0, 1, 2],
+                columns: vec![0, 1, 2],
             },
             IndexType::HashMap,
         )
@@ -1082,7 +1082,7 @@ mod tests {
             &g,
             ColumnRef {
                 node: x,
-                columns: vec1![0, 2],
+                columns: vec![0, 2],
             },
             IndexType::HashMap,
         )
@@ -1102,7 +1102,7 @@ mod tests {
             &g,
             ColumnRef {
                 node: reader,
-                columns: vec1![0, 2],
+                columns: vec![0, 2],
             },
             IndexType::HashMap,
         )
@@ -1162,7 +1162,7 @@ mod tests {
             &g,
             ColumnRef {
                 node: reader,
-                columns: vec1![1, 2],
+                columns: vec![1, 2],
             },
             IndexType::HashMap,
         )
@@ -1186,7 +1186,7 @@ mod tests {
             &g,
             ColumnRef {
                 node: paginate,
-                columns: vec1![1, 2],
+                columns: vec![1, 2],
             },
             IndexType::HashMap,
         )

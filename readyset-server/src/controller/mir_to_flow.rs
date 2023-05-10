@@ -530,7 +530,6 @@ fn make_grouped_node(
     kind: GroupedNodeType,
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<DfNodeIndex> {
-    invariant!(!group_by.is_empty());
     let parent_na = graph.resolve_dataflow_node(parent).ok_or_else(|| {
         ReadySetError::MirNodeMustHaveDfNodeAssigned {
             mir_node_index: parent.index(),
@@ -541,7 +540,6 @@ fn make_grouped_node(
         .iter()
         .map(|c| graph.column_id_for_column(parent, c))
         .collect::<ReadySetResult<Vec<_>>>()?;
-    invariant!(!group_col_indx.is_empty());
 
     // Grouped projects the group_by columns followed by computed column
     let parent_cols = mig.dataflow_state.ingredients[parent_na.address()].columns();

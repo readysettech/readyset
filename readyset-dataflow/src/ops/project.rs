@@ -1,6 +1,5 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::convert::TryInto;
 
 use dataflow_expression::Expr;
 use dataflow_state::PointKey;
@@ -219,7 +218,7 @@ impl Ingredient for Project {
         if mapped_cols.len() != cols.len() {
             ColumnSource::RequiresFullReplay(vec1![self.src.as_global()])
         } else {
-            ColumnSource::exact_copy(self.src.as_global(), mapped_cols.try_into().unwrap())
+            ColumnSource::exact_copy(self.src.as_global(), mapped_cols)
         }
     }
 

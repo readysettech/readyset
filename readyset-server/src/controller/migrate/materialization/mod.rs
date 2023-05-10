@@ -6,7 +6,6 @@
 //! module).
 
 use std::collections::{HashMap, HashSet};
-use std::convert::TryFrom;
 
 use dataflow::prelude::*;
 use dataflow::{DomainRequest, LookupIndex};
@@ -14,7 +13,6 @@ use petgraph::graph::NodeIndex;
 use readyset_errors::{internal, internal_err, invariant, ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info_span, trace};
-use vec1::Vec1;
 
 use crate::controller::keys;
 use crate::controller::migrate::DomainMigrationPlan;
@@ -532,7 +530,7 @@ impl Materializations {
                     graph,
                     ColumnRef {
                         node: ni,
-                        columns: Vec1::try_from(index.columns.clone()).unwrap(),
+                        columns: index.columns.clone(),
                     },
                     index.index_type,
                 )?);
@@ -788,7 +786,7 @@ impl Materializations {
                         graph,
                         ColumnRef {
                             node: ni,
-                            columns: Vec1::try_from(index.columns.clone()).unwrap(),
+                            columns: index.columns.clone(),
                         },
                         index.index_type,
                     )?;

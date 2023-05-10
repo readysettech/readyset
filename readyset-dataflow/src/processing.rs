@@ -352,7 +352,7 @@ pub struct ColumnRef<N = NodeIndex> {
     /// The index of the referenced node.
     pub node: N,
     /// The referenced column indices.
-    pub columns: Vec1<usize>,
+    pub columns: Vec<usize>,
 }
 
 /// A miss on a node's column(s).
@@ -362,11 +362,11 @@ pub struct ColumnMiss {
     pub node: LocalNodeIndex,
     /// The column indices that the lookup was performed in
     ///
-    /// Invariant: this will have the same length as all the keys in `missed_key`
-    pub column_indices: Vec1<usize>,
+    /// Invariant: this will have the same length as all the keys in `missed_keys`
+    pub column_indices: Vec<usize>,
     /// The keys that we missed on.
     ///
-    /// Invariant: this will have the same length as `column_indices`
+    /// Invariant: These keys will have the same length as `column_indices`
     pub missed_keys: Vec1<KeyComparison>,
 }
 
@@ -404,7 +404,7 @@ pub enum ColumnSource {
 
 impl ColumnSource {
     /// Helper function to make a [`ColumnSource::ExactCopy`] with the provided information.
-    pub fn exact_copy(index: NodeIndex, cols: Vec1<usize>) -> Self {
+    pub fn exact_copy(index: NodeIndex, cols: Vec<usize>) -> Self {
         ColumnSource::ExactCopy(ColumnRef {
             node: index,
             columns: cols,

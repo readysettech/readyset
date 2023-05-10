@@ -1022,12 +1022,7 @@ impl Ingredient for Union {
                 emit.iter()
                     .map(|(src, emit)| ColumnRef {
                         node: src.as_global(),
-                        columns: cols
-                            .iter()
-                            .map(|&idx| emit[idx])
-                            .collect::<Vec<_>>()
-                            .try_into()
-                            .unwrap(),
+                        columns: cols.iter().map(|&idx| emit[idx]).collect::<Vec<_>>(),
                     })
                     .collect::<Vec<_>>()
                     .try_into()

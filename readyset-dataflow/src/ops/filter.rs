@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::convert::TryInto;
 
 use dataflow_expression::Expr;
 use dataflow_state::PointKey;
@@ -71,7 +70,7 @@ impl Ingredient for Filter {
     }
 
     fn column_source(&self, cols: &[usize]) -> ColumnSource {
-        ColumnSource::exact_copy(self.src.as_global(), cols.try_into().unwrap())
+        ColumnSource::exact_copy(self.src.as_global(), cols.to_vec())
     }
 
     fn description(&self, detailed: bool) -> String {

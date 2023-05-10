@@ -103,8 +103,6 @@ impl Join {
             )
         };
 
-        debug_assert!(!on.is_empty());
-
         Self {
             left: left.into(),
             right: right.into(),
@@ -658,12 +656,12 @@ impl Ingredient for Join {
         Ok(vec![
             ColumnMiss {
                 node: *self.left,
-                column_indices: Vec1::try_from(left_cols).unwrap(),
+                column_indices: left_cols,
                 missed_keys: Vec1::try_from(left_keys).unwrap(),
             },
             ColumnMiss {
                 node: *self.right,
-                column_indices: Vec1::try_from(right_cols).unwrap(),
+                column_indices: right_cols,
                 missed_keys: Vec1::try_from(right_keys).unwrap(),
             },
         ])
@@ -689,23 +687,13 @@ impl Ingredient for Join {
             // we can just 1:1 index the left parent and do the joining bits on replay
             ColumnSource::exact_copy(
                 self.left.as_global(),
-                left_cols
-                    .into_iter()
-                    .flatten()
-                    .collect::<Vec<_>>()
-                    .try_into()
-                    .unwrap(),
+                left_cols.into_iter().flatten().collect::<Vec<_>>(),
             )
         } else if right_cols.iter().all(|x| x.is_some()) {
             // same for right parent
             ColumnSource::exact_copy(
                 self.right.as_global(),
-                right_cols
-                    .into_iter()
-                    .flatten()
-                    .collect::<Vec<_>>()
-                    .try_into()
-                    .unwrap(),
+                right_cols.into_iter().flatten().collect::<Vec<_>>(),
             )
         } else {
             let right_cols = right_cols
@@ -718,11 +706,11 @@ impl Ingredient for Join {
             ColumnSource::GeneratedFromColumns(vec1![
                 ColumnRef {
                     node: self.left.as_global(),
-                    columns: left_cols.try_into().unwrap()
+                    columns: left_cols
                 },
                 ColumnRef {
                     node: self.right.as_global(),
-                    columns: right_cols.try_into().unwrap()
+                    columns: right_cols
                 },
             ])
         }
@@ -963,7 +951,7 @@ mod tests {
                 .node_mut()
                 .handle_upquery(ColumnMiss {
                     node,
-                    column_indices: vec1![0, 1, 2],
+                    column_indices: vec![0, 1, 2],
                     missed_keys: vec1![
                         vec1![DfValue::from(1), DfValue::from(2), DfValue::from(3)].into()
                     ],
@@ -973,8 +961,8 @@ mod tests {
             let left_miss = res.iter().find(|miss| miss.node == *l).unwrap();
             let right_miss = res.iter().find(|miss| miss.node == *r).unwrap();
 
-            assert_eq!(left_miss.column_indices, vec1![0, 1]);
-            assert_eq!(right_miss.column_indices, vec1![1]);
+            assert_eq!(left_miss.column_indices, vec![0, 1]);
+            assert_eq!(right_miss.column_indices, vec![1]);
 
             assert_eq!(
                 left_miss.missed_keys,
@@ -994,7 +982,7 @@ mod tests {
                 .node_mut()
                 .handle_upquery(ColumnMiss {
                     node,
-                    column_indices: vec1![0, 1, 2],
+                    column_indices: vec![0, 1, 2],
                     missed_keys: vec1![
                         vec1![DfValue::from(1), DfValue::from(2), DfValue::from(3)].into(),
                         vec1![DfValue::from(4), DfValue::from(5), DfValue::from(6)].into()
@@ -1005,8 +993,8 @@ mod tests {
             let left_miss = res.iter().find(|miss| miss.node == *l).unwrap();
             let right_miss = res.iter().find(|miss| miss.node == *r).unwrap();
 
-            assert_eq!(left_miss.column_indices, vec1![0, 1]);
-            assert_eq!(right_miss.column_indices, vec1![1]);
+            assert_eq!(left_miss.column_indices, vec![0, 1]);
+            assert_eq!(right_miss.column_indices, vec![1]);
 
             assert_eq!(
                 left_miss.missed_keys,
@@ -1032,7 +1020,7 @@ mod tests {
                 .node_mut()
                 .handle_upquery(ColumnMiss {
                     node,
-                    column_indices: vec1![0, 1, 2],
+                    column_indices: vec![0, 1, 2],
                     missed_keys: vec1![KeyComparison::Range((
                         Bound::Included(vec1![
                             DfValue::from(1),
@@ -1051,8 +1039,8 @@ mod tests {
             let left_miss = res.iter().find(|miss| miss.node == *l).unwrap();
             let right_miss = res.iter().find(|miss| miss.node == *r).unwrap();
 
-            assert_eq!(left_miss.column_indices, vec1![0, 1]);
-            assert_eq!(right_miss.column_indices, vec1![1]);
+            assert_eq!(left_miss.column_indices, vec![0, 1]);
+            assert_eq!(right_miss.column_indices, vec![1]);
 
             assert_eq!(
                 left_miss.missed_keys,
@@ -1078,7 +1066,7 @@ mod tests {
                 .node_mut()
                 .handle_upquery(ColumnMiss {
                     node,
-                    column_indices: vec1![0, 1, 2],
+                    column_indices: vec![0, 1, 2],
                     missed_keys: vec1![KeyComparison::Range((
                         Bound::Included(vec1![
                             DfValue::from(1),
@@ -1093,8 +1081,8 @@ mod tests {
             let left_miss = res.iter().find(|miss| miss.node == *l).unwrap();
             let right_miss = res.iter().find(|miss| miss.node == *r).unwrap();
 
-            assert_eq!(left_miss.column_indices, vec1![0, 1]);
-            assert_eq!(right_miss.column_indices, vec1![1]);
+            assert_eq!(left_miss.column_indices, vec![0, 1]);
+            assert_eq!(right_miss.column_indices, vec![1]);
 
             assert_eq!(
                 left_miss.missed_keys,
