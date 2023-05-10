@@ -165,6 +165,10 @@ impl GroupedOperation for ExtremumOperator {
         // Type of extremum relies on col type.
         DfType::Unknown
     }
+
+    fn can_lose_state(&self) -> bool {
+        true
+    }
 }
 
 #[cfg(test)]

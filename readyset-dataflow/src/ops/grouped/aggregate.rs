@@ -286,6 +286,10 @@ impl GroupedOperation for Aggregator {
             _ => false,
         }
     }
+
+    fn can_lose_state(&self) -> bool {
+        false
+    }
 }
 
 // TODO: These unit tests are lengthy, repetitive, and hard to read.

@@ -91,6 +91,10 @@ pub trait GroupedOperation: fmt::Debug + Clone {
     fn emit_empty(&self) -> bool {
         false
     }
+
+    /// Returns `true` if this node might return `GroupedStateLost` from an update, requiring its
+    /// state to be repopulated from its parent
+    fn can_lose_state(&self) -> bool;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -403,18 +407,23 @@ where
     }
 
     fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, LookupIndex> {
-        HashMap::from([
-            // index the parent for state repopulation purposes
-            (
-                self.src.as_global(),
-                LookupIndex::Strict(Index::hash_map(self.group_by.clone())),
-            ),
+        let mut indexes = HashMap::from([
             // index by our primary key
             (
                 this,
                 LookupIndex::Strict(Index::hash_map(self.out_key.clone())),
             ),
-        ])
+        ]);
+
+        if self.inner.can_lose_state() {
+            // index the parent for state repopulation purposes
+            indexes.insert(
+                self.src.as_global(),
+                LookupIndex::Strict(Index::hash_map(self.group_by.clone())),
+            );
+        }
+
+        indexes
     }
 
     fn column_source(&self, cols: &[usize]) -> ColumnSource {

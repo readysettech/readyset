@@ -210,6 +210,10 @@ impl GroupedOperation for GroupConcat {
     fn empty_value(&self) -> Option<DfValue> {
         Some("".into())
     }
+
+    fn can_lose_state(&self) -> bool {
+        false
+    }
 }
 
 #[cfg(test)]
