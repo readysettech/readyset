@@ -89,15 +89,12 @@ pub struct Index {
     pub index_type: IndexType,
 
     /// The column indices in the underlying relation that this index is on
-    /// TODO: Convert to Vec1
     pub columns: Vec<usize>,
 }
 
-#[allow(clippy::len_without_is_empty)] // Index can't have an empty set of columns
 impl Index {
     /// Create a new Index with the given index type and column indices
     pub fn new(index_type: IndexType, columns: Vec<usize>) -> Self {
-        debug_assert!(!columns.is_empty());
         Self {
             index_type,
             columns,
@@ -117,6 +114,11 @@ impl Index {
     /// Returns the length of this index's key
     pub fn len(&self) -> usize {
         self.columns.len()
+    }
+
+    /// Returns true if this index is indexing on no columns
+    pub fn is_empty(&self) -> bool {
+        self.columns.is_empty()
     }
 }
 

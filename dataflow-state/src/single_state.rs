@@ -1,3 +1,4 @@
+use std::iter;
 use std::ops::{Bound, RangeBounds};
 use std::rc::Rc;
 
@@ -81,6 +82,10 @@ impl SingleState {
     fn mark_point_filled(&mut self, key: Vec1<DfValue>) {
         let mut key = key.into_iter();
         let replaced = match self.state {
+            KeyedState::AllRows(_) => {
+                // No-op (can't be partial)
+                return;
+            }
             KeyedState::SingleBTree(ref mut map) => {
                 assert_eq!(key.len(), 1);
                 map.insert(key.next().unwrap(), Rows::default())
@@ -227,10 +232,12 @@ impl SingleState {
     ///
     /// # Panics
     ///
-    /// Panics if the `key` is a range, but the underlying KeyedState is backed by a HashMap
+    /// * Panics if the `key` is a range, but the underlying KeyedState is backed by a HashMap
+    /// * Panics if the underlying index has no columns
     pub(super) fn mark_hole(&mut self, key: &KeyComparison) -> u64 {
         let removed: Box<dyn Iterator<Item = (Row, usize)>> = match key {
             KeyComparison::Equal(key) => match self.state {
+                KeyedState::AllRows(_) => panic!("Empty-column index cannot be partial"),
                 KeyedState::SingleBTree(ref mut m) => {
                     Box::new(m.remove(&(key[0])).into_iter().flatten())
                 }
@@ -335,6 +342,7 @@ impl SingleState {
     pub(super) fn clear(&mut self) {
         self.row_count = 0;
         match self.state {
+            KeyedState::AllRows(ref mut rows) => rows.clear(),
             KeyedState::SingleBTree(ref mut map) => map.clear(),
             KeyedState::DoubleBTree(ref mut map) => map.clear(),
             KeyedState::TriBTree(ref mut map) => map.clear(),
@@ -380,6 +388,7 @@ impl SingleState {
 
     pub(super) fn values<'a>(&'a self) -> Box<dyn Iterator<Item = &'a Rows> + 'a> {
         match self.state {
+            KeyedState::AllRows(ref rows) => Box::new(iter::once(rows)),
             KeyedState::SingleBTree(ref map) => Box::new(map.values()),
             KeyedState::DoubleBTree(ref map) => Box::new(map.values()),
             KeyedState::TriBTree(ref map) => Box::new(map.values()),

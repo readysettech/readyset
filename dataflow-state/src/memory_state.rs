@@ -610,6 +610,50 @@ mod tests {
         );
     }
 
+    #[test]
+    fn empty_column_set() {
+        let mut state = MemoryState::default();
+        state.add_key(Index::hash_map(vec![]), None);
+
+        let mut rows = vec![
+            vec![1.into()],
+            vec![2.into()],
+            vec![3.into()],
+            vec![4.into()],
+            vec![5.into()],
+            vec![6.into()],
+        ];
+
+        state
+            .process_records(&mut rows.clone().into(), None, None)
+            .unwrap();
+        let mut res = state
+            .lookup(&[], &PointKey::Empty)
+            .unwrap()
+            .into_iter()
+            .map(|v| v.into_owned())
+            .collect::<Vec<_>>();
+        res.sort();
+        assert_eq!(res, rows);
+
+        state
+            .process_records(
+                &mut vec![(vec![DfValue::from(6)], false)].into(),
+                None,
+                None,
+            )
+            .unwrap();
+        rows.pop();
+        let mut res = state
+            .lookup(&[], &PointKey::Empty)
+            .unwrap()
+            .into_iter()
+            .map(|v| v.into_owned())
+            .collect::<Vec<_>>();
+        res.sort();
+        assert_eq!(res, rows);
+    }
+
     mod lookup_range {
         use std::ops::{Bound, RangeBounds};
 

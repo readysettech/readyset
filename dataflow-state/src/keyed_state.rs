@@ -14,8 +14,8 @@ use crate::{Misses, PointKey, RangeKey, Row, Rows};
 
 /// A map containing a single index into the state of a node.
 ///
-/// KeyedStates are associative (key-value) maps from lists of [`DfValue`]s of length of at least 1
-/// to [lists of reference-counted pointers to rows](Rows), and can be backed by either a
+/// KeyedStates are associative (key-value) maps from lists of [`DfValue`]s  to [lists of
+/// reference-counted pointers to rows](Rows), and can be backed by either a
 /// [`BTreeMap`](std::collections::BTreeMap) or an [`IndexMap`], according to an
 /// [`IndexType`](readyset_client::IndexType).
 ///
@@ -23,6 +23,7 @@ use crate::{Misses, PointKey, RangeKey, Row, Rows};
 /// looking up ranges in a HashMap, will panic.
 #[allow(clippy::type_complexity)]
 pub(super) enum KeyedState {
+    AllRows(Rows),
     SingleBTree(PartialMap<DfValue, Rows>),
     DoubleBTree(PartialMap<(DfValue, DfValue), Rows>),
     TriBTree(PartialMap<(DfValue, DfValue, DfValue), Rows>),
@@ -49,6 +50,7 @@ impl KeyedState {
     /// Returns the length of this keyed state's key
     pub(super) fn key_len(&self) -> usize {
         match self {
+            KeyedState::AllRows(_) => 0,
             KeyedState::SingleBTree(_) | KeyedState::SingleHash(_) => 1,
             KeyedState::DoubleBTree(_) | KeyedState::DoubleHash(_) => 2,
             KeyedState::TriBTree(_) | KeyedState::TriHash(_) => 3,
@@ -62,6 +64,7 @@ impl KeyedState {
     /// Returns the number of keys stored in this keyed state
     pub(super) fn key_count(&self) -> usize {
         match self {
+            KeyedState::AllRows(_) => 0,
             KeyedState::SingleBTree(partial_map) => partial_map.num_keys(),
             KeyedState::DoubleBTree(partial_map) => partial_map.num_keys(),
             KeyedState::TriBTree(partial_map) => partial_map.num_keys(),
@@ -87,6 +90,7 @@ impl KeyedState {
     /// Panics if the length of `key` is different than the length of this `KeyedState`
     pub(super) fn lookup<'a>(&'a self, key: &PointKey) -> Option<&'a Rows> {
         match (self, key) {
+            (KeyedState::AllRows(r), PointKey::Empty) => Some(r),
             (KeyedState::SingleBTree(m), PointKey::Single(k)) => m.get(k),
             (KeyedState::DoubleBTree(m), PointKey::Double(k)) => m.get(k),
             (KeyedState::TriBTree(m), PointKey::Tri(k)) => m.get(k),
@@ -166,6 +170,10 @@ impl KeyedState {
         }
 
         match self {
+            KeyedState::AllRows(rows) => {
+                debug_assert!(key_cols.is_empty());
+                rows.insert(row);
+            }
             KeyedState::SingleBTree(map) => single_insert!(map, key_cols, row, partial),
             KeyedState::DoubleBTree(map) => {
                 multi_insert!(map, key_cols, row, partial, partial_map::Entry)
@@ -273,6 +281,7 @@ impl KeyedState {
         }
 
         match self {
+            KeyedState::AllRows(rows) => return do_remove(rows),
             KeyedState::SingleBTree(map) => single_remove!(map, key_cols, row),
             KeyedState::DoubleBTree(map) => multi_remove!(map, key_cols, row),
             KeyedState::TriBTree(map) => multi_remove!(map, key_cols, row),
@@ -526,8 +535,13 @@ impl KeyedState {
     }
 
     /// Remove all rows for the given key, returning the evicted rows.
+    ///
+    /// # Panics
+    ///
+    /// * Panics if `self` is [`KeyedState::AllRows`], which cannot be partial
     pub(super) fn evict(&mut self, key: &[DfValue]) -> Option<Rows> {
         match *self {
+            KeyedState::AllRows(_) => panic!("Empty-column index cannot be partial"),
             KeyedState::SingleBTree(ref mut m) => m.remove(&(key[0])),
             KeyedState::DoubleBTree(ref mut m) => m.remove(&MakeKey::from_key(key)),
             KeyedState::TriBTree(ref mut m) => m.remove(&MakeKey::from_key(key)),
@@ -601,6 +615,7 @@ impl From<&Index> for KeyedState {
     fn from(index: &Index) -> Self {
         use IndexType::*;
         match (index.len(), &index.index_type) {
+            (0, _) => KeyedState::AllRows(Default::default()),
             (1, BTreeMap) => KeyedState::SingleBTree(Default::default()),
             (2, BTreeMap) => KeyedState::DoubleBTree(Default::default()),
             (3, BTreeMap) => KeyedState::TriBTree(Default::default()),
