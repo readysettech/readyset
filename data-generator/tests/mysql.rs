@@ -17,10 +17,10 @@ async fn mysql_connection() -> mysql_async::Conn {
                 env::var("MYSQL_USER").unwrap_or_else(|_| "root".to_owned()),
             ))
             .pass(Some(
-                env::var("MYSQL_PWD").unwrap_or_else(|_| "noria".to_owned()),
+                env::var("MYSQL_PASSWORD").unwrap_or_else(|_| "noria".to_owned()),
             ))
             .db_name(Some(
-                env::var("MYSQL_DB").unwrap_or_else(|_| "mysql".to_owned()),
+                env::var("MYSQL_DATABASE").unwrap_or_else(|_| "mysql".to_owned()),
             )),
     )
     .await

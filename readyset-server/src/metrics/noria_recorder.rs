@@ -3,7 +3,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
 
-use metrics::{Counter, Gauge, Histogram, KeyName, Recorder, Unit};
+use metrics::{Counter, Gauge, Histogram, KeyName, Recorder, SharedString, Unit};
 use parking_lot::Mutex;
 use readyset_client::metrics::{Key, MetricsDump};
 
@@ -80,15 +80,15 @@ impl Recorder for NoriaMetricsRecorder {
             .into()
     }
 
-    fn describe_counter(&self, _: KeyName, _: Option<Unit>, _: &'static str) {
+    fn describe_counter(&self, _: KeyName, _: Option<Unit>, _: SharedString) {
         // no-op
     }
 
-    fn describe_gauge(&self, _: KeyName, _: Option<metrics::Unit>, _: &'static str) {
+    fn describe_gauge(&self, _: KeyName, _: Option<metrics::Unit>, _: SharedString) {
         // no-op
     }
 
-    fn describe_histogram(&self, _: KeyName, _: Option<metrics::Unit>, _: &'static str) {
+    fn describe_histogram(&self, _: KeyName, _: Option<metrics::Unit>, _: SharedString) {
         // no-op
     }
 }

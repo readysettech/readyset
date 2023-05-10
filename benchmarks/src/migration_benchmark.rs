@@ -69,7 +69,7 @@ impl BenchmarkControl for MigrationBenchmark {
             benchmark_histogram!(
                 "migration_benchmark.migrate_duration",
                 Microseconds,
-                "Duration of a migration against Noria",
+                "Duration of a migration against Noria".into(),
                 create_elapsed.as_micros() as f64
             );
 
@@ -84,7 +84,7 @@ impl BenchmarkControl for MigrationBenchmark {
             benchmark_histogram!(
                 "migration_benchmark.unmigrate_duration",
                 Microseconds,
-                "Duration of a migration to remove a query against Noria",
+                "Duration of a migration to remove a query against Noria".into(),
                 drop_elapsed.as_micros() as f64
             );
 

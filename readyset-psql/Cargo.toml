@@ -6,7 +6,7 @@ authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 [target.'cfg(not(target_env="msvc"))'.dependencies]
-tikv-jemallocator = "0.4"
+tikv-jemallocator = "0.5"
 
 [dependencies]
 clap = { version = "4.2", features = ["derive","env"] }

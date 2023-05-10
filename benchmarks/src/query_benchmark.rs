@@ -111,7 +111,7 @@ impl BenchmarkControl for QueryBenchmark {
         benchmark_counter!(
             "query_benchmark.queries_executed",
             Count,
-            "Number of queries executed in this benchmark run"
+            "Number of queries executed in this benchmark run".into()
         );
         multi_thread::run_multithread_benchmark::<Self>(
             self.threads,
@@ -173,7 +173,7 @@ impl MultithreadBenchmark for QueryBenchmark {
                 benchmark_histogram!(
                     "query_benchmark.query_duration",
                     Microseconds,
-                    "Duration of queries executed",
+                    "Duration of queries executed".into(),
                     l as f64
                 );
             }
@@ -187,7 +187,12 @@ impl MultithreadBenchmark for QueryBenchmark {
             queries_this_interval
         );
         let qps = hist.len() as f64 / interval.as_secs() as f64;
-        benchmark_histogram!("query_benchmark.qps", Count, "Queries per second", qps);
+        benchmark_histogram!(
+            "query_benchmark.qps",
+            Count,
+            "Queries per second".into(),
+            qps
+        );
         debug!(
             "qps: {:.0}\tp50: {:.1} ms\tp90: {:.1} ms\tp99: {:.1} ms\tp99.99: {:.1} ms",
             qps,

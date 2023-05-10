@@ -51,7 +51,7 @@
 //!         benchmark_gauge!(
 //!             "my_benchmark.number_of_queries",
 //!             Count,
-//!             "Number of queries executed in this benchmark run",
+//!             "Number of queries executed in this benchmark run".into(),
 //!             self.row_count as f64
 //!         );
 //!         Ok(BenchmarkResults::new())

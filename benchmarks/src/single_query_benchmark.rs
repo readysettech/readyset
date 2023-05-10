@@ -111,7 +111,7 @@ impl SingleQueryBenchmark {
             benchmark_histogram!(
                 "single_query_benchmark.duration",
                 Microseconds,
-                "Duration of queries executed",
+                "Duration of queries executed".into(),
                 elapsed.as_micros() as f64
             );
         }

@@ -128,7 +128,7 @@ impl BenchmarkRunner {
         let handle = if let Some(prometheus) = &self.deployment_params.prometheus_push_gateway {
             let mut builder = PrometheusBuilder::new()
                 .idle_timeout(MetricKindMask::ALL, None)
-                .with_push_gateway(prometheus, PUSH_GATEWAY_PUSH_INTERVAL)?;
+                .with_push_gateway(prometheus, PUSH_GATEWAY_PUSH_INTERVAL, None, None)?;
             for (key, value) in &self.benchmark_cmd.as_ref().unwrap().labels() {
                 builder = builder.add_global_label(key, value);
             }
@@ -356,7 +356,7 @@ impl BenchmarkRunner {
             benchmark_histogram!(
                 "benchmark_duration",
                 Microseconds,
-                "Time, in microseconds, that it took to run the benchmark.",
+                "Time, in microseconds, that it took to run the benchmark.".into(),
                 duration.as_micros() as f64
             );
 

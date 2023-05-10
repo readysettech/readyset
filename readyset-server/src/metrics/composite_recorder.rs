@@ -1,7 +1,7 @@
 #![allow(clippy::option_map_unit_fn)]
 use std::sync::Arc;
 
-use metrics::{Counter, Gauge, Histogram, KeyName, Recorder, Unit};
+use metrics::{Counter, Gauge, Histogram, KeyName, Recorder, SharedString, Unit};
 use metrics_exporter_prometheus::PrometheusRecorder;
 use readyset_client::metrics::Key;
 
@@ -149,19 +149,19 @@ impl Recorder for CompositeMetricsRecorder {
         }
     }
 
-    fn describe_counter(&self, key: KeyName, unit: Option<Unit>, desc: &'static str) {
+    fn describe_counter(&self, key: KeyName, unit: Option<Unit>, desc: SharedString) {
         self.prom_recorder
             .as_ref()
             .map(|x| x.describe_counter(key, unit, desc));
     }
 
-    fn describe_gauge(&self, key: KeyName, unit: Option<metrics::Unit>, desc: &'static str) {
+    fn describe_gauge(&self, key: KeyName, unit: Option<metrics::Unit>, desc: SharedString) {
         self.prom_recorder
             .as_ref()
             .map(|x| x.describe_gauge(key, unit, desc));
     }
 
-    fn describe_histogram(&self, key: KeyName, unit: Option<metrics::Unit>, desc: &'static str) {
+    fn describe_histogram(&self, key: KeyName, unit: Option<metrics::Unit>, desc: SharedString) {
         self.prom_recorder
             .as_ref()
             .map(|x| x.describe_histogram(key, unit, desc));

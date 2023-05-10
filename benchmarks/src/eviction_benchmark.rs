@@ -119,7 +119,7 @@ impl BenchmarkControl for EvictionBenchmark {
         benchmark_counter!(
             "query_benchmark.queries_executed",
             Count,
-            "Number of queries executed in this benchmark run"
+            "Number of queries executed in this benchmark run".into()
         );
 
         let result = multi_thread::run_multithread_benchmark::<Self>(
@@ -355,7 +355,7 @@ impl MultithreadBenchmark for EvictionBenchmark {
                 benchmark_histogram!(
                     "query_benchmark.query_duration",
                     Microseconds,
-                    "Duration of queries executed",
+                    "Duration of queries executed".into(),
                     l as f64
                 );
             }
@@ -370,7 +370,12 @@ impl MultithreadBenchmark for EvictionBenchmark {
         );
         let qps = hist.len() as f64 / interval.as_secs() as f64;
         let cache_hit_rate = if hit > 0. { hit / (hit + miss) } else { 0. };
-        benchmark_histogram!("query_benchmark.qps", Count, "Queries per second", qps);
+        benchmark_histogram!(
+            "query_benchmark.qps",
+            Count,
+            "Queries per second".into(),
+            qps
+        );
         info!(
             "qps: {:.0}\tevicted: {:.2} MiB\thit rate: {:.1}%\tscale: {:.3}\tp50: {:.1} ms\tp90: {:.1} ms\tp99: {:.1} ms\tp99.99: {:.1} ms",
             qps,

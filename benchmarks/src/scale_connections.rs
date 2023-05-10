@@ -65,14 +65,14 @@ impl BenchmarkControl for ScaleConnections {
             benchmark_histogram!(
                 "scale_connections.connection_duration",
                 Seconds,
-                "The number of seconds spent creating a new connection",
+                "The number of seconds spent creating a new connection".into(),
                 connection_time.as_secs_f64()
             );
 
             benchmark_counter!(
                 "scale_connections.connections",
                 Count,
-                "The number of connections the benchmark has executed",
+                "The number of connections the benchmark has executed".into(),
                 1
             )
         }

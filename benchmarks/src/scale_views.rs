@@ -129,20 +129,20 @@ impl BenchmarkControl for ScaleViews {
             benchmark_histogram!(
                 "scale_views.connection_duration",
                 Seconds,
-                "The number of seconds spent creating a new connection",
+                "The number of seconds spent creating a new connection".into(),
                 connection_time.as_secs_f64()
             );
             benchmark_histogram!(
                 "scale_views.prepare_duration",
                 Seconds,
-                "The number of seconds spent executing a prepare for a view",
+                "The number of seconds spent executing a prepare for a view".into(),
                 prepare_time.as_secs_f64()
             );
 
             benchmark_counter!(
                 "scale_views.num_views",
                 Count,
-                "The number of views prepared against the backend.",
+                "The number of views prepared against the backend.".into(),
                 1
             )
         }

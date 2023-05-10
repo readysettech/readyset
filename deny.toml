@@ -201,7 +201,7 @@ skip-tree = [
     { name = "redox_users", version = "0.3.5" },
     # https://github.com/crossbeam-rs/crossbeam/pull/926
     { name = "nperf-core", version = "0.1.1" },
-    { name = "metrics-util", version = "0.13.0" },
+    { name = "metrics-util", version = "0.15.0" },
     { name = "mysql", version = "23.0.1" },
     { name = "lru", version = "0.10.0" },
 ]

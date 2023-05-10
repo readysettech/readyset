@@ -126,7 +126,7 @@ impl CacheHitBenchmark {
             benchmark_histogram!(
                 &histogram_name,
                 Microseconds,
-                "Duration of queries executed",
+                "Duration of queries executed".into(),
                 elapsed.as_micros() as f64
             );
         }

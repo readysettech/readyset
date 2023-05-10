@@ -168,20 +168,20 @@ mod tests {
     fn test_metrics_macros() {
         let handle = setup();
 
-        benchmark_gauge!("test", Count, "desc", 1.0);
-        benchmark_gauge!("test", Count, "desc", 2.0);
-        benchmark_gauge!("test", Count, "desc", 3.0, "a" => "b");
-        benchmark_gauge!("test", Count, "desc", 4.0, "c" => "d");
-        benchmark_gauge!("test", Count, "desc", 5.0, "e" => "f", "g" => "h");
+        benchmark_gauge!("test", Count, "desc".into(), 1.0);
+        benchmark_gauge!("test", Count, "desc".into(), 2.0);
+        benchmark_gauge!("test", Count, "desc".into(), 3.0, "a" => "b");
+        benchmark_gauge!("test", Count, "desc".into(), 4.0, "c" => "d");
+        benchmark_gauge!("test", Count, "desc".into(), 5.0, "e" => "f", "g" => "h");
 
-        benchmark_counter!("one", Seconds, "desc");
-        benchmark_counter!("two", Seconds, "desc", 39);
+        benchmark_counter!("one", Seconds, "desc".into(), 0);
+        benchmark_counter!("two", Seconds, "desc".into(), 39);
         benchmark_increment_counter!("two", Seconds, 2);
         benchmark_increment_counter!("two", Seconds);
         benchmark_increment_counter!("three", Seconds);
 
         for i in 1..=100 {
-            benchmark_histogram!("percentile", Bytes, "desc", i as f64);
+            benchmark_histogram!("percentile", Bytes, "desc".into(), i as f64);
         }
 
         // TODO:  If https://github.com/metrics-rs/metrics/pull/236 lands, use that instead of checking rendered text
@@ -212,13 +212,14 @@ mod tests {
         // TODO: We shouldn't hold test against these exact values. We should instead extract the
         // values and use `assert_relative_eq!()`.
         assert!(output.contains(indoc! {r#"
+            # HELP benchmark_percentile_bytes desc
             # TYPE benchmark_percentile_bytes summary
             benchmark_percentile_bytes{quantile="0"} 1
             benchmark_percentile_bytes{quantile="0.5"} 50.00385027884824
             benchmark_percentile_bytes{quantile="0.9"} 90.00813093751373
             benchmark_percentile_bytes{quantile="0.95"} 95.00219629040446
             benchmark_percentile_bytes{quantile="0.99"} 98.99803587754256
-            benchmark_percentile_bytes{quantile="0.999"} 99.9929826824495
+            benchmark_percentile_bytes{quantile="0.999"} 98.99803587754256
             benchmark_percentile_bytes{quantile="1"} 100
             benchmark_percentile_bytes_sum 5050
             benchmark_percentile_bytes_count 100

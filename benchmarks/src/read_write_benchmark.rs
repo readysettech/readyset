@@ -119,7 +119,7 @@ impl BenchmarkControl for ReadWriteBenchmark {
         benchmark_counter!(
             "read_write_benchmark.queries_executed",
             Count,
-            "Number of queries executed in this benchmark run"
+            "Number of queries executed in this benchmark run".into()
         );
 
         multi_thread::run_multithread_benchmark::<Self>(
@@ -199,7 +199,7 @@ impl MultithreadBenchmark for ReadWriteBenchmark {
                 benchmark_histogram!(
                     "read_write_benchmark.read_query_duration",
                     Microseconds,
-                    "Duration of queries executed",
+                    "Duration of queries executed".into(),
                     l as f64
                 );
             }
@@ -210,7 +210,7 @@ impl MultithreadBenchmark for ReadWriteBenchmark {
                 benchmark_histogram!(
                     "read_write_benchmark.update_query_duration",
                     Microseconds,
-                    "Duration of queries executed",
+                    "Duration of queries executed".into(),
                     l as f64
                 );
             }
@@ -229,14 +229,14 @@ impl MultithreadBenchmark for ReadWriteBenchmark {
         benchmark_histogram!(
             "read_write_benchmark.read_qps",
             Count,
-            "Queries per second",
+            "Queries per second".into(),
             read_qps
         );
         let update_qps = update_hist.len() as f64 / interval.as_secs() as f64;
         benchmark_histogram!(
             "read_write_benchmark.update_qps",
             Count,
-            "Queries per second",
+            "Queries per second".into(),
             update_qps
         );
         debug!(

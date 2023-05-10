@@ -21,7 +21,7 @@ failure_injection = ["fail/failpoints", "readyset-client/failure_injection", "da
 redact_sensitive = ["readyset-util/redact_sensitive"]
 
 [target.'cfg(not(target_env="msvc"))'.dependencies]
-tikv-jemallocator = "0.4"
+tikv-jemallocator = "0.5.0"
 
 [dependencies]
 clap = { version = "4.2", features = ["derive","env"] }
@@ -37,9 +37,9 @@ pin-project = "1.0"
 hyper = { version = "0.14.10", features = [ "stream", "server" ] }
 querystring = "1.1.0"
 itertools = "0.10"
-metrics = "0.19"
-metrics-util = "0.13"
-metrics-exporter-prometheus = "0.10"
+metrics = "0.21"
+metrics-util = "0.15"
+metrics-exporter-prometheus = "0.12.1"
 nom = "7.1"
 petgraph = { version = "0.5", features = ["serde-1"] }
 rand = "0.7.0"
@@ -59,7 +59,7 @@ lazy_static = "1.4.0"
 regex = "1.5.4"
 tracing-futures = "0.2.5"
 parking_lot = "0.11.2"
-tikv-jemalloc-ctl = "0.4"
+tikv-jemalloc-ctl = "0.5.0"
 scopeguard = "1.1.0"
 fail = "0.5.0"
 sha1 = "0.10"

@@ -33,7 +33,7 @@ impl BenchmarkControl for Template {
         benchmark_gauge!(
             "template.fake_number_of_queries",
             Count,
-            "number of queries executed",
+            "number of queries executed".into(),
             133333337.0,
             "label_key_1" => "label_value_1",
             "label_key_2" => "label_value_2"

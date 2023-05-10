@@ -24,7 +24,7 @@ derive_more = "0.99.11"
 thiserror = "1.0.26"
 readyset-util = { path = "../readyset-util" }
 readyset-errors = { path = "../readyset-errors" }
-metrics = "0.19"
+metrics = "0.21"
 futures = "0.3"
 readyset-tracing = { path = "../readyset-tracing" }
 readyset-version = { path = "../readyset-version" }
