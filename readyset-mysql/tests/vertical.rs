@@ -343,8 +343,20 @@ where
         res
     }
 
-    fn preconditions_met(&self, _op: &Self::Operation) -> bool {
-        true // TODO
+    fn preconditions_met(&self, op: &Self::Operation) -> bool {
+        match op {
+            Operation::Update {
+                table,
+                old_row: row,
+                ..
+            }
+            | Operation::Delete { table, row } => self
+                .rows
+                .get(table)
+                .map_or(false, |table_rows| table_rows.contains(row)),
+            // Can always insert any row or query any key and we shouldn't error out
+            Operation::Insert { .. } | Operation::Query { .. } => true,
+        }
     }
 
     fn next_state(&mut self, op: &Self::Operation) {
