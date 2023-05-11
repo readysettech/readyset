@@ -374,20 +374,32 @@ where
         max_ops: stateful_config.max_ops,
     };
 
-    proptest!(stateful_config.proptest_config, |(steps in test_state)| {
+    // We have to manually construct a [`TestRunner`] with the given config because using the
+    // closure-style version of the [`proptest!`] macro causes the `source_file` value to be
+    // unconditionally replaced with the result of `file!()`; this prevents other tests from
+    // configuring the failure persistence features to output regressions into the same crate
+    // directory structure as the actual test code.
+    let mut runner = TestRunner::new(stateful_config.proptest_config);
+    let result = runner.run(&test_state, |steps| {
         prop_assume!(preconditions_hold::<T, _>(&steps));
         next_step_idx.set(0);
         let rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
             .unwrap();
-        rt.block_on(
-            async {
-                tokio::time::timeout(
-                    stateful_config.test_case_timeout,
-                    run::<T, _>(steps, next_step_idx.clone())
-                ).await
-            }
-        ).unwrap();
+        rt.block_on(async {
+            tokio::time::timeout(
+                stateful_config.test_case_timeout,
+                run::<T, _>(steps, next_step_idx.clone()),
+            )
+            .await
+        })
+        .unwrap();
+        Ok(())
     });
+
+    match result {
+        Ok(_) => (),
+        Err(e) => panic!("{}\n{}", e, runner),
+    }
 }
