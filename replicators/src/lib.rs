@@ -21,7 +21,7 @@ pub use postgres_connector::PostgresPosition;
 /// Provide a simplistic human-readable estimate for how much time remains to complete an operation
 pub(crate) fn estimate_remaining_time(elapsed: Duration, progress: f64, total: f64) -> String {
     let estimated_length = elapsed.div_f64(progress).mul_f64(total);
-    let remaining = estimated_length - elapsed;
+    let remaining = estimated_length.saturating_sub(elapsed);
     let seconds = remaining.as_secs() % 60;
     let minutes = (remaining.as_secs() / 60) % 60;
     let hours = (remaining.as_secs() / 60) / 60;
