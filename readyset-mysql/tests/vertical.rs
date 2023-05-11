@@ -40,6 +40,7 @@ use mysql_common::value::Value;
 use paste::paste;
 use proptest::prelude::*;
 use proptest::sample::select;
+use proptest::test_runner::{FailurePersistence, FileFailurePersistence};
 use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
 use readyset_client_test_helpers::TestBuilder;
 use readyset_data::DfValue;
@@ -671,11 +672,19 @@ macro_rules! vertical_tests {
             #[serial_test::serial]
             #[cfg_attr(not(feature = "vertical_tests"), ignore)]
             fn $name() {
+                let failure_persistence: Option<Box<dyn FailurePersistence>> =
+                    Some(Box::new(FileFailurePersistence::WithSource("proptest-regressions")));
+                let proptest_config = ProptestConfig {
+                    failure_persistence,
+                    source_file: Some(file!()),
+                    ..ProptestConfig::default()
+                };
+
                 let config = StatefulProptestConfig {
                     min_ops: 1,
                     max_ops: 100,
                     test_case_timeout: Duration::from_secs(60),
-                    proptest_config: ProptestConfig::default(),
+                    proptest_config,
                 };
 
                 stateful_proptest::test::<DataflowModelState<[<$name:camel TestDef>]>>(config);
