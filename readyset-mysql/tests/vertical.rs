@@ -675,6 +675,7 @@ macro_rules! vertical_tests {
                     min_ops: 1,
                     max_ops: 100,
                     test_case_timeout: Duration::from_secs(60),
+                    proptest_config: ProptestConfig::default(),
                 };
 
                 stateful_proptest::test::<DataflowModelState<[<$name:camel TestDef>]>>(config);

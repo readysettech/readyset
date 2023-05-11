@@ -1155,6 +1155,7 @@ fn run_cases() {
         min_ops: 7,
         max_ops: 13,
         test_case_timeout: Duration::from_secs(60),
+        proptest_config: ProptestConfig::default(),
     };
 
     stateful_proptest::test::<DDLModelState>(config);

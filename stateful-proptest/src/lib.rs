@@ -37,6 +37,13 @@ pub struct StatefulProptestConfig {
     pub max_ops: usize,
     /// Amount of time to wait before timing out and failing a test case.
     pub test_case_timeout: Duration,
+    /// Can be used to override default proptest configuration parameters.
+    ///
+    /// Note, however, that we ignore the provided value of [`ProptestConfig::max_shrink_iters`],
+    /// and always set it to `max_ops * 2`, because the default value is not high enough to make
+    /// sure we won't fail out of shrinking before we've had a chance to try removing and adding
+    /// back in each individual op.
+    pub proptest_config: ProptestConfig,
 }
 
 /// A trait for defining stateful property tests.
@@ -346,16 +353,12 @@ where
 }
 
 /// Execute a property test for the specified test model, using the config values passed in.
-pub fn test<T>(stateful_config: StatefulProptestConfig)
+pub fn test<T>(mut stateful_config: StatefulProptestConfig)
 where
     T: ModelState,
 {
-    // TODO we may want to provide a way to expose other ProptestConfig fields to the caller,
-    // instead of just hard-coding everything to use the default values.
-    let config = ProptestConfig {
-        max_shrink_iters: stateful_config.max_ops as u32 * 2,
-        ..ProptestConfig::default()
-    };
+    // Always make sure we have max_shrink_iters high enough to fully shrink a max size test case:
+    stateful_config.proptest_config.max_shrink_iters = stateful_config.max_ops as u32 * 2;
 
     // Used for optimizing shrinking by letting us immediately discard any steps after the failing
     // step. To enable this, we need to be able to mutate the value from the test itself, and then
@@ -371,7 +374,7 @@ where
         max_ops: stateful_config.max_ops,
     };
 
-    proptest!(config, |(steps in test_state)| {
+    proptest!(stateful_config.proptest_config, |(steps in test_state)| {
         prop_assume!(preconditions_hold::<T, _>(&steps));
         next_step_idx.set(0);
         let rt = tokio::runtime::Builder::new_multi_thread()
