@@ -15,6 +15,7 @@ pub mod hash;
 pub mod intervals;
 pub mod math;
 pub mod nonmaxusize;
+pub mod progress;
 pub mod properties;
 pub mod redacted;
 pub mod shutdown;

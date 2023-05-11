@@ -8,6 +8,7 @@ description = "Extensions to the Rust standard library"
 
 [dependencies]
 anyhow = "1.0"
+backoff = { version = "0.4.0", features = ["tokio"] }
 proptest = "1.0.0"
 chrono = { version = "0.4.0", features = ["serde"] }
 tokio = { workspace = true, features = ["full"] }

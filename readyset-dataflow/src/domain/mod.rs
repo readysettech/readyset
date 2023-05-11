@@ -6,11 +6,13 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::convert::{TryFrom, TryInto};
 use std::fmt::Debug;
 use std::ops::Bound;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 use std::{cell, cmp, mem, process, time};
 
 use ahash::RandomState;
+use backoff::ExponentialBackoffBuilder;
 use dataflow_state::{
     EvictBytesResult, MaterializedNodeState, PointKey, RangeKey, RangeLookupResult,
 };
@@ -26,13 +28,14 @@ use readyset_client::replication::ReplicationOffsetState;
 use readyset_client::{channel, internal, KeyComparison, KeyCount, ReaderAddress};
 use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
 use readyset_util::futures::abort_on_panic;
+use readyset_util::progress::report_progress_with;
 use readyset_util::redacted::Sensitive;
 use readyset_util::Indices;
 use serde::{Deserialize, Serialize};
 use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
 use tokio::sync::mpsc::Sender;
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{debug, error, trace, warn, Instrument};
+use tracing::{debug, error, info, trace, warn, Instrument};
 use vec1::Vec1;
 
 pub(crate) use self::replay_paths::ReplayPath;
@@ -662,14 +665,44 @@ async fn initialize_state(
     sender: Sender<MaterializedState>,
 ) -> ReadySetResult<()> {
     trace!("running separate thread to initialize base node persistent state");
+    let reported_once = Arc::new(AtomicBool::new(false));
     let mut s = MaterializedNodeState::Persistent(
-        PersistentState::new(base_name.clone(), unique_keys, &persistence_params)
-            .map_err(|e| ReadySetError::from(e))?,
+        report_progress_with(
+            ExponentialBackoffBuilder::new()
+                .with_initial_interval(Duration::from_secs(15))
+                .with_multiplier(2.0)
+                .build(),
+            {
+                let base_name = base_name.clone();
+                let reported_once = Arc::clone(&reported_once);
+                move || {
+                    reported_once.store(true, Ordering::Relaxed);
+                    let base_name = base_name.clone();
+                    async move {
+                        info!(%base_name, %node_idx, "Still initializing state");
+                    }
+                }
+            },
+            {
+                let base_name = base_name.clone();
+                tokio::task::spawn_blocking(move || {
+                    PersistentState::new(base_name, unique_keys, &persistence_params)
+                        .map_err(|e| ReadySetError::from(e))
+                })
+            }
+            .fuse(),
+        )
+        .await
+        .unwrap()?,
     );
     for idx in indices {
         s.add_key(idx, None);
     }
-    trace!("done initializing persistent state! notifying replica");
+    if reported_once.load(Ordering::Relaxed) {
+        info!(%base_name, %node_idx, "Finished initializing state");
+    } else {
+        trace!("done initializing persistent state! notifying replica");
+    }
     sender
         .send(MaterializedState {
             node: node_idx,
