@@ -84,8 +84,8 @@ use readyset_data::DfValue;
 use readyset_errors::{internal_err, invariant, ReadySetError, ReadySetResult};
 use readyset_util::intervals::BoundPair;
 use rocksdb::{
-    self, ColumnFamilyDescriptor, IteratorMode, PlainTableFactoryOptions, SliceTransform,
-    WriteBatch, DB,
+    self, ColumnFamilyDescriptor, EncodingType, IteratorMode, PlainTableFactoryOptions,
+    SliceTransform, WriteBatch, DB,
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -1137,6 +1137,13 @@ impl IndexParams {
                     bloom_bits_per_key: 10,
                     hash_table_ratio: 0.75,
                     index_sparseness: 16,
+                    huge_page_tlb_size: 0,
+                    encoding_type: EncodingType::default(),
+                    full_scan_mode: false,
+                    // Store the plain table index and bloom filter in the table file itself. This
+                    // speeds up re-opening the db on restart *significantly* (up to multiple hours
+                    // for large tables) by avoiding recomputing the index on startup
+                    store_index_in_file: true,
                 });
 
                 // We're either going to be doing direct point lookups, in the case of unique
