@@ -1155,13 +1155,13 @@ impl IndexParams {
             // columns in the index
             IndexType::BTreeMap => match self.num_columns {
                 Some(0) => unreachable!("Can't create a column family with 0 columns"),
-                Some(1) => opts.set_comparator("compare_keys_1", compare_keys_1),
-                Some(2) => opts.set_comparator("compare_keys_2", compare_keys_2),
-                Some(3) => opts.set_comparator("compare_keys_3", compare_keys_3),
-                Some(4) => opts.set_comparator("compare_keys_4", compare_keys_4),
-                Some(5) => opts.set_comparator("compare_keys_5", compare_keys_5),
-                Some(6) => opts.set_comparator("compare_keys_6", compare_keys_6),
-                _ => opts.set_comparator("compare_keys_multi", compare_keys_multi),
+                Some(1) => opts.set_comparator("compare_keys_1", Box::new(compare_keys_1)),
+                Some(2) => opts.set_comparator("compare_keys_2", Box::new(compare_keys_2)),
+                Some(3) => opts.set_comparator("compare_keys_3", Box::new(compare_keys_3)),
+                Some(4) => opts.set_comparator("compare_keys_4", Box::new(compare_keys_4)),
+                Some(5) => opts.set_comparator("compare_keys_5", Box::new(compare_keys_5)),
+                Some(6) => opts.set_comparator("compare_keys_6", Box::new(compare_keys_6)),
+                _ => opts.set_comparator("compare_keys_multi", Box::new(compare_keys_multi)),
             },
         }
 
