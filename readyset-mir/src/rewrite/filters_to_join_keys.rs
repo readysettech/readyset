@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use nom_sql::{BinaryOperator, Expr};
 use readyset_errors::{internal, internal_err, ReadySetResult};
-use tracing::trace;
+use tracing::{trace, trace_span};
 
 use crate::node::MirNodeInner;
 use crate::query::MirQuery;
@@ -45,7 +45,9 @@ pub(crate) fn convert_filters_to_join_keys(query: &mut MirQuery<'_>) -> ReadySet
             continue;
         };
 
-        trace!(filter_idx = %filter_idx.index(), %c1, %c2, "Trying to lift filter to join key");
+        let span = trace_span!("Lifting filter", filter_idx = %filter_idx.index());
+        let _guard = span.enter();
+        trace!(%c1, %c2, "Trying to lift filter to join key");
 
         // Now, ascend through that filter's ancestors to:
         //
@@ -63,7 +65,6 @@ pub(crate) fn convert_filters_to_join_keys(query: &mut MirQuery<'_>) -> ReadySet
                 | MirNodeInner::TopK { group_by, .. } => {
                     if !(group_by.contains(&c1) && group_by.contains(&c2)) {
                         trace!(
-                            filter_idx = %filter_idx.index(),
                             "Columns in filter not in group_by of ancestor grouped node; can't \
                              turn filter into join key"
                         );
@@ -76,14 +77,27 @@ pub(crate) fn convert_filters_to_join_keys(query: &mut MirQuery<'_>) -> ReadySet
                         .get(0)
                         .ok_or_else(|| internal_err!("AliasTable must have a parent"))?;
                     let parent_cols = query.graph.columns(alias_table_parent);
+                    let (Ok(new_c1_idx), Ok(new_c2_idx)) = (
+                        query.graph.column_id_for_column(ancestor_idx, &c1),
+                        query.graph.column_id_for_column(ancestor_idx, &c2)
+                    ) else {
+
+                        trace!(
+                            ancestor_idx = %ancestor_idx.index(),
+                            "Filter columns no longer resolve in ancestor, giving up on filter"
+                        );
+                        continue 'filter;
+                    };
+
                     c1 = parent_cols
-                        .get(query.graph.column_id_for_column(ancestor_idx, &c1)?)
+                        .get(new_c1_idx)
                         .ok_or_else(|| internal_err!("Column index out of bounds"))?
                         .clone();
                     c2 = parent_cols
-                        .get(query.graph.column_id_for_column(ancestor_idx, &c2)?)
+                        .get(new_c2_idx)
                         .ok_or_else(|| internal_err!("Column index out of bounds"))?
                         .clone();
+
                     trace!(c1 = %c1, c2 = %c2, "Remapped columns through AliasTable ancestor");
                 }
                 MirNodeInner::LeftJoin { .. } => {
@@ -123,6 +137,7 @@ pub(crate) fn convert_filters_to_join_keys(query: &mut MirQuery<'_>) -> ReadySet
                             .push((filter_idx, (c2, c1)));
                         continue 'filter;
                     }
+                    trace!(join_idx = %ancestor_idx.index(), "Will make filter a join key");
                 }
                 MirNodeInner::Base { .. }
                 | MirNodeInner::Filter { .. }
@@ -193,12 +208,26 @@ mod tests {
                         constraints: vec![],
                         comment: None,
                     },
+                    ColumnSpecification {
+                        column: nom_sql::Column::from("t1.c"),
+                        sql_type: SqlType::Int(None),
+                        constraints: vec![],
+                        comment: None,
+                    },
                 ],
                 primary_key: Some([Column::new(Some("t1"), "a")].into()),
                 unique_keys: Default::default(),
             },
         ));
         mir_graph[t1].add_owner(query_name.clone());
+
+        let t1_alias_table = mir_graph.add_node(MirNode::new(
+            "t1_alias_table".into(),
+            MirNodeInner::AliasTable { table: "t1".into() },
+        ));
+        mir_graph[t1_alias_table].add_owner(query_name.clone());
+        mir_graph.add_edge(t1, t1_alias_table, 0);
+
         let t2 = mir_graph.add_node(MirNode::new(
             "t2".into(),
             MirNodeInner::Base {
@@ -222,20 +251,27 @@ mod tests {
         ));
         mir_graph[t2].add_owner(query_name.clone());
 
+        let t2_alias_table = mir_graph.add_node(MirNode::new(
+            "t2_alias_table".into(),
+            MirNodeInner::AliasTable { table: "t2".into() },
+        ));
+        mir_graph[t2_alias_table].add_owner(query_name.clone());
+        mir_graph.add_edge(t2, t2_alias_table, 0);
+
         let join = mir_graph.add_node(MirNode::new(
             "join".into(),
             MirNodeInner::Join {
                 on: vec![],
                 project: vec![
                     Column::new(Some("t1"), "a"),
-                    Column::new(Some("t2"), "a"),
+                    Column::new(Some("t1"), "c"),
                     Column::new(Some("t2"), "b"),
                 ],
             },
         ));
         mir_graph[join].add_owner(query_name.clone());
-        mir_graph.add_edge(t1, join, 0);
-        mir_graph.add_edge(t2, join, 1);
+        mir_graph.add_edge(t1_alias_table, join, 0);
+        mir_graph.add_edge(t2_alias_table, join, 1);
 
         join
     }
@@ -249,7 +285,7 @@ mod tests {
         let filter = mir_graph.add_node(MirNode::new(
             "filter".into(),
             MirNodeInner::Filter {
-                conditions: parse_expr(Dialect::MySQL, "t1.a = t2.a").unwrap(),
+                conditions: parse_expr(Dialect::MySQL, "t1.a = t2.b").unwrap(),
             },
         ));
         mir_graph[filter].add_owner(query_name.clone());
@@ -284,7 +320,7 @@ mod tests {
         match &mir_graph[join].inner {
             MirNodeInner::Join { on, .. } => assert_eq!(
                 *on,
-                vec![(Column::new(Some("t1"), "a"), Column::new(Some("t2"), "a"))]
+                vec![(Column::new(Some("t1"), "a"), Column::new(Some("t2"), "b"))]
             ),
             _ => panic!(),
         }
@@ -337,5 +373,84 @@ mod tests {
             ),
             _ => panic!(),
         }
+    }
+
+    #[test]
+    fn two_columns_same_table() {
+        readyset_tracing::init_test_logging();
+        let query_name: Relation = "q".into();
+        let mut mir_graph = MirGraph::new();
+        let join = make_join(&query_name, &mut mir_graph);
+
+        let filter = mir_graph.add_node(MirNode::new(
+            "filter".into(),
+            MirNodeInner::Filter {
+                conditions: parse_expr(Dialect::MySQL, "t1.a = t1.c").unwrap(),
+            },
+        ));
+        mir_graph[filter].add_owner(query_name.clone());
+        mir_graph.add_edge(join, filter, 0);
+
+        let leaf = mir_graph.add_node(MirNode::new(
+            "leaf".into(),
+            MirNodeInner::leaf(
+                vec![(
+                    Column::named("b").aliased_as_table("through_alias_table"),
+                    ViewPlaceholder::OneToOne(1, BinaryOperator::Equal),
+                )],
+                IndexType::HashMap,
+            ),
+        ));
+        mir_graph[leaf].add_owner(query_name.clone());
+        mir_graph.add_edge(filter, leaf, 0);
+
+        let mut query = MirQuery::new(query_name, leaf, &mut mir_graph);
+
+        convert_filters_to_join_keys(&mut query).unwrap();
+
+        assert!(mir_graph.contains_node(filter), "Filter is not a join key!");
+    }
+
+    #[test]
+    fn two_columns_same_table_through_alias_table() {
+        readyset_tracing::init_test_logging();
+        let query_name: Relation = "q".into();
+        let mut mir_graph = MirGraph::new();
+        let join = make_join(&query_name, &mut mir_graph);
+
+        let alias_table = mir_graph.add_node(MirNode::new(
+            "alias_table".into(),
+            MirNodeInner::AliasTable { table: "sq".into() },
+        ));
+        mir_graph[alias_table].add_owner(query_name.clone());
+        mir_graph.add_edge(join, alias_table, 0);
+
+        let filter = mir_graph.add_node(MirNode::new(
+            "filter".into(),
+            MirNodeInner::Filter {
+                conditions: parse_expr(Dialect::MySQL, "sq.a = sq.c").unwrap(),
+            },
+        ));
+        mir_graph[filter].add_owner(query_name.clone());
+        mir_graph.add_edge(alias_table, filter, 0);
+
+        let leaf = mir_graph.add_node(MirNode::new(
+            "leaf".into(),
+            MirNodeInner::leaf(
+                vec![(
+                    Column::named("b").aliased_as_table("through_alias_table"),
+                    ViewPlaceholder::OneToOne(1, BinaryOperator::Equal),
+                )],
+                IndexType::HashMap,
+            ),
+        ));
+        mir_graph[leaf].add_owner(query_name.clone());
+        mir_graph.add_edge(filter, leaf, 0);
+
+        let mut query = MirQuery::new(query_name, leaf, &mut mir_graph);
+
+        convert_filters_to_join_keys(&mut query).unwrap();
+
+        assert!(mir_graph.contains_node(filter), "Filter is not a join key!");
     }
 }
