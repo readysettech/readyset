@@ -7,6 +7,7 @@ use nom::sequence::tuple;
 use nom_locate::LocatedSpan;
 use serde::{Deserialize, Serialize};
 
+use crate::common::statement_terminator;
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Dialect, NomSqlResult};
 
@@ -41,31 +42,61 @@ impl fmt::Display for RollbackStatement {
 // Parse rule for a START TRANSACTION query.
 // TODO(peter): Handle dialect differences.
 pub fn start_transaction(
-    _: Dialect,
+    dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], StartTransactionStatement> {
     move |i| {
-        let (remaining_input, (_, _)) = tuple((
-            whitespace0,
-            alt((
-                map(
-                    tuple((
-                        tag_no_case("start"),
-                        whitespace1,
-                        tag_no_case("transaction"),
-                    )),
-                    |_| (),
-                ),
-                map(
-                    tuple((
-                        tag_no_case("begin"),
-                        opt(tuple((whitespace1, tag_no_case("work")))),
-                    )),
-                    |_| (),
-                ),
-            )),
+        let (i, _) = whitespace0(i)?;
+        let (i, stmt) = alt((
+            map(
+                tuple((
+                    tag_no_case("start"),
+                    whitespace1,
+                    tag_no_case("transaction"),
+                )),
+                |_| StartTransactionStatement,
+            ),
+            begin(dialect),
         ))(i)?;
+        let (i, _) = tuple((whitespace0, statement_terminator))(i)?;
 
-        Ok((remaining_input, StartTransactionStatement))
+        Ok((i, stmt))
+    }
+}
+
+fn begin(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], StartTransactionStatement> {
+    move |i| match dialect {
+        Dialect::MySQL => mysql_begin()(i),
+        Dialect::PostgreSQL => postgres_begin()(i),
+    }
+}
+
+fn postgres_begin() -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], StartTransactionStatement>
+{
+    move |i| {
+        map(
+            tuple((
+                tag_no_case("begin"),
+                opt(alt((
+                    tuple((whitespace1, tag_no_case("work"))),
+                    tuple((whitespace1, tag_no_case("transaction"))),
+                ))),
+            )),
+            |_| StartTransactionStatement,
+        )(i)
+    }
+}
+
+fn mysql_begin() -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], StartTransactionStatement> {
+    move |i| {
+        map(
+            tuple((
+                tag_no_case("begin"),
+                opt(tuple((whitespace1, tag_no_case("work")))),
+            )),
+            |_| StartTransactionStatement,
+        )(i)
     }
 }
 
@@ -126,29 +157,41 @@ pub fn rollback(
 mod tests {
     use super::*;
 
-    #[test]
-    fn start_transaction_simple() {
-        let qstring = "START TRANSACTION";
-
-        let res = start_transaction(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
+    fn start_transaction_dialect_agnostic(dialect: Dialect) {
+        let qstring = "    START       TRANSACTION ;  ";
+        let res = start_transaction(dialect)(LocatedSpan::new(qstring.as_bytes()));
         assert_eq!(res.unwrap().1, StartTransactionStatement,);
     }
 
     #[test]
-    fn start_transaction_complex() {
-        let qstring = "    START       TRANSACTION   ";
+    fn parses_start_transaction() {
+        start_transaction_dialect_agnostic(Dialect::MySQL);
+        start_transaction_dialect_agnostic(Dialect::PostgreSQL);
+    }
 
+    #[test]
+    fn begin_transaction() {
+        let qstring = " BEGIN  TRANSACTION; ";
         let res = start_transaction(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
+        assert!(res.is_err());
+        let res = start_transaction(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
+        assert_eq!(res.unwrap().1, StartTransactionStatement,);
+    }
+
+    fn begin_dialect_agnostic(dialect: Dialect) {
+        let qstring = "    BEGIN       WORK;   ";
+        let res = start_transaction(dialect)(LocatedSpan::new(qstring.as_bytes()));
         assert_eq!(res.unwrap().1, StartTransactionStatement,);
 
-        let qstring = "    BEGIN       WORK   ";
-
-        let res = start_transaction(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
+        let qstring = "    BEGIN;   ";
+        let res = start_transaction(dialect)(LocatedSpan::new(qstring.as_bytes()));
         assert_eq!(res.unwrap().1, StartTransactionStatement,);
-        let qstring = "    BEGIN    ";
+    }
 
-        let res = start_transaction(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
-        assert_eq!(res.unwrap().1, StartTransactionStatement,);
+    #[test]
+    fn parses_begin() {
+        begin_dialect_agnostic(Dialect::MySQL);
+        begin_dialect_agnostic(Dialect::PostgreSQL);
     }
 
     #[test]
