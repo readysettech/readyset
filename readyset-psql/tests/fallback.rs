@@ -679,6 +679,54 @@ async fn deletion_propagation_after_alter() {
     shutdown_tx.shutdown().await;
 }
 
+#[ignore = "ENG-3041 Test reproduces write drop due to known bug"]
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn write_propagation_after_alter_and_drop() {
+    readyset_tracing::init_test_logging();
+
+    let (config, _handle, shutdown_tx) = setup().await;
+    let client = connect(config).await;
+
+    client
+        .simple_query("CREATE TABLE cats (meow INT)")
+        .await
+        .unwrap();
+
+    client
+        .simple_query("CREATE TABLE dogs (woof INT)")
+        .await
+        .unwrap();
+
+    sleep().await;
+
+    client
+        .simple_query("ALTER TABLE cats RENAME COLUMN meow TO purr")
+        .await
+        .unwrap();
+
+    client.simple_query("DROP TABLE cats").await.unwrap();
+
+    client
+        .simple_query("INSERT INTO dogs VALUES (1)")
+        .await
+        .unwrap();
+
+    eventually!(run_test: {
+        client
+            .query("SELECT woof FROM dogs", &[])
+            .await
+            .unwrap()
+            .iter()
+            .map(|row| row.get::<_, i32>(0))
+            .collect::<Vec<_>>()
+    }, then_assert: |result| {
+        assert_eq!(result, vec![1]);
+    });
+
+    shutdown_tx.shutdown().await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn rename_column_then_create_view() {
