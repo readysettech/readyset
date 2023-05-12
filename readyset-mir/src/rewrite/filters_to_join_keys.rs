@@ -118,24 +118,26 @@ pub(crate) fn convert_filters_to_join_keys(query: &mut MirQuery<'_>) -> ReadySet
                         .ok_or_else(|| internal_err!("Joins must have at least two ancestors"))?;
 
                     // Could this filter be a join key in this join?
-                    if query.graph.provides_column(left_parent, &c1)
-                        && query.graph.provides_column(right_parent, &c2)
-                    {
-                        // Yes, using `c1` from the left and `c2` from the right!
-                        filters_to_add
-                            .entry(ancestor_idx)
-                            .or_default()
-                            .push((filter_idx, (c1, c2)));
-                        continue 'filter;
-                    } else if query.graph.provides_column(right_parent, &c1)
-                        && query.graph.provides_column(left_parent, &c2)
-                    {
-                        // Yes, using `c2` from the left and `c1` from the right!
-                        filters_to_add
-                            .entry(ancestor_idx)
-                            .or_default()
-                            .push((filter_idx, (c2, c1)));
-                        continue 'filter;
+                    if c1.table != c2.table {
+                        if query.graph.provides_column(left_parent, &c1)
+                            && query.graph.provides_column(right_parent, &c2)
+                        {
+                            // Yes, using `c1` from the left and `c2` from the right!
+                            filters_to_add
+                                .entry(ancestor_idx)
+                                .or_default()
+                                .push((filter_idx, (c1, c2)));
+                            continue 'filter;
+                        } else if query.graph.provides_column(right_parent, &c1)
+                            && query.graph.provides_column(left_parent, &c2)
+                        {
+                            // Yes, using `c2` from the left and `c1` from the right!
+                            filters_to_add
+                                .entry(ancestor_idx)
+                                .or_default()
+                                .push((filter_idx, (c2, c1)));
+                            continue 'filter;
+                        }
                     }
                     trace!(join_idx = %ancestor_idx.index(), "Will make filter a join key");
                 }
