@@ -60,8 +60,11 @@ pub struct UpstreamConfig {
     #[serde(default)]
     pub disable_setup_ddl_replication: bool,
 
-    /// Sets the server id when acquiring a binlog replication slot.
-    #[clap(long, hide = true)]
+    /// Server ID to use when registering as a replication follower with the upstream db
+    ///
+    /// This can be used to differentiate different ReadySet deployments connected to the same
+    /// upstream DB.
+    #[clap(long, env = "REPLICATION_SERVER_ID")]
     #[serde(default)]
     pub replication_server_id: Option<u32>,
 
