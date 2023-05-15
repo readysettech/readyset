@@ -18,6 +18,7 @@ use readyset_errors::ReadySetError;
 use readyset_server::Handle;
 use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer, TelemetryReporter};
 use readyset_util::shutdown::ShutdownSender;
+use test_utils::skip_flaky_finder;
 
 async fn setup() -> (mysql_async::Opts, Handle, ShutdownSender) {
     readyset_tracing::init_test_logging();
@@ -1859,6 +1860,7 @@ async fn non_default_db_in_connection_opts() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[skip_flaky_finder]
 async fn test_show_proxied_queries_telemetry() {
     readyset_tracing::init_test_logging();
     let (mut reporter, opts, _handle, shutdown_tx) = setup_telemetry().await;
