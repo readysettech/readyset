@@ -13,27 +13,41 @@ use std::time::Duration;
 
 use database_utils::UpstreamConfig;
 use failpoint_macros::failpoint;
+use futures::future::Fuse;
+use futures::FutureExt;
 use hyper::Method;
 use readyset_client::consensus::Authority;
 use readyset_client::internal::ReplicaAddress;
-use readyset_client::recipe::ExtendRecipeSpec;
+use readyset_client::recipe::{ExtendRecipeResult, ExtendRecipeSpec, MigrationStatus};
 use readyset_client::replication::ReplicationOffset;
 use readyset_client::status::{ReadySetStatus, SnapshotStatus};
 use readyset_client::WorkerDescriptor;
-use readyset_errors::{ReadySetError, ReadySetResult};
+use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
 use readyset_telemetry_reporter::TelemetrySender;
 use readyset_util::futures::abort_on_panic;
 use readyset_util::shutdown::ShutdownReceiver;
 use readyset_version::RELEASE_VERSION;
 use reqwest::Url;
+use slotmap::{DefaultKey, Key, KeyData, SlotMap};
+use tokio::select;
 use tokio::sync::mpsc::UnboundedSender;
-use tokio::sync::Notify;
+use tokio::sync::{Mutex, Notify};
+use tokio::task::JoinHandle;
+use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
 
 use crate::controller::state::{DfState, DfStateHandle};
 use crate::controller::{ControllerRequest, ControllerState, Worker, WorkerIdentifier};
 use crate::coordination::DomainDescriptor;
 use crate::worker::WorkerRequestKind;
+
+/// Maximum amount of time to wait for an `extend_recipe` request to run synchronously, before we
+/// let it run in the background and return [`ExtendRecipeResult::Pending`].
+const EXTEND_RECIPE_MAX_SYNC_TIME: Duration = Duration::from_secs(5);
+
+/// A handle to a migration running in the background. Used as part of
+/// [`Leader::running_migrations`].
+type RunningMigration = Fuse<JoinHandle<ReadySetResult<()>>>;
 
 /// The ReadySet leader, responsible for making control-plane decisions for the whole of a ReadySet
 /// cluster.
@@ -45,7 +59,7 @@ use crate::worker::WorkerRequestKind;
 /// `Migration`, which can be performed using `Leader::migrate`. Only one `Migration` can
 /// occur at any given point in time.
 pub struct Leader {
-    pub(super) dataflow_state_handle: DfStateHandle,
+    pub(super) dataflow_state_handle: Arc<DfStateHandle>,
 
     pending_recovery: bool,
 
@@ -60,6 +74,13 @@ pub struct Leader {
     pub(super) replicator_config: UpstreamConfig,
     /// A client to the current authority.
     pub(super) authority: Arc<Authority>,
+
+    /// A map of currently running migrations.
+    ///
+    /// Requests to `/extend_recipe` run for at least [`EXTEND_RECIPE_MAX_SYNC_TIME`], after which
+    /// a handle to the running migration is placed here, where it can be queried via an rpc to
+    /// `/migration_status`.
+    running_migrations: Mutex<SlotMap<DefaultKey, RunningMigration>>,
 }
 
 impl Leader {
@@ -459,7 +480,7 @@ impl Leader {
                     if body.require_leader_ready {
                         require_leader_ready()?;
                     }
-                    let ret = futures::executor::block_on(async move {
+                    futures::executor::block_on(async move {
                         let mut state_copy: DfState = {
                             let reader = self.dataflow_state_handle.read().await;
                             check_quorum!(reader);
@@ -467,7 +488,7 @@ impl Leader {
                         };
                         state_copy.extend_recipe(body, true).await
                     })?;
-                    return_serialized!(ret);
+                    return_serialized!(ExtendRecipeResult::Done);
                 }
                 (&Method::GET | &Method::POST, "/supports_pagination") => {
                     let ds = futures::executor::block_on(self.dataflow_state_handle.read());
@@ -498,13 +519,57 @@ impl Leader {
                     require_leader_ready()?;
                 }
                 let ret = futures::executor::block_on(async move {
-                    let mut writer = self.dataflow_state_handle.write().await;
-                    check_quorum!(writer.as_ref());
-                    let r = writer.as_mut().extend_recipe(body, false).await?;
-                    self.dataflow_state_handle.commit(writer, authority).await?;
-                    Ok(r)
+                    check_quorum!(self.dataflow_state_handle.read().await);
+
+                    // Start the migration running in the background
+                    let dataflow_state_handle = Arc::clone(&self.dataflow_state_handle);
+                    let authority = Arc::clone(authority);
+                    let mut migration = tokio::spawn(async move {
+                        let mut writer = dataflow_state_handle.write().await;
+                        writer.as_mut().extend_recipe(body, false).await?;
+                        dataflow_state_handle.commit(writer, &authority).await?;
+                        Ok(())
+                    })
+                    .fuse();
+
+                    // Either the migration completes synchronously (under
+                    // EXTEND_RECIPE_MAX_SYNC_TIME), or we place it in `self.running_migrations` and
+                    // return a `Pending` result.
+                    select! {
+                        res = &mut migration => {
+                            res.map_err(|e| internal_err!("{e}"))?.map(|_| ExtendRecipeResult::Done)
+                        }
+                        _ = sleep(EXTEND_RECIPE_MAX_SYNC_TIME) => {
+                            let mut running_migrations = self.running_migrations.lock().await;
+                            let migration_id = running_migrations.insert(migration);
+                            Ok(ExtendRecipeResult::Pending(migration_id.data().as_ffi()))
+                        }
+                    }
                 })?;
                 return_serialized!(ret);
+            }
+            (&Method::POST, "/migration_status") => {
+                let migration_id: u64 = bincode::deserialize(&body)?;
+                let migration_key = DefaultKey::from(KeyData::from_ffi(migration_id));
+                let ret = futures::executor::block_on(async move {
+                    let mut running_migrations = self.running_migrations.lock().await;
+                    let mut migration: &mut RunningMigration = running_migrations
+                        .get_mut(migration_key)
+                        .ok_or_else(|| ReadySetError::UnknownMigration(migration_id))?;
+
+                    match (&mut migration).now_or_never() {
+                        None => ReadySetResult::Ok(MigrationStatus::Pending),
+                        Some(res) => {
+                            // Migration is done, remove it from the map
+                            // Note that this means that only one thread can poll on the status of a
+                            // particular migration!
+                            running_migrations.remove(migration_key);
+                            res.map_err(|e| internal_err!("{e}"))??;
+                            Ok(MigrationStatus::Done)
+                        }
+                    }
+                })?;
+                return_serialized!(ret)
             }
             (&Method::POST, "/remove_query") => {
                 require_leader_ready()?;
@@ -697,7 +762,7 @@ impl Leader {
         // [`ControllerState`]   itself.
         let pending_recovery = state.dataflow_state.ingredients.node_indices().count() > 1;
 
-        let dataflow_state_handle = DfStateHandle::new(state.dataflow_state);
+        let dataflow_state_handle = Arc::new(DfStateHandle::new(state.dataflow_state));
 
         Leader {
             dataflow_state_handle,
@@ -711,6 +776,7 @@ impl Leader {
             replicator_config,
             authority,
             worker_request_timeout,
+            running_migrations: Default::default(),
         }
     }
 }

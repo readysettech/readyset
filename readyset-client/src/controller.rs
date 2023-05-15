@@ -27,7 +27,7 @@ use crate::debug::info::GraphInfo;
 use crate::debug::stats;
 use crate::metrics::MetricsDump;
 use crate::recipe::changelist::ChangeList;
-use crate::recipe::ExtendRecipeSpec;
+use crate::recipe::{ExtendRecipeResult, ExtendRecipeSpec, MigrationStatus};
 use crate::replication::ReplicationOffsets;
 use crate::status::ReadySetStatus;
 use crate::table::{Table, TableBuilder, TableRpc};
@@ -35,6 +35,8 @@ use crate::view::{View, ViewBuilder, ViewRpc};
 use crate::{NodeSize, ReplicationOffset, TableStatus, ViewCreateRequest, ViewFilter, ViewRequest};
 
 mod rpc;
+
+const EXTEND_RECIPE_POLL_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Describes a running controller instance.
 ///
@@ -536,7 +538,7 @@ impl ReadySetHandle {
     pub fn dry_run(
         &mut self,
         changes: ChangeList,
-    ) -> impl Future<Output = ReadySetResult<()>> + '_ {
+    ) -> impl Future<Output = ReadySetResult<ExtendRecipeResult>> + '_ {
         let request = ExtendRecipeSpec::from(changes);
 
         self.rpc("dry_run", request, self.migration_timeout)
@@ -551,7 +553,28 @@ impl ReadySetHandle {
     ) -> impl Future<Output = ReadySetResult<()>> + '_ {
         let request = ExtendRecipeSpec::from(changes);
 
-        self.rpc("extend_recipe", request, self.migration_timeout)
+        async move {
+            match self
+                .rpc("extend_recipe", request, self.migration_timeout)
+                .await?
+            {
+                ExtendRecipeResult::Done => Ok(()),
+                ExtendRecipeResult::Pending(migration_id) => {
+                    while self
+                        .rpc::<_, MigrationStatus>(
+                            "migration_status",
+                            migration_id,
+                            self.migration_timeout,
+                        )
+                        .await?
+                        .is_pending()
+                    {
+                        tokio::time::sleep(EXTEND_RECIPE_POLL_INTERVAL).await;
+                    }
+                    Ok(())
+                }
+            }
+        }
     }
 
     /// Extend the existing recipe with the given set of queries and don't require leader ready.

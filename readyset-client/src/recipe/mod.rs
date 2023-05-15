@@ -31,3 +31,32 @@ impl<'a> From<ChangeList> for ExtendRecipeSpec<'a> {
         }
     }
 }
+
+/// The result of a request to extend a recipe
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+pub enum ExtendRecipeResult {
+    /// The extend recipe request has completed, and the graph has been successfully modified
+    Done,
+    /// The extend recipe request is still running, and its status can be queried using the given
+    /// token
+    Pending(u64),
+}
+
+/// The status of an actively running migration
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+pub enum MigrationStatus {
+    /// The migration has completed
+    Done,
+    /// The migration has not yet completed
+    Pending,
+}
+
+impl MigrationStatus {
+    /// Returns `true` if the migration status is [`Pending`].
+    ///
+    /// [`Pending`]: MigrationStatus::Pending
+    #[must_use]
+    pub fn is_pending(&self) -> bool {
+        matches!(self, Self::Pending)
+    }
+}

@@ -654,6 +654,10 @@ pub enum ReadySetError {
     #[error("Connection to the upstream database was lost: {0}")]
     UpstreamConnectionLost(String),
 
+    /// An unknown pending migration was referenced
+    #[error("Unknown migration: {0}")]
+    UnknownMigration(u64),
+
     /// Error interacting with a Consul server
     #[error("Consul error: {0}")]
     ConsulError(String),
