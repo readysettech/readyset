@@ -4,7 +4,7 @@ use std::fmt::{self, Display};
 use std::future;
 use std::time::Instant;
 
-use futures::future::join_all;
+use futures::stream::FuturesUnordered;
 use futures::{pin_mut, StreamExt, TryFutureExt};
 use itertools::Itertools;
 use metrics::register_gauge;
@@ -626,7 +626,7 @@ impl<'a> PostgresReplicator<'a> {
     async fn snapshot_table(
         pool: deadpool_postgres::Pool,
         span: tracing::Span,
-        table: &TableDescription,
+        table: TableDescription,
         noria_table: readyset_client::Table,
         snapshot_report_interval_secs: u16,
         snapshot_name: String,
@@ -895,7 +895,7 @@ impl<'a> PostgresReplicator<'a> {
         self.transaction.take().unwrap().commit().await?;
 
         // Finally copy each table into noria
-        let mut futs = Vec::with_capacity(tables.len());
+        let mut snapshotting_tables = FuturesUnordered::new();
         for table in &tables {
             let span =
                 info_span!("Snapshotting table", table = %table.name.display(Dialect::PostgreSQL));
@@ -912,7 +912,8 @@ impl<'a> PostgresReplicator<'a> {
             let pool = self.pool.clone();
 
             let snapshot_name = replication_slot.snapshot_name.clone();
-            futs.push(Self::snapshot_table(
+            let table = table.clone();
+            snapshotting_tables.push(Self::snapshot_table(
                 pool,
                 span,
                 table,
@@ -926,7 +927,7 @@ impl<'a> PostgresReplicator<'a> {
         // Remove from the set of tables any that failed to snapshot,
         // and add them as non-replicated relations.
         // Propagate any non-TableErrors.
-        for res in join_all(futs).await {
+        while let Some(res) = snapshotting_tables.next().await {
             if let Err(e) = res {
                 match e {
                     ReadySetError::TableError { ref table, .. } => {
