@@ -866,6 +866,9 @@ async fn delete_row() {
         .await
         .unwrap();
 
+    // Let the delete propagate
+    sleep().await;
+
     assert_eq!(
         all_rows.lookup(&[0.into()], true).await.unwrap().into_vec(),
         vec![
