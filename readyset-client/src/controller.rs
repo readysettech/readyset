@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use tower::buffer::Buffer;
 use tower::ServiceExt;
 use tower_service::Service;
-use tracing::trace;
+use tracing::{debug, trace};
 use url::Url;
 
 use crate::consensus::{Authority, AuthorityControl};
@@ -37,6 +37,7 @@ use crate::{NodeSize, ReplicationOffset, TableStatus, ViewCreateRequest, ViewFil
 mod rpc;
 
 const EXTEND_RECIPE_POLL_INTERVAL: Duration = Duration::from_secs(1);
+const WAIT_FOR_ALL_TABLES_TO_COMPACT_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
 /// Describes a running controller instance.
 ///
@@ -723,6 +724,19 @@ impl ReadySetHandle {
         &mut self,
     ) -> impl Future<Output = ReadySetResult<Vec<String>>> + '_ {
         self.rpc("snapshotting_tables", (), self.request_timeout)
+    }
+
+    /// Poll in a loop to wait for all tables to finish compacting
+    pub async fn wait_for_all_tables_to_compact(&mut self) -> ReadySetResult<()> {
+        while !self
+            .rpc("all_tables_compacted", (), self.request_timeout)
+            .await?
+        {
+            debug!("Waiting for all tables to compact");
+            tokio::time::sleep(WAIT_FOR_ALL_TABLES_TO_COMPACT_POLL_INTERVAL).await;
+        }
+
+        Ok(())
     }
 
     /// Return a map of node indices to key counts.

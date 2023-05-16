@@ -68,6 +68,7 @@ use std::ops::Bound;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 use std::{fmt, fs};
 
@@ -84,15 +85,15 @@ use readyset_data::DfValue;
 use readyset_errors::{internal_err, invariant, ReadySetError, ReadySetResult};
 use readyset_util::intervals::BoundPair;
 use rocksdb::{
-    self, ColumnFamilyDescriptor, EncodingType, IteratorMode, PlainTableFactoryOptions,
-    SliceTransform, WriteBatch, DB,
+    self, ColumnFamilyDescriptor, CompactOptions, EncodingType, IteratorMode,
+    PlainTableFactoryOptions, SliceTransform, WriteBatch, DB,
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tempfile::{tempdir, TempDir};
 use test_strategy::Arbitrary;
 use thiserror::Error;
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{debug, error, info, info_span, instrument, warn};
 
 use crate::{
     EvictKeysResult, LookupResult, PointKey, RangeKey, RangeLookupResult, RecordResult, State,
@@ -362,6 +363,43 @@ struct PersistentIndex {
     is_primary: bool,
 }
 
+/// Handle to a manual compaction running in the background
+struct CompactionThreadHandle {
+    handle: Option<JoinHandle<()>>,
+    opts: Arc<CompactOptions>,
+}
+
+impl CompactionThreadHandle {
+    /// Cancel the running compaction
+    fn cancel(&self) {
+        info!("Cancelling compaction");
+        if !self.is_finished() {
+            self.opts.set_canceled(true);
+        }
+    }
+
+    fn cancel_blocking(&mut self) {
+        self.cancel();
+        self.join();
+    }
+
+    fn is_finished(&self) -> bool {
+        self.handle.as_ref().map_or(true, |h| h.is_finished())
+    }
+
+    fn join(&mut self) {
+        if let Some(handle) = self.handle.take() {
+            handle.join().unwrap();
+        }
+    }
+}
+
+impl Drop for CompactionThreadHandle {
+    fn drop(&mut self) {
+        self.cancel_blocking();
+    }
+}
+
 /// PersistentState stores data in RocksDB.
 pub struct PersistentState {
     name: SqlIdentifier,
@@ -377,6 +415,7 @@ pub struct PersistentState {
     /// When set to true [`SnapshotMode::SnapshotModeEnabled`] compaction will be disabled and
     /// writes will bypass WAL and fsync
     snapshot_mode: SnapshotMode,
+    compaction_threads: Vec<CompactionThreadHandle>,
 }
 
 /// Things that are shared between read handles and the state itself, that can be locked under a
@@ -1293,7 +1332,7 @@ fn compaction_progress_watcher(table_name: &str, db: &DB) -> anyhow::Result<impl
     Ok(log_watcher)
 }
 
-fn compact_cf(table: &str, db: &DB, index: &PersistentIndex) {
+fn compact_cf(table: &str, db: &DB, index: &PersistentIndex, opts: &CompactOptions) {
     let cf = match db.cf_handle(&index.column_family) {
         Some(cf) => cf,
         None => {
@@ -1307,16 +1346,16 @@ fn compact_cf(table: &str, db: &DB, index: &PersistentIndex) {
         warn!(%error, %table, "Could not start compaction monitor");
     }
 
-    let mut opts = rocksdb::CompactOptions::default();
-    // We don't want to block other compactions happening in parallel
-    opts.set_exclusive_manual_compaction(false);
-    db.compact_range_cf_opt(cf, Option::<&[u8]>::None, Option::<&[u8]>::None, &opts);
+    db.compact_range_cf_opt(cf, Option::<&[u8]>::None, Option::<&[u8]>::None, opts);
 
-    info!(%table, cf = %index.column_family, "Compaction finished");
-
-    // Reenable auto compactions when done
-    if let Err(error) = db.set_options_cf(cf, &[("disable_auto_compactions", "false")]) {
-        error!(%error, %table, "Error setting cf options");
+    if opts.canceled() {
+        warn!(%table, cf = %index.column_family, "Compaction was cancelled");
+    } else {
+        info!(%table, cf = %index.column_family, "Compaction finished");
+        // Reenable auto compactions when done
+        if let Err(error) = db.set_options_cf(cf, &[("disable_auto_compactions", "false")]) {
+            error!(%error, %table, "Error setting cf options");
+        }
     }
 }
 
@@ -1492,6 +1531,7 @@ impl PersistentState {
             db: read_handle,
             _tmpdir: None,
             snapshot_mode: SnapshotMode::SnapshotModeDisabled,
+            compaction_threads: vec![],
         };
 
         if let Some(pk) = state.unique_keys.first().cloned() {
@@ -1624,7 +1664,9 @@ impl PersistentState {
         // Flush just in case
         db.flush_cf(cf).unwrap();
         // Manually compact the newly created column family
-        compact_cf(&self.name, &db, &persistent_index);
+        let mut opts = CompactOptions::default();
+        opts.set_exclusive_manual_compaction(false);
+        compact_cf(&self.name, &db, &persistent_index, &opts);
         info!("Base finished compacting secondary index");
     }
 
@@ -1673,6 +1715,11 @@ impl PersistentState {
         }
     }
 
+    pub fn compaction_finished(&mut self) -> bool {
+        self.compaction_threads.retain(|thr| !thr.is_finished());
+        self.compaction_threads.is_empty()
+    }
+
     fn enable_snapshot_mode(&mut self) {
         self.db.replication_offset = None; // Remove any replication offset first (although it should be None already)
         let meta = self.meta();
@@ -1699,9 +1746,31 @@ impl PersistentState {
     }
 
     fn disable_snapshot_mode(&mut self) {
-        for index in self.db.inner().indices.iter() {
+        for index in self.db.inner().indices.iter().cloned() {
             // Perform a manual compaction for each column family
-            compact_cf(&self.name, &self.db.handle(), index);
+
+            let mut opts = CompactOptions::default();
+            opts.set_exclusive_manual_compaction(false);
+            opts.create_cancel_flag();
+            let opts = Arc::new(opts);
+
+            let table = self.name.clone();
+            let read_handle = self.read_handle();
+            let thread_opts = Arc::clone(&opts);
+            let compaction_thread = std::thread::spawn(move || {
+                let span = info_span!(
+                    "Compacting index",
+                    %table,
+                    column_family = %index.column_family
+                );
+                let _guard = span.enter();
+                compact_cf(&table, &read_handle.handle(), &index, &thread_opts);
+            });
+
+            self.compaction_threads.push(CompactionThreadHandle {
+                handle: Some(compaction_thread),
+                opts,
+            });
         }
     }
 

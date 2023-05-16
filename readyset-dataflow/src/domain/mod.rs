@@ -2265,6 +2265,14 @@ impl Domain {
             DomainRequest::IsReady { node } => {
                 Ok(Some(bincode::serialize(&!self.not_ready.contains(&node))?))
             }
+            DomainRequest::AllTablesCompacted => {
+                let finished = self
+                    .state
+                    .values_mut()
+                    .filter_map(|state| state.as_persistent_mut())
+                    .all(|state| state.compaction_finished());
+                Ok(Some(bincode::serialize(&finished)?))
+            }
         };
         // What we just did might have done things like insert into `self.delayed_for_self`, so
         // run the event loop before returning to make sure that gets processed.

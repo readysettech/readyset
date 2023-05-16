@@ -902,6 +902,23 @@ impl DfState {
             .collect()
     }
 
+    pub(super) async fn all_tables_compacted(&self) -> ReadySetResult<bool> {
+        let domains = self.domains_with_base_tables().await?;
+        let mut stream = self
+            .query_domains::<_, bool>(
+                domains
+                    .into_iter()
+                    .map(|domain| (domain, DomainRequest::AllTablesCompacted)),
+            )
+            .map_ok(|(_, compacted)| compacted.iter().all(|c| c.iter().all(|finished| *finished)));
+        while let Some(finished) = stream.next().await {
+            if !finished? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
     /// Return a map of node indices to key counts.
     #[allow(dead_code)]
     pub(super) async fn node_sizes(&self) -> ReadySetResult<HashMap<NodeIndex, NodeSize>> {

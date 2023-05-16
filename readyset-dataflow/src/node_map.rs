@@ -208,6 +208,11 @@ impl<T> NodeMap<T> {
         self.contents.iter().filter_map(Option::as_ref)
     }
 
+    /// Construct an iterator over mutable references to all values in the map
+    pub fn values_mut(&mut self) -> impl Iterator<Item = &mut T> + '_ {
+        self.contents.iter_mut().filter_map(Option::as_mut)
+    }
+
     /// Returns the number of entries in the map
     pub fn len(&self) -> usize {
         self.len

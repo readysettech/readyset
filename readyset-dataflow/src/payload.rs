@@ -226,7 +226,10 @@ pub enum DomainRequest {
     },
 
     /// Drops an existing column from a `Base` node.
-    DropBaseColumn { node: LocalNodeIndex, column: usize },
+    DropBaseColumn {
+        node: LocalNodeIndex,
+        column: usize,
+    },
 
     /// Change the type of an existing column in a node.
     ///
@@ -246,7 +249,9 @@ pub enum DomainRequest {
     },
 
     /// Direct domain to remove some nodes.
-    RemoveNodes { nodes: Vec<LocalNodeIndex> },
+    RemoveNodes {
+        nodes: Vec<LocalNodeIndex>,
+    },
 
     /// Tell an egress node about its corresponding ingress node in the next domain
     AddEgressTx {
@@ -306,7 +311,9 @@ pub enum DomainRequest {
     },
 
     /// Probe for the number of records in the given node's state
-    StateSizeProbe { node: LocalNodeIndex },
+    StateSizeProbe {
+        node: LocalNodeIndex,
+    },
 
     /// Ask domain to log its state size
     UpdateStateSize,
@@ -332,7 +339,10 @@ pub enum DomainRequest {
 
     /// Instruct domain to replay the state of a particular node along an existing replay path,
     /// identified by `tag`.
-    StartReplay { tag: Tag, from: LocalNodeIndex },
+    StartReplay {
+        tag: Tag,
+        from: LocalNodeIndex,
+    },
 
     /// Query whether a domain has finished replaying.
     QueryReplayDone,
@@ -371,7 +381,11 @@ pub enum DomainRequest {
     /// Requests to know if the given node is ready.
     /// Used for base table nodes, since the initialization of the persistent state for those nodes
     /// is done in a different thread.
-    IsReady { node: LocalNodeIndex },
+    IsReady {
+        node: LocalNodeIndex,
+    },
+
+    AllTablesCompacted,
 }
 
 /// The primary unit of communication between nodes in the dataflow graph.

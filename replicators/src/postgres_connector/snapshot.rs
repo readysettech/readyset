@@ -951,6 +951,9 @@ impl<'a> PostgresReplicator<'a> {
             }
         }
 
+        // Wait for all tables to finish compaction
+        self.noria.wait_for_all_tables_to_compact().await?;
+
         Ok(())
     }
 
