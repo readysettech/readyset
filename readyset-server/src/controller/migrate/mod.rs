@@ -66,7 +66,7 @@ mod sharding;
 const DOMAIN_REQUEST_INITIAL_DELAY_IN_MS: u64 = 200;
 /// The max possible delay used when sending follow up requests
 /// to a domain, for the exponential backoff strategy
-const DOMAIN_REQUEST_MAX_DELAY_IN_MS: u64 = 1_800_000; // 30 min
+const DOMAIN_REQUEST_MAX_DELAY_IN_MS: u64 = 1000 * 60; // 1 min
 
 /// A [`DomainRequest`] with associated domain/shard information describing which domain it's for.
 ///
