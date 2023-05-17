@@ -360,11 +360,10 @@ impl SingleState {
         };
     }
 
-    /// Evict up to `bytes` by randomly selected keys from state and return them along with the
-    /// removed rows
+    /// Select and evict a random key from `Self::state`. Return the key and evicted rows.
     pub(super) fn evict_random(&mut self, rng: &mut ThreadRng) -> Option<(Vec<DfValue>, Rows)> {
         self.state.evict_with_seed(rng.gen()).map(|(rows, key)| {
-            self.row_count = self.row_count.saturating_sub(1);
+            self.row_count = self.row_count.saturating_sub(rows.len());
             (key, rows)
         })
     }
@@ -521,6 +520,20 @@ mod tests {
                     &(vec1![DfValue::from(0)]..vec1![DfValue::from(10)])
                 ))
                 .is_missing())
+        }
+
+        #[test]
+        fn row_count_after_eviction() {
+            let mut state = SingleState::new(Index::new(IndexType::HashMap, vec![0]), true);
+            state.mark_filled(KeyComparison::Equal(
+                Vec1::try_from(vec![1.into()]).unwrap(),
+            ));
+            state.insert_row(Row::from(vec![1.into(), 2.into()]));
+            state.insert_row(Row::from(vec![1.into(), 3.into()]));
+            assert_eq!(state.row_count, 2);
+            let mut rng = rand::thread_rng();
+            state.evict_random(&mut rng);
+            assert!(state.is_empty());
         }
     }
 }
