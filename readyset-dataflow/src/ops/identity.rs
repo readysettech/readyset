@@ -45,6 +45,7 @@ impl Ingredient for Identity {
         _: &ReplayContext<'_>,
         _: &DomainNodes,
         _: &StateMap,
+        _: &mut AuxiliaryNodeStateMap,
     ) -> ReadySetResult<ProcessingResult> {
         Ok(ProcessingResult {
             results: rs,

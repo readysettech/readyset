@@ -253,6 +253,7 @@ impl Ingredient for TopK {
         replay: &ReplayContext,
         nodes: &DomainNodes,
         state: &StateMap,
+        _auxiliary_node_states: &mut AuxiliaryNodeStateMap,
     ) -> ReadySetResult<ProcessingResult> {
         debug_assert_eq!(from, *self.src);
 

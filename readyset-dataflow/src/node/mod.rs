@@ -5,7 +5,9 @@ use readyset_client::consistency::Timestamp;
 use readyset_data::{DfType, Dialect};
 use serde::{Deserialize, Serialize};
 
-use crate::ops;
+use crate::ops::grouped::aggregate::AggregatorState;
+use crate::ops::grouped::concat::GroupConcatState;
+use crate::ops::{self};
 use crate::prelude::*;
 use crate::processing::LookupIndex;
 
@@ -184,6 +186,13 @@ impl DanglingDomainNode {
     }
 }
 
+/// The state of an internal node in the graph
+// Naming convention is NodeOperator(name of type internal to NodeOperator)
+pub enum AuxiliaryNodeState {
+    Aggregation(AggregatorState),
+    Concat(GroupConcatState),
+}
+
 // external parts of Ingredient
 impl Node {
     /// Called when a node is first connected to the graph.
@@ -352,6 +361,32 @@ impl Node {
     ///    ☒    |  Dropped
     pub fn description(&self, detailed: bool) -> String {
         self.inner.description(detailed)
+    }
+
+    pub fn initial_auxiliary_state(&self) -> Option<AuxiliaryNodeState> {
+        match &self.inner {
+            NodeType::Internal(no) => match no {
+                NodeOperator::Aggregation(_) => {
+                    Some(AuxiliaryNodeState::Aggregation(Default::default()))
+                }
+                NodeOperator::Concat(_) => Some(AuxiliaryNodeState::Concat(Default::default())),
+                NodeOperator::Extremum(_)
+                | NodeOperator::Join(_)
+                | NodeOperator::Paginate(_)
+                | NodeOperator::Project(_)
+                | NodeOperator::Union(_)
+                | NodeOperator::Identity(_)
+                | NodeOperator::Filter(_)
+                | NodeOperator::TopK(_) => None,
+            },
+            NodeType::Ingress
+            | NodeType::Base(_)
+            | NodeType::Egress(_)
+            | NodeType::Sharder(_)
+            | NodeType::Reader(_)
+            | NodeType::Source
+            | NodeType::Dropped => None,
+        }
     }
 }
 

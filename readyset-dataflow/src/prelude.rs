@@ -6,6 +6,7 @@
 
 use std::cell;
 
+use crate::node::AuxiliaryNodeState;
 // core types
 pub(crate) use crate::processing::{
     Ingredient, Lookup, Miss, ProcessingResult, RawProcessingResult, ReplayContext,
@@ -21,6 +22,7 @@ pub use crate::node_map::NodeMap;
 pub(crate) use crate::payload::ReplayPathSegment;
 pub(crate) type StateMap = NodeMap<MaterializedNodeState>;
 pub type DomainNodes = NodeMap<cell::RefCell<Node>>;
+pub(crate) type AuxiliaryNodeStateMap = NodeMap<AuxiliaryNodeState>;
 
 // public exports
 pub use common::*;

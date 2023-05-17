@@ -51,6 +51,7 @@ impl Ingredient for Filter {
         _: &ReplayContext,
         _: &DomainNodes,
         _: &StateMap,
+        _: &mut AuxiliaryNodeStateMap,
     ) -> ReadySetResult<ProcessingResult> {
         let mut results = Vec::new();
         for r in rs {

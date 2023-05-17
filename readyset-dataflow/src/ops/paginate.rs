@@ -182,6 +182,7 @@ impl Ingredient for Paginate {
         replay: &ReplayContext,
         _nodes: &DomainNodes,
         state: &StateMap,
+        _auxiliary_node_states: &mut AuxiliaryNodeStateMap,
     ) -> ReadySetResult<ProcessingResult> {
         debug_assert_eq!(from, *self.src);
 

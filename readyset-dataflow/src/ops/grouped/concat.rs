@@ -1,6 +1,5 @@
 //! Kinda (s)crappy group_concat() implementation
 
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::fmt::Write;
@@ -11,7 +10,7 @@ use readyset_errors::invariant_eq;
 use readyset_util::Indices;
 use serde::{Deserialize, Serialize};
 
-use crate::node::Node;
+use crate::node::{AuxiliaryNodeState, Node};
 use crate::ops::grouped::{GroupedOperation, GroupedOperator};
 use crate::prelude::*;
 
@@ -44,10 +43,6 @@ pub struct GroupConcat {
     group_by: Vec<usize>,
     /// The user-defined separator.
     separator: String,
-    /// Cached state for each group (set of data corresponding to the columns of `group_by`).
-    // We skip serde since we don't want the state of the node, just the configuration.
-    #[serde(skip)]
-    last_state: RefCell<HashMap<Vec<DfValue>, LastState>>,
 }
 
 fn concat_fmt<F: Write>(f: &mut F, dt: &DfValue) -> ReadySetResult<()> {
@@ -76,7 +71,6 @@ impl GroupConcat {
                 source_col,
                 group_by,
                 separator,
-                last_state: RefCell::new(HashMap::new()),
             },
         ))
     }
@@ -119,6 +113,7 @@ impl GroupedOperation for GroupConcat {
         &self,
         current: Option<&DfValue>,
         diffs: &mut dyn Iterator<Item = Self::Diff>,
+        auxiliary_node_state: Option<&mut AuxiliaryNodeState>,
     ) -> ReadySetResult<Option<DfValue>> {
         let current: Option<&str> = current
             .filter(|dt| matches!(dt, &DfValue::Text(..) | &DfValue::TinyText(..)))
@@ -131,7 +126,13 @@ impl GroupedOperation for GroupConcat {
             .ok_or_else(|| internal_err!("group_concat got no diffs"))?;
         let group = first_diff.group_by.clone();
 
-        let mut ls = self.last_state.borrow_mut().remove(&group);
+        let last_state = match auxiliary_node_state {
+            Some(AuxiliaryNodeState::Concat(ref mut gcs)) => &mut gcs.last_state,
+            Some(_) => internal!("Incorrect auxiliary state for Concat node"),
+            None => internal!("Missing auxiliary state for Concat node"),
+        };
+
+        let mut ls = last_state.remove(&group);
         let mut prev_state = match current {
             #[allow(clippy::unwrap_used)] // check for is_some() before unwrapping
             Some(text) if ls.is_some() && text == ls.as_ref().unwrap().string_repr => {
@@ -184,7 +185,7 @@ impl GroupedOperation for GroupConcat {
             }
         }
         prev_state.string_repr = out_str.clone();
-        self.last_state.borrow_mut().insert(group, prev_state);
+        last_state.insert(group, prev_state);
         Ok(Some(out_str.into()))
     }
 
@@ -214,6 +215,12 @@ impl GroupedOperation for GroupConcat {
     fn can_lose_state(&self) -> bool {
         false
     }
+}
+
+#[derive(Debug, Default)]
+/// Auxiliary State for a single GroupConcat Node, which is owned by a Domain.
+pub struct GroupConcatState {
+    last_state: HashMap<Vec<DfValue>, LastState>,
 }
 
 #[cfg(test)]

@@ -109,6 +109,8 @@ pub(crate) struct ProcessEnv<'domain> {
     pub(crate) executor: &'domain mut dyn Executor,
     pub(crate) shard: Option<usize>,
     pub(crate) replica: usize,
+    /// Per-Node mutable state for nodes that require it
+    pub(crate) auxiliary_node_states: &'domain mut AuxiliaryNodeStateMap,
 }
 
 impl Node {
@@ -304,7 +306,14 @@ impl Node {
                     // we need to own the data
                     let old_data = mem::take(data);
 
-                    match i.on_input_raw(from, old_data, replay, env.nodes, env.state)? {
+                    match i.on_input_raw(
+                        from,
+                        old_data,
+                        replay,
+                        env.nodes,
+                        env.state,
+                        env.auxiliary_node_states,
+                    )? {
                         RawProcessingResult::Regular(m) => {
                             *data = m.results;
                             lookups = m.lookups;

@@ -1,4 +1,3 @@
-use std::cell::RefCell;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -8,6 +7,7 @@ use readyset_data::{Collation, DfType};
 use readyset_errors::{invariant, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
+use crate::node::AuxiliaryNodeState;
 use crate::ops::grouped::{GroupedOperation, GroupedOperator};
 use crate::prelude::*;
 
@@ -58,7 +58,6 @@ impl Aggregation {
                 op: self,
                 over,
                 group: group_by.into(),
-                count_sum_map: RefCell::new(Default::default()),
                 over_else: None,
                 out_ty,
             },
@@ -83,10 +82,6 @@ pub struct Aggregator {
     op: Aggregation,
     over: usize,
     group: Vec<usize>,
-    // only needed for AVG. Stores both sum and count to avoid rounding errors.
-    // We skip serde since we don't want the state, just the configuration.
-    #[serde(skip)]
-    count_sum_map: RefCell<HashMap<GroupHash, AverageDataPair>>,
     over_else: Option<Literal>,
     // Output type of this column
     out_ty: DfType,
@@ -103,7 +98,7 @@ pub struct NumericalDiff {
     group_hash: GroupHash,
 }
 
-type GroupHash = u64;
+pub type GroupHash = u64;
 
 /// For storing (Count, Sum) in additional state for Average.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -128,6 +123,12 @@ impl AverageDataPair {
             Ok(DfValue::Double(0.0))
         }
     }
+}
+
+#[derive(Debug, Default)]
+/// Auxiliary State for an Aggregator node, which is owned by a Domain
+pub struct AggregatorState {
+    count_sum_map: HashMap<GroupHash, AverageDataPair>,
 }
 
 impl Aggregator {
@@ -187,6 +188,7 @@ impl GroupedOperation for Aggregator {
         &self,
         current: Option<&DfValue>,
         diffs: &mut dyn Iterator<Item = Self::Diff>,
+        auxiliary_node_state: Option<&mut AuxiliaryNodeState>,
     ) -> ReadySetResult<Option<DfValue>> {
         let apply_count = |curr: DfValue, diff: Self::Diff| -> ReadySetResult<DfValue> {
             if diff.positive {
@@ -204,9 +206,16 @@ impl GroupedOperation for Aggregator {
             }
         };
 
-        let apply_avg = |_curr, diff: Self::Diff| -> ReadySetResult<DfValue> {
-            self.count_sum_map
-                .borrow_mut()
+        let count_sum_map = match auxiliary_node_state {
+            Some(AuxiliaryNodeState::Aggregation(ref mut aggregator_state)) => {
+                &mut aggregator_state.count_sum_map
+            }
+            Some(_) => internal!("Incorrect auxiliary state for Aggregation node"),
+            None => internal!("Missing auxiliary state for Aggregation node"),
+        };
+
+        let mut apply_avg = |_curr, diff: Self::Diff| -> ReadySetResult<DfValue> {
+            count_sum_map
                 .entry(diff.group_hash)
                 .or_insert(AverageDataPair {
                     sum: DfValue::Double(0.0),

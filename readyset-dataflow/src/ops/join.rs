@@ -236,6 +236,7 @@ impl Ingredient for Join {
         replay: &ReplayContext<'_>,
         nodes: &DomainNodes,
         state: &StateMap,
+        _auxiliary_node_states: &mut AuxiliaryNodeStateMap,
     ) -> ReadySetResult<ProcessingResult> {
         let mut misses = Vec::new();
         let mut lookups = Vec::new();

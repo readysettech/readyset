@@ -382,6 +382,7 @@ impl Ingredient for Union {
         _: &ReplayContext,
         _: &DomainNodes,
         _: &StateMap,
+        _: &mut AuxiliaryNodeStateMap,
     ) -> ReadySetResult<ProcessingResult> {
         let mut results = match self.emit {
             Emit::AllFrom(..) => rs,
@@ -439,6 +440,7 @@ impl Ingredient for Union {
         replay: ReplayContext,
         n: &DomainNodes,
         s: &StateMap,
+        ans: &mut AuxiliaryNodeStateMap,
     ) -> ReadySetResult<RawProcessingResult> {
         use std::mem;
 
@@ -477,7 +479,7 @@ impl Ingredient for Union {
                     invariant!(self.replay_key.is_empty() || self.replay_pieces.is_empty());
 
                     // process the results (self is okay to have mutably borrowed here)
-                    let rs = self.on_input(from, rs, &replay, n, s)?.results;
+                    let rs = self.on_input(from, rs, &replay, n, s, ans)?.results;
 
                     // *then* borrow self.full_wait_state again
                     if let FullWait::Ongoing {
@@ -502,7 +504,7 @@ impl Ingredient for Union {
                 if self.replay_pieces.is_empty() {
                     // no replay going on, so we're done.
                     return Ok(RawProcessingResult::Regular(
-                        self.on_input(from, rs, &replay, n, s)?,
+                        self.on_input(from, rs, &replay, n, s, ans)?,
                     ));
                 }
 
@@ -596,7 +598,7 @@ impl Ingredient for Union {
                 }
 
                 Ok(RawProcessingResult::Regular(
-                    self.on_input(from, rs, &replay, n, s)?,
+                    self.on_input(from, rs, &replay, n, s, ans)?,
                 ))
             }
             ReplayContext::Full { last } => {
@@ -653,7 +655,7 @@ impl Ingredient for Union {
                 // arm). feel free to go check. interestingly enough, it's also fine for us to
                 // still emit 2 (i.e., not capture it), since it'll just be dropped by the target
                 // domain.
-                let mut rs = self.on_input(from, rs, &replay, n, s)?.results;
+                let mut rs = self.on_input(from, rs, &replay, n, s, ans)?.results;
                 let exit;
                 match self.full_wait_state {
                     FullWait::None => {
@@ -894,7 +896,7 @@ impl Ingredient for Union {
                             pieces.buffered.into_iter()
                         })
                         .map(|(from, rs)| {
-                            Ok(self.on_input(from, rs, &replay, n, s)?
+                            Ok(self.on_input(from, rs, &replay, n, s, ans)?
                                 .results)
                         })
                         // FIXME(eta): this iterator / result stuff makes me sad, and is probably

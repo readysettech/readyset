@@ -152,8 +152,18 @@ impl Ingredient for NodeOperator {
         replay: &ReplayContext,
         domain: &DomainNodes,
         states: &StateMap,
+        auxiliary_node_states: &mut AuxiliaryNodeStateMap,
     ) -> ReadySetResult<ProcessingResult> {
-        impl_ingredient_fn_mut!(self, on_input, from, data, replay, domain, states)
+        impl_ingredient_fn_mut!(
+            self,
+            on_input,
+            from,
+            data,
+            replay,
+            domain,
+            states,
+            auxiliary_node_states
+        )
     }
     fn on_input_raw(
         &mut self,
@@ -162,8 +172,18 @@ impl Ingredient for NodeOperator {
         replay: ReplayContext,
         domain: &DomainNodes,
         states: &StateMap,
+        auxiliary_node_states: &mut AuxiliaryNodeStateMap,
     ) -> ReadySetResult<RawProcessingResult> {
-        impl_ingredient_fn_mut!(self, on_input_raw, from, data, replay, domain, states)
+        impl_ingredient_fn_mut!(
+            self,
+            on_input_raw,
+            from,
+            data,
+            replay,
+            domain,
+            states,
+            auxiliary_node_states
+        )
     }
     fn on_eviction(&mut self, from: LocalNodeIndex, tag: Tag, keys: &[KeyComparison]) {
         impl_ingredient_fn_mut!(self, on_eviction, from, tag, keys)
@@ -223,6 +243,7 @@ pub mod test {
         pub(super) states: StateMap,
         nodes: DomainNodes,
         remap: HashMap<NodeIndex, IndexPair>,
+        auxiliary_node_states: AuxiliaryNodeStateMap,
     }
 
     #[allow(clippy::new_without_default)]
@@ -241,6 +262,7 @@ pub mod test {
                 states: StateMap::new(),
                 nodes: DomainNodes::default(),
                 remap: HashMap::new(),
+                auxiliary_node_states: Default::default(),
             }
         }
 
@@ -256,9 +278,11 @@ pub mod test {
         ) -> IndexPair {
             use crate::node::special::Base;
             let i = Base::new().with_default_values(defaults);
-            let global = self
-                .graph
-                .add_node(Node::new(name, make_columns(fields), i));
+            let node = Node::new(name, make_columns(fields), i);
+            if let Some(s) = node.initial_auxiliary_state() {
+                self.auxiliary_node_states.insert(node.local_addr(), s);
+            }
+            let global = self.graph.add_node(node);
             self.graph.add_edge(self.source, global, ());
             let mut remap = HashMap::new();
             let local = LocalNodeIndex::make(self.remap.len() as u32);
@@ -290,10 +314,13 @@ pub mod test {
             assert!(!parents.is_empty(), "node under test should have ancestors");
 
             let i: NodeOperator = i.into();
-            let global = self
-                .graph
-                .add_node(Node::new(name, make_columns(fields), i));
+            let node = Node::new(name, make_columns(fields), i);
+            let aux_state = node.initial_auxiliary_state();
+            let global = self.graph.add_node(node);
             let local = LocalNodeIndex::make(self.remap.len() as u32);
+            if let Some(aux_state) = aux_state {
+                self.auxiliary_node_states.insert(local, aux_state);
+            }
             if materialized {
                 self.states
                     .insert(local, MaterializedNodeState::Memory(MemoryState::default()));
@@ -425,7 +452,14 @@ pub mod test {
                 let mut n = self.nodes[*id].borrow_mut();
                 n.as_mut_internal()
                     .unwrap()
-                    .on_input_raw(*src, u.into(), replay, &self.nodes, &self.states)
+                    .on_input_raw(
+                        *src,
+                        u.into(),
+                        replay,
+                        &self.nodes,
+                        &self.states,
+                        &mut self.auxiliary_node_states,
+                    )
                     .unwrap()
             };
 

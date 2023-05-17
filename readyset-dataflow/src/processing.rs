@@ -732,6 +732,7 @@ where
         replay: &ReplayContext,
         domain: &DomainNodes,
         states: &StateMap,
+        auxiliary_node_states: &mut AuxiliaryNodeStateMap,
     ) -> ReadySetResult<ProcessingResult>;
 
     #[allow(clippy::too_many_arguments)]
@@ -742,10 +743,16 @@ where
         replay: ReplayContext,
         domain: &DomainNodes,
         states: &StateMap,
+        auxiliary_node_states: &mut AuxiliaryNodeStateMap,
     ) -> ReadySetResult<RawProcessingResult> {
-        Ok(RawProcessingResult::Regular(
-            self.on_input(from, data, &replay, domain, states)?,
-        ))
+        Ok(RawProcessingResult::Regular(self.on_input(
+            from,
+            data,
+            &replay,
+            domain,
+            states,
+            auxiliary_node_states,
+        )?))
     }
 
     /// Triggered whenever an eviction occurs, to allow the operator to react by evicting from any

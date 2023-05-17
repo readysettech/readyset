@@ -405,8 +405,18 @@ impl DomainBuilder {
             _nshards: self.nshards,
 
             persistence_parameters: self.persistence_parameters,
-            nodes: self.nodes,
             state: StateMap::default(),
+            auxiliary_node_states: self
+                .nodes
+                .iter()
+                .filter_map(|(n, node)| {
+                    node.borrow()
+                        .initial_auxiliary_state()
+                        .map(|state| (n, state))
+                })
+                .collect(),
+            nodes: self.nodes,
+
             reader_write_handles: Default::default(),
             not_ready,
             mode: DomainMode::Forwarding,
@@ -575,14 +585,20 @@ pub struct Domain {
     ///
     /// * All nodes mentioned in `self.replay_paths` and `self.not_ready` must exist in
     ///   `self.nodes`
-    /// * All keys of `self.state` must also be keys in `self.nodes`
-    /// * `nodes` cannot be empty
+    /// * All keys of `self.state` and `self.auxiliary_node_states` must also be
+    /// keys in `self.nodes` * `nodes` cannot be empty
     nodes: DomainNodes,
 
     /// State for all materialized non-reader nodes managed by this domain
     ///
     /// Invariant: All keys of `self.state` must also be keys in `self.nodes`
     state: StateMap,
+
+    /// State for internal nodes managed by this domain
+    ///
+    /// Invariant: All keys of `self.auxiliary_node_states` must also be keys in
+    /// `self.nodes`
+    auxiliary_node_states: AuxiliaryNodeStateMap,
 
     /// State for all reader nodes managed by this domain
     ///
@@ -1159,6 +1175,7 @@ impl Domain {
                     executor,
                     shard: self.shard,
                     replica: self.replica,
+                    auxiliary_node_states: &mut self.auxiliary_node_states,
                 },
             )?;
             assert_eq!(captured.len(), 0);
@@ -1370,6 +1387,7 @@ impl Domain {
         let ret = match req {
             DomainRequest::AddNode { node, parents } => {
                 let addr = node.local_addr();
+                let aux_state = node.initial_auxiliary_state();
                 self.not_ready.insert(addr);
 
                 for p in parents {
@@ -1380,6 +1398,9 @@ impl Domain {
                         .add_child(node.local_addr());
                 }
                 self.nodes.insert(addr, cell::RefCell::new(node));
+                if let Some(aux_state) = aux_state {
+                    self.auxiliary_node_states.insert(addr, aux_state);
+                }
                 trace!(local = addr.id(), "new node incorporated");
                 Ok(None)
             }
@@ -1393,6 +1414,7 @@ impl Domain {
                     if let Some(state) = self.state.remove(node) {
                         state.tear_down()?;
                     };
+                    self.auxiliary_node_states.remove(node);
                     self.reader_write_handles.remove(node);
                     self.metrics.set_node_state_size(node, 0);
                     trace!(local = node.id(), "node removed");
@@ -3013,6 +3035,7 @@ impl Domain {
                         executor: ex,
                         shard: self.shard,
                         replica: self.replica,
+                        auxiliary_node_states: &mut self.auxiliary_node_states,
                     },
                 )?;
 

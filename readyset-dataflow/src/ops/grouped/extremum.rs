@@ -2,6 +2,7 @@ use readyset_data::DfType;
 use readyset_errors::{invariant, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
+use crate::node::AuxiliaryNodeState;
 use crate::ops::grouped::{GroupedOperation, GroupedOperator};
 use crate::prelude::*;
 
@@ -97,6 +98,7 @@ impl GroupedOperation for ExtremumOperator {
         &self,
         current: Option<&DfValue>,
         diffs: &mut dyn Iterator<Item = Self::Diff>,
+        _auxiliary_node_state: Option<&mut AuxiliaryNodeState>,
     ) -> ReadySetResult<Option<DfValue>> {
         // Extreme values are those that are at least as extreme as the current min/max (if any).
         // let mut is_extreme_value : Box<dyn Fn(i64) -> bool> = Box::new(|_|true);

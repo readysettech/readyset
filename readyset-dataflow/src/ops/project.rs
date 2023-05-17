@@ -161,6 +161,7 @@ impl Ingredient for Project {
         _: &ReplayContext,
         _: &DomainNodes,
         _: &StateMap,
+        _: &mut AuxiliaryNodeStateMap,
     ) -> ReadySetResult<ProcessingResult> {
         debug_assert_eq!(from, *self.src);
         if let Some(ref emit) = self.emit {

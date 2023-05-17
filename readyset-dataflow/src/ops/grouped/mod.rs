@@ -8,6 +8,7 @@ use readyset_data::DfType;
 use readyset_errors::{internal_err, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
+use crate::node::AuxiliaryNodeState;
 use crate::prelude::*;
 use crate::processing::{ColumnSource, IngredientLookupResult, LookupIndex, LookupMode};
 
@@ -59,6 +60,9 @@ pub trait GroupedOperation: fmt::Debug + Clone {
     /// Given the given `current` value, and a number of changes for a group (`diffs`), compute the
     /// updated group value.
     ///
+    /// If the apply function creates side effects, they are performed on the passed in
+    /// `AuxiliaryNodeState`
+    ///
     /// A return value of [`None`] indicates that the operator has lost the ability to construct
     /// state for the operator, and needs to start from the beginning (eg, an `extremum` had the
     /// extreme value deleted).
@@ -66,6 +70,7 @@ pub trait GroupedOperation: fmt::Debug + Clone {
         &self,
         current: Option<&DfValue>,
         diffs: &mut dyn Iterator<Item = Self::Diff>,
+        auxiliary_node_state: Option<&mut AuxiliaryNodeState>,
     ) -> ReadySetResult<Option<DfValue>>;
 
     fn description(&self, detailed: bool) -> String;
@@ -189,6 +194,7 @@ where
         replay: &ReplayContext,
         nodes: &DomainNodes,
         state: &StateMap,
+        auxiliary_node_states: &mut AuxiliaryNodeStateMap,
     ) -> ReadySetResult<ProcessingResult> {
         debug_assert_eq!(from, *self.src);
 
@@ -284,7 +290,11 @@ where
                     .unwrap_or(0);
 
                 // new is the result of applying all diffs for the group to the current value
-                let new = match this.inner.apply(current.as_ref(), &mut diffs as &mut _)? {
+                let new = match this.inner.apply(
+                    current.as_ref(),
+                    &mut diffs as &mut _,
+                    auxiliary_node_states.get_mut(*us),
+                )? {
                     Some(v) => v,
                     None => {
                         // we lost the grouped state, so we need to start afresh.
@@ -346,7 +356,11 @@ where
                             .map(|x| this.inner.to_diff(&x, true))
                             .collect::<ReadySetResult<Vec<_>>>()?;
                         this.inner
-                            .apply(None, &mut diffs.into_iter())?
+                            .apply(
+                                None,
+                                &mut diffs.into_iter(),
+                                auxiliary_node_states.get_mut(*us),
+                            )?
                             .unwrap_or_else(|| this.inner.empty_value().unwrap_or(DfValue::None))
                     }
                 };

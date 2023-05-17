@@ -681,6 +681,10 @@ pub enum ReadySetError {
     /// Error interacting with native_tls
     #[error("TLS error: {0}")]
     NativeTlsError(String),
+
+    /// Incorrect Auxiliary node state was found
+    #[error("Incorrect Auxiliary Node State for {0} Node")]
+    IncorrectNodeState(String),
 }
 
 impl ReadySetError {
