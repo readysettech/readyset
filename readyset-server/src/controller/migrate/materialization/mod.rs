@@ -1077,11 +1077,11 @@ impl Materializations {
         }
 
         // then, we start prepping new nodes
-        for ni in make {
-            let n = &graph[ni];
+        for ni in &make {
+            let n = &graph[*ni];
             let mut index_on = self
                 .added
-                .remove(&ni)
+                .remove(ni)
                 .map(|idxs| -> ReadySetResult<_> {
                     invariant!(!idxs.is_empty());
                     Ok(idxs)
@@ -1090,7 +1090,7 @@ impl Materializations {
                 .unwrap_or_default();
 
             let start = ::std::time::Instant::now();
-            self.ready_one(ni, &mut index_on, graph, dmp)?;
+            self.ready_one(*ni, &mut index_on, graph, dmp)?;
             let reconstructed = index_on.is_empty();
 
             // communicate to the domain in charge of a particular node that it should start
@@ -1116,6 +1116,16 @@ impl Materializations {
                     "reconstruction completed"
                 );
             }
+        }
+
+        for ni in &make {
+            let n = &graph[*ni];
+            dmp.add_message(
+                n.domain(),
+                DomainRequest::IsReady {
+                    node: n.local_addr(),
+                },
+            )?;
         }
 
         self.added.clear();
