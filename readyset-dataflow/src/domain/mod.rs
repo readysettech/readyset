@@ -3877,6 +3877,78 @@ impl Domain {
             Ok(())
         }
 
+        fn eviction_candidates(
+            nodes: &DomainNodes,
+            num_bytes: &mut usize,
+            state: &StateMap,
+            reader_write_handles: &NodeMap<backlog::WriteHandle>,
+        ) -> Vec<(LocalNodeIndex, usize)> {
+            let mut candidates: Vec<_> = nodes
+                .values()
+                .filter_map(|nd| {
+                    let n = &*nd.borrow();
+                    let local_index = n.local_addr();
+
+                    if let Some(wh) = reader_write_handles.get(local_index) {
+                        if wh.is_partial() {
+                            Some(wh.deep_size_of())
+                        } else {
+                            None
+                        }
+                    } else {
+                        //deep_size_of(local_index)
+                        //self.state
+                        state
+                            .get(local_index)
+                            .filter(|state| state.is_partial())
+                            .map(|state| state.deep_size_of())
+                    }
+                    .map(|s| (local_index, s))
+                })
+                .filter(|&(_, s)| s > 0)
+                .map(|(x, s)| (x, s as usize))
+                .collect();
+
+            // we want to spread the eviction across the nodes,
+            // rather than emptying out one node completely.
+            // -1* so we sort in descending order
+            // TODO: be smarter than 3 here
+            candidates.sort_unstable_by_key(|&(_, s)| -(s as i64));
+            candidates.truncate(3);
+
+            // don't evict from tiny things (< 10% of max)
+            #[allow(clippy::indexing_slicing)]
+            // candidates must be at least nodes.len(), and nodes can't be empty
+            if let Some(too_small_i) = candidates
+                .iter()
+                .position(|&(_, s)| s < candidates[0].1 / 10)
+            {
+                // everything beyond this is smaller, so also too small
+                candidates.truncate(too_small_i);
+            }
+
+            let mut n = candidates.len();
+            // rev to start with the smallest of the n domains
+            for (_, size) in candidates.iter_mut().rev() {
+                // TODO: should this be evenly divided, or weighted by the size of the
+                // domains?
+                let share = (*num_bytes + n - 1) / n;
+                // we're only willing to evict at most half the state in each node
+                // unless this is the only node left to evict from
+                *size = if n > 1 {
+                    cmp::min(*size / 2, share)
+                } else {
+                    assert_eq!(share, *num_bytes);
+                    share
+                };
+                *num_bytes -= *size;
+                trace!(bytes = *size, node = ?n, "chose to evict from node");
+                n -= 1;
+            }
+
+            candidates
+        }
+
         match m {
             Packet::Evict {
                 node,
@@ -3889,69 +3961,12 @@ impl Domain {
                 let nodes = if let Some(node) = node {
                     vec![(node, num_bytes)]
                 } else {
-                    let mut candidates: Vec<_> = self
-                        .nodes
-                        .values()
-                        .filter_map(|nd| {
-                            let n = &*nd.borrow();
-                            let local_index = n.local_addr();
-
-                            if let Some(wh) = self.reader_write_handles.get(local_index) {
-                                if wh.is_partial() {
-                                    Some(wh.deep_size_of())
-                                } else {
-                                    None
-                                }
-                            } else {
-                                self.state
-                                    .get(local_index)
-                                    .filter(|state| state.is_partial())
-                                    .map(|state| state.deep_size_of())
-                            }
-                            .map(|s| (local_index, s))
-                        })
-                        .filter(|&(_, s)| s > 0)
-                        .map(|(x, s)| (x, s as usize))
-                        .collect();
-
-                    // we want to spread the eviction across the nodes,
-                    // rather than emptying out one node completely.
-                    // -1* so we sort in descending order
-                    // TODO: be smarter than 3 here
-                    candidates.sort_unstable_by_key(|&(_, s)| -(s as i64));
-                    candidates.truncate(3);
-
-                    // don't evict from tiny things (< 10% of max)
-                    #[allow(clippy::indexing_slicing)]
-                    // candidates must be at least nodes.len(), and nodes can't be empty
-                    if let Some(too_small_i) = candidates
-                        .iter()
-                        .position(|&(_, s)| s < candidates[0].1 / 10)
-                    {
-                        // everything beyond this is smaller, so also too small
-                        candidates.truncate(too_small_i);
-                    }
-
-                    let mut n = candidates.len();
-                    // rev to start with the smallest of the n domains
-                    for (_, size) in candidates.iter_mut().rev() {
-                        // TODO: should this be evenly divided, or weighted by the size of the
-                        // domains?
-                        let share = (num_bytes + n - 1) / n;
-                        // we're only willing to evict at most half the state in each node
-                        // unless this is the only node left to evict from
-                        *size = if n > 1 {
-                            cmp::min(*size / 2, share)
-                        } else {
-                            assert_eq!(share, num_bytes);
-                            share
-                        };
-                        num_bytes -= *size;
-                        trace!(bytes = *size, node = ?n, "chose to evict from node");
-                        n -= 1;
-                    }
-
-                    candidates
+                    eviction_candidates(
+                        &self.nodes,
+                        &mut num_bytes,
+                        &self.state,
+                        &self.reader_write_handles,
+                    )
                 };
 
                 for (node, num_bytes) in nodes {
