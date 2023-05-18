@@ -348,8 +348,8 @@ impl Benchmark {
         group.finish();
 
         // Required for subsequent benchmarks to properly get all cores and not incrimentally fewer
+        #[cfg(not(target_os = "macos"))]
         unset_affinity();
-
         Ok(())
     }
 }
@@ -491,6 +491,7 @@ impl AdapterHandle {
                 // We don't want the benchmarking process and the server to share CPU cores, to
                 // reduce noise, therefore we schedule the processes to different
                 // CPU cores alltogether
+                #[cfg(not(target_os = "macos"))]
                 set_cpu_affinity(true);
                 drop(sock2);
                 sock1.read_exact(&mut [0u8])?;
@@ -499,6 +500,7 @@ impl AdapterHandle {
                 std::process::exit(0);
             }
             Fork::Parent(child_pid) => {
+                #[cfg(not(target_os = "macos"))]
                 set_cpu_affinity(false);
                 drop(sock1);
 
@@ -669,6 +671,7 @@ async fn drop_cached_queries() -> anyhow::Result<()> {
 }
 
 // This will properly work only if there is no hyperthreading, or with 2way-SMT
+#[cfg(not(target_os = "macos"))]
 fn set_cpu_affinity(for_adapter: bool) {
     let physical_cpus = num_cpus::get_physical();
     let logical_cpus = num_cpus::get();
@@ -703,7 +706,6 @@ fn set_cpu_affinity(for_adapter: bool) {
             logical_cpus - 1
         )
     };
-
     std::process::Command::new("taskset")
         .arg("-p")
         .arg("--cpu-list")
@@ -713,6 +715,7 @@ fn set_cpu_affinity(for_adapter: bool) {
         .expect("failed to execute process");
 }
 
+#[cfg(not(target_os = "macos"))]
 fn unset_affinity() {
     let pid = std::process::id();
     std::process::Command::new("taskset")
