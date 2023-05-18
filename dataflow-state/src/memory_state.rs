@@ -13,8 +13,8 @@ use tracing::trace;
 use crate::keyed_state::KeyedState;
 use crate::single_state::SingleState;
 use crate::{
-    EvictBytesResult, EvictKeysResult, LookupResult, PointKey, RangeKey, RangeLookupResult,
-    RecordResult, Row, Rows, State,
+    EvictBytesResult, EvictKeysResult, EvictRandomResult, LookupResult, PointKey, RangeKey,
+    RangeLookupResult, RecordResult, Row, Rows, State,
 };
 
 #[derive(Default)]
@@ -314,17 +314,8 @@ impl State for MemoryState {
             }
 
             let (keys, rows) = evicted?;
-            for row in &rows {
-                for (key, weak_index) in self.weak_indices.iter_mut() {
-                    weak_index.remove(key, row, None);
-                }
-
-                // Only count strong references after we removed a row from `weak_indices`
-                // otherwise if it is there, it will never have a reference count of 1
-                if Rc::strong_count(&row.0) == 1 {
-                    bytes_freed += row.deep_size_of();
-                }
-            }
+            rows.iter()
+                .for_each(|row| bytes_freed += self.handle_evicted_row(row));
             bytes_freed += base_row_bytes(&keys);
             keys_evicted.push(keys);
         }
@@ -341,6 +332,7 @@ impl State for MemoryState {
         });
     }
 
+    /// Evicts the given `keys` for the state associated with the target of the given `tag`
     fn evict_keys(&mut self, tag: Tag, keys: &[KeyComparison]) -> Option<EvictKeysResult> {
         // we may be told to evict from a tag that add_key hasn't been called for yet
         // this can happen if an upstream domain issues an eviction for a replay path that we have
@@ -349,17 +341,9 @@ impl State for MemoryState {
             let rows_evicted = self.state[state_index].evict_keys(keys);
             let mut bytes_freed = 0;
 
-            for row in &rows_evicted {
-                for (key, weak_index) in self.weak_indices.iter_mut() {
-                    weak_index.remove(key, row, None);
-                }
-
-                // Only count strong references after we removed a row from `weak_indices`
-                // otherwise if it is there, it will never have a reference count of 1
-                if Rc::strong_count(&row.0) == 1 {
-                    bytes_freed += row.deep_size_of();
-                }
-            }
+            rows_evicted
+                .iter()
+                .for_each(|row| bytes_freed += self.handle_evicted_row(row));
 
             let key_bytes = keys.iter().map(base_row_bytes_from_comparison).sum::<u64>();
 
@@ -369,6 +353,28 @@ impl State for MemoryState {
                 index: self.state[state_index].index(),
                 bytes_freed,
             }
+        })
+    }
+
+    /// Randomly evict a single key from the state associated with the target of the given `tag`
+    fn evict_random<R: rand::Rng>(&mut self, tag: Tag, rng: &mut R) -> Option<EvictRandomResult> {
+        self.by_tag.get(&tag).cloned().and_then(move |state_index| {
+            self.state[state_index]
+                .evict_random(rng)
+                .map(|(key, rows)| {
+                    let mut bytes_freed = 0;
+                    rows.iter()
+                        .for_each(|row| bytes_freed += self.handle_evicted_row(row));
+                    let key_bytes = key.deep_size_of();
+                    bytes_freed += key_bytes;
+                    self.mem_size = self.mem_size.saturating_sub(bytes_freed);
+
+                    EvictRandomResult {
+                        index: self.state[state_index].index(),
+                        key_evicted: key,
+                        bytes_freed,
+                    }
+                })
         })
     }
 
@@ -461,6 +467,24 @@ impl MemoryState {
         }
 
         hit
+    }
+
+    /// Removes a `Row` that was evicted from `self::state` from `self::weak_indices`, and returns
+    /// the number of bytes freed if the last reference to the `Row` was dropped.
+    fn handle_evicted_row(&mut self, row: &Row) -> u64 {
+        // TODO(ENG-3062): Possibly consider duplicate rows when removing from
+        // self.weak_indices
+        for (key, weak_index) in self.weak_indices.iter_mut() {
+            weak_index.remove(key, row, None);
+        }
+
+        // Only count strong references after we removed a row from `weak_indices`
+        // otherwise if it is there, it will never have a reference count of 1
+        if Rc::strong_count(&row.0) == 1 {
+            row.deep_size_of()
+        } else {
+            0
+        }
     }
 }
 
@@ -697,6 +721,34 @@ mod tests {
                         range.end_bound().map(Vec1::as_vec).cloned()
                     )])
                 );
+            }
+
+            #[test]
+            fn evict_random() {
+                let mut state = MemoryState::default();
+
+                let tag_1 = Tag::new(1);
+                let tag_2 = Tag::new(2);
+
+                // Initialize MemoryState with two indices
+                state.add_key(Index::new(IndexType::HashMap, vec![0]), Some(vec![tag_1]));
+                state.add_key(Index::new(IndexType::HashMap, vec![1]), Some(vec![tag_2]));
+
+                // Mark two holes filled for Tag 1, and one for Tag 2
+                state.mark_filled(KeyComparison::from(vec1![DfValue::from(0)]), tag_1);
+                state.mark_filled(KeyComparison::from(vec1![DfValue::from(1)]), tag_1);
+                state.mark_filled(KeyComparison::from(vec1![DfValue::from(0)]), tag_2);
+
+                // Evict a random key for Tag 1
+                let mut rng = rand::thread_rng();
+                state.evict_random(tag_1, &mut rng);
+                let lookup_1 = state.lookup(&[0], &PointKey::Single(DfValue::from(0)));
+                let lookup_2 = state.lookup(&[0], &PointKey::Single(DfValue::from(1)));
+                let lookup_3 = state.lookup(&[1], &PointKey::Single(DfValue::from(0)));
+
+                // Assert exactly one of the first two lookups missed and the third did not
+                assert!(lookup_1.is_missing() ^ lookup_2.is_missing());
+                assert!(!lookup_3.is_missing());
             }
         }
 

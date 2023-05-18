@@ -96,7 +96,8 @@ use thiserror::Error;
 use tracing::{debug, error, info, info_span, instrument, warn};
 
 use crate::{
-    EvictKeysResult, LookupResult, PointKey, RangeKey, RangeLookupResult, RecordResult, State,
+    EvictKeysResult, EvictRandomResult, LookupResult, PointKey, RangeKey, RangeLookupResult,
+    RecordResult, State,
 };
 
 // Incremented on each PersistentState initialization so that IndexSeq
@@ -809,6 +810,12 @@ impl State for PersistentState {
 
     /// Panics if called
     #[allow(clippy::unreachable)] // this should never happen!
+    fn evict_random<R: rand::Rng>(&mut self, _: Tag, _: &mut R) -> Option<EvictRandomResult> {
+        unreachable!("can't evict keys from PersistentState")
+    }
+
+    /// Panics if called
+    #[allow(clippy::unreachable)] // this should never happen!
     fn clear(&mut self) {
         unreachable!("can't clear PersistentState")
     }
@@ -1038,6 +1045,10 @@ impl State for PersistentStateHandle {
     }
 
     fn evict_keys(&mut self, _: Tag, _: &[KeyComparison]) -> Option<EvictKeysResult> {
+        None
+    }
+
+    fn evict_random<R: rand::Rng>(&mut self, _: Tag, _: &mut R) -> Option<EvictRandomResult> {
         None
     }
 

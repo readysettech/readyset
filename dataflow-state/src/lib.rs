@@ -49,6 +49,16 @@ pub struct EvictKeysResult<'a> {
     pub bytes_freed: u64,
 }
 
+/// Information about state evicted via a call to [`State::evict_random`]
+pub struct EvictRandomResult<'a> {
+    /// The index that was evicted from
+    pub index: &'a Index,
+    /// The evicted key
+    pub key_evicted: Vec<DfValue>,
+    /// The number of bytes removed from the state
+    pub bytes_freed: u64,
+}
+
 /// The state of an individual, non-reader node in the graph
 pub enum MaterializedNodeState {
     /// The state that stores all the materialized rows in-memory.
@@ -210,6 +220,10 @@ pub trait State: SizeOf + Send {
     /// Evict the listed keys from the materialization targeted by `tag`, returning the index chosen
     /// to evict from and the number of bytes evicted.
     fn evict_keys(&mut self, tag: Tag, keys: &[KeyComparison]) -> Option<EvictKeysResult>;
+
+    /// Evict a random key from the materialization targeted by `tag`, returning the index chosen to
+    /// evict from and the number of bytes evicted.
+    fn evict_random<R: rand::Rng>(&mut self, tag: Tag, rng: &mut R) -> Option<EvictRandomResult>;
 
     /// Remove all rows from this state
     fn clear(&mut self);
@@ -399,6 +413,14 @@ impl State for MaterializedNodeState {
             MaterializedNodeState::Memory(ms) => ms.evict_keys(tag, keys),
             MaterializedNodeState::Persistent(ps) => ps.evict_keys(tag, keys),
             MaterializedNodeState::PersistentReadHandle(rh) => rh.evict_keys(tag, keys),
+        }
+    }
+
+    fn evict_random<R: rand::Rng>(&mut self, tag: Tag, rng: &mut R) -> Option<EvictRandomResult> {
+        match self {
+            MaterializedNodeState::Memory(ms) => ms.evict_random(tag, rng),
+            MaterializedNodeState::Persistent(ps) => ps.evict_random(tag, rng),
+            MaterializedNodeState::PersistentReadHandle(rh) => rh.evict_random(tag, rng),
         }
     }
 

@@ -4,7 +4,6 @@ use std::rc::Rc;
 
 use common::{IndexType, SizeOf};
 use itertools::Either;
-use rand::prelude::*;
 use readyset_client::internal::Index;
 use readyset_client::KeyComparison;
 use readyset_data::DfValue;
@@ -361,7 +360,10 @@ impl SingleState {
     }
 
     /// Select and evict a random key from `Self::state`. Return the key and evicted rows.
-    pub(super) fn evict_random(&mut self, rng: &mut ThreadRng) -> Option<(Vec<DfValue>, Rows)> {
+    pub(super) fn evict_random<R: rand::Rng>(
+        &mut self,
+        rng: &mut R,
+    ) -> Option<(Vec<DfValue>, Rows)> {
         self.state.evict_with_seed(rng.gen()).map(|(rows, key)| {
             self.row_count = self.row_count.saturating_sub(rows.len());
             (key, rows)
