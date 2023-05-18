@@ -340,7 +340,6 @@ impl WriteHandle {
     }
 
     /// Evict a single key from state
-    #[allow(dead_code)]
     pub(crate) fn evict_random(&mut self) -> u64 {
         let request = EvictionQuantity::Quantity(1);
         self.evict_inner(request)

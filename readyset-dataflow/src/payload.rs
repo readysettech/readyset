@@ -233,6 +233,9 @@ pub enum EvictRequest {
         tag: Tag,
         keys: Vec<KeyComparison>,
     },
+
+    /// Evict a random key from the materialization targeted by the replay path `tag` in the graph.
+    Random { tag: Tag },
 }
 
 /// A request issued to a domain through the worker RPC interface.
@@ -405,6 +408,9 @@ pub enum DomainRequest {
     },
 
     AllTablesCompacted,
+
+    /// Requests an eviction from state within this Domain.
+    Evict(EvictRequest),
 }
 
 /// The primary unit of communication between nodes in the dataflow graph.
@@ -565,7 +571,8 @@ impl Packet {
 
     pub(crate) fn tag(&self) -> Option<Tag> {
         match *self {
-            Packet::ReplayPiece { tag, .. } | Packet::Evict(EvictRequest::Keys { tag, .. }) => {
+            Packet::ReplayPiece { tag, .. }
+            | Packet::Evict(EvictRequest::Keys { tag, .. } | EvictRequest::Random { tag }) => {
                 Some(tag)
             }
             _ => None,

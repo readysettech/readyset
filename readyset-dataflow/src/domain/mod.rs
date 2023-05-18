@@ -14,7 +14,8 @@ use std::{cell, cmp, mem, process, time};
 use ahash::RandomState;
 use backoff::ExponentialBackoffBuilder;
 use dataflow_state::{
-    EvictBytesResult, MaterializedNodeState, PointKey, RangeKey, RangeLookupResult,
+    EvictBytesResult, EvictRandomResult, MaterializedNodeState, PointKey, RangeKey,
+    RangeLookupResult,
 };
 use failpoint_macros::failpoint;
 use futures_util::future::FutureExt;
@@ -2298,6 +2299,11 @@ impl Domain {
                     .all(|state| state.compaction_finished());
                 Ok(Some(bincode::serialize(&finished)?))
             }
+            // Handle an external request for an eviction
+            DomainRequest::Evict(req) => {
+                self.handle_eviction(req, executor)?;
+                Ok(None)
+            }
         };
         // What we just did might have done things like insert into `self.delayed_for_self`, so
         // run the event loop before returning to make sure that gets processed.
@@ -4093,7 +4099,70 @@ impl Domain {
                             )?;
                         }
                     }
-                    TriggerEndpoint::None | TriggerEndpoint::Start(..) => {}
+                    TriggerEndpoint::None | TriggerEndpoint::Start(_) => {}
+                }
+            }
+            EvictRequest::Random { tag } => {
+                let (trigger, path) = if let Some(rp) = self.replay_paths.get(tag) {
+                    (&rp.trigger, &rp.path)
+                } else {
+                    debug!(?tag, "got eviction for tag that has not yet been finalized");
+                    return Ok(());
+                };
+
+                match trigger {
+                    TriggerEndpoint::End { .. } | TriggerEndpoint::Local(..) => {
+                        // This path terminates inside the domain. Find the destination node, evict
+                        // from it, and then propagate the eviction further downstream.
+                        let destination = path.last().node;
+                        let mut freed = 0u64;
+                        #[allow(clippy::indexing_slicing)] // we got the node from self.nodes
+                        let n = self.nodes[destination].borrow_mut();
+
+                        if n.is_dropped() {
+                            // Node was dropped. Skip.
+                        } else if let Some(state) = self.reader_write_handles.get_mut(destination) {
+                            freed += state.evict_random();
+                            state.swap();
+                            state.notify_readers_of_eviction()?;
+                        } else if let Some(EvictRandomResult {
+                            index,
+                            key_evicted,
+                            bytes_freed,
+                            ..
+                        }) = {
+                            let mut rng = rand::thread_rng();
+                            self.state[destination].evict_random(tag, &mut rng)
+                        } {
+                            let key = KeyComparison::try_from(key_evicted)
+                                .map_err(|_| internal_err!("Empty key evicted"))?;
+
+                            freed += bytes_freed;
+                            let index = index.clone();
+                            trigger_downstream_evictions(
+                                &index,
+                                &[key],
+                                destination,
+                                ex,
+                                &self.not_ready,
+                                &self.replay_paths,
+                                self.shard,
+                                self.replica,
+                                &mut self.state,
+                                &mut self.reader_write_handles,
+                                &self.nodes,
+                                &mut self.remapped_keys,
+                            )?;
+                        } else {
+                            // This node was unable to evict any keys
+                        }
+
+                        debug!(%freed, node = ?n, "evicted from node");
+                        self.state_size.fetch_sub(freed as usize, Ordering::AcqRel);
+                    }
+                    TriggerEndpoint::None | TriggerEndpoint::Start { .. } => {
+                        // Node not in domain.
+                    }
                 }
             }
         };
