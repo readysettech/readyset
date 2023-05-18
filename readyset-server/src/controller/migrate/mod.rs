@@ -83,8 +83,9 @@ pub struct StoredDomainRequest {
 
 impl StoredDomainRequest {
     /// Sends the request to the domain.
-    /// Returns an `Option` with another request, that is meant to be sent
-    /// afterwards as a follow up (up to the caller to decide when to send it).
+    ///
+    /// Optionally returns another request to be sent afterwards as a follow up (up to the caller to
+    /// decide when to send it).
     pub async fn apply(
         self,
         mainline: &mut DfState,
@@ -132,7 +133,8 @@ impl StoredDomainRequest {
                     Err(e) => return Err(e),
                 }
             }
-            DomainRequest::Ready { node, .. } | DomainRequest::IsReady { node } => {
+            // If IsReady returns `false`, we need to send it again later
+            DomainRequest::IsReady { node } => {
                 trace!(request = ?self.req.clone(), node = node.id(), "sending domain ready/is_ready request");
                 let req = self.req.clone();
                 let is_ready = if let Some(shard) = self.shard {

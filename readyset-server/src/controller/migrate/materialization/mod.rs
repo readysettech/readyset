@@ -1007,6 +1007,9 @@ impl Materializations {
             }
         }
 
+        // Track a set of nodes which we haven't already waited to be ready
+        let mut non_ready_nodes = make.iter().copied().collect::<HashSet<_>>();
+
         // first, we add any new indices to existing nodes
         for node in reindex {
             let mut index_on = self.added.remove(&node).unwrap();
@@ -1071,17 +1074,17 @@ impl Materializations {
             {
                 let span = info_span!("reconstructing node", node = %node.index());
                 let _guard = span.enter();
-                self.setup(node, &mut index_on, graph, dmp)?;
+                self.setup(node, &mut index_on, &mut non_ready_nodes, graph, dmp)?;
             }
             index_on.clear();
         }
 
         // then, we start prepping new nodes
-        for ni in make {
-            let n = &graph[ni];
+        for ni in &make {
+            let n = &graph[*ni];
             let mut index_on = self
                 .added
-                .remove(&ni)
+                .remove(ni)
                 .map(|idxs| -> ReadySetResult<_> {
                     invariant!(!idxs.is_empty());
                     Ok(idxs)
@@ -1090,7 +1093,7 @@ impl Materializations {
                 .unwrap_or_default();
 
             let start = ::std::time::Instant::now();
-            self.ready_one(ni, &mut index_on, graph, dmp)?;
+            self.ready_one(*ni, &mut index_on, &mut non_ready_nodes, graph, dmp)?;
             let reconstructed = index_on.is_empty();
 
             // communicate to the domain in charge of a particular node that it should start
@@ -1118,6 +1121,18 @@ impl Materializations {
             }
         }
 
+        // Wait for each of the nodes to be ready which we didn't already (eg because we wanted to
+        // replay from them)
+        for ni in non_ready_nodes {
+            let n = &graph[ni];
+            dmp.add_message(
+                n.domain(),
+                DomainRequest::IsReady {
+                    node: n.local_addr(),
+                },
+            )?;
+        }
+
         self.added.clear();
         self.pending_recovery = false;
 
@@ -1130,6 +1145,7 @@ impl Materializations {
         &mut self,
         ni: NodeIndex,
         index_on: &mut Indices,
+        non_ready_nodes: &mut HashSet<NodeIndex>,
         graph: &Graph,
         dmp: &mut DomainMigrationPlan,
     ) -> Result<(), ReadySetError> {
@@ -1171,7 +1187,7 @@ impl Materializations {
             let span = info_span!("reconstructing node", node = %ni.index());
             let _guard = span.enter();
             debug!(node = %ni.index(), "beginning reconstruction");
-            self.setup(ni, index_on, graph, dmp)?;
+            self.setup(ni, index_on, non_ready_nodes, graph, dmp)?;
         }
 
         // NOTE: the state has already been marked ready by the replay completing, but we want to
@@ -1186,6 +1202,7 @@ impl Materializations {
         &mut self,
         ni: NodeIndex,
         index_on: &mut Indices,
+        non_ready_nodes: &mut HashSet<NodeIndex>,
         graph: &Graph,
         dmp: &mut DomainMigrationPlan,
     ) -> Result<(), ReadySetError> {
@@ -1222,6 +1239,17 @@ impl Materializations {
                     domain = %pending.source_domain.index(),
                     "telling root domain to start replay"
                 );
+
+                // Before we try to replay from the node, wait for it to be ready (but only if we
+                // haven't done so already)
+                if non_ready_nodes.remove(&ni) {
+                    dmp.add_message(
+                        pending.source_domain,
+                        DomainRequest::IsReady {
+                            node: pending.source,
+                        },
+                    )?;
+                }
 
                 dmp.add_message(
                     pending.source_domain,
