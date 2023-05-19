@@ -627,7 +627,7 @@ where
     /// **NOTE:** You MUST ensure that the returned [`ColumnSource`], if it is a
     /// [`ColumnSource::ExactCopy`] or [`ColumnSource::Union`], does not change the length of `cols`
     /// -- i.e. if `column_source` was called with a slice of length 1, the `columns` field in any
-    /// [`ColumnRef`]s returned by this functio must also have length 1, unless the columns are
+    /// [`ColumnRef`]s returned by this function must also have length 1, unless the columns are
     /// generated.
     ///
     /// (The above invariant is checked with an assertion in debug builds only.)

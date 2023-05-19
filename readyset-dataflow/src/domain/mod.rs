@@ -129,7 +129,7 @@ impl Debug for TriggerEndpoint {
 }
 
 /// The result of do_lookup, consists of the vector of the found records
-/// the hashset of the fullfilled keys, and a hashset of the missed key/replay key tuples
+/// the hashset of the fulfilled keys, and a hashset of the missed key/replay key tuples
 struct StateLookupResult<'a> {
     /// Records returned by the lookup
     records: Vec<RecordResult<'a>>,
@@ -1120,7 +1120,7 @@ impl Domain {
                 Ok(())
             }
             TriggerEndpoint::Local(..) => {
-                // didn't count against our quote, so we're also not decementing
+                // didn't count against our quote, so we're also not decrementing
                 Ok(())
             }
             TriggerEndpoint::Start(..) | TriggerEndpoint::None => {
@@ -2759,7 +2759,7 @@ impl Domain {
                     // this point should we start buffering messages for the target node. since the
                     // node is not yet marked ready, all previous messages for this node will
                     // automatically be discarded by dispatch(). the reason we should ignore all
-                    // messages preceeding the first replay message is that those have already been
+                    // messages preceding the first replay message is that those have already been
                     // accounted for in the state we are being replayed. if we buffered them and
                     // applied them after all the state has been replayed, we would double-apply
                     // those changes, which is bad.
@@ -2824,7 +2824,7 @@ impl Domain {
             let target_in_self = path.iter().any(|n| n.is_target);
 
             if target_in_self {
-                // If this replay pathh is bound for us, prune keys and data for keys we're
+                // If this replay path is bound for us, prune keys and data for keys we're
                 // not waiting for
                 if let ReplayPieceContext::Partial {
                     ref mut for_keys, ..
@@ -3244,7 +3244,7 @@ impl Domain {
                 // _wrong_, and we will eventually make progress, but it is pretty
                 // inefficient.
                 //
-                // insted, we probably want the join to do the eviction. we achieve this by
+                // instead, we probably want the join to do the eviction. we achieve this by
                 // only evicting from a after the replay has passed the join (or, more
                 // generally, the operator that might perform lookups into a)
                 if let Some(ref backfill_keys) = backfill_keys {

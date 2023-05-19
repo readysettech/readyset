@@ -85,7 +85,7 @@ pub struct Leader {
 
 impl Leader {
     /// Run all tasks required to be the leader. This may spawn tasks that
-    /// may become ready asyncronously. Use the notification to indicate
+    /// may become ready asynchronously. Use the notification to indicate
     /// to the Controller that the leader is ready to handle requests.
     pub(super) async fn start(
         &mut self,

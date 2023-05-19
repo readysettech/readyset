@@ -60,7 +60,7 @@ impl ToString for NodeOperator {
     fn to_string(&self) -> String {
         match *self {
             NodeOperator::Aggregation(_) => "Aggregation",
-            NodeOperator::Extremum(_) => "Extermum",
+            NodeOperator::Extremum(_) => "Extremum",
             NodeOperator::Concat(_) => "Concat",
             NodeOperator::Join(_) => "Join",
             NodeOperator::Paginate(_) => "Paginate",

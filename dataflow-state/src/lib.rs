@@ -95,7 +95,7 @@ pub trait State: SizeOf + Send {
     fn add_weak_key(&mut self, index: Index);
 
     /// Returns whether this state is currently keyed on anything. If not, then it cannot store any
-    /// infromation and is thus "not useful".
+    /// information and is thus "not useful".
     fn is_useful(&self) -> bool;
 
     /// Returns true if this state is partially materialized
@@ -622,7 +622,7 @@ impl<'a> LookupResult<'a> {
         }
     }
 
-    /// Returns the contained [`RecordResult<'a>`](RecordResult) value, panicing if the value is
+    /// Returns the contained [`RecordResult<'a>`](RecordResult) value, panicking if the value is
     /// [`Missing`].
     pub fn unwrap(self) -> RecordResult<'a> {
         self.records().unwrap()
@@ -658,7 +658,7 @@ impl<'a> RangeLookupResult<'a> {
         }
     }
 
-    /// Returns the contained [`RecordResult<'a>`](RecordResult) value, panicing if the value is
+    /// Returns the contained [`RecordResult<'a>`](RecordResult) value, panicking if the value is
     /// [`Missing`].
     pub fn unwrap(self) -> RecordResult<'a> {
         self.records().unwrap()

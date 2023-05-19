@@ -599,7 +599,7 @@ mod tests {
             (vec![2.into(), 5.into()], false),
             (vec![2.into(), 2.into()], true),
             (vec![2.into(), 2.into()], false),
-            (vec![2.into(), 5.into()], false), // Group 2 loses last row and dissapears
+            (vec![2.into(), 5.into()], false), // Group 2 loses last row and disappears
             (vec![3.into(), 3.into()], true),  // Group 3 is new, +3
         ];
 
@@ -898,7 +898,7 @@ mod tests {
         }));
     }
 
-    /// Testing AVG emits correct records with multple group by columns and single decimal
+    /// Testing AVG emits correct records with multiple group by columns and single decimal
     /// over column. Similar to `avg_of_decimals_forwards` with additional group column.
     /// Records are in the form of (GroupCol1, OverCol, GroupCol2).
     #[test]
@@ -981,7 +981,7 @@ mod tests {
         }
     }
 
-    /// Testing COUNT emits correct records with multple group by columns and single
+    /// Testing COUNT emits correct records with multiple group by columns and single
     /// over column. Similar to `count_forwards` with additional group column.
     /// Records are in the form of (GroupCol1, OverCol, GroupCol2).
     #[test]

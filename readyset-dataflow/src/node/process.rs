@@ -34,7 +34,7 @@ struct MissSet<'a> {
     on: LocalNodeIndex,
     /// The columns of `on` we were looking up on.
     lookup_idx: Vec<usize>,
-    /// The key that we useed to do the lookup that resulted in the miss
+    /// The key that we used to do the lookup that resulted in the miss
     lookup_key: MissLookupKey,
     /// The replay key that was being processed during the lookup (if any)
     replay_key: Option<MissReplayKey>,

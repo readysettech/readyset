@@ -185,7 +185,7 @@ impl ColumnSchema {
     }
 }
 
-/// A `ViewSchema` is used to desribe the columns of a stored ReadySet
+/// A `ViewSchema` is used to describe the columns of a stored ReadySet
 /// view as a vector of columns. The ViewSchema contains a vector with all
 /// projected columns and a vector with columns returned to the client.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -258,7 +258,7 @@ impl ViewSchema {
         }
     }
 
-    /// Return a vector specifiying the types of the columns for the requested indices
+    /// Return a vector specifying the types of the columns for the requested indices
     pub fn col_types<I>(&self, indices: I, schema_type: SchemaType) -> ReadySetResult<Vec<&DfType>>
     where
         I: IntoIterator<Item = usize>,
@@ -376,7 +376,7 @@ pub enum KeyComparison {
 
 #[allow(clippy::len_without_is_empty)] // can never be empty
 impl KeyComparison {
-    /// Attempt to construct a key comparsion comparing the given key using the given binary
+    /// Attempt to construct a key comparison comparing the given key using the given binary
     /// operator
     pub fn from_key_and_operator(
         key: Vec<DfValue>,
@@ -524,9 +524,9 @@ impl KeyComparison {
         }
     }
 
-    /// Returns true if the given `key` is covered by this [`KeyComparsion`].
+    /// Returns true if the given `key` is covered by this [`KeyComparison`].
     ///
-    /// Concretely, this is the case if the [`KeyComparsion`] is either an [equality][] match on
+    /// Concretely, this is the case if the [`KeyComparison`] is either an [equality][] match on
     /// `key`, or a [range][] match that covers `key`.
     ///
     /// [equality]: KeyComparison::equal
@@ -588,7 +588,7 @@ impl KeyComparison {
         matches!(self, KeyComparison::Equal(_))
     }
 
-    /// Returns `true` if this [`KeyComparsion`] is a [`Range`] key.
+    /// Returns `true` if this [`KeyComparison`] is a [`Range`] key.
     ///
     /// [`Range`]: KeyComparison::Range
     pub fn is_range(&self) -> bool {
@@ -1076,7 +1076,7 @@ pub struct ReusedReaderHandle {
     /// for the given placeholders.
     required_values: HashMap<PlaceholderIdx, Literal>,
     // Remapping from [`PlaceholderIdx`]s in the cached query to [`Literal`]s in the executed
-    // query. This remapping is applied to [`key_mapping`] when buliding keys.
+    // query. This remapping is applied to [`key_mapping`] when building keys.
     key_remapping: HashMap<PlaceholderIdx, Literal>,
 }
 
@@ -1102,7 +1102,7 @@ pub struct ViewQuery {
     pub block: bool,
     /// Expression to use to filter values after they're returned from the underlying reader.
     ///
-    /// This expression will be evaluaated on each of the rows returned from the reader, and any
+    /// This expression will be evaluated on each of the rows returned from the reader, and any
     /// rows for which it evaluates to a non-[truthy][] value will be omitted from the result set.
     ///
     /// [truthy]: DfValue::is_truthy
