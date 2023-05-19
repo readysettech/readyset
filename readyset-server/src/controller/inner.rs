@@ -185,7 +185,7 @@ impl Leader {
 
     #[failpoint("controller-request")]
     #[allow(clippy::let_unit_value)]
-    pub(super) fn external_request(
+    pub(super) async fn external_request(
         &self,
         method: hyper::Method,
         path: &str,
@@ -203,7 +203,7 @@ impl Leader {
 
         debug!(%method, %path, "received external HTTP request");
 
-        let require_leader_ready = || -> ReadySetResult<()> {
+        let require_leader_ready = move || -> ReadySetResult<()> {
             if !leader_ready {
                 Err(ReadySetError::LeaderNotReady)
             } else {
@@ -224,49 +224,40 @@ impl Leader {
         {
             match (&method, path) {
                 (&Method::GET, "/simple_graph") => {
-                    let ds = futures::executor::block_on(self.dataflow_state_handle.read());
+                    let ds = self.dataflow_state_handle.read().await;
                     return Ok(ds.graphviz(false, None).into_bytes());
                 }
                 (&Method::POST, "/simple_graphviz") => {
-                    let ds = futures::executor::block_on(self.dataflow_state_handle.read());
+                    let ds = self.dataflow_state_handle.read().await;
                     return_serialized!(ds.graphviz(false, None));
                 }
                 (&Method::GET, "/graph") => {
-                    let (ds, node_sizes) = futures::executor::block_on(async move {
-                        let ds = self.dataflow_state_handle.read().await;
-                        let node_sizes = ds.node_sizes().await?;
-                        ReadySetResult::Ok((ds, node_sizes))
-                    })?;
+                    let ds = self.dataflow_state_handle.read().await;
+                    let node_sizes = ds.node_sizes().await?;
                     return Ok(ds.graphviz(true, Some(node_sizes)).into_bytes());
                 }
                 (&Method::POST, "/graphviz") => {
-                    let (ds, node_sizes) = futures::executor::block_on(async move {
-                        let ds = self.dataflow_state_handle.read().await;
-                        let node_sizes = ds.node_sizes().await?;
-                        ReadySetResult::Ok((ds, node_sizes))
-                    })?;
+                    let ds = self.dataflow_state_handle.read().await;
+                    let node_sizes = ds.node_sizes().await?;
                     return_serialized!(ds.graphviz(true, Some(node_sizes)));
                 }
                 (&Method::GET | &Method::POST, "/get_statistics") => {
-                    let ret = futures::executor::block_on(async move {
-                        let ds = self.dataflow_state_handle.read().await;
-                        ds.get_statistics().await
-                    });
-                    return_serialized!(ret);
+                    let ds = self.dataflow_state_handle.read().await;
+                    return_serialized!(ds.get_statistics().await);
                 }
                 (&Method::GET | &Method::POST, "/instances") => {
-                    let ds = futures::executor::block_on(self.dataflow_state_handle.read());
+                    let ds = self.dataflow_state_handle.read().await;
                     return_serialized!(ds.get_instances());
                 }
                 (&Method::GET | &Method::POST, "/controller_uri") => {
                     return_serialized!(self.controller_uri);
                 }
                 (&Method::GET, "/workers") | (&Method::POST, "/workers") => {
-                    let ds = futures::executor::block_on(self.dataflow_state_handle.read());
+                    let ds = self.dataflow_state_handle.read().await;
                     return_serialized!(&ds.workers.keys().collect::<Vec<_>>())
                 }
                 (&Method::GET, "/healthy_workers") | (&Method::POST, "/healthy_workers") => {
-                    let ds = futures::executor::block_on(self.dataflow_state_handle.read());
+                    let ds = self.dataflow_state_handle.read().await;
                     return_serialized!(&ds
                         .workers
                         .iter()
@@ -284,7 +275,7 @@ impl Leader {
                 }
                 (&Method::POST, "/set_memory_limit") => {
                     let (period, limit) = bincode::deserialize(&body)?;
-                    let res: Result<(), ReadySetError> = futures::executor::block_on(async move {
+                    let res: Result<(), ReadySetError> = {
                         let ds = self.dataflow_state_handle.read().await;
                         for (_, worker) in ds.workers.iter() {
                             worker
@@ -292,7 +283,7 @@ impl Leader {
                                 .await?;
                         }
                         Ok(())
-                    });
+                    };
                     return_serialized!(res);
                 }
                 (&Method::GET | &Method::POST, "/version") => {
@@ -302,57 +293,56 @@ impl Leader {
             }
 
             // *** Read methods that do require quorum ***
-
             match (&method, path) {
                 (&Method::GET | &Method::POST, "/controller_uri") => {
                     return_serialized!(self.controller_uri);
                 }
                 (&Method::POST, "/tables") => {
-                    let ds = futures::executor::block_on(self.dataflow_state_handle.read());
+                    let ds = self.dataflow_state_handle.read().await;
                     check_quorum!(ds);
                     return_serialized!(ds.tables())
                 }
                 (&Method::POST, "/table_statuses") => {
-                    let res = futures::executor::block_on(async move {
+                    let res = {
                         let ds = self.dataflow_state_handle.read().await;
                         check_quorum!(ds);
                         ds.table_statuses().await
-                    });
+                    };
                     return_serialized!(res)
                 }
                 (&Method::POST, "/non_replicated_relations") => {
-                    let ds = futures::executor::block_on(self.dataflow_state_handle.read());
+                    let ds = self.dataflow_state_handle.read().await;
                     check_quorum!(ds);
                     return_serialized!(ds.non_replicated_relations())
                 }
                 (&Method::POST, "/views") => {
-                    let ds = futures::executor::block_on(self.dataflow_state_handle.read());
+                    let ds = self.dataflow_state_handle.read().await;
                     check_quorum!(ds);
                     return_serialized!(ds.views())
                 }
                 (&Method::POST, "/verbose_views") => {
-                    let ds = futures::executor::block_on(self.dataflow_state_handle.read());
+                    let ds = self.dataflow_state_handle.read().await;
                     check_quorum!(ds);
                     return_serialized!(ds.verbose_views())
                 }
                 (&Method::POST, "/view_statuses") => {
                     let (queries, dialect) = bincode::deserialize(&body)?;
-                    let ds = futures::executor::block_on(self.dataflow_state_handle.read());
+                    let ds = self.dataflow_state_handle.read().await;
                     check_quorum!(ds);
                     return_serialized!(ds.view_statuses(queries, dialect))
                 }
                 (&Method::GET | &Method::POST, "/instances") => {
-                    let ds = futures::executor::block_on(self.dataflow_state_handle.read());
+                    let ds = self.dataflow_state_handle.read().await;
                     check_quorum!(ds);
                     return_serialized!(ds.get_instances());
                 }
                 (&Method::GET | &Method::POST, "/workers") => {
-                    let ds = futures::executor::block_on(self.dataflow_state_handle.read());
+                    let ds = self.dataflow_state_handle.read().await;
                     check_quorum!(ds);
                     return_serialized!(ds.workers.keys().collect::<Vec<_>>())
                 }
                 (&Method::GET | &Method::POST, "/healthy_workers") => {
-                    let ds = futures::executor::block_on(self.dataflow_state_handle.read());
+                    let ds = self.dataflow_state_handle.read().await;
                     check_quorum!(ds);
                     return_serialized!(ds
                         .workers
@@ -362,7 +352,7 @@ impl Leader {
                         .collect::<Vec<_>>());
                 }
                 (&Method::GET, "/nodes") => {
-                    let ds = futures::executor::block_on(self.dataflow_state_handle.read());
+                    let ds = self.dataflow_state_handle.read().await;
                     check_quorum!(ds);
                     let nodes = if let Some(query) = &query {
                         let pairs = querystring::querify(query);
@@ -405,7 +395,7 @@ impl Leader {
                     // NOTE(eta): there is DELIBERATELY no `?` after the `table_builder` call,
                     // because the receiving end expects a `ReadySetResult` to be serialized.
                     let body = bincode::deserialize(&body)?;
-                    let ds = futures::executor::block_on(self.dataflow_state_handle.read());
+                    let ds = self.dataflow_state_handle.read().await;
                     check_quorum!(ds);
                     let ret = ds.table_builder(&body);
                     return_serialized!(ret);
@@ -414,7 +404,7 @@ impl Leader {
                     // NOTE(eta): there is DELIBERATELY no `?` after the `table_builder` call,
                     // because the receiving end expects a `ReadySetResult` to be serialized.
                     let body = bincode::deserialize(&body)?;
-                    let ds = futures::executor::block_on(self.dataflow_state_handle.read());
+                    let ds = self.dataflow_state_handle.read().await;
                     check_quorum!(ds);
                     let ret = ds.table_builder_by_index(body);
                     return_serialized!(ret);
@@ -423,34 +413,30 @@ impl Leader {
                     // NOTE(eta): same as above applies
                     require_leader_ready()?;
                     let body = bincode::deserialize(&body)?;
-                    let ds = futures::executor::block_on(self.dataflow_state_handle.read());
+                    let ds = self.dataflow_state_handle.read().await;
                     check_quorum!(ds);
                     let ret = ds.view_builder(body);
                     return_serialized!(ret);
                 }
                 (&Method::POST, "/get_info") => {
-                    let ds = futures::executor::block_on(self.dataflow_state_handle.read());
+                    let ds = self.dataflow_state_handle.read().await;
                     check_quorum!(ds);
                     return_serialized!(ds.get_info()?)
                 }
                 (&Method::POST, "/replication_offsets") => {
-                    // this method can't be `async` since `Leader` isn't Send because `Graph`
-                    // isn't Send :(
-                    let res = futures::executor::block_on(async move {
+                    let res = {
                         let ds = self.dataflow_state_handle.read().await;
                         check_quorum!(ds);
                         ds.replication_offsets().await
-                    })?;
+                    }?;
                     return_serialized!(res);
                 }
                 (&Method::POST, "/snapshotting_tables") => {
-                    // this method can't be `async` since `Leader` isn't Send because `Graph`
-                    // isn't Send :(
-                    let res = futures::executor::block_on(async move {
+                    let res = {
                         let ds = self.dataflow_state_handle.read().await;
                         check_quorum!(ds);
                         ds.snapshotting_tables().await
-                    })?;
+                    }?;
                     return_serialized!(res);
                 }
                 (&Method::POST, "/all_tables_compacted") => {
@@ -462,10 +448,10 @@ impl Leader {
                     return_serialized!(res);
                 }
                 (&Method::POST, "/node_sizes") => {
-                    let res = futures::executor::block_on(async move {
+                    let res = {
                         let ds = self.dataflow_state_handle.read().await;
                         ds.node_sizes().await
-                    })?;
+                    }?;
                     return_serialized!(res);
                 }
                 (&Method::POST, "/leader_ready") => {
@@ -488,18 +474,16 @@ impl Leader {
                     if body.require_leader_ready {
                         require_leader_ready()?;
                     }
-                    futures::executor::block_on(async move {
-                        let mut state_copy: DfState = {
-                            let reader = self.dataflow_state_handle.read().await;
-                            check_quorum!(reader);
-                            reader.clone()
-                        };
-                        state_copy.extend_recipe(body, true).await
-                    })?;
+                    let mut state_copy: DfState = {
+                        let reader = self.dataflow_state_handle.read().await;
+                        check_quorum!(reader);
+                        reader.clone()
+                    };
+                    state_copy.extend_recipe(body, true).await?;
                     return_serialized!(ExtendRecipeResult::Done);
                 }
                 (&Method::GET | &Method::POST, "/supports_pagination") => {
-                    let ds = futures::executor::block_on(self.dataflow_state_handle.read());
+                    let ds = self.dataflow_state_handle.read().await;
                     let supports =
                         ds.recipe.mir_config().allow_paginate && ds.recipe.mir_config().allow_topk;
                     return_serialized!(supports)
@@ -512,13 +496,13 @@ impl Leader {
 
         match (&method, path) {
             (&Method::GET, "/flush_partial") => {
-                let ret = futures::executor::block_on(async move {
+                let ret = {
                     let mut writer = self.dataflow_state_handle.write().await;
                     check_quorum!(writer.as_ref());
                     let r = writer.as_mut().flush_partial().await?;
                     self.dataflow_state_handle.commit(writer, authority).await?;
-                    Ok(r)
-                })?;
+                    r
+                };
                 return_serialized!(ret);
             }
             (&Method::POST, "/extend_recipe") => {
@@ -526,7 +510,7 @@ impl Leader {
                 if body.require_leader_ready {
                     require_leader_ready()?;
                 }
-                let ret = futures::executor::block_on(async move {
+                let ret = {
                     check_quorum!(self.dataflow_state_handle.read().await);
 
                     // Start the migration running in the background
@@ -553,13 +537,13 @@ impl Leader {
                             Ok(ExtendRecipeResult::Pending(migration_id.data().as_ffi()))
                         }
                     }
-                })?;
+                }?;
                 return_serialized!(ret);
             }
             (&Method::POST, "/migration_status") => {
                 let migration_id: u64 = bincode::deserialize(&body)?;
                 let migration_key = DefaultKey::from(KeyData::from_ffi(migration_id));
-                let ret = futures::executor::block_on(async move {
+                let ret = {
                     let mut running_migrations = self.running_migrations.lock().await;
                     let mut migration: &mut RunningMigration = running_migrations
                         .get_mut(migration_key)
@@ -576,53 +560,42 @@ impl Leader {
                             Ok(MigrationStatus::Done)
                         }
                     }
-                })?;
+                }?;
                 return_serialized!(ret)
             }
             (&Method::POST, "/remove_query") => {
                 require_leader_ready()?;
                 let query_name = bincode::deserialize(&body)?;
-                let ret = futures::executor::block_on(async move {
-                    let mut writer = self.dataflow_state_handle.write().await;
-                    check_quorum!(writer.as_ref());
-                    let r = writer.as_mut().remove_query(&query_name).await?;
-                    self.dataflow_state_handle.commit(writer, authority).await?;
-                    Ok(r)
-                })?;
-                return_serialized!(ret);
+                let mut writer = self.dataflow_state_handle.write().await;
+                check_quorum!(writer.as_ref());
+                writer.as_mut().remove_query(&query_name).await?;
+                self.dataflow_state_handle.commit(writer, authority).await?;
+                return_serialized!(());
             }
             (&Method::POST, "/remove_all_queries") => {
                 require_leader_ready()?;
-                let ret = futures::executor::block_on(async move {
-                    let mut writer = self.dataflow_state_handle.write().await;
-                    check_quorum!(writer.as_ref());
-                    writer.as_mut().remove_all_queries().await?;
-                    self.dataflow_state_handle.commit(writer, authority).await?;
-                    Ok(())
-                })?;
-                return_serialized!(ret);
+                let mut writer = self.dataflow_state_handle.write().await;
+                check_quorum!(writer.as_ref());
+                writer.as_mut().remove_all_queries().await?;
+                self.dataflow_state_handle.commit(writer, authority).await?;
+                return_serialized!(ReadySetResult::Ok(()));
             }
             (&Method::POST, "/set_schema_replication_offset") => {
                 let body: Option<ReplicationOffset> = bincode::deserialize(&body)?;
-                let ret = futures::executor::block_on(async move {
-                    let mut writer = self.dataflow_state_handle.write().await;
-                    check_quorum!(writer.as_ref());
-                    writer.as_mut().set_schema_replication_offset(body);
-                    self.dataflow_state_handle.commit(writer, authority).await
-                })?;
-                return_serialized!(ret);
+                let mut writer = self.dataflow_state_handle.write().await;
+                check_quorum!(writer.as_ref());
+                writer.as_mut().set_schema_replication_offset(body);
+                self.dataflow_state_handle.commit(writer, authority).await?;
+                return_serialized!(ReadySetResult::Ok(()));
             }
             (&Method::POST, "/remove_node") => {
                 require_leader_ready()?;
                 let body = bincode::deserialize(&body)?;
-                let ret = futures::executor::block_on(async move {
-                    let mut writer = self.dataflow_state_handle.write().await;
-                    check_quorum!(writer.as_ref());
-                    let r = writer.as_mut().remove_nodes(vec![body].as_slice()).await?;
-                    self.dataflow_state_handle.commit(writer, authority).await?;
-                    Ok(r)
-                })?;
-                return_serialized!(ret);
+                let mut writer = self.dataflow_state_handle.write().await;
+                check_quorum!(writer.as_ref());
+                writer.as_mut().remove_nodes(vec![body].as_slice()).await?;
+                self.dataflow_state_handle.commit(writer, authority).await?;
+                return_serialized!(());
             }
             _ => Err(ReadySetError::UnknownEndpoint),
         }

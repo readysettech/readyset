@@ -920,13 +920,16 @@ impl DfState {
     }
 
     /// Return a map of node indices to key counts.
-    #[allow(dead_code)]
     pub(super) async fn node_sizes(&self) -> ReadySetResult<HashMap<NodeIndex, NodeSize>> {
+        // Copying the keys into a vec here is a workaround for a higher order
+        // lifetime compile error in `external_request` that occurs if we simply
+        // use keys().map() to pass into query_domains directly.
+        let domains: Vec<DomainIndex> = self.domains.keys().copied().collect();
         let counts_per_domain: Vec<(DomainIndex, Vec<Vec<Vec<(NodeIndex, NodeSize)>>>)> = self
             .query_domains::<_, Vec<(NodeIndex, NodeSize)>>(
-                self.domains
-                    .keys()
-                    .map(|di| (*di, DomainRequest::RequestNodeSizes)),
+                domains
+                    .into_iter()
+                    .map(|di| (di, DomainRequest::RequestNodeSizes)),
             )
             .try_collect()
             .await?;

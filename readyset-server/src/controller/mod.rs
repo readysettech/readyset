@@ -1118,16 +1118,9 @@ async fn handle_controller_request(
         let guard = leader_handle.read().await;
         let resp = {
             if let Some(ref ci) = *guard {
-                Ok(tokio::task::block_in_place(|| {
-                    ci.external_request(
-                        method,
-                        path.as_ref(),
-                        query,
-                        body,
-                        &authority,
-                        leader_ready,
-                    )
-                }))
+                Ok(ci
+                    .external_request(method, path.as_ref(), query, body, &authority, leader_ready)
+                    .await)
             } else {
                 Err(ReadySetError::NotLeader)
             }
