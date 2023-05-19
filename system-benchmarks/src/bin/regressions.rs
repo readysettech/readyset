@@ -2,8 +2,11 @@
 //! nice chart so that big performance changes are visible.
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::str::FromStr;
 
-use serde::Deserialize;
+use database_utils::{DatabaseConnection, DatabaseURL, QueryableConnection};
+use readyset_data::DfValue;
+use serde::{Deserialize, Serialize};
 
 // How many build at most to check
 const MAX_BUILDS_TO_CHECK: usize = 150;
@@ -147,6 +150,53 @@ async fn get_bench(
     Ok(serde_json::from_str::<BaseBenchmarks>(&benchmark_json)?.benchmarks)
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct BenchmarkResults {
+    mean_tps: f64,
+}
+
+/// Upload results to either a mysql or postgres database. Results are a map of the build number to
+/// the mean throughput.
+async fn upload_results_to_database(
+    client: &mut DatabaseConnection,
+    commit: &str,
+    results: &BTreeMap<String, DataSet>,
+) -> anyhow::Result<()> {
+    // Create the table if it doesn't already exist.
+    let ddl = std::fs::read_to_string("regressions.sql")?;
+    client.query_drop(&ddl).await?;
+
+    let query = r"
+    INSERT INTO benchmark_data (buildkite_commit, name, build, execution_end_time, data) VALUES 
+    ($1, $2, $3, NOW(), $4)"
+        .to_string();
+    for (
+        name,
+        DataSet {
+            label: _,
+            data,
+            border_color: _,
+            border_dash: _,
+        },
+    ) in results
+    {
+        for (build, mean_tps) in data {
+            let data = BenchmarkResults {
+                mean_tps: *mean_tps,
+            };
+            let params: Vec<DfValue> = vec![
+                commit.into(),
+                name.clone().into(),
+                build.clone().into(),
+                serde_json::to_value(&data)?.into(),
+            ];
+            client.execute(&query, params).await?;
+        }
+    }
+
+    Ok(())
+}
+
 fn color_and_dash_for_idx(idx: usize) -> (&'static str, &'static str) {
     (
         HTML_COLORS[idx % HTML_COLORS.len()],
@@ -154,7 +204,7 @@ fn color_and_dash_for_idx(idx: usize) -> (&'static str, &'static str) {
     )
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct DataSet {
     label: String,
     data: BTreeMap<String, f64>,
@@ -166,6 +216,13 @@ struct DataSet {
 async fn main() -> anyhow::Result<()> {
     let this_build: usize = std::env::var("BUILD_NUMBER").expect("Need build").parse()?;
     let access_token = std::env::var("ACCESS_TOKEN").expect("Need token");
+
+    // We wait to return an error in the case of an invalid database url, because there is still
+    // value in running the benchmarks and writing out results to an html file. After writing the
+    // html file out, we return the error.
+    let db_url = std::env::var("DATABASE_URL")
+        .ok()
+        .map(|url| DatabaseURL::from_str(&url));
 
     let client = reqwest::Client::new();
 
@@ -198,6 +255,9 @@ async fn main() -> anyhow::Result<()> {
 
             for (name, results) in benchmarks_for_build {
                 memory_limits.insert(results.info.value_str.unwrap_or_default());
+
+                // Multiply the mean estimates by the benchmark batch size to arrive at a mean
+                // throughput.
                 let mean_tpt = 8192. * 1_000_000_000.0 / results.estimates.mean.point_estimate;
 
                 let next_ds = datasets.len();
@@ -221,7 +281,7 @@ async fn main() -> anyhow::Result<()> {
 
     let label_string = itertools::join(labels.iter().map(|l| format!("'{l}'")), ",");
     let dataset_string = itertools::join(
-        datasets.into_values().map(
+        datasets.clone().into_values().map(
             |DataSet {
                  label,
                  border_color,
@@ -263,6 +323,12 @@ async fn main() -> anyhow::Result<()> {
             .replace("$MEMORY_LIMITS$", &mem_limits_string)
             .replace("$DATASETS$", &dataset_string),
     )?;
+
+    if let Some(res) = db_url {
+        let url = res?;
+        let mut conn = url.connect(None).await?;
+        upload_results_to_database(&mut conn, &commit, &datasets).await?;
+    }
 
     Ok(())
 }

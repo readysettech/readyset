@@ -6019,6 +6019,7 @@ dependencies = [
  "temp-dir",
  "tikv-jemallocator",
  "tokio",
+ "tokio-postgres",
 ]
 
 [[package]]
