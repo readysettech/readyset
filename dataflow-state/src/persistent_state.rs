@@ -235,7 +235,7 @@ pub struct PersistenceParameters {
     pub mode: DurabilityMode,
     /// Filename prefix for the RocksDB database folder
     pub db_filename_prefix: String,
-    /// Number of background threads PersistentState can use (shared acrosss all worker threads).
+    /// Number of background threads PersistentState can use (shared across all worker threads).
     pub persistence_threads: i32,
     /// An optional path to a directory where to store the DB files, if None will be stored in the
     /// current working directory
@@ -408,11 +408,11 @@ impl SharedState {
     }
 }
 
-/// A handle that can cloned and shared between threas to safely read from the [`PersistentState`]
-/// concurently.
+/// A handle that can cloned and shared between threads to safely read from the [`PersistentState`]
+/// concurrently.
 #[derive(Clone)]
 pub struct PersistentStateHandle {
-    /// The replication offset used to make sure the read handle recieved all forward processing
+    /// The replication offset used to make sure the read handle received all forward processing
     /// messages for state, if the replication offset of the read handle is behind that of
     /// the base table (`inner.replication_offset`), lookups will result in a miss.
     replication_offset: Option<ReplicationOffset>,
@@ -640,7 +640,7 @@ impl State for PersistentState {
             let db = &self.db.handle();
             if self.snapshot_mode.is_enabled() && replication_offset.is_some() {
                 // We are setting the replication offset, which is great, but all of our previous
-                // writes are not guranteed to flush to disk even if the next write is synced. We
+                // writes are not guaranteed to flush to disk even if the next write is synced. We
                 // therefore perform a flush before handling the next write.
                 //
                 // See: https://github.com/facebook/rocksdb/wiki/RocksDB-FAQhttps://github.com/facebook/rocksdb/wiki/RocksDB-FAQ
@@ -808,11 +808,11 @@ impl State for PersistentState {
 
 impl State for PersistentStateHandle {
     fn add_key(&mut self, _: Index, _: Option<Vec<Tag>>) {
-        // Do nothing, as all keys are propagated via the [`PeristentState::add_key`]
+        // Do nothing, as all keys are propagated via the [`PersistentState::add_key`]
     }
 
     fn add_weak_key(&mut self, _: Index) {
-        // Add key does nothing, as all keys are propagated via the [`PeristentState::add_key`]
+        // Add key does nothing, as all keys are propagated via the [`PersistentState::add_key`]
     }
 
     fn process_records(
@@ -1611,7 +1611,7 @@ impl PersistentState {
 
                     // In the first stage we have log entries of the form `Generated table #53:
                     // 3314046 keys, 268436084 bytes` we will be looking for the
-                    // number of keys in the table, it seems when we have all of the keys proccessed
+                    // number of keys in the table, it seems when we have all of the keys processed
                     // is when first stage is done.
                     if line.contains("Generated table") {
                         // Look for number of keys
