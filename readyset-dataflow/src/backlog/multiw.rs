@@ -2,6 +2,7 @@ use std::ops::{Bound, RangeBounds};
 
 use ahash::RandomState;
 use dataflow_expression::PreInsertion;
+use reader_map::EvictionQuantity;
 use readyset_client::consistency::Timestamp;
 
 use super::{key_to_single, Key};
@@ -89,15 +90,15 @@ impl Handle {
 
     /// Evict keys that were selected by the assigned eviction strategy from the state, and return
     /// the number of bytes freed. The amount of keys evicted will be ceil(len() * ratio)
-    pub fn evict(&mut self, ratio: f64) -> u64 {
+    pub fn evict(&mut self, keys_to_evict: EvictionQuantity) -> u64 {
         let base_value_size = self.base_value_size() as u64;
         match *self {
-            Handle::Single(ref mut h) => h.evict_keys(ratio, |k, v| {
+            Handle::Single(ref mut h) => h.evict_keys(keys_to_evict, |k, v| {
                 // Each row's state is composed of: The key, the set of Values in the row (DfValues)
                 // and the bytes required to hold the Row data structure.
                 k.deep_size_of() + v.iter().map(|r| r.deep_size_of()).sum::<u64>() + base_value_size
             }),
-            Handle::Many(ref mut h) => h.evict_keys(ratio, |k, v| {
+            Handle::Many(ref mut h) => h.evict_keys(keys_to_evict, |k, v| {
                 k.deep_size_of() + v.iter().map(|r| r.deep_size_of()).sum::<u64>() + base_value_size
             }),
         }

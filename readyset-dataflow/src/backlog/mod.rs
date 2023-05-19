@@ -6,7 +6,7 @@ use std::sync::Arc;
 use ahash::RandomState;
 use common::SizeOf;
 use dataflow_expression::{PostLookup, ReaderProcessing};
-use reader_map::EvictionStrategy;
+use reader_map::{EvictionQuantity, EvictionStrategy};
 use readyset_client::consistency::Timestamp;
 use readyset_client::results::SharedResults;
 use readyset_client::KeyComparison;
@@ -315,9 +315,8 @@ impl WriteHandle {
         self.partial
     }
 
-    /// Attempt to evict `bytes` from state. This approximates the number of keys to evict,
-    /// these keys may not have exactly `bytes` worth of state.
-    pub(crate) fn evict_bytes(&mut self, bytes: usize) -> u64 {
+    /// Evict from state according to the [`EvictionQuantity`].
+    fn evict_inner(&mut self, request: EvictionQuantity) -> u64 {
         let mut bytes_to_be_freed = 0;
         if self.mem_size > 0 {
             debug_assert!(
@@ -326,11 +325,25 @@ impl WriteHandle {
                 self.mem_size
             );
 
-            bytes_to_be_freed += self.handle.evict(bytes as f64 / self.mem_size as f64);
+            bytes_to_be_freed += self.handle.evict(request);
         }
 
         self.mem_size = self.mem_size.saturating_sub(bytes_to_be_freed as usize);
         bytes_to_be_freed
+    }
+
+    /// Attempt to evict `bytes` from state. This approximates the number of keys to evict,
+    /// these keys may not have exactly `bytes` worth of state.
+    pub(crate) fn evict_bytes(&mut self, bytes: usize) -> u64 {
+        let request = EvictionQuantity::Ratio(bytes as f64 / self.mem_size as f64);
+        self.evict_inner(request)
+    }
+
+    /// Evict a single key from state
+    #[allow(dead_code)]
+    pub(crate) fn evict_random(&mut self) -> u64 {
+        let request = EvictionQuantity::Quantity(1);
+        self.evict_inner(request)
     }
 
     pub(crate) fn mark_hole(&mut self, key: &KeyComparison) -> ReadySetResult<()> {

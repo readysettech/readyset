@@ -12,6 +12,15 @@ use crate::inner::Inner;
 use crate::read::ReadHandle;
 use crate::values::Values;
 
+/// A representation of how many keys to evict from the map.
+#[derive(Debug)]
+pub enum EvictionQuantity {
+    /// The number of keys to evict
+    Quantity(usize),
+    /// The ratio of keys to evict on [0, 1]
+    Ratio(f64),
+}
+
 /// A handle that may be used to modify the eventually consistent map.
 ///
 /// Note that any changes made to the map will not be made visible to readers until
@@ -229,14 +238,14 @@ where
         self.add_op(Operation::Retain(k, Predicate(Box::new(f))))
     }
 
-    /// Remove the value-bag for randomly chosen keys in an attempt to evict `ratio` keys.
+    /// Remove the value-bag for randomly chosen keys given an `EvictionQuantity` to evict.
     ///
     /// This method immediately calls [`publish`](Self::publish) to ensure that the keys and values
     /// it returns match the elements that will be emptied on the next call to
     /// [`publish`](Self::publish). The values will be submitted for eviction, but the result will
     /// only be visible to all readers after a following call to publish is made. The method returns
     /// the amount of memory freed, computed using the provided closure on each (K,V) pair.
-    pub fn evict_keys<'a, F>(&'a mut self, ratio: f64, mut mem_cnt: F) -> u64
+    pub fn evict_keys<'a, F>(&'a mut self, keys_to_evict: EvictionQuantity, mut mem_cnt: F) -> u64
     where
         F: FnMut(&K, &Values<V>) -> u64,
     {
@@ -252,7 +261,11 @@ where
         let inner: &'a Inner<K, V, M, T, S, I> =
             unsafe { std::mem::transmute::<&Inner<K, V, M, T, S, I>, _>(inner.as_ref()) };
 
-        let nkeys_to_evict = ((inner.data.len() as f64 * ratio) as usize).min(inner.data.len());
+        let keys_to_evict = match keys_to_evict {
+            EvictionQuantity::Ratio(ratio) => (inner.data.len() as f64 * ratio) as usize,
+            EvictionQuantity::Quantity(keys) => keys,
+        }
+        .min(inner.data.len());
 
         let mut mem_freed = 0;
 
@@ -260,7 +273,7 @@ where
             IndexType::BTreeMap => {
                 let mut range_iterator = inner
                     .eviction_strategy
-                    .pick_ranges_to_evict(&inner.data, nkeys_to_evict);
+                    .pick_ranges_to_evict(&inner.data, keys_to_evict);
 
                 while let Some(subrange_iter) = range_iterator.next_range() {
                     let mut subrange_iter = subrange_iter.map(|(k, v)| {
@@ -283,7 +296,7 @@ where
             IndexType::HashMap => {
                 let kvs = inner
                     .eviction_strategy
-                    .pick_keys_to_evict(&inner.data, nkeys_to_evict);
+                    .pick_keys_to_evict(&inner.data, keys_to_evict);
 
                 for (k, v) in kvs {
                     self.add_op(Operation::RemoveEntry(k.clone()));

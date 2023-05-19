@@ -6,7 +6,7 @@ use partial_map::InsertionOrder;
 use reader_map::handles::{ReadHandle, WriteHandle};
 use reader_map::refs::Miss;
 use reader_map::Error::*;
-use reader_map::{DefaultInsertionOrder, Options};
+use reader_map::{DefaultInsertionOrder, EvictionQuantity, Options};
 use readyset_client::internal::IndexType;
 
 macro_rules! assert_match {
@@ -974,7 +974,7 @@ where
 {
     let mut evicted = Vec::new();
 
-    w.evict_keys(ratio, |k, _| {
+    w.evict_keys(EvictionQuantity::Ratio(ratio), |k, _| {
         evicted.push(k.clone());
         0
     });
