@@ -1,5 +1,3 @@
-//! # Stateful Proptest Reference Documentation
-//!
 //! This framework builds on the [`proptest`] framework to make it easier to build stateful
 //! property-based tests. By "stateful", we mean that the intent is to be able to test stateful
 //! systems, which we do by modeling the state of the system under test and using that model to
