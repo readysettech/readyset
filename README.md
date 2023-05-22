@@ -236,7 +236,7 @@ This section is for developers who want to build ReadySet from source as they wo
    **macOS with [homebrew](https://brew.sh/):**
 
    ```bash
-   brew install lz4 openssl@1.1 rocksdb
+   brew install lz4 openssl@1.1
    ```
 
    Add the following to your [cargo config](https://doc.rust-lang.org/cargo/reference/config.html)
@@ -245,20 +245,19 @@ This section is for developers who want to build ReadySet from source as they wo
    ```toml
    [env]
    LIBRARY_PATH = "/opt/homebrew/lib"
-   ROCKSDB_LIB_DIR = "/opt/homebrew/lib"
    ```
 
    **Ubuntu:**
 
    ```bash
-   sudo apt update && sudo apt install -y build-essential libssl-dev pkg-config llvm clang liblz4-dev librocksdb-dev
+   sudo apt update && sudo apt install -y build-essential libssl-dev pkg-config llvm clang liblz4-dev
    sudo apt-get -y install cmake
    ```
 
    **Arch:**
 
    ```bash
-   sudo pacman -S base-devel clang lz4 rocksdb-static
+   sudo pacman -S base-devel clang lz4
    ```
 
    **CentOS/Amazon Linux:**
