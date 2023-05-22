@@ -9,4 +9,4 @@ edition = "2021"
 async-trait = "0.1"
 proptest = "1.0.0"
 rand = "0.8.5"
-tokio = { workspace = true, features = ["full"] }
+tokio = { version = "1.28", features = ["full"] }
