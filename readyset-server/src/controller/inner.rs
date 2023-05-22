@@ -440,11 +440,11 @@ impl Leader {
                     return_serialized!(res);
                 }
                 (&Method::POST, "/all_tables_compacted") => {
-                    let res = futures::executor::block_on(async move {
+                    let res = {
                         let ds = self.dataflow_state_handle.read().await;
                         check_quorum!(ds);
                         ds.all_tables_compacted().await
-                    })?;
+                    }?;
                     return_serialized!(res);
                 }
                 (&Method::POST, "/node_sizes") => {
