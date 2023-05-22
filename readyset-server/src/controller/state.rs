@@ -116,10 +116,16 @@ pub struct DfState {
     #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
     pub(super) node_restrictions: HashMap<NodeRestrictionKey, DomainPlacementRestriction>,
 
+    #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
+    /// Map from local to global node index for each domain
+    pub(super) domain_nodes: HashMap<DomainIndex, NodeMap<NodeIndex>>,
+    /// Map from global node index to index pair for each domain
+    #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
+    pub(super) domain_node_index_pairs: HashMap<DomainIndex, HashMap<NodeIndex, IndexPair>>,
+
     #[serde(skip)]
     pub(super) domains: HashMap<DomainIndex, DomainHandle>,
-    #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
-    pub(super) domain_nodes: HashMap<DomainIndex, NodeMap<NodeIndex>>,
+
     #[serde(skip)]
     pub(super) channel_coordinator: Arc<ChannelCoordinator>,
 
@@ -128,10 +134,6 @@ pub struct DfState {
     pub(super) read_addrs: HashMap<WorkerIdentifier, SocketAddr>,
     #[serde(skip)]
     pub(super) workers: HashMap<WorkerIdentifier, Worker>,
-
-    /// State between migrations
-    #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
-    pub(super) remap: HashMap<DomainIndex, HashMap<NodeIndex, IndexPair>>,
 }
 
 impl DfState {
@@ -166,7 +168,7 @@ impl DfState {
             channel_coordinator,
             read_addrs: Default::default(),
             workers: Default::default(),
-            remap: Default::default(),
+            domain_node_index_pairs: Default::default(),
             replication_strategy,
         }
     }

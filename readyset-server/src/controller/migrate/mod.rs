@@ -969,7 +969,7 @@ fn plan_add_nodes(
         for (domain, nodes) in &mut domain_new_nodes {
             // Number of pre-existing nodes
             let mut nnodes = dataflow_state
-                .remap
+                .domain_node_index_pairs
                 .get(domain)
                 .map(HashMap::len)
                 .unwrap_or(0);
@@ -1000,7 +1000,7 @@ fn plan_add_nodes(
                     );
                 }
                 dataflow_state
-                    .remap
+                    .domain_node_index_pairs
                     .entry(*domain)
                     .or_insert_with(HashMap::new)
                     .entry(ni)
@@ -1029,7 +1029,8 @@ fn plan_add_nodes(
                     // NOTE: this has to be *per node*, since a shared parent may be remapped
                     // differently to different children (due to sharding for example). we just
                     // allocate it once though.
-                    let mut remap_ = dataflow_state.remap[domain].clone();
+                    let mut node_index_mappings =
+                        dataflow_state.domain_node_index_pairs[domain].clone();
 
                     // Parents in other domains have been swapped for ingress nodes.
                     // Those ingress nodes' indices are now local.
@@ -1039,7 +1040,10 @@ fn plan_add_nodes(
                             continue;
                         }
 
-                        remap_.insert(src, dataflow_state.remap[domain][&instead]);
+                        node_index_mappings.insert(
+                            src,
+                            dataflow_state.domain_node_index_pairs[domain][&instead],
+                        );
                     }
 
                     trace!(node = ni.index(), "initializing new node");
@@ -1047,7 +1051,7 @@ fn plan_add_nodes(
                         .ingredients
                         .node_weight_mut(ni)
                         .unwrap()
-                        .on_commit(&remap_);
+                        .on_commit(&node_index_mappings);
                 }
             }
         }
