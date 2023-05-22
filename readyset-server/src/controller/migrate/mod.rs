@@ -229,7 +229,7 @@ impl<'df> MigrationPlan<'df> {
     pub async fn apply(self) -> ReadySetResult<()> {
         let MigrationPlan {
             dataflow_state,
-            mut dmp,
+            dmp,
         } = self;
 
         debug!(
@@ -325,8 +325,8 @@ impl DomainMigrationPlan {
 
     /// Apply all stored changes using the given controller object, placing new domains and sending
     /// messages added since the last time this method was called.
-    pub async fn apply(&mut self, mainline: &mut DfState) -> ReadySetResult<()> {
-        for place in self.place.drain(..) {
+    pub async fn apply(self, mainline: &mut DfState) -> ReadySetResult<()> {
+        for place in self.place {
             let d = mainline
                 .place_domain(place.idx, place.shard_replica_workers, place.nodes)
                 .await?;
@@ -339,7 +339,7 @@ impl DomainMigrationPlan {
         // nodes that might not be ready yet.
         // TODO(fran): This feels yucky, we should revisit this in the future and think of a better
         //  abstraction.
-        let mut stored = std::mem::take(&mut self.stored);
+        let mut stored = self.stored;
         let create_exponential_backoff = || {
             ExponentialBackoff::from_millis(DOMAIN_REQUEST_INITIAL_DELAY_IN_MS)
                 // Cap at 30 minutes
