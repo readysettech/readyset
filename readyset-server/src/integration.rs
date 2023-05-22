@@ -25,10 +25,11 @@ use dataflow::utils::{dataflow_column, make_columns};
 use dataflow::{
     BinaryOperator, DurabilityMode, Expr as DfExpr, PersistenceParameters, ReaderProcessing,
 };
-use futures::StreamExt;
+use futures::{join, StreamExt};
 use itertools::Itertools;
 use nom_sql::{
-    parse_create_view, parse_query, parse_select_statement, OrderType, Relation, SqlQuery,
+    parse_create_table, parse_create_view, parse_query, parse_select_statement, OrderType,
+    Relation, SqlQuery,
 };
 use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use readyset_client::consistency::Timestamp;
@@ -9012,6 +9013,68 @@ async fn simple_dry_run_unsupported() {
             ..
         })
     ));
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn multiple_simultaneous_migrations() {
+    let (mut g, shutdown_tx) = start_simple_unsharded("multiple_simultaneous_migrations").await;
+    let mut g2 = g.clone();
+
+    g.extend_recipe(ChangeList::from_change(
+        Change::CreateTable(
+            parse_create_table(nom_sql::Dialect::MySQL, "CREATE TABLE t (x int, y int)").unwrap(),
+        ),
+        Dialect::DEFAULT_MYSQL,
+    ))
+    .await
+    .unwrap();
+
+    let mut t = g.table("t").await.unwrap();
+
+    t.insert_many(vec![
+        vec![DfValue::from(1), DfValue::from(2)],
+        vec![DfValue::from(3), DfValue::from(4)],
+    ])
+    .await
+    .unwrap();
+
+    let (r1, r2) = join!(
+        g.extend_recipe(ChangeList::from_change(
+            Change::CreateCache {
+                name: Some("q1".into()),
+                statement: Box::new(
+                    parse_select_statement(nom_sql::Dialect::MySQL, "SELECT * FROM t WHERE x = ?")
+                        .unwrap()
+                ),
+                always: false
+            },
+            Dialect::DEFAULT_MYSQL
+        )),
+        g2.extend_recipe(ChangeList::from_change(
+            Change::CreateCache {
+                name: Some("q2".into()),
+                statement: Box::new(
+                    parse_select_statement(nom_sql::Dialect::MySQL, "SELECT * FROM t WHERE y = ?")
+                        .unwrap()
+                ),
+                always: false
+            },
+            Dialect::DEFAULT_MYSQL
+        ))
+    );
+    r1.unwrap();
+    r2.unwrap();
+
+    let mut q1 = g.view("q1").await.unwrap().into_reader_handle().unwrap();
+    let mut q2 = g.view("q1").await.unwrap().into_reader_handle().unwrap();
+
+    let res1 = q1.lookup(&[1.into()], true).await.unwrap().into_vec();
+    let res2 = q2.lookup(&[3.into()], true).await.unwrap().into_vec();
+
+    assert_eq!(res1, vec![vec![1.into(), 2.into()]]);
+    assert_eq!(res2, vec![vec![3.into(), 4.into()]]);
 
     shutdown_tx.shutdown().await;
 }
