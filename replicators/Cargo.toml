@@ -51,7 +51,7 @@ deadpool-postgres = "0.10.3"
 readyset-server = { path = "../readyset-server" }
 readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter", features = ["test-util"] }
 readyset-client-test-helpers = { path = "../readyset-client-test-helpers", features = ["postgres"] }
-stateful-proptest = { path = "../stateful-proptest" }
+proptest-stateful = { path = "../proptest-stateful" }
 serial_test = "0.5"
 rand = "0.8.5"
 proptest = "1.0.0"

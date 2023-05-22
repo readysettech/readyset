@@ -41,12 +41,12 @@ use paste::paste;
 use proptest::prelude::*;
 use proptest::sample::select;
 use proptest::test_runner::{FailurePersistence, FileFailurePersistence};
+use proptest_stateful::{ModelState, StatefulProptestConfig};
 use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
 use readyset_client_test_helpers::TestBuilder;
 use readyset_data::DfValue;
 use readyset_server::Handle;
 use readyset_util::shutdown::ShutdownSender;
-use stateful_proptest::{ModelState, StatefulProptestConfig};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Operation {
@@ -687,7 +687,7 @@ macro_rules! vertical_tests {
                     proptest_config,
                 };
 
-                stateful_proptest::test::<DataflowModelState<[<$name:camel TestDef>]>>(config);
+                proptest_stateful::test::<DataflowModelState<[<$name:camel TestDef>]>>(config);
             }
         }
     };

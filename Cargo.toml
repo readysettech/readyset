@@ -51,7 +51,7 @@ members = [
     "readyset-util",
     "readyset-version",
     "replicators",
-    "stateful-proptest",
+    "proptest-stateful",
     "system-benchmarks",
     "test-utils",
     "timestamp-service",

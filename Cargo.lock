@@ -3915,6 +3915,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "proptest-stateful"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "proptest",
+ "rand 0.8.5",
+ "tokio",
+]
+
+[[package]]
 name = "prost"
 version = "0.11.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4774,6 +4784,7 @@ dependencies = [
  "paste",
  "pin-project",
  "proptest",
+ "proptest-stateful",
  "readyset-adapter",
  "readyset-client",
  "readyset-client-metrics",
@@ -4786,7 +4797,6 @@ dependencies = [
  "readyset-util",
  "readyset-version",
  "serial_test",
- "stateful-proptest",
  "streaming-iterator",
  "test-strategy",
  "test-utils",
@@ -5142,6 +5152,7 @@ dependencies = [
  "postgres-protocol",
  "postgres-types",
  "proptest",
+ "proptest-stateful",
  "rand 0.8.5",
  "readyset-client",
  "readyset-client-test-helpers",
@@ -5156,7 +5167,6 @@ dependencies = [
  "serde",
  "serde_json",
  "serial_test",
- "stateful-proptest",
  "test-strategy",
  "test-utils",
  "tokio",
@@ -5779,16 +5789,6 @@ dependencies = [
  "libc",
  "psm",
  "winapi 0.3.9",
-]
-
-[[package]]
-name = "stateful-proptest"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "proptest",
- "rand 0.8.5",
- "tokio",
 ]
 
 [[package]]

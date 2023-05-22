@@ -34,13 +34,13 @@ use nom_sql::SqlType;
 use proptest::prelude::*;
 use proptest::strategy::{BoxedStrategy, Just, Strategy};
 use proptest::{collection, sample};
+use proptest_stateful::{ModelState, StatefulProptestConfig};
 use readyset_client_test_helpers::psql_helpers::{self, PostgreSQLAdapter};
 use readyset_client_test_helpers::TestBuilder;
 use readyset_data::{DfValue, TimestampTz};
 use readyset_server::Handle;
 use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
-use stateful_proptest::{ModelState, StatefulProptestConfig};
 use tokio_postgres::{Client, Config, NoTls, Row};
 
 const SQL_NAME_REGEX: &str = "[a-zA-Z_][a-zA-Z0-9_]*";
@@ -1158,5 +1158,5 @@ fn run_cases() {
         proptest_config: ProptestConfig::default(),
     };
 
-    stateful_proptest::test::<DDLModelState>(config);
+    proptest_stateful::test::<DDLModelState>(config);
 }

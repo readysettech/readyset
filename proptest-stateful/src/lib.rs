@@ -78,7 +78,7 @@ pub trait ModelState: Clone + Debug + Default {
     // fn op_generators(&self) -> Vec<impl Strategy<Value = Self::Operation>>;
     /// Returns a [`Vec`] of [`Strategy`]s for generating [`Self::Operation`] values.
     ///
-    /// The stateful-proptest code will pseudo-randomly pick a strategy based off of the random
+    /// The proptest-stateful code will pseudo-randomly pick a strategy based off of the random
     /// seed from the proptest [`TestRunner`], and generate a single [`Self::Operation`] value from
     /// the selected [`Strategy`].
     fn op_generators(&self) -> Vec<Self::OperationStrategy>;
@@ -264,7 +264,7 @@ where
 }
 
 /// Holds the internal state of a stateful property test run, including both the supplied
-/// [`ModelState`] value, and other fields that are used internally to the stateful-proptest
+/// [`ModelState`] value, and other fields that are used internally to the proptest-stateful
 /// framework.
 #[derive(Clone, Debug)]
 struct TestState<T, O>

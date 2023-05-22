@@ -47,7 +47,7 @@ mysql = "23.0.1"
 paste = "1.0.5"
 proptest = "1.0.0"
 serial_test = "0.5.1"
-stateful-proptest = { path = "../stateful-proptest" }
+proptest-stateful = { path = "../proptest-stateful" }
 test-strategy = "0.2.0"
 readyset-tracing = { path = "../readyset-tracing" }
 
