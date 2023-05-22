@@ -28,7 +28,7 @@ use proptest::test_runner::TestRunner;
 use rand::distributions::{Distribution, Uniform};
 
 /// Used by the caller of [`test`] for providing config options.
-pub struct StatefulProptestConfig {
+pub struct ProptestStatefulConfig {
     /// Minimum number of operations to generate for any given test case.
     pub min_ops: usize,
     /// Maximum number of operations to generate for any given test case.
@@ -351,7 +351,7 @@ where
 }
 
 /// Execute a property test for the specified test model, using the config values passed in.
-pub fn test<T>(mut stateful_config: StatefulProptestConfig)
+pub fn test<T>(mut stateful_config: ProptestStatefulConfig)
 where
     T: ModelState,
 {

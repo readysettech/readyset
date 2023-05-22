@@ -41,7 +41,7 @@ use paste::paste;
 use proptest::prelude::*;
 use proptest::sample::select;
 use proptest::test_runner::{FailurePersistence, FileFailurePersistence};
-use proptest_stateful::{ModelState, StatefulProptestConfig};
+use proptest_stateful::{ModelState, ProptestStatefulConfig};
 use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
 use readyset_client_test_helpers::TestBuilder;
 use readyset_data::DfValue;
@@ -680,7 +680,7 @@ macro_rules! vertical_tests {
                     ..ProptestConfig::default()
                 };
 
-                let config = StatefulProptestConfig {
+                let config = ProptestStatefulConfig {
                     min_ops: 1,
                     max_ops: 100,
                     test_case_timeout: Duration::from_secs(60),
