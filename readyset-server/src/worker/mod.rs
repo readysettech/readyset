@@ -293,8 +293,8 @@ impl Worker {
                 // need to register the domain with the local channel coordinator.
                 // local first to ensure that we don't unnecessarily give away remote for a
                 // local thing if there's a race
-                self.coord.insert_local(replica_addr, local_tx)?;
-                self.coord.insert_remote(replica_addr, bind_external)?;
+                self.coord.insert_local(replica_addr, local_tx);
+                self.coord.insert_remote(replica_addr, bind_external);
 
                 self.state_sizes
                     .lock()
@@ -362,7 +362,7 @@ impl Worker {
                         "found domain"
                     );
                     self.coord
-                        .insert_remote(dd.replica_address(), dd.socket_address())?;
+                        .insert_remote(dd.replica_address(), dd.socket_address());
                 }
                 Ok(None)
             }

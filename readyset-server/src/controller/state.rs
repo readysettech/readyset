@@ -1094,7 +1094,7 @@ impl DfState {
                 debug!(external_addr = %ret.external_addr, "worker booted domain");
 
                 self.channel_coordinator
-                    .insert_remote(replica_address, ret.external_addr)?;
+                    .insert_remote(replica_address, ret.external_addr);
                 domain_addresses.push(DomainDescriptor::new(replica_address, ret.external_addr));
                 shard_assignments.push(w.uri.clone());
             }

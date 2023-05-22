@@ -210,26 +210,20 @@ impl<K: Eq + Hash + Clone, T> ChannelCoordinator<K, T> {
         }
     }
 
-    pub fn insert_remote(&self, key: K, addr: SocketAddr) -> ReadySetResult<()> {
+    pub fn insert_remote(&self, key: K, addr: SocketAddr) {
         #[allow(clippy::expect_used)]
         // This can only fail if the mutex is poisoned, in which case we can't recover,
         // so we allow to panic if that happens.
         let mut guard = self.inner.write().expect("poisoned mutex");
         guard.addrs.insert(key, addr);
-        Ok(())
     }
 
-    pub fn insert_local(
-        &self,
-        key: K,
-        chan: tokio::sync::mpsc::UnboundedSender<T>,
-    ) -> ReadySetResult<()> {
+    pub fn insert_local(&self, key: K, chan: tokio::sync::mpsc::UnboundedSender<T>) {
         #[allow(clippy::expect_used)]
         // This can only fail if the mutex is poisoned, in which case we can't recover,
         // so we allow to panic if that happens.
         let mut guard = self.inner.write().expect("poisoned mutex");
         guard.locals.insert(key, chan);
-        Ok(())
     }
 
     pub fn has<Q>(&self, key: &Q) -> bool
