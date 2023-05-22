@@ -86,15 +86,12 @@ impl StoredDomainRequest {
     ///
     /// Optionally returns another request to be sent afterwards as a follow up (up to the caller to
     /// decide when to send it).
-    pub async fn apply(
-        self,
-        mainline: &mut DfState,
-    ) -> ReadySetResult<Option<StoredDomainRequest>> {
+    pub async fn apply(self, mainline: &DfState) -> ReadySetResult<Option<StoredDomainRequest>> {
         trace!(req=?self, "Applying domain request");
         let dom =
             mainline
                 .domains
-                .get_mut(&self.domain)
+                .get(&self.domain)
                 .ok_or_else(|| ReadySetError::UnknownDomain {
                     domain_index: self.domain.index(),
                 })?;
