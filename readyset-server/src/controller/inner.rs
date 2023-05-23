@@ -517,6 +517,12 @@ impl Leader {
                         ds.recipe.mir_config().allow_paginate && ds.recipe.mir_config().allow_topk;
                     return_serialized!(supports)
                 }
+                (&Method::GET, "/evict_random") => {
+                    let ds = self.dataflow_state_handle.read().await;
+                    check_quorum!(ds);
+                    ds.evict_random().await?;
+                    return_serialized!(());
+                }
                 _ => {}
             }
         }

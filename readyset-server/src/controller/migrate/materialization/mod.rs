@@ -1280,4 +1280,20 @@ impl Materializations {
             self.redundant_partial.remove(ni);
         }
     }
+
+    /// Returns a (`NodeIndex`, `Tag`) pair for each index in a partially materialized node.
+    pub(in crate::controller) fn partial_tags(&self) -> Vec<(NodeIndex, Tag)> {
+        // For each partially materialized node, get each tag in self::paths
+        #[allow(clippy::unwrap_used)]
+        self.partial
+            .iter()
+            .filter_map(|partial_node| {
+                // Each replay path for a partial index on `partial_node`
+                self.paths
+                    .get(partial_node)
+                    .map(|tags| (partial_node, tags))
+            })
+            .flat_map(|(partial_node, tags)| tags.iter().map(|(tag, _)| (*partial_node, *tag)))
+            .collect()
+    }
 }

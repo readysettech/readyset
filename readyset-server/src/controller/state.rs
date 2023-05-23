@@ -35,6 +35,7 @@ use nom_sql::{
     CacheInner, CreateCacheStatement, Relation, SelectStatement, SqlIdentifier, SqlQuery,
 };
 use petgraph::visit::Bfs;
+use rand::Rng;
 use readyset_client::builders::{
     ReaderHandleBuilder, ReusedReaderHandleBuilder, TableBuilder, ViewBuilder,
 };
@@ -1256,6 +1257,50 @@ impl DfState {
         warn!(total_evicted, "flushed partial domain state");
 
         Ok(total_evicted)
+    }
+
+    /// *Test only API*
+    /// Select a random partially materialized index and trigger an eviction for a single key.
+    pub(super) async fn evict_random(&self) -> ReadySetResult<()> {
+        let tags = self.materializations.partial_tags();
+        if tags.is_empty() {
+            trace!("Attempted to evict but found no tags for any partial materialization");
+            return Ok(());
+        }
+
+        let idx = {
+            let mut rng = rand::thread_rng();
+            rng.gen_range(0, tags.len())
+        };
+
+        let (ni, tag) = tags.get(idx).ok_or_else(|| internal_err!())?;
+        let di = self
+            .domain_for_node(ni)
+            .ok_or_else(|| internal_err!("Cannot find the Domain for node {:?}", ni))?;
+
+        self.domains
+            .get(&di)
+            .ok_or_else(|| internal_err!())?
+            .send_to_healthy::<()>(
+                DomainRequest::Evict(EvictRequest::Random { tag: *tag }),
+                &self.workers,
+            )
+            .await?;
+
+        Ok(())
+    }
+
+    /// Iterate over all nodes stored in `self::domain_nodes` to find the [`Domain`] that owns the
+    /// given `node`.
+    ///
+    /// Note: This is not a fast way to find which Domain owns a Node. If using this function in a
+    /// hot path, consider adding additional information to Materializations for efficient indexing.
+    fn domain_for_node(&self, node: &NodeIndex) -> Option<DomainIndex> {
+        self.domain_nodes
+            .iter()
+            .flat_map(|(d, nodes)| nodes.into_iter().map(|(_, ni)| (*d, ni)))
+            .find(|(_, ni)| *ni == node)
+            .map(|(di, _)| di)
     }
 
     pub(super) async fn apply_recipe(
