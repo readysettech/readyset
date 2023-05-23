@@ -31,7 +31,7 @@ use reqwest::Url;
 use slotmap::{DefaultKey, Key, KeyData, SlotMap};
 use tokio::select;
 use tokio::sync::mpsc::UnboundedSender;
-use tokio::sync::{Mutex, Notify};
+use tokio::sync::{watch, Mutex, Notify};
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
@@ -81,6 +81,8 @@ pub struct Leader {
     /// a handle to the running migration is placed here, where it can be queried via an rpc to
     /// `/migration_status`.
     running_migrations: Mutex<SlotMap<DefaultKey, RunningMigration>>,
+
+    pub(super) running_recovery: Option<watch::Receiver<ReadySetResult<()>>>,
 }
 
 impl Leader {
@@ -679,20 +681,51 @@ impl Leader {
             );
         }
 
-        if ds.workers.len() >= self.quorum && self.pending_recovery {
+        let dmp = if ds.workers.len() >= self.quorum && self.pending_recovery {
             self.pending_recovery = false;
             let domain_nodes = ds
                 .domain_nodes
                 .iter()
                 .map(|(k, v)| (*k, v.values().copied().collect::<HashSet<_>>()))
                 .collect::<HashMap<_, _>>();
-            ds.recover(&domain_nodes).await?;
+            let dmp = ds.plan_recovery(&domain_nodes).await?;
             info!("Finished restoring graph configuration");
-        }
+            Some(dmp)
+        } else {
+            None
+        };
 
         self.dataflow_state_handle
             .commit(writer, &self.authority)
-            .await
+            .await?;
+
+        if let Some(dmp) = dmp {
+            let dataflow_state_handle = Arc::clone(&self.dataflow_state_handle);
+            let authority = Arc::clone(&self.authority);
+            let (tx, rx) = watch::channel(Ok(()));
+            let apply_handle = tokio::spawn(async move {
+                debug!("Waiting for dataflow state write handle to apply dmp");
+                let mut writer = dataflow_state_handle.write().await;
+                if let Err(error) = dmp.apply(writer.as_mut()).await {
+                    error!(%error, "Error applying domain migration plan");
+                    Err(error)
+                } else {
+                    dataflow_state_handle.commit(writer, &authority).await?;
+                    Ok(())
+                }
+            });
+            tokio::spawn(abort_on_panic(async move {
+                let res = apply_handle
+                    .await
+                    .map_err(|e| internal_err!("Error during recovery: {e}"))
+                    .flatten();
+                debug!(?res, "Recovery finished");
+                let _ = tx.send_replace(res);
+            }));
+            self.running_recovery = Some(rx);
+        }
+
+        Ok(())
     }
 
     pub(super) async fn handle_failed_workers(
@@ -718,7 +751,7 @@ impl Leader {
             ds.workers.remove(&wi);
         }
 
-        ds.recover(&affected_nodes).await?;
+        ds.plan_recovery(&affected_nodes).await?.apply(ds).await?;
 
         self.dataflow_state_handle
             .commit(writer, &self.authority)
@@ -758,6 +791,7 @@ impl Leader {
             authority,
             worker_request_timeout,
             running_migrations: Default::default(),
+            running_recovery: None,
         }
     }
 }

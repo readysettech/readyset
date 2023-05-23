@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
+use std::future;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -8,6 +9,7 @@ use anyhow::{format_err, Context};
 use dataflow::node::{self, Column};
 use dataflow::prelude::ChannelCoordinator;
 use failpoint_macros::set_failpoint;
+use futures::future::Either;
 use hyper::http::{Method, StatusCode};
 use metrics::{counter, gauge, histogram};
 use nom_sql::Relation;
@@ -432,8 +434,10 @@ impl Controller {
                 let done = leader_ready
                     && match guard.as_ref() {
                         Some(leader) => {
-                            let ds = leader.dataflow_state_handle.read().await;
-                            !ds.workers.is_empty()
+                            leader.running_recovery.is_none() && {
+                                let ds = leader.dataflow_state_handle.read().await;
+                                !ds.workers.is_empty()
+                            }
                         }
                         None => false,
                     };
@@ -565,6 +569,36 @@ impl Controller {
 
         let leader_ready = self.leader_ready.clone();
         loop {
+            // There is either...
+            let running_recovery = self
+                .inner
+                .read()
+                .await
+                .as_ref()
+                .and_then(|leader| {
+                    leader.running_recovery.clone().map(|mut rx| {
+                        // a. A currently running recovery, which when it's done will place its
+                        //    result in a `tokio::sync::watch`. ...
+                        let inner = Arc::clone(&self.inner);
+                        Either::Left(async move {
+                            // ... We wait until that recovery is done...
+                            let _ = rx.changed().await;
+                            // ... then yield the result of the recovery.
+                            inner
+                                .read()
+                                .await
+                                .as_ref()
+                                .and_then(|leader| leader.running_recovery.as_ref())
+                                .map(|rx| (*rx.borrow()).clone())
+                                .unwrap_or(Ok(()))
+                        })
+                    })
+                })
+                // b. No currently running recovery, in which case we don't need to wait for
+                //    anything (but we make a `pending()` future so that we can have a single value
+                //    to await on in the `select`)
+                .unwrap_or_else(|| Either::Right(future::pending::<ReadySetResult<()>>()));
+
             select! {
                 req = self.handle_rx.recv() => {
                     if let Some(req) = req {
@@ -632,6 +666,15 @@ impl Controller {
                         }
                     }
 
+                }
+                res = running_recovery => {
+                    res?; // If recovery fails, fail the whole controller (there's not much else we
+                          // can do!)
+                    if let Some(leader) = self.inner.write().await.as_mut() {
+                        // Recovery is done, so we can write back None (and avoid the whole
+                        // rigamarole with .await'ing it)
+                        leader.running_recovery = None;
+                    }
                 }
                 _ = self.leader_ready_notification.notified() => {
                     self.leader_ready.store(true, Ordering::Release);

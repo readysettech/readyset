@@ -201,6 +201,7 @@ pub struct DomainSettings {
 ///
 /// This behaves a bit like a map of `DomainHandle`s.
 #[derive(Debug)]
+#[must_use]
 pub struct DomainMigrationPlan {
     /// An (ordered!) list of domain requests to send on application.
     stored: VecDeque<StoredDomainRequest>,

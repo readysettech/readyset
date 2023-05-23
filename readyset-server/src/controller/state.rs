@@ -1368,10 +1368,10 @@ impl DfState {
     /// [`crate::controller::migrate::assignment::assign`] must hold as well.
     ///  - `self.remap` and `self.node_restrictions` must be valid.
     /// - All the other fields should be empty or `[Default::default()]`.
-    pub(super) async fn recover(
+    pub(super) async fn plan_recovery(
         &mut self,
         domain_nodes: &HashMap<DomainIndex, HashSet<NodeIndex>>,
-    ) -> ReadySetResult<()> {
+    ) -> ReadySetResult<DomainMigrationPlan> {
         let mut dmp = DomainMigrationPlan::new(self);
         let domain_nodes = domain_nodes
             .iter()
@@ -1405,7 +1405,7 @@ impl DfState {
         self.materializations
             .commit(&mut self.ingredients, &new, &mut dmp)?;
 
-        dmp.apply(self).await
+        Ok(dmp)
     }
 
     /// This method is a hack to make sure the [`ControllerState`] "persisted" in the
