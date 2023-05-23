@@ -372,8 +372,8 @@ struct CompactionThreadHandle {
 impl CompactionThreadHandle {
     /// Cancel the running compaction
     fn cancel(&self) {
-        info!("Cancelling compaction");
         if !self.is_finished() {
+            info!("Cancelling compaction before it has finished");
             self.opts.set_canceled(true);
         }
     }
