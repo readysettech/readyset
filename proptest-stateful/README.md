@@ -62,9 +62,11 @@ TODO: actually code up an example test like this, and link to it here.
 
 ## Additional Resources
 
-The API reference documentation is available at TODO.
+The API reference documentation is available
+[here](https://docs.rs/proptest-stateful/latest/proptest_stateful/).
 
-For more complex real-world examples, check out the test suites we've written here:
+For more complex real-world examples, check out these test suites we've
+written:
  * [ddl_vertical.rs](https://github.com/readysettech/readyset/blob/main/replicators/tests/ddl_vertical.rs)
  * [vertical.rs](https://github.com/readysettech/readyset/blob/main/readyset-mysql/tests/vertical.rs)
 
