@@ -1,4 +1,4 @@
-//! This framework builds on the [`proptest`] framework to make it easier to build stateful
+//! This framework builds on the [`mod@proptest`] framework to make it easier to build stateful
 //! property-based tests. By "stateful", we mean that the intent is to be able to test stateful
 //! systems, which we do by modeling the state of the system under test and using that model to
 //! assist in generating test cases and defining the expected results.
@@ -27,7 +27,7 @@ use proptest::strategy::{NewTree, ValueTree};
 use proptest::test_runner::TestRunner;
 use rand::distributions::{Distribution, Uniform};
 
-/// Used by the caller of [`test`] for providing config options.
+/// Used by the caller of [`test()`] for providing config options.
 pub struct ProptestStatefulConfig {
     /// Minimum number of operations to generate for any given test case.
     pub min_ops: usize,
@@ -90,13 +90,14 @@ pub trait ModelState: Clone + Debug + Default {
     /// Called once at the beginning of each test case's execution.
     ///
     /// After performing any necessary initialization work, the implementation returns a value of
-    /// type [`Self::RunContext`] which is subsequently passed back into calls to [`run_op`],
-    /// [`check_postconditions`], and [`clean_up_test_run`].
+    /// type [`Self::RunContext`] which is subsequently passed back into calls to
+    /// [`run_op`](Self::run_op), [`check_postconditions`](Self::check_postconditions), and
+    /// [`clean_up_test_run`](Self::clean_up_test_run).
     async fn init_test_run(&self) -> Self::RunContext;
     /// Called to execute `op` during a test run.
     async fn run_op(&self, op: &Self::Operation, ctxt: &mut Self::RunContext);
-    /// Called after each execution of [`run_op`] to check any postconditions that are expected to
-    /// be upheld during the test run.
+    /// Called after each execution of [`run_op`](Self::run_op) to check any postconditions that
+    /// are expected to be upheld during the test run.
     ///
     /// Since the return type is `()`, postcondition failures must trigger a panic.
     async fn check_postconditions(&self, ctxt: &mut Self::RunContext);
