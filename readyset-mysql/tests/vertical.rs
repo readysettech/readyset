@@ -66,17 +66,7 @@ enum Operation {
         table: &'static str,
         row: Vec<DfValue>,
     },
-    /* TODO: coming soon
-    Evict {
-        /// *seed* for the node index to evict from.
-        ///
-        /// Note that we don't know how many nodes a query will have until after we install it in
-        /// ReadySet, so the actual node index will be this modulo the number of non-base-table
-        /// nodes
-        node_seed: usize,
-        key: Vec<DfValue>,
-    },
-    */
+    Evict,
 }
 
 #[derive(Debug, Clone)]
@@ -212,8 +202,9 @@ where
         let mut res = vec![];
 
         // We can always insert a row into a table or query a randomly generated key, so include
-        // those two strategies no matter what. Later in this function we may conditionally add more
-        // strategies.
+        // those two strategies no matter what. We can also always request an eviction, though it
+        // may be a no-op if we have not inserted anything.
+        // Later in this function we may conditionally add more strategies.
         let no_fk_strategies = T::row_strategies()
             .iter()
             .filter_map(|(k, v)| Some((*k, v.clone().no_foreign_keys()?)))
@@ -233,6 +224,10 @@ where
             .boxed();
 
         res.push(random_key_query_strat);
+
+        let evict_strategy = Just(Operation::Evict).boxed();
+
+        res.push(evict_strategy);
 
         let existing_keys = self.existing_keys().collect::<Vec<_>>();
 
@@ -355,8 +350,9 @@ where
                 .rows
                 .get(table)
                 .map_or(false, |table_rows| table_rows.contains(row)),
-            // Can always insert any row or query any key and we shouldn't error out
-            Operation::Insert { .. } | Operation::Query { .. } => true,
+            // Can always insert any row or query any key or request an eviction and we shouldn't
+            // error out
+            Operation::Insert { .. } | Operation::Query { .. } | Operation::Evict => true,
         }
     }
 
@@ -380,7 +376,7 @@ where
                 let row_pos = table_rows.iter().position(|r| r == row).unwrap();
                 table_rows.swap_remove(row_pos);
             }
-            Operation::Query { .. } => (),
+            Operation::Query { .. } | Operation::Evict => (),
         }
     }
 
@@ -630,6 +626,12 @@ impl Operation {
                     )
                     .await
                     .into())
+            }
+            Operation::Evict => {
+                // Call the /evict_random Controller RPC. We don't care about the result.
+                let host = conn.opts().ip_or_hostname();
+                reqwest::get(format!("http://{}:6033/evict_random", host)).await?;
+                Ok(OperationResult::NoResults)
             }
         }
     }

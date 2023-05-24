@@ -50,6 +50,7 @@ serial_test = "0.5.1"
 proptest-stateful = { path = "../proptest-stateful" }
 test-strategy = "0.2.0"
 readyset-tracing = { path = "../readyset-tracing" }
+reqwest = "0.11.3"
 
 [features]
 vertical_tests = []

@@ -4726,6 +4726,7 @@ dependencies = [
  "readyset-tracing",
  "readyset-util",
  "readyset-version",
+ "reqwest",
  "serial_test",
  "streaming-iterator",
  "test-strategy",
