@@ -471,8 +471,12 @@ impl TableDescription {
                 // Fetch an *approximate estimate* of the number of rows in the table, rather than
                 // an exact count (the latter is *significantly* more expensive, especially for
                 // large tables). We're only using this for reporting snapshotting progress, so an
-                // approximate row count should be fine
-                "SELECT c.reltuples::bigint AS approximate_nrows
+                // approximate row count should be fine.
+                // Note that sometimes `c.reltuples` can be `-1` if the table is very new and
+                // hasn't been analyzed yet, so we `greatest` it with `1` to make
+                // sure we always have a positive integer (to avoid panics when subtracting
+                // durations)
+                "SELECT greatest(c.reltuples::bigint, 1) AS approximate_nrows
                  FROM pg_class c JOIN pg_namespace n ON c.relnamespace = n.oid
                  WHERE c.relname = $1 AND n.nspname = $2",
                 &[&self.name.name.as_str(), &self.schema()?.as_str()],
