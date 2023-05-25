@@ -211,6 +211,24 @@ pub enum SenderReplication {
     Fanout { num_replicas: usize },
 }
 
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, EnumDiscriminants, Debug)]
+/// A request to evict state.
+pub enum EvictRequest {
+    /// Trigger an eviction from the target node.
+    Bytes {
+        node: Option<LocalNodeIndex>,
+        num_bytes: usize,
+    },
+
+    /// Evict the indicated keys from the materialization targeted by the replay path `tag` (along
+    /// with any other materializations below it).
+    Keys {
+        link: Link,
+        tag: Tag,
+        keys: Vec<KeyComparison>,
+    },
+}
+
 /// A request issued to a domain through the worker RPC interface.
 #[derive(Clone, Serialize, Deserialize, Debug)]
 #[allow(clippy::large_enum_variant)]
@@ -420,21 +438,9 @@ pub enum Packet {
         context: ReplayPieceContext,
     },
 
-    /// Trigger an eviction from the target node.
-    Evict {
-        node: Option<LocalNodeIndex>,
-        num_bytes: usize,
-    },
+    // Trigger an eviction as specified by the to the [`EvictRequest`].
+    Evict(EvictRequest),
 
-    /// Evict the indicated keys from the materialization targed by the replay path `tag` (along
-    /// with any other materializations below it).
-    EvictKeys {
-        link: Link,
-        tag: Tag,
-        keys: Vec<KeyComparison>,
-    },
-
-    //
     // Internal control
     Finish(Tag, LocalNodeIndex),
 
@@ -515,7 +521,7 @@ impl Packet {
         match *self {
             Packet::Message { ref mut link, .. } => link,
             Packet::ReplayPiece { ref mut link, .. } => link,
-            Packet::EvictKeys { ref mut link, .. } => link,
+            Packet::Evict(EvictRequest::Keys { ref mut link, .. }) => link,
             Packet::Timestamp { ref mut link, .. } => link.as_mut().unwrap(),
             _ => unreachable!(),
         }
@@ -558,7 +564,9 @@ impl Packet {
 
     pub(crate) fn tag(&self) -> Option<Tag> {
         match *self {
-            Packet::ReplayPiece { tag, .. } | Packet::EvictKeys { tag, .. } => Some(tag),
+            Packet::ReplayPiece { tag, .. } | Packet::Evict(EvictRequest::Keys { tag, .. }) => {
+                Some(tag)
+            }
             _ => None,
         }
     }
@@ -623,7 +631,6 @@ impl ToString for Packet {
             Packet::RequestReaderReplay { .. } => "RequestReaderReplay",
             Packet::RequestPartialReplay { .. } => "RequestPartialReplay",
             Packet::ReplayPiece { .. } => "ReplayPiece",
-            Packet::EvictKeys { .. } => "EvictKeys",
             Packet::Timestamp { .. } => "Timestamp",
             Packet::Finish { .. } => "Finish",
             Packet::Spin { .. } => "Spin",

@@ -8,7 +8,7 @@ use readyset_errors::{internal, ReadySetResult};
 use serde::{Deserialize, Serialize};
 use vec1::Vec1;
 
-use crate::payload::ReplayPieceContext;
+use crate::payload::{EvictRequest, ReplayPieceContext};
 use crate::prelude::NodeIndex;
 use crate::Packet;
 
@@ -54,7 +54,7 @@ impl PacketFilter {
     /// filtering:
     /// 1. If the packet is a replay piece ([`Packet::ReplayPiece`]), then the requested keys are
     ///    stored in the filter, along the column indexes they predicate upon.
-    /// 2. If the packet is an eviction message ([`Packet::EvictKeys`]), the evicted keys are
+    /// 2. If the packet is an eviction message ([`Packet::Evict`]), the evicted keys are
     ///    removed from the filter.
     /// 3. If the packet is an update ([`Packet::Message`]), then the packet is stripped down of any
     ///    record that does not comply with the stored keys. If no record survives the filtering,
@@ -136,11 +136,11 @@ impl PacketFilter {
                 }
                 Ok(true)
             }
-            Packet::EvictKeys {
+            Packet::Evict(EvictRequest::Keys {
                 link: _,
                 tag: _,
                 keys,
-            } => {
+            }) => {
                 // We iterate through the keys that must be evicted, as
                 // instructed by the packet.
                 for k in keys {
@@ -794,11 +794,11 @@ mod test {
         }
 
         fn create_packet(keys: Vec<KeyComparison>) -> Packet {
-            Packet::EvictKeys {
+            Packet::Evict(EvictRequest::Keys {
                 link: create_link(),
                 tag: Tag::new(1),
                 keys,
-            }
+            })
         }
     }
 

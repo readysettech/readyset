@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use dataflow::payload::EvictRequest;
 use dataflow::{DomainBuilder, DomainRequest, Packet, Readers};
 use enum_kinds::EnumKind;
 use futures::stream::FuturesUnordered;
@@ -560,10 +561,10 @@ async fn do_eviction(
                         })?),
                     };
                     let r = tx
-                        .send(Box::new(Packet::Evict {
+                        .send(Box::new(Packet::Evict(EvictRequest::Bytes {
                             node: None,
                             num_bytes: evict,
-                        }))
+                        })))
                         .await;
 
                     if let Err(e) = r {

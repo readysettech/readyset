@@ -2,7 +2,7 @@ use readyset_client::KeyComparison;
 use serde::{Deserialize, Serialize};
 use vec_map::VecMap;
 
-use crate::payload::{self, ReplayPieceContext, SenderReplication};
+use crate::payload::{self, EvictRequest, ReplayPieceContext, SenderReplication};
 use crate::prelude::*;
 
 #[derive(Serialize, Deserialize)]
@@ -260,14 +260,16 @@ impl Sharder {
                 for shard in key.shard_keys(self.txs.len()) {
                     let dst = self.txs[shard].node;
                     let p = self.sharded.entry(shard).or_insert_with(|| {
-                        Box::new(Packet::EvictKeys {
+                        Box::new(Packet::Evict(EvictRequest::Keys {
                             link: Link { src, dst },
                             keys: Vec::new(),
                             tag,
-                        })
+                        }))
                     });
                     match **p {
-                        Packet::EvictKeys { ref mut keys, .. } => keys.push(key.clone()),
+                        Packet::Evict(EvictRequest::Keys { ref mut keys, .. }) => {
+                            keys.push(key.clone())
+                        }
                         _ => {
                             // TODO: Scoped for a future refactor:
                             // https://readysettech.atlassian.net/browse/ENG-455
@@ -289,11 +291,11 @@ impl Sharder {
             // send to all shards
             for tx in &self.txs {
                 tx.send(
-                    Box::new(Packet::EvictKeys {
+                    Box::new(Packet::Evict(EvictRequest::Keys {
                         link: Link { src, dst: tx.node },
                         keys: keys.to_vec(),
                         tag,
-                    }),
+                    })),
                     replica,
                     output,
                 )?;

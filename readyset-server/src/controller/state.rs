@@ -22,6 +22,7 @@ use std::time::Instant;
 
 use array2::Array2;
 use common::IndexPair;
+use dataflow::payload::EvictRequest;
 use dataflow::prelude::{ChannelCoordinator, DomainIndex, DomainNodes, Graph, NodeIndex};
 use dataflow::{
     DomainBuilder, DomainConfig, DomainRequest, NodeMap, Packet, PersistenceParameters, Sharding,
@@ -1241,10 +1242,10 @@ impl DfState {
                     .get_mut(&di)
                     .unwrap()
                     .send_to_healthy::<()>(
-                        DomainRequest::Packet(Packet::Evict {
+                        DomainRequest::Packet(Packet::Evict(EvictRequest::Bytes {
                             node: Some(na),
                             num_bytes: bytes as usize,
-                        }),
+                        })),
                         workers,
                     )
                     .await?;

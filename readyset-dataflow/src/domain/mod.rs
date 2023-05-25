@@ -43,7 +43,8 @@ use self::replay_paths::{Destination, ReplayPathSpec, ReplayPaths, Target};
 use crate::node::special::EgressTx;
 use crate::node::{NodeProcessingResult, ProcessEnv};
 use crate::payload::{
-    MaterializedState, PrepareStateKind, PrettyReplayPath, ReplayPieceContext, SourceSelection,
+    EvictRequest, MaterializedState, PrepareStateKind, PrettyReplayPath, ReplayPieceContext,
+    SourceSelection,
 };
 use crate::prelude::*;
 use crate::processing::ColumnMiss;
@@ -1266,7 +1267,7 @@ impl Domain {
             // now send evictions for all the (tag, [key]) things in evictions
             for (tag, keys) in evictions {
                 self.handle_eviction(
-                    Packet::EvictKeys {
+                    EvictRequest::Keys {
                         keys: keys.into_iter().collect(),
                         link: Link::new(src, me),
                         tag,
@@ -2334,8 +2335,8 @@ impl Domain {
                 self.total_replay_time.stop();
                 self.metrics.rec_replay_time(tag, start.elapsed());
             }
-            Packet::Evict { .. } | Packet::EvictKeys { .. } => {
-                self.handle_eviction(*m, executor)?;
+            Packet::Evict(req) => {
+                self.handle_eviction(req, executor)?;
             }
             Packet::Timestamp { .. } => {
                 // TODO(justinmiron): Handle timestamp packets at data flow nodes. The
@@ -3751,9 +3752,11 @@ impl Domain {
         }
     }
 
+    /// Handles an [`EvictRequest`], triggering downstream evictions in this Domain or others as
+    /// necessary.
     pub fn handle_eviction(
         &mut self,
-        m: Packet,
+        request: EvictRequest,
         ex: &mut dyn Executor,
     ) -> Result<(), ReadySetError> {
         #[allow(clippy::too_many_arguments)]
@@ -3949,8 +3952,8 @@ impl Domain {
             candidates
         }
 
-        match m {
-            Packet::Evict {
+        match request {
+            EvictRequest::Bytes {
                 node,
                 mut num_bytes,
             } => {
@@ -4025,7 +4028,7 @@ impl Domain {
 
                 self.metrics.rec_eviction_time(start.elapsed(), total_freed);
             }
-            Packet::EvictKeys {
+            EvictRequest::Keys {
                 link: Link { dst, .. },
                 keys,
                 tag,
@@ -4095,9 +4098,6 @@ impl Domain {
                     }
                     TriggerEndpoint::None | TriggerEndpoint::Start(..) => {}
                 }
-            }
-            _ => {
-                internal!();
             }
         };
 
