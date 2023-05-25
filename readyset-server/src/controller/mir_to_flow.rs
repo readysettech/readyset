@@ -8,6 +8,7 @@
 
 use std::collections::HashMap;
 use std::convert::TryInto;
+use std::iter;
 
 use common::DfValue;
 use dataflow::node::Column as DfColumn;
@@ -19,10 +20,10 @@ use dataflow::{node, ops, Expr as DfExpr, PostLookupAggregates, ReaderProcessing
 use itertools::Itertools;
 use mir::graph::MirGraph;
 use mir::node::node_inner::MirNodeInner;
-use mir::node::{GroupedNodeType, ViewKeyColumn};
+use mir::node::{GroupedNodeType, ProjectExpr, ViewKeyColumn};
 use mir::query::MirQuery;
 use mir::{Column, DfNodeIndex, NodeIndex as MirNodeIndex};
-use nom_sql::{ColumnConstraint, ColumnSpecification, Expr, OrderType, Relation, SqlIdentifier};
+use nom_sql::{ColumnConstraint, ColumnSpecification, Expr, OrderType, Relation};
 use petgraph::graph::NodeIndex;
 use petgraph::Direction;
 use readyset_client::internal::{Index, IndexType};
@@ -262,21 +263,14 @@ pub(super) fn mir_node_to_flow_parts(
                         mig,
                     )?)
                 }
-                MirNodeInner::Project {
-                    ref emit,
-                    ref literals,
-                    ref expressions,
-                } => {
+                MirNodeInner::Project { ref emit } => {
                     invariant_eq!(ancestors.len(), 1);
                     let parent = ancestors[0];
                     Some(make_project_node(
                         graph,
                         name,
                         parent,
-                        &graph.columns(mir_node),
                         emit,
-                        expressions,
-                        literals,
                         custom_types,
                         mig,
                     )?)
@@ -708,9 +702,6 @@ fn make_join_node(
     // use as our join key
     if on.is_empty() {
         let mut make_cross_join_bogokey = |graph: &MirGraph, node: MirNodeIndex| {
-            let mut node_columns = graph.columns(node);
-            node_columns.push(Column::named("cross_join_bogokey"));
-
             make_project_node(
                 graph,
                 format!(
@@ -719,10 +710,15 @@ fn make_join_node(
                 )
                 .into(),
                 node,
-                &node_columns,
-                &graph.columns(node),
-                &[],
-                &[("cross_join_bogokey".into(), DfValue::from(0))],
+                &graph
+                    .columns(node)
+                    .into_iter()
+                    .map(ProjectExpr::Column)
+                    .chain(iter::once(ProjectExpr::Expr {
+                        expr: Expr::Literal(0.into()),
+                        alias: "cross_join_bogokey".into(),
+                    }))
+                    .collect::<Vec<_>>(),
                 custom_types,
                 mig,
             )
@@ -898,10 +894,7 @@ fn make_project_node(
     graph: &MirGraph,
     name: Relation,
     parent: MirNodeIndex,
-    source_columns: &[Column],
-    emit: &[Column],
-    expressions: &[(SqlIdentifier, Expr)],
-    literals: &[(SqlIdentifier, DfValue)],
+    emit: &[ProjectExpr],
     custom_types: &HashMap<Relation, DfType>,
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<DfNodeIndex> {
@@ -912,84 +905,47 @@ fn make_project_node(
     })?;
     let parent_cols = mig.dataflow_state.ingredients[parent_na.address()].columns();
 
-    let projected_column_ids = emit
-        .iter()
-        .map(|c| {
-            graph
-                .find_source_for_child_column(parent, c)
-                .ok_or_else(|| internal_err!("could not find source for child column: {:?}", c))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    let mut cols = Vec::with_capacity(emit.len());
+    let mut exprs = Vec::with_capacity(emit.len());
+    for expr in emit {
+        let (name, ty, source, expr) = match expr {
+            ProjectExpr::Column(c) => {
+                let index = graph
+                    .find_source_for_child_column(parent, c)
+                    .ok_or_else(|| {
+                        internal_err!("could not find source for child column: {:?}", c)
+                    })?;
+                let parent = &parent_cols[index];
 
-    let mut cols = projected_column_ids
-        .iter()
-        .map(|i| {
-            parent_cols
-                .get(*i)
-                .cloned()
-                .ok_or_else(|| internal_err!("Invalid index"))
-        })
-        .collect::<ReadySetResult<Vec<_>>>()?;
+                (
+                    c.name.clone(),
+                    parent.ty().clone(),
+                    parent.source().cloned(),
+                    DfExpr::Column {
+                        index,
+                        ty: parent.ty().clone(),
+                    },
+                )
+            }
+            ProjectExpr::Expr { expr, alias } => {
+                let expr = lower_expression(
+                    graph,
+                    parent,
+                    expr.clone(),
+                    parent_cols,
+                    custom_types,
+                    mig.dialect,
+                )?;
 
-    // First set names for emitted columns. `set_names()` is not used because it assumes the two
-    // fields have equal lengths
-    let column_names = column_names(source_columns);
-    for (c, n) in cols.iter_mut().zip(column_names) {
-        c.set_name(n.into());
+                (alias.clone(), expr.ty().clone(), None, expr)
+            }
+        };
+
+        cols.push(DfColumn::new(name, ty, source));
+        exprs.push(expr);
     }
 
-    let (_, literal_values): (Vec<_>, Vec<_>) = literals.iter().cloned().unzip();
-
-    let projected_expressions: Vec<DfExpr> = expressions
-        .iter()
-        .map(|(_, e)| {
-            lower_expression(
-                graph,
-                parent,
-                e.clone(),
-                parent_cols,
-                custom_types,
-                mig.dialect,
-            )
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-
-    let col_names = source_columns
-        .iter()
-        .skip(cols.len())
-        .map(|c| c.name.clone());
-
-    let projected_expression_types = projected_expressions
-        .iter()
-        .map(|e| e.ty().clone())
-        .collect::<Vec<_>>();
-
-    let literal_types = literal_values
-        .iter()
-        .map(DfValue::infer_dataflow_type)
-        .collect::<Vec<_>>();
-
-    cols.extend(
-        projected_expression_types
-            .iter()
-            .chain(literal_types.iter())
-            .zip(col_names)
-            .map(|(ty, n)| DfColumn::new(n, ty.clone(), Some(name.clone()))),
-    );
-
-    // Check here since we did not check in `set_names()`
-    invariant_eq!(source_columns.len(), cols.len());
-
-    let n = mig.add_ingredient(
-        name,
-        cols,
-        Project::new(
-            parent_na.address(),
-            projected_column_ids.as_slice(),
-            Some(literal_values),
-            Some(projected_expressions),
-        ),
-    );
+    let n = mig.add_ingredient(name, cols, Project::new(parent_na.address(), exprs));
     Ok(DfNodeIndex::new(n))
 }
 

@@ -298,25 +298,8 @@ impl GraphViz for MirNodeInner {
                     on.iter().map(|(l, r)| format!("{}:{}", l, r)).join(", ")
                 )
             }
-            MirNodeInner::Project {
-                ref emit,
-                ref literals,
-                ref expressions,
-            } => {
-                write!(
-                    f,
-                    "π: {}",
-                    emit.iter()
-                        .map(|c| c.to_string())
-                        .chain(literals.iter().map(|(n, v)| format!("{}: {}", n, v)))
-                        .chain(expressions.iter().map(|(n, e)| format!(
-                            "{}: {}",
-                            n,
-                            // FIXME(ENG-2502): Use correct dialect.
-                            e.display(nom_sql::Dialect::MySQL)
-                        )))
-                        .join(", ")
-                )
+            MirNodeInner::Project { ref emit } => {
+                write!(f, "π: {}", emit.iter().join(", "))
             }
             MirNodeInner::Distinct { ref group_by } => {
                 let key_cols = group_by.iter().join(", ");

@@ -6,7 +6,7 @@ use nom_sql::Relation;
 use readyset_errors::{internal, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
-pub use self::node_inner::{MirNodeInner, ViewKeyColumn};
+pub use self::node_inner::{MirNodeInner, ProjectExpr, ViewKeyColumn};
 use crate::DfNodeIndex;
 
 pub mod node_inner;
@@ -234,16 +234,21 @@ mod tests {
         fn project() {
             has_columns_single_parent(
                 MirNodeInner::Project {
-                    emit: vec![Column::new(Some("base"), "b")],
-                    expressions: vec![(
-                        "expr".into(),
-                        Expr::BinaryOp {
-                            lhs: Box::new(Expr::Column("base.a".into())),
-                            op: BinaryOperator::Add,
-                            rhs: Box::new(Expr::Literal(1.into())),
+                    emit: vec![
+                        ProjectExpr::Column(Column::new(Some("base"), "b")),
+                        ProjectExpr::Expr {
+                            alias: "expr".into(),
+                            expr: Expr::BinaryOp {
+                                lhs: Box::new(Expr::Column("base.a".into())),
+                                op: BinaryOperator::Add,
+                                rhs: Box::new(Expr::Literal(1.into())),
+                            },
                         },
-                    )],
-                    literals: vec![("lit".into(), 2.into())],
+                        ProjectExpr::Expr {
+                            alias: "lit".into(),
+                            expr: Expr::Literal(2.into()),
+                        },
+                    ],
                 },
                 vec![
                     Column::new(Some("base"), "b"),
@@ -500,9 +505,17 @@ mod tests {
             let node = graph.add_node(MirNode::new(
                 "project".into(),
                 MirNodeInner::Project {
-                    emit: vec![Column::new(Some("base"), "project")],
-                    expressions: vec![("expr".into(), Expr::Literal(Literal::from(0)))],
-                    literals: vec![("literal".into(), 0.into())],
+                    emit: vec![
+                        ProjectExpr::Column(Column::new(Some("base"), "project")),
+                        ProjectExpr::Expr {
+                            alias: "expr".into(),
+                            expr: Expr::Literal(Literal::from(0)),
+                        },
+                        ProjectExpr::Expr {
+                            alias: "literal".into(),
+                            expr: Expr::Literal(0.into()),
+                        },
+                    ],
                 },
             ));
             let referenced = graph.referenced_columns(node);

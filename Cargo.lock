@@ -4745,6 +4745,7 @@ dependencies = [
 name = "readyset-mir"
 version = "0.7.0"
 dependencies = [
+ "derive_more",
  "fixedbitset",
  "itertools",
  "lazy_static",

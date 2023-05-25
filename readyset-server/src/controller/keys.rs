@@ -593,8 +593,9 @@ fn trace(
 #[cfg(test)]
 mod tests {
     use dataflow::utils::make_columns;
-    use dataflow::{node, ops};
+    use dataflow::{node, ops, Expr};
     use nom_sql::OrderType;
+    use readyset_data::DfType;
 
     use super::*;
 
@@ -742,7 +743,19 @@ mod tests {
         let x = g.add_node(node::Node::new(
             "x",
             make_columns(&["x2", "x1"]),
-            ops::NodeOperator::Project(ops::project::Project::new(a, &[1, 0], None, None)),
+            ops::NodeOperator::Project(ops::project::Project::new(
+                a,
+                vec![
+                    Expr::Column {
+                        index: 1,
+                        ty: DfType::Unknown,
+                    },
+                    Expr::Column {
+                        index: 0,
+                        ty: DfType::Unknown,
+                    },
+                ],
+            )),
         ));
         g.add_edge(a, x, ());
 
@@ -787,9 +800,16 @@ mod tests {
             make_columns(&["x1", "foo"]),
             ops::NodeOperator::Project(ops::project::Project::new(
                 a,
-                &[0],
-                Some(vec![DfValue::from(42)]),
-                None,
+                vec![
+                    Expr::Column {
+                        index: 0,
+                        ty: DfType::Unknown,
+                    },
+                    Expr::Literal {
+                        val: DfValue::from(42),
+                        ty: DfType::Int,
+                    },
+                ],
             )),
         ));
         g.add_edge(a, x, ());

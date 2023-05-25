@@ -5,6 +5,7 @@ use dataflow::ops::grouped::aggregate::Aggregation;
 use dataflow::ops::grouped::extremum::Extremum;
 use dataflow::ops::union;
 use dataflow::PostLookupAggregates;
+use derive_more::From;
 use itertools::Itertools;
 use nom_sql::{BinaryOperator, ColumnSpecification, Expr, OrderType, Relation, SqlIdentifier};
 use readyset_client::{PlaceholderIdx, ViewPlaceholder};
@@ -13,6 +14,35 @@ use serde::{Deserialize, Serialize};
 use vec1::Vec1;
 
 use crate::Column;
+
+/// Expressions which can be emitted by a [`Project`] node.
+///
+/// This is an enum so that emitted columns can be MIR [`Column`]s, to allow for them to contain
+/// aliases.
+///
+/// [`Project`]: MirNodeInner::Project
+#[derive(Clone, Debug, Serialize, Deserialize, From)]
+pub enum ProjectExpr {
+    /// Emit a (named) column verbatim from the parent
+    Column(Column),
+
+    /// Project an expression, using the given alias to name the resulting column (which will have
+    /// no [`table`]). This should probably never contain [`Expr::Column`].
+    ///
+    /// [`table`]: nom_sql::Column::table
+    Expr { expr: Expr, alias: SqlIdentifier },
+}
+
+impl Display for ProjectExpr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ProjectExpr::Column(col) => write!(f, "{col}"),
+            ProjectExpr::Expr { expr, alias } => {
+                write!(f, "{alias}: {}", expr.display(nom_sql::Dialect::MySQL))
+            }
+        }
+    }
+}
 
 /// An individual column in the `key` of a [`ViewKey`]
 ///
@@ -172,22 +202,12 @@ pub enum MirNodeInner {
     /// Node which outputs a subset of columns from its parent in any order, and can evaluate
     /// expressions.
     ///
-    /// Project nodes always emit columns first, then expressions, then literals.
-    ///
     /// Converted to [`Project`] when lowering to dataflow.
     ///
     /// [`Project`]: dataflow::ops::project::Project
     Project {
-        /// List of columns, in order, to emit verbatim from the parent
-        emit: Vec<Column>,
-        /// List of pairs of `(alias, expr)`, giving expressions to evaluate and the names for the
-        /// columns for the results of those expressions.
-        ///
-        /// Note that at this point these expressions are still just raw AST, so column references
-        /// use only name and table (and don't support aliases).
-        expressions: Vec<(SqlIdentifier, Expr)>,
-        /// List of pairs of `(alias, value)`, giving literal values to emit in the output
-        literals: Vec<(SqlIdentifier, DfValue)>,
+        /// List of columns and expressions to emit
+        emit: Vec<ProjectExpr>,
     },
     /// Node which computes a union of all of its (two or more) parents.
     ///
@@ -320,7 +340,7 @@ impl MirNodeInner {
                 Ok(true)
             }
             MirNodeInner::Project { emit, .. } => {
-                emit.push(c);
+                emit.push(c.into());
                 Ok(true)
             }
             MirNodeInner::Union { emit, .. } => {
@@ -488,21 +508,7 @@ impl MirNodeInner {
                         .join(", ")
                 )
             }
-            MirNodeInner::Project {
-                ref emit,
-                ref literals,
-                ref expressions,
-            } => format!(
-                "π [{}]",
-                emit.iter()
-                    .map(|c| c.name.clone())
-                    .chain(expressions.iter().map(|(n, e)| {
-                        format!("{}: {}", n, e.display(nom_sql::Dialect::MySQL)).into()
-                    }))
-                    .chain(literals.iter().map(|(n, v)| format!("{}: {}", n, v).into()))
-                    .collect::<Vec<_>>()
-                    .join(", "),
-            ),
+            MirNodeInner::Project { ref emit } => format!("π [{}]", emit.iter().join(", ")),
             MirNodeInner::Distinct { ref group_by } => {
                 let key_cols = group_by
                     .iter()

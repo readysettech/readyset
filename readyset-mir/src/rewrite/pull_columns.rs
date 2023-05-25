@@ -70,7 +70,7 @@ mod tests {
     use super::*;
     use crate::graph::MirGraph;
     use crate::node::node_inner::MirNodeInner;
-    use crate::node::MirNode;
+    use crate::node::{MirNode, ProjectExpr};
     use crate::NodeIndex;
 
     fn create_base_node(mir_graph: &mut MirGraph) -> NodeIndex {
@@ -143,15 +143,17 @@ mod tests {
         let prj = mir_graph.add_node(MirNode::new(
             "prj".into(),
             MirNodeInner::Project {
-                emit: vec!["a".into(), "agg".into()],
-                expressions: vec![(
-                    "c0".into(),
-                    Expr::Call(FunctionExpr::Call {
-                        name: "ifnull".into(),
-                        arguments: vec![Expr::Column("c".into()), Expr::Literal(0.into())],
-                    }),
-                )],
-                literals: vec![],
+                emit: vec![
+                    ProjectExpr::Column("a".into()),
+                    ProjectExpr::Column("agg".into()),
+                    ProjectExpr::Expr {
+                        alias: "c0".into(),
+                        expr: Expr::Call(FunctionExpr::Call {
+                            name: "ifnull".into(),
+                            arguments: vec![Expr::Column("c".into()), Expr::Literal(0.into())],
+                        }),
+                    },
+                ],
             },
         ));
         mir_graph[prj].add_owner(query_name.clone());
@@ -191,9 +193,7 @@ mod tests {
         let prj = mir_graph.add_node(MirNode::new(
             "prj".into(),
             MirNodeInner::Project {
-                emit: vec!["a".into()],
-                expressions: vec![],
-                literals: vec![],
+                emit: vec![ProjectExpr::Column("a".into())],
             },
         ));
         mir_graph[prj].add_owner(query_name.clone());

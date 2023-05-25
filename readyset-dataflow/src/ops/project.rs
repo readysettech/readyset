@@ -3,6 +3,7 @@ use std::collections::HashMap;
 
 use dataflow_expression::Expr;
 use dataflow_state::PointKey;
+use itertools::Itertools;
 use readyset_errors::ReadySetResult;
 use serde::{Deserialize, Serialize};
 use tracing::error;
@@ -12,34 +13,19 @@ use crate::processing::{ColumnSource, IngredientLookupResult, LookupIndex, Looku
 
 /// Permutes or omits columns from its source node, or adds additional columns whose values are
 /// given by expressions
-///
-/// Columns emitted by project are always in the following order:
-///
-/// 1. columns ([`emit`](Project::emit))
-/// 2. [`expressions`](Project::expressions)
-/// 3. literals ([`additional`](Project::additional))
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Project {
     us: Option<IndexPair>,
-    emit: Vec<usize>,
-    additional: Option<Vec<DfValue>>,
-    expressions: Option<Vec<Expr>>,
+    emit: Vec<Expr>,
     src: IndexPair,
     cols: usize,
 }
 
 impl Project {
     /// Construct a new project operator.
-    pub fn new(
-        src: NodeIndex,
-        emit: &[usize],
-        additional: Option<Vec<DfValue>>,
-        expressions: Option<Vec<Expr>>,
-    ) -> Project {
+    pub fn new(src: NodeIndex, emit: Vec<Expr>) -> Project {
         Project {
-            emit: emit.into(),
-            additional,
-            expressions,
+            emit,
             src: src.into(),
             cols: 0,
             us: None,
@@ -57,7 +43,11 @@ impl Ingredient for Project {
     }
 
     fn can_query_through(&self) -> bool {
-        self.expressions.is_none() && self.additional.is_none()
+        // TODO(grfn): Make query_through just use column provenance (?) or make it pass column
+        // indices at least
+        self.emit
+            .iter()
+            .all(|expr| matches!(expr, Expr::Column { .. }))
     }
 
     #[allow(clippy::type_complexity)]
@@ -69,55 +59,29 @@ impl Ingredient for Project {
         states: &'a StateMap,
         mode: LookupMode,
     ) -> ReadySetResult<IngredientLookupResult<'a>> {
-        let emit = self.emit.clone();
-        let additional = self.additional.clone();
-        let expressions = self.expressions.clone();
-
-        let c = columns
+        let in_cols = match columns
             .iter()
-            .map(|&outi| {
-                if outi >= self.emit.len() {
-                    Err(ReadySetError::Internal(format!(
-                        "query_through should never be queried for
-                                                generated columns; columns: {:?}; self.emit: {:?}",
-                        columns, self.emit
-                    )))
-                } else {
-                    Ok(emit[outi])
-                }
+            .map(|&outi| match self.emit.get(outi) {
+                Some(Expr::Column { index, .. }) => Ok(*index),
+                _ => Err(internal_err!(
+                    "query_through should never be queried for generated columns; \
+                         columns: {columns:?}",
+                )),
             })
-            .collect::<Result<Vec<_>, _>>();
-        let in_cols = match c {
-            Ok(c) => c,
+            .collect::<Result<Vec<_>, _>>()
+        {
+            Ok(cols) => cols,
             Err(e) => return Ok(IngredientLookupResult::err(e)),
         };
 
         let res = self.lookup(*self.src, &in_cols, key, nodes, states, mode)?;
+        let emit = self.emit.clone();
         Ok(res.map(move |r| {
             let r = r?;
-            let mut new_r = Vec::with_capacity(r.len());
-            let mut expr: Vec<DfValue> = if let Some(ref e) = expressions {
-                e.iter()
-                    .map(|expr| expr.eval(&r))
-                    .collect::<ReadySetResult<Vec<DfValue>>>()?
-            } else {
-                vec![]
-            };
-
-            new_r.extend(
-                r.iter()
-                    .cloned()
-                    .enumerate()
-                    .filter(|(i, _)| emit.iter().any(|e| e == i))
-                    .map(|(_, c)| c),
-            );
-
-            new_r.append(&mut expr);
-            if let Some(ref a) = additional {
-                new_r.append(&mut a.clone());
-            }
-
-            Ok(Cow::from(new_r))
+            emit.iter()
+                .map(|expr| expr.eval(&r))
+                .collect::<ReadySetResult<Vec<DfValue>>>()
+                .map(Cow::Owned)
         }))
     }
 
@@ -143,27 +107,17 @@ impl Ingredient for Project {
     ) -> ReadySetResult<ProcessingResult> {
         debug_assert_eq!(from, *self.src);
         for r in &mut *rs {
-            let mut new_r = Vec::with_capacity(r.len());
-
-            for &i in &self.emit {
-                new_r.push(r[i].clone());
-            }
-
-            if let Some(ref e) = self.expressions {
-                new_r.extend(e.iter().map(|expr| match expr.eval(r) {
+            **r = self
+                .emit
+                .iter()
+                .map(|expr| match expr.eval(r) {
                     Ok(val) => val,
-                    Err(e) => {
-                        error!(error = %e, "Error evaluating project expression");
+                    Err(error) => {
+                        error!(%error, "Error evaluating project expression");
                         DfValue::None
                     }
-                }));
-            }
-
-            if let Some(ref a) = self.additional {
-                new_r.append(&mut a.clone());
-            }
-
-            **r = new_r;
+                })
+                .collect();
         }
 
         Ok(ProcessingResult {
@@ -179,14 +133,12 @@ impl Ingredient for Project {
     fn column_source(&self, cols: &[usize]) -> ColumnSource {
         let mapped_cols = cols
             .iter()
-            .filter_map(|&x| {
-                if x >= self.emit.len() {
-                    None
-                } else {
-                    Some(self.emit[x])
-                }
+            .filter_map(|&col| match self.emit.get(col) {
+                Some(Expr::Column { index, .. }) => Some(*index),
+                _ => None,
             })
             .collect::<Vec<_>>();
+
         if mapped_cols.len() != cols.len() {
             ColumnSource::RequiresFullReplay(vec1![self.src.as_global()])
         } else {
@@ -199,17 +151,7 @@ impl Ingredient for Project {
             return String::from("π");
         }
 
-        let mut emit_cols = vec![];
-        emit_cols.extend(self.emit.iter().map(ToString::to_string));
-
-        if let Some(ref arithmetic) = self.expressions {
-            emit_cols.extend(arithmetic.iter().map(ToString::to_string));
-        }
-
-        if let Some(ref add) = self.additional {
-            emit_cols.extend(add.iter().map(|e| format!("lit: {}", e)));
-        }
-        format!("π[{}]", emit_cols.join(", "))
+        format!("π[{}]", self.emit.iter().join(", "))
     }
 }
 
@@ -228,16 +170,29 @@ mod tests {
         let mut g = ops::test::MockGraph::new();
         let s = g.add_base("source", &["x", "y", "z"]);
 
-        let permutation = if all { vec![0, 1, 2] } else { vec![2, 0] };
-        let additional = if add {
-            Some(vec![DfValue::from("hello"), DfValue::Int(42)])
-        } else {
-            None
-        };
+        let mut exprs = (if all { vec![0, 1, 2] } else { vec![2, 0] })
+            .into_iter()
+            .map(|index| Expr::Column {
+                index,
+                ty: DfType::DEFAULT_TEXT,
+            })
+            .collect::<Vec<_>>();
+        if add {
+            exprs.extend([
+                Expr::Literal {
+                    val: DfValue::from("hello"),
+                    ty: DfType::DEFAULT_TEXT,
+                },
+                Expr::Literal {
+                    val: DfValue::Int(42),
+                    ty: DfType::Int,
+                },
+            ]);
+        }
         g.set_op(
             "permute",
             &["x", "y", "z"],
-            Project::new(s.as_global(), &permutation[..], additional, None),
+            Project::new(s.as_global(), exprs),
             materialized,
         );
         g
@@ -247,16 +202,21 @@ mod tests {
         let mut g = ops::test::MockGraph::new();
         let s = g.add_base("source", &["x", "y", "z"]);
 
-        let permutation = vec![0, 1];
+        let permutation = vec![
+            Expr::Column {
+                index: 0,
+                ty: DfType::DEFAULT_TEXT,
+            },
+            Expr::Column {
+                index: 1,
+                ty: DfType::DEFAULT_TEXT,
+            },
+            expression,
+        ];
         g.set_op(
             "permute",
             &["x", "y", "z"],
-            Project::new(
-                s.as_global(),
-                &permutation[..],
-                None,
-                Some(vec![expression]),
-            ),
+            Project::new(s.as_global(), permutation),
             false,
         );
         g
@@ -276,7 +236,10 @@ mod tests {
     #[test]
     fn it_describes() {
         let p = setup(false, false, true);
-        assert_eq!(p.node().description(true), "π[2, 0, lit: hello, lit: 42]");
+        assert_eq!(
+            p.node().description(true),
+            "π[2, 0, (lit: hello), (lit: 42)]"
+        );
     }
 
     #[test]
@@ -290,7 +253,7 @@ mod tests {
         let p = setup(false, true, true);
         assert_eq!(
             p.node().description(true),
-            "π[0, 1, 2, lit: hello, lit: 42]"
+            "π[0, 1, 2, (lit: hello), (lit: 42)]"
         );
     }
 
@@ -436,9 +399,7 @@ mod tests {
 
     fn setup_query_through(
         mut state: MaterializedNodeState,
-        permutation: &[usize],
-        additional: Option<Vec<DfValue>>,
-        expressions: Option<Vec<Expr>>,
+        emit: Vec<Expr>,
     ) -> (Project, StateMap) {
         let global = NodeIndex::new(0);
         let mut index: IndexPair = global.into();
@@ -452,7 +413,7 @@ mod tests {
         state.process_records(&mut row.into(), None, None).unwrap();
         states.insert(local, state);
 
-        let mut project = Project::new(global, permutation, additional, expressions);
+        let mut project = Project::new(global, emit);
         let mut remap = HashMap::new();
         remap.insert(global, index);
         project.on_commit(global, &remap);
@@ -482,7 +443,23 @@ mod tests {
     #[test]
     fn it_queries_through_all() {
         let state = MaterializedNodeState::Memory(MemoryState::default());
-        let (p, states) = setup_query_through(state, &[0, 1, 2], None, None);
+        let (p, states) = setup_query_through(
+            state,
+            vec![
+                Expr::Column {
+                    index: 0,
+                    ty: DfType::Int,
+                },
+                Expr::Column {
+                    index: 1,
+                    ty: DfType::Int,
+                },
+                Expr::Column {
+                    index: 2,
+                    ty: DfType::Int,
+                },
+            ],
+        );
         let expected: Vec<DfValue> = vec![1.into(), 2.into(), 3.into()];
         assert_query_through(p, 0, 1.into(), states, expected);
     }
@@ -498,7 +475,23 @@ mod tests {
             .unwrap(),
         );
 
-        let (p, states) = setup_query_through(state, &[0, 1, 2], None, None);
+        let (p, states) = setup_query_through(
+            state,
+            vec![
+                Expr::Column {
+                    index: 0,
+                    ty: DfType::Int,
+                },
+                Expr::Column {
+                    index: 1,
+                    ty: DfType::Int,
+                },
+                Expr::Column {
+                    index: 2,
+                    ty: DfType::Int,
+                },
+            ],
+        );
         let expected: Vec<DfValue> = vec![1.into(), 2.into(), 3.into()];
         assert_query_through(p, 0, 1.into(), states, expected);
     }
@@ -506,7 +499,13 @@ mod tests {
     #[test]
     fn it_queries_through_some() {
         let state = MaterializedNodeState::Memory(MemoryState::default());
-        let (p, states) = setup_query_through(state, &[1], None, None);
+        let (p, states) = setup_query_through(
+            state,
+            vec![Expr::Column {
+                index: 1,
+                ty: DfType::Int,
+            }],
+        );
         let expected: Vec<DfValue> = vec![2.into()];
         assert_query_through(p, 0, 2.into(), states, expected);
     }
@@ -522,23 +521,39 @@ mod tests {
             .unwrap(),
         );
 
-        let (p, states) = setup_query_through(state, &[1], None, None);
+        let (p, states) = setup_query_through(
+            state,
+            vec![Expr::Column {
+                index: 1,
+                ty: DfType::Int,
+            }],
+        );
         let expected: Vec<DfValue> = vec![2.into()];
         assert_query_through(p, 0, 2.into(), states, expected);
     }
 
     #[test]
     fn it_queries_through_w_literals() {
-        let additional = Some(vec![DfValue::Int(42)]);
         let state = MaterializedNodeState::Memory(MemoryState::default());
-        let (p, states) = setup_query_through(state, &[1], additional, None);
+        let (p, states) = setup_query_through(
+            state,
+            vec![
+                Expr::Column {
+                    index: 1,
+                    ty: DfType::Int,
+                },
+                Expr::Literal {
+                    val: DfValue::Int(42),
+                    ty: DfType::Int,
+                },
+            ],
+        );
         let expected: Vec<DfValue> = vec![2.into(), 42.into()];
         assert_query_through(p, 0, 2.into(), states, expected);
     }
 
     #[test]
     fn it_queries_through_w_literals_persistent() {
-        let additional = Some(vec![DfValue::Int(42)]);
         let state = MaterializedNodeState::Persistent(
             PersistentState::new(
                 String::from("it_queries_through_w_literals"),
@@ -548,37 +563,51 @@ mod tests {
             .unwrap(),
         );
 
-        let (p, states) = setup_query_through(state, &[1], additional, None);
+        let (p, states) = setup_query_through(
+            state,
+            vec![
+                Expr::Column {
+                    index: 1,
+                    ty: DfType::Int,
+                },
+                Expr::Literal {
+                    val: DfValue::Int(42),
+                    ty: DfType::Int,
+                },
+            ],
+        );
         let expected: Vec<DfValue> = vec![2.into(), 42.into()];
         assert_query_through(p, 0, 2.into(), states, expected);
     }
 
     #[test]
     fn it_queries_through_w_arithmetic_and_literals() {
-        let additional = Some(vec![DfValue::Int(42)]);
-        let expressions = Some(vec![Expr::Op {
-            left: Box::new(make_int_column(0)),
-            right: Box::new(make_int_column(1)),
-            op: BinaryOperator::Add,
-            ty: DfType::Int,
-        }]);
-
         let state = MaterializedNodeState::Memory(MemoryState::default());
-        let (p, states) = setup_query_through(state, &[1], additional, expressions);
+        let (p, states) = setup_query_through(
+            state,
+            vec![
+                Expr::Column {
+                    index: 1,
+                    ty: DfType::Int,
+                },
+                Expr::Op {
+                    left: Box::new(make_int_column(0)),
+                    right: Box::new(make_int_column(1)),
+                    op: BinaryOperator::Add,
+                    ty: DfType::Int,
+                },
+                Expr::Literal {
+                    val: DfValue::Int(42),
+                    ty: DfType::Int,
+                },
+            ],
+        );
         let expected: Vec<DfValue> = vec![2.into(), (1 + 2).into(), 42.into()];
         assert_query_through(p, 0, 2.into(), states, expected);
     }
 
     #[test]
     fn it_queries_through_w_arithmetic_and_literals_persistent() {
-        let additional = Some(vec![DfValue::Int(42)]);
-        let expressions = Some(vec![Expr::Op {
-            left: Box::new(make_int_column(0)),
-            right: Box::new(make_int_column(1)),
-            op: BinaryOperator::Add,
-            ty: DfType::Int,
-        }]);
-
         let state = MaterializedNodeState::Persistent(
             PersistentState::new(
                 String::from("it_queries_through_w_arithmetic_and_literals_persistent"),
@@ -588,7 +617,25 @@ mod tests {
             .unwrap(),
         );
 
-        let (p, states) = setup_query_through(state, &[1], additional, expressions);
+        let (p, states) = setup_query_through(
+            state,
+            vec![
+                Expr::Column {
+                    index: 1,
+                    ty: DfType::Int,
+                },
+                Expr::Op {
+                    left: Box::new(make_int_column(0)),
+                    right: Box::new(make_int_column(1)),
+                    op: BinaryOperator::Add,
+                    ty: DfType::Int,
+                },
+                Expr::Literal {
+                    val: DfValue::Int(42),
+                    ty: DfType::Int,
+                },
+            ],
+        );
         let expected: Vec<DfValue> = vec![2.into(), (1 + 2).into(), 42.into()];
         assert_query_through(p, 0, 2.into(), states, expected);
     }
@@ -616,7 +663,16 @@ mod tests {
             .unwrap(),
         );
 
-        let (p, states) = setup_query_through(state, &[1], None, Some(vec![expression]));
+        let (p, states) = setup_query_through(
+            state,
+            vec![
+                Expr::Column {
+                    index: 1,
+                    ty: DfType::Int,
+                },
+                expression,
+            ],
+        );
         let expected: Vec<DfValue> = vec![2.into(), ((1 + 2) * 2).into()];
         assert_query_through(p, 0, 2.into(), states, expected);
     }

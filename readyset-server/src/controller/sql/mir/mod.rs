@@ -1,17 +1,17 @@
 use std::collections::{HashMap, HashSet};
-use std::convert::TryFrom;
 use std::fmt::Debug;
+use std::iter;
 use std::vec::Vec;
 
 use ::serde::{Deserialize, Serialize};
 use catalog_tables::is_catalog_table;
-use common::{DfValue, IndexType};
+use common::IndexType;
 use dataflow::ops::grouped::aggregate::Aggregation;
 use dataflow::ops::union;
 use lazy_static::lazy_static;
 use mir::graph::MirGraph;
 use mir::node::node_inner::MirNodeInner;
-use mir::node::{GroupedNodeType, MirNode, ViewKeyColumn};
+use mir::node::{GroupedNodeType, MirNode, ProjectExpr, ViewKeyColumn};
 use mir::query::{MirBase, MirQuery};
 use mir::DfNodeIndex;
 pub use mir::{Column, NodeIndex};
@@ -1017,20 +1017,11 @@ impl SqlToMirConverter {
         query_name: &Relation,
         name: Relation,
         parent_node: NodeIndex,
-        emit: Vec<Column>,
-        expressions: Vec<(SqlIdentifier, Expr)>,
-        literals: Vec<(SqlIdentifier, DfValue)>,
+        emit: Vec<ProjectExpr>,
     ) -> NodeIndex {
         self.add_query_node(
             query_name.clone(),
-            MirNode::new(
-                name,
-                MirNodeInner::Project {
-                    emit,
-                    literals,
-                    expressions,
-                },
-            ),
+            MirNode::new(name, MirNodeInner::Project { emit }),
             &[parent_node],
         )
     }
@@ -1108,16 +1099,15 @@ impl SqlToMirConverter {
                 query_name,
                 format!("{}_proj", name).into(),
                 parent,
-                parent_columns,
-                exprs_to_project
+                parent_columns
                     .into_iter()
-                    .map(|expr| {
+                    .map(ProjectExpr::Column)
+                    .chain(exprs_to_project.into_iter().map(|expr| {
                         // FIXME(ENG-2502): Use correct dialect.
-                        let expr_string = expr.display(nom_sql::Dialect::MySQL).to_string();
-                        (expr_string.into(), expr)
-                    })
+                        let alias = expr.display(nom_sql::Dialect::MySQL).to_string().into();
+                        ProjectExpr::Expr { alias, expr }
+                    }))
                     .collect(),
-                vec![],
             );
             nodes.push(project_node);
             parent = project_node;
@@ -1228,11 +1218,15 @@ impl SqlToMirConverter {
                     query_name,
                     format!("{}_prj_hlpr", name.display_unquoted()).into(),
                     subquery_leaf,
-                    vec![],
-                    vec![],
                     vec![
-                        ("__count_val".into(), DfValue::from(0u32)),
-                        ("__count_grp".into(), DfValue::from(0u32)),
+                        ProjectExpr::Expr {
+                            alias: "__count_val".into(),
+                            expr: Expr::Literal(0u32.into()),
+                        },
+                        ProjectExpr::Expr {
+                            alias: "__count_grp".into(),
+                            expr: Expr::Literal(0u32.into()),
+                        },
                     ],
                 );
                 // -> [0, 0] for each row
@@ -1267,9 +1261,14 @@ impl SqlToMirConverter {
                     query_name,
                     format!("{}_join_key", name.display_unquoted()).into(),
                     parent,
-                    parent_columns,
-                    vec![],
-                    vec![("__exists_join_key".into(), DfValue::from(0u32))],
+                    parent_columns
+                        .into_iter()
+                        .map(ProjectExpr::Column)
+                        .chain(iter::once(ProjectExpr::Expr {
+                            alias: "__exists_join_key".into(),
+                            expr: Expr::Literal(0u32.into()),
+                        }))
+                        .collect(),
                 );
 
                 // -> ⋈ on: l.__exists_join_key ≡ r.__count_grp
@@ -1353,32 +1352,26 @@ impl SqlToMirConverter {
         let arith_and_lit_columns_needed =
             value_columns_needed_for_predicates(&qg.columns, &qg.global_predicates);
 
-        Ok(if !arith_and_lit_columns_needed.is_empty() {
-            let projected_expressions: Vec<(SqlIdentifier, Expr)> = arith_and_lit_columns_needed
-                .iter()
-                .filter_map(|(_, oc)| match oc {
-                    OutputColumn::Expr(ref ac) => Some((ac.name.clone(), ac.expression.clone())),
-                    OutputColumn::Data { .. } => None,
-                    OutputColumn::Literal(_) => None,
-                })
-                .collect();
-            let projected_literals: Vec<(SqlIdentifier, DfValue)> = arith_and_lit_columns_needed
-                .iter()
-                .map(|(_, oc)| -> ReadySetResult<_> {
-                    match oc {
-                        OutputColumn::Expr(_) => Ok(None),
-                        OutputColumn::Data { .. } => Ok(None),
-                        OutputColumn::Literal(ref lc) => {
-                            Ok(Some((lc.name.clone(), DfValue::try_from(&lc.value)?)))
-                        }
-                    }
-                })
-                .collect::<Result<Vec<_>, _>>()?
+        if !arith_and_lit_columns_needed.is_empty() {
+            let passthru_cols = self.mir_graph.columns(prev_node);
+            let mut emit = passthru_cols
                 .into_iter()
-                .flatten()
-                .collect();
+                .map(ProjectExpr::Column)
+                .collect::<Vec<_>>();
+            for (_, oc) in arith_and_lit_columns_needed {
+                match oc {
+                    OutputColumn::Data { .. } => {}
+                    OutputColumn::Literal(lc) => emit.push(ProjectExpr::Expr {
+                        expr: Expr::Literal(lc.value),
+                        alias: lc.name,
+                    }),
+                    OutputColumn::Expr(ec) => emit.push(ProjectExpr::Expr {
+                        expr: ec.expression,
+                        alias: ec.name,
+                    }),
+                }
+            }
 
-            let passthru_cols: Vec<_> = self.mir_graph.columns(prev_node);
             let projected = self.make_project_node(
                 query_name,
                 format!(
@@ -1388,15 +1381,13 @@ impl SqlToMirConverter {
                 )
                 .into(),
                 prev_node,
-                passthru_cols,
-                projected_expressions,
-                projected_literals,
+                emit,
             );
 
-            Some(projected)
+            Ok(Some(projected))
         } else {
-            None
-        })
+            Ok(None)
+        }
     }
 
     /// Adds all the MIR nodes corresponding to the given query,
@@ -1691,18 +1682,6 @@ impl SqlToMirConverter {
             }
 
             // 10. Generate leaf views that expose the query result
-            let mut projected_columns: Vec<Column> = query_graph
-                .columns
-                .iter()
-                .filter_map(|oc| match *oc {
-                    OutputColumn::Expr(_) => None,
-                    OutputColumn::Data {
-                        ref column,
-                        alias: ref name,
-                    } => Some(Column::from(column).aliased_as(name.clone())),
-                    OutputColumn::Literal(_) => None,
-                })
-                .collect();
 
             // We may already have added some of the expression and literal columns
             let (_, already_computed): (Vec<_>, Vec<_>) = value_columns_needed_for_predicates(
@@ -1711,48 +1690,43 @@ impl SqlToMirConverter {
             )
             .into_iter()
             .unzip();
-            let projected_expressions: Vec<(SqlIdentifier, Expr)> = query_graph
+            let mut emit = query_graph
                 .columns
                 .iter()
-                .filter_map(|oc| match *oc {
-                    OutputColumn::Expr(ref ac) => {
+                .map(|oc| match oc {
+                    OutputColumn::Expr(ac) => {
                         if !already_computed.contains(oc) {
-                            Some((ac.name.clone(), ac.expression.clone()))
-                        } else {
-                            projected_columns.push(Column::named(&ac.name));
-                            None
-                        }
-                    }
-                    OutputColumn::Data { .. } => None,
-                    OutputColumn::Literal(_) => None,
-                })
-                .collect();
-            let projected_literals: Vec<(SqlIdentifier, DfValue)> = query_graph
-                .columns
-                .iter()
-                .map(|oc| -> ReadySetResult<_> {
-                    match *oc {
-                        OutputColumn::Expr(_) => Ok(None),
-                        OutputColumn::Data { .. } => Ok(None),
-                        OutputColumn::Literal(ref lc) => {
-                            if !already_computed.contains(oc) {
-                                Ok(Some((lc.name.clone(), DfValue::try_from(&lc.value)?)))
-                            } else {
-                                projected_columns.push(Column::named(&lc.name));
-                                Ok(None)
+                            ProjectExpr::Expr {
+                                alias: ac.name.clone(),
+                                expr: ac.expression.clone(),
                             }
+                        } else {
+                            ProjectExpr::Column(Column::named(&ac.name))
                         }
                     }
+                    OutputColumn::Literal(lc) => {
+                        if !already_computed.contains(oc) {
+                            ProjectExpr::Expr {
+                                alias: lc.name.clone(),
+                                expr: Expr::Literal(lc.value.clone()),
+                            }
+                        } else {
+                            ProjectExpr::Column(Column::named(&lc.name))
+                        }
+                    }
+                    OutputColumn::Data { column, alias } => {
+                        ProjectExpr::Column(Column::from(column).aliased_as(alias.clone()))
+                    }
                 })
-                .collect::<Result<Vec<_>, _>>()?
-                .into_iter()
-                .flatten()
-                .collect();
+                .collect::<Vec<_>>();
 
             if leaf_behavior.should_make_leaf() {
                 for (column, _) in &view_key.columns {
-                    if !projected_columns.contains(column) {
-                        projected_columns.push(column.clone())
+                    if !emit
+                        .iter()
+                        .any(|expr| matches!(expr, ProjectExpr::Column(c) if c == column))
+                    {
+                        emit.push(ProjectExpr::Column(column.clone()))
                     }
                 }
             }
@@ -1765,9 +1739,7 @@ impl SqlToMirConverter {
                     query_name.clone()
                 },
                 final_node,
-                projected_columns.clone(),
-                projected_expressions,
-                projected_literals,
+                emit.clone(),
             );
 
             if query_graph.distinct {
@@ -1825,14 +1797,17 @@ impl SqlToMirConverter {
                 let parent_columns = self.mir_graph.columns(final_node);
                 for col in returned_cols.iter() {
                     if let Some(c) = parent_columns.iter().find(|c| col.cmp(c).is_eq()) {
-                        project_order.push(c.clone());
+                        project_order.push(ProjectExpr::Column(c.clone()));
                     } else {
                         internal!("Returned column {col} not in projected schema");
                     }
                 }
                 for col in parent_columns {
-                    if !project_order.contains(&col) {
-                        project_order.push(col);
+                    if !emit
+                        .iter()
+                        .any(|expr| matches!(expr, ProjectExpr::Column(c) if *c == col))
+                    {
+                        project_order.push(ProjectExpr::Column(col));
                     }
                 }
 
@@ -1846,8 +1821,6 @@ impl SqlToMirConverter {
                     },
                     final_node,
                     project_order,
-                    vec![],
-                    vec![],
                 );
 
                 let aggregates = if view_key.index_type != IndexType::HashMap {

@@ -1,8 +1,11 @@
-use common::DfValue;
+use std::iter;
+
+use nom_sql::Expr;
 use readyset_client::ViewPlaceholder;
 use readyset_errors::{invariant_eq, ReadySetResult};
 use tracing::trace;
 
+use crate::node::node_inner::ProjectExpr;
 use crate::node::{MirNode, MirNodeInner};
 use crate::query::MirQuery;
 use crate::Column;
@@ -61,9 +64,16 @@ pub(crate) fn add_bogokey_if_necessary(query: &mut MirQuery<'_>) -> ReadySetResu
         MirNode::new(
             format!("{}_bogo_project", query.name().display_unquoted()).into(),
             MirNodeInner::Project {
-                emit: query.graph.columns(parent_idx),
-                expressions: vec![],
-                literals: vec![("bogokey".into(), DfValue::from(0i32))],
+                emit: query
+                    .graph
+                    .columns(parent_idx)
+                    .into_iter()
+                    .map(ProjectExpr::Column)
+                    .chain(iter::once(ProjectExpr::Expr {
+                        expr: Expr::Literal(0.into()),
+                        alias: "bogokey".into(),
+                    }))
+                    .collect(),
             },
         ),
     )?;
@@ -86,7 +96,7 @@ pub(crate) fn add_bogokey_if_necessary(query: &mut MirQuery<'_>) -> ReadySetResu
 #[allow(clippy::panic)]
 mod tests {
     use common::IndexType;
-    use nom_sql::{BinaryOperator, ColumnSpecification, Relation, SqlType};
+    use nom_sql::{BinaryOperator, ColumnSpecification, Literal, Relation, SqlType};
     use petgraph::visit::EdgeRef;
     use petgraph::Direction;
     use readyset_client::ViewPlaceholder;
@@ -148,8 +158,14 @@ mod tests {
             .unwrap()
             .source();
         match &query.get_node(bogokey_node).unwrap().inner {
-            MirNodeInner::Project { literals, .. } => {
-                assert_eq!(literals, &[("bogokey".into(), DfValue::from(0i32))])
+            MirNodeInner::Project { emit } => {
+                assert!(emit.iter().any(|emit| matches!(
+                    emit,
+                    ProjectExpr::Expr {
+                        expr: Expr::Literal(Literal::Integer(0)),
+                        alias
+                    } if alias == "bogokey"
+                )))
             }
             _ => panic!("bogo project node should be a Project"),
         }
@@ -219,8 +235,17 @@ mod tests {
             .unwrap()
             .source();
         match &query.get_node(bogokey_node).unwrap().inner {
-            MirNodeInner::Project { literals, .. } => {
-                assert_eq!(literals, &[("bogokey".into(), DfValue::from(0i32))])
+            MirNodeInner::Project { emit } => {
+                assert!(
+                    emit.iter().any(|emit| matches!(
+                        emit,
+                        ProjectExpr::Expr {
+                            expr: Expr::Literal(Literal::Integer(0)),
+                            alias
+                        } if alias == "bogokey"
+                    )),
+                    "{emit:?}"
+                )
             }
             _ => panic!("bogo project node should be a Project"),
         }

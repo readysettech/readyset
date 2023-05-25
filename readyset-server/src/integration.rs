@@ -2358,7 +2358,19 @@ async fn migrate_added_columns() {
             let b = mig.add_ingredient(
                 "x",
                 make_columns(&["c", "b"]),
-                Project::new(a, &[2, 0], None, None),
+                Project::new(
+                    a,
+                    vec![
+                        DfExpr::Column {
+                            index: 2,
+                            ty: DfType::Unknown,
+                        },
+                        DfExpr::Column {
+                            index: 0,
+                            ty: DfType::Unknown,
+                        },
+                    ],
+                ),
             );
             mig.maintain_anonymous(b, &Index::hash_map(vec![1]));
             b
@@ -2517,7 +2529,19 @@ async fn key_on_added() {
             let b = mig.add_ingredient(
                 "x",
                 make_columns(&["c", "b"]),
-                Project::new(a, &[2, 1], None, None),
+                Project::new(
+                    a,
+                    vec![
+                        DfExpr::Column {
+                            index: 2,
+                            ty: DfType::Unknown,
+                        },
+                        DfExpr::Column {
+                            index: 1,
+                            ty: DfType::Unknown,
+                        },
+                    ],
+                ),
             );
             mig.maintain_anonymous(b, &Index::hash_map(vec![0]));
             b
@@ -2865,7 +2889,19 @@ async fn full_aggregation_with_bogokey() {
             let bogo = mig.add_ingredient(
                 "bogo",
                 make_columns(&["x", "bogo"]),
-                Project::new(base, &[0], Some(vec![0.into()]), None),
+                Project::new(
+                    base,
+                    vec![
+                        DfExpr::Column {
+                            index: 0,
+                            ty: DfType::Unknown,
+                        },
+                        DfExpr::Literal {
+                            val: 0.into(),
+                            ty: DfType::Int,
+                        },
+                    ],
+                ),
             );
             let agg = mig.add_ingredient(
                 "agg",

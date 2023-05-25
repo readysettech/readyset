@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use dataflow::{PostLookupAggregate, PostLookupAggregateFunction, PostLookupAggregates};
 use mir::node::node_inner::MirNodeInner;
+use mir::node::ProjectExpr;
 use mir::{Column, NodeIndex};
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::FunctionExpr::*;
@@ -78,15 +79,21 @@ pub(super) fn make_expressions_above_grouped(
         .collect();
 
     if !exprs.is_empty() {
-        let cols = mir_converter.columns(*prev_node).to_vec();
+        let cols = mir_converter.columns(*prev_node);
 
         let node = mir_converter.make_project_node(
             query_name,
             mir_converter.generate_label(&name.into()),
             *prev_node,
-            cols,
-            exprs.clone(),
-            vec![],
+            cols.into_iter()
+                .map(ProjectExpr::Column)
+                .chain(
+                    exprs
+                        .iter()
+                        .cloned()
+                        .map(|(alias, expr)| ProjectExpr::Expr { alias, expr }),
+                )
+                .collect(),
         );
         *prev_node = node;
         exprs.into_iter().map(|(e, n)| (n, e)).collect()

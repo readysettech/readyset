@@ -15,6 +15,8 @@ tracing = { version = "0.1", features = ["release_max_level_debug"] }
 serde = { version = "1.0.8", features = ["rc", "derive"] }
 proptest = "1.0.0"
 vec1 = "1.6"
+fixedbitset = { version = "0.2.0", default-features = false }
+derive_more = "0.99.17"
 
 # local deps
 common = { path = "../readyset-common", package = "readyset-common" }
@@ -23,7 +25,6 @@ nom-sql = { path = "../nom-sql" }
 readyset-client = { path = "../readyset-client" }
 readyset-errors = { path = "../readyset-errors" }
 readyset-data = { path = "../readyset-data" }
-fixedbitset = { version = "0.2.0", default-features = false }
 
 [dev-dependencies]
 readyset-tracing = { path = "../readyset-tracing" }

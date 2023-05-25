@@ -276,14 +276,14 @@ struct DependentCondition {
 #[cfg(test)]
 #[allow(clippy::panic)] // it's a test
 mod tests {
-    use common::{DfValue, IndexType};
+    use common::IndexType;
     use dataflow::ops::grouped::aggregate::Aggregation;
     use nom_sql::{BinaryOperator, ColumnSpecification, Expr, Literal, Relation, SqlType};
     use petgraph::Direction;
 
     use super::*;
     use crate::graph::MirGraph;
-    use crate::node::{MirNode, MirNodeInner};
+    use crate::node::{MirNode, MirNodeInner, ProjectExpr};
     use crate::rewrite::pull_columns::pull_all_required_columns;
     use crate::visualize::GraphViz;
     use crate::Column;
@@ -343,11 +343,15 @@ mod tests {
         let group_proj = graph.add_node(MirNode::new(
             "q_prj_hlpr".into(),
             MirNodeInner::Project {
-                emit: vec![],
-                expressions: vec![],
-                literals: vec![
-                    ("__count_val".into(), DfValue::from(0u32)),
-                    ("__count_grp".into(), DfValue::from(0u32)),
+                emit: vec![
+                    ProjectExpr::Expr {
+                        alias: "__count_val".into(),
+                        expr: Expr::Literal(0u32.into()),
+                    },
+                    ProjectExpr::Expr {
+                        alias: "__count_grp".into(),
+                        expr: Expr::Literal(0u32.into()),
+                    },
                 ],
             },
         ));
@@ -403,9 +407,13 @@ mod tests {
         let left_literal_join_key_proj = graph.add_node(MirNode::new(
             "t1_join_key".into(),
             MirNodeInner::Project {
-                emit: vec![Column::new(Some("t1"), "a")],
-                expressions: vec![],
-                literals: vec![("__exists_join_key".into(), DfValue::from(0u32))],
+                emit: vec![
+                    ProjectExpr::Column(Column::new(Some("t1"), "a")),
+                    ProjectExpr::Expr {
+                        alias: "__exists_join_key".into(),
+                        expr: Expr::Literal(0u32.into()),
+                    },
+                ],
             },
         ));
         graph[left_literal_join_key_proj].add_owner(query_name.clone());
@@ -586,11 +594,15 @@ mod tests {
         let group_proj = graph.add_node(MirNode::new(
             "q_prj_hlpr".into(),
             MirNodeInner::Project {
-                emit: vec![],
-                expressions: vec![],
-                literals: vec![
-                    ("__count_val".into(), DfValue::from(0u32)),
-                    ("__count_grp".into(), DfValue::from(0u32)),
+                emit: vec![
+                    ProjectExpr::Expr {
+                        alias: "__count_val".into(),
+                        expr: Expr::Literal(0u32.into()),
+                    },
+                    ProjectExpr::Expr {
+                        alias: "__count_grp".into(),
+                        expr: Expr::Literal(0u32.into()),
+                    },
                 ],
             },
         ));
@@ -646,9 +658,13 @@ mod tests {
         let left_literal_join_key_proj = graph.add_node(MirNode::new(
             "t1_join_key".into(),
             MirNodeInner::Project {
-                emit: vec![Column::new(Some("t1"), "a")],
-                expressions: vec![],
-                literals: vec![("__exists_join_key".into(), DfValue::from(0u32))],
+                emit: vec![
+                    ProjectExpr::Column(Column::new(Some("t1"), "a")),
+                    ProjectExpr::Expr {
+                        alias: "__exists_join_key".into(),
+                        expr: Expr::Literal(0u32.into()),
+                    },
+                ],
             },
         ));
         graph[left_literal_join_key_proj].add_owner(query_name.clone());

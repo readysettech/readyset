@@ -15,6 +15,7 @@ use petgraph::{Directed, Direction};
 use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
+use crate::node::node_inner::ProjectExpr;
 use crate::node::{MirNode, MirNodeInner};
 use crate::{Column as MirColumn, DfNodeIndex, Ix, NodeIndex, PAGE_NUMBER_COL};
 
@@ -156,19 +157,21 @@ impl MirGraph {
                 columns
             }
             MirNodeInner::Distinct { group_by } => group_by.clone(),
-            MirNodeInner::Project {
-                emit, expressions, ..
-            } => {
+            MirNodeInner::Project { emit } => {
                 let mut columns = vec![];
-                for c in emit {
-                    if !columns.contains(c) {
-                        columns.push(c.clone());
-                    }
-                }
-                for (_, expr) in expressions {
-                    for c in expr.referred_columns() {
-                        if !columns.iter().any(|col| col == c) {
-                            columns.push(c.clone().into());
+                for expr in emit {
+                    match expr {
+                        ProjectExpr::Column(c) => {
+                            if !columns.contains(c) {
+                                columns.push(c.clone());
+                            }
+                        }
+                        ProjectExpr::Expr { expr, .. } => {
+                            for c in expr.referred_columns() {
+                                if !columns.iter().any(|col| col == c) {
+                                    columns.push(c.clone().into());
+                                }
+                            }
                         }
                     }
                 }
@@ -267,20 +270,12 @@ impl MirGraph {
                     });
                 cols
             }
-            MirNodeInner::Project {
-                emit,
-                expressions,
-                literals,
-            } => emit
+            MirNodeInner::Project { emit } => emit
                 .iter()
-                .cloned()
-                .chain(
-                    expressions
-                        .iter()
-                        .map(|(name, _)| name)
-                        .chain(literals.iter().map(|(name, _)| name))
-                        .map(MirColumn::named),
-                )
+                .map(|expr| match expr {
+                    ProjectExpr::Column(col) => col.clone(),
+                    ProjectExpr::Expr { alias, .. } => MirColumn::named(alias),
+                })
                 .collect(),
             MirNodeInner::Union { emit, .. } => emit
                 .first()
@@ -480,11 +475,7 @@ mod tests {
         ));
         let t2_prj = graph.add_node(MirNode::new(
             "t2".into(),
-            MirNodeInner::Project {
-                emit: vec![],
-                expressions: vec![],
-                literals: vec![],
-            },
+            MirNodeInner::Project { emit: vec![] },
         ));
         graph.add_edge(t2, t2_prj, 0);
 
