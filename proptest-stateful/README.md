@@ -88,7 +88,7 @@ take outside contributions. Once a non-async version exists, we'll also likely
 want to add a crate feature to allow us to disable the async functionality for
 projects that don't need it.
 
-Currently, we only shrink by removing entire operations, not be shrinking the
+Currently, we only shrink by removing entire operations, not by shrinking the
 operations themselves. Shrinking an individual operation can be quite tricky,
 however, because oftentimes later operations were generated based off the
 specific operations that came before them. For some tests this may not be an
