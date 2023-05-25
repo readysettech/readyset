@@ -42,7 +42,7 @@
 
 #![warn(clippy::panic)]
 #![deny(unused_extern_crates, macro_use_extern_crate)]
-#![feature(stmt_expr_attributes, box_patterns)]
+#![feature(stmt_expr_attributes, box_patterns, never_type, exhaustive_patterns)]
 
 pub use column::Column;
 use lazy_static::lazy_static;
