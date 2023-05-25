@@ -1,3 +1,14 @@
-1. Get the application URL by running these commands:
-  export SERVICE_IP=$(kubectl get svc --namespace {{ .Release.Namespace }} {{ include "readyset.fullname" . }}-adapter --template "{{"{{ range (index .status.loadBalancer.ingress 0) }}{{.}}{{ end }}"}}")
-  echo http://$SERVICE_IP:{{ .Values.readyset.adapter.httpPort }}/metrics
+Congrats, ReadySet has been deployed!!
+
+CHART NAME: {{ .Chart.Name }}
+CHART VERSION: {{ .Chart.Version }}
+APP VERSION: {{ .Chart.AppVersion }}
+
+Give the chart approximately 5 minutes to deploy. When the service is ready, you should see all pods up.
+
+For connecting to MySQL:
+
+mysql -u $(kubectl get secret readyset-upstream-database -o jsonpath="{.data.username}" | base64 -d) \
+  -h $(kubectl get svc readyset-adapter --template {{ "\"{{ range (index .status.loadBalancer.ingress 0) }}{{.}}{{ end }}\"" }}) \
+  --password=$(kubectl get secret readyset-upstream-database -o jsonpath="{.data.password}" | base64 -d) \
+  --database=$(kubectl get secret readyset-upstream-database -o jsonpath="{.data.database}" | base64 -d)

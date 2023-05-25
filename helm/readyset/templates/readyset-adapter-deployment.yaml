@@ -93,7 +93,7 @@ spec:
             - name: UPSTREAM_DB_URL
               valueFrom:
                 secretKeyRef:
-                  name: readyset-db-url
+                  name: readyset-upstream-database
                   key: url
             - name: LOG_FORMAT
               value: "json"
