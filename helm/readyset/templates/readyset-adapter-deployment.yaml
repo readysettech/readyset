@@ -78,7 +78,7 @@ spec:
                 curl http://127.0.0.1:8500/v1/health/node/$(hostname) \
                 2>/dev/null | grep -E '".+"'
         - name: readyset-adapter
-          image: {{ .Values.readyset.adapter.image.repository | default "public.ecr.aws/readyset" }}/readyset:latest
+          image: {{ .Values.readyset.adapter.image.repository | default "public.ecr.aws/readyset" }}/readyset:{{ .Values.readyset.adapter.image.tag | default "latest"}}
           imagePullPolicy: Always
           securityContext:
             runAsGroup: 1000
@@ -100,6 +100,8 @@ spec:
             # Identify this as a Helm deployment to TelemetryReporter
             - name: DEPLOYMENT_ENV
               value: "helm"
+            - name: DATABASE_TYPE
+              value: "{{ .Values.readyset.database.type | default "mysql" }}"
             - name: AUTHORITY_ADDRESS
               value: "readyset-consul-server:8500"
             - name: AUTHORITY

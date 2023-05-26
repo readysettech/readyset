@@ -7,7 +7,7 @@ annotations:
 type: application
 
 # Versions are expected to follow Semantic Versioning (https://semver.org/)
-version: 0.3.0
+version: 0.3.1
 
 # appVersion is not expected to follow Semantic Versioning (https://semver.org)
 appVersion: "latest"

@@ -4,12 +4,15 @@
 # Disclaimer: Removing any of the following items from the list
 # will likely break things in unspectacular ways.
 readyset:
+  database:
+    type: mysql # or psql; Necessary to work with older versions of ReadySet
   adapter:
     ingress:
       enabled: true
     httpPort: 6034
     image:
       repository: # "public.ecr.aws/readyset" # No trailing slash
+      tag: "latest"
     port: 3306 # Or 5432
     resources:
       requests:
@@ -24,6 +27,10 @@ readyset:
         storage: "50Gi"
         cpu: 500m
         memory: "1Gi"
+    image:
+      repository: # "public.ecr.aws/readyset" # No trailing slash
+      tag: "latest"
+
 
 kubernetes:
   storageClass: # Leave empty to use default provisioner
