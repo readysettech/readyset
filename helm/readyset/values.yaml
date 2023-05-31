@@ -4,8 +4,6 @@
 # Disclaimer: Removing any of the following items from the list
 # will likely break things in unspectacular ways.
 readyset:
-  database:
-    type: mysql # or psql; Necessary to work with older versions of ReadySet
   adapter:
     ingress:
       enabled: true
@@ -30,7 +28,6 @@ readyset:
     image:
       repository: # "public.ecr.aws/readyset" # No trailing slash
       tag: "latest"
-
 
 kubernetes:
   storageClass: # Leave empty to use default provisioner

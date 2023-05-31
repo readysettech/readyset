@@ -1,13 +1,13 @@
 apiVersion: v2
-
 name: readyset
 description: Official ReadySet Chart
 annotations:
   category: Infrastructure
 type: application
+icon: https://readyset.io/favicon.ico
 
 # Versions are expected to follow Semantic Versioning (https://semver.org/)
-version: 0.3.1
+version: 0.4.0-rc2
 
 # appVersion is not expected to follow Semantic Versioning (https://semver.org)
 appVersion: "latest"

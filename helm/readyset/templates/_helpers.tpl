@@ -29,7 +29,7 @@ Create chart name and version as used by the chart label.
 Expand the name of the chart.
 */}}
 {{- define "readyset.labels" -}}
-helm.sh/chart: {{ include "readyset.chart" . }}
+helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
 app.kubernetes.io/instance: {{ printf "%s-%s" .Release.Name (randAlphaNum 8 | lower) }}
 app.kubernetes.io/part-of: {{ include "readyset.name" . }}
 app.kubernetes.io/name: readyset
@@ -68,14 +68,14 @@ MySQL port number for readyset-adapter
 */}}
 {{- define "readyset.mysqlPort" -}}
 3306
-{{- end}}
+{{- end }}
 
 {{/*
 PostgreSQL port number for readyset-adapter
 */}}
 {{- define "readyset.postgresqlPort" -}}
 5432
-{{- end}}
+{{- end }}
 
 {{/*
 Default storageClass is null, to default to the cluster's default provisioner. Do set this to what works best for your workload.
@@ -83,3 +83,30 @@ Default storageClass is null, to default to the cluster's default provisioner. D
 {{- define "readyset.defaultStorageClass" -}}
 null
 {{- end }}
+
+{{/*
+Define the database type we're connecting to
+*/}}
+{{- define "readyset.database.type" -}}
+{{- $type := mustRegexFind "postgresql|mysql" .Values.readyset.databaseUri }}
+{{- if not $type }}
+{{ fail "Must pass either 'mysql' or 'postgresql' in the scheme of the URI" }}
+{{- else -}}
+{{- printf "%s" $type -}}
+{{- end }}
+{{- end }}
+
+{{/*
+Define a random name from the chart + 8 random characters. Necessary for ReadySet to start
+*/}}
+{{- define "readyset.deployment" -}}
+{{- printf "%s-%s" (include "readyset.chart" .) (randAlphaNum 8 | lower) }}
+{{- end }}
+
+{{- define "readyset.serviceAccountName" -}}
+{{- if .Values.serviceAccount.create -}}
+    {{ default (include "readyset.fullname" .) .Values.serviceAccount.name }}
+{{- else -}}
+    {{ default "default" .Values.serviceAccount.name }}
+{{- end -}}
+{{- end -}}

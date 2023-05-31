@@ -3,7 +3,6 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: readyset-adapter
-  namespace: default
 rules:
   # Required for k8s consul retry-join
   - apiGroups: [""]
