@@ -2855,7 +2855,12 @@ impl Domain {
                     }
 
                     if for_keys.is_empty() {
-                        debug!("Received packet with no keys that we were waiting for");
+                        debug!(
+                            src = %link.src,
+                            dst = %link.dst,
+                            ?tag,
+                            "Received packet with no keys that we were waiting for",
+                        );
                         return Ok(());
                     } else if for_keys.len() != had {
                         // discard records in data associated with the keys we weren't
