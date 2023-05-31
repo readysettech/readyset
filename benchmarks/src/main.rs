@@ -4,8 +4,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::bail;
-use benchmarks::benchmark::{Benchmark, BenchmarkControl, DeploymentParameters};
+use benchmarks::benchmark::{Benchmark, BenchmarkControl, BenchmarkResults, DeploymentParameters};
 use benchmarks::benchmark_histogram;
+use benchmarks::graph::GraphParams;
 use benchmarks::reporting::ReportMode;
 use benchmarks::utils::readyset_ready;
 use clap::{Parser, ValueHint};
@@ -103,6 +104,9 @@ struct BenchmarkRunner {
     /// Records the commit id to aid potential future analysis
     #[clap(long, hide(true), env = "BUILDKITE_COMMIT")]
     report_commit_id: Option<String>,
+
+    #[clap(flatten)]
+    graph_params: GraphParams,
 }
 
 fn make_prometheus_url(base: &str, benchmark_name_label: &str, instance_label: &str) -> String {
@@ -290,10 +294,8 @@ impl BenchmarkRunner {
         }
     }
 
-    pub async fn initialize_from_args(
-        &mut self,
-    ) -> anyhow::Result<Option<(Handle, ShutdownSender)>> {
-        if let Some(f) = &self.benchmark {
+    fn load_benchmark_cmd_from_args(&mut self) -> anyhow::Result<()> {
+        if let Some(f) = self.benchmark.take() {
             self.warn_if_benchmark_params();
 
             if !f.exists() {
@@ -304,6 +306,14 @@ impl BenchmarkRunner {
             }
             self.benchmark_cmd = Some(serde_yaml::from_str(&std::fs::read_to_string(f)?)?);
         }
+
+        Ok(())
+    }
+
+    pub async fn initialize_from_args(
+        &mut self,
+    ) -> anyhow::Result<Option<(Handle, ShutdownSender)>> {
+        self.load_benchmark_cmd_from_args()?;
 
         let (params, handle) = if self.local_with_upstream.is_some() {
             self.warn_if_deployment_params("local-with-upstream");
@@ -350,7 +360,7 @@ impl BenchmarkRunner {
         Ok(handle)
     }
 
-    pub async fn run(mut self) -> anyhow::Result<()> {
+    pub async fn run(&mut self) -> anyhow::Result<Vec<BenchmarkResults>> {
         // Initializes `DeploymentParameters` and `Benchmark` from the set of arguments passed by
         // the user. These arguments need not be passed by the arguments in the flattened structs
         // directly, and instead may be passed via YAML or via arguments like `--local`.
@@ -364,7 +374,7 @@ impl BenchmarkRunner {
         if let Some(f) = &self.only_to_spec {
             let f = std::fs::File::create(f)?;
             serde_yaml::to_writer(f, &self.benchmark_cmd.as_ref().unwrap())?;
-            return Ok(());
+            return Ok(vec![]);
         }
 
         let prometheus_handle = self.init_prometheus().await?;
@@ -434,7 +444,7 @@ impl BenchmarkRunner {
         }
 
         // Write human-readable outputs if specified.
-        if let Some(f) = self.results_file {
+        if let Some(f) = &self.results_file {
             let mut file = std::fs::OpenOptions::new()
                 .create(true)
                 .append(true)
@@ -451,13 +461,13 @@ impl BenchmarkRunner {
 
         // Push metrics recorded in the push gateway manually before exiting.
         if let (Some(addr), Some(prometheus_handle)) = (
-            self.deployment_params.prometheus_push_gateway,
+            &self.deployment_params.prometheus_push_gateway,
             prometheus_handle,
         ) {
             let client = reqwest::Client::default();
             let output = prometheus_handle.render();
             client
-                .put(&addr)
+                .put(addr)
                 .body(output)
                 .send()
                 .await?
@@ -468,18 +478,47 @@ impl BenchmarkRunner {
             shutdown_tx.shutdown().await;
         }
 
+        Ok(results)
+    }
+
+    pub async fn run_graph(mut self) -> anyhow::Result<()> {
+        // We need iterations to be set to 1 so that we only have to deal with one result per value
+        // for the x axis
+        if self.iterations != 1 {
+            bail!("Can only run with --graph if --iterations=1");
+        }
+
+        self.load_benchmark_cmd_from_args()?;
+        let mut results = self.graph_params.results_writer()?;
+        for run in self.graph_params.clone().runs() {
+            self.benchmark_cmd
+                .as_mut()
+                .unwrap()
+                .update_from(run.as_args());
+            let run_results = self.run().await?;
+
+            assert_eq!(run_results.len(), 1);
+            results.write_result(run.x_value(), run_results.into_iter().next().unwrap())?;
+        }
+
         Ok(())
     }
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let benchmark_cmd_runner = BenchmarkRunner::parse();
+    let mut benchmark_cmd_runner = BenchmarkRunner::parse();
     benchmark_cmd_runner
         .tracing
         .init("benchmarks", "benchmark-deployment")?;
 
-    benchmark_cmd_runner.run().await
+    if benchmark_cmd_runner.graph_params.graph {
+        benchmark_cmd_runner.run_graph().await?;
+    } else {
+        benchmark_cmd_runner.run().await?;
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

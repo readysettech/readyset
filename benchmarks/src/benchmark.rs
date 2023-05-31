@@ -11,6 +11,7 @@
 //!     - Add the type's name as a variant `Benchmark`.
 
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::str::FromStr;
 
 use anyhow::Result;
@@ -73,6 +74,28 @@ impl Benchmark {
             Self::FallbackBenchmark(_) => "fallback_benchmark",
             Self::SingleQueryBenchmark(_) => "single_query_benchmark",
             Self::WorkloadEmulator(_) => "workload_emulator",
+        }
+    }
+
+    pub fn update_from<I, T>(&mut self, itr: I)
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<OsString> + Clone,
+    {
+        match self {
+            Benchmark::Template(x) => x.update_from(itr),
+            Benchmark::QueryBenchmark(x) => x.update_from(itr),
+            Benchmark::WriteBenchmark(x) => x.update_from(itr),
+            Benchmark::CacheHitBenchmark(x) => x.update_from(itr),
+            Benchmark::ScaleViews(x) => x.update_from(itr),
+            Benchmark::ScaleConnections(x) => x.update_from(itr),
+            Benchmark::WriteLatencyBenchmark(x) => x.update_from(itr),
+            Benchmark::MigrationBenchmark(x) => x.update_from(itr),
+            Benchmark::EvictionBenchmark(x) => x.update_from(itr),
+            Benchmark::ReadWriteBenchmark(x) => x.update_from(itr),
+            Benchmark::FallbackBenchmark(x) => x.update_from(itr),
+            Benchmark::SingleQueryBenchmark(x) => x.update_from(itr),
+            Benchmark::WorkloadEmulator(x) => x.update_from(itr),
         }
     }
 }

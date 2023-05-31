@@ -84,6 +84,7 @@
 #![feature(const_float_bits_conv, type_alias_impl_trait)]
 
 pub mod benchmark;
+pub mod graph;
 pub mod reporting;
 pub mod spec;
 pub mod template;

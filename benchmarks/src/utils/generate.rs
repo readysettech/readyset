@@ -39,8 +39,8 @@ pub struct DataGenerator {
 
     /// Change or assign values to user variables in the provided schema.
     /// The format is a json map, for example "{ 'user_rows': '10000', 'article_rows': '100' }"
-    #[clap(long, default_value = "{}")]
-    var_overrides: serde_json::Value,
+    #[clap(long)]
+    var_overrides: Option<serde_json::Value>,
 }
 
 fn multi_ddl(input: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<SqlQuery>> {
@@ -55,7 +55,7 @@ impl DataGenerator {
     pub fn new<P: Into<PathBuf>>(schema: P) -> Self {
         DataGenerator {
             schema: schema.into(),
-            var_overrides: json!({}),
+            var_overrides: None,
         }
     }
 
@@ -143,6 +143,8 @@ impl DataGenerator {
     pub async fn generate(&self, conn_str: &str) -> anyhow::Result<DatabaseGenerationSpec> {
         let user_vars: HashMap<String, String> = self
             .var_overrides
+            .clone()
+            .unwrap_or_else(|| json!({}))
             .as_object()
             .expect("var-overrides should be formatted as a json map")
             .into_iter()

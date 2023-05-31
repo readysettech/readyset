@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 tokio = { workspace = true, features = ["full"] }
 anyhow = "1.0.38"
+csv = "1.2"
 nom = "7.1"
 nom_locate = "4.0.0"
 rand = "0.8.3"

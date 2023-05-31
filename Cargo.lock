@@ -68,42 +68,51 @@ dependencies = [
 
 [[package]]
 name = "anstream"
-version = "0.2.6"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "342258dd14006105c2b75ab1bd7543a03bdf0cfc94383303ac212a04939dff6f"
+checksum = "0ca84f3628370c59db74ee214b3263d58f9aadd9b4fe7e711fd87dc452b7f163"
 dependencies = [
  "anstyle",
  "anstyle-parse",
+ "anstyle-query",
  "anstyle-wincon",
- "concolor-override",
- "concolor-query",
+ "colorchoice",
  "is-terminal",
  "utf8parse",
 ]
 
 [[package]]
 name = "anstyle"
-version = "0.3.5"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23ea9e81bd02e310c216d080f6223c179012256e5151c41db88d12c88a1684d2"
+checksum = "41ed9a86bf92ae6580e0a31281f65a1b1d867c0cc68d5346e2ae128dddfa6a7d"
 
 [[package]]
 name = "anstyle-parse"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7d1bb534e9efed14f3e5f44e7dd1a4f709384023a4165199a4241e18dff0116"
+checksum = "e765fd216e48e067936442276d1d57399e37bce53c264d6fefbe298080cb57ee"
 dependencies = [
  "utf8parse",
 ]
 
 [[package]]
-name = "anstyle-wincon"
-version = "0.2.0"
+name = "anstyle-query"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3127af6145b149f3287bb9a0d10ad9c5692dba8c53ad48285e5bec4063834fa"
+checksum = "5ca11d4be1bab0c8bc8734a9aa7bf4ee8316d462a08c6ac5052f888fef5b494b"
+dependencies = [
+ "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "anstyle-wincon"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "180abfa45703aebe0093f79badacc01b8fd4ea2e35118747e5811127f926e188"
 dependencies = [
  "anstyle",
- "windows-sys 0.45.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -320,7 +329,8 @@ dependencies = [
  "async-trait",
  "atomic-counter",
  "chrono",
- "clap 4.2.1",
+ "clap 4.3.2",
+ "csv",
  "data-generator",
  "database-utils",
  "enum_dispatch",
@@ -484,18 +494,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bstr"
-version = "0.2.17"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba3569f383e8f1598449f1a423e72e99569137b47740b1da11ef19af3d5c3223"
-dependencies = [
- "lazy_static",
- "memchr",
- "regex-automata",
- "serde",
-]
-
-[[package]]
 name = "bufstream"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -655,9 +653,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.2.1"
+version = "4.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "046ae530c528f252094e4a77886ee1374437744b2bff1497aa898bbddbbb29b3"
+checksum = "401a4694d2bf92537b6867d94de48c4842089645fdcdf6c71865b175d836e9c2"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -666,9 +664,9 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.2.1"
+version = "4.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "223163f58c9a40c3b0a43e1c4b50a9ce09f007ea2cb1ec258a687945b4b7929f"
+checksum = "72394f3339a76daf211e57d4bcb374410f3965dcc606dd0e03738c7888766980"
 dependencies = [
  "anstream",
  "anstyle",
@@ -680,9 +678,9 @@ dependencies = [
 
 [[package]]
 name = "clap_derive"
-version = "4.2.0"
+version = "4.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f9644cd56d6b87dbe899ef8b053e331c0637664e9e21a33dfcdc36093f5c5c4"
+checksum = "b8cd2b2a819ad6eec39e8f1d6b53001af1e5469f8c177579cdaeb313115b825f"
 dependencies = [
  "heck 0.4.1",
  "proc-macro2 1.0.56",
@@ -692,9 +690,9 @@ dependencies = [
 
 [[package]]
 name = "clap_lex"
-version = "0.4.1"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a2dd5a6fe8c6e3502f568a6353e5273bbb15193ad9a89e457b9970798efbea1"
+checksum = "2da6da31387c7e4ef160ffab6d5e7f00c42626fe39aea70a7b0f1773f7dd6c1b"
 
 [[package]]
 name = "clipboard-win"
@@ -735,19 +733,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "concolor-override"
+name = "colorchoice"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a855d4a1978dc52fb0536a04d384c2c0c1aa273597f08b77c8c4d3b2eec6037f"
-
-[[package]]
-name = "concolor-query"
-version = "0.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "88d11d52c3d7ca2e6d0040212be9e4dbbcd78b6447f535b6b561f449427944cf"
-dependencies = [
- "windows-sys 0.45.0",
-]
+checksum = "acbf1af155f9b9ef647e42cdc158db4b64a1b61f743629225fde6f3e0be2a7c7"
 
 [[package]]
 name = "concrete-iter"
@@ -987,13 +976,12 @@ dependencies = [
 
 [[package]]
 name = "csv"
-version = "1.1.6"
+version = "1.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22813a6dc45b335f9bade10bf7271dc477e81113e89eb251a0bc2a8a81c536e1"
+checksum = "626ae34994d3d8d668f4269922248239db4ae42d538b14c398b74a52208e8086"
 dependencies = [
- "bstr",
  "csv-core",
- "itoa 0.4.8",
+ "itoa 1.0.4",
  "ryu",
  "serde",
 ]
@@ -1171,7 +1159,7 @@ name = "database-utils"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "clap 4.2.1",
+ "clap 4.3.2",
  "derive_more",
  "futures",
  "mysql_async",
@@ -1220,7 +1208,7 @@ dependencies = [
  "ahash 0.7.6",
  "anyhow",
  "bincode",
- "clap 4.2.1",
+ "clap 4.3.2",
  "criterion",
  "derive_more",
  "hashbag",
@@ -2733,7 +2721,7 @@ dependencies = [
  "async-trait",
  "bit-vec",
  "chrono",
- "clap 4.2.1",
+ "clap 4.3.2",
  "derive_more",
  "futures",
  "futures-executor",
@@ -3121,7 +3109,7 @@ dependencies = [
  "assert_approx_eq",
  "bincode",
  "bit-vec",
- "clap 4.2.1",
+ "clap 4.3.2",
  "concrete-iter",
  "criterion",
  "derive_more",
@@ -4018,7 +4006,7 @@ dependencies = [
  "anyhow",
  "bit-vec",
  "chrono",
- "clap 4.2.1",
+ "clap 4.3.2",
  "data-generator",
  "derive_more",
  "eui48",
@@ -4297,7 +4285,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
- "clap 4.2.1",
+ "clap 4.3.2",
  "database-utils",
  "fail",
  "failpoint-macros",
@@ -4343,7 +4331,7 @@ dependencies = [
  "bincode",
  "bit-vec",
  "chrono",
- "clap 4.2.1",
+ "clap 4.3.2",
  "criterion",
  "dashmap 4.0.2",
  "database-utils",
@@ -4408,7 +4396,7 @@ dependencies = [
  "byteorder",
  "bytes 1.3.0",
  "chrono",
- "clap 4.2.1",
+ "clap 4.3.2",
  "cloudflare-zlib",
  "consulrs",
  "dataflow-expression",
@@ -4620,7 +4608,7 @@ dependencies = [
  "anyhow",
  "backoff",
  "bincode",
- "clap 4.2.1",
+ "clap 4.3.2",
  "criterion",
  "dataflow-expression",
  "dataflow-state",
@@ -4700,7 +4688,7 @@ dependencies = [
  "bit-vec",
  "bytes 1.3.0",
  "chrono",
- "clap 4.2.1",
+ "clap 4.3.2",
  "console",
  "database-utils",
  "derive_more",
@@ -4771,7 +4759,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
- "clap 4.2.1",
+ "clap 4.3.2",
  "derive_more",
  "fail",
  "failpoint-macros",
@@ -4817,7 +4805,7 @@ dependencies = [
  "bit-vec",
  "chrono",
  "cidr",
- "clap 4.2.1",
+ "clap 4.3.2",
  "criterion",
  "eui48",
  "fail",
@@ -4860,7 +4848,7 @@ name = "readyset-repl"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.2.1",
+ "clap 4.3.2",
  "console",
  "database-utils",
  "nom",
@@ -4888,7 +4876,7 @@ dependencies = [
  "bincode",
  "catalog-tables",
  "chrono",
- "clap 4.2.1",
+ "clap 4.3.2",
  "criterion",
  "database-utils",
  "derive_more",
@@ -5012,7 +5000,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bincode",
- "clap 4.2.1",
+ "clap 4.3.2",
  "hyper",
  "readyset-client",
  "readyset-server",
@@ -5025,7 +5013,7 @@ name = "readyset-tracing"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.2.1",
+ "clap 4.3.2",
  "lazy_static",
  "once_cell",
  "opentelemetry",
@@ -5135,7 +5123,7 @@ dependencies = [
  "bit-vec",
  "bytes 1.3.0",
  "chrono",
- "clap 4.2.1",
+ "clap 4.3.2",
  "database-utils",
  "deadpool-postgres",
  "fail",
@@ -5995,7 +5983,7 @@ dependencies = [
  "anyhow",
  "benchmarks",
  "bincode",
- "clap 4.2.1",
+ "clap 4.3.2",
  "core_affinity",
  "criterion",
  "database-utils",
@@ -6644,8 +6632,8 @@ version = "1.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
- "cfg-if 0.1.10",
- "rand 0.7.3",
+ "cfg-if 1.0.0",
+ "rand 0.8.5",
  "static_assertions",
 ]
 
