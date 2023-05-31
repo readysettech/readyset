@@ -1132,7 +1132,7 @@ async fn replication_of_other_tables_succeeds_even_after_error() {
 
     let (config, _handle, shutdown_tx) = TestBuilder::default()
         .recreate_database(false)
-        .fallback_url(PostgreSQLAdapter::url())
+        .fallback_url(PostgreSQLAdapter::upstream_url("noria"))
         .migration_mode(MigrationMode::InRequestPath)
         .build::<PostgreSQLAdapter>()
         .await;
