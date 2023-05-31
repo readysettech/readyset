@@ -8,6 +8,7 @@ use itertools::Itertools;
 use lazy_static::lazy_static;
 use petgraph::visit::EdgeRef;
 use petgraph::Direction;
+use readyset_client::ViewPlaceholder;
 use regex::Regex;
 
 use crate::graph::MirGraph;
@@ -224,8 +225,23 @@ impl GraphViz for MirNodeInner {
                 aggregates,
                 ..
             } => {
-                let key_cols = keys.iter().map(|k| &k.0).join(", ");
-                write!(f, "Leaf | ⚷: {index_type:?}[{key_cols}]")?;
+                write!(f, "Leaf | ⚷: {index_type:?}[")?;
+                for (i, (col, placeholder)) in keys.iter().enumerate() {
+                    if i != 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{col}")?;
+                    match placeholder {
+                        ViewPlaceholder::Generated => write!(f, " (gen)"),
+                        ViewPlaceholder::OneToOne(idx, op) => write!(f, " {op} ${idx}"),
+                        ViewPlaceholder::Between(min, max) => write!(f, " BETWEEN {min} AND {max}"),
+                        ViewPlaceholder::PageNumber {
+                            offset_placeholder,
+                            limit,
+                        } => write!(f, " PAGE ${offset_placeholder} PER {limit}"),
+                    }?
+                }
+                write!(f, "]")?;
 
                 if let Some(order_by) = order_by {
                     write!(
