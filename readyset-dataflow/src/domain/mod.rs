@@ -228,6 +228,9 @@ struct Waiting {
     /// For each eventual redo, how many holes are we waiting for?
     holes: HashMap<Redo, usize>,
     /// For each hole, which redos do we expect we'll have to do?
+    ///
+    /// Note that for extended replay paths, the `Hole` is in the *target* of the path, *not* the
+    /// destination
     redos: HashMap<Hole, HashSet<Redo>>,
 }
 
@@ -2821,9 +2824,9 @@ impl Domain {
                 .borrow()
                 .is_sender();
             // Is the target of this replay path inside this domain?
-            let target_in_self = path.iter().any(|n| n.is_target);
+            let target_segment = path.iter().find(|n| n.is_target);
 
-            if target_in_self {
+            if let Some(target_segment) = target_segment {
                 // If this replay path is bound for us, prune keys and data for keys we're
                 // not waiting for
                 if let ReplayPieceContext::Partial {
@@ -2831,7 +2834,7 @@ impl Domain {
                 } = context
                 {
                     let had = for_keys.len();
-                    let partial_index = path.last().partial_index.as_ref().unwrap();
+                    let partial_index = target_segment.partial_index.as_ref().unwrap();
                     if let Some(w) = self.waiting.get(dst) {
                         // discard all the keys that we aren't waiting for
                         for_keys.retain(|k| {
