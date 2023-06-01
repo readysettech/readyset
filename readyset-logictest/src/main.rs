@@ -299,7 +299,7 @@ struct Verify {
     #[clap(long, short = 'z', env = "AUTHORITY_ADDRESS", default_value = "")]
     authority_address: String,
 
-    /// The authority to use. Possible values: zookeeper, consul, local.
+    /// The authority to use. Possible values: consul, local.
     #[clap(long, env = "AUTHORITY", default_value = "local", value_enum)]
     authority: AuthorityType,
 }

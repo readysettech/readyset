@@ -1076,7 +1076,7 @@ mod tests {
 
         authority
             .become_leader(LeaderPayload {
-                controller_uri: url::Url::parse("http://127.0.0.1:2181").unwrap(),
+                controller_uri: url::Url::parse("http://127.0.0.1:8500").unwrap(),
                 nonce: 1,
             })
             .await
@@ -1118,7 +1118,7 @@ mod tests {
         authority.delete_all_keys().await;
 
         let payload = LeaderPayload {
-            controller_uri: url::Url::parse("http://127.0.0.1:2181").unwrap(),
+            controller_uri: url::Url::parse("http://127.0.0.1:8500").unwrap(),
             nonce: 1,
         };
         let expected_leader_payload = payload.clone();
@@ -1230,7 +1230,7 @@ mod tests {
         authority.delete_all_keys().await;
 
         let payload = LeaderPayload {
-            controller_uri: url::Url::parse("http://127.0.0.1:2181").unwrap(),
+            controller_uri: url::Url::parse("http://127.0.0.1:8500").unwrap(),
             nonce: 1,
         };
 
@@ -1298,7 +1298,7 @@ mod tests {
         authority.delete_all_keys().await;
 
         let payload = LeaderPayload {
-            controller_uri: url::Url::parse("http://127.0.0.1:2181").unwrap(),
+            controller_uri: url::Url::parse("http://127.0.0.1:8500").unwrap(),
             nonce: 1,
         };
 
@@ -1349,7 +1349,7 @@ mod tests {
         authority.destroy_session().await.unwrap();
 
         let payload = LeaderPayload {
-            controller_uri: url::Url::parse("http://127.0.0.1:2181").unwrap(),
+            controller_uri: url::Url::parse("http://127.0.0.1:8500").unwrap(),
             nonce: 2,
         };
 
@@ -1581,7 +1581,7 @@ mod tests {
         authority.delete_all_keys().await;
 
         let payload = LeaderPayload {
-            controller_uri: url::Url::parse("http://127.0.0.1:2181").unwrap(),
+            controller_uri: url::Url::parse("http://127.0.0.1:8500").unwrap(),
             nonce: 1,
         };
 

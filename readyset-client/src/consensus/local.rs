@@ -1,5 +1,5 @@
 //! LocalAuthority is replicating the abstraction over the different authority
-//! systems (Zookeeper, Consul, etcd) but for a single process and in memory
+//! systems (Consul, etcd) but for a single process and in memory
 //! instead of requiring a server.
 //!
 //! As such, it is maintaining a separation between the Store and Authority. In
@@ -10,7 +10,7 @@
 //! from LocalAuthorityStore when it last checked in.
 //!
 //! The LocalAuthority supports ephemeral keys, instead of tying these keys to
-//! an active session similar to Zookeeper, the authority will drop ephemeral
+//! an active session similar to Consul, the authority will drop ephemeral
 //! keys it created when it is dropped.
 use std::any::Any;
 use std::collections::btree_map::Entry;

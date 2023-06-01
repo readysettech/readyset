@@ -1,4 +1,4 @@
-//! Trait for interacting with an conensus system (Zookeeper, Consul, etcd) to determine
+//! Trait for interacting with an conensus system (Consul, etcd) to determine
 //! which ReadySet worker acts as the controller, which ReadySet workers exist, detecting failed
 //! workers which necessitate changes, and storing cluster wide global state.
 
@@ -19,12 +19,10 @@ use url::Url;
 mod consul;
 mod local;
 mod standalone;
-pub mod zk;
 
 pub use self::consul::ConsulAuthority;
 pub use self::local::{LocalAuthority, LocalAuthorityStore};
 pub use self::standalone::StandaloneAuthority;
-pub use self::zk::ZookeeperAuthority;
 use crate::ControllerDescriptor;
 
 // This should be an associated type on Authority but since Authority will only have one possible
@@ -236,7 +234,6 @@ pub trait AuthorityControl: Send + Sync {
 #[allow(clippy::large_enum_variant)]
 #[enum_dispatch(AuthorityControl)]
 pub enum Authority {
-    ZookeeperAuthority,
     ConsulAuthority,
     LocalAuthority,
     StandaloneAuthority,
@@ -245,7 +242,6 @@ pub enum Authority {
 /// Enum that mirrors Authority that parses command line arguments.
 #[derive(Clone, Debug, Eq, PartialEq, ValueEnum)]
 pub enum AuthorityType {
-    Zookeeper,
     Consul,
     Local,
     Standalone,
@@ -255,7 +251,6 @@ impl FromStr for AuthorityType {
     type Err = anyhow::Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "zookeeper" => Ok(AuthorityType::Zookeeper),
             "consul" => Ok(AuthorityType::Consul),
             "local" => Ok(AuthorityType::Local),
             "standalone" => Ok(AuthorityType::Standalone),
@@ -267,7 +262,6 @@ impl FromStr for AuthorityType {
 impl Display for AuthorityType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self {
-            AuthorityType::Zookeeper => write!(f, "zookeeper"),
             AuthorityType::Consul => write!(f, "consul"),
             AuthorityType::Local => write!(f, "local"),
             AuthorityType::Standalone => write!(f, "standalone"),
@@ -278,11 +272,6 @@ impl Display for AuthorityType {
 impl AuthorityType {
     pub async fn to_authority(&self, addr: &str, deployment: &str) -> Authority {
         match self {
-            AuthorityType::Zookeeper => Authority::from(
-                ZookeeperAuthority::new(&format!("{}/{}", addr, deployment))
-                    .await
-                    .unwrap(),
-            ),
             AuthorityType::Consul => Authority::from(
                 ConsulAuthority::new(&format!("http://{}/{}", addr, deployment)).unwrap(),
             ),

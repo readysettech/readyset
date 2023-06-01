@@ -19,10 +19,10 @@ a PostgreSQL server), pass `-a <IP>:<PORT>`, making sure to specify the desired
 bind ip as well.
 
 ## Connecting to Noria
-The PostgreSQL adapter uses ZooKeeper to find the Noria server. To specify the
-ZooKeeper server location, pass the `--authority-address` argument:
+The PostgreSQL adapter uses Consul to find the Noria server. To specify the
+Consul server location, pass the `--authority-address` argument:
 
 ```console
-$ cargo run --release -- --deployment $DEPLOYMENT_ID --authority-address 172.16.0.19:2181
+$ cargo run --release -- --deployment $DEPLOYMENT_ID --authority-address 172.16.0.19:8500
 ```
-... for a ZooKeeper server listening on port `2181` at IP `172.16.0.19`.
+... for a Consul server listening on port `8500` at IP `172.16.0.19`.

@@ -29,7 +29,7 @@ struct NoriaClientOpts {
         long,
         required_if_eq("database-type", "noria"),
         env("AUTHORITY_ADDRESS"),
-        default_value("127.0.0.1:2181")
+        default_value("127.0.0.1:8500")
     )]
     authority_address: String,
 
@@ -37,8 +37,8 @@ struct NoriaClientOpts {
         long,
         env("AUTHORITY"),
         required_if_eq("database-type", "noria"),
-        default_value("zookeeper"),
-        value_parser = ["consul", "zookeeper"]
+        default_value("consul"),
+        value_parser = ["consul"]
     )]
     authority: AuthorityType,
 

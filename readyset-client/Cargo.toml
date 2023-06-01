@@ -67,7 +67,6 @@ triomphe = "0.1"
 streaming-iterator = "0.1"
 
 # consensus/
-zookeeper-async = "4.0.1"
 enum_dispatch = "0.3.7"
 async-trait = "0.1"
 consulrs = { workspace = true }

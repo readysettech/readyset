@@ -24,5 +24,4 @@ tikv-jemalloc-ctl = "0.5.0"
 readyset-util = { path = "../readyset-util" }
 deadpool-postgres = "0.10.3"
 failpoint-macros = { path = "../failpoint-macros" }
-zookeeper-async = "4.0.1"
 tokio-native-tls = "0.3.1"

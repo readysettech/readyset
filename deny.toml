@@ -192,7 +192,6 @@ skip = [
 # by default infinite
 skip-tree = [
     { name = "rusty-fork", version = "0.3.0" },
-    { name = "zookeeper", version = "0.6.1" },
     { name = "fail", version = "0.5.0" },
     { name = "rust_decimal", version = "1.17.0" },
     { name = "prometheus-http-query", version = "0.3.0" },

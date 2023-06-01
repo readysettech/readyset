@@ -158,15 +158,6 @@ pub enum ReadySetError {
         source: Box<ReadySetError>,
     },
 
-    /// A connection to Apache ZooKeeper failed.
-    #[error("Failed to connect to ZooKeeper at '{connect_string}': {reason}")]
-    ZookeeperConnectionFailed {
-        /// The connection string used to connect to ZooKeeper.
-        connect_string: String,
-        /// A textual reason why the connection failed.
-        reason: String,
-    },
-
     /// An error occurred while sending on a TCP socket.
     #[error("TCP send error: {0}")]
     TcpSendError(String),
@@ -661,10 +652,6 @@ pub enum ReadySetError {
     /// Error interacting with a Consul server
     #[error("Consul error: {0}")]
     ConsulError(String),
-
-    /// Error interacting with Zookeeper
-    #[error("Zookeeper error: {0}")]
-    ZookeeperError(String),
 
     /// A query contains placeholders in positions that are unsupported by ReadySet.
     #[error("Query contains placeholders in unsupported positions")]
@@ -1169,7 +1156,6 @@ impl_from_to_string!(deadpool_postgres::BuildError, ReplicationFailed);
 impl_from_to_string!(io::Error, IOError);
 impl_from_to_string!(tikv_jemalloc_ctl::Error, JemallocCtlError);
 impl_from_to_string!(consulrs::error::ClientError, ConsulError);
-impl_from_to_string!(zookeeper_async::ZkError, ZookeeperError);
 impl_from_to_string!(tokio_native_tls::native_tls::Error, NativeTlsError);
 
 impl From<Size0Error> for ReadySetError {

@@ -313,7 +313,7 @@ mod tests {
         assert_eq!(authority.try_read("/a").await.unwrap(), Some(12));
 
         let payload = LeaderPayload {
-            controller_uri: url::Url::parse("http://127.0.0.1:2181").unwrap(),
+            controller_uri: url::Url::parse("http://127.0.0.1:8500").unwrap(),
             nonce: 1,
         };
         let expected_leader_payload = payload.clone();
@@ -413,7 +413,7 @@ mod tests {
 
         authority
             .become_leader(LeaderPayload {
-                controller_uri: url::Url::parse("http://127.0.0.1:2181").unwrap(),
+                controller_uri: url::Url::parse("http://127.0.0.1:8500").unwrap(),
                 nonce: 1,
             })
             .await

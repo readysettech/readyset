@@ -100,7 +100,6 @@ struct Options {
         env = "AUTHORITY_ADDRESS",
         default_value_if("authority", "standalone", Some(".")),
         default_value_if("authority", "consul", Some("127.0.0.1:8500")),
-        default_value_if("authority", "zookeeper", Some("127.0.0.1:2181")),
         required = false
     )]
     authority_address: String,

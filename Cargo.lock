@@ -167,7 +167,7 @@ checksum = "2a31c08aa335b3ab414d29bdefe1f4353408abf93f3db1e3e2cc78d3ec4f0d43"
 dependencies = [
  "bincode",
  "byteorder",
- "bytes 1.3.0",
+ "bytes",
  "futures-core",
  "futures-sink",
  "serde",
@@ -238,7 +238,7 @@ dependencies = [
  "async-trait",
  "axum-core",
  "bitflags",
- "bytes 1.3.0",
+ "bytes",
  "futures-util",
  "http",
  "http-body",
@@ -265,7 +265,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3bdc19781b16e32f8a7200368a336fa4509d4b72ef15dd4e41df5290855ee1e6"
 dependencies = [
  "async-trait",
- "bytes 1.3.0",
+ "bytes",
  "futures-util",
  "http",
  "http-body",
@@ -522,12 +522,6 @@ name = "byteorder"
 version = "1.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "14c189c53d098945499cdfa7ecc63567cf3886b3332b312a5b4585d8d3a6a610"
-
-[[package]]
-name = "bytes"
-version = "0.5.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e4cec68f03f32e44924783795810fa50a7035d8c8ebe78580ad7e6c703fba38"
 
 [[package]]
 name = "bytes"
@@ -1937,7 +1931,7 @@ version = "0.3.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "17f8a914c2987b688368b5138aa05321db91f4090cf26118185672ad588bce21"
 dependencies = [
- "bytes 1.3.0",
+ "bytes",
  "fnv",
  "futures-core",
  "futures-sink",
@@ -2062,7 +2056,7 @@ version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1323096b05d41827dadeaee54c9981958c0f94e670bc94ed80037d1a7b8b186b"
 dependencies = [
- "bytes 1.3.0",
+ "bytes",
  "fnv",
  "itoa 0.4.8",
 ]
@@ -2073,7 +2067,7 @@ version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ff4f84919677303da5f147645dbea6b1881f368d03ac84e1dc09031ebd7b2c6"
 dependencies = [
- "bytes 1.3.0",
+ "bytes",
  "http",
  "pin-project-lite",
 ]
@@ -2108,7 +2102,7 @@ version = "0.14.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "436ec0091e4f20e655156a30a0df3770fe2900aa301e548e08446ec794b6953c"
 dependencies = [
- "bytes 1.3.0",
+ "bytes",
  "futures-channel",
  "futures-core",
  "futures-util",
@@ -2144,7 +2138,7 @@ version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6183ddfa99b85da61a140bea0efc93fdf56ceaa041b37d553518030827f9905"
 dependencies = [
- "bytes 1.3.0",
+ "bytes",
  "hyper",
  "native-tls",
  "tokio",
@@ -2885,7 +2879,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "05f11339ca5c251941805d51362a07823605a80586ced92914ab7de84fba813f"
 dependencies = [
  "bufstream",
- "bytes 1.3.0",
+ "bytes",
  "crossbeam",
  "flate2",
  "io-enum",
@@ -2949,7 +2943,7 @@ name = "mysql_async"
 version = "0.31.3"
 source = "git+https://github.com/readysettech/mysql_async#c8a4278869aab876f73449fd2c6d61f154d5b350"
 dependencies = [
- "bytes 1.3.0",
+ "bytes",
  "crossbeam",
  "flate2",
  "futures-core",
@@ -2987,7 +2981,7 @@ dependencies = [
  "bitflags",
  "bitvec",
  "byteorder",
- "bytes 1.3.0",
+ "bytes",
  "cc",
  "chrono",
  "cmake",
@@ -3245,28 +3239,6 @@ checksum = "0fac9e2da13b5eb447a6ce3d392f23a29d8694bff781bf03a16cd9ac8697593b"
 dependencies = [
  "hermit-abi 0.2.6",
  "libc",
-]
-
-[[package]]
-name = "num_enum"
-version = "0.5.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f9bd055fb730c4f8f4f57d45d35cd6b3f0980535b056dc7ff119cee6a66ed6f"
-dependencies = [
- "derivative",
- "num_enum_derive",
-]
-
-[[package]]
-name = "num_enum_derive"
-version = "0.5.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "486ea01961c4a818096de679a8b740b26d9033146ac5291b1c98557658f8cdd9"
-dependencies = [
- "proc-macro-crate",
- "proc-macro2 1.0.56",
- "quote 1.0.26",
- "syn 1.0.109",
 ]
 
 [[package]]
@@ -3693,7 +3665,7 @@ version = "0.19.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8bbcd5f6deb39585a0d9f4ef34c4a41c25b7ad26d23c75d837d78c8e7adc85f"
 dependencies = [
- "bytes 1.3.0",
+ "bytes",
  "fallible-iterator",
  "futures",
  "log",
@@ -3706,7 +3678,7 @@ name = "postgres"
 version = "0.19.4"
 source = "git+https://github.com/readysettech/rust-postgres.git#5302d7ed0b9cca0b4672b8a3fdde21c7b0643f3d"
 dependencies = [
- "bytes 1.3.0",
+ "bytes",
  "fallible-iterator",
  "futures-util",
  "log",
@@ -3742,7 +3714,7 @@ source = "git+https://github.com/readysettech/rust-postgres.git#5302d7ed0b9cca0b
 dependencies = [
  "base64 0.20.0",
  "byteorder",
- "bytes 1.3.0",
+ "bytes",
  "fallible-iterator",
  "hmac",
  "md-5",
@@ -3758,7 +3730,7 @@ version = "0.2.4"
 source = "git+https://github.com/readysettech/rust-postgres.git#5302d7ed0b9cca0b4672b8a3fdde21c7b0643f3d"
 dependencies = [
  "bit-vec",
- "bytes 1.3.0",
+ "bytes",
  "chrono",
  "cidr",
  "eui48",
@@ -3816,16 +3788,6 @@ dependencies = [
  "lazy_static",
  "term",
  "unicode-width",
-]
-
-[[package]]
-name = "proc-macro-crate"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ebace6889caf889b4d3f76becee12e90353f2b8c7d875534a71e5742f8f6f83"
-dependencies = [
- "thiserror",
- "toml",
 ]
 
 [[package]]
@@ -3918,7 +3880,7 @@ version = "0.11.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "21dc42e00223fc37204bd4aa177e69420c604ca4a183209a8f9de30c6d934698"
 dependencies = [
- "bytes 1.3.0",
+ "bytes",
  "prost-derive",
 ]
 
@@ -3951,7 +3913,7 @@ dependencies = [
  "async-trait",
  "base64 0.21.0",
  "bit-vec",
- "bytes 1.3.0",
+ "bytes",
  "chrono",
  "cidr",
  "database-utils",
@@ -4394,7 +4356,7 @@ dependencies = [
  "bit-vec",
  "bufstream",
  "byteorder",
- "bytes 1.3.0",
+ "bytes",
  "chrono",
  "clap 4.3.2",
  "cloudflare-zlib",
@@ -4458,7 +4420,6 @@ dependencies = [
  "uuid 0.8.2",
  "vec1",
  "vec_map",
- "zookeeper-async",
 ]
 
 [[package]]
@@ -4563,7 +4524,7 @@ dependencies = [
  "anyhow",
  "bincode",
  "bit-vec",
- "bytes 1.3.0",
+ "bytes",
  "chrono",
  "cidr",
  "criterion",
@@ -4677,7 +4638,6 @@ dependencies = [
  "tokio-postgres",
  "url",
  "vec1",
- "zookeeper-async",
 ]
 
 [[package]]
@@ -4686,7 +4646,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bit-vec",
- "bytes 1.3.0",
+ "bytes",
  "chrono",
  "clap 4.3.2",
  "console",
@@ -4952,7 +4912,6 @@ dependencies = [
  "url",
  "vec1",
  "vec_map",
- "zookeeper",
 ]
 
 [[package]]
@@ -5121,7 +5080,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bit-vec",
- "bytes 1.3.0",
+ "bytes",
  "chrono",
  "clap 4.3.2",
  "database-utils",
@@ -5172,7 +5131,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "46a1f7aa4f35e5e8b4160449f51afc758f0ce6454315a9fa7d0d113e958c41eb"
 dependencies = [
  "base64 0.13.0",
- "bytes 1.3.0",
+ "bytes",
  "encoding_rs",
  "futures-core",
  "futures-util",
@@ -5255,7 +5214,7 @@ checksum = "ee9164faf726e4f3ece4978b25ca877ddc6802fa77f38cdccb32c7f805ecd70c"
 dependencies = [
  "arrayvec 0.7.2",
  "byteorder",
- "bytes 1.3.0",
+ "bytes",
  "num-traits",
  "postgres 0.19.3",
  "serde",
@@ -5290,7 +5249,7 @@ source = "git+https://github.com/readysettech/rustify?branch=log-messages#f3c110
 dependencies = [
  "anyhow",
  "async-trait",
- "bytes 1.3.0",
+ "bytes",
  "http",
  "reqwest",
  "rustify_derive",
@@ -5724,12 +5683,6 @@ name = "smawk"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f67ad224767faa3c7d8b6d91985b78e70a1324408abcb1cfcc2be4c06bc06043"
-
-[[package]]
-name = "snowflake"
-version = "1.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "27207bb65232eda1f588cf46db2fee75c0808d557f6b3cf19a75f5d6d7c94df1"
 
 [[package]]
 name = "socket2"
@@ -6243,7 +6196,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0aa32867d44e6f2ce3385e89dceb990188b8bb0fb25b0cf576647a6f98ac5105"
 dependencies = [
  "autocfg",
- "bytes 1.3.0",
+ "bytes",
  "libc",
  "mio 0.8.5",
  "num_cpus",
@@ -6293,7 +6246,7 @@ source = "git+https://github.com/readysettech/rust-postgres.git#5302d7ed0b9cca0b
 dependencies = [
  "async-trait",
  "byteorder",
- "bytes 1.3.0",
+ "bytes",
  "fallible-iterator",
  "futures-channel",
  "futures-util",
@@ -6348,7 +6301,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "53474327ae5e166530d17f2d956afcb4f8a004de581b3cae10f12006bc8163e3"
 dependencies = [
  "async-stream",
- "bytes 1.3.0",
+ "bytes",
  "futures-core",
  "tokio",
  "tokio-stream",
@@ -6377,7 +6330,7 @@ version = "0.6.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9e99e1983e5d376cd8eb4b66604d2e99e79f5bd988c3055891dcd8c9e2604cc0"
 dependencies = [
- "bytes 1.3.0",
+ "bytes",
  "futures-core",
  "futures-sink",
  "log",
@@ -6391,7 +6344,7 @@ version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f988a1a1adc2fb21f9c12aa96441da33a1728193ae0b95d2be22dbd17fcb4e5c"
 dependencies = [
- "bytes 1.3.0",
+ "bytes",
  "futures-core",
  "futures-sink",
  "pin-project-lite",
@@ -6418,7 +6371,7 @@ dependencies = [
  "async-trait",
  "axum",
  "base64 0.13.0",
- "bytes 1.3.0",
+ "bytes",
  "futures-core",
  "futures-util",
  "h2",
@@ -6476,7 +6429,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d342c6d58709c0a6d48d48dabbb62d4ef955cf5f0f3bbfd845838e7ae88dbae"
 dependencies = [
  "bitflags",
- "bytes 1.3.0",
+ "bytes",
  "futures-core",
  "futures-util",
  "http",
@@ -7183,49 +7136,4 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "835688a7a1b5d2dfaeb5b7e1b4cfb979e7095a70cd1c72fe083f4904ef3e995e"
 dependencies = [
  "rand 0.8.5",
-]
-
-[[package]]
-name = "zookeeper"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4c33bece4e00dc8fbd92ad66a0b3f066940bdd075dd40635b555648f16d9e95"
-dependencies = [
- "byteorder",
- "bytes 0.5.6",
- "lazy_static",
- "log",
- "mio 0.6.23",
- "mio-extras",
- "snowflake",
- "zookeeper_derive",
-]
-
-[[package]]
-name = "zookeeper-async"
-version = "4.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ad7fe1d3bac736a306d30a2f9b9af12a0f967d7f61589f55e1957b6fad6e9e8"
-dependencies = [
- "async-trait",
- "byteorder",
- "bytes 1.3.0",
- "derive_more",
- "futures",
- "lazy_static",
- "num_enum",
- "snowflake",
- "tokio",
- "tracing",
- "uuid 0.8.2",
-]
-
-[[package]]
-name = "zookeeper_derive"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42307291e3c8b2e4082e5647572da863f0470511d0ecb1618a4cd0a361549723"
-dependencies = [
- "quote 1.0.26",
- "syn 1.0.109",
 ]

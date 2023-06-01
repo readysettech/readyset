@@ -7,13 +7,13 @@ use readyset_data::Dialect;
 #[derive(Parser)]
 #[clap(name = "extend_recipe")]
 struct ExtendRecipe {
-    #[clap(short, long, env("AUTHORITY_ADDRESS"), default_value("127.0.0.1:2181"))]
+    #[clap(short, long, env("AUTHORITY_ADDRESS"), default_value("127.0.0.1:8500"))]
     authority_address: String,
     #[clap(
         long,
         env("AUTHORITY"),
-        default_value("zookeeper"),
-        value_parser = ["consul", "zookeeper"]
+        default_value("consul"),
+        value_parser = ["consul"]
     )]
     authority: AuthorityType,
     #[clap(short, long, env("DEPLOYMENT"))]

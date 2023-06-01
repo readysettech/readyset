@@ -16,8 +16,8 @@
 //! (potentially distributed) server. The server in this case is the `readyset-server`
 //! binary, and must be started before clients can connect. See `readyset-server --help` for details
 //! and the [ReadySet repository README](https://github.com/readysettech/readyset/) for details.
-//! ReadySet uses [Apache ZooKeeper](https://zookeeper.apache.org/) to announce the location of its
-//! servers, so ZooKeeper must also be running.
+//! ReadySet uses [HasiCorp Consul](https://www.consul.io/) to announce the location of its
+//! servers, so Consul must also be running.
 //!
 //! # Quickstart example
 //!
@@ -26,18 +26,15 @@
 //!
 //! ```no_run
 //! # use readyset_client::*;
-//! # use readyset_client::consensus::Authority;
+//! # use readyset_client::consensus::{Authority, ConsulAuthority};
 //! # use readyset_data::{DfValue, Dialect};
 //! # use readyset_client::recipe::ChangeList;
 //!
 //! #[tokio::main]
 //! async fn main() {
-//!     let zk_auth = Authority::from(
-//!         ZookeeperAuthority::new("127.0.0.1:2181/quickstart")
-//!             .await
-//!             .unwrap(),
-//!     );
-//!     let mut db = ReadySetHandle::new(zk_auth).await;
+//!     let consul_auth =
+//!         Authority::from(ConsulAuthority::new("127.0.0.1:8500/quickstart").unwrap());
+//!     let mut db = ReadySetHandle::new(consul_auth).await;
 //!
 //!     // if this is the first time we interact with ReadySet, we must give it the schema
 //!     db.extend_recipe(
@@ -282,7 +279,6 @@ pub use view::{
     ViewSchema,
 };
 
-pub use crate::consensus::ZookeeperAuthority;
 // FIXME(eta): get rid of these
 use crate::internal::*;
 

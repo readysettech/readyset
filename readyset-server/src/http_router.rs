@@ -11,7 +11,7 @@ use health_reporter::{HealthReporter, State};
 use hyper::header::CONTENT_TYPE;
 use hyper::service::make_service_fn;
 use hyper::{self, Body, Method, Request, Response, StatusCode};
-use readyset_client::consensus::{Authority, AuthorityControl};
+use readyset_client::consensus::Authority;
 use readyset_client::metrics::recorded;
 use readyset_errors::ReadySetError;
 use readyset_util::shutdown::ShutdownReceiver;
@@ -141,22 +141,6 @@ impl Service<Request<Body>> for NoriaServerHttpRouter {
                     .header(CONTENT_TYPE, "text/html")
                     .body(hyper::Body::from(include_str!("graph.html")));
                 Box::pin(async move { Ok(res.unwrap()) })
-            }
-            (&Method::GET, path) if path.starts_with("/zookeeper/") => {
-                let zookeeper_path = path.to_owned();
-                let authority = self.authority.clone();
-                Box::pin(async move {
-                    let res = match authority
-                        .try_read_raw(&format!("/{}", &zookeeper_path["/zookeeper/".len()..]))
-                        .await
-                    {
-                        Ok(Some(data)) => res
-                            .header(CONTENT_TYPE, "application/json")
-                            .body(hyper::Body::from(data)),
-                        _ => res.status(StatusCode::NOT_FOUND).body(hyper::Body::empty()),
-                    };
-                    Ok(res.unwrap())
-                })
             }
             (&Method::GET, "/metrics") => {
                 let render = get_global_recorder().and_then(|r| r.render(RecorderType::Prometheus));

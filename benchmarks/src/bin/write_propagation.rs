@@ -53,10 +53,10 @@ struct Writer {
     #[clap(long)]
     database_url: String,
 
-    #[clap(short, long, env("AUTHORITY_ADDRESS"), default_value("127.0.0.1:2181"))]
+    #[clap(short, long, env("AUTHORITY_ADDRESS"), default_value("127.0.0.1:8500"))]
     authority_address: String,
 
-    #[clap(long, env("AUTHORITY"), default_value("zookeeper"), value_parser = ["consul", "zookeeper"])]
+    #[clap(long, env("AUTHORITY"), default_value("consul"), value_parser = ["consul"])]
     authority: AuthorityType,
 
     #[clap(short, long, env("DEPLOYMENT"), value_parser = NonEmptyStringValueParser::new())]

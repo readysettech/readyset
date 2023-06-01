@@ -41,7 +41,7 @@ const WAIT_FOR_ALL_TABLES_TO_COMPACT_POLL_INTERVAL: Duration = Duration::from_se
 
 /// Describes a running controller instance.
 ///
-/// A serialized version of this struct is stored in ZooKeeper so that clients can reach the
+/// A serialized version of this struct is stored in the Authority so that clients can reach the
 /// currently active controller.
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct ControllerDescriptor {
