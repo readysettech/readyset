@@ -538,10 +538,10 @@ impl TableDescription {
             if binary_row_batches.as_mut().peek().await.is_none() {
                 // This is the last batch of rows we're adding to the table, so batch the RPCs to
                 // set the replication offset and compact the table along with the insertion
-                let span = info_span!(
-                    "Setting replication offset and compacting table",
+                info!(
                     table = %noria_table.table_name().display(Dialect::PostgreSQL),
-                    %wal_position
+                    %wal_position,
+                    "Setting replication offset and compacting table"
                 );
 
                 let capacity = match noria_rows_iter.size_hint() {
@@ -558,7 +558,6 @@ impl TableDescription {
 
                 noria_table.perform_all(actions).await?;
                 set_replication_offset_and_snapshot_mode = true;
-                span.in_scope(|| info!("Compacting finished"));
             } else {
                 noria_table
                     .insert_many(noria_rows_iter.collect::<Result<Vec<_>, _>>()?)
