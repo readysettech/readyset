@@ -3,6 +3,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: readyset-adapter
+  namespace: {{ required "You must pass a namespace" (.Release.Namespace | quote) }}
   labels: {{ include "readyset.labels" . | nindent 4 }}
 spec:
   replicas: 1

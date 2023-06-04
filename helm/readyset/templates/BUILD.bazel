@@ -1,0 +1,24 @@
+filegroup(
+    name = "chart_templates",
+    srcs = glob([
+        "*.yaml",
+        "charts/**",
+    ]),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "chart_helpers",
+    srcs = [
+        "_helpers.tpl",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "chart_notes",
+    srcs = [
+        "NOTES.txt",
+    ],
+    visibility = ["//visibility:public"],
+)

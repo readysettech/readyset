@@ -1,0 +1,6 @@
+filegroup(
+    name = "chart_charts",
+    srcs = [
+        "consul-1.1.1.tgz",
+    ],
+)

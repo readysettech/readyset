@@ -18,7 +18,7 @@ spec:
         - ReadWriteOnce
         resources:
           requests:
-            storage: {{ default "50Gi" .Values.readyset.server.resources.requests.storage }}
+            storage: {{ .Values.readyset.server.resources.requests.storage | default "50Gi" }}
         storageClassName: {{ .Values.kubernetes.storageClass | default (include "readyset.defaultStorageClass" .) }}
   template:
     metadata:

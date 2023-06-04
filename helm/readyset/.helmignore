@@ -1,0 +1,9 @@
+bazel-*
+go.mod
+go.sum
+BUILD.bazel
+WORKSPACE
+repositories.bzl
+*.go
+.gitignore
+TESTING.md

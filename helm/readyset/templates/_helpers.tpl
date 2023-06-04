@@ -42,11 +42,11 @@ app.kubernetes.io/managed-by: {{ .Release.Service | quote }}
 Readyset authority address configuration logic.
 */}}
 {{- define "readyset.selectorLabels" -}}
-{{- if contains "readyset-adapter" .Template.Name }}
+{{- if contains "readyset-adapter" .Template.Name -}}
 app.kubernetes.io/component: adapter
-{{- else if contains "readyset-server" .Template.Name }}
+{{- else if contains "readyset-server" .Template.Name -}}
 app.kubernetes.io/component: server
-{{- end }}
+{{- end -}}
 {{- end }}
 
 {{/*
@@ -93,7 +93,7 @@ Define the database type we're connecting to
 {{ fail "Must pass either 'mysql' or 'postgresql' in the scheme of the URI" }}
 {{- else -}}
 {{- printf "%s" $type -}}
-{{- end }}
+{{- end -}}
 {{- end }}
 
 {{/*

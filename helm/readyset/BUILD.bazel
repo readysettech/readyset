@@ -1,0 +1,48 @@
+load("@bazel_gazelle//:def.bzl", "gazelle")
+load("@io_bazel_rules_go//go:def.bzl", "go_test")
+
+gazelle(
+    name = "update-repos",
+    args = [
+        "-from_file=go.mod",
+        "-to_macro=repositories.bzl%go_repositories",
+    ],
+    command = "update-repos",
+)
+
+# gazelle:prefix readyset_helm_test
+gazelle(name = "gazelle")
+
+filegroup(
+    name = "chart_definition",
+    srcs = [
+        "Chart.lock",
+        "Chart.yaml",
+    ],
+)
+
+filegroup(
+    name = "chart_values",
+    srcs = ["values.yaml"],
+)
+
+go_test(
+    name = "readyset_helm_test_test",
+    size = "large",
+    srcs = ["template_render_test.go"],
+    data = [
+        ":chart_definition",
+        ":chart_values",
+        "//templates:chart_helpers",
+        "//templates:chart_notes",
+        "//templates:chart_templates",
+    ],
+    deps = [
+        "@com_github_gruntwork_io_terratest//modules/helm",
+        "@com_github_gruntwork_io_terratest//modules/k8s",
+        "@com_github_gruntwork_io_terratest//modules/random",
+        "@com_github_stretchr_testify//assert",
+        "@com_github_stretchr_testify//require",
+        "@io_k8s_api//apps/v1:apps",
+    ],
+)
