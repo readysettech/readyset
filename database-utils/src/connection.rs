@@ -136,18 +136,18 @@ impl QueryableConnection for DatabaseConnection {
             DatabaseConnection::MySQL(conn) => Ok(QueryResults::MySql(
                 conn.query_iter(query).await?.collect().await?,
             )),
-            DatabaseConnection::PostgreSQL(client, _jh) => {
-                // TODO: We should use simple_query here instead, because query_raw will still
-                // prepare. simple_query returns a different result type, so may take some work to
-                // get it work properly here.
-                Ok(QueryResults::Postgres(
-                    client
-                        .query_raw(query.as_ref(), Vec::<i8>::new())
-                        .await?
-                        .try_collect()
-                        .await?,
-                ))
-            }
+            DatabaseConnection::PostgreSQL(client, _jh) => Ok(QueryResults::Postgres(
+                // It is not possible to use `Client::simple_query` here because that method
+                // returns a stream of `SimpleQueryMessage`, which does not implement `FromSql`. It
+                // is only possible to convert `SimpleQueryMessage` to a `&str` (and not, say, a
+                // `DfValue`) because `SimpleQueryMessage`s don't contain any information about the
+                // underlying types of the columns.
+                client
+                    .query_raw(query.as_ref(), Vec::<i8>::new())
+                    .await?
+                    .try_collect()
+                    .await?,
+            )),
         }
     }
 

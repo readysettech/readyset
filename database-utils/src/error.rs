@@ -1,6 +1,7 @@
 use std::fmt::{Debug, Display};
 
 use thiserror::Error;
+use tokio_postgres::error::SqlState;
 use {mysql_async as mysql, tokio_postgres as pgsql};
 
 /// Base error enum for this library. Represents many types of potential errors we may encounter.
@@ -23,6 +24,18 @@ pub enum DatabaseError {
 
     #[error("TLS not supported for MySQL")]
     TlsUnsupported,
+}
+
+impl DatabaseError {
+    /// Returns true only if the error is a MySQL key already exists error
+    pub fn is_mysql_key_already_exists(&self) -> bool {
+        matches!(self, Self::MySQL(mysql::Error::Server(e)) if e.code == 1062)
+    }
+
+    /// Returns true only if the error is a Postgres unique violation error
+    pub fn is_postgres_unique_violation(&self) -> bool {
+        matches!(self, Self::PostgreSQL(e) if e.code() == Some(&SqlState::UNIQUE_VIOLATION))
+    }
 }
 
 #[derive(Debug)]

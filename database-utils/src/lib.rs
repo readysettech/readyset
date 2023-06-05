@@ -144,7 +144,7 @@ impl Default for UpstreamConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
 pub enum DatabaseType {
     #[value(name = "mysql")]
     MySQL,
