@@ -9,6 +9,7 @@ use async_trait::async_trait;
 use clap::Parser;
 use database_utils::{DatabaseURL, QueryableConnection};
 use metrics::Unit;
+use nom_sql::Dialect;
 use rand::{thread_rng, Rng};
 use readyset_data::DfValue;
 use serde::{Deserialize, Serialize};
@@ -25,7 +26,7 @@ use crate::{benchmark_counter, benchmark_histogram};
 
 const REPORT_RESULTS_INTERVAL: Duration = Duration::from_secs(2);
 
-#[derive(Parser, Clone, Default, Serialize, Deserialize)]
+#[derive(Parser, Clone, Serialize, Deserialize)]
 pub struct ReadWriteBenchmark {
     /// Parameters to handle generating parameters for arbitrary queries.
     #[clap(flatten)]
@@ -57,6 +58,10 @@ pub struct ReadWriteBenchmark {
     /// `DistributionAnnotation` for the format for each parameters annotation.
     #[clap(long, conflicts_with = "query_spec_file")]
     update_query_spec: Option<String>,
+
+    // The dialect that should be used to parse the query string.
+    #[clap(long, default_value = "mysql")]
+    dialect: Dialect,
 
     /// Install and generate from an arbitrary schema.
     #[clap(flatten)]
@@ -112,6 +117,7 @@ impl BenchmarkControl for ReadWriteBenchmark {
                 QuerySpec::File(self.update_query.clone().try_into().unwrap()),
                 self.update_query_spec_file.clone(),
                 self.update_query_spec.clone(),
+                self.dialect,
             ),
             target_read_qps: self.target_read_qps,
             target_update_qps: self.target_update_qps,

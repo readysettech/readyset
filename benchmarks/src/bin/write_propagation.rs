@@ -16,25 +16,24 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::env;
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{mpsc, Arc, RwLock};
 use std::time::{Duration, Instant};
 
+use benchmarks::utils::backend::Backend;
 use benchmarks::utils::generate::load_to_backend;
 use benchmarks::utils::spec::{DatabaseGenerationSpec, DatabaseSchema};
 use clap::builder::NonEmptyStringValueParser;
 use clap::{Parser, ValueHint};
 use data_generator::ColumnGenerationSpec;
+use database_utils::DatabaseURL;
 use nom_sql::Relation;
 use readyset_adapter::backend::noria_connector::{NoriaConnector, ReadBehavior};
-use readyset_adapter::backend::{Backend, BackendBuilder};
-use readyset_adapter::query_status_cache::QueryStatusCache;
-use readyset_adapter::{UpstreamConfig, UpstreamDatabase};
 use readyset_client::consensus::AuthorityType;
 use readyset_client::{KeyComparison, ReadySetHandle, View, ViewCreateRequest, ViewQuery};
 use readyset_data::{DfValue, Dialect};
-use readyset_mysql::{MySqlQueryHandler, MySqlUpstream};
 use vec1::Vec1;
 
 static REPORTING_INTERVAL: Duration = Duration::from_secs(10);
@@ -106,26 +105,26 @@ impl Writer {
 
         let auto_increments: Arc<RwLock<HashMap<Relation, AtomicUsize>>> = Arc::default();
         let query_cache: Arc<RwLock<HashMap<ViewCreateRequest, Relation>>> = Arc::default();
-        let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
-        let upstream =
-            Some(MySqlUpstream::connect(UpstreamConfig::from_url(&self.database_url), None).await?);
         let server_supports_pagination = ch.supports_pagination().await?;
+        let (dialect, nom_sql_dialect) = match DatabaseURL::from_str(&self.database_url)? {
+            DatabaseURL::MySQL(_) => (Dialect::DEFAULT_MYSQL, nom_sql::Dialect::MySQL),
+            DatabaseURL::PostgreSQL(_) => {
+                (Dialect::DEFAULT_POSTGRESQL, nom_sql::Dialect::PostgreSQL)
+            }
+        };
         let noria = NoriaConnector::new(
             ch.clone(),
             auto_increments,
             query_cache,
             ReadBehavior::Blocking,
-            Dialect::DEFAULT_MYSQL,
-            nom_sql::Dialect::MySQL,
+            dialect,
+            nom_sql_dialect,
             vec![],
             server_supports_pagination,
         )
         .await;
 
-        let mut b = BackendBuilder::new()
-            .require_authentication(false)
-            .enable_ryw(true)
-            .build(noria, upstream, query_status_cache);
+        let mut b = Backend::new(&self.database_url, noria).await?;
 
         let mut view = ch.view("w").await.unwrap();
 
@@ -180,7 +179,7 @@ impl Writer {
         &self,
         article: usize,
         schema: DatabaseSchema,
-        backend: &mut Backend<MySqlUpstream, MySqlQueryHandler>,
+        backend: &mut Backend,
     ) -> anyhow::Result<()> {
         let mut database_spec = DatabaseGenerationSpec::new(schema).table_rows("articles", 1);
         // Article table overrides.

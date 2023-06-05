@@ -30,7 +30,6 @@ criterion = { version = "0.3", features = ["async_tokio"] }
 fork = "0.1"
 futures = "0.3"
 num_cpus = "1.13"
-mysql_async = { workspace = true }
 parking_lot = "0.12"
 temp-dir = "0.1"
 tikv-jemallocator = "0.5"

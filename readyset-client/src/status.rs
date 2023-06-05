@@ -95,6 +95,26 @@ impl TryFrom<Vec<tokio_postgres::Row>> for ReadySetStatus {
     }
 }
 
+impl TryFrom<Vec<tokio_postgres::SimpleQueryRow>> for ReadySetStatus {
+    type Error = ReadySetError;
+    fn try_from(vars: Vec<tokio_postgres::SimpleQueryRow>) -> Result<Self, Self::Error> {
+        let v = vars
+            .into_iter()
+            .map(|row| {
+                if let (Some(l), Some(v)) = (row.get(0), row.get(1)) {
+                    Ok((l.to_owned(), v.to_owned()))
+                } else {
+                    Err(ReadySetError::Internal(
+                        "Invalid row structure for ReadySetStatus".to_string(),
+                    ))
+                }
+            })
+            .collect::<Result<Vec<(String, String)>, ReadySetError>>()?;
+
+        ReadySetStatus::try_from(v)
+    }
+}
+
 /// Whether or not snapshotting has completed.
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub enum SnapshotStatus {

@@ -4,13 +4,12 @@
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
-use std::iter::repeat;
 use std::path::PathBuf;
 use std::str::FromStr;
 
 use anyhow::{anyhow, Context, Result};
 use clap::{Parser, ValueHint};
-use database_utils::{DatabaseURL, QueryableConnection};
+use database_utils::{DatabaseConnection, DatabaseURL, QueryableConnection};
 use futures::StreamExt;
 use itertools::Itertools;
 use nom::multi::many1;
@@ -18,15 +17,15 @@ use nom::sequence::delimited;
 use nom_locate::LocatedSpan;
 use nom_sql::parser::{sql_query, SqlQuery};
 use nom_sql::whitespace::whitespace0;
-use nom_sql::{Dialect, Expr, NomSqlResult};
+use nom_sql::{Column, Dialect, Expr, NomSqlResult, Relation};
 use query_generator::{ColumnName, TableName, TableSpec};
-use readyset_adapter::backend::Backend;
-use readyset_mysql::{MySqlQueryHandler, MySqlUpstream};
+use readyset_data::DfValue;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::warn;
 
 use super::spec::{DatabaseGenerationSpec, DatabaseSchema, TableGenerationSpec};
+use crate::utils::backend::Backend;
 use crate::utils::path::benchmark_path;
 
 const MAX_BATCH_ROWS: usize = 500;
@@ -68,46 +67,76 @@ impl DataGenerator {
             .map_err(|e| anyhow!("Error parsing DDL {}", e.to_string()))?;
         // This may be a multi-line DDL, if it is semi-colons terminate the statements.
         for statement in parsed.1 {
-            // FIXME: Use correct dialect.
-            conn.query_drop(statement.display(nom_sql::Dialect::MySQL).to_string())
+            conn.query_drop(statement.display(conn.dialect()).to_string())
                 .await?;
         }
         Ok(())
     }
 
-    async fn adjust_mysql_vars(db_url: &DatabaseURL) -> Option<usize> {
-        use mysql_async::prelude::Queryable;
+    async fn adjust_upstream_vars(db_url: &DatabaseURL) -> Option<usize> {
+        let mut conn = db_url.connect(None).await.ok()?;
 
-        let mysql_opt = match db_url {
-            DatabaseURL::MySQL(mysql_opts) => mysql_opts.clone(),
-            _ => return None,
-        };
+        match conn {
+            DatabaseConnection::MySQL(_) => {
+                let results: Vec<Vec<DfValue>> = conn
+                    .query("SELECT @@innodb_buffer_pool_size")
+                    .await
+                    .ok()?
+                    .try_into()
+                    .ok()?;
+                let old_size: usize = results.get(0)?.get(0)?.try_into().ok()?;
+                let new_size = std::cmp::min(old_size * 8, 1024 * 1024 * 1024); // We want a buffer of at least 1GiB
 
-        let mut conn = mysql_async::Conn::new(mysql_opt).await.ok()?;
-        let size = conn.query_first("SELECT @@innodb_buffer_pool_size").await;
-        let old_size: usize = size.ok()??;
-        let new_size = std::cmp::min(old_size * 8, 1024 * 1024 * 1024); // We want a buffer of at least 1GiB
+                let set_pool_size_q = format!("SET GLOBAL innodb_buffer_pool_size={}", new_size);
+                let disable_redo_log_q = "ALTER INSTANCE DISABLE INNODB REDO_LOG";
+                let _ = conn.query_drop(set_pool_size_q).await;
+                let _ = conn.query_drop(disable_redo_log_q).await;
+                Some(old_size)
+            }
+            DatabaseConnection::PostgreSQL(_, _) => {
+                let mut results: Vec<Vec<DfValue>> = conn
+                    .query("SHOW shared_buffers")
+                    .await
+                    .ok()?
+                    .try_into()
+                    .ok()?;
+                let old_size: usize = results.remove(0).remove(0).try_into().ok()?;
+                let new_size = std::cmp::min(old_size * 8, 1024 * 1024 * 1024); // We want a buffer of at least 1GiB
 
-        let set_pool_size_q = format!("SET GLOBAL innodb_buffer_pool_size={}", new_size);
-        let disable_redo_log_q = "ALTER INSTANCE DISABLE INNODB REDO_LOG";
-        let _ = conn.query_drop(set_pool_size_q).await;
-        let _ = conn.query_drop(disable_redo_log_q).await;
-        Some(old_size)
+                // Changing the shared buffer size via `ALTER SYSTEM` is only supported by Postgres
+                // >= 14
+                if get_postgres_version(&mut conn).await? >= 14000 {
+                    let set_pool_size_q =
+                        format!("ALTER SYSTEM SET shared_buffers TO {}", new_size);
+                    let _ = conn.query_drop(set_pool_size_q).await;
+                }
+                Some(old_size)
+            }
+        }
     }
 
-    async fn revert_mysql_vars(db_url: &DatabaseURL, old_size: Option<usize>) {
-        use mysql_async::prelude::Queryable;
+    async fn revert_upstream_vars(db_url: &DatabaseURL, old_size: Option<usize>) {
+        let conn = db_url.connect(None).await;
 
-        let (mysql_opt, old_size) = match (db_url, old_size) {
-            (DatabaseURL::MySQL(opts), Some(sz)) => (opts.clone(), sz),
-            _ => return,
-        };
-
-        if let Ok(mut conn) = mysql_async::Conn::new(mysql_opt).await {
-            let set_pool_size_q = format!("SET GLOBAL innodb_buffer_pool_size={}", old_size);
-            let enable_redo_log_q = "ALTER INSTANCE ENABLE INNODB REDO_LOG";
-            let _ = conn.query_drop(set_pool_size_q).await;
-            let _ = conn.query_drop(enable_redo_log_q).await;
+        match (conn, old_size) {
+            (Ok(mut conn @ DatabaseConnection::MySQL(_)), Some(old_size)) => {
+                let set_pool_size_q = format!("SET GLOBAL innodb_buffer_pool_size={}", old_size);
+                let disable_redo_log_q = "ALTER INSTANCE ENABLE INNODB REDO_LOG";
+                let _ = conn.query_drop(set_pool_size_q).await;
+                let _ = conn.query_drop(disable_redo_log_q).await;
+            }
+            (Ok(mut conn @ DatabaseConnection::PostgreSQL(_, _)), Some(old_size)) => {
+                if let Some(pg_version) = get_postgres_version(&mut conn).await {
+                    // Changing the shared buffer size via `ALTER SYSTEM` is only supported by
+                    // Postgres >= 14
+                    if pg_version >= 14000 {
+                        let set_pool_size_q =
+                            format!("ALTER SYSTEM SET shared_buffers TO {}", old_size);
+                        let _ = conn.query_drop(set_pool_size_q).await;
+                    }
+                }
+            }
+            _ => (),
         }
     }
 
@@ -122,13 +151,13 @@ impl DataGenerator {
 
         let db_url = DatabaseURL::from_str(conn_str)?;
 
-        let old_size = Self::adjust_mysql_vars(&db_url).await;
+        let old_size = Self::adjust_upstream_vars(&db_url).await;
 
         let schema = DatabaseSchema::try_from((benchmark_path(&self.schema)?, user_vars))?;
         let database_spec = DatabaseGenerationSpec::new(schema);
         let status = parallel_load(db_url.clone(), database_spec.clone()).await;
 
-        Self::revert_mysql_vars(&db_url, old_size).await;
+        Self::revert_upstream_vars(&db_url, old_size).await;
 
         status?;
 
@@ -145,22 +174,60 @@ impl DataGenerator {
     }
 }
 
+async fn get_postgres_version(conn: &mut DatabaseConnection) -> Option<usize> {
+    match conn {
+        DatabaseConnection::PostgreSQL(_, _) => {
+            let mut results: Vec<Vec<DfValue>> = conn
+                .query("SHOW server_version_num")
+                .await
+                .ok()?
+                .try_into()
+                .ok()?;
+            results.pop()?.pop()?.try_into().ok()
+        }
+        _ => None,
+    }
+}
+
 #[derive(Debug)]
 pub struct TablePartition {
     rows: usize,
     index: usize,
 }
 
-fn query_for_prepared_insert(table_name: &TableName, cols: &[ColumnName], rows: usize) -> String {
-    let placeholders = format!("({})", repeat("?").take(cols.len()).join(","));
-    let placeholders = repeat(placeholders).take(rows).join(",");
-
-    format!(
-        "INSERT INTO `{}` (`{}`) VALUES {}",
-        table_name,
-        cols.iter().join("`,`"),
-        placeholders
-    )
+fn query_for_prepared_insert(
+    table_name: &TableName,
+    cols: &[ColumnName],
+    rows: usize,
+    dialect: Dialect,
+) -> String {
+    nom_sql::InsertStatement {
+        table: Relation::from(table_name.clone()),
+        fields: Some(cols.iter().map(|col| Column::from(col.clone())).collect()),
+        data: match dialect {
+            Dialect::MySQL => {
+                vec![
+                    vec![
+                        nom_sql::Expr::Literal(nom_sql::ItemPlaceholder::QuestionMark.into());
+                        cols.len()
+                    ];
+                    rows
+                ]
+            }
+            Dialect::PostgreSQL => (1..=(rows * cols.len()))
+                .map(|n| {
+                    nom_sql::Expr::Literal(nom_sql::ItemPlaceholder::DollarNumber(n as u32).into())
+                })
+                .chunks(cols.len())
+                .into_iter()
+                .map(|chunk| chunk.collect())
+                .collect(),
+        },
+        ignore: false,
+        on_duplicate: None,
+    }
+    .display(dialect)
+    .to_string()
 }
 
 pub async fn load_table_part(
@@ -170,19 +237,18 @@ pub async fn load_table_part(
     partition: TablePartition,
     progress_bar: indicatif::ProgressBar,
 ) -> Result<()> {
-    use mysql_async::prelude::Queryable;
-    let mut conn = match db_url {
-        DatabaseURL::MySQL(opts) => mysql_async::Conn::new(opts).await?,
-        _ => unimplemented!(),
-    };
+    let mut conn = db_url.connect(None).await?;
 
     let columns = spec.columns.keys().cloned().collect::<Vec<_>>();
-    let insert_stmt = query_for_prepared_insert(&table_name, &columns, MAX_BATCH_ROWS);
-    let prepared_stmt = conn.prep(insert_stmt).await?;
+    let insert_stmt =
+        query_for_prepared_insert(&table_name, &columns, MAX_BATCH_ROWS, conn.dialect());
+    let prepared_stmt = conn.prepare(insert_stmt).await?;
 
     let mut rows_remaining = partition.rows;
 
-    conn.query_drop("SET autocommit = 0").await?;
+    if let DatabaseConnection::MySQL(_) = conn {
+        conn.query_drop("SET autocommit = 0").await?;
+    }
 
     while rows_remaining > 0 {
         let rows_to_generate = std::cmp::min(MAX_BATCH_ROWS, rows_remaining);
@@ -192,32 +258,24 @@ pub async fn load_table_part(
             let data = spec.generate_data_from_index(rows_to_generate, index, false);
 
             data.into_iter()
-                .flat_map(|mut row| {
-                    columns
-                        .iter()
-                        .map(move |col| row.remove(col).unwrap().try_into().unwrap())
-                })
-                .collect::<Vec<mysql_async::Value>>()
+                .flat_map(|mut row| columns.iter().map(move |col| row.remove(col).unwrap()))
+                .collect::<Vec<DfValue>>()
         });
 
         let res = if rows_to_generate == MAX_BATCH_ROWS {
-            conn.exec_drop(
-                &prepared_stmt,
-                mysql_async::Params::Positional(data_as_params),
-            )
-            .await
+            conn.execute(&prepared_stmt, data_as_params).await
         } else {
-            let tail_insert = query_for_prepared_insert(&table_name, &columns, rows_to_generate);
-            let stmt = conn.prep(tail_insert).await?;
-            conn.exec_drop(&stmt, mysql_async::Params::Positional(data_as_params))
-                .await
+            let tail_insert =
+                query_for_prepared_insert(&table_name, &columns, rows_to_generate, conn.dialect());
+            let stmt = conn.prepare(tail_insert).await?;
+            conn.execute(&stmt, data_as_params).await
         };
 
         match res {
             Ok(_) => {}
-            // If it is a key already exists error try to continue.
-            Err(mysql_async::Error::Server(e)) if e.code == 1062 => {
-                warn!("Key already exists, skipping");
+            // If the error indicates that a row has already been inserted, skip it
+            Err(e) if e.is_mysql_key_already_exists() || e.is_postgres_unique_violation() => {
+                warn!("Row already exists, skipping");
             }
             Err(e) => return Err(e.into()),
         }
@@ -300,10 +358,7 @@ pub async fn parallel_load(db: DatabaseURL, spec: DatabaseGenerationSpec) -> Res
     Ok(())
 }
 
-pub async fn load_to_backend(
-    db: &mut Backend<MySqlUpstream, MySqlQueryHandler>,
-    mut spec: DatabaseGenerationSpec,
-) -> Result<()> {
+pub async fn load_to_backend(db: &mut Backend, mut spec: DatabaseGenerationSpec) -> Result<()> {
     // Iterate over the set of tables in the database for each, generate random
     // data.
     for (table_name, table_spec) in spec.tables.iter_mut() {
@@ -329,8 +384,7 @@ pub async fn load_to_backend(
             on_duplicate: None,
         };
 
-        // FIXME: Use correct dialect.
-        db.query(&insert.display(nom_sql::Dialect::MySQL).to_string())
+        db.query(&insert.display(db.dialect()).to_string())
             .await
             .with_context(|| format!("Inserting row into database for {}", table_name))?;
     }

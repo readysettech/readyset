@@ -16,7 +16,7 @@ use std::str::FromStr;
 use anyhow::Result;
 use async_trait::async_trait;
 use clap::Parser;
-use database_utils::{DatabaseConnection, DatabaseURL};
+use database_utils::{DatabaseConnection, DatabaseType, DatabaseURL};
 use enum_dispatch::enum_dispatch;
 use hdrhistogram::Histogram;
 use serde::{Deserialize, Serialize};
@@ -77,7 +77,7 @@ impl Benchmark {
     }
 }
 
-#[derive(Parser, Default, Clone, Deserialize, Serialize)]
+#[derive(Parser, Clone, Deserialize, Serialize)]
 pub struct DeploymentParameters {
     /// Instance label, for metrics.  In CI, it makes sense to set this to the
     /// CL# or commit hash.
@@ -104,6 +104,12 @@ pub struct DeploymentParameters {
 
     #[clap(long)]
     pub enable_fallback_cache: bool,
+
+    #[clap(long)]
+    pub database_type: DatabaseType,
+
+    #[clap(long, default_value = "test")]
+    pub database_name: String,
 }
 
 impl DeploymentParameters {

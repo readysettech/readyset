@@ -273,11 +273,7 @@ impl WorkloadSpec {
                 };
 
                 let _ = conn
-                    .query_drop(
-                        create_cache_query
-                            .display(nom_sql::Dialect::MySQL)
-                            .to_string(),
-                    )
+                    .query_drop(create_cache_query.display(conn.dialect()).to_string())
                     .await;
             }
 

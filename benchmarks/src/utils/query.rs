@@ -18,7 +18,7 @@ use anyhow::{anyhow, Result};
 use clap::Parser;
 use data_generator::{ColumnGenerator, DistributionAnnotation};
 use database_utils::{DatabaseConnection, DatabaseStatement, QueryableConnection};
-use nom_sql::{Literal, SqlType};
+use nom_sql::{Dialect, Literal, SqlType};
 use readyset_data::DfValue;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -103,12 +103,17 @@ impl QuerySpec {
     }
 }
 
-#[derive(Parser, Clone, Default, Serialize, Deserialize)]
+#[derive(Parser, Clone, Serialize, Deserialize)]
 pub struct ArbitraryQueryParameters {
     /// A path to the query that we are benchmarking, or a string containing the query that we are
     /// benchmarking.
     #[clap(long)]
     query: QuerySpec,
+
+    // The dialect that should be used to parse the query string.
+    #[clap(long, default_value = "mysql")]
+    #[serde(default = "default_dialect")]
+    dialect: Dialect,
 
     /// A annotation spec for each of the parameters in query. See
     /// `DistributionAnnotations` for the format of the file.
@@ -123,16 +128,33 @@ pub struct ArbitraryQueryParameters {
     query_spec: Option<String>,
 }
 
+fn default_dialect() -> Dialect {
+    Dialect::MySQL
+}
+
+impl Default for ArbitraryQueryParameters {
+    fn default() -> Self {
+        Self {
+            query: QuerySpec::default(),
+            dialect: default_dialect(),
+            query_spec_file: Option::default(),
+            query_spec: Option::default(),
+        }
+    }
+}
+
 impl ArbitraryQueryParameters {
     pub fn new(
         query: QuerySpec,
         query_spec_file: Option<PathBuf>,
         query_spec: Option<String>,
+        dialect: Dialect,
     ) -> Self {
         Self {
             query,
             query_spec_file,
             query_spec,
+            dialect,
         }
     }
 
@@ -193,13 +215,8 @@ impl ArbitraryQueryParameters {
             always: false,
         };
 
-        // FIXME: Use correct dialect.
-        conn.query_drop(
-            create_cache_query
-                .display(nom_sql::Dialect::MySQL)
-                .to_string(),
-        )
-        .await?;
+        conn.query_drop(create_cache_query.display(conn.dialect()).to_string())
+            .await?;
 
         Ok(())
     }

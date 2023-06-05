@@ -9,17 +9,20 @@ use benchmarks::benchmark_histogram;
 use benchmarks::reporting::ReportMode;
 use benchmarks::utils::readyset_ready;
 use clap::{Parser, ValueHint};
+use database_utils::DatabaseType;
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use metrics_util::MetricKindMask;
 use readyset_adapter::backend::noria_connector::ReadBehavior;
 use readyset_adapter::backend::{MigrationMode, UnsupportedSetMode};
 use readyset_adapter::BackendBuilder;
 use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
+use readyset_client_test_helpers::psql_helpers::PostgreSQLAdapter;
 use readyset_client_test_helpers::TestBuilder;
 use readyset_server::Handle;
 use readyset_util::shutdown::ShutdownSender;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
+use tokio_postgres::config::Host;
 use tracing::warn;
 
 const PUSH_GATEWAY_PUSH_INTERVAL: Duration = Duration::from_secs(5);
@@ -187,7 +190,7 @@ impl BenchmarkRunner {
     pub async fn start_local(
         &self,
         upstream_addr: Option<String>,
-    ) -> (DeploymentParameters, Handle, ShutdownSender) {
+    ) -> anyhow::Result<(DeploymentParameters, Handle, ShutdownSender)> {
         let mut test_builder = TestBuilder::new(
             BackendBuilder::default()
                 .unsupported_set_mode(UnsupportedSetMode::Allow)
@@ -201,25 +204,60 @@ impl BenchmarkRunner {
             test_builder = test_builder.fallback_url(addr.clone());
         }
 
-        let (mysql_opts, handle, shutdown_tx) = test_builder.build::<MySQLAdapter>().await;
+        let (target_conn_str, handle, shutdown_tx) = match self.deployment_params.database_type {
+            DatabaseType::MySQL => {
+                if matches!(&upstream_addr, Some(addr) if !addr.starts_with("mysql")) {
+                    bail!("--database-type specifies MySQL but the upstream address does not");
+                }
 
-        let target_conn_str = format!(
-            "mysql://{}:{}",
-            mysql_opts.ip_or_hostname(),
-            mysql_opts.tcp_port()
-        );
+                let (mysql_opts, handle, shutdown_tx) = test_builder.build::<MySQLAdapter>().await;
 
+                // TODO(REA-2787): We should eventually pass a database name here, but due to a bug
+                // in the way we handle database names for MySQL connections, the
+                // benchmarks don't work if we pass the name here. Since MySQL
+                // supports connecting without an explicit name, we just omit it.
+                let target_conn_str = format!(
+                    "mysql://{}:{}",
+                    mysql_opts.ip_or_hostname(),
+                    mysql_opts.tcp_port(),
+                );
+
+                (target_conn_str, handle, shutdown_tx)
+            }
+            DatabaseType::PostgreSQL => {
+                if matches!(&upstream_addr, Some(addr) if !addr.starts_with("postgres")) {
+                    bail!("--database-type specifies PostgreSQL but the upstream address does not");
+                }
+
+                let (config, handle, shutdown_tx) = test_builder.build::<PostgreSQLAdapter>().await;
+                let host = config
+                    .get_hosts()
+                    .first()
+                    .expect("PostgreSQL URL has no hostname set");
+                let host_str = match host {
+                    Host::Tcp(tcp) => tcp.as_str(),
+                    Host::Unix(p) => p.to_str().expect("Invalid UTF-8 in host"),
+                };
+                let port = config.get_ports()[0];
+                let target_conn_str = format!(
+                    "postgres://{}:{}/{}",
+                    host_str, port, self.deployment_params.database_name,
+                );
+
+                (target_conn_str, handle, shutdown_tx)
+            }
+        };
         let setup_conn_str = upstream_addr.unwrap_or_else(|| target_conn_str.clone());
 
-        (
+        Ok((
             DeploymentParameters {
                 target_conn_str,
                 setup_conn_str,
-                ..Default::default()
+                ..self.deployment_params.clone()
             },
             handle,
             shutdown_tx,
-        )
+        ))
     }
 
     /// Warn if deployment parameters are overwritten by `--local` or `--deployment`.
@@ -269,7 +307,8 @@ impl BenchmarkRunner {
 
         let (params, handle) = if self.local_with_upstream.is_some() {
             self.warn_if_deployment_params("local-with-upstream");
-            let (params, h, shutdown_tx) = self.start_local(self.local_with_upstream.clone()).await;
+            let (params, h, shutdown_tx) =
+                self.start_local(self.local_with_upstream.clone()).await?;
             (params, Some((h, shutdown_tx)))
         } else if self.local {
             self.warn_if_deployment_params("local");
@@ -278,7 +317,7 @@ impl BenchmarkRunner {
                 warn!("Ignoring --skip-setup as --local requires setup");
             }
 
-            let (params, h, shutdown_tx) = self.start_local(None).await;
+            let (params, h, shutdown_tx) = self.start_local(None).await?;
             (params, Some((h, shutdown_tx)))
         } else if let Some(f) = &self.deployment {
             // Verify that the deployment is passed through some method.

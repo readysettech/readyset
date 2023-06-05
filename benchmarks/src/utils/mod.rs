@@ -5,11 +5,11 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use anyhow::Result;
-use database_utils::{DatabaseError, DatabaseURL, QueryableConnection};
-use mysql_async::ServerError;
+use database_utils::{DatabaseURL, QueryableConnection};
 use readyset_client::status::{ReadySetStatus, SnapshotStatus};
 use tracing::info;
 
+pub mod backend;
 pub mod generate;
 pub mod multi_thread;
 pub mod path;
@@ -70,18 +70,12 @@ pub async fn readyset_ready(target: &str) -> anyhow::Result<()> {
     let mut conn = DatabaseURL::from_str(target)?.connect(None).await?;
 
     loop {
-        let res = conn.query("SHOW READYSET STATUS").await;
-        if let Err(DatabaseError::MySQL(mysql_async::Error::Server(ServerError { code, .. }))) = res
-        {
-            // If it is a syntax error, this is not a ReadySet adapter and does not support this
-            // syntax.
-            if code == 1064 {
-                info!("Database ready!");
-                break;
-            }
-        }
+        let res = conn
+            .query("SHOW READYSET STATUS")
+            .await
+            .expect("Failed to run `SHOW READYSET STATUS`. Is this a ReadySet deployment?");
 
-        let status = ReadySetStatus::try_from(res?)?;
+        let status = ReadySetStatus::try_from(res)?;
         if status.snapshot_status == SnapshotStatus::Completed {
             info!("Database ready!");
             break;

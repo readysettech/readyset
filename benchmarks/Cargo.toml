@@ -10,7 +10,6 @@ tokio = { workspace = true, features = ["full"] }
 anyhow = "1.0.38"
 nom = "7.1"
 nom_locate = "4.0.0"
-mysql_async = { workspace = true }
 rand = "0.8.3"
 rand_distr = "0.4"
 tracing = "0.1.29"
@@ -54,8 +53,9 @@ query-generator = { path = "../query-generator" }
 readyset-adapter = { path = "../readyset-adapter" }
 readyset-server = { path = "../readyset-server" }
 readyset-mysql = { path = "../readyset-mysql" }
+readyset-psql = { path = "../readyset-psql" }
 readyset-tracing = { path = "../readyset-tracing" }
-readyset-client-test-helpers = { path = "../readyset-client-test-helpers", features = ["mysql"] }
+readyset-client-test-helpers = { path = "../readyset-client-test-helpers", features = ["mysql", "postgres"] }
 readyset-util = { path = "../readyset-util" }
 
 [lib]

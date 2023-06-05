@@ -65,7 +65,6 @@ struct NoriaClientOpts {
 #[derive(Parser, Clone)]
 struct UpstreamOpts {
     /// Upstream database connection string.
-    /// Only one of upstream database url and zooekeper url can be specified.
     #[clap(long, required_if_eq("database-type", "upstream"))]
     database_url: Option<DatabaseURL>,
 
@@ -328,7 +327,7 @@ impl NoriaExecutor {
     }
 }
 
-/// Executes queries directly to Noria through the `View` API.
+/// Executes queries directly on the upstream database.
 struct UpstreamExecutor {
     conn: DatabaseConnection,
     statement: DatabaseStatement,

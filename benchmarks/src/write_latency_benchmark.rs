@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use clap::Parser;
 use database_utils::QueryableConnection;
 use metrics::Unit;
-use nom_sql::{parse_query, Dialect, SqlQuery};
+use nom_sql::{parse_query, SqlQuery};
 use query_generator::{ColumnName, TableName};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
@@ -58,7 +58,7 @@ impl BenchmarkControl for WriteLatencyBenchmark {
 
         let mut prepared_statement = self.update_query.prepared_statement(&mut db).await?;
         let parsed_query =
-            parse_query(Dialect::MySQL, &prepared_statement.query).map_err(|e| anyhow!("{}", e))?;
+            parse_query(db.dialect(), &prepared_statement.query).map_err(|e| anyhow!("{}", e))?;
         let table: TableName = match parsed_query {
             SqlQuery::Update(q) => q.table.display_unquoted().to_string().into(),
             _ => bail!("The provided query must be an UPDATE query"),

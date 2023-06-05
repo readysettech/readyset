@@ -247,9 +247,8 @@ impl MultithreadBenchmark for WriteBenchmark {
 
             let start = Instant::now();
 
-            // FIXME: Use correct dialect.
             let _ = conn
-                .query_drop(insert.display(nom_sql::Dialect::MySQL).to_string())
+                .query_drop(insert.display(conn.dialect()).to_string())
                 .await;
 
             result_batch.queries.push(start.elapsed().as_micros());
