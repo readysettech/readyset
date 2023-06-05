@@ -6011,6 +6011,7 @@ dependencies = [
  "readyset-client",
  "readyset-data",
  "readyset-mysql",
+ "readyset-psql",
  "regex",
  "reqwest",
  "serde",

@@ -22,6 +22,7 @@ nom-sql = { path = "../nom-sql" }
 
 readyset-client = { path = "../readyset-client" }
 readyset-mysql = { path = "../readyset-mysql" }
+readyset-psql = { path = "../readyset-psql" }
 readyset = { path = "../readyset" }
 
 clap = { version = "4.2", features = ["derive"] }

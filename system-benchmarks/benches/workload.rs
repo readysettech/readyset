@@ -1,4 +1,3 @@
-use std::fmt::Display;
 use std::fs::read_dir;
 use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -23,11 +22,13 @@ use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use nperf_core::args::{FlamegraphArgs, RecordArgs};
 use readyset::mysql::MySqlHandler;
+use readyset::psql::PsqlHandler;
 use readyset::{NoriaAdapter, Options};
 use readyset_client::get_metric;
 use readyset_client::metrics::{recorded, MetricsDump};
 use readyset_client::status::{ReadySetStatus, SnapshotStatus};
 use readyset_data::DfValue;
+use readyset_psql::AuthenticationMethod;
 use regex::Regex;
 use structopt::StructOpt;
 use tokio::sync::Mutex;
@@ -35,9 +36,9 @@ use tokio::time::sleep;
 
 /// Subdirectory where the benchmarks are kept
 const BENCHMARK_DATA_PATH: &str = "./bench_data";
-/// The ReadySet MySQL adapter listen port
+/// The ReadySet adapter listen port
 const BENCHMARK_PORT: u16 = 50000;
-/// The MySQL database name where benchmark schemas are installed
+/// The upstream database name where benchmark schemas are installed
 const DB_NAME: &str = "rs_bench";
 /// The batch size (number of queries) ] per benchmark iteration
 const BENCH_BATCH_SIZE: u64 = 8192;
@@ -46,19 +47,12 @@ const WORKLOAD_DURATION: Duration = Duration::from_secs(30);
 /// The controller address to make RPC calls to
 const LEADER_URI: &str = "http://127.0.0.1:6033";
 
-/// The MySQL instance backing the databases used in those benchmarks
-fn mysql_url(db: impl Display) -> String {
-    format!(
-        "mysql://root:noria@{}:{}/{}",
-        std::env::var("MYSQL_HOST").unwrap_or_else(|_| "127.0.0.1".into()),
-        std::env::var("MYSQL_TCP_PORT").unwrap_or_else(|_| "3306".into()),
-        db
-    )
-}
-
-/// The ReadySet MySQL adapter url
-fn readyset_url() -> String {
-    format!("mysql://127.0.0.1:{BENCHMARK_PORT}")
+/// The ReadySet adapter url
+fn readyset_url(database_type: DatabaseType) -> String {
+    match database_type {
+        DatabaseType::PostgreSQL => format!("postgres://127.0.0.1:{BENCHMARK_PORT}"),
+        DatabaseType::MySQL => format!("mysql://127.0.0.1:{BENCHMARK_PORT}"),
+    }
 }
 
 fn rpc_url(rpc: &str) -> String {
@@ -86,6 +80,7 @@ impl PreparedPool {
             let statements = Vec::new();
             conns.push(PreparedConn { conn, statements })
         }
+
         Ok(PreparedPool { conns })
     }
 
@@ -102,19 +97,17 @@ impl PreparedPool {
     async fn prepare_pool_and_warm_cache(
         &mut self,
         workload: &WorkloadSpec,
+        upstream_url: &str,
+        database_type: DatabaseType,
     ) -> anyhow::Result<QuerySet> {
         let distributions = workload
-            .load_distributions(
-                &mut DatabaseURL::from_str(&mysql_url(DB_NAME))?
-                    .connect(None)
-                    .await?,
-            )
+            .load_distributions(&mut DatabaseURL::from_str(upstream_url)?.connect(None).await?)
             .await?;
 
         let query_set = workload
             .load_queries(
                 &distributions,
-                &mut DatabaseURL::from_str(&readyset_url())?
+                &mut DatabaseURL::from_str(&readyset_url(database_type))?
                     .connect(None)
                     .await?,
             )
@@ -239,13 +232,18 @@ impl Benchmark {
 
         println!("Preparing benchmark {}", self.name);
 
-        let hdl = AdapterHandle::generate_data_and_start_adapter(&self.schema)?;
+        let hdl = AdapterHandle::generate_data_and_start_adapter(&self.schema, args)?;
+        let upstream_url = args.upstream_url_with_db_name();
         let rt = tokio::runtime::Runtime::new()?;
         let pool_size = num_cpus::get_physical() * 4;
-        let mut readyset_pool = rt.block_on(PreparedPool::try_new(pool_size, &readyset_url()))?;
+        let database_type = DatabaseType::from_str(&upstream_url)?;
+        let mut readyset_pool = rt.block_on(PreparedPool::try_new(
+            pool_size,
+            &readyset_url(database_type),
+        ))?;
         let mut upstream_pool = args
             .compare_upstream
-            .then(|| rt.block_on(PreparedPool::try_new(pool_size, &mysql_url(DB_NAME))))
+            .then(|| rt.block_on(PreparedPool::try_new(pool_size, &upstream_url)))
             .transpose()?;
 
         let mut group = c.benchmark_group(&self.name);
@@ -263,9 +261,17 @@ impl Benchmark {
             set_memory_limit_bytes(None)?;
 
             let workload = WorkloadSpec::from_yaml(&std::fs::read_to_string(workload)?)?;
-            let query_set = rt.block_on(readyset_pool.prepare_pool_and_warm_cache(&workload))?;
+            let query_set = rt.block_on(readyset_pool.prepare_pool_and_warm_cache(
+                &workload,
+                &upstream_url,
+                database_type,
+            ))?;
             if let Some(upstream_pool) = &mut upstream_pool {
-                rt.block_on(upstream_pool.prepare_pool_and_warm_cache(&workload))?;
+                rt.block_on(upstream_pool.prepare_pool_and_warm_cache(
+                    &workload,
+                    &upstream_url,
+                    database_type,
+                ))?;
             }
 
             let mut do_bench = |param: &str, pool: &mut PreparedPool| -> anyhow::Result<()> {
@@ -342,7 +348,7 @@ impl Benchmark {
                 do_bench(&param, &mut readyset_pool)?;
             }
 
-            rt.block_on(drop_cached_queries())?;
+            rt.block_on(drop_cached_queries(database_type))?;
         }
 
         group.finish();
@@ -373,17 +379,14 @@ fn get_metrics() -> anyhow::Result<MetricsDump> {
 
 fn get_cache_hit_ratio() -> anyhow::Result<f64> {
     let metrics = get_metrics()?;
-
     let hit = match get_metric!(metrics, recorded::SERVER_VIEW_QUERY_HIT).unwrap() {
         readyset_client::metrics::DumpedMetricValue::Counter(hit) => hit,
         _ => unreachable!(),
     };
-
     let miss = match get_metric!(metrics, recorded::SERVER_VIEW_QUERY_MISS).unwrap() {
         readyset_client::metrics::DumpedMetricValue::Counter(miss) => miss,
         _ => unreachable!(),
     };
-
     Ok(hit / (hit + miss))
 }
 
@@ -483,8 +486,12 @@ impl AdapterHandle {
     }
 
     /// Returns a write handle that we can write anything to to indicate benchmarks is done
-    fn generate_data_and_start_adapter<P: Into<PathBuf>>(schema: P) -> anyhow::Result<Self> {
+    fn generate_data_and_start_adapter<P: Into<PathBuf>>(
+        schema: P,
+        args: &SystemBenchArgs,
+    ) -> anyhow::Result<Self> {
         let (mut sock1, mut sock2) = UnixStream::pair()?;
+        let upstream_url_clone = args.upstream_url_with_db_name();
         // A word of warning: DO NOT CREATE A RUNTIME BEFORE FORKING, IT *WILL* MESS WITH TOKIO
         match fork().unwrap() {
             Fork::Child => {
@@ -495,7 +502,7 @@ impl AdapterHandle {
                 set_cpu_affinity(true);
                 drop(sock2);
                 sock1.read_exact(&mut [0u8])?;
-                std::thread::spawn(start_adapter);
+                std::thread::spawn(move || start_adapter(&upstream_url_clone));
                 sock1.read_exact(&mut [0u8])?;
                 std::process::exit(0);
             }
@@ -505,12 +512,13 @@ impl AdapterHandle {
                 drop(sock1);
 
                 let rt = tokio::runtime::Runtime::new()?;
-                rt.block_on(prepare_db(schema))?;
+                rt.block_on(prepare_db(schema, args))?;
 
                 // Write a byte to indicate database is ready and fork can initiate replication
                 sock2.write_all(&[1u8]).unwrap();
 
-                rt.block_on(wait_adapter_ready())?;
+                let database_type = DatabaseType::from_str(&args.upstream_url_with_db_name())?;
+                rt.block_on(wait_adapter_ready(database_type))?;
                 Ok(AdapterHandle {
                     pid: child_pid,
                     write_hdl: sock2,
@@ -529,47 +537,59 @@ impl Drop for PerfHandle {
 }
 
 /// Creates a new database for benchmarking, installs the given schema and generates data for it
-async fn prepare_db<P: Into<PathBuf>>(path: P) -> anyhow::Result<()> {
+async fn prepare_db<P: Into<PathBuf>>(path: P, args: &SystemBenchArgs) -> anyhow::Result<()> {
     let generator = DataGenerator::new(path);
-    let mut conn = DatabaseURL::from_str(&mysql_url(""))?.connect(None).await?;
+    let mut conn = DatabaseURL::from_str(&args.upstream_url)?
+        .connect(None)
+        .await?;
     conn.query_drop(format!("DROP DATABASE IF EXISTS {DB_NAME}"))
         .await?;
     conn.query_drop(format!("CREATE DATABASE {DB_NAME}"))
         .await?;
     drop(conn);
-    let conn_str = &mysql_url(DB_NAME);
-    generator.install(conn_str).await?;
-    generator.generate(conn_str).await?;
+
+    let conn_str = args.upstream_url_with_db_name();
+    generator.install(&conn_str).await?;
+    generator.generate(&conn_str).await?;
     Ok(())
 }
 
-/// Start the ReadySet MySQL adapter in standalone mode without fallback cache enabled.
+/// Start the ReadySet adapter in standalone mode without fallback cache enabled.
 #[cfg(not(feature = "fallback_cache"))]
-fn start_adapter() {
-    start_adapter_with_options(FallbackCacheOptions {
-        enable: false,
-        disk_modeled: false,
-    })
+fn start_adapter(upstream_url: &str) -> anyhow::Result<()> {
+    start_adapter_with_options(
+        FallbackCacheOptions {
+            enable: false,
+            disk_modeled: false,
+        },
+        upstream_url,
+    )
 }
 
-/// Start the ReadySet MySQL adapter in standalone mode with fallback cache enabled and disk
+/// Start the ReadySet adapter in standalone mode with fallback cache enabled and disk
 /// modeling disabled.
 #[cfg(all(feature = "fallback_cache", not(feature = "disk_modeled")))]
-fn start_adapter() {
-    start_adapter_with_options(FallbackCacheOptions {
-        enable: true,
-        disk_modeled: false,
-    })
+fn start_adapter(upstream_url: &str) -> anyhow::Result<()> {
+    start_adapter_with_options(
+        FallbackCacheOptions {
+            enable: true,
+            disk_modeled: false,
+        },
+        upstream_url,
+    )
 }
 
-/// Start the ReadySet MySQL adapter in standalone mode with fallback cache enabled and disk
+/// Start the ReadySet adapter in standalone mode with fallback cache enabled and disk
 /// modeling enabled.
 #[cfg(all(feature = "fallback_cache", feature = "disk_modeled"))]
-fn start_adapter() {
-    start_adapter_with_options(FallbackCacheOptions {
-        enable: true,
-        disk_modeled: true,
-    })
+fn start_adapter(upstream_url: &str) -> anyhow::Result<()> {
+    start_adapter_with_options(
+        FallbackCacheOptions {
+            enable: true,
+            disk_modeled: true,
+        },
+        upstream_url,
+    )
 }
 
 /// Various options for enabling and configuring the fallback cache.
@@ -580,10 +600,14 @@ struct FallbackCacheOptions {
     disk_modeled: bool,
 }
 
-/// Start the ReadySet MySQL adapter in standalone mode with options.
-fn start_adapter_with_options(fallback_cache_options: FallbackCacheOptions) {
+/// Start the ReadySet adapter in standalone mode with options.
+fn start_adapter_with_options(
+    fallback_cache_options: FallbackCacheOptions,
+    upstream_url: &str,
+) -> anyhow::Result<()> {
+    let database_type = DatabaseType::from_str(upstream_url)?;
+    let database_type_flag = format!("--database-type={}", database_type);
     let temp_dir = temp_dir::TempDir::new().unwrap();
-    let mysql_url = mysql_url(DB_NAME);
     let mut options = vec![
         "bench", // This is equivalent to the program name in argv, ignored
         "--deployment",
@@ -591,7 +615,7 @@ fn start_adapter_with_options(fallback_cache_options: FallbackCacheOptions) {
         "--standalone",
         "--allow-unauthenticated-connections",
         "--upstream-db-url",
-        mysql_url.as_str(),
+        upstream_url,
         "--durability",
         "ephemeral",
         "--authority",
@@ -603,7 +627,7 @@ fn start_adapter_with_options(fallback_cache_options: FallbackCacheOptions) {
         "--eviction-policy",
         "lru",
         "--noria-metrics",
-        "--database-type=mysql",
+        &database_type_flag,
     ];
 
     if fallback_cache_options.enable {
@@ -616,25 +640,56 @@ fn start_adapter_with_options(fallback_cache_options: FallbackCacheOptions) {
 
     let adapter_options = Options::parse_from(options);
 
-    let mut adapter = NoriaAdapter {
-        description: "ReadySet benchmark adapter",
-        default_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), BENCHMARK_PORT),
-        connection_handler: MySqlHandler {
-            enable_statement_logging: false,
-        },
-        database_type: DatabaseType::MySQL,
-        parse_dialect: nom_sql::Dialect::MySQL,
-        expr_dialect: readyset_data::Dialect::DEFAULT_MYSQL,
-    };
+    match database_type {
+        DatabaseType::MySQL => {
+            let mut adapter = NoriaAdapter {
+                description: "ReadySet benchmark adapter",
+                default_address: SocketAddr::new(
+                    IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                    BENCHMARK_PORT,
+                ),
+                connection_handler: MySqlHandler {
+                    enable_statement_logging: false,
+                },
+                database_type: DatabaseType::MySQL,
+                parse_dialect: nom_sql::Dialect::MySQL,
+                expr_dialect: readyset_data::Dialect::DEFAULT_MYSQL,
+            };
 
-    adapter.run(adapter_options).unwrap();
+            adapter.run(adapter_options).unwrap();
+        }
+        DatabaseType::PostgreSQL => {
+            let mut adapter = NoriaAdapter {
+                description: "ReadySet benchmark adapter",
+                default_address: SocketAddr::new(
+                    IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                    BENCHMARK_PORT,
+                ),
+                connection_handler: PsqlHandler {
+                    authentication_method: AuthenticationMethod::Cleartext,
+                    tls_acceptor: None,
+                    enable_statement_logging: false,
+                },
+                database_type: DatabaseType::PostgreSQL,
+                parse_dialect: nom_sql::Dialect::PostgreSQL,
+                expr_dialect: readyset_data::Dialect::DEFAULT_POSTGRESQL,
+            };
+
+            adapter.run(adapter_options).unwrap();
+        }
+    }
+
+    Ok(())
 }
 
 /// Wait for replication to finish by lazy looping over "SHOW READYSET STATUS"
-async fn wait_adapter_ready() -> anyhow::Result<()> {
+async fn wait_adapter_ready(database_type: DatabaseType) -> anyhow::Result<()> {
     // First attempt to connect to the readyset adapter at all
     let mut conn = loop {
-        match DatabaseURL::from_str(&readyset_url())?.connect(None).await {
+        match DatabaseURL::from_str(&readyset_url(database_type))?
+            .connect(None)
+            .await
+        {
             Ok(conn) => break conn,
             _ => sleep(Duration::from_secs(1)).await,
         }
@@ -661,8 +716,8 @@ async fn wait_adapter_ready() -> anyhow::Result<()> {
 }
 
 /// Drop all currently cached queries
-async fn drop_cached_queries() -> anyhow::Result<()> {
-    let mut conn = DatabaseURL::from_str(&readyset_url())?
+async fn drop_cached_queries(database_type: DatabaseType) -> anyhow::Result<()> {
+    let mut conn = DatabaseURL::from_str(&readyset_url(database_type))?
         .connect(None)
         .await?;
     conn.query_drop(nom_sql::DropAllCachesStatement {}.to_string())
@@ -776,6 +831,12 @@ struct SystemBenchArgs {
     /// Compare all benchmark results against the upstream database as well
     #[clap(long)]
     compare_upstream: bool,
+    /// The URL associated with the upstream database
+    #[clap(long)]
+    upstream_url: String,
+    /// The name of the test database to be created
+    #[clap(long, default_value = "rs_bench")]
+    database_name: String,
 
     #[clap(long, hide(true))]
     /// Is present when executed with `cargo bench`
@@ -783,6 +844,12 @@ struct SystemBenchArgs {
     #[clap(long, hide(true))]
     /// Is present when executed with `cargo test`
     test: bool,
+}
+
+impl SystemBenchArgs {
+    fn upstream_url_with_db_name(&self) -> String {
+        format!("{}/{}", self.upstream_url, self.database_name)
+    }
 }
 
 fn main() -> anyhow::Result<()> {
