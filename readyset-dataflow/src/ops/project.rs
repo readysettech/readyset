@@ -21,7 +21,7 @@ use crate::processing::{ColumnSource, IngredientLookupResult, LookupIndex, Looku
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Project {
     us: Option<IndexPair>,
-    emit: Option<Vec<usize>>,
+    emit: Vec<usize>,
     additional: Option<Vec<DfValue>>,
     expressions: Option<Vec<Expr>>,
     src: IndexPair,
@@ -37,7 +37,7 @@ impl Project {
         expressions: Option<Vec<Expr>>,
     ) -> Project {
         Project {
-            emit: Some(emit.into()),
+            emit: emit.into(),
             additional,
             expressions,
             src: src.into(),
@@ -73,59 +73,52 @@ impl Ingredient for Project {
         let additional = self.additional.clone();
         let expressions = self.expressions.clone();
 
-        let in_cols = if let Some(ref emit) = self.emit {
-            let c = columns
-                .iter()
-                .map(|&outi| {
-                    if outi >= emit.len() {
-                        Err(ReadySetError::Internal(format!(
-                            "query_through should never be queried for
+        let c = columns
+            .iter()
+            .map(|&outi| {
+                if outi >= self.emit.len() {
+                    Err(ReadySetError::Internal(format!(
+                        "query_through should never be queried for
                                                 generated columns; columns: {:?}; self.emit: {:?}",
-                            columns, emit
-                        )))
-                    } else {
-                        Ok(emit[outi])
-                    }
-                })
-                .collect();
-            match c {
-                Ok(c) => Cow::Owned(c),
-                Err(e) => return Ok(IngredientLookupResult::err(e)),
-            }
-        } else {
-            Cow::Borrowed(columns)
+                        columns, self.emit
+                    )))
+                } else {
+                    Ok(emit[outi])
+                }
+            })
+            .collect::<Result<Vec<_>, _>>();
+        let in_cols = match c {
+            Ok(c) => c,
+            Err(e) => return Ok(IngredientLookupResult::err(e)),
         };
 
         let res = self.lookup(*self.src, &in_cols, key, nodes, states, mode)?;
-        Ok(match emit {
-            Some(emit) => res.map(move |r| {
-                let r = r?;
-                let mut new_r = Vec::with_capacity(r.len());
-                let mut expr: Vec<DfValue> = if let Some(ref e) = expressions {
-                    e.iter()
-                        .map(|expr| expr.eval(&r))
-                        .collect::<ReadySetResult<Vec<DfValue>>>()?
-                } else {
-                    vec![]
-                };
+        Ok(res.map(move |r| {
+            let r = r?;
+            let mut new_r = Vec::with_capacity(r.len());
+            let mut expr: Vec<DfValue> = if let Some(ref e) = expressions {
+                e.iter()
+                    .map(|expr| expr.eval(&r))
+                    .collect::<ReadySetResult<Vec<DfValue>>>()?
+            } else {
+                vec![]
+            };
 
-                new_r.extend(
-                    r.iter()
-                        .cloned()
-                        .enumerate()
-                        .filter(|(i, _)| emit.iter().any(|e| e == i))
-                        .map(|(_, c)| c),
-                );
+            new_r.extend(
+                r.iter()
+                    .cloned()
+                    .enumerate()
+                    .filter(|(i, _)| emit.iter().any(|e| e == i))
+                    .map(|(_, c)| c),
+            );
 
-                new_r.append(&mut expr);
-                if let Some(ref a) = additional {
-                    new_r.append(&mut a.clone());
-                }
+            new_r.append(&mut expr);
+            if let Some(ref a) = additional {
+                new_r.append(&mut a.clone());
+            }
 
-                Ok(Cow::from(new_r))
-            }),
-            None => res,
-        })
+            Ok(Cow::from(new_r))
+        }))
     }
 
     fn on_connected(&mut self, g: &Graph) {
@@ -137,20 +130,6 @@ impl Ingredient for Project {
     fn on_commit(&mut self, us: NodeIndex, remap: &HashMap<NodeIndex, IndexPair>) {
         self.src.remap(remap);
         self.us = Some(remap[&us]);
-
-        // Eliminate emit specifications which require no permutation of
-        // the inputs, so we don't needlessly perform extra work on each
-        // update.
-        self.emit = self.emit.take().and_then(|emit| {
-            let complete =
-                emit.len() == self.cols && self.additional.is_none() && self.expressions.is_none();
-            let sequential = emit.iter().enumerate().all(|(i, &j)| i == j);
-            if complete && sequential {
-                None
-            } else {
-                Some(emit)
-            }
-        });
     }
 
     fn on_input(
@@ -163,30 +142,28 @@ impl Ingredient for Project {
         _: &mut AuxiliaryNodeStateMap,
     ) -> ReadySetResult<ProcessingResult> {
         debug_assert_eq!(from, *self.src);
-        if let Some(ref emit) = self.emit {
-            for r in &mut *rs {
-                let mut new_r = Vec::with_capacity(r.len());
+        for r in &mut *rs {
+            let mut new_r = Vec::with_capacity(r.len());
 
-                for &i in emit {
-                    new_r.push(r[i].clone());
-                }
-
-                if let Some(ref e) = self.expressions {
-                    new_r.extend(e.iter().map(|expr| match expr.eval(r) {
-                        Ok(val) => val,
-                        Err(e) => {
-                            error!(error = %e, "Error evaluating project expression");
-                            DfValue::None
-                        }
-                    }));
-                }
-
-                if let Some(ref a) = self.additional {
-                    new_r.append(&mut a.clone());
-                }
-
-                **r = new_r;
+            for &i in &self.emit {
+                new_r.push(r[i].clone());
             }
+
+            if let Some(ref e) = self.expressions {
+                new_r.extend(e.iter().map(|expr| match expr.eval(r) {
+                    Ok(val) => val,
+                    Err(e) => {
+                        error!(error = %e, "Error evaluating project expression");
+                        DfValue::None
+                    }
+                }));
+            }
+
+            if let Some(ref a) = self.additional {
+                new_r.append(&mut a.clone());
+            }
+
+            **r = new_r;
         }
 
         Ok(ProcessingResult {
@@ -203,15 +180,10 @@ impl Ingredient for Project {
         let mapped_cols = cols
             .iter()
             .filter_map(|&x| {
-                if self
-                    .emit
-                    .as_ref()
-                    .map(|emit| x >= emit.len())
-                    .unwrap_or(false)
-                {
+                if x >= self.emit.len() {
                     None
                 } else {
-                    Some(self.emit.as_ref().map_or(x, |emit| emit[x]))
+                    Some(self.emit[x])
                 }
             })
             .collect::<Vec<_>>();
@@ -228,20 +200,15 @@ impl Ingredient for Project {
         }
 
         let mut emit_cols = vec![];
-        match self.emit.as_ref() {
-            None => emit_cols.push("*".to_string()),
-            Some(emit) => {
-                emit_cols.extend(emit.iter().map(ToString::to_string));
+        emit_cols.extend(self.emit.iter().map(ToString::to_string));
 
-                if let Some(ref arithmetic) = self.expressions {
-                    emit_cols.extend(arithmetic.iter().map(ToString::to_string));
-                }
+        if let Some(ref arithmetic) = self.expressions {
+            emit_cols.extend(arithmetic.iter().map(ToString::to_string));
+        }
 
-                if let Some(ref add) = self.additional {
-                    emit_cols.extend(add.iter().map(|e| format!("lit: {}", e)));
-                }
-            }
-        };
+        if let Some(ref add) = self.additional {
+            emit_cols.extend(add.iter().map(|e| format!("lit: {}", e)));
+        }
         format!("π[{}]", emit_cols.join(", "))
     }
 }
@@ -316,12 +283,6 @@ mod tests {
     fn it_describes_arithmetic() {
         let p = setup_column_arithmetic(BinaryOperator::Add);
         assert_eq!(p.node().description(true), "π[0, 1, (0 + 1)]");
-    }
-
-    #[test]
-    fn it_describes_all() {
-        let p = setup(false, true, false);
-        assert_eq!(p.node().description(true), "π[*]");
     }
 
     #[test]
