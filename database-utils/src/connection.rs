@@ -9,7 +9,6 @@ use futures::TryStreamExt;
 use mysql::prelude::AsQuery;
 use mysql_async::prelude::Queryable;
 use nom_sql::{Dialect, SqlType};
-use readyset_client::status::ReadySetStatus;
 use readyset_errors::ReadySetError;
 use {mysql_async as mysql, tokio_postgres as pgsql};
 
@@ -441,21 +440,6 @@ where
                 })
                 .collect::<Result<Vec<Vec<V>>, _>>()
                 .map_err(DatabaseError::PostgreSQL)?),
-        }
-    }
-}
-
-impl TryFrom<QueryResults> for ReadySetStatus {
-    type Error = DatabaseError;
-
-    fn try_from(results: QueryResults) -> Result<Self, Self::Error> {
-        match results {
-            QueryResults::MySql(results) => results
-                .try_into()
-                .map_err(|e: ReadySetError| DatabaseError::ValueConversion(Box::new(e))),
-            QueryResults::Postgres(results) => results
-                .try_into()
-                .map_err(|e: ReadySetError| DatabaseError::ValueConversion(Box::new(e))),
         }
     }
 }

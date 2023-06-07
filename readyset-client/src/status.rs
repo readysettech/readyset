@@ -7,10 +7,8 @@
 //!
 //! These two converions are used to convert the [`ReadySetStatus`] structs to a format
 //! that can be passed to various SQL clients.
-use std::convert::TryFrom;
 use std::fmt::{self, Display};
 
-use readyset_errors::{internal, ReadySetError};
 use serde::{Deserialize, Serialize};
 
 // Consts for variable names.
@@ -27,91 +25,12 @@ pub struct ReadySetStatus {
     //TODO: Include binlog position and other fields helpful for evaluating a ReadySet cluster.
 }
 
-impl TryFrom<Vec<(String, String)>> for ReadySetStatus {
-    type Error = ReadySetError;
-    fn try_from(vars: Vec<(String, String)>) -> Result<Self, Self::Error> {
-        let mut res = ReadySetStatus {
-            snapshot_status: SnapshotStatus::InProgress,
-        };
-        for v in vars {
-            match (v.0.as_str(), v.1) {
-                (SNAPSHOT_STATUS_VARIABLE, v) => res.snapshot_status = SnapshotStatus::try_from(v)?,
-                (_, _) => {
-                    internal!("Invalid ReadySetStatus variable")
-                }
-            }
-        }
-
-        Ok(res)
-    }
-}
-
 impl From<ReadySetStatus> for Vec<(String, String)> {
     fn from(status: ReadySetStatus) -> Vec<(String, String)> {
         vec![(
             SNAPSHOT_STATUS_VARIABLE.to_string(),
             status.snapshot_status.to_string(),
         )]
-    }
-}
-
-impl TryFrom<Vec<mysql_common::row::Row>> for ReadySetStatus {
-    type Error = ReadySetError;
-    fn try_from(vars: Vec<mysql_common::row::Row>) -> Result<Self, Self::Error> {
-        let v = vars
-            .into_iter()
-            .map(|row| {
-                if let (Some(l), Some(v)) = (row.get(0), row.get(1)) {
-                    Ok((l, v))
-                } else {
-                    Err(ReadySetError::Internal(
-                        "Invalid row structure for ReadySetStatus".to_string(),
-                    ))
-                }
-            })
-            .collect::<Result<Vec<(String, String)>, ReadySetError>>()?;
-
-        ReadySetStatus::try_from(v)
-    }
-}
-
-impl TryFrom<Vec<tokio_postgres::Row>> for ReadySetStatus {
-    type Error = ReadySetError;
-    fn try_from(vars: Vec<tokio_postgres::Row>) -> Result<Self, Self::Error> {
-        let v = vars
-            .into_iter()
-            .map(|row| {
-                if let (Some(l), Some(v)) = (row.get(0), row.get(1)) {
-                    Ok((l, v))
-                } else {
-                    Err(ReadySetError::Internal(
-                        "Invalid row structure for ReadySetStatus".to_string(),
-                    ))
-                }
-            })
-            .collect::<Result<Vec<(String, String)>, ReadySetError>>()?;
-
-        ReadySetStatus::try_from(v)
-    }
-}
-
-impl TryFrom<Vec<tokio_postgres::SimpleQueryRow>> for ReadySetStatus {
-    type Error = ReadySetError;
-    fn try_from(vars: Vec<tokio_postgres::SimpleQueryRow>) -> Result<Self, Self::Error> {
-        let v = vars
-            .into_iter()
-            .map(|row| {
-                if let (Some(l), Some(v)) = (row.get(0), row.get(1)) {
-                    Ok((l.to_owned(), v.to_owned()))
-                } else {
-                    Err(ReadySetError::Internal(
-                        "Invalid row structure for ReadySetStatus".to_string(),
-                    ))
-                }
-            })
-            .collect::<Result<Vec<(String, String)>, ReadySetError>>()?;
-
-        ReadySetStatus::try_from(v)
     }
 }
 
@@ -131,32 +50,5 @@ impl Display for SnapshotStatus {
             SnapshotStatus::Completed => "Completed",
         };
         write!(f, "{}", s)
-    }
-}
-
-impl TryFrom<String> for SnapshotStatus {
-    type Error = ReadySetError;
-    fn try_from(val: String) -> Result<Self, Self::Error> {
-        Ok(match val.as_str() {
-            "In Progress" => SnapshotStatus::InProgress,
-            "Completed" => SnapshotStatus::Completed,
-            _ => internal!("Invalid snapshot status"),
-        })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn readyset_status_round_trip() {
-        let original = ReadySetStatus {
-            snapshot_status: SnapshotStatus::Completed,
-        };
-        let intermediate: Vec<(String, String)> = original.clone().into();
-        let round_tripped = ReadySetStatus::try_from(intermediate).unwrap();
-
-        assert_eq!(original, round_tripped);
     }
 }

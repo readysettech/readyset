@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use database_utils::{DatabaseURL, QueryableConnection};
-use readyset_client::status::{ReadySetStatus, SnapshotStatus};
+use readyset_data::DfValue;
 use tracing::info;
 
 pub mod backend;
@@ -75,8 +75,15 @@ pub async fn readyset_ready(target: &str) -> anyhow::Result<()> {
             .await
             .expect("Failed to run `SHOW READYSET STATUS`. Is this a ReadySet deployment?");
 
-        let status = ReadySetStatus::try_from(res)?;
-        if status.snapshot_status == SnapshotStatus::Completed {
+        let snapshot_status: String = Vec::<Vec<DfValue>>::try_from(res)
+            .unwrap()
+            .into_iter()
+            .find(|r| r[0] == "Snapshot Status".into())
+            .unwrap()[1]
+            .clone()
+            .try_into()
+            .unwrap();
+        if snapshot_status == "Completed" {
             info!("Database ready!");
             break;
         }

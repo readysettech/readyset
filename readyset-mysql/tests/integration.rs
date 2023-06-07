@@ -1,4 +1,3 @@
-use std::convert::TryFrom;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -10,7 +9,6 @@ use readyset_adapter::backend::{MigrationMode, QueryInfo};
 use readyset_adapter::proxied_queries_reporter::ProxiedQueriesReporter;
 use readyset_adapter::query_status_cache::{MigrationStyle, QueryStatusCache};
 use readyset_adapter::BackendBuilder;
-use readyset_client::status::ReadySetStatus;
 use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::mysql_helpers::{last_query_info, MySQLAdapter};
 use readyset_client_test_helpers::{sleep, TestBuilder};
@@ -1776,7 +1774,15 @@ async fn show_readyset_status() {
     let (opts, _handle, shutdown_tx) = setup().await;
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
     let ret: Vec<mysql::Row> = conn.query("SHOW READYSET STATUS;").await.unwrap();
-    ReadySetStatus::try_from(ret).unwrap();
+    assert_eq!(ret.len(), 1);
+    assert_eq!(
+        ret.first().unwrap().get::<String, _>(0).unwrap(),
+        "Snapshot Status"
+    );
+    assert_eq!(
+        ret.first().unwrap().get::<String, _>(1).unwrap(),
+        "Completed"
+    );
 
     shutdown_tx.shutdown().await;
 }

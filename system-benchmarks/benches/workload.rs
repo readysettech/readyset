@@ -26,7 +26,6 @@ use readyset::psql::PsqlHandler;
 use readyset::{NoriaAdapter, Options};
 use readyset_client::get_metric;
 use readyset_client::metrics::{recorded, MetricsDump};
-use readyset_client::status::{ReadySetStatus, SnapshotStatus};
 use readyset_data::DfValue;
 use readyset_psql::AuthenticationMethod;
 use regex::Regex;
@@ -705,10 +704,12 @@ async fn wait_adapter_ready(database_type: DatabaseType) -> anyhow::Result<()> {
             .await;
 
         if let Ok(data) = res {
-            if let Ok(ReadySetStatus {
-                snapshot_status: SnapshotStatus::Completed,
-            }) = ReadySetStatus::try_from(data)
-            {
+            let snapshot_status = Vec::<Vec<DfValue>>::try_from(data)
+                .ok()
+                .and_then(|res| res.into_iter().find(|r| r[0] == "Snapshot Status".into()))
+                .and_then(|r| r.into_iter().nth(1))
+                .and_then(|v| String::try_from(v).ok());
+            if snapshot_status.as_deref() == Some("Completed") {
                 return Ok(());
             }
         }
