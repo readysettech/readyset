@@ -3,7 +3,7 @@ use clap::Parser;
 
 #[derive(Parser)]
 #[clap(name = "data_generator")]
-struct DataGenerator {
+struct DataGeneratorTool {
     /// Path to the desired database SQL schema.
     #[clap(flatten)]
     generator: DataGeneratorUtil,
@@ -13,7 +13,7 @@ struct DataGenerator {
     database_url: String,
 }
 
-impl DataGenerator {
+impl DataGeneratorTool {
     pub async fn run(self) -> anyhow::Result<()> {
         self.generator.generate(&self.database_url).await?;
         Ok(())
@@ -22,6 +22,6 @@ impl DataGenerator {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let data_generator = DataGenerator::parse();
+    let data_generator = DataGeneratorTool::parse();
     data_generator.run().await
 }
