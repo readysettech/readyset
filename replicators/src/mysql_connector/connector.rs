@@ -172,6 +172,7 @@ impl MySqlBinlogConnector {
 
     /// After we have registered as a replica, we can request the binlog
     async fn request_binlog(&mut self) -> mysql::Result<()> {
+        info!(next_position = %self.next_position, "Starting binlog replication");
         let cmd = mysql_common::packets::ComBinlogDump::new(self.server_id())
             .with_pos(self.next_position.position)
             .with_filename(self.next_position.binlog_file.as_bytes());
