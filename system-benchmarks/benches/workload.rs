@@ -236,7 +236,7 @@ impl Benchmark {
         let upstream_url = args.upstream_url_with_db_name();
         let rt = tokio::runtime::Runtime::new()?;
         let pool_size = num_cpus::get_physical() * 4;
-        let database_type = DatabaseType::from_str(&upstream_url)?;
+        let database_type = DatabaseURL::from_str(&upstream_url)?.database_type();
         let mut readyset_pool = rt.block_on(PreparedPool::try_new(
             pool_size,
             &readyset_url(database_type),
@@ -517,7 +517,9 @@ impl AdapterHandle {
                 // Write a byte to indicate database is ready and fork can initiate replication
                 sock2.write_all(&[1u8]).unwrap();
 
-                let database_type = DatabaseType::from_str(&args.upstream_url_with_db_name())?;
+                let database_type =
+                    DatabaseURL::from_str(&args.upstream_url_with_db_name())?.database_type();
+
                 rt.block_on(wait_adapter_ready(database_type))?;
                 Ok(AdapterHandle {
                     pid: child_pid,
@@ -605,7 +607,7 @@ fn start_adapter_with_options(
     fallback_cache_options: FallbackCacheOptions,
     upstream_url: &str,
 ) -> anyhow::Result<()> {
-    let database_type = DatabaseType::from_str(upstream_url)?;
+    let database_type = DatabaseURL::from_str(upstream_url)?.database_type();
     let database_type_flag = format!("--database-type={}", database_type);
     let temp_dir = temp_dir::TempDir::new().unwrap();
     let mut options = vec![
