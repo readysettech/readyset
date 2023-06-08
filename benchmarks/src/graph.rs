@@ -7,6 +7,7 @@ use anyhow::bail;
 use clap::Parser;
 
 use crate::benchmark::BenchmarkResults;
+use crate::QUANTILES;
 
 #[derive(Debug, Clone)]
 struct CommaSeparatedString(Vec<String>);
@@ -133,6 +134,12 @@ impl GraphResultsWriter {
                         max.to_string(),
                         mean.to_string(),
                     ]
+                    .into_iter()
+                    .chain(
+                        QUANTILES.iter().map(move |(_, quantile)| {
+                            hist.value_at_quantile(*quantile).to_string()
+                        }),
+                    )
                 }));
                 csv.write_record(row)?;
             }

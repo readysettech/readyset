@@ -105,3 +105,12 @@ mod write_benchmark;
 mod write_latency_benchmark;
 
 pub use workload_emulator::{QuerySet, WorkloadEmulator};
+
+pub const QUANTILES: &[(&str, f64)] = &[
+    ("p10", 0.1),
+    ("p50", 0.5),
+    ("p75", 0.75),
+    ("p90", 0.9),
+    ("p95", 0.95),
+    ("p99.9", 0.999),
+];

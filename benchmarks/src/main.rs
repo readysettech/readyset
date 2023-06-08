@@ -5,10 +5,10 @@ use std::time::{Duration, Instant};
 
 use anyhow::bail;
 use benchmarks::benchmark::{Benchmark, BenchmarkControl, BenchmarkResults, DeploymentParameters};
-use benchmarks::benchmark_histogram;
 use benchmarks::graph::GraphParams;
 use benchmarks::reporting::ReportMode;
 use benchmarks::utils::readyset_ready;
+use benchmarks::{benchmark_histogram, QUANTILES};
 use clap::{Parser, ValueHint};
 use database_utils::DatabaseType;
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
@@ -439,7 +439,11 @@ impl BenchmarkRunner {
                 let min = hist.min();
                 let max = hist.max();
                 let mean = hist.mean();
-                println!("\t{metric} ({} - {:?} goal) - Samples: {samples} - Min: {min} - Max: {max} - Mean: {mean}", data.unit, data.desired_action);
+                print!("\t{metric} ({} - {:?} goal) - Samples: {samples} - Min: {min} - Max: {max} - Mean: {mean}", data.unit, data.desired_action);
+                for (label, quantile) in QUANTILES {
+                    print!(" - {label}: {}", hist.value_at_quantile(*quantile));
+                }
+                println!();
             }
         }
 
