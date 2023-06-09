@@ -76,7 +76,8 @@ pub struct WriteBenchmarkThreadData {
 
 impl WriteBenchmarkThreadData {
     fn new(w: &WriteBenchmark, deployment: &DeploymentParameters) -> Result<Self> {
-        let schema = DatabaseSchema::try_from((w.schema.clone(), HashMap::new()))?;
+        let ddl = std::fs::read_to_string(&w.schema)?;
+        let schema = DatabaseSchema::new(&ddl, deployment.database_type.into())?;
         let database_spec = DatabaseGenerationSpec::new(schema);
         let tables = database_spec
             .tables
@@ -171,7 +172,7 @@ impl BenchmarkControl for WriteBenchmark {
             .await?;
 
         let ddl = std::fs::read_to_string(self.schema.as_path())?;
-        let schema = DatabaseSchema::new(&ddl, Default::default())?;
+        let schema = DatabaseSchema::new(&ddl, (&conn).into())?;
 
         conn.query_drop(&ddl).await?;
         if let Some(num_indices) = self.indices_per_table {

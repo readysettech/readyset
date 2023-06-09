@@ -4,7 +4,6 @@
 //! Assumptions: There is only a single write client
 //! in the system.
 
-use std::convert::TryFrom;
 use std::env;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -185,9 +184,11 @@ impl Writer {
     }
 
     pub async fn run(&'static self) -> anyhow::Result<()> {
-        let news_app_schema = DatabaseSchema::try_from(self.schema.clone().unwrap_or_else(|| {
+        let path = self.schema.clone().unwrap_or_else(|| {
             PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap() + "/news_app_db.sql")
-        }))?;
+        });
+        let ddl = std::fs::read_to_string(&path)?;
+        let news_app_schema = DatabaseSchema::new(&ddl, self.database_url.dialect().into())?;
 
         let current_articles = Arc::new(AtomicUsize::new(self.article_table_rows));
         let (tx, rx): (Sender<WriterThreadUpdate>, Receiver<WriterThreadUpdate>) = mpsc::channel();

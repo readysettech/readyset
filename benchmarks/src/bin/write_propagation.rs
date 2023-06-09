@@ -13,7 +13,6 @@
 //!   the write propagation time.
 
 use std::collections::HashMap;
-use std::convert::TryFrom;
 use std::env;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -268,9 +267,12 @@ impl Writer {
     }
 
     pub async fn run(&'static self) -> anyhow::Result<()> {
-        let news_app_schema = DatabaseSchema::try_from(self.schema.clone().unwrap_or_else(|| {
+        let path = self.schema.clone().unwrap_or_else(|| {
             PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap() + "/news_app_db.sql")
-        }))?;
+        });
+        let dialect = DatabaseURL::from_str(&self.database_url)?.dialect();
+        let ddl = std::fs::read_to_string(&path)?;
+        let news_app_schema = DatabaseSchema::new(&ddl, dialect.into())?;
 
         let current_articles = Arc::new(AtomicUsize::new(self.article_table_rows));
         let (tx, rx): (Sender<WriterThreadUpdate>, Receiver<WriterThreadUpdate>) = mpsc::channel();

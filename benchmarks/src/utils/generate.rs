@@ -3,7 +3,7 @@
 
 use std::borrow::Borrow;
 use std::collections::HashMap;
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryInto;
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::warn;
 
-use super::spec::{DatabaseGenerationSpec, DatabaseSchema, TableGenerationSpec};
+use super::spec::{DatabaseGenerationSpec, DatabaseSchema, SchemaKind, TableGenerationSpec};
 use crate::utils::backend::Backend;
 use crate::utils::path::benchmark_path;
 
@@ -37,18 +37,15 @@ pub struct DataGenerator {
     #[clap(long, value_hint = ValueHint::AnyPath)]
     schema: PathBuf,
 
-    /// Change or assign values to user variables in the provided schema.
+    /// Change or assign values to user variables in the provided schema. Note that user variables
+    /// are not supported for Postgres.
     /// The format is a json map, for example "{ 'user_rows': '10000', 'article_rows': '100' }"
     #[clap(long)]
     var_overrides: Option<serde_json::Value>,
 }
 
-fn multi_ddl(input: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<SqlQuery>> {
-    many1(delimited(
-        whitespace0,
-        sql_query(Dialect::MySQL),
-        whitespace0,
-    ))(input)
+fn multi_ddl(input: LocatedSpan<&[u8]>, dialect: Dialect) -> NomSqlResult<&[u8], Vec<SqlQuery>> {
+    many1(delimited(whitespace0, sql_query(dialect), whitespace0))(input)
 }
 
 impl DataGenerator {
@@ -77,7 +74,7 @@ impl DataGenerator {
         let mut conn = DatabaseURL::from_str(conn_str)?.connect(None).await?;
         let ddl = std::fs::read_to_string(&benchmark_path(&self.schema)?)?;
 
-        let parsed = multi_ddl(LocatedSpan::new(ddl.as_bytes()))
+        let parsed = multi_ddl(LocatedSpan::new(ddl.as_bytes()), conn.dialect())
             .map_err(|e| anyhow!("Error parsing DDL {}", e.to_string()))?;
         // This may be a multi-line DDL, if it is semi-colons terminate the statements.
         for statement in parsed.1 {
@@ -155,21 +152,35 @@ impl DataGenerator {
     }
 
     pub async fn generate(&self, conn_str: &str) -> anyhow::Result<DatabaseGenerationSpec> {
-        let user_vars: HashMap<String, String> = self
-            .var_overrides
-            .clone()
-            .unwrap_or_else(|| json!({}))
-            .as_object()
-            .expect("var-overrides should be formatted as a json map")
-            .into_iter()
-            .map(|(key, value)| (key.to_owned(), value.as_str().unwrap().to_owned()))
-            .collect();
-
         let db_url = DatabaseURL::from_str(conn_str)?;
+
+        let schema = match db_url.dialect() {
+            Dialect::PostgreSQL => {
+                if self.var_overrides.is_some() {
+                    warn!("var overrides are set, but var overrides are not supported for PostgreSQL!");
+                }
+
+                let ddl = std::fs::read_to_string(benchmark_path(&self.schema)?)?;
+                DatabaseSchema::new(&ddl, SchemaKind::PostgreSQL)?
+            }
+            Dialect::MySQL => {
+                let user_vars: HashMap<String, String> = self
+                    .var_overrides
+                    .clone()
+                    .unwrap_or_else(|| json!({}))
+                    .as_object()
+                    .expect("var-overrides should be formatted as a json map")
+                    .into_iter()
+                    .map(|(key, value)| (key.to_owned(), value.as_str().unwrap().to_owned()))
+                    .collect();
+
+                let ddl = std::fs::read_to_string(benchmark_path(&self.schema)?)?;
+                DatabaseSchema::new(&ddl, SchemaKind::MySQL { user_vars })?
+            }
+        };
 
         let old_size = Self::adjust_upstream_vars(&db_url).await;
 
-        let schema = DatabaseSchema::try_from((benchmark_path(&self.schema)?, user_vars))?;
         let database_spec = DatabaseGenerationSpec::new(schema);
         let status = parallel_load(db_url.clone(), database_spec.clone()).await;
 
