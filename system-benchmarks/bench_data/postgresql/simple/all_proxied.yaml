@@ -1,0 +1,15 @@
+distributions:
+  - name: ids
+    range:
+      start: 0
+      end: 100000
+    zipf: 1.15
+queries:
+  - spec: >-
+      SELECT id, name FROM users WHERE id = $1
+    params:
+      - sql_type: bigint
+        distribution: ids
+        col: 0
+    weight: 1
+    migrate: false

@@ -1,0 +1,6 @@
+CREATE TABLE users (
+  id int NOT NULL PRIMARY KEY,
+  name text NOT NULL
+);
+
+COMMENT ON TABLE users IS 'ROWS = 100000';

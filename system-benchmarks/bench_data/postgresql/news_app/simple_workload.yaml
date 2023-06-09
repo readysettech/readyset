@@ -1,0 +1,62 @@
+distributions:
+  - name: users
+    range:
+      start: 0
+      end: 100000
+    uniform:
+  - name: articles
+    range:
+      start: 0
+      end: 10000
+    uniform:
+queries:
+  - spec: 'SELECT A.id, A.title, A.keywords, A.creation_time, A.short_text, A.image_url, A.url
+           FROM articles A, recommendations R
+           WHERE A.id = R.article_id AND R.user_id IN ($1, $2, $3, $4, $5) ORDER BY A.title LIMIT 10'
+    params:
+    - sql_type: bigint
+      distribution: users
+    - sql_type: bigint
+      distribution: users
+    - sql_type: bigint
+      distribution: users
+    - sql_type: bigint
+      distribution: users
+    - sql_type: bigint
+      distribution: users
+    weight: 1000
+    migrate: true
+  - spec: 'SELECT AT.name, A.title
+           FROM authors AT, articles A
+           WHERE A.author_id = AT.id AND A.id IN ($1, $2, $3, $4, $5) LIMIT 10'
+    params:
+    - sql_type: bigint
+      distribution: articles
+    - sql_type: bigint
+      distribution: articles
+    - sql_type: bigint
+      distribution: articles
+    - sql_type: bigint
+      distribution: articles
+    - sql_type: bigint
+      distribution: articles
+    weight: 100
+    migrate: true
+  - spec: 'WITH t AS (
+            SELECT article_id
+            FROM recommendations
+            WHERE user_id = $2
+            OFFSET FLOOR(RANDOM() * 1000000) LIMIT 1
+           )
+           UPDATE recommendations
+           SET article_id = $1
+           FROM t
+           WHERE t.article_id = recommendations.article_id'
+    params:
+    - sql_type: bigint
+      distribution: articles
+    - sql_type: bigint
+      distribution: users
+    weight: 10
+    migrate: false
+

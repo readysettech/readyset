@@ -1,0 +1,25 @@
+distributions:
+  - name: users
+    range:
+      start: 0
+      end: 100000
+    # zipf(1.15) means that 90% of the queries gonna be for 10% of the keys
+    zipf: 1.15
+queries:
+  - spec: 'SELECT A.id, A.title, A.keywords, A.creation_time, A.short_text, A.image_url, A.url
+           FROM articles A, recommendations R
+           WHERE A.id = R.article_id AND R.user_id IN ($1, $2, $3, $4, $5) ORDER BY A.title LIMIT 10'
+    params:
+    - sql_type: bigint
+      distribution: users
+    - sql_type: bigint
+      distribution: users
+    - sql_type: bigint
+      distribution: users
+    - sql_type: bigint
+      distribution: users
+    - sql_type: bigint
+      distribution: users
+    weight: 2000000
+    migrate: true
+

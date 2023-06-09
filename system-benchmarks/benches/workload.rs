@@ -178,8 +178,12 @@ struct Benchmark {
 
 impl Benchmark {
     /// Enumerate all benchmarks in the default benchmarks directory
-    fn find_benchmarks(filter: regex::Regex) -> anyhow::Result<Vec<Self>> {
-        let bench_dir = Path::new(BENCHMARK_DATA_PATH);
+    fn find_benchmarks(
+        filter: regex::Regex,
+        database_type: DatabaseType,
+    ) -> anyhow::Result<Vec<Self>> {
+        let data_path = format!("{BENCHMARK_DATA_PATH}/{database_type}");
+        let bench_dir = Path::new(&data_path);
         let subdirs = read_dir(benchmark_path(bench_dir)?)?;
 
         // Find all subdirectories in the benchmarks directory
@@ -874,7 +878,8 @@ fn main() -> anyhow::Result<()> {
         criterion = criterion.save_baseline(baseline);
     }
 
-    let benchmarks = Benchmark::find_benchmarks(filter)?;
+    let database_type = DatabaseURL::from_str(&args.upstream_url)?.database_type();
+    let benchmarks = Benchmark::find_benchmarks(filter, database_type)?;
 
     for benchmark in benchmarks {
         benchmark.run_benchmark(&mut criterion, &args)?;
