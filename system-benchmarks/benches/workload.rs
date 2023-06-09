@@ -49,8 +49,8 @@ const LEADER_URI: &str = "http://127.0.0.1:6033";
 /// The ReadySet adapter url
 fn readyset_url(database_type: DatabaseType) -> String {
     match database_type {
-        DatabaseType::PostgreSQL => format!("postgres://127.0.0.1:{BENCHMARK_PORT}"),
-        DatabaseType::MySQL => format!("mysql://127.0.0.1:{BENCHMARK_PORT}"),
+        DatabaseType::PostgreSQL => format!("postgres://127.0.0.1:{BENCHMARK_PORT}/{DB_NAME}"),
+        DatabaseType::MySQL => format!("mysql://127.0.0.1:{BENCHMARK_PORT}/{DB_NAME}"),
     }
 }
 
@@ -700,16 +700,20 @@ async fn wait_adapter_ready(database_type: DatabaseType) -> anyhow::Result<()> {
     let q = nom_sql::ShowStatement::ReadySetStatus;
     loop {
         let res = conn
-            .query(q.display(nom_sql::Dialect::MySQL).to_string())
+            .simple_query(q.display(nom_sql::Dialect::MySQL).to_string())
             .await;
 
         if let Ok(data) = res {
-            let snapshot_status = Vec::<Vec<DfValue>>::try_from(data)
-                .ok()
-                .and_then(|res| res.into_iter().find(|r| r[0] == "Snapshot Status".into()))
-                .and_then(|r| r.into_iter().nth(1))
-                .and_then(|v| String::try_from(v).ok());
-            if snapshot_status.as_deref() == Some("Completed") {
+            let snapshot_status: String = Vec::<Vec<DfValue>>::try_from(data)
+                .unwrap()
+                .into_iter()
+                .find(|r| r[0] == "Snapshot Status".into())
+                .unwrap()[1]
+                .clone()
+                .try_into()
+                .unwrap();
+
+            if snapshot_status == "Completed" {
                 return Ok(());
             }
         }
