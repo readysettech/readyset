@@ -16,6 +16,7 @@ pub use self::alter::{
     AlterColumnOperation, AlterTableDefinition, AlterTableStatement, ReplicaIdentity,
 };
 pub use self::column::{Column, ColumnConstraint, ColumnSpecification};
+pub use self::comment::CommentStatement;
 pub use self::common::{FieldDefinitionExpr, FieldReference, IndexType, TableKey};
 pub use self::compound_select::{CompoundSelectOperator, CompoundSelectStatement};
 pub use self::create::{
@@ -63,6 +64,7 @@ mod macros;
 mod alter;
 pub mod analysis;
 mod column;
+mod comment;
 mod common;
 mod compound_select;
 mod create;

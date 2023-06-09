@@ -8,6 +8,7 @@ use readyset_util::redacted::Sensitive;
 use serde::{Deserialize, Serialize};
 
 use crate::alter::{alter_table_statement, AlterTableStatement};
+use crate::comment::{comment, CommentStatement};
 use crate::compound_select::{compound_selection, CompoundSelectStatement};
 use crate::create::{
     create_cached_query, create_table, key_specification, view_creation, CreateCacheStatement,
@@ -59,6 +60,7 @@ pub enum SqlQuery {
     Use(UseStatement),
     Show(ShowStatement),
     Explain(ExplainStatement),
+    Comment(CommentStatement),
 }
 
 impl SqlQuery {
@@ -85,6 +87,7 @@ impl SqlQuery {
             Self::Use(use_db) => write!(f, "{}", use_db),
             Self::Show(show) => write!(f, "{}", show.display(dialect)),
             Self::Explain(explain) => write!(f, "{}", explain),
+            Self::Comment(c) => write!(f, "{}", c.display(dialect)),
         })
     }
 }
@@ -122,6 +125,7 @@ impl SqlQuery {
             Self::Use(_) => "USE",
             Self::Show(_) => "SHOW",
             Self::Explain(_) => "EXPLAIN",
+            Self::Comment(_) => "COMMENT",
         }
     }
 
@@ -135,6 +139,16 @@ pub fn sql_query(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResul
     move |i| {
         // Ignore preceding whitespace or comments
         let (i, _) = whitespace0(i)?;
+
+        // `alt` supports a maximum of 21 parsers, so we split the parser up to handle more
+        alt((sql_query_part1(dialect), sql_query_part2(dialect)))(i)
+    }
+}
+
+fn sql_query_part1(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlQuery> {
+    move |i| {
         alt((
             map(create_table(dialect), SqlQuery::CreateTable),
             map(insertion(dialect), SqlQuery::Insert),
@@ -159,6 +173,11 @@ pub fn sql_query(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResul
             map(explain_statement, SqlQuery::Explain),
         ))(i)
     }
+}
+fn sql_query_part2(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlQuery> {
+    move |i| map(comment(dialect), SqlQuery::Comment)(i)
 }
 
 macro_rules! export_parser {

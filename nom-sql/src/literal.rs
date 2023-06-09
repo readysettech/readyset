@@ -195,9 +195,7 @@ impl Display for Literal {
             Literal::Numeric(val, scale) => {
                 write!(f, "{}", Decimal::from_i128_with_scale(*val, *scale))
             }
-            Literal::String(ref s) => {
-                write!(f, "'{}'", s.replace('\'', "''").replace('\\', "\\\\"))
-            }
+            Literal::String(ref s) => display_string_literal(f, s),
             Literal::Blob(ref bv) => write!(
                 f,
                 "{}",
@@ -222,6 +220,10 @@ impl Display for Literal {
             }
         }
     }
+}
+
+pub(crate) fn display_string_literal(f: &mut fmt::Formatter<'_>, s: &str) -> fmt::Result {
+    write!(f, "'{}'", s.replace('\'', "''").replace('\\', "\\\\"))
 }
 
 impl Literal {

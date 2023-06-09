@@ -17,14 +17,14 @@ use crate::set::Variable;
 use crate::transaction::{CommitStatement, RollbackStatement, StartTransactionStatement};
 use crate::{
     AlterColumnOperation, AlterTableDefinition, AlterTableStatement, CacheInner, CaseWhenBranch,
-    Column, ColumnConstraint, ColumnSpecification, CommonTableExpr, CompoundSelectStatement,
-    CreateCacheStatement, CreateTableStatement, CreateViewStatement, DeleteStatement,
-    DropAllCachesStatement, DropCacheStatement, DropTableStatement, DropViewStatement,
-    ExplainStatement, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, GroupByClause,
-    InValue, InsertStatement, JoinClause, JoinConstraint, JoinRightSide, Literal, OrderClause,
-    Relation, SelectSpecification, SelectStatement, SetNames, SetPostgresParameter, SetStatement,
-    SetVariables, ShowStatement, SqlIdentifier, SqlQuery, SqlType, TableExpr, TableExprInner,
-    TableKey, UpdateStatement, UseStatement,
+    Column, ColumnConstraint, ColumnSpecification, CommentStatement, CommonTableExpr,
+    CompoundSelectStatement, CreateCacheStatement, CreateTableStatement, CreateViewStatement,
+    DeleteStatement, DropAllCachesStatement, DropCacheStatement, DropTableStatement,
+    DropViewStatement, ExplainStatement, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr,
+    GroupByClause, InValue, InsertStatement, JoinClause, JoinConstraint, JoinRightSide, Literal,
+    OrderClause, Relation, SelectSpecification, SelectStatement, SetNames, SetPostgresParameter,
+    SetStatement, SetVariables, ShowStatement, SqlIdentifier, SqlQuery, SqlType, TableExpr,
+    TableExprInner, TableKey, UpdateStatement, UseStatement,
 };
 
 /// Each method of the `VisitorMut` trait is a hook to be potentially overridden when recursively
@@ -409,6 +409,13 @@ pub trait VisitorMut<'ast>: Sized {
         _explain_statement: &'ast mut ExplainStatement,
     ) -> Result<(), Self::Error> {
         Ok(())
+    }
+
+    fn visit_comment_statement(
+        &mut self,
+        comment_statement: &'ast mut CommentStatement,
+    ) -> Result<(), Self::Error> {
+        walk_comment_statement(self, comment_statement)
     }
 
     fn visit_sql_query(&mut self, sql_query: &'ast mut SqlQuery) -> Result<(), Self::Error> {
@@ -1128,7 +1135,29 @@ pub fn walk_sql_query<'a, V: VisitorMut<'a>>(
         SqlQuery::Use(statement) => visitor.visit_use_statement(statement),
         SqlQuery::Show(statement) => visitor.visit_show_statement(statement),
         SqlQuery::Explain(statement) => visitor.visit_explain_statement(statement),
+        SqlQuery::Comment(statement) => visitor.visit_comment_statement(statement),
     }
+}
+
+pub fn walk_comment_statement<'a, V: VisitorMut<'a>>(
+    visitor: &mut V,
+    comment_statement: &'a mut CommentStatement,
+) -> Result<(), V::Error> {
+    match comment_statement {
+        CommentStatement::Column {
+            column_name,
+            table_name,
+            ..
+        } => {
+            visitor.visit_sql_identifier(column_name)?;
+            visitor.visit_sql_identifier(table_name)?;
+        }
+        CommentStatement::Table { table_name, .. } => {
+            visitor.visit_sql_identifier(table_name)?;
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

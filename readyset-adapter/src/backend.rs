@@ -2171,7 +2171,10 @@ where
                     SqlQuery::RenameTable(_) => {
                         unsupported!("{} not yet supported", query.query_type());
                     }
-                    SqlQuery::Set(_) | SqlQuery::CompoundSelect(_) | SqlQuery::Show(_) => {
+                    SqlQuery::Set(_)
+                    | SqlQuery::CompoundSelect(_)
+                    | SqlQuery::Show(_)
+                    | SqlQuery::Comment(_) => {
                         event.sql_type = SqlQueryType::Other;
                         upstream.query(raw_query).await.map(QueryResult::Upstream)
                     }

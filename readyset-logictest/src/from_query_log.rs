@@ -99,7 +99,8 @@ fn is_ddl(query: &SqlQuery) -> bool {
         | SqlQuery::Commit(_)
         | SqlQuery::Rollback(_)
         | SqlQuery::Show(_)
-        | SqlQuery::Explain(_) => false,
+        | SqlQuery::Explain(_)
+        | SqlQuery::Comment(_) => false,
         SqlQuery::CreateTable(_)
         | SqlQuery::CreateView(_)
         | SqlQuery::DropTable(_)
