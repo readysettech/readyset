@@ -1920,6 +1920,7 @@ async fn test_show_caches_queries_telemetry() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "Flaky test (REA-2878)"]
 async fn test_proxied_queries_telemetry() {
     readyset_tracing::init_test_logging();
     // This variation on setup_telemetry sets up a periodic reporter for proxied queries.

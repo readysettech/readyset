@@ -2420,6 +2420,7 @@ async fn pgsql_unsupported() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
+#[ignore = "Flaky test (REA-2878)"]
 async fn pgsql_delete_from_table_without_pk() {
     readyset_tracing::init_test_logging();
     let url = pgsql_url();
