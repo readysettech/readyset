@@ -4059,17 +4059,17 @@ impl Domain {
 
                 match trigger {
                     TriggerEndpoint::End { .. } | TriggerEndpoint::Local(..) => {
-                        // This path terminates inside the domain. Find the target node, evict
+                        // This path terminates inside the domain. Find the destination node, evict
                         // from it, and then propagate the eviction further downstream.
-                        let target = path.last().node;
+                        let destination = path.last().node;
                         // We've already evicted from readers in walk_path
                         #[allow(clippy::indexing_slicing)] // came from replay paths
-                        if self.nodes[target].borrow().is_reader() {
+                        if self.nodes[destination].borrow().is_reader() {
                             return Ok(());
                         }
                         // No need to continue if node was dropped.
                         #[allow(clippy::indexing_slicing)] // came from replay paths
-                        if self.nodes[target].borrow().is_dropped() {
+                        if self.nodes[destination].borrow().is_dropped() {
                             return Ok(());
                         }
 
@@ -4077,13 +4077,13 @@ impl Domain {
                             internal_err!("Received eviction for non-partial replay path")
                         })?;
 
-                        trace!(local = %target, ?keys, ?tag, "Evicting keys");
+                        trace!(local = %destination, ?keys, ?tag, "Evicting keys");
                         #[allow(clippy::indexing_slicing)] // came from replay paths
-                        if self.state[target].evict_keys(tag, &keys).is_some() {
+                        if self.state[destination].evict_keys(tag, &keys).is_some() {
                             trigger_downstream_evictions(
                                 &index,
                                 &keys[..],
-                                target,
+                                destination,
                                 ex,
                                 &self.not_ready,
                                 &self.replay_paths,
