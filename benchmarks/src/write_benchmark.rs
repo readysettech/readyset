@@ -5,18 +5,22 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use async_trait::async_trait;
 use clap::{Parser, ValueHint};
-use database_utils::{DatabaseURL, QueryableConnection};
+use database_utils::{DatabaseConnection, DatabaseURL, QueryableConnection};
+use itertools::Itertools;
 use metrics::Unit;
-use nom_sql::Expr;
+use nom_sql::{
+    BinaryOperator, CacheInner, CreateCacheStatement, Dialect, Expr, FieldDefinitionExpr,
+    ItemPlaceholder, Literal, SelectStatement, TableExpr, TableExprInner,
+};
 use parking_lot::Mutex;
-use query_generator::TableSpec;
+use query_generator::{ColumnName, TableSpec};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
-use tracing::debug;
+use tracing::{debug, info};
 
 use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters, MetricGoal};
 use crate::utils::multi_thread::{self, MultithreadBenchmark};
@@ -29,8 +33,8 @@ const REPORT_RESULTS_INTERVAL: Duration = Duration::from_secs(2);
 
 #[derive(Parser, Clone, Serialize, Deserialize)]
 pub struct WriteBenchmark {
-    /// Path to the desired database SQL schema. Each table must have
-    /// a primary key to generate data.
+    /// Path to the desired database SQL schema. Each table must have a primary key to generate
+    /// data.
     #[clap(long, value_hint = ValueHint::AnyPath)]
     schema: PathBuf,
 
@@ -43,11 +47,17 @@ pub struct WriteBenchmark {
     #[clap(long, default_value = "1")]
     threads: u64,
 
-    /// The duration, specified as the number of seconds that the benchmark
-    /// should be running. If `None` is provided, the benchmark will run
-    /// until it is interrupted.
+    /// The duration, specified as the number of seconds that the benchmark should be running. If
+    /// `None` is provided, the benchmark will run until it is interrupted.
     #[clap(long, value_parser = crate::utils::seconds_as_str_to_duration)]
     pub run_for: Option<Duration>,
+
+    /// Optionally create this many indices in each of the tables that're being written to.
+    ///
+    /// If any of the tables do not have enough columns to create this many distinct indices, the
+    /// benchmark run will fail
+    #[clap(long)]
+    indices_per_table: Option<usize>,
 }
 
 #[derive(Clone)]
@@ -79,14 +89,90 @@ impl WriteBenchmarkThreadData {
     }
 }
 
+fn columns_for_indices(num_indices: usize, table: &TableSpec) -> Result<Vec<Vec<ColumnName>>> {
+    let res: Vec<_> = (1..=table.columns.len())
+        .flat_map(|len| table.columns.keys().cloned().permutations(len))
+        .take(num_indices)
+        .collect();
+
+    if res.len() < num_indices {
+        bail!(
+            "Not enough columns in table {} to make {num_indices} indices",
+            table.name
+        );
+    }
+
+    Ok(res)
+}
+
+fn query_indexed_by_columns(
+    table: &TableSpec,
+    cols: Vec<ColumnName>,
+    dialect: Dialect,
+) -> SelectStatement {
+    SelectStatement {
+        tables: vec![TableExpr {
+            inner: TableExprInner::Table(table.name.clone().into()),
+            alias: None,
+        }],
+        fields: vec![FieldDefinitionExpr::All],
+        where_clause: cols
+            .into_iter()
+            .enumerate()
+            .map(|(i, c)| Expr::BinaryOp {
+                lhs: Box::new(Expr::Column(c.into())),
+                op: BinaryOperator::Equal,
+                rhs: Box::new(Expr::Literal(Literal::Placeholder(match dialect {
+                    Dialect::PostgreSQL => ItemPlaceholder::DollarNumber(i.try_into().unwrap()),
+                    Dialect::MySQL => ItemPlaceholder::QuestionMark,
+                }))),
+            })
+            .reduce(|lhs, rhs| Expr::BinaryOp {
+                lhs: Box::new(lhs),
+                op: BinaryOperator::And,
+                rhs: Box::new(rhs),
+            }),
+        ..Default::default()
+    }
+}
+
+async fn create_indices(
+    conn: &mut DatabaseConnection,
+    num_indices: usize,
+    schema: &DatabaseSchema,
+) -> Result<()> {
+    for table_spec in schema.tables().values() {
+        info!(num_indices, table = %table_spec.table.name, "Creating indices in table");
+        for cols in columns_for_indices(num_indices, &table_spec.table)? {
+            let query = query_indexed_by_columns(&table_spec.table, cols, conn.dialect());
+            let create_cache = CreateCacheStatement {
+                name: None,
+                inner: Ok(CacheInner::Statement(Box::new(query))),
+                always: false,
+            };
+            conn.query_drop(create_cache.display(conn.dialect()).to_string())
+                .await?;
+        }
+    }
+
+    Ok(())
+}
+
 #[async_trait]
 impl BenchmarkControl for WriteBenchmark {
     async fn setup(&self, deployment: &DeploymentParameters) -> Result<()> {
         let mut conn = DatabaseURL::from_str(&deployment.target_conn_str)?
             .connect(None)
             .await?;
+
         let ddl = std::fs::read_to_string(self.schema.as_path())?;
-        conn.query_drop(ddl).await?;
+        let schema = DatabaseSchema::new(&ddl, Default::default())?;
+
+        conn.query_drop(&ddl).await?;
+        if let Some(num_indices) = self.indices_per_table {
+            create_indices(&mut conn, num_indices, &schema).await?;
+        }
+
         Ok(())
     }
 

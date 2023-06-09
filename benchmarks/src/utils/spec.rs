@@ -90,7 +90,7 @@ fn parse_ddl(input: LocatedSpan<&[u8]>) -> anyhow::Result<Vec<SqlQuery>> {
 }
 
 impl DatabaseSchema {
-    fn new(ddl: &str, mut user_vars: HashMap<String, String>) -> anyhow::Result<Self> {
+    pub fn new(ddl: &str, mut user_vars: HashMap<String, String>) -> anyhow::Result<Self> {
         let ddl = parse_ddl(LocatedSpan::new(ddl.as_bytes())).unwrap();
 
         let mut schema = DatabaseSchema {
@@ -174,6 +174,10 @@ impl DatabaseSchema {
         }
 
         Ok(schema)
+    }
+
+    pub fn tables(&self) -> &HashMap<TableName, TableGenerationSpec> {
+        &self.tables
     }
 }
 
