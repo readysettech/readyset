@@ -1639,6 +1639,20 @@ impl From<&[JsonValue]> for DfValue {
     }
 }
 
+impl TryFrom<(Type, String)> for DfValue {
+    type Error = ReadySetError;
+
+    fn try_from((pgtype, s): (Type, String)) -> Result<Self, Self::Error> {
+        DfValue::from_sql(&pgtype, s.as_bytes()).map_err(|e| {
+            ReadySetError::DfValueConversionError {
+                src_type: "(tokio_postgres::types::Type, String)".into(),
+                target_type: "DfValue".into(),
+                details: e.to_string(),
+            }
+        })
+    }
+}
+
 impl TryFrom<mysql_common::value::Value> for DfValue {
     type Error = ReadySetError;
 

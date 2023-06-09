@@ -24,8 +24,15 @@ pub trait QueryableConnection: Send {
         Q: AsQuery + AsRef<str> + Send + Sync;
 
     /// Executes query for either mysql or postgres, whichever is the underlying
-    /// connection variant.
+    /// connection variant. This method prepares the statement if necessary.
     async fn query<Q>(&mut self, query: Q) -> Result<QueryResults, DatabaseError>
+    where
+        Q: AsQuery + AsRef<str> + Send + Sync;
+
+    /// Executes query for either mysql or postgres, whichever is the underlying
+    /// connection variant. This method will **not** prepare the statement. If you are passing
+    /// parameters, it is highly recommended that you use [`QueryableConnection::execute`].
+    async fn simple_query<Q>(&mut self, query: Q) -> Result<SimpleQueryResults, DatabaseError>
     where
         Q: AsQuery + AsRef<str> + Send + Sync;
 
@@ -159,6 +166,23 @@ impl QueryableConnection for DatabaseConnection {
                     .await?
                     .try_collect()
                     .await?,
+            )),
+        }
+    }
+
+    async fn simple_query<Q>(&mut self, query: Q) -> Result<SimpleQueryResults, DatabaseError>
+    where
+        Q: AsQuery + AsRef<str> + Send + Sync,
+    {
+        match self {
+            DatabaseConnection::MySQL(conn) => Ok(SimpleQueryResults::MySql(
+                conn.query_iter(query).await?.collect().await?,
+            )),
+            DatabaseConnection::PostgreSQL(client, _jh) => Ok(SimpleQueryResults::Postgres(
+                extract_simple_query_rows(client.simple_query(query.as_ref()).await?),
+            )),
+            DatabaseConnection::PostgreSQLPool(client) => Ok(SimpleQueryResults::Postgres(
+                extract_simple_query_rows(client.simple_query(query.as_ref()).await?),
             )),
         }
     }
@@ -322,6 +346,13 @@ impl QueryableConnection for DatabaseConnectionPool {
     {
         self.get_conn().await?.execute(stmt, params).await
     }
+
+    async fn simple_query<Q>(&mut self, query: Q) -> Result<SimpleQueryResults, DatabaseError>
+    where
+        Q: AsQuery + AsRef<str> + Send + Sync,
+    {
+        self.get_conn().await?.simple_query(query).await
+    }
 }
 
 /// A builder for a connection pool to either a MySQL or PostgreSQL database.
@@ -380,6 +411,20 @@ where
         .map(mysql_async::Value::try_from)
         .collect::<Result<Vec<mysql_async::Value>, _>>()
         .map_err(|e| DatabaseError::ValueConversion(Box::new(e)))
+}
+
+/// Finds the `SimpleQueryMessage::Row`s in the result set and extracts the inner
+/// `SimpleQueryRow`s.
+fn extract_simple_query_rows(
+    results: Vec<pgsql::SimpleQueryMessage>,
+) -> Vec<pgsql::SimpleQueryRow> {
+    results
+        .into_iter()
+        .flat_map(|r| match r {
+            tokio_postgres::SimpleQueryMessage::Row(r) => Some(r),
+            _ => None,
+        })
+        .collect::<Vec<pgsql::SimpleQueryRow>>()
 }
 
 /// An enum wrapper around various prepared statement types. Either a mysql_async prepared
@@ -569,6 +614,54 @@ where
     }
 }
 
+/// An enum wrapper around the native Postgres and MySQL simple query result types.
+pub enum SimpleQueryResults {
+    MySql(Vec<mysql_async::Row>),
+    Postgres(Vec<pgsql::SimpleQueryRow>),
+}
+
+impl<V> TryFrom<SimpleQueryResults> for Vec<Vec<V>>
+where
+    V: TryFrom<mysql_async::Value>,
+    <V as TryFrom<mysql_async::Value>>::Error: std::error::Error + Send + Sync + 'static,
+    V: TryFrom<(tokio_postgres::types::Type, String)>,
+    <V as TryFrom<(tokio_postgres::types::Type, String)>>::Error:
+        std::error::Error + Send + Sync + 'static,
+{
+    type Error = DatabaseError;
+
+    fn try_from(results: SimpleQueryResults) -> Result<Self, Self::Error> {
+        match results {
+            SimpleQueryResults::MySql(results) => Ok(results
+                .into_iter()
+                .map(|mut r| {
+                    (0..r.columns().len())
+                        .map(|c| {
+                            V::try_from(r.take::<mysql::Value, _>(c).unwrap())
+                                .map_err(|e| DatabaseError::ValueConversion(Box::new(e)))
+                        })
+                        .collect::<Result<Vec<V>, _>>()
+                })
+                .collect::<Result<Vec<Vec<V>>, _>>()?),
+            SimpleQueryResults::Postgres(results) => results
+                .into_iter()
+                .map(|r| {
+                    (0..r.len())
+                        .map(|c| {
+                            let pgtype =
+                                tokio_postgres::types::Type::from_oid(r.fields()[c].type_oid())
+                                    .unwrap();
+
+                            V::try_from((pgtype, r.get(c).unwrap().to_owned()))
+                                .map_err(|e| DatabaseError::ValueConversion(Box::new(e)))
+                        })
+                        .collect::<Result<Vec<V>, _>>()
+                })
+                .collect::<Result<Vec<Vec<V>>, _>>(),
+        }
+    }
+}
+
 /// An enum wrapper around the native Postgres and MySQL transaction types.
 pub enum Transaction<'a> {
     MySql(mysql_async::Transaction<'a>),
@@ -620,6 +713,23 @@ impl<'a> QueryableConnection for Transaction<'a> {
                     .await?
                     .try_collect()
                     .await?,
+            )),
+        }
+    }
+
+    async fn simple_query<Q>(&mut self, query: Q) -> Result<SimpleQueryResults, DatabaseError>
+    where
+        Q: AsQuery + AsRef<str> + Send + Sync,
+    {
+        match self {
+            Transaction::MySql(transaction) => Ok(SimpleQueryResults::MySql(
+                transaction.query_iter(query).await?.collect().await?,
+            )),
+            Transaction::Postgres(transaction) => Ok(SimpleQueryResults::Postgres(
+                extract_simple_query_rows(transaction.simple_query(query.as_ref()).await?),
+            )),
+            Transaction::PostgresPool(transaction) => Ok(SimpleQueryResults::Postgres(
+                extract_simple_query_rows(transaction.simple_query(query.as_ref()).await?),
             )),
         }
     }
