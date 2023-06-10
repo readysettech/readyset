@@ -167,6 +167,10 @@ impl BenchmarkControl for ReadWriteBenchmark {
     fn name(&self) -> &'static str {
         "read_write_benchmark"
     }
+
+    fn data_generator(&mut self) -> Option<&mut DataGenerator> {
+        Some(&mut self.data_generator)
+    }
 }
 
 #[derive(Debug, Clone)]

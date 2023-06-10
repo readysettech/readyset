@@ -11,7 +11,6 @@
 //!     - Add the type's name as a variant `Benchmark`.
 
 use std::collections::HashMap;
-use std::ffi::OsString;
 use std::str::FromStr;
 
 use anyhow::Result;
@@ -25,6 +24,7 @@ use serde::{Deserialize, Serialize};
 use crate::cache_hit_benchmark::CacheHitBenchmark;
 use crate::eviction_benchmark::EvictionBenchmark;
 use crate::fallback_benchmark::FallbackBenchmark;
+use crate::graph::ArgOverride;
 use crate::migration_benchmark::MigrationBenchmark;
 use crate::query_benchmark::QueryBenchmark;
 use crate::read_write_benchmark::ReadWriteBenchmark;
@@ -32,6 +32,7 @@ use crate::scale_connections::ScaleConnections;
 use crate::scale_views::ScaleViews;
 use crate::single_query_benchmark::SingleQueryBenchmark;
 use crate::template::Template;
+use crate::utils::generate::DataGenerator;
 use crate::utils::prometheus::{ForwardPrometheusMetrics, PrometheusEndpoint};
 use crate::workload_emulator::WorkloadEmulator;
 use crate::write_benchmark::WriteBenchmark;
@@ -77,26 +78,26 @@ impl Benchmark {
         }
     }
 
-    pub fn update_from<I, T>(&mut self, itr: I)
-    where
-        I: IntoIterator<Item = T>,
-        T: Into<OsString> + Clone,
-    {
-        match self {
-            Benchmark::Template(x) => x.update_from(itr),
-            Benchmark::QueryBenchmark(x) => x.update_from(itr),
-            Benchmark::WriteBenchmark(x) => x.update_from(itr),
-            Benchmark::CacheHitBenchmark(x) => x.update_from(itr),
-            Benchmark::ScaleViews(x) => x.update_from(itr),
-            Benchmark::ScaleConnections(x) => x.update_from(itr),
-            Benchmark::WriteLatencyBenchmark(x) => x.update_from(itr),
-            Benchmark::MigrationBenchmark(x) => x.update_from(itr),
-            Benchmark::EvictionBenchmark(x) => x.update_from(itr),
-            Benchmark::ReadWriteBenchmark(x) => x.update_from(itr),
-            Benchmark::FallbackBenchmark(x) => x.update_from(itr),
-            Benchmark::SingleQueryBenchmark(x) => x.update_from(itr),
-            Benchmark::WorkloadEmulator(x) => x.update_from(itr),
+    pub fn update_from(&mut self, args: ArgOverride) -> anyhow::Result<()> {
+        match args {
+            ArgOverride::CliArgs(itr) => match self {
+                Benchmark::Template(x) => x.update_from(itr),
+                Benchmark::QueryBenchmark(x) => x.update_from(itr),
+                Benchmark::WriteBenchmark(x) => x.update_from(itr),
+                Benchmark::CacheHitBenchmark(x) => x.update_from(itr),
+                Benchmark::ScaleViews(x) => x.update_from(itr),
+                Benchmark::ScaleConnections(x) => x.update_from(itr),
+                Benchmark::WriteLatencyBenchmark(x) => x.update_from(itr),
+                Benchmark::MigrationBenchmark(x) => x.update_from(itr),
+                Benchmark::EvictionBenchmark(x) => x.update_from(itr),
+                Benchmark::ReadWriteBenchmark(x) => x.update_from(itr),
+                Benchmark::FallbackBenchmark(x) => x.update_from(itr),
+                Benchmark::SingleQueryBenchmark(x) => x.update_from(itr),
+                Benchmark::WorkloadEmulator(x) => x.update_from(itr),
+            },
+            ArgOverride::Json(json) => self.update_data_generator_from(json)?,
         }
+        Ok(())
     }
 }
 
@@ -300,4 +301,14 @@ pub trait BenchmarkControl {
 
     /// The benchmark template's name
     fn name(&self) -> &'static str;
+
+    fn update_data_generator_from(&mut self, json: serde_json::Value) -> anyhow::Result<()> {
+        if let Some(x) = self.data_generator() {
+            x.update_from(json)?
+        }
+        Ok(())
+    }
+
+    /// The [`DataGenerator`] used by this benchmark, if any.
+    fn data_generator(&mut self) -> Option<&mut DataGenerator>;
 }

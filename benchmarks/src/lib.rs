@@ -9,6 +9,7 @@
 //! use anyhow::Result;
 //! use benchmarks::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters};
 //! use benchmarks::benchmark_gauge;
+//! use benchmarks::utils::generate::DataGenerator;
 //! use benchmarks::utils::prometheus::ForwardPrometheusMetrics;
 //! use database_utils::QueryableConnection;
 //! use itertools::{Itertools, Tuples};
@@ -77,6 +78,10 @@
 //!
 //!     fn name(&self) -> &'static str {
 //!         "my_benchmark"
+//!     }
+//!
+//!     fn data_generator(&mut self) -> Option<&mut DataGenerator> {
+//!         None
 //!     }
 //! }
 //! ```

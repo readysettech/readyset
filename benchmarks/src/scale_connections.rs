@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use tracing::info;
 
 use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters, MetricGoal};
+use crate::utils::generate::DataGenerator;
 use crate::utils::prometheus::ForwardPrometheusMetrics;
 use crate::{benchmark_counter, benchmark_histogram};
 
@@ -98,5 +99,9 @@ impl BenchmarkControl for ScaleConnections {
 
     fn name(&self) -> &'static str {
         "scale_connections"
+    }
+
+    fn data_generator(&mut self) -> Option<&mut DataGenerator> {
+        None
     }
 }

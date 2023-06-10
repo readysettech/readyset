@@ -498,7 +498,7 @@ impl BenchmarkRunner {
             self.benchmark_cmd
                 .as_mut()
                 .unwrap()
-                .update_from(run.as_args());
+                .update_from(run.as_args())?;
             let run_results = self.run().await?;
 
             assert_eq!(run_results.len(), 1);

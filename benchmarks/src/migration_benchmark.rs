@@ -126,4 +126,8 @@ impl BenchmarkControl for MigrationBenchmark {
     fn name(&self) -> &'static str {
         "migration_benchmark"
     }
+
+    fn data_generator(&mut self) -> Option<&mut DataGenerator> {
+        Some(&mut self.data_generator)
+    }
 }

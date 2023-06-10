@@ -134,6 +134,10 @@ impl BenchmarkControl for QueryBenchmark {
     fn name(&self) -> &'static str {
         "query_benchmark"
     }
+
+    fn data_generator(&mut self) -> Option<&mut DataGenerator> {
+        Some(&mut self.data_generator)
+    }
 }
 
 #[derive(Debug, Clone)]

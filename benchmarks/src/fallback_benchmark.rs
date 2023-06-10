@@ -153,6 +153,10 @@ impl BenchmarkControl for FallbackBenchmark {
     fn name(&self) -> &'static str {
         "fallback_benchmark"
     }
+
+    fn data_generator(&mut self) -> Option<&mut DataGenerator> {
+        Some(&mut self.data_generator)
+    }
 }
 
 #[derive(Debug, Clone)]

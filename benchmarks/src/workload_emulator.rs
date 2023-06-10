@@ -22,6 +22,7 @@ use zipf::ZipfDistribution;
 
 use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters, MetricGoal};
 use crate::spec::WorkloadSpec;
+use crate::utils::generate::DataGenerator;
 use crate::utils::multi_thread::{self, MultithreadBenchmark};
 use crate::utils::prometheus::ForwardPrometheusMetrics;
 use crate::utils::us_to_ms;
@@ -165,6 +166,10 @@ impl BenchmarkControl for WorkloadEmulator {
 
     fn name(&self) -> &'static str {
         "workload_emulator"
+    }
+
+    fn data_generator(&mut self) -> Option<&mut DataGenerator> {
+        None
     }
 }
 

@@ -82,6 +82,10 @@ impl BenchmarkControl for SingleQueryBenchmark {
     fn name(&self) -> &'static str {
         "single_query_benchmark"
     }
+
+    fn data_generator(&mut self) -> Option<&mut DataGenerator> {
+        Some(&mut self.data_generator)
+    }
 }
 
 impl SingleQueryBenchmark {

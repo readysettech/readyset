@@ -23,6 +23,7 @@ use tokio::sync::mpsc::{self, UnboundedSender};
 use tracing::{debug, info};
 
 use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters, MetricGoal};
+use crate::utils::generate::DataGenerator;
 use crate::utils::multi_thread::{self, MultithreadBenchmark};
 use crate::utils::prometheus::ForwardPrometheusMetrics;
 use crate::utils::spec::{DatabaseGenerationSpec, DatabaseSchema};
@@ -213,6 +214,10 @@ impl BenchmarkControl for WriteBenchmark {
 
     fn name(&self) -> &'static str {
         "write_benchmark"
+    }
+
+    fn data_generator(&mut self) -> Option<&mut DataGenerator> {
+        None
     }
 }
 

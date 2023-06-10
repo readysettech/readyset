@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters, MetricGoal};
 use crate::benchmark_gauge;
+use crate::utils::generate::DataGenerator;
 use crate::utils::prometheus::ForwardPrometheusMetrics;
 
 #[derive(Parser, Serialize, Deserialize)]
@@ -55,5 +56,9 @@ impl BenchmarkControl for Template {
 
     fn name(&self) -> &'static str {
         "template"
+    }
+
+    fn data_generator(&mut self) -> Option<&mut DataGenerator> {
+        None
     }
 }

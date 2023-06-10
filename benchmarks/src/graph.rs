@@ -5,6 +5,7 @@ use std::str::FromStr;
 
 use anyhow::bail;
 use clap::Parser;
+use serde_json::json;
 
 use crate::benchmark::BenchmarkResults;
 use crate::QUANTILES;
@@ -41,6 +42,11 @@ pub struct GraphParams {
     )]
     x_values: Option<CommaSeparatedString>,
 
+    /// Flag to indicate if the `--x-axis` is a data generation variable, rather than a
+    /// field in the BenchmarkControl struct.
+    #[clap(long, requires_all = ["graph", "x_axis", "x_values", "graph_results_path"])]
+    pub x_axis_is_datagen_var: bool,
+
     /// File to output graph results to. Currently accepts `.csv` files.
     #[clap(long, requires_all = ["graph", "x_axis", "x_values"])]
     graph_results_path: Option<PathBuf>,
@@ -57,6 +63,7 @@ impl GraphParams {
         self.x_values.as_ref().unwrap().0.iter().map(|v| GraphRun {
             x_axis: x_axis.clone(),
             x_value: v.clone(),
+            x_axis_is_datagen_var: self.x_axis_is_datagen_var,
         })
     }
 
@@ -74,18 +81,30 @@ impl GraphParams {
 pub struct GraphRun {
     x_axis: String,
     x_value: String,
+    x_axis_is_datagen_var: bool,
+}
+
+pub enum ArgOverride {
+    CliArgs(Box<dyn Iterator<Item = String>>),
+    Json(serde_json::Value),
 }
 
 impl GraphRun {
     /// Convert this graph run into a list of command-line arguments that can be passed to
     /// [`crate::Benchmark::update_from`]
-    pub fn as_args(&self) -> impl Iterator<Item = String> {
-        [
-            "benchmarks".to_owned(),
-            format!("--{}", &self.x_axis),
-            self.x_value.clone(),
-        ]
-        .into_iter()
+    pub fn as_args(&self) -> ArgOverride {
+        if self.x_axis_is_datagen_var {
+            ArgOverride::Json(json!({ self.x_axis.clone(): self.x_value.clone() }))
+        } else {
+            ArgOverride::CliArgs(Box::new(
+                vec![
+                    "benchmarks".to_owned(),
+                    format!("--{}", &self.x_axis),
+                    self.x_value.clone(),
+                ]
+                .into_iter(),
+            ))
+        }
     }
 
     /// The individual x value for this graph run

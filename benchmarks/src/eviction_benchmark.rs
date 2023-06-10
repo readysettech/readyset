@@ -150,6 +150,10 @@ impl BenchmarkControl for EvictionBenchmark {
     fn name(&self) -> &'static str {
         "eviction_benchmark"
     }
+
+    fn data_generator(&mut self) -> Option<&mut DataGenerator> {
+        Some(&mut self.data_generator)
+    }
 }
 
 #[derive(Debug, Clone, Default)]

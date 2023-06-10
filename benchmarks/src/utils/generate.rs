@@ -59,6 +59,20 @@ impl DataGenerator {
         }
     }
 
+    pub fn update_from(&mut self, json: serde_json::Value) -> anyhow::Result<()> {
+        match self.var_overrides.as_mut().and_then(|x| x.as_object_mut()) {
+            Some(x) => {
+                let mut override_map = json;
+                let m = override_map
+                    .as_object_mut()
+                    .ok_or_else(|| anyhow!("json was not a map"))?;
+                x.append(m);
+            }
+            None => self.var_overrides = Some(json),
+        }
+        Ok(())
+    }
+
     pub async fn install(&self, conn_str: &str) -> anyhow::Result<()> {
         let mut conn = DatabaseURL::from_str(conn_str)?.connect(None).await?;
         let ddl = std::fs::read_to_string(&benchmark_path(&self.schema)?)?;

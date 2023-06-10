@@ -121,4 +121,8 @@ impl BenchmarkControl for WriteLatencyBenchmark {
     fn name(&self) -> &'static str {
         "write_latency_benchmark"
     }
+
+    fn data_generator(&mut self) -> Option<&mut DataGenerator> {
+        Some(&mut self.data_generator)
+    }
 }

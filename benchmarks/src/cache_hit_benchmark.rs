@@ -90,6 +90,10 @@ impl BenchmarkControl for CacheHitBenchmark {
     fn name(&self) -> &'static str {
         "cache_hit_benchmark"
     }
+
+    fn data_generator(&mut self) -> Option<&mut DataGenerator> {
+        Some(&mut self.data_generator)
+    }
 }
 
 impl CacheHitBenchmark {
