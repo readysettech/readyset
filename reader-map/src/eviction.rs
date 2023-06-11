@@ -23,6 +23,7 @@ use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
 
 use itertools::Either;
+use rand::seq::SliceRandom;
 use rand::Rng;
 
 use crate::inner::Data;
@@ -337,6 +338,7 @@ impl LRUEviction {
 }
 
 impl RandomEviction {
+    /// Selects exactly nkeys keys to evict.
     fn pick_keys_to_evict<'a, K, V, S>(
         &self,
         data: &'a Data<K, V, S>,
@@ -346,12 +348,19 @@ impl RandomEviction {
         K: Ord + Clone,
         S: std::hash::BuildHasher,
     {
-        let ratio = nkeys as f64 / data.len() as f64;
+        // Allocate a random shuffling of indices corresponding to keys in data.
         let mut rng = rand::thread_rng();
-        // We return the iterator over the keys whose counter value is lower than that
-        data.iter().filter(move |_| rng.gen_bool(ratio))
+        let mut indices = (0..nkeys).collect::<Vec<_>>();
+        indices.shuffle(&mut rng);
+        // Return an iterator yielding elements with idx < nkeys
+        indices
+            .into_iter()
+            .zip(data.iter())
+            .filter_map(move |(idx, entry)| (idx < nkeys).then_some(entry))
     }
 
+    /// Selects exactly nkeys BTreeMap keys (not ranges) to evict.
+    /// nkeys *must* be no more than data.len()
     fn pick_ranges_to_evict<'a, K, V, S>(
         &self,
         data: &'a Data<K, V, S>,
@@ -367,13 +376,16 @@ impl RandomEviction {
         // Picking a random range to evict is kinda useless really, there is very little chance it
         // will be able to form proper ranges, unless ratio is high, but oh well, don't use random
         // for ranges I suppose.
-        let ratio = nkeys as f64 / data.len() as f64;
+
+        // Allocate a random shuffling of indices corresponding to keys in data.
         let mut rng = rand::thread_rng();
-        // We return the iterator over the keys whose counter value is lower than that
-        (
-            std::iter::repeat_with(move || rng.gen_bool(ratio) as u64).zip(data.iter()),
-            move |v| v == 1,
-        )
+        let mut indices = (0..nkeys as u64).collect::<Vec<_>>();
+        indices.shuffle(&mut rng);
+        // Return an iterator over all elements and a cutoff function selecting all indices less
+        // than nkeys
+        (indices.into_iter().zip(data.iter()), move |v| {
+            v < nkeys as u64
+        })
     }
 }
 
