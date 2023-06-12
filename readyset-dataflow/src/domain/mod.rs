@@ -3899,8 +3899,6 @@ impl Domain {
                             None
                         }
                     } else {
-                        //deep_size_of(local_index)
-                        //self.state
                         state
                             .get(local_index)
                             .filter(|state| state.is_partial())
