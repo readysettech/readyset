@@ -198,6 +198,22 @@ impl ReplContext {
 
                             DatabaseStatement::Postgres(statement, query.into())
                         }
+                        DatabaseConnection::PostgreSQLPool(client) => {
+                            let statement = client
+                                .prepare_typed(
+                                    query,
+                                    &type_oids
+                                        .into_iter()
+                                        .map(|oid| {
+                                            Type::from_oid(oid)
+                                                .ok_or_else(|| anyhow!("Unknown type {oid}"))
+                                        })
+                                        .collect::<Result<Vec<_>, _>>()?,
+                                )
+                                .await?;
+
+                            DatabaseStatement::Postgres(statement, query.into())
+                        }
                     },
                 };
                 self.prepared_statements.push(stmt);

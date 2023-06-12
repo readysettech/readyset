@@ -16,6 +16,12 @@ pub enum DatabaseError {
     #[error(transparent)]
     NativeTls(#[from] native_tls::Error),
 
+    #[error(transparent)]
+    DeadpoolPool(#[from] deadpool_postgres::PoolError),
+
+    #[error(transparent)]
+    DeadpoolBuild(#[from] deadpool_postgres::BuildError),
+
     #[error("Error converting value from result set: {0}")]
     ValueConversion(Box<dyn std::error::Error + Send + Sync>),
 

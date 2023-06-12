@@ -5,8 +5,6 @@ publish = false
 authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 derive_more = "0.99.17"
 futures = "0.3.21"
@@ -23,3 +21,4 @@ readyset-errors = { path = "../readyset-errors" }
 async-trait = "0.1"
 nom-sql = { path = "../nom-sql" }
 readyset-client = { path = "../readyset-client" }
+deadpool-postgres = "0.10.3"

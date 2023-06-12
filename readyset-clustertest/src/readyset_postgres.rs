@@ -19,43 +19,30 @@ fn readyset_postgres_cleanup(name: &str) -> DeploymentBuilder {
 }
 
 async fn replication_slot_exists(conn: &mut DatabaseConnection) -> bool {
-    match conn {
-        DatabaseConnection::MySQL(_) => false,
-        DatabaseConnection::PostgreSQL(client, _) => {
-            // Check for replication slot.
-            if let Ok(row) = client
-                .query_one(
-                    "SELECT slot_name FROM pg_replication_slots WHERE slot_name = 'readyset'",
-                    &[],
-                )
-                .await
-            {
-                let value: &str = row.get(0);
-                value == "readyset"
-            } else {
-                false
-            }
-        }
+    const QUERY: &str = "SELECT slot_name FROM pg_replication_slots WHERE slot_name = 'readyset'";
+    if let Ok(row) = match conn {
+        DatabaseConnection::MySQL(_) => return false,
+        DatabaseConnection::PostgreSQL(client, _) => client.query_one(QUERY, &[]).await,
+        DatabaseConnection::PostgreSQLPool(client) => client.query_one(QUERY, &[]).await,
+    } {
+        let value: &str = row.get(0);
+        value == "readyset"
+    } else {
+        false
     }
 }
 
 async fn publication_exists(conn: &mut DatabaseConnection) -> bool {
-    match conn {
-        DatabaseConnection::MySQL(_) => false,
-        DatabaseConnection::PostgreSQL(client, _) => {
-            if let Ok(row) = client
-                .query_one(
-                    "SELECT pubname FROM pg_publication WHERE pubname = 'readyset'",
-                    &[],
-                )
-                .await
-            {
-                let value: &str = row.get(0);
-                value == "readyset"
-            } else {
-                false
-            }
-        }
+    const QUERY: &str = "SELECT pubname FROM pg_publication WHERE pubname = 'readyset'";
+    if let Ok(row) = match conn {
+        DatabaseConnection::MySQL(_) => return false,
+        DatabaseConnection::PostgreSQL(client, _) => client.query_one(QUERY, &[]).await,
+        DatabaseConnection::PostgreSQLPool(client) => client.query_one(QUERY, &[]).await,
+    } {
+        let value: &str = row.get(0);
+        value == "readyset"
+    } else {
+        false
     }
 }
 

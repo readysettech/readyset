@@ -1154,6 +1154,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "clap 4.3.2",
+ "deadpool-postgres",
  "derive_more",
  "futures",
  "mysql_async",

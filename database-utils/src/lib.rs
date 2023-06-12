@@ -7,6 +7,7 @@ use std::str::{self, FromStr};
 use std::time::Duration;
 
 use clap::{Parser, ValueEnum};
+use connection::DatabaseConnectionPoolBuilder;
 use derive_more::From;
 use error::DatabaseTypeParseError;
 use mysql_async::OptsBuilder;
@@ -22,7 +23,8 @@ mod connection;
 pub mod error;
 
 pub use connection::{
-    DatabaseConnection, DatabaseStatement, QueryResults, QueryableConnection, Transaction,
+    DatabaseConnection, DatabaseConnectionPool, DatabaseStatement, QueryResults,
+    QueryableConnection, Transaction,
 };
 pub use error::DatabaseError;
 
@@ -282,6 +284,48 @@ impl DatabaseURL {
                     tokio::spawn(async move { connection.await.map_err(Into::into) });
                 Ok(DatabaseConnection::PostgreSQL(client, connection_handle))
             }
+        }
+    }
+
+    /// Construct a new [`DatabaseConnectionPoolBuilder`] which can be used to build a connection
+    /// pool for this database URL
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use database_utils::{DatabaseURL, DatabaseError, QueryableConnection};
+    /// # use std::str::FromStr;
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), DatabaseError> {
+    /// let mut url = DatabaseURL::from_str("mysql://root:noria@localhost/test").unwrap();
+    /// let pool = url.pool_builder(None)?.max_connections(16).build()?;
+    /// let mut conn = pool.get_conn().await?;
+    /// conn.query_drop("SHOW TABLES").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn pool_builder(
+        self,
+        tls_connector_builder: Option<TlsConnectorBuilder>,
+    ) -> Result<DatabaseConnectionPoolBuilder, DatabaseError> {
+        match self {
+            DatabaseURL::MySQL(opts) => Ok(DatabaseConnectionPoolBuilder::MySQL(
+                mysql_async::OptsBuilder::from_opts(opts),
+                mysql_async::PoolOpts::default(),
+            )),
+            DatabaseURL::PostgreSQL(opts) => Ok(DatabaseConnectionPoolBuilder::PostgreSQL(
+                deadpool_postgres::Pool::builder(deadpool_postgres::Manager::from_config(
+                    opts,
+                    postgres_native_tls::MakeTlsConnector::new(
+                        tls_connector_builder
+                            .unwrap_or_else(native_tls::TlsConnector::builder)
+                            .build()?,
+                    ),
+                    deadpool_postgres::ManagerConfig {
+                        recycling_method: deadpool_postgres::RecyclingMethod::Fast,
+                    },
+                )),
+            )),
         }
     }
 

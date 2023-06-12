@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use derive_more::From;
 use futures::TryStreamExt;
 use mysql::prelude::AsQuery;
+use mysql::PoolConstraints;
 use mysql_async::prelude::Queryable;
 use nom_sql::{Dialect, SqlType};
 use readyset_errors::ReadySetError;
@@ -110,6 +111,7 @@ pub enum DatabaseConnection {
         tokio_postgres::Client,
         tokio::task::JoinHandle<Result<(), ReadySetError>>,
     ),
+    PostgreSQLPool(deadpool_postgres::Client),
 }
 
 #[async_trait]
@@ -121,6 +123,10 @@ impl QueryableConnection for DatabaseConnection {
         match self {
             DatabaseConnection::MySQL(conn) => Ok(conn.query_drop(stmt).await?),
             DatabaseConnection::PostgreSQL(client, _jh) => {
+                client.simple_query(stmt.as_ref()).await?;
+                Ok(())
+            }
+            DatabaseConnection::PostgreSQLPool(client) => {
                 client.simple_query(stmt.as_ref()).await?;
                 Ok(())
             }
@@ -141,6 +147,13 @@ impl QueryableConnection for DatabaseConnection {
                 // is only possible to convert `SimpleQueryMessage` to a `&str` (and not, say, a
                 // `DfValue`) because `SimpleQueryMessage`s don't contain any information about the
                 // underlying types of the columns.
+                client
+                    .query_raw(query.as_ref(), Vec::<i8>::new())
+                    .await?
+                    .try_collect()
+                    .await?,
+            )),
+            DatabaseConnection::PostgreSQLPool(client) => Ok(QueryResults::Postgres(
                 client
                     .query_raw(query.as_ref(), Vec::<i8>::new())
                     .await?
@@ -175,6 +188,12 @@ impl QueryableConnection for DatabaseConnection {
                     .try_collect()
                     .await?,
             )),
+            Self::PostgreSQLPool(conn) => Ok(QueryResults::Postgres(
+                conn.query_raw(stmt.as_postgres_statement()?, params)
+                    .await?
+                    .try_collect()
+                    .await?,
+            )),
         }
     }
 }
@@ -189,6 +208,10 @@ impl DatabaseConnection {
         match self {
             DatabaseConnection::MySQL(conn) => Ok(conn.prep(query).await?.into()),
             DatabaseConnection::PostgreSQL(client, _jh) => Ok(DatabaseStatement::Postgres(
+                client.prepare(query.as_ref()).await?,
+                query.to_string(),
+            )),
+            DatabaseConnection::PostgreSQLPool(client) => Ok(DatabaseStatement::Postgres(
                 client.prepare(query.as_ref()).await?,
                 query.to_string(),
             )),
@@ -208,13 +231,18 @@ impl DatabaseConnection {
                 .await
                 .map(Transaction::Postgres)
                 .map_err(DatabaseError::PostgreSQL),
+            Self::PostgreSQLPool(conn) => conn
+                .transaction()
+                .await
+                .map(Transaction::PostgresPool)
+                .map_err(DatabaseError::PostgreSQL),
         }
     }
 
     /// Returns the SQL dialect associated with the underlying connection type.
     pub fn dialect(&self) -> Dialect {
         match self {
-            Self::PostgreSQL(_, _) => Dialect::PostgreSQL,
+            Self::PostgreSQL(_, _) | Self::PostgreSQLPool(_) => Dialect::PostgreSQL,
             Self::MySQL(_) => Dialect::MySQL,
         }
     }
@@ -228,17 +256,114 @@ impl DatabaseConnection {
     }
 
     pub fn as_postgres_conn(&mut self) -> Result<&mut tokio_postgres::Client, DatabaseError> {
-        if let DatabaseConnection::PostgreSQL(c, _jh) = self {
-            Ok(c)
-        } else {
-            Err(DatabaseError::WrongConnection(ConnectionType::PostgreSQL))
+        match self {
+            DatabaseConnection::PostgreSQL(c, _jh) => Ok(c),
+            DatabaseConnection::PostgreSQLPool(c) => Ok(c.as_mut()),
+            _ => Err(DatabaseError::WrongConnection(ConnectionType::PostgreSQL)),
         }
     }
 
     pub fn cached_statements(&self) -> Option<usize> {
         match self {
             DatabaseConnection::MySQL(conn) => Some(conn.opts().stmt_cache_size()),
-            DatabaseConnection::PostgreSQL(_, _) => None,
+            DatabaseConnection::PostgreSQL(_, _) | DatabaseConnection::PostgreSQLPool(_) => None,
+        }
+    }
+}
+
+/// A connection pool to either a mysql or postgresql database
+#[derive(Debug, Clone)]
+pub enum DatabaseConnectionPool {
+    MySQL(mysql_async::Pool),
+    PostgreSQL(deadpool_postgres::Pool),
+}
+
+impl DatabaseConnectionPool {
+    /// Check out a single connection from this pool
+    pub async fn get_conn(&self) -> Result<DatabaseConnection, DatabaseError> {
+        match self {
+            DatabaseConnectionPool::MySQL(pool) => {
+                Ok(DatabaseConnection::MySQL(pool.get_conn().await?))
+            }
+            DatabaseConnectionPool::PostgreSQL(pool) => {
+                Ok(DatabaseConnection::PostgreSQLPool(pool.get().await?))
+            }
+        }
+    }
+}
+
+#[async_trait]
+impl QueryableConnection for DatabaseConnectionPool {
+    async fn query_drop<Q>(&mut self, stmt: Q) -> Result<(), DatabaseError>
+    where
+        Q: AsQuery + AsRef<str> + Send + Sync,
+    {
+        self.get_conn().await?.query_drop(stmt).await
+    }
+
+    async fn query<Q>(&mut self, query: Q) -> Result<QueryResults, DatabaseError>
+    where
+        Q: AsQuery + AsRef<str> + Send + Sync,
+    {
+        self.get_conn().await?.query(query).await
+    }
+
+    async fn execute<S, P>(&mut self, stmt: &S, params: P) -> Result<QueryResults, DatabaseError>
+    where
+        P: IntoIterator + Send,
+        P::IntoIter: ExactSizeIterator,
+        P::Item: pgsql::types::BorrowToSql,
+        S: DatabaseStatementLike,
+        for<'a> &'a <S as DatabaseStatementLike>::MySqlStatement:
+            mysql_async::prelude::StatementLike,
+        mysql_async::Value: TryFrom<<P as IntoIterator>::Item>,
+        <mysql_async::Value as TryFrom<<P as IntoIterator>::Item>>::Error:
+            std::error::Error + Send + Sync + 'static,
+    {
+        self.get_conn().await?.execute(stmt, params).await
+    }
+}
+
+/// A builder for a connection pool to either a MySQL or PostgreSQL database.
+///
+/// Construct a [`DatabaseConnectionPoolBuilder`] using [`DatabaseURL::pool_builder`][].
+///
+/// Note that only the configuration methods that we've needed so far have been added to this type -
+/// in the future, we'll almost definitely want to allow configuring more than just
+/// [`max_connections`].
+///
+/// [`DatabaseURL::pool_builder`]: crate::DatabaseURL::pool_builder
+pub enum DatabaseConnectionPoolBuilder {
+    MySQL(mysql_async::OptsBuilder, mysql_async::PoolOpts),
+    PostgreSQL(deadpool_postgres::PoolBuilder),
+}
+
+impl DatabaseConnectionPoolBuilder {
+    /// Build a [`DatabaseConnectionPool`] from this builder
+    pub fn build(self) -> Result<DatabaseConnectionPool, DatabaseError> {
+        match self {
+            DatabaseConnectionPoolBuilder::MySQL(opts, pool_opts) => {
+                Ok(DatabaseConnectionPool::MySQL(mysql_async::Pool::new(
+                    opts.pool_opts(Some(pool_opts)),
+                )))
+            }
+            DatabaseConnectionPoolBuilder::PostgreSQL(ps) => {
+                Ok(DatabaseConnectionPool::PostgreSQL(ps.build()?))
+            }
+        }
+    }
+
+    /// Configure the maximum number of connections that will be created for the pool
+    pub fn max_connections(self, max_connections: usize) -> Self {
+        match self {
+            DatabaseConnectionPoolBuilder::MySQL(opts, po) => {
+                let constraints =
+                    PoolConstraints::new(po.constraints().min(), max_connections).unwrap();
+                DatabaseConnectionPoolBuilder::MySQL(opts, po.with_constraints(constraints))
+            }
+            DatabaseConnectionPoolBuilder::PostgreSQL(builder) => {
+                DatabaseConnectionPoolBuilder::PostgreSQL(builder.max_size(max_connections))
+            }
         }
     }
 }
@@ -448,6 +573,7 @@ where
 pub enum Transaction<'a> {
     MySql(mysql_async::Transaction<'a>),
     Postgres(pgsql::Transaction<'a>),
+    PostgresPool(deadpool_postgres::Transaction<'a>),
 }
 
 #[async_trait]
@@ -462,6 +588,10 @@ impl<'a> QueryableConnection for Transaction<'a> {
                 transaction.simple_query(stmt.as_ref()).await?;
                 Ok(())
             }
+            Transaction::PostgresPool(transaction) => {
+                transaction.simple_query(stmt.as_ref()).await?;
+                Ok(())
+            }
         }
     }
 
@@ -473,18 +603,24 @@ impl<'a> QueryableConnection for Transaction<'a> {
             Transaction::MySql(transaction) => Ok(QueryResults::MySql(
                 transaction.query_iter(query).await?.collect().await?,
             )),
-            Transaction::Postgres(transaction) => {
-                // TODO: We should use simple_query here instead, because query_raw will still
-                // prepare. simple_query returns a different result type, so may take some work to
-                // get it work properly here.
-                Ok(QueryResults::Postgres(
-                    transaction
-                        .query_raw(query.as_ref(), Vec::<i8>::new())
-                        .await?
-                        .try_collect()
-                        .await?,
-                ))
-            }
+            // TODO: We should use simple_query here instead, because query_raw will still
+            // prepare. simple_query returns a different result type, so may take some work to
+            // get it work properly here.
+            Transaction::Postgres(transaction) => Ok(QueryResults::Postgres(
+                transaction
+                    .query_raw(query.as_ref(), Vec::<i8>::new())
+                    .await?
+                    .try_collect()
+                    .await?,
+            )),
+
+            Transaction::PostgresPool(transaction) => Ok(QueryResults::Postgres(
+                transaction
+                    .query_raw(query.as_ref(), Vec::<i8>::new())
+                    .await?
+                    .try_collect()
+                    .await?,
+            )),
         }
     }
 
@@ -519,6 +655,13 @@ impl<'a> QueryableConnection for Transaction<'a> {
                     .try_collect()
                     .await?,
             )),
+            Self::PostgresPool(transaction) => Ok(QueryResults::Postgres(
+                transaction
+                    .query_raw(stmt.as_postgres_statement()?, params)
+                    .await?
+                    .try_collect()
+                    .await?,
+            )),
         }
     }
 }
@@ -529,6 +672,10 @@ impl<'a> Transaction<'a> {
         match self {
             Self::MySql(transaction) => transaction.commit().await.map_err(DatabaseError::MySQL),
             Self::Postgres(transaction) => transaction
+                .commit()
+                .await
+                .map_err(DatabaseError::PostgreSQL),
+            Self::PostgresPool(transaction) => transaction
                 .commit()
                 .await
                 .map_err(DatabaseError::PostgreSQL),

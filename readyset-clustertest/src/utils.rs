@@ -182,7 +182,8 @@ where
                     DatabaseConnection::MySQL(conn) => {
                         tokio::time::timeout(remaining, conn.exec(query.clone(), params.clone()))
                     }
-                    DatabaseConnection::PostgreSQL(_, _) => {
+                    DatabaseConnection::PostgreSQL(_, _)
+                    | DatabaseConnection::PostgreSQLPool(_) => {
                         todo!("TODO(luke): support postgres query_until_expected_inner")
                     }
                 }
@@ -192,7 +193,7 @@ where
                 DatabaseConnection::MySQL(conn) => {
                     tokio::time::timeout(remaining, conn.query(*q)).await
                 }
-                DatabaseConnection::PostgreSQL(_, _) => {
+                DatabaseConnection::PostgreSQL(_, _) | DatabaseConnection::PostgreSQLPool(_) => {
                     todo!("TODO(luke): support postgres query_until_expected_inner")
                 }
             },

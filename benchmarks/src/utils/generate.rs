@@ -93,7 +93,7 @@ impl DataGenerator {
                 let _ = conn.query_drop(disable_redo_log_q).await;
                 Some(old_size)
             }
-            DatabaseConnection::PostgreSQL(_, _) => {
+            DatabaseConnection::PostgreSQL(_, _) | DatabaseConnection::PostgreSQLPool(_) => {
                 let mut results: Vec<Vec<DfValue>> = conn
                     .query("SHOW shared_buffers")
                     .await
