@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use anyhow::{bail, Result};
 use async_trait::async_trait;
 use clap::{Parser, ValueHint};
-use database_utils::{DatabaseConnection, DatabaseURL, QueryableConnection};
+use database_utils::{DatabaseConnection, DatabaseError, DatabaseURL, QueryableConnection};
 use itertools::Itertools;
 use metrics::Unit;
 use nom_sql::{
@@ -19,7 +19,7 @@ use parking_lot::Mutex;
 use query_generator::{ColumnName, TableSpec};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::{self, UnboundedSender};
 use tracing::{debug, info};
 
 use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters, MetricGoal};
@@ -28,8 +28,6 @@ use crate::utils::prometheus::ForwardPrometheusMetrics;
 use crate::utils::spec::{DatabaseGenerationSpec, DatabaseSchema};
 use crate::utils::us_to_ms;
 use crate::{benchmark_counter, benchmark_histogram};
-
-const REPORT_RESULTS_INTERVAL: Duration = Duration::from_secs(2);
 
 #[derive(Parser, Clone, Serialize, Deserialize)]
 pub struct WriteBenchmark {
@@ -46,6 +44,10 @@ pub struct WriteBenchmark {
     /// The number of threads to execute the read benchmark across.
     #[clap(long, default_value = "1")]
     threads: u64,
+
+    /// The number of connections to use for the connection pool to the database
+    #[clap(long, default_value = "64")]
+    pool_size: usize,
 
     /// The duration, specified as the number of seconds that the benchmark should be running. If
     /// `None` is provided, the benchmark will run until it is interrupted.
@@ -65,6 +67,7 @@ pub struct WriteBenchmarkThreadData {
     upstream_conn_str: String,
     target_qps: Option<u64>,
     threads: u64,
+    pool_size: usize,
 
     /// Tables we will generate data for from the schema.
     tables: Vec<Arc<Mutex<TableSpec>>>,
@@ -84,6 +87,7 @@ impl WriteBenchmarkThreadData {
             upstream_conn_str: deployment.target_conn_str.clone(),
             target_qps: w.target_qps,
             threads: w.threads,
+            pool_size: w.pool_size,
             tables,
         })
     }
@@ -212,24 +216,9 @@ impl BenchmarkControl for WriteBenchmark {
     }
 }
 
-#[derive(Debug, Clone)]
-/// A batched set of results sent on an interval by the read benchmark thread.
-pub(crate) struct WriteBenchmarkResultBatch {
-    /// Query end-to-end latency in ms.
-    queries: Vec<u128>,
-}
-
-impl WriteBenchmarkResultBatch {
-    fn new() -> Self {
-        Self {
-            queries: Vec::new(),
-        }
-    }
-}
-
 #[async_trait]
 impl MultithreadBenchmark for WriteBenchmark {
-    type BenchmarkResult = WriteBenchmarkResultBatch;
+    type BenchmarkResult = u128;
     type Parameters = WriteBenchmarkThreadData;
 
     async fn handle_benchmark_results(
@@ -238,27 +227,24 @@ impl MultithreadBenchmark for WriteBenchmark {
         benchmark_results: &mut BenchmarkResults,
     ) -> Result<()> {
         let mut hist = hdrhistogram::Histogram::<u64>::new(3).unwrap();
-        let mut queries_this_interval = 0;
+        let queries_this_interval = results.len();
         let results_data =
             benchmark_results.entry("query_duration", Unit::Microseconds, MetricGoal::Decreasing);
-        for u in results {
-            queries_this_interval += u.queries.len() as u64;
-            for l in u.queries {
-                results_data.push(l as f64);
-                hist.record(u64::try_from(l).unwrap()).unwrap();
-                benchmark_histogram!(
-                    "write_benchmark.query_duration",
-                    Microseconds,
-                    "Duration of queries executed".into(),
-                    l as f64
-                );
-            }
+        for l in results {
+            results_data.push(l as f64);
+            hist.record(u64::try_from(l).unwrap()).unwrap();
+            benchmark_histogram!(
+                "write_benchmark.query_duration",
+                Microseconds,
+                "Duration of queries executed".into(),
+                l as f64
+            );
         }
         benchmark_counter!(
             "write_benchmark.queries_executed",
             Count,
             "Number of queries executed in this benchmark run".into(),
-            queries_this_interval
+            queries_this_interval as _
         );
         let qps = hist.len() as f64 / interval.as_secs() as f64;
         benchmark_histogram!(
@@ -283,61 +269,75 @@ impl MultithreadBenchmark for WriteBenchmark {
         params: Self::Parameters,
         sender: UnboundedSender<Self::BenchmarkResult>,
     ) -> Result<()> {
-        let mut conn = DatabaseURL::from_str(&params.upstream_conn_str)?
-            .connect(None)
-            .await?;
+        let url = DatabaseURL::from_str(&params.upstream_conn_str)?;
+        let dialect = url.dialect();
+        let pool = url
+            .pool_builder(None)?
+            .max_connections(params.pool_size)
+            .build()?;
 
-        let mut last_report = Instant::now();
-        let mut result_batch = WriteBenchmarkResultBatch::new();
+        let insert = {
+            // TODO(justin): Evaluate if we can improve performance by precomputing these
+            // variables outside of the loop.
+            let mut rng = rand::thread_rng();
+            let index: usize = rng.gen_range(0..(params.tables.len()));
+            let mut spec = params.tables.get(index).unwrap().lock();
+            let table_name = spec.name.clone();
+            let data = spec.generate_data_from_index(1, 0, false);
+            let columns = spec.columns.keys().collect::<Vec<_>>();
+            nom_sql::InsertStatement {
+                table: table_name.into(),
+                fields: Some(columns.iter().map(|cn| (*cn).clone().into()).collect()),
+                data: data
+                    .into_iter()
+                    .map(|mut row| {
+                        columns
+                            .iter()
+                            .map(|col| Expr::Literal(row.remove(col).unwrap().try_into().unwrap()))
+                            .collect()
+                    })
+                    .collect(),
+                ignore: false,
+                on_duplicate: None,
+            }
+            .display(dialect)
+            .to_string()
+        };
+
         let mut throttle_interval =
             multi_thread::throttle_interval(params.target_qps, params.threads);
+        let (err_tx, mut err_rx) = mpsc::channel::<DatabaseError>(1);
         loop {
-            if last_report.elapsed() > REPORT_RESULTS_INTERVAL {
-                let mut new_results = WriteBenchmarkResultBatch::new();
-                std::mem::swap(&mut new_results, &mut result_batch);
-                sender.send(new_results)?;
-                last_report = Instant::now();
-            }
-
             if let Some(interval) = &mut throttle_interval {
                 interval.tick().await;
             }
 
-            let insert = {
-                // TODO(justin): Evaluate if we can improve performance by precomputing these
-                // variables outside of the loop.
-                let mut rng = rand::thread_rng();
-                let index: usize = rng.gen_range(0..(params.tables.len()));
-                let mut spec = params.tables.get(index).unwrap().lock();
-                let table_name = spec.name.clone();
-                let data = spec.generate_data_from_index(1, 0, false);
-                let columns = spec.columns.keys().collect::<Vec<_>>();
-                nom_sql::InsertStatement {
-                    table: table_name.into(),
-                    fields: Some(columns.iter().map(|cn| (*cn).clone().into()).collect()),
-                    data: data
-                        .into_iter()
-                        .map(|mut row| {
-                            columns
-                                .iter()
-                                .map(|col| {
-                                    Expr::Literal(row.remove(col).unwrap().try_into().unwrap())
-                                })
-                                .collect()
-                        })
-                        .collect(),
-                    ignore: false,
-                    on_duplicate: None,
+            if let Ok(err) = err_rx.try_recv() {
+                return Err(err.into());
+            }
+
+            let pool = pool.clone();
+            let sender = sender.clone();
+            let insert = insert.clone();
+            let err_tx = err_tx.clone();
+            tokio::spawn(async move {
+                match pool.get_conn().await {
+                    Ok(mut conn) => {
+                        let start = Instant::now();
+                        match conn.query_drop(insert).await {
+                            Ok(_) => {
+                                let _ = sender.send(start.elapsed().as_micros());
+                            }
+                            Err(e) => {
+                                let _ = err_tx.send(e).await;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let _ = err_tx.send(e).await;
+                    }
                 }
-            };
-
-            let start = Instant::now();
-
-            let _ = conn
-                .query_drop(insert.display(conn.dialect()).to_string())
-                .await;
-
-            result_batch.queries.push(start.elapsed().as_micros());
+            });
         }
     }
 }

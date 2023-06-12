@@ -12,6 +12,7 @@ use derive_more::From;
 use error::DatabaseTypeParseError;
 use mysql_async::OptsBuilder;
 use native_tls::TlsConnectorBuilder;
+use nom_sql::Dialect;
 use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_util::redacted::RedactedString;
 use serde::{Deserialize, Serialize};
@@ -473,5 +474,13 @@ impl DatabaseURL {
     #[must_use]
     pub fn is_mysql(&self) -> bool {
         matches!(self, Self::MySQL(..))
+    }
+
+    /// Returns the SQL dialect for the URL.
+    pub fn dialect(&self) -> Dialect {
+        match self {
+            Self::PostgreSQL(_) => Dialect::PostgreSQL,
+            Self::MySQL(_) => Dialect::MySQL,
+        }
     }
 }
