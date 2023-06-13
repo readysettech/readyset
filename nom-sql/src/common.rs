@@ -429,7 +429,10 @@ fn group_concat_fx(
 fn agg_fx_args(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], (Expr, bool)> {
-    move |i| delimited(tag("("), agg_function_arguments(dialect), tag(")"))(i)
+    move |i| {
+        let (i, _) = whitespace0(i)?;
+        delimited(tag("("), agg_function_arguments(dialect), tag(")"))(i)
+    }
 }
 
 fn delim_fx_args(
@@ -524,7 +527,18 @@ pub fn function_expr(
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], FunctionExpr> {
     move |i| {
         alt((
-            map(tag_no_case("count(*)"), |_| FunctionExpr::CountStar),
+            map(
+                tuple((
+                    tag_no_case("count"),
+                    whitespace0,
+                    tag("("),
+                    whitespace0,
+                    tag("*"),
+                    whitespace0,
+                    tag(")"),
+                )),
+                |_| FunctionExpr::CountStar,
+            ),
             map(
                 preceded(tag_no_case("count"), agg_fx_args(dialect)),
                 |args| FunctionExpr::Count {
@@ -553,7 +567,14 @@ pub fn function_expr(
             map(
                 preceded(
                     tag_no_case("group_concat"),
-                    delimited(tag("("), group_concat_fx(dialect), tag(")")),
+                    preceded(
+                        whitespace0,
+                        delimited(
+                            terminated(tag("("), whitespace0),
+                            group_concat_fx(dialect),
+                            preceded(whitespace0, tag(")")),
+                        ),
+                    ),
                 ),
                 |(col, separator)| FunctionExpr::GroupConcat {
                     expr: Box::new(Expr::Column(col)),
@@ -873,6 +894,28 @@ mod tests {
         };
         let res = to_nom_result(function_expr(Dialect::MySQL)(LocatedSpan::new(qs)));
         assert_eq!(res.unwrap().1, expected);
+
+        assert_eq!(
+            test_parse!(function_expr(Dialect::MySQL), b"group_concat(a)"),
+            FunctionExpr::GroupConcat {
+                expr: Box::new(Expr::Column("a".into())),
+                separator: None
+            }
+        );
+        assert_eq!(
+            test_parse!(function_expr(Dialect::MySQL), b"group_concat (a)"),
+            FunctionExpr::GroupConcat {
+                expr: Box::new(Expr::Column("a".into())),
+                separator: None
+            }
+        );
+        assert_eq!(
+            test_parse!(function_expr(Dialect::MySQL), b"group_concat ( a )"),
+            FunctionExpr::GroupConcat {
+                expr: Box::new(Expr::Column("a".into())),
+                separator: None
+            }
+        );
     }
 
     #[test]
@@ -1028,6 +1071,22 @@ mod tests {
                     Expr::Literal(7u32.into()),
                 ]
             }
+        );
+    }
+
+    #[test]
+    fn count_star() {
+        assert_eq!(
+            test_parse!(function_expr(Dialect::MySQL), b"count(*)"),
+            FunctionExpr::CountStar
+        );
+        assert_eq!(
+            test_parse!(function_expr(Dialect::MySQL), b"count (*)"),
+            FunctionExpr::CountStar
+        );
+        assert_eq!(
+            test_parse!(function_expr(Dialect::MySQL), b"count ( * )"),
+            FunctionExpr::CountStar
         );
     }
 
