@@ -794,12 +794,14 @@ impl ReadySetHandle {
         self.rpc("set_memory_limit", (period, limit), self.request_timeout)
     }
 
-    /// Randomly evict a single key from a randomly chosen and partial index in dataflow state.
-    /// Returns a [`SingleKeyEviction`] if an eviction occurred.
+    /// Evict a single key from a partial index. If no `eviction_request` is provided, a random key
+    /// and partial index will be selected. Returns a [`SingleKeyEviction`] if an eviction
+    /// occurred.
     pub fn evict_single(
         &mut self,
+        eviction_request: Option<SingleKeyEviction>,
     ) -> impl Future<Output = ReadySetResult<Option<SingleKeyEviction>>> + '_ {
-        self.rpc("evict_single", (), self.request_timeout)
+        self.rpc("evict_single", eviction_request, self.request_timeout)
     }
 
     #[cfg(feature = "failure_injection")]

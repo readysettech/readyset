@@ -222,19 +222,22 @@ impl<'a> MutWriteHandleEntry<'a> {
         }
     }
 
-    pub(crate) fn mark_hole(self) {
+    /// Clear this entry and return the number of bytes freed
+    pub(crate) fn mark_hole(self) -> u64 {
+        // Do not account for the key if we miss on the lookup
         let size = self
             .handle
             .handle
             .read()
             .get(&self.key)
-            .map(|rs| rs.iter().map(SizeOf::deep_size_of).sum())
+            .map(|rs| {
+                rs.iter().map(SizeOf::deep_size_of).sum::<u64>() as usize
+                    + self.key_value_size(&self.key)
+            })
             .unwrap_or(0);
-        self.handle.mem_size = self
-            .handle
-            .mem_size
-            .saturating_sub(size as usize + self.key_value_size(&self.key));
-        self.handle.handle.empty(self.key)
+        self.handle.mem_size = self.handle.mem_size.saturating_sub(size);
+        self.handle.handle.empty(self.key);
+        size as u64
     }
 }
 
@@ -347,12 +350,12 @@ impl WriteHandle {
         self.evict_inner(request)
     }
 
-    pub(crate) fn mark_hole(&mut self, key: &KeyComparison) -> ReadySetResult<()> {
+    pub(crate) fn mark_hole(&mut self, key: &KeyComparison) -> ReadySetResult<u64> {
         if let Some(len) = key.len() {
             invariant_eq!(len, self.index.len());
         }
         match key {
-            KeyComparison::Equal(k) => self.mut_with_key(k.as_vec()).mark_hole(),
+            KeyComparison::Equal(k) => Ok(self.mut_with_key(k.as_vec()).mark_hole()),
             KeyComparison::Range((start, end)) => {
                 let start = start.clone();
                 let end = end.clone();
@@ -375,9 +378,9 @@ impl WriteHandle {
                     self.handle
                         .empty_range((range.0.map(Vec1::into_vec), range.1.map(Vec1::into_vec)));
                 }
+                Ok(size)
             }
         }
-        Ok(())
     }
 
     pub(crate) fn mark_filled(&mut self, key: KeyComparison) -> ReadySetResult<()> {

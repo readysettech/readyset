@@ -42,6 +42,7 @@ use proptest::prelude::*;
 use proptest::sample::select;
 use proptest::test_runner::{FailurePersistence, FileFailurePersistence};
 use proptest_stateful::{ModelState, ProptestStatefulConfig};
+use readyset_client::SingleKeyEviction;
 use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
 use readyset_client_test_helpers::TestBuilder;
 use readyset_data::DfValue;
@@ -633,6 +634,7 @@ impl Operation {
                 let client = reqwest::Client::new();
                 let _ = client
                     .post(format!("http://{host}:6033/evict_single"))
+                    .body(bincode::serialize::<Option<SingleKeyEviction>>(&None)?)
                     .send()
                     .await?;
                 Ok(OperationResult::NoResults)

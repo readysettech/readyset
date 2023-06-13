@@ -35,9 +35,7 @@ use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore}
 use readyset_client::consistency::Timestamp;
 use readyset_client::internal::LocalNodeIndex;
 use readyset_client::recipe::changelist::{Change, ChangeList, CreateCache};
-use readyset_client::{
-    KeyComparison, Modification, SchemaType, SingleKeyEviction, ViewPlaceholder, ViewQuery,
-};
+use readyset_client::{KeyComparison, Modification, SchemaType, ViewPlaceholder, ViewQuery};
 use readyset_data::{DfType, DfValue, Dialect};
 use readyset_errors::ReadySetError::{
     self, MigrationPlanFailed, RpcFailed, SelectQueryCreationFailed,
@@ -9517,9 +9515,9 @@ async fn views_out_of_order() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn evict_random_returns_key() {
+async fn evict_single() {
     readyset_tracing::init_test_logging();
-    let (mut g, shutdown_tx) = start_simple_unsharded("evict_random_returns_key").await;
+    let (mut g, shutdown_tx) = start_simple_unsharded("evict_single").await;
 
     g.extend_recipe(
         ChangeList::from_str("CREATE TABLE t1 (x int, y int);", Dialect::DEFAULT_MYSQL).unwrap(),
@@ -9548,12 +9546,102 @@ async fn evict_random_returns_key() {
 
     // Call /evict_random and ensure we get the key we just looked up. Ignores the Tag and
     // DomainIndex since those are not deterministic.
-    let SingleKeyEviction { key, .. } = g.evict_single().await.unwrap().unwrap();
-    assert_eq!(key, vec![2.into()]);
+    let eviction = g.evict_single(None).await.unwrap().unwrap();
+    assert_eq!(eviction.key, vec![2.into()]);
+
+    // The next call should return None, because the eviction will hit a hole
+    assert!(g
+        .evict_single(Some(eviction.clone()))
+        .await
+        .unwrap()
+        .is_none());
+
+    // Lookup again to fill the hole
+    let res = rh.lookup(&[2.into()], true).await.unwrap().into_vec();
+    assert_eq!(res, vec![vec![DfValue::from(1)]]);
+
+    // Evicting by key should now succeed
+    let eviction = g.evict_single(Some(eviction)).await.unwrap().unwrap();
+    assert_eq!(eviction.key, vec![2.into()]);
 
     // Make sure nothing went so wrong that we can't lookup again
     let res = rh.lookup(&[2.into()], true).await.unwrap().into_vec();
     assert_eq!(res, vec![vec![DfValue::from(1)]]);
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn evict_single_intermediate_state() {
+    readyset_tracing::init_test_logging();
+    let (mut g, shutdown_tx) = start_simple_unsharded("evict_single_intermediate_state").await;
+
+    g.extend_recipe(
+        ChangeList::from_str("CREATE TABLE t1 (x int, y int);", Dialect::DEFAULT_MYSQL).unwrap(),
+    )
+    .await
+    .unwrap();
+
+    // A partially stateful intermediary node will be generated to satisfy the aggregate
+    // Note: if an update to dataflow causes this migration to generate other than exactly two
+    // partially stateful nodes, the test will break.
+    g.extend_recipe(ChangeList::from_change(
+        Change::create_cache(
+            "q",
+            parse_select_statement(nom_sql::Dialect::MySQL, "SELECT sum(x) FROM t1 WHERE y = ?")
+                .unwrap(),
+            false,
+        ),
+        Dialect::DEFAULT_MYSQL,
+    ))
+    .await
+    .unwrap();
+
+    // insert and query to get an item in state
+    let mut t = g.table("t1").await.unwrap();
+    let mut rh = g.view("q").await.unwrap().into_reader_handle().unwrap();
+    t.insert(vec![1.into(), 2.into()]).await.unwrap();
+    let res = rh.lookup(&[2.into()], true).await.unwrap().into_vec();
+    assert_eq!(res, vec![vec![DfValue::from(Decimal::new(10, 1))]]);
+
+    // Call /evict_random and ensure we get the key we just looked up. Ignores the Tag and
+    // DomainIndex since those are not deterministic.
+    let eviction1 = g.evict_single(None).await.unwrap().unwrap();
+    assert_eq!(eviction1.key, vec![2.into()]);
+
+    // Call /evict_random again. The rpc will return None if we previously evicted from intermediate
+    // state. Otherwise, the result will reflect an eviction from intermediate state.
+    //
+    // We sleep to allow the eviction to propagate to the reader if we triggered the eviction at the
+    // intermediate state.
+    sleep().await;
+    let eviction2 = g.evict_single(None).await.unwrap();
+    let intermediate_eviction = match eviction2 {
+        // We evicted from reader and then the intermediate state
+        Some(eviction) => eviction,
+        // We evicted from intermediate state first, then found a hole in the reader
+        None => eviction1,
+    };
+
+    // The next call to evict from intermediate state should return None, because the eviction will
+    // hit a hole
+    assert!(g
+        .evict_single(Some(intermediate_eviction.clone()))
+        .await
+        .unwrap()
+        .is_none());
+
+    // Lookup again to fill the hole
+    let res = rh.lookup(&[2.into()], true).await.unwrap().into_vec();
+    assert_eq!(res, vec![vec![DfValue::from(Decimal::new(10, 1))]]);
+
+    // Evicting by key should now succeed
+    let eviction = g
+        .evict_single(Some(intermediate_eviction))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(eviction.key, vec![2.into()]);
 
     shutdown_tx.shutdown().await;
 }

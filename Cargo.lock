@@ -4698,6 +4698,7 @@ version = "0.4.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "bincode",
  "chrono",
  "clap 4.3.2",
  "derive_more",

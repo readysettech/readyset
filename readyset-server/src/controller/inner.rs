@@ -22,7 +22,7 @@ use readyset_client::internal::ReplicaAddress;
 use readyset_client::recipe::{ExtendRecipeResult, ExtendRecipeSpec, MigrationStatus};
 use readyset_client::replication::ReplicationOffset;
 use readyset_client::status::{ReadySetStatus, SnapshotStatus};
-use readyset_client::WorkerDescriptor;
+use readyset_client::{SingleKeyEviction, WorkerDescriptor};
 use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
 use readyset_telemetry_reporter::TelemetrySender;
 use readyset_util::futures::abort_on_panic;
@@ -518,9 +518,10 @@ impl Leader {
                     return_serialized!(supports)
                 }
                 (&Method::POST, "/evict_single") => {
+                    let body: Option<SingleKeyEviction> = bincode::deserialize(&body)?;
                     let ds = self.dataflow_state_handle.read().await;
                     check_quorum!(ds);
-                    let key = ds.evict_single(None).await?;
+                    let key = ds.evict_single(body).await?;
                     return_serialized!(key);
                 }
                 _ => {}

@@ -1267,9 +1267,9 @@ impl DfState {
     /// randomly selected Tag contains no materialized state.
     pub(super) async fn evict_single(
         &self,
-        eviction: Option<SingleKeyEviction>,
+        eviction_request: Option<SingleKeyEviction>,
     ) -> ReadySetResult<Option<SingleKeyEviction>> {
-        let (di, tag, key) = match eviction {
+        let (di, tag, key) = match eviction_request {
             Some(SingleKeyEviction {
                 domain_idx,
                 tag,

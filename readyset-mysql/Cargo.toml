@@ -18,6 +18,7 @@ lazy_static = "1.0"
 streaming-iterator = "0.1"
 futures-util = "0.3"
 pin-project = "1.0"
+bincode = "1.3.3"
 
 readyset-client = { path = "../readyset-client" }
 readyset-errors = { path = "../readyset-errors" }

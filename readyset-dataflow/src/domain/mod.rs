@@ -4138,11 +4138,13 @@ impl Domain {
                                             IndexType::BTreeMap => key_comparison.into_range(),
                                         }
                                     };
-                                    let _ = state.mark_hole(&key_comparison);
+                                    let freed = state.mark_hole(&key_comparison)?;
                                     // TODO(REA-2682): Should reader evictions be accounted for in
                                     // self.state_size anyways? They're not when we evict during
                                     // walk_path().
-                                    (0, Some(key))
+                                    //
+                                    // Don't return an evicted key if there was no eviction
+                                    (freed, if freed > 0 { Some(key) } else { None })
                                 }
                                 None => state.evict_random(),
                             };
@@ -4158,7 +4160,11 @@ impl Domain {
                                         [destination]
                                         .evict_keys(tag, &[KeyComparison::try_from(key.clone())?])
                                     {
-                                        Some((index, bytes_freed, key))
+                                        if bytes_freed > 0 {
+                                            Some((index, bytes_freed, key))
+                                        } else {
+                                            None
+                                        }
                                     } else {
                                         None
                                     }
