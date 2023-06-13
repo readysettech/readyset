@@ -791,6 +791,11 @@ impl ReadySetHandle {
         self.rpc("set_memory_limit", (period, limit), self.request_timeout)
     }
 
+    /// Evict a random key from partial state. Returns the evicted key, if any.
+    pub fn evict_random(&mut self) -> impl Future<Output = ReadySetResult<()>> + '_ {
+        self.rpc("evict_random", (), self.request_timeout)
+    }
+
     #[cfg(feature = "failure_injection")]
     /// Set a failpoint with provided name and action
     pub fn failpoint(

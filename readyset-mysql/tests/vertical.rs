@@ -630,7 +630,11 @@ impl Operation {
             Operation::Evict => {
                 // Call the /evict_random Controller RPC. We don't care about the result.
                 let host = conn.opts().ip_or_hostname();
-                reqwest::get(format!("http://{}:6033/evict_random", host)).await?;
+                let client = reqwest::Client::new();
+                let _ = client
+                    .post(format!("http://{host}:6033/evict_random"))
+                    .send()
+                    .await?;
                 Ok(OperationResult::NoResults)
             }
         }
