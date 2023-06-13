@@ -450,6 +450,19 @@ impl KeyComparison {
         }
     }
 
+    /// Convert the [`KeyComparison`] into a [`KeyComparison::Range`].
+    ///
+    /// If self was an Equal comparison, return a Range comparison with inclusive upper and lower
+    /// bounds equal to the Equal key.
+    pub fn into_range(self) -> KeyComparison {
+        match self {
+            KeyComparison::Range(_) => self,
+            KeyComparison::Equal(key) => {
+                KeyComparison::Range((Bound::Included(key.clone()), Bound::Included(key)))
+            }
+        }
+    }
+
     /// Returns true if this KeyComparison represents a range where the upper bound is less than the
     /// lower bound
     ///

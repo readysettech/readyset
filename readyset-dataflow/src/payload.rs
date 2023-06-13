@@ -234,8 +234,11 @@ pub enum EvictRequest {
         keys: Vec<KeyComparison>,
     },
 
-    /// Evict a random key from the materialization targeted by the replay path `tag` in the graph.
-    Random { tag: Tag },
+    /// Evict a single key from the materialization targeted by the replay path `tag` in the graph.
+    /// If no key is provided, the underlying state will select a key to evict at random.
+    ///
+    /// Note: this variant is intended for tests, and not practical for production.
+    SingleKey { tag: Tag, key: Option<Vec<DfValue>> },
 }
 
 /// A request issued to a domain through the worker RPC interface.
@@ -572,7 +575,7 @@ impl Packet {
     pub(crate) fn tag(&self) -> Option<Tag> {
         match *self {
             Packet::ReplayPiece { tag, .. }
-            | Packet::Evict(EvictRequest::Keys { tag, .. } | EvictRequest::Random { tag }) => {
+            | Packet::Evict(EvictRequest::Keys { tag, .. } | EvictRequest::SingleKey { tag, .. }) => {
                 Some(tag)
             }
             _ => None,

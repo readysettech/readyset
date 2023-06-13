@@ -14,8 +14,8 @@ use std::{cell, cmp, mem, process, time};
 use ahash::RandomState;
 use backoff::ExponentialBackoffBuilder;
 use dataflow_state::{
-    EvictBytesResult, EvictRandomResult, MaterializedNodeState, PointKey, RangeKey,
-    RangeLookupResult,
+    EvictBytesResult, EvictKeysResult, EvictRandomResult, MaterializedNodeState, PointKey,
+    RangeKey, RangeLookupResult,
 };
 use failpoint_macros::failpoint;
 use futures_util::future::FutureExt;
@@ -4107,7 +4107,7 @@ impl Domain {
                 }
                 None
             }
-            EvictRequest::Random { tag } => {
+            EvictRequest::SingleKey { tag, key } => {
                 let (trigger, path) = if let Some(rp) = self.replay_paths.get(tag) {
                     (&rp.trigger, &rp.path)
                 } else {
@@ -4127,19 +4127,60 @@ impl Domain {
                             // Node was dropped. Skip.
                             (0, None)
                         } else if let Some(state) = self.reader_write_handles.get_mut(destination) {
-                            let (bytes_freed, eviction) = state.evict_random();
+                            let (bytes_freed, eviction) = match key {
+                                Some(key) => {
+                                    let key_comparison = {
+                                        let key_comparison = KeyComparison::try_from(key.clone())?;
+                                        // We must pass a KeyComparison::Range to a BTreeMap reader
+                                        // or it will not update its intervals
+                                        match state.index_type() {
+                                            IndexType::HashMap => key_comparison,
+                                            IndexType::BTreeMap => key_comparison.into_range(),
+                                        }
+                                    };
+                                    let _ = state.mark_hole(&key_comparison);
+                                    // TODO(REA-2682): Should reader evictions be accounted for in
+                                    // self.state_size anyways? They're not when we evict during
+                                    // walk_path().
+                                    (0, Some(key))
+                                }
+                                None => state.evict_random(),
+                            };
                             state.swap();
                             state.notify_readers_of_eviction()?;
                             (bytes_freed, eviction)
-                        } else if let Some(EvictRandomResult {
-                            index,
-                            key_evicted,
-                            bytes_freed,
-                            ..
-                        }) = {
-                            let mut rng = rand::thread_rng();
-                            self.state[destination].evict_random(tag, &mut rng)
-                        } {
+                        } else {
+                            let eviction = match key {
+                                Some(key) => {
+                                    // A BTree MemoryState will still update its intervals if passed
+                                    // a KeyComparison::Equal.
+                                    if let Some(EvictKeysResult { bytes_freed, index }) = self.state
+                                        [destination]
+                                        .evict_keys(tag, &[KeyComparison::try_from(key.clone())?])
+                                    {
+                                        Some((index, bytes_freed, key))
+                                    } else {
+                                        None
+                                    }
+                                }
+                                None => {
+                                    if let Some(EvictRandomResult {
+                                        index,
+                                        key_evicted,
+                                        bytes_freed,
+                                    }) = {
+                                        let mut rng = rand::thread_rng();
+                                        self.state[destination].evict_random(tag, &mut rng)
+                                    } {
+                                        Some((index, bytes_freed, key_evicted))
+                                    } else {
+                                        None
+                                    }
+                                }
+                            };
+                            let Some((index, bytes_freed, key_evicted)) = eviction else {
+                                return Ok(None);
+                            };
                             let key = KeyComparison::try_from(key_evicted.clone())
                                 .map_err(|_| internal_err!("Empty key evicted"))?;
 
@@ -4159,9 +4200,6 @@ impl Domain {
                                 &mut self.remapped_keys,
                             )?;
                             (bytes_freed, Some(key_evicted))
-                        } else {
-                            // This node was unable to evict any keys
-                            (0, None)
                         };
 
                         debug!(%freed, node = ?n, "evicted from node");

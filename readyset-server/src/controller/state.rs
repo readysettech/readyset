@@ -21,7 +21,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use array2::Array2;
-use common::IndexPair;
+use common::{IndexPair, Tag};
 use dataflow::payload::EvictRequest;
 use dataflow::prelude::{ChannelCoordinator, DomainIndex, DomainNodes, Graph, NodeIndex};
 use dataflow::{
@@ -1260,32 +1260,46 @@ impl DfState {
     }
 
     /// *Test only API*
-    /// Select a random partially materialized index and trigger an eviction for a single key.
-    /// Returns the `SingleKeyEviction` containing information on the eviction if one occurred. An
-    /// eviction might not occur if the selected Tag contains no materialized state.
-    pub(super) async fn evict_single(&self) -> ReadySetResult<Option<SingleKeyEviction>> {
-        let tags = self.materializations.partial_tags();
-        if tags.is_empty() {
-            trace!("Attempted to evict but found no tags for any partial materialization");
-            return Ok(None);
-        }
+    /// Triggers an eviction for a single key based on the provided `SingleKeyEviction` or randomly
+    /// if not provided.
+    ///
+    /// Returns the `SingleKeyEviction` if an eviction occurs. An eviction might not occur if the
+    /// randomly selected Tag contains no materialized state.
+    pub(super) async fn evict_single(
+        &self,
+        eviction: Option<SingleKeyEviction>,
+    ) -> ReadySetResult<Option<SingleKeyEviction>> {
+        let (di, tag, key) = match eviction {
+            Some(SingleKeyEviction {
+                domain_idx,
+                tag,
+                key,
+            }) => (domain_idx, Tag::new(tag), Some(key)),
+            None => {
+                let tags = self.materializations.partial_tags();
+                if tags.is_empty() {
+                    trace!("Attempted to evict but found no tags for any partial materialization");
+                    return Ok(None);
+                }
 
-        let idx = {
-            let mut rng = rand::thread_rng();
-            rng.gen_range(0, tags.len())
+                let idx = {
+                    let mut rng = rand::thread_rng();
+                    rng.gen_range(0, tags.len())
+                };
+
+                let (ni, tag) = tags.get(idx).ok_or_else(|| internal_err!())?;
+                let di = self
+                    .domain_for_node(ni)
+                    .ok_or_else(|| internal_err!("Cannot find the Domain for node {:?}", ni))?;
+                (di, *tag, None)
+            }
         };
-
-        let (ni, tag) = tags.get(idx).ok_or_else(|| internal_err!())?;
-        let di = self
-            .domain_for_node(ni)
-            .ok_or_else(|| internal_err!("Cannot find the Domain for node {:?}", ni))?;
-
         let res = self
             .domains
             .get(&di)
             .ok_or_else(|| internal_err!())?
             .send_to_healthy::<Option<Vec<DfValue>>>(
-                DomainRequest::Evict(EvictRequest::Random { tag: *tag }),
+                DomainRequest::Evict(EvictRequest::SingleKey { tag, key }),
                 &self.workers,
             )
             .await?
@@ -1295,7 +1309,7 @@ impl DfState {
             .ok_or_else(|| internal_err!("expected a replica"))?
             .map(|key| SingleKeyEviction {
                 domain_idx: di,
-                tag: u32::from(*tag),
+                tag: u32::from(tag),
                 key,
             });
 

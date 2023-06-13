@@ -424,6 +424,11 @@ impl WriteHandle {
             .map_err(|_| ReadySetError::ReaderNotFound)?;
         Ok(())
     }
+
+    /// The index type of the underlying state
+    pub(crate) fn index_type(&self) -> IndexType {
+        self.index.index_type
+    }
 }
 
 impl SizeOf for WriteHandle {

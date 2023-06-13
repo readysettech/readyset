@@ -520,7 +520,7 @@ impl Leader {
                 (&Method::POST, "/evict_single") => {
                     let ds = self.dataflow_state_handle.read().await;
                     check_quorum!(ds);
-                    let key = ds.evict_single().await?;
+                    let key = ds.evict_single(None).await?;
                     return_serialized!(key);
                 }
                 _ => {}
