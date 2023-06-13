@@ -632,7 +632,7 @@ impl Operation {
                 let host = conn.opts().ip_or_hostname();
                 let client = reqwest::Client::new();
                 let _ = client
-                    .post(format!("http://{host}:6033/evict_random"))
+                    .post(format!("http://{host}:6033/evict_single"))
                     .send()
                     .await?;
                 Ok(OperationResult::NoResults)

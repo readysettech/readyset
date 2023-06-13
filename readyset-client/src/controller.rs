@@ -33,7 +33,10 @@ use crate::replication::ReplicationOffsets;
 use crate::status::ReadySetStatus;
 use crate::table::{Table, TableBuilder, TableRpc};
 use crate::view::{View, ViewBuilder, ViewRpc};
-use crate::{NodeSize, ReplicationOffset, TableStatus, ViewCreateRequest, ViewFilter, ViewRequest};
+use crate::{
+    NodeSize, ReplicationOffset, SingleKeyEviction, TableStatus, ViewCreateRequest, ViewFilter,
+    ViewRequest,
+};
 
 mod rpc;
 
@@ -791,9 +794,12 @@ impl ReadySetHandle {
         self.rpc("set_memory_limit", (period, limit), self.request_timeout)
     }
 
-    /// Evict a random key from partial state. Returns the evicted key, if any.
-    pub fn evict_random(&mut self) -> impl Future<Output = ReadySetResult<()>> + '_ {
-        self.rpc("evict_random", (), self.request_timeout)
+    /// Randomly evict a single key from a randomly chosen and partial index in dataflow state.
+    /// Returns a [`SingleKeyEviction`] if an eviction occurred.
+    pub fn evict_single(
+        &mut self,
+    ) -> impl Future<Output = ReadySetResult<Option<SingleKeyEviction>>> + '_ {
+        self.rpc("evict_single", (), self.request_timeout)
     }
 
     #[cfg(feature = "failure_injection")]

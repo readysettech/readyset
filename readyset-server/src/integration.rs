@@ -35,7 +35,9 @@ use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore}
 use readyset_client::consistency::Timestamp;
 use readyset_client::internal::LocalNodeIndex;
 use readyset_client::recipe::changelist::{Change, ChangeList, CreateCache};
-use readyset_client::{KeyComparison, Modification, SchemaType, ViewPlaceholder, ViewQuery};
+use readyset_client::{
+    KeyComparison, Modification, SchemaType, SingleKeyEviction, ViewPlaceholder, ViewQuery,
+};
 use readyset_data::{DfType, DfValue, Dialect};
 use readyset_errors::ReadySetError::{
     self, MigrationPlanFailed, RpcFailed, SelectQueryCreationFailed,
@@ -9510,6 +9512,48 @@ async fn views_out_of_order() {
     ))
     .await
     .unwrap();
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn evict_random_returns_key() {
+    readyset_tracing::init_test_logging();
+    let (mut g, shutdown_tx) = start_simple_unsharded("evict_random_returns_key").await;
+
+    g.extend_recipe(
+        ChangeList::from_str("CREATE TABLE t1 (x int, y int);", Dialect::DEFAULT_MYSQL).unwrap(),
+    )
+    .await
+    .unwrap();
+
+    g.extend_recipe(ChangeList::from_change(
+        Change::create_cache(
+            "q",
+            parse_select_statement(nom_sql::Dialect::MySQL, "SELECT x FROM t1 where y = ?")
+                .unwrap(),
+            false,
+        ),
+        Dialect::DEFAULT_MYSQL,
+    ))
+    .await
+    .unwrap();
+
+    // insert and query to get an item in state
+    let mut t = g.table("t1").await.unwrap();
+    let mut rh = g.view("q").await.unwrap().into_reader_handle().unwrap();
+    t.insert(vec![1.into(), 2.into()]).await.unwrap();
+    let res = rh.lookup(&[2.into()], true).await.unwrap().into_vec();
+    assert_eq!(res, vec![vec![DfValue::from(1)]]);
+
+    // Call /evict_random and ensure we get the key we just looked up. Ignores the Tag and
+    // DomainIndex since those are not deterministic.
+    let SingleKeyEviction { key, .. } = g.evict_single().await.unwrap().unwrap();
+    assert_eq!(key, vec![2.into()]);
+
+    // Make sure nothing went so wrong that we can't lookup again
+    let res = rh.lookup(&[2.into()], true).await.unwrap().into_vec();
+    assert_eq!(res, vec![vec![DfValue::from(1)]]);
 
     shutdown_tx.shutdown().await;
 }

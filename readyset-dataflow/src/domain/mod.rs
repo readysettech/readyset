@@ -2299,10 +2299,11 @@ impl Domain {
                     .all(|state| state.compaction_finished());
                 Ok(Some(bincode::serialize(&finished)?))
             }
-            // Handle an external request for an eviction
+            // Handle an external request for an eviction. Returns the evicted key unless no
+            // eviction occurred.
             DomainRequest::Evict(req) => {
-                self.handle_eviction(req, executor)?;
-                Ok(None)
+                let key = self.handle_eviction(req, executor)?;
+                Ok(Some(bincode::serialize(&key)?))
             }
         };
         // What we just did might have done things like insert into `self.delayed_for_self`, so
@@ -3759,11 +3760,13 @@ impl Domain {
 
     /// Handles an [`EvictRequest`], triggering downstream evictions in this Domain or others as
     /// necessary.
+    ///
+    /// If handling an `EvictRequest::Random`, we return the evicted key.
     pub fn handle_eviction(
         &mut self,
         request: EvictRequest,
         ex: &mut dyn Executor,
-    ) -> Result<(), ReadySetError> {
+    ) -> ReadySetResult<Option<Vec<DfValue>>> {
         #[allow(clippy::too_many_arguments)]
         fn trigger_downstream_evictions(
             index: &Index,
@@ -3778,7 +3781,7 @@ impl Domain {
             reader_write_handles: &mut NodeMap<backlog::WriteHandle>,
             nodes: &DomainNodes,
             remapped_keys: &mut RemappedKeys,
-        ) -> Result<(), ReadySetError> {
+        ) -> ReadySetResult<()> {
             for (tag, path, keys) in
                 replay_paths.downstream_dependent_paths(node, index, keys, remapped_keys)
             {
@@ -3955,7 +3958,7 @@ impl Domain {
             candidates
         }
 
-        match request {
+        let key = match request {
             EvictRequest::Bytes {
                 node,
                 mut num_bytes,
@@ -4030,6 +4033,7 @@ impl Domain {
                 }
 
                 self.metrics.rec_eviction_time(start.elapsed(), total_freed);
+                None
             }
             EvictRequest::Keys {
                 link: Link { dst, .. },
@@ -4040,7 +4044,7 @@ impl Domain {
                     (&rp.trigger, &rp.path)
                 } else {
                     debug!(?tag, "got eviction for tag that has not yet been finalized");
-                    return Ok(());
+                    return Ok(None);
                 };
 
                 let i = path
@@ -4068,12 +4072,12 @@ impl Domain {
                         // We've already evicted from readers in walk_path
                         #[allow(clippy::indexing_slicing)] // came from replay paths
                         if self.nodes[destination].borrow().is_reader() {
-                            return Ok(());
+                            return Ok(None);
                         }
                         // No need to continue if node was dropped.
                         #[allow(clippy::indexing_slicing)] // came from replay paths
                         if self.nodes[destination].borrow().is_dropped() {
-                            return Ok(());
+                            return Ok(None);
                         }
 
                         let index = path.last().partial_index.clone().ok_or_else(|| {
@@ -4101,13 +4105,14 @@ impl Domain {
                     }
                     TriggerEndpoint::None | TriggerEndpoint::Start(_) => {}
                 }
+                None
             }
             EvictRequest::Random { tag } => {
                 let (trigger, path) = if let Some(rp) = self.replay_paths.get(tag) {
                     (&rp.trigger, &rp.path)
                 } else {
                     debug!(?tag, "got eviction for tag that has not yet been finalized");
-                    return Ok(());
+                    return Ok(None);
                 };
 
                 match trigger {
@@ -4115,16 +4120,17 @@ impl Domain {
                         // This path terminates inside the domain. Find the destination node, evict
                         // from it, and then propagate the eviction further downstream.
                         let destination = path.last().node;
-                        let mut freed = 0u64;
                         #[allow(clippy::indexing_slicing)] // we got the node from self.nodes
                         let n = self.nodes[destination].borrow_mut();
 
-                        if n.is_dropped() {
+                        let (freed, eviction) = if n.is_dropped() {
                             // Node was dropped. Skip.
+                            (0, None)
                         } else if let Some(state) = self.reader_write_handles.get_mut(destination) {
-                            (freed, _) = state.evict_random();
+                            let (bytes_freed, eviction) = state.evict_random();
                             state.swap();
                             state.notify_readers_of_eviction()?;
+                            (bytes_freed, eviction)
                         } else if let Some(EvictRandomResult {
                             index,
                             key_evicted,
@@ -4134,10 +4140,9 @@ impl Domain {
                             let mut rng = rand::thread_rng();
                             self.state[destination].evict_random(tag, &mut rng)
                         } {
-                            let key = KeyComparison::try_from(key_evicted)
+                            let key = KeyComparison::try_from(key_evicted.clone())
                                 .map_err(|_| internal_err!("Empty key evicted"))?;
 
-                            freed += bytes_freed;
                             let index = index.clone();
                             trigger_downstream_evictions(
                                 &index,
@@ -4153,21 +4158,25 @@ impl Domain {
                                 &self.nodes,
                                 &mut self.remapped_keys,
                             )?;
+                            (bytes_freed, Some(key_evicted))
                         } else {
                             // This node was unable to evict any keys
-                        }
+                            (0, None)
+                        };
 
                         debug!(%freed, node = ?n, "evicted from node");
                         self.state_size.fetch_sub(freed as usize, Ordering::AcqRel);
+                        eviction
                     }
                     TriggerEndpoint::None | TriggerEndpoint::Start { .. } => {
                         // Node not in domain.
+                        None
                     }
                 }
             }
         };
 
-        Ok(())
+        Ok(key)
     }
 
     pub fn address(&self) -> ReplicaAddress {

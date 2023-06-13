@@ -48,10 +48,10 @@ use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::recipe::ExtendRecipeSpec;
 use readyset_client::replication::{ReplicationOffset, ReplicationOffsetState, ReplicationOffsets};
 use readyset_client::{
-    NodeSize, TableReplicationStatus, TableStatus, ViewCreateRequest, ViewFilter, ViewRequest,
-    ViewSchema,
+    NodeSize, SingleKeyEviction, TableReplicationStatus, TableStatus, ViewCreateRequest,
+    ViewFilter, ViewRequest, ViewSchema,
 };
-use readyset_data::Dialect;
+use readyset_data::{DfValue, Dialect};
 use readyset_errors::{
     internal, internal_err, invariant_eq, NodeType, ReadySetError, ReadySetResult,
 };
@@ -1261,11 +1261,13 @@ impl DfState {
 
     /// *Test only API*
     /// Select a random partially materialized index and trigger an eviction for a single key.
-    pub(super) async fn evict_random(&self) -> ReadySetResult<()> {
+    /// Returns the `SingleKeyEviction` containing information on the eviction if one occurred. An
+    /// eviction might not occur if the selected Tag contains no materialized state.
+    pub(super) async fn evict_single(&self) -> ReadySetResult<Option<SingleKeyEviction>> {
         let tags = self.materializations.partial_tags();
         if tags.is_empty() {
             trace!("Attempted to evict but found no tags for any partial materialization");
-            return Ok(());
+            return Ok(None);
         }
 
         let idx = {
@@ -1278,16 +1280,26 @@ impl DfState {
             .domain_for_node(ni)
             .ok_or_else(|| internal_err!("Cannot find the Domain for node {:?}", ni))?;
 
-        self.domains
+        let res = self
+            .domains
             .get(&di)
             .ok_or_else(|| internal_err!())?
-            .send_to_healthy::<()>(
+            .send_to_healthy::<Option<Vec<DfValue>>>(
                 DomainRequest::Evict(EvictRequest::Random { tag: *tag }),
                 &self.workers,
             )
-            .await?;
+            .await?
+            .pop()
+            .ok_or_else(|| internal_err!("expected a shard"))?
+            .pop()
+            .ok_or_else(|| internal_err!("expected a replica"))?
+            .map(|key| SingleKeyEviction {
+                domain_idx: di,
+                tag: u32::from(*tag),
+                key,
+            });
 
-        Ok(())
+        Ok(res)
     }
 
     /// Iterate over all nodes stored in `self::domain_nodes` to find the [`Domain`] that owns the

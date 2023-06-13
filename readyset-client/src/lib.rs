@@ -405,6 +405,24 @@ pub struct ReaderAddress {
     pub shard: usize,
 }
 
+/// Represents an eviction of a single key from some partially materialized index identified by the
+/// `tag`. `domain_idx` is included for convenience, because the controller does not store mappings
+/// from Tag to `DomainIndex`.
+///
+/// This struct may represent the result of an eviction or may be used to trigger an eviction.
+///
+/// Note: `tag` is included as a u32 because it is defined in readyset-common, which imports this
+/// crate.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SingleKeyEviction {
+    /// The `DomainIndex` of the `Domain` that owns the partially materialized index.
+    pub domain_idx: DomainIndex,
+    /// The Tag identifying the partially materialized index.
+    pub tag: u32,
+    /// The key that was evicted from the partially materialized index.
+    pub key: Vec<DfValue>,
+}
+
 /// Use to aggregate various node stats that describe its size
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NodeSize {
