@@ -24,6 +24,7 @@
 //! Note that this test suite requires the *exact* configuration specified in that docker-compose
 //! configuration, including the port, username, and password.
 
+use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
@@ -67,7 +68,17 @@ enum Operation {
         table: &'static str,
         row: Vec<DfValue>,
     },
-    Evict,
+    /// This operation triggers an eviction of a single key in ReadySet, using `inner` as the
+    /// payload for the /evict_single RPC.
+    ///
+    /// The payload is initialized to `None`, which triggers a random eviction the first time this
+    /// operation is run. `inner` is then updated with the `SingleKeyResult` returned by the
+    /// /evict_single RPC, so that if this operation is run again, we can trigger the same eviction
+    /// again. This behavior is necessary to ensure consistent results when attempting to reproduce
+    /// a failing test case.
+    Evict {
+        inner: RefCell<Option<SingleKeyEviction>>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -226,7 +237,10 @@ where
 
         res.push(random_key_query_strat);
 
-        let evict_strategy = Just(Operation::Evict).boxed();
+        let evict_strategy = Just(Operation::Evict {
+            inner: RefCell::new(None),
+        })
+        .boxed();
 
         res.push(evict_strategy);
 
@@ -353,7 +367,7 @@ where
                 .map_or(false, |table_rows| table_rows.contains(row)),
             // Can always insert any row or query any key or request an eviction and we shouldn't
             // error out
-            Operation::Insert { .. } | Operation::Query { .. } | Operation::Evict => true,
+            Operation::Insert { .. } | Operation::Query { .. } | Operation::Evict { .. } => true,
         }
     }
 
@@ -377,7 +391,7 @@ where
                 let row_pos = table_rows.iter().position(|r| r == row).unwrap();
                 table_rows.swap_remove(row_pos);
             }
-            Operation::Query { .. } | Operation::Evict => (),
+            Operation::Query { .. } | Operation::Evict { .. } => (),
         }
     }
 
@@ -628,15 +642,21 @@ impl Operation {
                     .await
                     .into())
             }
-            Operation::Evict => {
+            Operation::Evict { inner } => {
                 // Call the /evict_random Controller RPC. We don't care about the result.
                 let host = conn.opts().ip_or_hostname();
                 let client = reqwest::Client::new();
-                let _ = client
+                let body = bincode::serialize::<Option<SingleKeyEviction>>(&*inner.borrow())?;
+                let res = client
                     .post(format!("http://{host}:6033/evict_single"))
-                    .body(bincode::serialize::<Option<SingleKeyEviction>>(&None)?)
+                    .body(body)
                     .send()
                     .await?;
+                if inner.borrow().is_none() {
+                    let eviction =
+                        bincode::deserialize::<Option<SingleKeyEviction>>(&res.bytes().await?)?;
+                    inner.replace(eviction);
+                }
                 Ok(OperationResult::NoResults)
             }
         }

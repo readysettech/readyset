@@ -413,7 +413,7 @@ pub struct ReaderAddress {
 ///
 /// Note: `tag` is included as a u32 because it is defined in readyset-common, which imports this
 /// crate.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SingleKeyEviction {
     /// The `DomainIndex` of the `Domain` that owns the partially materialized index.
     pub domain_idx: DomainIndex,
