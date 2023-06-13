@@ -69,7 +69,7 @@ pub struct UpstreamConfig {
     pub replication_server_id: Option<u32>,
 
     /// The time to wait before restarting the replicator in seconds.
-    #[clap(long, hide = true, default_value = "30", value_parser = duration_from_seconds)]
+    #[clap(long, hide = true, default_value = "1", value_parser = duration_from_seconds)]
     #[serde(default = "default_replicator_restart_timeout")]
     pub replicator_restart_timeout: Duration,
 
@@ -135,7 +135,7 @@ impl Default for UpstreamConfig {
             disable_upstream_ssl_verification: false,
             disable_setup_ddl_replication: false,
             replication_server_id: Default::default(),
-            replicator_restart_timeout: Duration::from_secs(30),
+            replicator_restart_timeout: Duration::from_secs(1),
             replication_tables: Default::default(),
             snapshot_report_interval_secs: 30,
             ssl_root_cert: None,
