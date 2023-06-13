@@ -389,7 +389,7 @@ impl MySqlReplicator {
         let mut row_stream = dumper.stream().await.map_err(log_err)?;
         let mut rows = Vec::with_capacity(BATCH_SIZE);
 
-        info!(rows = %nrows, "Replication started");
+        info!(rows = %nrows, "Snapshotting started");
 
         table_mutator.set_snapshot_mode(true).await?;
         let progress_percentage_metric: metrics::Gauge = register_gauge!(
@@ -447,7 +447,7 @@ impl MySqlReplicator {
             })?;
         }
 
-        info!(rows_replicated = %cnt, "Replication finished");
+        info!(rows_replicated = %cnt, "Snapshotting finished");
         progress_percentage_metric.set(100.0);
 
         Ok(())
