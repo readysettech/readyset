@@ -315,33 +315,35 @@ impl WriteHandle {
         self.partial
     }
 
-    /// Evict from state according to the [`EvictionQuantity`].
-    fn evict_inner(&mut self, request: EvictionQuantity) -> u64 {
-        let mut bytes_to_be_freed = 0;
-        if self.mem_size > 0 {
+    /// Evict from state according to the [`EvictionQuantity`]. Returns the number of bytes freed
+    /// and if the request is EvictionQuantity::SingleKey, returns the key that was evicted.
+    fn evict_inner(&mut self, request: EvictionQuantity) -> (u64, Option<Vec<DfValue>>) {
+        let (bytes_to_be_freed, eviction) = if self.mem_size > 0 {
             debug_assert!(
                 !self.handle.is_empty(),
                 "mem size is {}, but map is empty",
                 self.mem_size
             );
 
-            bytes_to_be_freed += self.handle.evict(request);
-        }
+            self.handle.evict(request)
+        } else {
+            (0, None)
+        };
 
         self.mem_size = self.mem_size.saturating_sub(bytes_to_be_freed as usize);
-        bytes_to_be_freed
+        (bytes_to_be_freed, eviction)
     }
 
     /// Attempt to evict `bytes` from state. This approximates the number of keys to evict,
     /// these keys may not have exactly `bytes` worth of state.
     pub(crate) fn evict_bytes(&mut self, bytes: usize) -> u64 {
         let request = EvictionQuantity::Ratio(bytes as f64 / self.mem_size as f64);
-        self.evict_inner(request)
+        self.evict_inner(request).0
     }
 
     /// Evict a single key from state
-    pub(crate) fn evict_random(&mut self) -> u64 {
-        let request = EvictionQuantity::Quantity(1);
+    pub(crate) fn evict_random(&mut self) -> (u64, Option<Vec<DfValue>>) {
+        let request = EvictionQuantity::SingleKey;
         self.evict_inner(request)
     }
 

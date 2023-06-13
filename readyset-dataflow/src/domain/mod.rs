@@ -4122,7 +4122,7 @@ impl Domain {
                         if n.is_dropped() {
                             // Node was dropped. Skip.
                         } else if let Some(state) = self.reader_write_handles.get_mut(destination) {
-                            freed += state.evict_random();
+                            (freed, _) = state.evict_random();
                             state.swap();
                             state.notify_readers_of_eviction()?;
                         } else if let Some(EvictRandomResult {

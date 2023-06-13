@@ -19,6 +19,11 @@ pub enum EvictionQuantity {
     Quantity(usize),
     /// The ratio of keys to evict on [0, 1]
     Ratio(f64),
+    /// Evict a single key.
+    ///
+    /// NOTE: This should not be used outside of tests, because it wouldn't be efficient to evict
+    /// one key at a time.
+    SingleKey,
 }
 
 /// A handle that may be used to modify the eventually consistent map.
@@ -245,7 +250,14 @@ where
     /// [`publish`](Self::publish). The values will be submitted for eviction, but the result will
     /// only be visible to all readers after a following call to publish is made. The method returns
     /// the amount of memory freed, computed using the provided closure on each (K,V) pair.
-    pub fn evict_keys<'a, F>(&'a mut self, keys_to_evict: EvictionQuantity, mut mem_cnt: F) -> u64
+    ///
+    /// Returns the number of bytes evicted calculated by `mem_cnt`. If passed an
+    /// [`EvictionQuantity::SingleKey`], also returns the key evicted.
+    pub fn evict_keys<'a, F>(
+        &'a mut self,
+        request: EvictionQuantity,
+        mut mem_cnt: F,
+    ) -> (u64, Option<K>)
     where
         F: FnMut(&K, &Values<V>) -> u64,
     {
@@ -261,9 +273,10 @@ where
         let inner: &'a Inner<K, V, M, T, S, I> =
             unsafe { std::mem::transmute::<&Inner<K, V, M, T, S, I>, _>(inner.as_ref()) };
 
-        let keys_to_evict = match keys_to_evict {
+        let keys_to_evict = match request {
             EvictionQuantity::Ratio(ratio) => (inner.data.len() as f64 * ratio) as usize,
             EvictionQuantity::Quantity(keys) => keys,
+            EvictionQuantity::SingleKey => 1,
         }
         .min(inner.data.len());
 
@@ -274,6 +287,21 @@ where
                 let mut range_iterator = inner
                     .eviction_strategy
                     .pick_ranges_to_evict(&inner.data, keys_to_evict);
+
+                // If we received an `EvictionQuantity::SingleKey` request, return the evicted key.
+                if matches!(request, EvictionQuantity::SingleKey) {
+                    // It's possible that we had nothing to evict
+                    let Some(mut subrange_iter) = range_iterator.next_range() else {
+                        return (0, None);
+                    };
+                    let (k, v) = subrange_iter.next().expect("Subrange can't be empty");
+
+                    // We should have only evicted a single key
+                    debug_assert!(subrange_iter.last().is_none());
+                    debug_assert!(range_iterator.next_range().is_none());
+
+                    return (mem_cnt(k, v), Some(k.clone()));
+                }
 
                 while let Some(subrange_iter) = range_iterator.next_range() {
                     let mut subrange_iter = subrange_iter.map(|(k, v)| {
@@ -294,18 +322,28 @@ where
                 }
             }
             IndexType::HashMap => {
-                let kvs = inner
+                let mut kvs = inner
                     .eviction_strategy
                     .pick_keys_to_evict(&inner.data, keys_to_evict);
+
+                // If we received an `EvictionQuantity::SingleKey` request, we return the evicted
+                // key
+                if matches!(request, EvictionQuantity::SingleKey) {
+                    let Some((k, v)) = kvs.next() else {
+                        return (0, None); // possible we had nothing to evict
+                    };
+                    self.add_op(Operation::RemoveEntry(k.clone()));
+                    return (mem_cnt(k, v), Some(k.clone()));
+                };
 
                 for (k, v) in kvs {
                     self.add_op(Operation::RemoveEntry(k.clone()));
                     mem_freed += mem_cnt(k, v);
                 }
             }
-        }
+        };
 
-        mem_freed
+        (mem_freed, None)
     }
 }
 
