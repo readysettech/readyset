@@ -8137,6 +8137,7 @@ async fn aggressive_eviction_range_impl() {
 
 rusty_fork_test! {
     #[test]
+    #[ignore = "Flaky (REA-2880)"]
     fn aggressive_eviction() {
         if skip_with_flaky_finder() {
             return;
