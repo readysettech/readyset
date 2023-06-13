@@ -1319,7 +1319,10 @@ impl DeploymentHandle {
         let start = Instant::now();
         let check_leader_loop = async {
             loop {
-                let remaining = std::cmp::min(Duration::from_secs(5), timeout - start.elapsed());
+                let remaining = std::cmp::min(
+                    Duration::from_secs(5),
+                    timeout.saturating_sub(start.elapsed()),
+                );
                 let res = tokio::time::timeout(remaining, self.handle.leader_ready()).await;
                 match res {
                     Ok(Ok(true)) => return,

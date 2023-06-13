@@ -163,12 +163,13 @@ where
     let start = Instant::now();
     loop {
         // Check if we have exceeded the given timeout. Otherwise, attempt query execution again.
-        if start.elapsed() > timeout {
+        let elapsed = start.elapsed();
+        if elapsed > timeout {
             println!("query_until_expected timed out, last: {:?}", last);
             return false;
         }
         // Set the timeout for this query execution, which may take at most 5 seconds.
-        let remaining = std::cmp::min(Duration::from_secs(5), timeout - start.elapsed());
+        let remaining = std::cmp::min(Duration::from_secs(5), timeout - elapsed);
         let num_noria_queries_before = if let ResultSource::FromNoria(metrics) = &mut source {
             get_num_view_queries(metrics).await
         } else {
