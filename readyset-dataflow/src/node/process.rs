@@ -286,7 +286,7 @@ impl Node {
                         }
                         Packet::ReplayPiece {
                             ref mut data,
-                            context: payload::ReplayPieceContext::Regular { last },
+                            context: payload::ReplayPieceContext::Full { last },
                             ..
                         } => {
                             trace!(?data, last, "received full replay");
@@ -358,7 +358,7 @@ impl Node {
 
                     if let Some(new_last) = set_replay_last {
                         if let Packet::ReplayPiece {
-                            context: payload::ReplayPieceContext::Regular { ref mut last },
+                            context: payload::ReplayPieceContext::Full { ref mut last },
                             ..
                         } = **m
                         {

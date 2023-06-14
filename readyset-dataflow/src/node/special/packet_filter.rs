@@ -617,7 +617,7 @@ mod test {
                     unishard: false,
                 }
             } else {
-                ReplayPieceContext::Regular { last: false }
+                ReplayPieceContext::Full { last: false }
             };
             Packet::ReplayPiece {
                 link: create_link(),

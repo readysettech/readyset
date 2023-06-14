@@ -1952,7 +1952,7 @@ impl Domain {
                 let p = Box::new(Packet::ReplayPiece {
                     tag,
                     link,
-                    context: ReplayPieceContext::Regular {
+                    context: ReplayPieceContext::Full {
                         last: state.is_empty(),
                     },
                     data: Vec::<Record>::new().into(),
@@ -2031,7 +2031,7 @@ impl Domain {
                                 let p = Box::new(Packet::ReplayPiece {
                                     tag,
                                     link, // to is overwritten by receiver
-                                    context: ReplayPieceContext::Regular { last },
+                                    context: ReplayPieceContext::Full { last },
                                     data: chunk,
                                 });
 
@@ -3401,7 +3401,7 @@ impl Domain {
                 // We would have bailed earlier (break 'outer, above) if m wasn't Some
                 if m.as_ref().unwrap().is_empty() {
                     if let Packet::ReplayPiece {
-                        context: ReplayPieceContext::Regular { last: false },
+                        context: ReplayPieceContext::Full { last: false },
                         ..
                     } = m.as_deref().unwrap()
                     {
@@ -3456,14 +3456,14 @@ impl Domain {
             };
 
             match context {
-                ReplayPieceContext::Regular { last } if last => {
+                ReplayPieceContext::Full { last } if last => {
                     debug!(terminal = notify_done, "last batch processed");
                     if notify_done {
                         debug!(local = dst.id(), "last batch received");
                         finished = Some((tag, dst, target.unwrap(), None));
                     }
                 }
-                ReplayPieceContext::Regular { .. } => {
+                ReplayPieceContext::Full { .. } => {
                     debug!("batch processed");
                 }
                 ReplayPieceContext::Partial { for_keys, .. } => {

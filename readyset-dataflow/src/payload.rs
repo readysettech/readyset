@@ -162,9 +162,12 @@ pub enum PrepareStateKind {
     },
 }
 
+/// Context associated with a batch of records for a replay
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ReplayPieceContext {
+    /// Context for a partial replay
     Partial {
+        /// The set of keys that are being replayed
         for_keys: HashSet<KeyComparison>,
         /// The index of the shard that originally requested the replay.
         requesting_shard: usize,
@@ -172,9 +175,12 @@ pub enum ReplayPieceContext {
         ///
         /// Only this replica will receive any replay piece packets.
         requesting_replica: usize,
+        /// Is this replay coming from a single shard in the source domain?
         unishard: bool,
     },
-    Regular {
+    /// Context for a full replay
+    Full {
+        /// Is this the last batch of records for this full replay?
         last: bool,
     },
 }

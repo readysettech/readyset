@@ -167,7 +167,7 @@ impl Sharder {
 
         let mut dest = Destination::Any;
         if let Packet::ReplayPiece {
-            context: payload::ReplayPieceContext::Regular { last: true },
+            context: payload::ReplayPieceContext::Full { last: true },
             ..
         } = *m
         {
