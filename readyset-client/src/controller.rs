@@ -299,7 +299,8 @@ impl ReadySetHandle {
         Self::make(authority.into(), request_timeout, migration_timeout)
     }
 
-    async fn simple_get_request<R>(&mut self, path: &'static str) -> ReadySetResult<R>
+    /// Issues a POST request to the given path with no body.
+    async fn simple_post_request<R>(&mut self, path: &'static str) -> ReadySetResult<R>
     where
         R: DeserializeOwned,
     {
@@ -322,12 +323,12 @@ impl ReadySetHandle {
     ///
     /// These have all been created in response to a `CREATE TABLE` statement in a recipe.
     pub async fn tables(&mut self) -> ReadySetResult<BTreeMap<Relation, NodeIndex>> {
-        self.simple_get_request("tables").await
+        self.simple_post_request("tables").await
     }
 
     /// Query the status of all known tables, including those not replicated by ReadySet
     pub async fn table_statuses(&mut self) -> ReadySetResult<BTreeMap<Relation, TableStatus>> {
-        self.simple_get_request("table_statuses").await?
+        self.simple_post_request("table_statuses").await?
     }
 
     /// Return a list of all relations (tables or views) which are known to exist in the upstream
@@ -336,7 +337,7 @@ impl ReadySetHandle {
     ///
     /// [`Change::AddNonReplicatedRelation`]: readyset_client::recipe::changelist::Change::AddNonReplicatedRelation
     pub async fn non_replicated_relations(&mut self) -> ReadySetResult<HashSet<Relation>> {
-        self.simple_get_request("non_replicated_relations").await
+        self.simple_post_request("non_replicated_relations").await
     }
 
     /// Enumerate all known external views.
@@ -346,7 +347,7 @@ impl ReadySetHandle {
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub async fn views(&mut self) -> ReadySetResult<BTreeMap<Relation, NodeIndex>> {
-        self.simple_get_request("views").await
+        self.simple_post_request("views").await
     }
 
     /// Enumerate all known external views. Includes the SqlQuery that created the view
@@ -355,7 +356,7 @@ impl ReadySetHandle {
     pub async fn verbose_views(
         &mut self,
     ) -> ReadySetResult<BTreeMap<Relation, (SelectStatement, bool)>> {
-        self.simple_get_request("verbose_views").await
+        self.simple_post_request("verbose_views").await
     }
 
     /// For each of the given list of queries, determine whether that query (or a semantically
