@@ -66,6 +66,9 @@ pub enum DatabaseURLParseError {
     #[error("Invalid database URL format; database URLs must start with either mysql:// or postgresql://")]
     InvalidFormat,
 
+    #[error("Invalid database URL format; ReadySet requires that Postgres database URLs contain a database name")]
+    MissingPostgresDbName,
+
     #[error(transparent)]
     PostgreSQL(#[from] pgsql::Error),
 

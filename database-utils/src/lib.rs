@@ -244,7 +244,12 @@ impl FromStr for DatabaseURL {
         if s.starts_with("mysql://") {
             Ok(Self::MySQL(mysql::Opts::from_url(s)?))
         } else if s.starts_with("postgresql://") || s.starts_with("postgres://") {
-            Ok(Self::PostgreSQL(pgsql::Config::from_str(s)?))
+            let result = Self::PostgreSQL(pgsql::Config::from_str(s)?);
+            // Require that Postgres URLs specify a database
+            match result.db_name() {
+                Some(_) => Ok(result),
+                None => Err(DatabaseURLParseError::MissingPostgresDbName),
+            }
         } else {
             Err(DatabaseURLParseError::InvalidFormat)
         }
