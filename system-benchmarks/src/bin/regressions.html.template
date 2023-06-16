@@ -2,7 +2,7 @@
 <html>
 
 <head>
-    <title>System Benchmark</title>
+    <title>System Benchmark -- $DATABASE_TYPE$</title>
 </head>
 
 <label for="memoryLimit">Memory limit:</label>

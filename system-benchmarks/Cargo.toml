@@ -15,6 +15,7 @@ serde_json = "1.0"
 tokio-postgres = { workspace = true, features = ["with-chrono-0_4", "with-eui48-1", "with-uuid-0_8", "with-serde_json-1", "with-bit-vec-0_6"] }
 database-utils = { path = "../database-utils" }
 readyset-data = { path = "../readyset-data" }
+clap = { version = "4.2", features = ["derive"] }
 
 [dev-dependencies]
 benchmarks = { path = "../benchmarks" }
@@ -25,7 +26,6 @@ readyset-mysql = { path = "../readyset-mysql" }
 readyset-psql = { path = "../readyset-psql" }
 readyset = { path = "../readyset" }
 
-clap = { version = "4.2", features = ["derive"] }
 core_affinity = "0.5"
 criterion = { version = "0.3", features = ["async_tokio"] }
 fork = "0.1"

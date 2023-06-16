@@ -4,7 +4,8 @@
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::str::FromStr;
 
-use database_utils::{DatabaseConnection, DatabaseURL, QueryableConnection};
+use clap::Parser;
+use database_utils::{DatabaseConnection, DatabaseType, DatabaseURL, QueryableConnection};
 use readyset_data::DfValue;
 use serde::{Deserialize, Serialize};
 
@@ -112,6 +113,7 @@ async fn get_bench_descriptor(
     client: &reqwest::Client,
     token: &str,
     build: usize,
+    database_type: DatabaseType,
 ) -> anyhow::Result<Option<JobArtifactDescriptor>> {
     // For each job, request the list of artifacts for that job:
     // https://buildkite.com/docs/apis/rest-api/artifacts#list-artifacts-for-a-job
@@ -119,9 +121,13 @@ async fn get_bench_descriptor(
     let response = client.get(url).bearer_auth(token).send().await?;
     let artifact_list = response.text().await?;
     let artifact_list = serde_json::from_str::<Vec<JobArtifactDescriptor>>(&artifact_list)?;
-    Ok(artifact_list
-        .into_iter()
-        .find(|a| a.filename == format!("{build}-bench.json")))
+    Ok(artifact_list.into_iter().find(|a| {
+        // For backwards compatibility, MySQL files do not have a "-mysql" suffix
+        match database_type {
+            DatabaseType::MySQL => a.filename == format!("{build}-bench.json"),
+            DatabaseType::PostgreSQL => a.filename == format!("{build}-bench-postgresql.json"),
+        }
+    }))
 }
 
 async fn get_build_descriptor(
@@ -167,7 +173,7 @@ async fn upload_results_to_database(
     client.query_drop(&ddl).await?;
 
     let query = r"
-    INSERT INTO benchmark_data (buildkite_commit, name, build, execution_end_time, data) VALUES 
+    INSERT INTO benchmark_data (buildkite_commit, name, build, execution_end_time, data) VALUES
     ($1, $2, $3, NOW(), $4)"
         .to_string();
     for (
@@ -212,8 +218,16 @@ struct DataSet {
     border_dash: &'static str,
 }
 
+#[derive(Parser, Debug)]
+struct RegressionsArgs {
+    /// The type of the database for which we'd like to plot regressions
+    #[clap(long)]
+    database_type: DatabaseType,
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let args = RegressionsArgs::parse();
     let this_build: usize = std::env::var("BUILD_NUMBER").expect("Need build").parse()?;
     let access_token = std::env::var("ACCESS_TOKEN").expect("Need token");
 
@@ -243,7 +257,9 @@ async fn main() -> anyhow::Result<()> {
             continue;
         }
 
-        if let Some(bench_artifact) = get_bench_descriptor(&client, &access_token, build).await? {
+        if let Some(bench_artifact) =
+            get_bench_descriptor(&client, &access_token, build, args.database_type).await?
+        {
             let benchmarks_for_build = get_bench(&client, &access_token, &bench_artifact).await?;
             if checked_build.commit == commit {
                 // Skip build with the same commit we already checked.
@@ -317,8 +333,9 @@ async fn main() -> anyhow::Result<()> {
     );
 
     std::fs::write(
-        "regressions.html",
+        format!("regressions-{}.html", args.database_type),
         TEMPLATE
+            .replace("$DATABASE_TYPE$", &args.database_type.to_string())
             .replace("$LABELS$", &label_string)
             .replace("$MEMORY_LIMITS$", &mem_limits_string)
             .replace("$DATASETS$", &dataset_string),
