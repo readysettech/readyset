@@ -478,7 +478,7 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
             }
 
             DfType::Inet => {
-                // Since MAC addresses can be represented in many ways, if we want to store them as
+                // Since Inet addresses can be represented in many ways, if we want to store them as
                 // a string, we have to at least normalize to the same representation.
                 // I.e. we want to make sure that:
                 // '0::beef',
