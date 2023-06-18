@@ -14,7 +14,7 @@ use crate::common::{column_identifier_no_alias, parse_comment};
 use crate::expression::expression;
 use crate::sql_type::type_identifier;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, Expr, Literal, NomSqlResult, Relation, SqlIdentifier, SqlType};
+use crate::{literal, Dialect, Expr, Literal, NomSqlResult, Relation, SqlIdentifier, SqlType};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct Column {
@@ -88,7 +88,7 @@ pub enum ColumnConstraint {
     Unique,
     /// NOTE(grfn): Yes, this really is its own special thing, not just an expression - see
     /// <https://dev.mysql.com/doc/refman/8.0/en/timestamp-initialization.html>
-    OnUpdateCurrentTimestamp,
+    OnUpdateCurrentTimestamp(Option<Literal>),
 }
 
 impl ColumnConstraint {
@@ -102,7 +102,13 @@ impl ColumnConstraint {
             Self::AutoIncrement => write!(f, "AUTO_INCREMENT"),
             Self::PrimaryKey => write!(f, "PRIMARY KEY"),
             Self::Unique => write!(f, "UNIQUE"),
-            Self::OnUpdateCurrentTimestamp => write!(f, "ON UPDATE CURRENT_TIMESTAMP"),
+            Self::OnUpdateCurrentTimestamp(opt) => {
+                write!(f, "ON UPDATE CURRENT_TIMESTAMP")?;
+                if let Some(lit) = opt {
+                    write!(f, "({})", lit)?;
+                }
+                Ok(())
+            }
         })
     }
 }
@@ -181,19 +187,28 @@ fn default(
     }
 }
 
-pub fn on_update_current_timestamp(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ColumnConstraint> {
-    let (i, _) = tag_no_case("on")(i)?;
-    let (i, _) = whitespace1(i)?;
-    let (i, _) = tag_no_case("update")(i)?;
-    let (i, _) = whitespace1(i)?;
-    let (i, _) = alt((
-        tag_no_case("current_timestamp"),
-        tag_no_case("now"),
-        tag_no_case("localtime"),
-        tag_no_case("localtimestamp"),
-    ))(i)?;
-    let (i, _) = opt(tag("()"))(i)?;
-    Ok((i, ColumnConstraint::OnUpdateCurrentTimestamp))
+pub fn on_update_current_timestamp(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ColumnConstraint> {
+    move |i| {
+        let (i, _) = tag_no_case("on")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("update")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = alt((
+            tag_no_case("current_timestamp"),
+            tag_no_case("now"),
+            tag_no_case("localtime"),
+            tag_no_case("localtimestamp"),
+        ))(i)?;
+
+        let (i, opt_lit) = opt(delimited(
+            tuple((whitespace0, tag("("), whitespace0)),
+            literal(dialect),
+            tuple((whitespace0, tag(")"), whitespace0)),
+        ))(i)?;
+        Ok((i, ColumnConstraint::OnUpdateCurrentTimestamp(opt_lit)))
+    }
 }
 
 pub fn column_constraint(
@@ -254,7 +269,7 @@ pub fn column_constraint(
             unique,
             character_set,
             collate,
-            on_update_current_timestamp,
+            on_update_current_timestamp(dialect),
         ))(i)
     }
 }
@@ -357,6 +372,69 @@ mod tests {
                 cspec.constraints[0],
                 ColumnConstraint::DefaultValue(Expr::Literal(Literal::Boolean(true)))
             ));
+        }
+
+        #[test]
+        fn on_update_current_timestamp_no_precision() {
+            let input = b"`lastModified` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP";
+            let (_, res) = column_specification(Dialect::MySQL)(LocatedSpan::new(input)).unwrap();
+            let cspec = ColumnSpecification {
+                column: Column {
+                    name: "lastModified".into(),
+                    table: None,
+                },
+                sql_type: SqlType::DateTime(Some(6)),
+                comment: None,
+                constraints: vec![
+                    ColumnConstraint::NotNull,
+                    ColumnConstraint::DefaultValue(Expr::Call(FunctionExpr::Call {
+                        name: "CURRENT_TIMESTAMP".into(),
+                        arguments: vec![Expr::Literal(Literal::UnsignedInteger(6))],
+                    })),
+                    ColumnConstraint::OnUpdateCurrentTimestamp(None),
+                ],
+            };
+            assert_eq!(res, cspec);
+            let res = cspec.display(Dialect::MySQL).to_string();
+            assert_eq!(res, String::from_utf8(input.to_vec()).unwrap());
+        }
+
+        #[test]
+        fn on_update_current_timestamp_precision() {
+            let canonical = "`lastModified` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6)";
+            let inputs = vec![
+                canonical,
+                "`lastModified` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP (6) ",
+                "`lastModified` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP( 6 )",
+                "`lastModified` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6 ) ",
+                "`lastModified` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP ( 6)",
+            ];
+            for input in inputs {
+                let (_, res) =
+                    column_specification(Dialect::MySQL)(LocatedSpan::new(input.as_bytes()))
+                        .unwrap();
+                let cspec = ColumnSpecification {
+                    column: Column {
+                        name: "lastModified".into(),
+                        table: None,
+                    },
+                    sql_type: SqlType::DateTime(Some(6)),
+                    comment: None,
+                    constraints: vec![
+                        ColumnConstraint::NotNull,
+                        ColumnConstraint::DefaultValue(Expr::Call(FunctionExpr::Call {
+                            name: "CURRENT_TIMESTAMP".into(),
+                            arguments: vec![Expr::Literal(Literal::UnsignedInteger(6))],
+                        })),
+                        ColumnConstraint::OnUpdateCurrentTimestamp(Some(Literal::UnsignedInteger(
+                            6,
+                        ))),
+                    ],
+                };
+                assert_eq!(res, cspec);
+                let res = cspec.display(Dialect::MySQL).to_string();
+                assert_eq!(res, canonical);
+            }
         }
     }
 

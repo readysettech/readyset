@@ -800,7 +800,10 @@ mod tests {
     use crate::column::Column;
     use crate::create_table_options::{CharsetName, CollationName};
     use crate::table::Relation;
-    use crate::{BinaryOperator, ColumnConstraint, Expr, LimitClause, Literal, SqlType, TableExpr};
+    use crate::{
+        BinaryOperator, ColumnConstraint, Expr, FunctionExpr, LimitClause, Literal, SqlType,
+        TableExpr,
+    };
 
     #[test]
     fn field_spec() {
@@ -2484,5 +2487,39 @@ PRIMARY KEY (`id`));";
                 options: Ok(vec![])
             }
         );
+    }
+
+    #[test]
+    fn on_update_current_timestamp_precision() {
+        let qstring = b"CREATE TABLE foo (
+          `lastModified` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6)
+        );";
+        let res = test_parse!(create_table(Dialect::MySQL), qstring);
+        assert_eq!(res.table.name, "foo");
+        assert_eq!(
+            res,
+            CreateTableStatement {
+                if_not_exists: false,
+                table: "foo".into(),
+                body: Ok(CreateTableBody {
+                    fields: vec![ColumnSpecification::with_constraints(
+                        "lastModified".into(),
+                        SqlType::DateTime(Some(6)),
+                        vec![
+                            ColumnConstraint::NotNull,
+                            ColumnConstraint::DefaultValue(Expr::Call(FunctionExpr::Call {
+                                name: "CURRENT_TIMESTAMP".into(),
+                                arguments: vec![Expr::Literal(Literal::UnsignedInteger(6,),),],
+                            },),),
+                            ColumnConstraint::OnUpdateCurrentTimestamp(Some(
+                                Literal::UnsignedInteger(6)
+                            ),),
+                        ],
+                    ),],
+                    keys: None,
+                }),
+                options: Ok(vec![]),
+            }
+        )
     }
 }
