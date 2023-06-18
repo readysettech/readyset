@@ -2454,4 +2454,35 @@ PRIMARY KEY (`id`));";
         let res = test_parse!(create_table(Dialect::MySQL), qstring);
         assert_eq!(res.table.name, "spree_zones");
     }
+
+    #[test]
+    fn bit_literal() {
+        let qstring = b"CREATE TABLE `table` (
+            `enabled` bit(1) NOT NULL DEFAULT b'0'
+          )";
+
+        let res = test_parse!(create_table(Dialect::MySQL), qstring);
+
+        assert_eq!(
+            res,
+            CreateTableStatement {
+                if_not_exists: false,
+                table: "table".into(),
+                body: Ok(CreateTableBody {
+                    fields: vec![ColumnSpecification::with_constraints(
+                        "enabled".into(),
+                        SqlType::Bit(Some(1)),
+                        vec![
+                            ColumnConstraint::NotNull,
+                            ColumnConstraint::DefaultValue(Expr::Literal(Literal::BitVector(
+                                vec![0]
+                            ))),
+                        ],
+                    ),],
+                    keys: None,
+                }),
+                options: Ok(vec![])
+            }
+        );
+    }
 }

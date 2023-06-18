@@ -1,13 +1,11 @@
 use std::fmt;
 use std::str::{self, FromStr};
 
-use bit_vec::BitVec;
 use clap::ValueEnum;
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case, take, take_while1};
-use nom::character::complete::char;
 use nom::character::is_alphanumeric;
-use nom::combinator::{map, map_res, not, opt, peek};
+use nom::combinator::{map_res, not, opt, peek};
 use nom::error::ErrorKind;
 use nom::multi::fold_many0;
 use nom::sequence::{delimited, preceded};
@@ -42,22 +40,6 @@ fn hex_bytes(input: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<u8>> {
         Vec::new,
         |mut acc: Vec<u8>, bytes: Vec<u8>| {
             acc.extend(bytes);
-            acc
-        },
-    )(input)
-}
-
-/// Bit vector literal value (PostgreSQL)
-fn raw_bit_vector_psql(input: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], BitVec> {
-    delimited(tag_no_case("b'"), bits, tag("'"))(input)
-}
-
-fn bits(input: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], BitVec> {
-    fold_many0(
-        map(alt((char('0'), char('1'))), |i: char| i == '1'),
-        BitVec::new,
-        |mut acc: BitVec, bit: bool| {
-            acc.push(bit);
             acc
         },
     )(input)
@@ -214,17 +196,6 @@ impl Dialect {
         move |i| match self {
             Dialect::PostgreSQL => raw_hex_bytes_psql(i),
             Dialect::MySQL => raw_hex_bytes_mysql(i),
-        }
-    }
-
-    /// Parse the raw (byte) content of a bit vector literal using this Dialect.
-    pub fn bitvec_literal(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], BitVec> {
-        move |input| match self {
-            Dialect::PostgreSQL => raw_bit_vector_psql(input),
-            Dialect::MySQL => Err(nom::Err::Error(NomSqlError {
-                input,
-                kind: nom::error::ErrorKind::Many0,
-            })),
         }
     }
 

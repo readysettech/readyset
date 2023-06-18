@@ -8,7 +8,7 @@ use eui48::{MacAddress, MacAddressFormat};
 use itertools::Itertools;
 use nom::branch::alt;
 use nom::bytes::complete::{is_not, tag, tag_no_case, take};
-use nom::character::complete::{digit1, satisfy};
+use nom::character::complete::{char, digit1, satisfy};
 use nom::combinator::{map, map_parser, map_res, not, opt, peek, recognize};
 use nom::error::ErrorKind;
 use nom::multi::fold_many0;
@@ -473,6 +473,17 @@ pub fn utf8_string_literal(
     }
 }
 
+fn bits(input: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], BitVec> {
+    fold_many0(
+        map(alt((char('0'), char('1'))), |i: char| i == '1'),
+        BitVec::new,
+        |mut acc: BitVec, bit: bool| {
+            acc.push(bit);
+            acc
+        },
+    )(input)
+}
+
 fn simple_literal(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Literal> {
     move |i| {
         alt((
@@ -480,7 +491,7 @@ fn simple_literal(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResu
             integer_literal,
             boolean_literal,
             map(dialect.bytes_literal(), Literal::ByteArray),
-            map(dialect.bitvec_literal(), |bits| {
+            map(delimited(tag_no_case("b'"), bits, tag("'")), |bits| {
                 Literal::BitVector(bits.to_bytes())
             }),
             map(
