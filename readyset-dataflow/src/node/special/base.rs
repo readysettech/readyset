@@ -134,7 +134,7 @@ impl Base {
     pub fn drop_column(&mut self, column: usize) -> ReadySetResult<()> {
         invariant!(
             !self.defaults.is_empty(),
-            "cannot add columns to base nodes without\
+            "cannot drop columns from base nodes without\
              setting default values for initial columns"
         );
         invariant!(column < self.defaults.len());
