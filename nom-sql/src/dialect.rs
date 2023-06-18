@@ -47,8 +47,8 @@ fn hex_bytes(input: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<u8>> {
     )(input)
 }
 
-/// Bit vector literal value (PostgreSQL)
-fn raw_bit_vector_psql(input: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], BitVec> {
+/// Bit vector literal value
+fn raw_bit_vector(input: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], BitVec> {
     delimited(tag_no_case("b'"), bits, tag("'"))(input)
 }
 
@@ -219,13 +219,7 @@ impl Dialect {
 
     /// Parse the raw (byte) content of a bit vector literal using this Dialect.
     pub fn bitvec_literal(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], BitVec> {
-        move |input| match self {
-            Dialect::PostgreSQL => raw_bit_vector_psql(input),
-            Dialect::MySQL => Err(nom::Err::Error(NomSqlError {
-                input,
-                kind: nom::error::ErrorKind::Many0,
-            })),
-        }
+        move |input| raw_bit_vector(input)
     }
 
     /// Parses the MySQL specific `{offset}, {limit}` part in a `LIMIT` clause
