@@ -31,7 +31,6 @@ use readyset_psql::AuthenticationMethod;
 use regex::Regex;
 use structopt::StructOpt;
 use tokio::sync::Mutex;
-use tokio::time::sleep;
 
 /// Subdirectory where the benchmarks are kept
 const BENCHMARK_DATA_PATH: &str = "./bench_data";
@@ -523,7 +522,9 @@ impl AdapterHandle {
                 let database_type =
                     DatabaseURL::from_str(&args.upstream_url_with_db_name())?.database_type();
 
-                rt.block_on(wait_adapter_ready(database_type))?;
+                rt.block_on(benchmarks::utils::readyset_ready(&readyset_url(
+                    database_type,
+                )))?;
                 Ok(AdapterHandle {
                     pid: child_pid,
                     write_hdl: sock2,
@@ -685,45 +686,6 @@ fn start_adapter_with_options(
     }
 
     Ok(())
-}
-
-/// Wait for replication to finish by lazy looping over "SHOW READYSET STATUS"
-async fn wait_adapter_ready(database_type: DatabaseType) -> anyhow::Result<()> {
-    // First attempt to connect to the readyset adapter at all
-    let mut conn = loop {
-        match DatabaseURL::from_str(&readyset_url(database_type))?
-            .connect(None)
-            .await
-        {
-            Ok(conn) => break conn,
-            _ => sleep(Duration::from_secs(1)).await,
-        }
-    };
-
-    // Then query status until snaphot is completed
-    let q = nom_sql::ShowStatement::ReadySetStatus;
-    loop {
-        let res = conn
-            .simple_query(q.display(nom_sql::Dialect::MySQL).to_string())
-            .await;
-
-        if let Ok(data) = res {
-            let snapshot_status: String = Vec::<Vec<DfValue>>::try_from(data)
-                .unwrap()
-                .into_iter()
-                .find(|r| r[0] == "Snapshot Status".into())
-                .unwrap()[1]
-                .clone()
-                .try_into()
-                .unwrap();
-
-            if snapshot_status == "Completed" {
-                return Ok(());
-            }
-        }
-
-        sleep(Duration::from_secs(1)).await;
-    }
 }
 
 /// Drop all currently cached queries

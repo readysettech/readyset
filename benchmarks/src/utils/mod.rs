@@ -1,4 +1,3 @@
-use std::convert::TryFrom;
 use std::future::Future;
 use std::num::ParseIntError;
 use std::str::FromStr;
@@ -64,34 +63,44 @@ macro_rules! make_key {
     }};
 }
 
-/// Waits for the back-end to return that it is ready to process queries.
+/// Wait for replication to finish by lazy looping over "SHOW READYSET STATUS"
 pub async fn readyset_ready(target: &str) -> anyhow::Result<()> {
     info!("Waiting for the target database to be ready...");
-    let mut conn = DatabaseURL::from_str(target)?.connect(None).await?;
+    // First attempt to connect to the readyset adapter at all
+    let mut conn = loop {
+        match DatabaseURL::from_str(target)?.connect(None).await {
+            Ok(conn) => break conn,
+            _ => tokio::time::sleep(Duration::from_secs(1)).await,
+        }
+    };
 
+    // Then query status until snaphot is completed
+    let q = nom_sql::ShowStatement::ReadySetStatus;
     loop {
+        // We have to use simple query here because ReadySet does not support preparing `SHOW`
+        // queries
         let res = conn
-            .query("SHOW READYSET STATUS")
-            .await
-            .expect("Failed to run `SHOW READYSET STATUS`. Is this a ReadySet deployment?");
+            .simple_query(q.display(nom_sql::Dialect::MySQL).to_string())
+            .await;
 
-        let snapshot_status: String = Vec::<Vec<DfValue>>::try_from(res)
-            .unwrap()
-            .into_iter()
-            .find(|r| r[0] == "Snapshot Status".into())
-            .unwrap()[1]
-            .clone()
-            .try_into()
-            .unwrap();
-        if snapshot_status == "Completed" {
-            info!("Database ready!");
-            break;
+        if let Ok(data) = res {
+            let snapshot_status: String = Vec::<Vec<DfValue>>::try_from(data)
+                .unwrap()
+                .into_iter()
+                .find(|r| r[0] == "Snapshot Status".into())
+                .unwrap()[1]
+                .clone()
+                .try_into()
+                .unwrap();
+
+            if snapshot_status == "Completed" {
+                info!("Database ready!");
+                return Ok(());
+            }
         }
 
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
-
-    Ok(())
 }
 
 #[macro_export]
