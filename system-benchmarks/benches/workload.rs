@@ -545,9 +545,18 @@ impl Drop for PerfHandle {
 /// Creates a new database for benchmarking, installs the given schema and generates data for it
 async fn prepare_db<P: Into<PathBuf>>(path: P, args: &SystemBenchArgs) -> anyhow::Result<()> {
     let generator = DataGenerator::new(path);
-    let mut conn = DatabaseURL::from_str(&args.upstream_url)?
-        .connect(None)
-        .await?;
+
+    // Postgres doesn't support connecting to the upstream database without a database name, so we
+    // have to include the default database name "postgres" here in order prepare our test database
+    let url = if args.upstream_url.starts_with("mysql") {
+        args.upstream_url.to_owned()
+    } else if args.upstream_url.starts_with("postgres") {
+        format!("{}/postgres", args.upstream_url)
+    } else {
+        anyhow::bail!("Upstream URL must start with either \"postgres\" or \"mysql\"");
+    };
+
+    let mut conn = DatabaseURL::from_str(&url)?.connect(None).await?;
     conn.query_drop(format!("DROP DATABASE IF EXISTS {DB_NAME}"))
         .await?;
     conn.query_drop(format!("CREATE DATABASE {DB_NAME}"))
@@ -840,7 +849,7 @@ fn main() -> anyhow::Result<()> {
         criterion = criterion.save_baseline(baseline);
     }
 
-    let database_type = DatabaseURL::from_str(&args.upstream_url)?.database_type();
+    let database_type = DatabaseURL::from_str(&args.upstream_url_with_db_name())?.database_type();
     let benchmarks = Benchmark::find_benchmarks(filter, database_type)?;
 
     for benchmark in benchmarks {

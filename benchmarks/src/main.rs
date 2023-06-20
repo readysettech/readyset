@@ -388,7 +388,11 @@ impl BenchmarkRunner {
         let importer = self.start_metric_readers();
 
         // Check that ReadySet has completed snapshotting via the readyset status.
-        readyset_ready(&self.deployment_params.target_conn_str).await?;
+        let readyset_target = format!(
+            "{}/{}",
+            self.deployment_params.target_conn_str, self.deployment_params.database_name
+        );
+        readyset_ready(&readyset_target).await?;
 
         let bench_start_time = std::time::SystemTime::now();
 
@@ -397,7 +401,7 @@ impl BenchmarkRunner {
             if self.iterations > 1 {
                 println!("Iteration: {} ---------------------------", i);
                 benchmark_cmd.reset(&self.deployment_params).await?;
-                readyset_ready(&self.deployment_params.target_conn_str).await?;
+                readyset_ready(&readyset_target).await?;
             }
             let start_time = Instant::now();
             let result = benchmark_cmd.benchmark(&self.deployment_params).await?;
