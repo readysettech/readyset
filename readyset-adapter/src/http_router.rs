@@ -12,16 +12,12 @@ use hyper::header::CONTENT_TYPE;
 use hyper::service::make_service_fn;
 use hyper::{self, Body, Method, Request, Response};
 use metrics_exporter_prometheus::PrometheusHandle;
-use readyset_client::query::DeniedQuery;
 use readyset_client_metrics::recorded;
-use readyset_sql_passes::anonymize::Anonymizer;
 use readyset_util::shutdown::ShutdownReceiver;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::Sender;
 use tokio_stream::wrappers::TcpListenerStream;
 use tower::Service;
-
-use crate::query_status_cache::QueryStatusCache;
 
 /// Routes requests from an HTTP server to expose metrics data from the adapter.
 /// To see the supported http requests and their respective routing, see
@@ -30,8 +26,6 @@ use crate::query_status_cache::QueryStatusCache;
 pub struct NoriaAdapterHttpRouter {
     /// The address to attempt to listen on.
     pub listen_addr: SocketAddr,
-    /// A reference to the QueryStatusCache that is in use by the adapter.
-    pub query_cache: &'static QueryStatusCache,
     /// Used to retrieve the current health of the adapter.
     pub health_reporter: AdapterHealthReporter,
     /// Used to communicate externally that a failpoint request has been received and successfully
@@ -112,62 +106,6 @@ impl Service<Request<Body>> for NoriaAdapterHttpRouter {
     ///
     ///   `curl -X GET <adapter>:<adapter-port>/health`
     ///
-    /// ## Allow List
-    ///
-    /// List of SQL queries that will be handled by ReadySet as opposed to being passed through to
-    /// the underlying database.
-    ///
-    /// * **URL**
-    ///
-    ///   `/allow-list`
-    ///
-    /// * **Method:**
-    ///
-    ///   `GET`
-    ///
-    /// * **Success Response:**
-    ///
-    ///   Allow list as a JSON Object.
-    ///
-    ///     * **Code:** 200 <br /> **Content:** `{ ... }`
-    ///
-    /// * **Error Response:**
-    ///
-    ///     * **Code:** 500 Internal Server Error <br /> **Content:** `"allow list failed to be
-    ///       converted into a json string"`
-    ///
-    /// * **Sample Call:**
-    ///
-    ///   `curl -X GET <adapter>:<adapter-port>/allow-list`
-    ///
-    /// ## Deny List
-    ///
-    /// List of SQL queries that will _not_ be handled by ReadySet and instead passed through to the
-    /// underlying database.
-    ///
-    /// * **URL**
-    ///
-    ///   `/deny-list`
-    ///
-    /// * **Method:**
-    ///
-    ///   `GET`
-    ///
-    /// * **Success Response:**
-    ///
-    ///   Allow list as a JSON Object.
-    ///
-    ///     * **Code:** 200 <br /> **Content:** `{ ... }`
-    ///
-    /// * **Error Response:**
-    ///
-    ///     * **Code:** 500 Internal Server Error <br /> **Content:** `"deny list failed to be
-    ///       converted into a json string"`
-    ///
-    /// * **Sample Call:**
-    ///
-    ///   `curl -X GET <adapter>:<adapter-port>/deny-list`
-    ///
     /// ## Prometheus
     ///
     /// Endpoint for Prometheus metric API calls.
@@ -241,47 +179,6 @@ impl Service<Request<Body>> for NoriaAdapterHttpRouter {
                         let _ = tx.send(()).await;
                     }
                     Ok(resp)
-                })
-            }
-            (&Method::GET, "/allow-list") => {
-                let query_cache = self.query_cache;
-                Box::pin(async move {
-                    let allow_list = query_cache.allow_list();
-                    let res = match serde_json::to_string(&allow_list) {
-                        Ok(json) => res
-                            .header(CONTENT_TYPE, "application/json")
-                            .body(hyper::Body::from(json)),
-                        Err(_) => res.status(500).header(CONTENT_TYPE, "text/plain").body(
-                            hyper::Body::from(
-                                "allow list failed to be converted into a json string".to_string(),
-                            ),
-                        ),
-                    };
-                    Ok(res.unwrap())
-                })
-            }
-            (&Method::GET, "/deny-list") => {
-                let query_cache = self.query_cache;
-                Box::pin(async move {
-                    let mut anonymizer = Anonymizer::new();
-                    let deny_list = query_cache
-                        .deny_list()
-                        .into_iter()
-                        .map(|DeniedQuery { query, .. }| {
-                            query.to_anonymized_string(&mut anonymizer)
-                        })
-                        .collect::<Vec<_>>();
-                    let res = match serde_json::to_string(&deny_list) {
-                        Ok(json) => res
-                            .header(CONTENT_TYPE, "application/json")
-                            .body(hyper::Body::from(json)),
-                        Err(_) => res.status(500).header(CONTENT_TYPE, "text/plain").body(
-                            hyper::Body::from(
-                                "deny list failed to be converted into a json string".to_string(),
-                            ),
-                        ),
-                    };
-                    Ok(res.unwrap())
                 })
             }
             (&Method::GET, "/health") => {

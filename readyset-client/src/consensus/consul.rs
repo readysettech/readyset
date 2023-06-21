@@ -118,7 +118,6 @@
 
 use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
-use std::net::SocketAddr;
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::time::Duration;
 
@@ -141,7 +140,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{error, warn};
 
 use super::{
-    AdapterId, AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult, LeaderPayload,
+    AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult, LeaderPayload,
     WorkerDescriptor, WorkerId,
 };
 #[cfg(feature = "failure_injection")]
@@ -154,8 +153,6 @@ pub const WORKER_PREFIX: &str = "workers/";
 pub const CONTROLLER_KEY: &str = "controller";
 /// Path to the controller state.
 pub const STATE_KEY: &str = "state";
-/// Path to the adapter http endpoints.
-pub const ADAPTER_PREFIX: &str = "adapters/";
 /// The delay before another client can claim a lock.
 const SESSION_LOCK_DELAY: &str = "0";
 /// When the authority releases a session, release the locks held
@@ -192,18 +189,8 @@ fn path_to_worker_id(path: &str) -> WorkerId {
     path[(path.rfind('/').unwrap() + 1)..].to_owned()
 }
 
-fn path_to_adapter_id(path: &str) -> AdapterId {
-    // See `adapter_id_to_path` for the type of path this is called on.
-    #[allow(clippy::unwrap_used)]
-    path[(path.rfind('/').unwrap() + 1)..].to_owned()
-}
-
 fn worker_id_to_path(id: &str) -> String {
     WORKER_PREFIX.to_owned() + id
-}
-
-fn adapter_id_to_path(id: &str) -> String {
-    ADAPTER_PREFIX.to_owned() + id
 }
 
 /// Returns the next controller state version. Returns a version in the set { "0", "1" }
@@ -944,80 +931,6 @@ impl AuthorityControl for ConsulAuthority {
 
         Ok(worker_descriptors)
     }
-
-    // TODO(justin): Duplicate code with register_worker, abstract writing a serialized value
-    // to a key + lock.
-    async fn register_adapter(&self, endpoint: SocketAddr) -> ReadySetResult<Option<AdapterId>> {
-        set_failpoint!(failpoints::AUTHORITY, |_| internal!(
-            "authority->server failure injected"
-        ));
-
-        // Each adapter is associated with the key:
-        // `ADAPTER_PREFIX`/<session>.
-        let session = self.get_session()?;
-        let key = adapter_id_to_path(&session);
-
-        kv::set(
-            &self.consul,
-            &self.prefix_with_deployment(&key),
-            &serde_json::to_vec(&endpoint)?,
-            Some(kv_requests::SetKeyRequestBuilder::default().acquire(session.clone())),
-        )
-        .await?;
-
-        Ok(Some(session))
-    }
-
-    async fn get_adapters(&self) -> ReadySetResult<HashSet<SocketAddr>> {
-        set_failpoint!(failpoints::AUTHORITY, |_| internal!(
-            "authority->server failure injected"
-        ));
-        let adapter_ids: HashSet<AdapterId> = match kv::read(
-            &self.consul,
-            &self.prefix_with_deployment(ADAPTER_PREFIX),
-            Some(kv_requests::ReadKeyRequestBuilder::default().recurse(true)),
-        )
-        .await
-        {
-            Ok(ApiResponse { response, .. }) => response
-                .into_iter()
-                .filter_map(|kv_pair| {
-                    if kv_pair.session.is_some() {
-                        Some(path_to_adapter_id(&kv_pair.key))
-                    } else {
-                        None
-                    }
-                })
-                .collect(),
-            // Consul returns a 404 error if the key does not exist.
-            Err(ClientError::APIError { code, .. }) if code == 404 => HashSet::new(),
-            // The API currently throws an error that it cannot parse the json
-            // if the key does not exist.
-            Err(e) => return Err(e.into()),
-        };
-
-        // TODO(justin): join_all is overkill for adapter / worker data as ordering of results is
-        // not needed.
-        let endpoints = join_all(adapter_ids.iter().map(|id| async move {
-            kv::read(
-                &self.consul,
-                &self.prefix_with_deployment(&adapter_id_to_path(id)),
-                None,
-            )
-            .await
-        }))
-        .await
-        .into_iter()
-        .collect::<Result<Vec<_>, _>>()?
-        .into_iter()
-        .map(|r| {
-            let bytes: Vec<u8> = get_value_as_bytes(r)?;
-            Ok(serde_json::from_slice(&bytes)?)
-        })
-        .collect::<ReadySetResult<HashSet<SocketAddr>>>()?;
-
-        Ok(endpoints)
-    }
 }
 
 #[cfg(test)]
@@ -1256,37 +1169,6 @@ mod tests {
             authority.try_get_leader().await.unwrap(),
             GetLeaderResult::NoLeader,
         );
-    }
-
-    #[tokio::test]
-    #[serial]
-    async fn retrieve_adapter_endpoints() {
-        let authority_address = test_authority_address("retrieve_adapter_endpoints");
-        let authority = Arc::new(ConsulAuthority::new(&authority_address).unwrap());
-        authority.init().await.unwrap();
-        authority.delete_all_keys().await;
-
-        let adapter_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 1234);
-
-        let adapter_addrs = authority.get_adapters().await.unwrap();
-        assert!(adapter_addrs.is_empty());
-
-        authority
-            .register_adapter(adapter_addr)
-            .await
-            .unwrap()
-            .unwrap();
-        let adapter_addrs = authority.get_adapters().await.unwrap();
-
-        assert_eq!(adapter_addrs.len(), 1);
-        assert!(adapter_addrs.contains(&adapter_addr));
-
-        // Kill the session, this should remove the keys from the worker set.
-        authority.destroy_session().await.unwrap();
-
-        let authority = Arc::new(ConsulAuthority::new(&authority_address).unwrap());
-        let adapter_addrs = authority.get_adapters().await.unwrap();
-        assert_eq!(adapter_addrs.len(), 0);
     }
 
     #[tokio::test]

@@ -38,7 +38,7 @@ use readyset_adapter::proxied_queries_reporter::ProxiedQueriesReporter;
 use readyset_adapter::query_status_cache::{MigrationStyle, QueryStatusCache};
 use readyset_adapter::views_synchronizer::ViewsSynchronizer;
 use readyset_adapter::{Backend, BackendBuilder, QueryHandler, UpstreamDatabase};
-use readyset_client::consensus::{AuthorityControl, AuthorityType, ConsulAuthority};
+use readyset_client::consensus::AuthorityType;
 #[cfg(feature = "failure_injection")]
 use readyset_client::failpoints;
 use readyset_client::metrics::recorded;
@@ -53,21 +53,10 @@ use readyset_util::redacted::RedactedString;
 use readyset_util::shutdown;
 use readyset_version::*;
 use tokio::net;
-use tokio::net::UdpSocket;
 use tokio::time::timeout;
 use tokio_stream::wrappers::TcpListenerStream;
 use tracing::{debug, debug_span, error, info, info_span, span, warn, Level};
 use tracing_futures::Instrument;
-
-// How frequently to try to establish an http registration for the first time or if the last tick
-// failed and we need to establish a new one
-const REGISTER_HTTP_INIT_INTERVAL: Duration = Duration::from_secs(2);
-
-// How frequently to try to establish an http registration if we have one already
-const REGISTER_HTTP_INTERVAL: Duration = Duration::from_secs(20);
-
-const AWS_PRIVATE_IP_ENDPOINT: &str = "http://169.254.169.254/latest/meta-data/local-ipv4";
-const AWS_METADATA_TOKEN_ENDPOINT: &str = "http://169.254.169.254/latest/api/token";
 
 /// Timeout to use when connecting to the upstream database
 const UPSTREAM_CONNECTION_TIMEOUT: Duration = Duration::from_secs(5);
@@ -772,7 +761,6 @@ where
         };
         let http_server = NoriaAdapterHttpRouter {
             listen_addr: options.metrics_address,
-            query_cache: query_status_cache,
             prometheus_handle,
             health_reporter: health_reporter.clone(),
             failpoint_channel: tx,
@@ -943,24 +931,6 @@ where
                 views_synchronizer.run().await
             };
             rt.handle().spawn(abort_on_panic(fut));
-        }
-
-        // Spin up async task that is in charge of creating a session with the authority,
-        // regularly updating the heartbeat to keep the session live, and registering the adapters
-        // http endpoint.
-        // For now we only support registering adapters over consul.
-        if let AuthorityType::Consul = options.authority {
-            set_failpoint!(failpoints::AUTHORITY);
-            rs_connect.in_scope(|| info!("Spawning Consul session task"));
-            let connection = span!(Level::DEBUG, "consul_session", addr = ?authority_address);
-            let fut = reconcile_endpoint_registration(
-                authority_address.clone(),
-                deployment,
-                options.metrics_address.port(),
-                options.use_aws_external_address,
-            )
-            .instrument(connection);
-            rt.handle().spawn(fut);
         }
 
         // Create a set of readers on this adapter. This will allow servicing queries directly
@@ -1236,117 +1206,6 @@ async fn check_server_version_compatibility(rh: &mut ReadySetHandle) -> anyhow::
         server_version
     );
     Ok(())
-}
-
-async fn my_ip(destination: &str, use_aws_external: bool) -> Option<IpAddr> {
-    if use_aws_external {
-        return my_aws_ip().await.ok();
-    }
-
-    let socket = match UdpSocket::bind("0.0.0.0:0").await {
-        Ok(s) => s,
-        Err(_) => return None,
-    };
-
-    match socket.connect(destination).await {
-        Ok(()) => (),
-        Err(_) => return None,
-    };
-
-    match socket.local_addr() {
-        Ok(addr) => Some(addr.ip()),
-        Err(_) => None,
-    }
-}
-
-// TODO(peter): Pull this out to a shared util between readyset-server and readyset-adapter
-async fn my_aws_ip() -> anyhow::Result<IpAddr> {
-    let client = reqwest::Client::builder().build()?;
-    let token: String = client
-        .put(AWS_METADATA_TOKEN_ENDPOINT)
-        .header("X-aws-ec2-metadata-token-ttl-seconds", "21600")
-        .send()
-        .await?
-        .text()
-        .await?
-        .parse()?;
-
-    Ok(client
-        .get(AWS_PRIVATE_IP_ENDPOINT)
-        .header("X-aws-ec2-metadata-token", &token)
-        .send()
-        .await?
-        .text()
-        .await?
-        .parse()?)
-}
-
-/// Facilitates continuously updating consul with this adapters externally accessibly http
-/// endpoint.
-async fn reconcile_endpoint_registration(
-    authority_address: String,
-    deployment: String,
-    port: u16,
-    use_aws_external: bool,
-) {
-    let connect_string = format!("http://{}/{}", &authority_address, &deployment);
-    debug!("{}", connect_string);
-    let authority = ConsulAuthority::new(&connect_string).unwrap();
-
-    let mut initializing = true;
-    let mut interval = tokio::time::interval(REGISTER_HTTP_INIT_INTERVAL);
-    let mut session_id = None;
-
-    async fn needs_refresh(id: &Option<String>, consul: &ConsulAuthority) -> bool {
-        if let Some(id) = id {
-            consul.worker_heartbeat(id.to_owned()).await.is_err()
-        } else {
-            true
-        }
-    }
-
-    loop {
-        interval.tick().await;
-        debug!("Checking authority registry");
-
-        if needs_refresh(&session_id, &authority).await {
-            // If we fail this heartbeat, we assume we need to create a new session.
-            if let Err(e) = authority.init().await {
-                error!(%e, "encountered error while trying to initialize authority in readyset-adapter");
-                // Try again on next tick, and reduce the polling interval until a new session is
-                // established.
-                initializing = true;
-                continue;
-            }
-        }
-
-        // We try to update our http endpoint every iteration regardless because it may
-        // have changed.
-        let ip = match my_ip(&authority_address, use_aws_external).await {
-            Some(ip) => ip,
-            None => {
-                info!("Failed to retrieve IP. Will try again on next tick");
-                continue;
-            }
-        };
-        let http_endpoint = SocketAddr::new(ip, port);
-
-        match authority.register_adapter(http_endpoint).await {
-            Ok(id) => {
-                if initializing {
-                    info!("Established authority connection, reducing polling interval");
-                    // Switch to a longer polling interval after the first registration is made
-                    interval = tokio::time::interval(REGISTER_HTTP_INTERVAL);
-                    initializing = false;
-                }
-
-                session_id = id;
-            }
-            Err(e) => {
-                error!(%e, "encountered error while trying to register adapter endpoint in authority")
-            }
-        }
-    }
 }
 
 #[cfg(test)]

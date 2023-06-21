@@ -2709,47 +2709,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "metrics-aggregator"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "bit-vec",
- "chrono",
- "clap 4.3.2",
- "derive_more",
- "futures",
- "futures-executor",
- "futures-util",
- "hyper",
- "itertools",
- "lazy_static",
- "metrics",
- "nom",
- "nom-sql",
- "prometheus-http-query",
- "readyset-client",
- "readyset-errors",
- "readyset-tracing",
- "readyset-util",
- "readyset-version",
- "regex",
- "reqwest",
- "rust_decimal",
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
- "tokio-stream",
- "tokio-tower",
- "tower",
- "tracing",
- "tracing-futures",
- "tracing-subscriber",
- "vec1",
-]
-
-[[package]]
 name = "metrics-exporter-prometheus"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3818,19 +3777,6 @@ dependencies = [
 name = "proc-maps"
 version = "0.1.0"
 source = "git+https://github.com/readysettech/not-perf.git#f50e7896c4556395a5f610db2e308e89a9a086cf"
-
-[[package]]
-name = "prometheus-http-query"
-version = "0.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e738d5715c5e078ac13cfde479c6b3417e447e8a0d3a974bbfe4cbd1d1a8978d"
-dependencies = [
- "reqwest",
- "serde",
- "serde_json",
- "time 0.3.9",
- "url",
-]
 
 [[package]]
 name = "prometheus-parse"
@@ -6137,14 +6083,7 @@ checksum = "c2702e08a7a860f005826c6815dcac101b19b5eb330c27fe4a5928fec1d20ddd"
 dependencies = [
  "libc",
  "num_threads",
- "time-macros",
 ]
-
-[[package]]
-name = "time-macros"
-version = "0.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42657b1a6f4d817cda8e7a0ace261fe0cc946cf3a80314390b22cc61ae080792"
 
 [[package]]
 name = "timekeeper"

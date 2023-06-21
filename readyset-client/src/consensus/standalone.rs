@@ -11,7 +11,6 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
-use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -25,7 +24,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 use super::{
-    AdapterId, AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult, LeaderPayload,
+    AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult, LeaderPayload,
     WorkerDescriptor, WorkerId,
 };
 
@@ -274,15 +273,6 @@ impl AuthorityControl for StandaloneAuthority {
         let db = self.state.db.write();
         db.put(STATE_KEY, rmp_serde::to_vec(&state)?)
             .map_err(|e| internal_err!("RocksDB error: {e}"))
-    }
-
-    async fn register_adapter(&self, _: SocketAddr) -> ReadySetResult<Option<AdapterId>> {
-        internal!("StandaloneAuthority does not support `register_adapter`.");
-    }
-
-    /// Retrieves the current set of adapter endpoints from the authority.
-    async fn get_adapters(&self) -> ReadySetResult<HashSet<SocketAddr>> {
-        internal!("StandaloneAuthority does not support `get_adapters`.");
     }
 }
 

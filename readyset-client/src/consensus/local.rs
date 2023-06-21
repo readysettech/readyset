@@ -15,7 +15,6 @@
 use std::any::Any;
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::net::SocketAddr;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use async_trait::async_trait;
@@ -24,7 +23,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 use super::{
-    AdapterId, AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult, LeaderPayload,
+    AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult, LeaderPayload,
     UpdateInPlace, WorkerDescriptor, WorkerId,
 };
 
@@ -428,14 +427,6 @@ impl AuthorityControl for LocalAuthority {
                     .map(|data| (id, serde_json::from_slice(data).unwrap()))
             })
             .collect())
-    }
-
-    async fn register_adapter(&self, _: SocketAddr) -> ReadySetResult<Option<AdapterId>> {
-        todo!();
-    }
-
-    async fn get_adapters(&self) -> ReadySetResult<HashSet<SocketAddr>> {
-        todo!();
     }
 }
 

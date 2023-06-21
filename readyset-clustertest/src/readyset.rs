@@ -576,47 +576,6 @@ async fn adapter_ready_before_server() {
     assert_deployment_health(deployment).await;
 }
 
-#[clustertest]
-async fn adapter_reports_unhealthy_consul_down() {
-    let mut deployment = DeploymentBuilder::new("ct_adapter_reports_unhealthy_consul_down")
-        .wait_for_failpoint(FailpointDestination::Adapter)
-        .auto_restart(true)
-        .start()
-        .await
-        .unwrap();
-
-    deployment
-        .start_adapter(false)
-        .await
-        .expect("adapter failed to become healthy");
-
-    let adapter_handle = deployment.first_adapter_handle().unwrap();
-
-    let timeout = Duration::new(2, 0);
-    let poll_interval = timeout.checked_div(100).unwrap();
-    wait_for_adapter_router(adapter_handle.metrics_port, timeout, poll_interval)
-        .await
-        .unwrap();
-
-    adapter_handle
-        .set_failpoint(failpoints::AUTHORITY, "pause")
-        .await;
-
-    let _ = wait_for_adapter_startup(adapter_handle.metrics_port, timeout).await;
-
-    assert!(!endpoint_reports_healthy(adapter_handle.metrics_port).await);
-
-    adapter_handle
-        .set_failpoint(failpoints::AUTHORITY, "off")
-        .await;
-
-    wait_for_adapter_startup(adapter_handle.metrics_port, timeout)
-        .await
-        .unwrap();
-
-    assert!(endpoint_reports_healthy(adapter_handle.metrics_port).await);
-}
-
 // Given a failpoint name, will assert that pausing that failpoint and then resuming it for the
 // server will result in first unhealthy status, and then healthy status.
 async fn assert_server_failpoint_pause_resume(deployment_name: &str, failpoint: &str) {
