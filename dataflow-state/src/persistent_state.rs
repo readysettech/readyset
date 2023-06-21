@@ -85,8 +85,8 @@ use readyset_data::DfValue;
 use readyset_errors::{internal_err, invariant, ReadySetError, ReadySetResult};
 use readyset_util::intervals::BoundPair;
 use rocksdb::{
-    self, ColumnFamilyDescriptor, CompactOptions, EncodingType, IteratorMode,
-    PlainTableFactoryOptions, SliceTransform, WriteBatch, DB,
+    self, BlockBasedOptions, ColumnFamilyDescriptor, CompactOptions, IteratorMode, SliceTransform,
+    WriteBatch, DB,
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -1182,19 +1182,9 @@ impl IndexParams {
             // For hash map indices, optimize for point queries and in-prefix range iteration, but
             // don't allow cross-prefix range iteration.
             IndexType::HashMap => {
-                opts.set_plain_table_factory(&PlainTableFactoryOptions {
-                    user_key_length: 0, // variable key length
-                    bloom_bits_per_key: 10,
-                    hash_table_ratio: 0.75,
-                    index_sparseness: 16,
-                    huge_page_tlb_size: 0,
-                    encoding_type: EncodingType::default(),
-                    full_scan_mode: false,
-                    // Store the plain table index and bloom filter in the table file itself. This
-                    // speeds up re-opening the db on restart *significantly* (up to multiple hours
-                    // for large tables) by avoiding recomputing the index on startup
-                    store_index_in_file: true,
-                });
+                let mut block_opts = BlockBasedOptions::default();
+                block_opts.set_bloom_filter(10.0, true);
+                opts.set_block_based_table_factory(&block_opts);
 
                 // We're either going to be doing direct point lookups, in the case of unique
                 // indexes, or iterating within a range.
