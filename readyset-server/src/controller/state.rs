@@ -1551,10 +1551,7 @@ impl DfStateHandle {
         writer: DfStateWriter<'_>,
         authority: &Arc<Authority>,
     ) -> ReadySetResult<()> {
-        let persistable_ds = PersistableDfState {
-            state: writer.state,
-        };
-
+        let new_state = &writer.state;
         if let Some(local) = authority.as_local() {
             local.update_controller_in_place(|state: Option<&mut ControllerState>| match state {
                 None => {
@@ -1562,7 +1559,7 @@ impl DfStateHandle {
                     Err(())
                 }
                 Some(mut state) => {
-                    state.dataflow_state = persistable_ds.state.clone();
+                    state.dataflow_state = new_state.clone();
                     state.dataflow_state.touch_up();
                     Ok(())
                 }
@@ -1570,18 +1567,14 @@ impl DfStateHandle {
         } else {
             authority
                 .update_controller_state(
-                    |state: Option<ControllerState>| {
-                        let _ = &persistable_ds; // capture the whole value, so the closure implements
-                                                 // Send
-                        match state {
-                            None => {
-                                eprintln!("There's no controller state to update");
-                                Err(())
-                            }
-                            Some(mut state) => {
-                                state.dataflow_state = persistable_ds.state.clone();
-                                Ok(state)
-                            }
+                    |state: Option<ControllerState>| match state {
+                        None => {
+                            eprintln!("There's no controller state to update");
+                            Err(())
+                        }
+                        Some(mut state) => {
+                            state.dataflow_state = new_state.clone();
+                            Ok(state)
                         }
                     },
                     |state: &mut ControllerState| {
@@ -1594,7 +1587,7 @@ impl DfStateHandle {
         .map_err(|_| internal_err!("Unable to update state"))?;
 
         let mut state_guard = self.reader.write().await;
-        state_guard.replace(persistable_ds.state);
+        state_guard.replace(new_state.clone());
         Ok(())
     }
 }
@@ -1650,12 +1643,6 @@ impl<'handle> AsMut<DfState> for DfStateWriter<'handle> {
     }
 }
 
-/// A wrapper around the dataflow state, to be used only in [`DfStateWriter::commit`]
-/// to send a copy of the state across thread boundaries.
-struct PersistableDfState {
-    state: DfState,
-}
-
 // There is a chain of not thread-safe (not [`Send`] structures at play here:
 // [`Graph`] is not [`Send`] (as it might contain a [`reader_map::WriteHandle`]), which
 // makes [`DfState`] not [`Send`].
@@ -1676,10 +1663,6 @@ struct PersistableDfState {
 // So, we explicitly tell the compiler that the [`DfStateReader`] is safe to be moved
 // between threads.
 unsafe impl Sync for DfStateReader {}
-
-// Needed to send a copy of the [`DfState`] across thread boundaries, when
-// we are persisting the state to the [`Authority`].
-unsafe impl Sync for PersistableDfState {}
 
 /// Build a graphviz [dot][] representation of the graph, given information about its
 /// materializations and (optionally) the set of nodes within each domain.
