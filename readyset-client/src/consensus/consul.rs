@@ -123,7 +123,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use consulrs::api::kv::common::KVPair;
-use consulrs::api::kv::requests as kv_requests;
+use consulrs::api::kv::requests::{self as kv_requests, SetKeyRequestBuilder};
 use consulrs::api::session::requests as session_requests;
 use consulrs::api::ApiResponse;
 use consulrs::client::{ConsulClient, ConsulClientSettingsBuilder};
@@ -757,9 +757,27 @@ impl AuthorityControl for ConsulAuthority {
         E: Send,
     {
         loop {
-            // TODO(justin): Use cas parameter to only modify if we have the same
-            // ModifyIndex when we write.
-            let current_val = self.try_read(path).await?;
+            let (modify_index, current_val) =
+                match kv::read(&self.consul, &self.prefix_with_deployment(path), None).await {
+                    Ok(resp) => {
+                        if let Some(pair) = resp.response.into_iter().next() {
+                            (
+                                pair.modify_index,
+                                pair.value
+                                    .map(|bytes| -> ReadySetResult<_> {
+                                        let bytes: Vec<u8> = bytes
+                                            .try_into()
+                                            .map_err(|e| internal_err!("Consul error: {e}"))?;
+                                        Ok(serde_json::from_slice(&bytes)?)
+                                    })
+                                    .transpose()?,
+                            )
+                        } else {
+                            (0, None)
+                        }
+                    }
+                    _ => (0, None),
+                };
 
             if let Ok(modified) = f(current_val) {
                 let bytes = serde_json::to_vec(&modified)?;
@@ -767,7 +785,7 @@ impl AuthorityControl for ConsulAuthority {
                     &self.consul,
                     &self.prefix_with_deployment(path),
                     &bytes,
-                    None,
+                    Some(SetKeyRequestBuilder::default().cas(modify_index)),
                 )
                 .await?;
 
@@ -940,6 +958,8 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
+    use futures::stream::FuturesUnordered;
+    use futures::StreamExt;
     use rand::distributions::Alphanumeric;
     use rand::{thread_rng, Rng};
     use reqwest::Url;
@@ -977,6 +997,36 @@ mod tests {
             authority.try_read::<Duration>("a").await.unwrap(),
             Some(Duration::from_secs(10))
         );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn read_modify_write_in_parallel() {
+        let authority_address = test_authority_address("read_modify_write_in_parallel");
+        let authority = Arc::new(ConsulAuthority::new(&authority_address).unwrap());
+        authority.init().await.unwrap();
+        authority.delete_all_keys().await;
+
+        let mut futs = (0..10)
+            .map(|_| {
+                let authority = authority.clone();
+                tokio::spawn(async move {
+                    authority
+                        .read_modify_write("counter", |val: Option<u64>| -> Result<u64, ()> {
+                            Ok(val.unwrap_or_default() + 1)
+                        })
+                        .await
+                        .unwrap()
+                })
+            })
+            .collect::<FuturesUnordered<_>>();
+
+        while let Some(res) = futs.next().await {
+            res.unwrap().unwrap();
+        }
+
+        let val = authority.try_read::<u64>("counter").await.unwrap().unwrap();
+        assert_eq!(val, 10);
     }
 
     #[tokio::test]
