@@ -281,6 +281,8 @@ mod tests {
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use std::sync::Arc;
 
+    use futures::stream::FuturesUnordered;
+    use futures::StreamExt;
     use reqwest::Url;
     use tempfile::tempdir;
 
@@ -434,5 +436,41 @@ mod tests {
 
         authority.overwrite_controller_state(1).await.unwrap();
         assert_eq!(incr_state(&authority).await, 2);
+    }
+
+    #[tokio::test]
+    async fn create_cache_statements() {
+        let dir = tempdir().unwrap();
+        let authority = Arc::new(
+            StandaloneAuthority::new(dir.path().to_str().unwrap(), "create_cache_statements")
+                .unwrap(),
+        );
+
+        assert_eq!(
+            authority.create_cache_statements().await.unwrap(),
+            Vec::<String>::new()
+        );
+
+        const STMTS: &[&str] = &["a", "b", "c", "d", "e", "f"];
+        let mut futs = STMTS
+            .iter()
+            .map(|stmt| {
+                let authority = authority.clone();
+                tokio::spawn(async move {
+                    authority
+                        .add_create_cache_statements([(*stmt).to_owned()])
+                        .await
+                        .unwrap()
+                })
+            })
+            .collect::<FuturesUnordered<_>>();
+
+        while let Some(res) = futs.next().await {
+            res.unwrap();
+        }
+
+        let mut stmts = authority.create_cache_statements().await.unwrap();
+        stmts.sort();
+        assert_eq!(stmts, STMTS);
     }
 }

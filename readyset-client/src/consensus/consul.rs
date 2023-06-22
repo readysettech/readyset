@@ -1555,4 +1555,40 @@ mod tests {
             );
         }
     }
+
+    #[tokio::test]
+    #[serial]
+    async fn create_cache_statements() {
+        let authority_address = test_authority_address("create_cache_statements");
+        let authority = Arc::new(ConsulAuthority::new(&authority_address).unwrap());
+        authority.init().await.unwrap();
+        authority.delete_all_keys().await;
+
+        assert_eq!(
+            authority.create_cache_statements().await.unwrap(),
+            Vec::<String>::new()
+        );
+
+        const STMTS: &[&str] = &["a", "b", "c", "d", "e", "f"];
+        let mut futs = STMTS
+            .iter()
+            .map(|stmt| {
+                let authority = authority.clone();
+                tokio::spawn(async move {
+                    authority
+                        .add_create_cache_statements([(*stmt).to_owned()])
+                        .await
+                        .unwrap()
+                })
+            })
+            .collect::<FuturesUnordered<_>>();
+
+        while let Some(res) = futs.next().await {
+            res.unwrap();
+        }
+
+        let mut stmts = authority.create_cache_statements().await.unwrap();
+        stmts.sort();
+        assert_eq!(stmts, STMTS);
+    }
 }

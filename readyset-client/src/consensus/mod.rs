@@ -11,7 +11,7 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use clap::ValueEnum;
 use enum_dispatch::enum_dispatch;
-use readyset_errors::ReadySetResult;
+use readyset_errors::{ReadySetError, ReadySetResult};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -33,6 +33,8 @@ type LeaderPayload = ControllerDescriptor;
 
 pub type VolumeId = String;
 pub type WorkerId = String;
+
+const CREATE_CACHE_STATEMENTS_PATH: &str = "create_cache_statements";
 
 /// A response to a `worker_heartbeat`, to inform the worker of its
 /// status within the system.
@@ -220,6 +222,52 @@ pub trait AuthorityControl: Send + Sync {
     async fn overwrite_controller_state<P>(&self, state: P) -> ReadySetResult<()>
     where
         P: Send + Serialize + 'static;
+
+    /// Return the list of CREATE CACHE statements that have been run against this ReadySet
+    /// deployment.
+    ///
+    /// This is stored separately from the controller state so that it's always available, using
+    /// backwards-compatible serialization, for if the controller state can't be deserialized
+    async fn create_cache_statements(&self) -> ReadySetResult<Vec<String>> {
+        Ok(self
+            .try_read(CREATE_CACHE_STATEMENTS_PATH)
+            .await?
+            .unwrap_or_default())
+    }
+
+    /// Insert a new list of statements into the list of CREATE CACHE statements that have been run
+    /// against this ReadySet deployment
+    ///
+    /// These are stored separately from the controller state so that it's always available, using
+    /// backwards-compatible serialization, for if the controller state can't be deserialized
+    async fn add_create_cache_statements<I>(&self, new_stmts: I) -> ReadySetResult<()>
+    where
+        I: IntoIterator<Item = String> + Clone + Send,
+    {
+        modify_create_cache_statements(self, move |stmts| {
+            stmts.extend(new_stmts.clone());
+        })
+        .await
+    }
+}
+
+async fn modify_create_cache_statements<A, F>(authority: &A, mut f: F) -> ReadySetResult<()>
+where
+    A: AuthorityControl + ?Sized,
+    F: FnMut(&mut Vec<String>) + Send,
+{
+    authority
+        .read_modify_write::<_, Vec<String>, ReadySetError>(
+            CREATE_CACHE_STATEMENTS_PATH,
+            move |stmts| {
+                let mut stmts = stmts.unwrap_or_default();
+                f(&mut stmts);
+                Ok(stmts)
+            },
+        )
+        .await??;
+
+    Ok(())
 }
 
 /// Enum that dispatches calls to the `AuthorityControl` trait to
