@@ -2480,9 +2480,9 @@ PRIMARY KEY (`id`));";
                                 name: "CURRENT_TIMESTAMP".into(),
                                 arguments: vec![Expr::Literal(Literal::UnsignedInteger(6,),),],
                             },),),
-                            ColumnConstraint::OnUpdateCurrentTimestamp(Some(Expr::Literal(
-                                Literal::UnsignedInteger(6,),
-                            ),),),
+                            ColumnConstraint::OnUpdateCurrentTimestamp(Some(
+                                Literal::UnsignedInteger(6)
+                            ),),
                         ],
                     ),],
                     keys: None,

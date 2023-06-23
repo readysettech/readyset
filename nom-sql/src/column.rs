@@ -5,7 +5,7 @@ use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::{map, opt};
 use nom::multi::many0;
-use nom::sequence::{delimited, preceded, tuple};
+use nom::sequence::{delimited, preceded, tuple, Tuple};
 use nom_locate::LocatedSpan;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
@@ -14,7 +14,7 @@ use crate::common::{column_identifier_no_alias, parse_comment};
 use crate::expression::expression;
 use crate::sql_type::type_identifier;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, Expr, Literal, NomSqlResult, Relation, SqlIdentifier, SqlType};
+use crate::{literal, Dialect, Expr, Literal, NomSqlResult, Relation, SqlIdentifier, SqlType};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct Column {
@@ -88,7 +88,7 @@ pub enum ColumnConstraint {
     Unique,
     /// NOTE(grfn): Yes, this really is its own special thing, not just an expression - see
     /// <https://dev.mysql.com/doc/refman/8.0/en/timestamp-initialization.html>
-    OnUpdateCurrentTimestamp(Option<Expr>),
+    OnUpdateCurrentTimestamp(Option<Literal>),
 }
 
 impl ColumnConstraint {
@@ -104,8 +104,8 @@ impl ColumnConstraint {
             Self::Unique => write!(f, "UNIQUE"),
             Self::OnUpdateCurrentTimestamp(opt) => {
                 write!(f, "ON UPDATE CURRENT_TIMESTAMP")?;
-                if let Some(expr) = opt {
-                    write!(f, "({})", expr.display(dialect))?;
+                if let Some(lit) = opt {
+                    write!(f, "({})", lit)?;
                 }
                 Ok(())
             }
@@ -201,8 +201,13 @@ pub fn on_update_current_timestamp(
             tag_no_case("localtime"),
             tag_no_case("localtimestamp"),
         ))(i)?;
-        let (i, expr) = opt(delimited(tag("("), expression(dialect), tag(")")))(i)?;
-        Ok((i, ColumnConstraint::OnUpdateCurrentTimestamp(expr)))
+
+        let (i, opt_lit) = opt(delimited(
+            tuple((whitespace0, tag("("), whitespace0)),
+            literal(dialect),
+            tuple((whitespace0, tag(")"), whitespace0)),
+        ))(i)?;
+        Ok((i, ColumnConstraint::OnUpdateCurrentTimestamp(opt_lit)))
     }
 }
 
@@ -396,29 +401,40 @@ mod tests {
 
         #[test]
         fn on_update_current_timestamp_precision() {
-            let input = b"`lastModified` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6)";
-            let (_, res) = column_specification(Dialect::MySQL)(LocatedSpan::new(input)).unwrap();
-            let cspec = ColumnSpecification {
-                column: Column {
-                    name: "lastModified".into(),
-                    table: None,
-                },
-                sql_type: SqlType::DateTime(Some(6)),
-                comment: None,
-                constraints: vec![
-                    ColumnConstraint::NotNull,
-                    ColumnConstraint::DefaultValue(Expr::Call(FunctionExpr::Call {
-                        name: "CURRENT_TIMESTAMP".into(),
-                        arguments: vec![Expr::Literal(Literal::UnsignedInteger(6))],
-                    })),
-                    ColumnConstraint::OnUpdateCurrentTimestamp(Some(Expr::Literal(
-                        Literal::UnsignedInteger(6),
-                    ))),
-                ],
-            };
-            assert_eq!(res, cspec);
-            let res = cspec.display(Dialect::MySQL).to_string();
-            assert_eq!(res, String::from_utf8(input.to_vec()).unwrap());
+            let canonical = "`lastModified` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6)";
+            let inputs = vec![
+                canonical,
+                "`lastModified` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP (6) ",
+                "`lastModified` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP( 6 )",
+                "`lastModified` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6 ) ",
+                "`lastModified` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP ( 6)",
+            ];
+            for input in inputs {
+                let (_, res) =
+                    column_specification(Dialect::MySQL)(LocatedSpan::new(input.as_bytes()))
+                        .unwrap();
+                let cspec = ColumnSpecification {
+                    column: Column {
+                        name: "lastModified".into(),
+                        table: None,
+                    },
+                    sql_type: SqlType::DateTime(Some(6)),
+                    comment: None,
+                    constraints: vec![
+                        ColumnConstraint::NotNull,
+                        ColumnConstraint::DefaultValue(Expr::Call(FunctionExpr::Call {
+                            name: "CURRENT_TIMESTAMP".into(),
+                            arguments: vec![Expr::Literal(Literal::UnsignedInteger(6))],
+                        })),
+                        ColumnConstraint::OnUpdateCurrentTimestamp(Some(Literal::UnsignedInteger(
+                            6,
+                        ))),
+                    ],
+                };
+                assert_eq!(res, cspec);
+                let res = cspec.display(Dialect::MySQL).to_string();
+                assert_eq!(res, canonical);
+            }
         }
     }
 
