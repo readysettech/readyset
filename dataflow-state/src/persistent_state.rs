@@ -325,9 +325,7 @@ impl Error {
     /// delete the DB file and try again
     pub fn is_permanent(&self) -> bool {
         match self {
-            // Could *maybe* try to slice up the RocksDB errors here, but for now it's simpler to
-            // just assume all RocksDB errors are permanent
-            Error::RocksDb(_) => true,
+            Error::RocksDb(e) => !matches!(e.kind(), rocksdb::ErrorKind::Corruption),
             // Could *maybe* try to slice up the IO errors here, but for now it's simpler to just
             // assume all IO errors are permanent
             Error::Io(_) => true,
