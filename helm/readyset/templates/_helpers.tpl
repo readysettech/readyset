@@ -30,7 +30,7 @@ Expand the name of the chart.
 */}}
 {{- define "readyset.labels" -}}
 helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
-app.kubernetes.io/instance: {{ printf "%s-%s" .Release.Name (randAlphaNum 8 | lower) }}
+app.kubernetes.io/instance: {{ printf "%s" (required "Must pass readyset.deployment as a value" .Values.readyset.deployment) }}
 app.kubernetes.io/part-of: {{ include "readyset.name" . }}
 app.kubernetes.io/name: readyset
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
@@ -87,20 +87,13 @@ null
 {{/*
 Define the database type we're connecting to
 */}}
-{{- define "readyset.database.type" -}}
-{{- $type := mustRegexFind "postgresql|mysql" .Values.readyset.databaseUri }}
-{{- if not $type }}
-{{ fail "Must pass either 'mysql' or 'postgresql' in the scheme of the URI" }}
+{{- define "readyset.query_caching_mode" -}}
+{{- $mode := mustRegexFind "async|explicit|in-request-path" .Values.readyset.query_caching_mode }}
+{{- if not $mode }}
+{{ fail "Must pass either 'async', 'explicit', 'in-request-path' to readyset.query_caching_mode" }}
 {{- else -}}
-{{- printf "%s" $type -}}
+{{- printf "%s" $mode -}}
 {{- end -}}
-{{- end }}
-
-{{/*
-Define a random name from the chart + 8 random characters. Necessary for ReadySet to start
-*/}}
-{{- define "readyset.deployment" -}}
-{{- printf "%s-%s" (include "readyset.chart" .) (randAlphaNum 8 | lower) }}
 {{- end }}
 
 {{- define "readyset.serviceAccountName" -}}

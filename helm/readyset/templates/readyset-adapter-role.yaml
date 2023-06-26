@@ -2,6 +2,7 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
+  namespace: {{ required "You must pass a namespace" (.Release.Namespace | quote) }}
   name: readyset-adapter
 rules:
   # Required for k8s consul retry-join

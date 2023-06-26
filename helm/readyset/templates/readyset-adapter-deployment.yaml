@@ -95,12 +95,12 @@ spec:
             - name: LOG_FORMAT
               value: "json"
             - name: DEPLOYMENT
-              value: {{ (include "readyset.deployment" .) }}
+              value: "{{ required "readyset.deployment is a required value" .Values.readyset.deployment }}"
             # Identify this as a Helm deployment to TelemetryReporter
+            - name: QUERY_CACHING
+              value: {{ (include "readyset.query_caching_mode" .) | default "explicit" }}
             - name: DEPLOYMENT_ENV
               value: "helm"
-            - name: DATABASE_TYPE
-              value: "{{ (include "readyset.database.type" . ) }}"
             - name: AUTHORITY_ADDRESS
               value: "readyset-consul-server:8500"
             - name: AUTHORITY
@@ -115,6 +115,14 @@ spec:
               value: "1"
             - name: VIEWS_POLLING_INTERVAL
               value: "180"
+            {{- if .Values.readyset.adapter.query_log_ad_hoc }}
+            - name: QUERY_LOG_AD_HOC
+              value: {{ .Values.readyset.adapter.query_log_ad_hoc | quote }}
+            {{- end }}
+            {{- if .Values.readyset.adapter.statement_logging }}
+            - name: STATEMENT_LOGGING
+              value: {{ .Values.readyset.adapter.statement_logging | quote }}
+            {{- end }}
           resources:
             requests:
               cpu: {{ default "500m" .Values.readyset.adapter.resources.requests.cpu }}

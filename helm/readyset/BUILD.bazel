@@ -10,7 +10,7 @@ gazelle(
     command = "update-repos",
 )
 
-# gazelle:prefix readyset_helm_test
+# gazelle:prefix chart_render_test
 gazelle(name = "gazelle")
 
 filegroup(
@@ -27,9 +27,9 @@ filegroup(
 )
 
 go_test(
-    name = "readyset_helm_test_test",
-    size = "large",
-    srcs = ["template_render_test.go"],
+    name = "chart_render_test",
+    size = "small",
+    srcs = ["chart_test.go"],
     data = [
         ":chart_definition",
         ":chart_values",
@@ -40,9 +40,11 @@ go_test(
     deps = [
         "@com_github_gruntwork_io_terratest//modules/helm",
         "@com_github_gruntwork_io_terratest//modules/k8s",
+        "@com_github_gruntwork_io_terratest//modules/logger",
         "@com_github_gruntwork_io_terratest//modules/random",
         "@com_github_stretchr_testify//assert",
         "@com_github_stretchr_testify//require",
         "@io_k8s_api//apps/v1:apps",
+        "@io_k8s_api//rbac/v1:rbac",
     ],
 )

@@ -2,6 +2,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
+  namespace: {{ required "You must pass a namespace" (.Release.Namespace | quote) }}
   name: readyset-consul-agent-cm
   labels: {{ include "readyset.labels" . | nindent 4 }}
 data:

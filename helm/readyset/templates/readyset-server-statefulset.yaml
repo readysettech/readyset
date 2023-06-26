@@ -3,6 +3,7 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: readyset-server
+  namespace: {{ required "You must pass a namespace" (.Release.Namespace | quote) }}
   labels: {{ include "readyset.labels" . | nindent 4 }}
 spec:
   serviceName: readyset-server
@@ -90,7 +91,7 @@ spec:
           env:
             # ReadySet Deployment Name (Unique per Consul Cluster)
             - name: DEPLOYMENT
-              value: "{{ (include "readyset.deployment" . ) }}"
+              value: "{{ required "readyset.deployment is a required value" .Values.readyset.deployment }}"
             # ReadySet Server Configs
             - name: NORIA_QUORUM
               value: "1"
@@ -130,6 +131,14 @@ spec:
               value: "1"
             - name: PROMETHEUS_METRICS
               value: "true"
+            {{- if .Values.readyset.server.replication_tables }}
+            - name: REPLICATION_TABLES
+              value: {{ .Values.readyset.server.replication_tables | quote }}
+            {{- end }}
+            {{- if .Values.readyset.server.statement_logging }}
+            - name: STATEMENT_LOGGING
+              value: {{ .Values.readyset.server.statement_logging | quote }}
+            {{- end }}
           volumeMounts:
             - mountPath: /state
               name: state

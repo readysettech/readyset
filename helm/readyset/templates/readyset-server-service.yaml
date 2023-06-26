@@ -3,6 +3,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: readyset-server
+  namespace: {{ required "You must pass a namespace" (.Release.Namespace | quote) }}
   labels: {{ include "readyset.labels" . | nindent 4 }}
   annotations:
     service.beta.kubernetes.io/aws-load-balancer-type: external

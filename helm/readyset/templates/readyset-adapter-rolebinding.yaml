@@ -2,6 +2,7 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
+  namespace: {{ required "You must pass a namespace" (.Release.Namespace | quote) }}
   name: readyset-adapter
 subjects:
 - kind: ServiceAccount
