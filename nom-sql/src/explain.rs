@@ -2,7 +2,7 @@ use std::fmt::{self, Display};
 
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
-use nom::combinator::{map, opt};
+use nom::combinator::{opt, value};
 use nom::sequence::{terminated, tuple};
 use nom_locate::LocatedSpan;
 use serde::{Deserialize, Serialize};
@@ -20,6 +20,8 @@ pub enum ExplainStatement {
     Graphviz { simplified: bool },
     /// Provides metadata about the last statement that was executed.
     LastStatement,
+    /// List domain shard replicas and what worker they're running on
+    Domains,
 }
 
 impl Display for ExplainStatement {
@@ -33,6 +35,7 @@ impl Display for ExplainStatement {
                 write!(f, "GRAPHVIZ;")
             }
             ExplainStatement::LastStatement => write!(f, "LAST STATEMENT;"),
+            ExplainStatement::Domains => write!(f, "DOMAINS;"),
         }
     }
 }
@@ -53,10 +56,11 @@ pub(crate) fn explain_statement(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Ex
     let (i, _) = whitespace1(i)?;
     let (i, stmt) = alt((
         explain_graphviz,
-        map(
+        value(
+            ExplainStatement::LastStatement,
             tuple((tag_no_case("last"), whitespace1, tag_no_case("statement"))),
-            |_| ExplainStatement::LastStatement,
         ),
+        value(ExplainStatement::Domains, tag_no_case("domains")),
     ))(i)?;
     let (i, _) = statement_terminator(i)?;
     Ok((i, stmt))
@@ -83,6 +87,14 @@ mod tests {
                 .unwrap()
                 .1,
             ExplainStatement::LastStatement
+        );
+    }
+
+    #[test]
+    fn explain_domains() {
+        assert_eq!(
+            test_parse!(explain_statement, b"explain domains;"),
+            ExplainStatement::Domains
         );
     }
 }
