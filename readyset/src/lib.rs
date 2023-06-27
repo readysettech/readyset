@@ -281,7 +281,7 @@ pub struct Options {
 
     // TODO(DAN): require explicit migrations
     /// Specifies the polling interval in seconds for requesting views from the Leader.
-    #[clap(long, env = "OUTPUTS_POLLING_INTERVAL", default_value = "300")]
+    #[clap(long, env = "OUTPUTS_POLLING_INTERVAL", default_value = "5")]
     views_polling_interval: u64,
 
     /// The time to wait before canceling a migration request. Defaults to 30 minutes.
