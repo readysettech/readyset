@@ -12,6 +12,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use database_utils::UpstreamConfig;
+use dataflow::DomainIndex;
 use failpoint_macros::failpoint;
 use futures::future::Fuse;
 use futures::FutureExt;
@@ -266,6 +267,17 @@ impl Leader {
                         .filter(|w| w.1.healthy)
                         .map(|w| w.0)
                         .collect::<Vec<_>>());
+                }
+                (&Method::GET | &Method::POST, "/domains") => {
+                    let ds = self.dataflow_state_handle.read().await;
+                    let res: HashMap<DomainIndex, Vec<Vec<WorkerIdentifier>>> = ds
+                        .domains
+                        .iter()
+                        .map(|(di, dh)| {
+                            (*di, dh.shards().map(|wis| wis.to_vec()).collect::<Vec<_>>())
+                        })
+                        .collect();
+                    return_serialized!(res)
                 }
                 (&Method::GET, "/allocated_bytes") => {
                     let alloc_bytes = tikv_jemalloc_ctl::epoch::mib()

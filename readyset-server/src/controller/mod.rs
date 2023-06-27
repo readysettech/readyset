@@ -1110,6 +1110,7 @@ mod tests {
 
     use std::collections::{BTreeMap, HashSet};
 
+    use dataflow::DomainIndex;
     use nom_sql::{parse_create_table, parse_select_statement, Dialect, Relation};
     use readyset_client::recipe::changelist::{Change, ChangeList};
     use readyset_client::replication::ReplicationOffset;
@@ -1500,6 +1501,29 @@ mod tests {
                     }
                 ),
             ])
+        );
+
+        shutdown_tx.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn domains() {
+        let (mut noria, shutdown_tx) = start_simple("domains").await;
+        noria
+            .extend_recipe(ChangeList::from_change(
+                Change::CreateTable(
+                    parse_create_table(Dialect::MySQL, "CREATE TABLE t1 (x int);").unwrap(),
+                ),
+                DataDialect::DEFAULT_MYSQL,
+            ))
+            .await
+            .unwrap();
+
+        let res = noria.domains().await.unwrap();
+        assert_eq!(res.len(), 1);
+        assert_eq!(
+            res.keys().copied().collect::<Vec<_>>(),
+            vec![DomainIndex::from(0)]
         );
 
         shutdown_tx.shutdown().await;

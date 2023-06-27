@@ -25,6 +25,7 @@ use url::Url;
 use crate::consensus::{Authority, AuthorityControl};
 use crate::debug::info::GraphInfo;
 use crate::debug::stats;
+use crate::internal::DomainIndex;
 use crate::metrics::MetricsDump;
 use crate::recipe::changelist::ChangeList;
 use crate::recipe::{ExtendRecipeResult, ExtendRecipeSpec, MigrationStatus};
@@ -700,6 +701,16 @@ impl ReadySetHandle {
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub fn healthy_workers(&mut self) -> impl Future<Output = ReadySetResult<Vec<Url>>> + '_ {
         self.rpc("healthy_workers", (), self.request_timeout)
+    }
+
+    /// Get a map from domain index to a shard->replica mapping of the workers that are running the
+    /// shard replicas of that domain .
+    ///
+    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
+    pub fn domains(
+        &mut self,
+    ) -> impl Future<Output = ReadySetResult<HashMap<DomainIndex, Vec<Vec<Url>>>>> + '_ {
+        self.rpc("domains", (), self.request_timeout)
     }
 
     /// Get the url of the current noria controller.
