@@ -544,6 +544,56 @@ impl NoriaConnector {
         Ok(QueryResult::Meta(vec![(label, graphviz).into()]))
     }
 
+    pub(crate) async fn explain_domains(&mut self) -> ReadySetResult<QueryResult<'static>> {
+        let domains = self.inner.get_mut()?.noria.domains().await?;
+        let schema = SelectSchema {
+            use_bogo: false,
+            schema: Cow::Owned(vec![
+                ColumnSchema {
+                    column: nom_sql::Column {
+                        name: "domain".into(),
+                        table: None,
+                    },
+                    column_type: DfType::DEFAULT_TEXT,
+                    base: None,
+                },
+                ColumnSchema {
+                    column: nom_sql::Column {
+                        name: "worker".into(),
+                        table: None,
+                    },
+                    column_type: DfType::DEFAULT_TEXT,
+                    base: None,
+                },
+            ]),
+            columns: Cow::Owned(vec!["domain".into(), "worker".into()]),
+        };
+
+        let mut data = domains
+            .into_iter()
+            .flat_map(|(di, shards)| {
+                shards
+                    .into_iter()
+                    .enumerate()
+                    .flat_map(move |(shard, replicas)| {
+                        replicas
+                            .into_iter()
+                            .enumerate()
+                            .map(move |(replica, worker)| {
+                                vec![
+                                    DfValue::from(format!("{di}.{shard}.{replica}")),
+                                    DfValue::from(worker.to_string()),
+                                ]
+                            })
+                    })
+            })
+            .collect::<Vec<_>>();
+
+        data.sort_by(|r1, r2| r1[1].cmp(&r2[1]));
+
+        Ok(QueryResult::from_owned(schema, vec![Results::new(data)]))
+    }
+
     pub(crate) async fn verbose_views(
         &mut self,
         query_id: &Option<String>,

@@ -1772,7 +1772,9 @@ where
             SqlQuery::Explain(nom_sql::ExplainStatement::Graphviz { simplified }) => {
                 self.noria.graphviz(*simplified).await
             }
-            SqlQuery::Explain(nom_sql::ExplainStatement::Domains) => Err(unsupported_err!()),
+            SqlQuery::Explain(nom_sql::ExplainStatement::Domains) => {
+                self.noria.explain_domains().await
+            }
             SqlQuery::CreateCache(CreateCacheStatement {
                 name,
                 inner,
