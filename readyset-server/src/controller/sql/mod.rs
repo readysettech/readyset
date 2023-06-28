@@ -30,6 +30,7 @@ pub(crate) use self::recipe::{QueryID, Recipe, Schema};
 use self::registry::ExprRegistry;
 use crate::controller::mir_to_flow::{mir_node_to_flow_parts, mir_query_to_flow_parts};
 use crate::controller::sql::registry::RecipeExpr;
+use crate::controller::state::RecipeChanges;
 use crate::controller::Migration;
 use crate::sql::mir::MirRemovalResult;
 use crate::ReuseConfigType;
@@ -210,7 +211,8 @@ impl SqlIncorporator {
         &mut self,
         changelist: ChangeList,
         mig: &mut Migration<'_>,
-    ) -> ReadySetResult<()> {
+    ) -> ReadySetResult<RecipeChanges> {
+        let mut res = RecipeChanges::default();
         debug!(
             num_queries = self.registry.len(),
             named_queries = self.registry.num_aliases(),
@@ -366,6 +368,7 @@ impl SqlIncorporator {
                     self.add_view(stmt.name, definition, schema_search_path.clone())?;
                 }
                 Change::CreateCache(cc) => {
+                    res.add_cache_statement(cc.clone());
                     self.add_query(cc.name, *cc.statement, cc.always, &schema_search_path, mig)?;
                 }
                 Change::AlterTable(_) => {
@@ -538,7 +541,7 @@ impl SqlIncorporator {
             }
         }
 
-        Ok(())
+        Ok(res)
     }
 
     fn invalidate_queries_for_added_relation(

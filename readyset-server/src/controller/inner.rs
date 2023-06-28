@@ -43,7 +43,7 @@ use tokio::task::JoinHandle;
 use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
 
-use crate::controller::state::{DfState, DfStateHandle};
+use crate::controller::state::{DfState, DfStateHandle, RecipeChanges};
 use crate::controller::{ControllerState, Worker, WorkerIdentifier};
 use crate::worker::WorkerRequestKind;
 
@@ -559,7 +559,12 @@ impl Leader {
                     let authority = Arc::clone(authority);
                     let mut migration = tokio::spawn(async move {
                         let mut writer = dataflow_state_handle.write().await;
-                        writer.as_mut().extend_recipe(body, false).await?;
+                        let RecipeChanges {
+                            new_cache_statements,
+                        } = writer.as_mut().extend_recipe(body, false).await?;
+                        authority
+                            .add_create_cache_statements(new_cache_statements)
+                            .await?;
                         dataflow_state_handle.commit(writer, &authority).await?;
                         Ok(())
                     })
