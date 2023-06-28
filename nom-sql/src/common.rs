@@ -16,6 +16,7 @@ use nom::{IResult, InputLength, InputTake};
 use nom_locate::LocatedSpan;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
+use test_strategy::Arbitrary;
 
 use crate::column::Column;
 use crate::dialect::Dialect;
@@ -32,7 +33,7 @@ pub fn debug_print(tag: &str, i: &[u8]) {
 #[cfg(not(feature = "debug"))]
 pub fn debug_print(_tag: &str, _i: &[u8]) {}
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum IndexType {
     BTree,
     Hash,
@@ -47,7 +48,7 @@ impl Display for IndexType {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum ReferentialAction {
     Cascade,
     SetNull,
@@ -72,7 +73,7 @@ impl fmt::Display for ReferentialAction {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum TableKey {
     PrimaryKey {
         constraint_name: Option<SqlIdentifier>,
@@ -268,7 +269,7 @@ impl TableKey {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary)]
 #[allow(clippy::large_enum_variant)] // NOTE(aspen): do we actually care about this?
 #[derive(Default)]
 pub enum FieldDefinitionExpr {
@@ -330,7 +331,7 @@ pub enum Sign {
 
 /// A reference to a field in a query, usable in either the `GROUP BY` or `ORDER BY` clauses of the
 /// query
-#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary)]
 pub enum FieldReference {
     /// A reference to a field in the `SELECT` list by its (1-based) index.
     Numeric(u64),

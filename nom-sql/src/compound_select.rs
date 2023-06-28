@@ -8,6 +8,7 @@ use nom::sequence::{delimited, preceded, tuple};
 use nom_locate::LocatedSpan;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
+use test_strategy::Arbitrary;
 
 use crate::common::{opt_delimited, terminated_with_statement_terminator};
 use crate::order::{order_clause, OrderClause};
@@ -15,7 +16,7 @@ use crate::select::{limit_offset_clause, nested_selection, LimitClause, SelectSt
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Dialect, NomSqlResult};
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Deserialize, Serialize, Arbitrary)]
 pub enum CompoundSelectOperator {
     Union,
     DistinctUnion,
@@ -34,7 +35,7 @@ impl fmt::Display for CompoundSelectOperator {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Deserialize, Serialize, Arbitrary)]
 pub struct CompoundSelectStatement {
     pub selects: Vec<(Option<CompoundSelectOperator>, SelectStatement)>,
     pub order: Option<OrderClause>,
