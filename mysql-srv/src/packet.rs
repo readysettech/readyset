@@ -331,8 +331,6 @@ pub fn onepacket(i: &[u8]) -> nom::IResult<&[u8], (u8, &[u8])> {
     Ok((i, (seq[0], bytes)))
 }
 
-// Clone because of https://github.com/Geal/nom/issues/1008
-#[derive(Clone)]
 pub struct Packet<'a>(&'a [u8], Vec<u8>);
 
 impl<'a> Packet<'a> {
