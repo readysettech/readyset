@@ -198,66 +198,8 @@ for ReadySet:
 
 ## Contributions
 
-We welcome contributions! Check out our roadmap here. TODO link.
+We welcome contributions! Check out [our issues
+page](https://github.com/readysettech/proptest-stateful/issues), and feel free
+to connect with us if you want to work on any of the outstanding tickets, or if
+you have any other ideas for fixes or improvements that you'd like to share.
 
-## Future Work
-
-Note that this library is still relatively new, so we are releasing it as
-pre-1.0 and expect there may regularly be breaking changes between versions. We
-plan to release a stable version once we've used it enough to feel confident in
-having implemented a solid API that holds up across a good variety of use
-cases.
-
-The current version of `proptest-stateful` only supports writing async tests
-using [tokio](https://tokio.rs/), because that is the only type of test we've
-needed to write thus far here at [ReadySet](https://readyset.io/). It almost
-certainly would make sense to have a non-async version of the framework; we may
-implement this ourselves at some point, but if this is something you would find
-useful and you'd like to implement it directly, we are also always happy to
-take outside contributions. Once a non-async version exists, we'll also likely
-want to add a crate feature to allow us to disable the async functionality for
-projects that don't need it.
-
-Currently, we only shrink by removing entire operations, not by shrinking the
-operations themselves. Shrinking an individual operation can be quite tricky,
-however, because oftentimes later operations were generated based off the
-specific operations that came before them. For some tests this may not be an
-issue, but I have yet to personally encounter one. It may be possible to add
-some kind of optional "fix operation" callback that can attempt to modify later
-operations to make preconditions pass again after an earlier operation is
-shrunk, but this seems like a tricky proposition, and in practice we've found
-that the current shrinking method is sufficient; getting to a minimal set of
-steps to produce a failure typically makes it easy to understand failing cases
-even if the steps themselves are more complex than they need to be.
-
-Finally, the shrinking algorithm we've implemented has worked well for the
-tests we've written so far, but it is worth noting that it is limited to
-removing a single test operation at a time during shrinking. (There is one
-exception to this, which is that we automatically and immediately shrink out
-all operations that occur after the step that triggered the initial test
-failure as an optimization, but after that we only attempt to remove one step
-at a time.) This results in a shrinking algorithm that was relatively simple to
-implement and understand, but it brings two significant downsides:
-
- 1. For tests with many operations, shrinking may be slow, especially if
-    re-running a test case is itself a slow process.
- 2. Depending on the preconditions specified, we may fail to shrink all the way
-    to a minimal set of operations.
-
-The latter issue is due to test cases that start with sequences like:
-
- 1. `CREATE TABLE readyset`
- 2. `DROP TABLE readyset`
- 3. `CREATE TABLE readyset`
-
-If step 3 is legitimately part of a minimal failing case, then we can't shrink
-it out...but we also can't shrink out step 2 because then the precondition for
-step 3 will fail (a table can't already exist before we create it), and we
-can't shrink out step 1 because the precondition for step 2 will fail (a table
-must exist for us to be able to drop it). So without the ability to try
-shrinking out multiple steps at once, we're unable to shrink out the first two
-steps.
-
-All that said, it's not clear what the best alternative shrinking algorithm
-might look like. More research is needed here, but if you have ideas or
-suggestions in this area we'd love to hear from you 🙂
