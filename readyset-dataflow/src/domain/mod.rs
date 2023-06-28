@@ -577,6 +577,11 @@ impl RemappedKeys {
     }
 }
 
+/// A [`Domain`] is a well-connected sub-graph of the overall dataflow graph, used as the unit
+/// of execution of the dataflow engine. The dataflow graph is split up into domains using
+/// [heuristics](../src/readyset_server/controller/migrate/assignment.rs.html)
+/// Domains are [scheduled](../src/readyset_server/controller/migrate/scheduling.rs.html)
+/// onto workers.
 pub struct Domain {
     index: DomainIndex,
     shard: Option<usize>,
