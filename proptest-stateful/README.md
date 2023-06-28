@@ -1,37 +1,24 @@
 # proptest-stateful
-## Introduction
 
-`proptest-stateful` is a Rust library created by [ReadySet](https://readyset.io/)
-for building stateful property-based tests using the
+`proptest-stateful` is a Rust library created by
+[ReadySet](https://readyset.io/) for writing stateful property-based tests
+using the
 [proptest](https://altsysrq.github.io/proptest-book/proptest/index.html) crate.
 
-Typical property-based tests are often stateless. That is, they do something
-like generate an input, call a function, and check some property on the output,
-all without depending on any particular underlying state in the system under
-test. This is perfectly fine if you're testing a stateless piece of code where
-the same input always generates the same output. But if you want to test
-something stateful &mdash; like, say, a key/value store &mdash; then testing a
-single function call at a time might not be sufficient to cover the full range
-of behavior you expect the system to exhibit.
+[API Reference
+Documentation](https://docs.rs/proptest-stateful/latest/proptest_stateful/).
 
-Stateful property tests generate a sequence of steps to run, and then execute
-them one at a time, checking postconditions for each operation along the way.
-If a test fails, the test framework will attempt to remove individual steps in
-the test sequence to find a minimal failing case.
+## Introduction
 
-There are a few reasons that doing this is tricky enough to warrant a
-standalone library:
+Property-based tests are often stateless: they generate an input, call a
+function, and check some property on the output. They do this without
+considering any underlying state of the system being tested.
 
- 1. The expected result of an operation may depend on the underlying state of
-    the system, so in order to check the result of each step, you may need to
-    maintain a model of the expected state of the system under test.
- 2. A given operation may not be expected to work in all possible states, so
-    you may need to use your model of the system state to dictate which kinds
-    of test steps can be generated at any given point in the sequence.
- 3. When shrinking a failing case, the attempts to shrink must *still continue*
-    to adhere to the same rules used during test case generation, or else a
-    shrunken input may fail due to an operation being executed in an invalid
-    state.
+`proptest-stateful` extends this testing paradigm to stateful systems: stateful
+property tests generate a sequence of operations to run, executes them one at a
+time, and checks postconditions for each operation along the way. If a test
+fails, `proptest-stateful` will attempt to remove individual steps in the test
+sequence to find a minimal failing case.
 
 `proptest-stateful` provides a trait for defining stateful property tests, with
 callbacks for specifying things like generation strategies, model states,
