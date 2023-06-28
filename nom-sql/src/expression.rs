@@ -13,6 +13,8 @@ use nom::sequence::{delimited, pair, preceded, terminated, tuple};
 use nom::Parser;
 use nom_locate::LocatedSpan;
 use pratt::{Affix, Associativity, PrattParser, Precedence};
+use proptest::prelude::Arbitrary;
+use proptest::strategy::BoxedStrategy;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
@@ -331,7 +333,9 @@ impl Display for BinaryOperator {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize, Arbitrary,
+)]
 pub enum UnaryOperator {
     Neg,
     Not,
@@ -632,6 +636,111 @@ impl Expr {
         // for Expr that returned a null literal, since there isn't really such a thing as a
         // "default" expression.
         mem::replace(self, Expr::Literal(Literal::Null))
+    }
+}
+
+impl Arbitrary for Expr {
+    type Parameters = ();
+
+    type Strategy = BoxedStrategy<Expr>;
+
+    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+        use proptest::option;
+        use proptest::prelude::*;
+
+        prop_oneof![
+            any::<Literal>().prop_map(Expr::Literal),
+            any::<Column>().prop_map(Expr::Column),
+            any::<Variable>().prop_map(Expr::Variable),
+        ]
+        .prop_recursive(4, 8, 4, |element| {
+            let box_expr = element.clone().prop_map(Box::new);
+            prop_oneof![
+                prop_oneof![
+                    (box_expr.clone(), any::<bool>())
+                        .prop_map(|(expr, distinct)| FunctionExpr::Avg { expr, distinct }),
+                    (box_expr.clone(), any::<bool>())
+                        .prop_map(|(expr, distinct)| FunctionExpr::Count { expr, distinct }),
+                    Just(FunctionExpr::CountStar),
+                    (box_expr.clone(), any::<bool>())
+                        .prop_map(|(expr, distinct)| FunctionExpr::Sum { expr, distinct }),
+                    box_expr.clone().prop_map(FunctionExpr::Max),
+                    box_expr.clone().prop_map(FunctionExpr::Min),
+                    (box_expr.clone(), any::<Option<String>>()).prop_map(|(expr, separator)| {
+                        FunctionExpr::GroupConcat { expr, separator }
+                    }),
+                    (
+                        box_expr.clone(),
+                        option::of(box_expr.clone()),
+                        option::of(box_expr.clone())
+                    )
+                        .prop_map(|(string, pos, len)| {
+                            FunctionExpr::Substring { string, pos, len }
+                        }),
+                    (
+                        any::<SqlIdentifier>(),
+                        proptest::collection::vec(element.clone(), 0..24)
+                    )
+                        .prop_map(|(name, arguments)| FunctionExpr::Call { name, arguments })
+                ]
+                .prop_map(Expr::Call),
+                (box_expr.clone(), any::<BinaryOperator>(), box_expr.clone(),)
+                    .prop_map(|(lhs, op, rhs)| Expr::BinaryOp { lhs, op, rhs },),
+                (box_expr.clone(), any::<BinaryOperator>(), box_expr.clone(),)
+                    .prop_map(|(lhs, op, rhs)| Expr::OpAny { lhs, op, rhs },),
+                (box_expr.clone(), any::<BinaryOperator>(), box_expr.clone(),)
+                    .prop_map(|(lhs, op, rhs)| Expr::OpSome { lhs, op, rhs },),
+                (box_expr.clone(), any::<BinaryOperator>(), box_expr.clone(),)
+                    .prop_map(|(lhs, op, rhs)| Expr::OpAll { lhs, op, rhs },),
+                (any::<UnaryOperator>(), box_expr.clone(),)
+                    .prop_map(|(op, rhs)| Expr::UnaryOp { op, rhs },),
+                (
+                    proptest::collection::vec(
+                        (element.clone(), element.clone())
+                            .prop_map(|(condition, body)| CaseWhenBranch { condition, body }),
+                        1..24
+                    ),
+                    option::of(box_expr.clone())
+                )
+                    .prop_map(|(branches, else_expr)| Expr::CaseWhen {
+                        branches,
+                        else_expr
+                    }),
+                (
+                    box_expr.clone(),
+                    box_expr.clone(),
+                    box_expr.clone(),
+                    any::<bool>(),
+                )
+                    .prop_map(|(operand, min, max, negated)| Expr::Between {
+                        operand,
+                        min,
+                        max,
+                        negated
+                    }),
+                (
+                    box_expr.clone(),
+                    /* TODO: IN (subquery) */
+                    proptest::collection::vec(element.clone(), 1..24).prop_map(InValue::List),
+                    any::<bool>(),
+                )
+                    .prop_map(|(lhs, rhs, negated)| Expr::In { lhs, rhs, negated }),
+                (box_expr, any::<SqlType>(), any::<bool>()).prop_map(
+                    |(expr, ty, postgres_style)| {
+                        Expr::Cast {
+                            expr,
+                            ty,
+                            postgres_style,
+                        }
+                    }
+                ),
+                proptest::collection::vec(element, 0..24).prop_map(Expr::Array),
+                // TODO: once we have Arbitrary for SelectStatement
+                // any::<Box<SelectStatement>>().prop_map(Expr::NestedSelect),
+                // any::<Box<SelectStatement>>().prop_map(Expr::Exists),
+            ]
+        })
+        .boxed()
     }
 }
 
@@ -1354,6 +1463,8 @@ pub(crate) fn expression(
 
 #[cfg(test)]
 mod tests {
+    use test_strategy::proptest;
+
     use super::*;
     use crate::to_nom_result;
 
@@ -1364,6 +1475,9 @@ mod tests {
         assert_eq!(res, Expr::Column("x".into()));
         assert_eq!(rem, b" y");
     }
+
+    #[proptest]
+    fn arbitrary_expr_doesnt_stack_overflow(_expr: Expr) {}
 
     pub mod precedence {
         use super::*;

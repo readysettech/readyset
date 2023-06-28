@@ -11,6 +11,7 @@ use nom::Parser;
 use nom_locate::LocatedSpan;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
+use test_strategy::Arbitrary;
 
 use crate::common::statement_terminator;
 use crate::expression::expression;
@@ -202,7 +203,9 @@ fn postgres_parameter_value(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Postgr
 }
 
 /// Scope for a [`Variable`]
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize, Arbitrary,
+)]
 pub enum VariableScope {
     User,
     Local,
@@ -231,7 +234,7 @@ pub(crate) fn variable_scope_prefix(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8]
     ))(i)
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize, Arbitrary)]
 pub struct Variable {
     pub scope: VariableScope,
     pub name: SqlIdentifier,
