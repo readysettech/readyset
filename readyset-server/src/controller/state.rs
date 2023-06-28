@@ -31,7 +31,7 @@ use futures::stream::{self, FuturesUnordered, StreamExt, TryStreamExt};
 use futures::{FutureExt, TryFutureExt, TryStream};
 use lazy_static::lazy_static;
 use metrics::{gauge, histogram};
-use nom_sql::{CreateCacheStatement, Relation, SqlIdentifier, SqlQuery};
+use nom_sql::{CacheInner, CreateCacheStatement, Relation, SqlIdentifier, SqlQuery};
 use petgraph::visit::Bfs;
 use rand::Rng;
 use readyset_client::builders::{
@@ -42,7 +42,7 @@ use readyset_client::debug::info::GraphInfo;
 use readyset_client::debug::stats::{DomainStats, GraphStats, NodeStats};
 use readyset_client::internal::{MaterializationStatus, ReplicaAddress};
 use readyset_client::metrics::recorded;
-use readyset_client::recipe::changelist::{Change, ChangeList};
+use readyset_client::recipe::changelist::{Change, ChangeList, CreateCache};
 use readyset_client::recipe::ExtendRecipeSpec;
 use readyset_client::{
     NodeSize, SingleKeyEviction, TableReplicationStatus, TableStatus, ViewCreateRequest,
@@ -79,6 +79,35 @@ use crate::worker::WorkerRequestKind;
 /// Number of concurrent requests to make when making multiple simultaneous requests to domains (eg
 /// for replication offsets)
 const CONCURRENT_REQUESTS: usize = 16;
+
+/// Set of relevant changes applied to a recipe during a call to `extend_recipe`
+#[derive(Debug, Clone, Default)]
+pub(crate) struct RecipeChanges {
+    /// List of new cache statements which have been added, formatted using
+    /// [`RecipeChanges::DIALECT`].
+    pub(crate) new_cache_statements: Vec<String>,
+}
+
+impl RecipeChanges {
+    /// Dialect used to format and parse statements within the authority
+    pub const DIALECT: nom_sql::Dialect = nom_sql::Dialect::PostgreSQL;
+
+    /// Add a new [`CreateCache`] statement to this set of recipe changes
+    pub(crate) fn add_cache_statement(&mut self, stmt: CreateCache) {
+        self.new_cache_statements.push(
+            CreateCacheStatement {
+                name: stmt.name,
+                inner: Ok(CacheInner::Statement(stmt.statement)),
+                always: stmt.always,
+                // Since these will be used to restore caches after an upgrade, set this to run
+                // them concurrently regardless of how they were originally cached.
+                concurrently: true,
+            }
+            .display(Self::DIALECT)
+            .to_string(),
+        );
+    }
+}
 
 /// This structure holds all the dataflow state.
 /// It's meant to be handled exclusively by the [`DfStateHandle`], which is the structure
@@ -1411,7 +1440,7 @@ impl DfState {
         &mut self,
         changelist: ChangeList,
         dry_run: bool,
-    ) -> Result<(), ReadySetError> {
+    ) -> Result<RecipeChanges, ReadySetError> {
         // I hate this, but there's no way around for now, as migrations
         // are super entangled with the recipe and the graph.
         let mut new = self.recipe.clone();
@@ -1422,32 +1451,34 @@ impl DfState {
             })
             .await;
 
-        match &r {
-            Ok(_) => self.recipe = new,
+        match r {
+            Ok(res) => {
+                self.recipe = new;
+                Ok(res)
+            }
             Err(e) => {
                 debug!(
                     error = %e,
                     "failed to apply recipe. Will retry periodically up to max_processing_minutes."
                 );
+                Err(e)
             }
         }
-
-        r
     }
 
     pub(super) async fn extend_recipe(
         &mut self,
         recipe_spec: ExtendRecipeSpec<'_>,
         dry_run: bool,
-    ) -> Result<(), ReadySetError> {
+    ) -> Result<RecipeChanges, ReadySetError> {
         // Drop recipes from the replicator that we have already processed.
         if let (Some(new), Some(current)) = (
             &recipe_spec.replication_offset,
             &self.schema_replication_offset,
         ) {
             if current >= new {
-                // Return an empty ActivationResult as this is a no-op.
-                return Ok(());
+                // no-op
+                return Ok(Default::default());
             }
         }
 
@@ -1488,7 +1519,7 @@ impl DfState {
         Ok(1)
     }
 
-    pub(super) async fn remove_all_queries(&mut self) -> ReadySetResult<()> {
+    pub(super) async fn remove_all_queries(&mut self) -> ReadySetResult<RecipeChanges> {
         let changes = self
             .recipe
             .cache_names()

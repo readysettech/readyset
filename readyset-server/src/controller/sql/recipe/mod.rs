@@ -16,6 +16,7 @@ use vec1::Vec1;
 use super::registry::{MatchedCache, RecipeExpr};
 use super::BaseSchema;
 use crate::controller::sql::SqlIncorporator;
+use crate::controller::state::RecipeChanges;
 use crate::controller::Migration;
 
 pub(crate) type QueryID = u128;
@@ -165,7 +166,7 @@ impl Recipe {
         &mut self,
         mig: &mut Migration<'_>,
         changelist: ChangeList,
-    ) -> ReadySetResult<()> {
+    ) -> ReadySetResult<RecipeChanges> {
         self.inc.apply_changelist(changelist, mig)
     }
 

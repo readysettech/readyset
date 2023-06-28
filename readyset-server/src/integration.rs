@@ -31,7 +31,9 @@ use nom_sql::{
     parse_create_table, parse_create_view, parse_query, parse_select_statement, OrderType,
     Relation, SqlQuery,
 };
-use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
+use readyset_client::consensus::{
+    Authority, AuthorityControl, LocalAuthority, LocalAuthorityStore,
+};
 use readyset_client::consistency::Timestamp;
 use readyset_client::internal::LocalNodeIndex;
 use readyset_client::recipe::changelist::{Change, ChangeList, CreateCache};
@@ -920,6 +922,41 @@ async fn it_works_with_sql_recipe() {
         .into_vec();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0][0], 2.into());
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn caches_go_in_authority_list() {
+    let authority = Arc::new(Authority::from(LocalAuthority::new_with_store(Arc::new(
+        LocalAuthorityStore::new(),
+    ))));
+    let (mut g, shutdown_tx) = build_custom(
+        "caches_go_in_authority_list",
+        None,
+        true,
+        authority.clone(),
+        false,
+        None,
+    )
+    .await;
+
+    g.extend_recipe(
+        ChangeList::from_str(
+            "CREATE TABLE t (x int);
+             CREATE CACHE q FROM SELECT x FROM t;",
+            Dialect::DEFAULT_MYSQL,
+        )
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+
+    let stmts = authority.create_cache_statements().await.unwrap();
+    assert_eq!(
+        stmts,
+        vec![r#"CREATE CACHE CONCURRENTLY "q" FROM SELECT "x" FROM "t""#]
+    );
 
     shutdown_tx.shutdown().await;
 }
