@@ -96,7 +96,7 @@ impl Relation {
 }
 
 /// An expression for a table in a query
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Arbitrary)]
 pub enum TableExprInner {
     Table(Relation),
     Subquery(Box<SelectStatement>),
@@ -128,7 +128,7 @@ impl TableExprInner {
 }
 
 /// An expression for a table in the `FROM` clause of a query, with optional alias
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Arbitrary)]
 pub struct TableExpr {
     pub inner: TableExprInner,
     pub alias: Option<SqlIdentifier>,

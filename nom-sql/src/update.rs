@@ -7,6 +7,7 @@ use nom::sequence::tuple;
 use nom_locate::LocatedSpan;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
+use test_strategy::Arbitrary;
 
 use crate::column::Column;
 use crate::common::{assignment_expr_list, statement_terminator};
@@ -15,7 +16,7 @@ use crate::table::{relation, Relation};
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Dialect, Expr, NomSqlResult};
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct UpdateStatement {
     pub table: Relation,
     pub fields: Vec<(Column, Expr)>,

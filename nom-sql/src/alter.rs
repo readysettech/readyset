@@ -14,6 +14,7 @@ use nom::sequence::{preceded, terminated};
 use nom_locate::LocatedSpan;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
+use test_strategy::Arbitrary;
 
 use crate::column::{column_specification, ColumnSpecification};
 use crate::common::{
@@ -26,7 +27,7 @@ use crate::table::{relation, Relation};
 use crate::whitespace::whitespace1;
 use crate::{Dialect, Literal, NomSqlResult, SqlIdentifier};
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum AlterColumnOperation {
     SetColumnDefault(Literal),
     DropColumnDefault,
@@ -43,7 +44,7 @@ impl AlterColumnOperation {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum DropBehavior {
     Cascade,
     Restrict,
@@ -58,7 +59,7 @@ impl fmt::Display for DropBehavior {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum ReplicaIdentity {
     Default,
     UsingIndex { index_name: SqlIdentifier },
@@ -77,7 +78,7 @@ impl Display for ReplicaIdentity {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum AlterTableDefinition {
     AddColumn(ColumnSpecification),
     AddKey(TableKey),
@@ -162,7 +163,7 @@ impl AlterTableDefinition {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct AlterTableStatement {
     pub table: Relation,
     /// The result of parsing the alter table definitions.

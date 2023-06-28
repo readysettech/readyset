@@ -6,6 +6,7 @@ use nom::sequence::{delimited, tuple};
 use nom_locate::LocatedSpan;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
+use test_strategy::Arbitrary;
 
 use crate::common::statement_terminator;
 use crate::select::where_clause;
@@ -13,7 +14,7 @@ use crate::table::{relation, Relation};
 use crate::whitespace::whitespace1;
 use crate::{Dialect, Expr, NomSqlResult};
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct DeleteStatement {
     pub table: Relation,
     pub where_clause: Option<Expr>,

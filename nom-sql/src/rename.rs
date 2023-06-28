@@ -7,13 +7,14 @@ use nom::multi::separated_list1;
 use nom_locate::LocatedSpan;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
+use test_strategy::Arbitrary;
 
 use crate::common::ws_sep_comma;
 use crate::table::{relation, Relation};
 use crate::whitespace::whitespace1;
 use crate::{Dialect, NomSqlResult};
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct RenameTableStatement {
     pub ops: Vec<RenameTableOperation>,
 }
@@ -43,7 +44,7 @@ pub fn rename_table(
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct RenameTableOperation {
     pub from: Relation,
     pub to: Relation,

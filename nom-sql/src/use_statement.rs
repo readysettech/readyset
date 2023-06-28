@@ -3,11 +3,12 @@ use std::fmt;
 use nom::bytes::complete::tag_no_case;
 use nom_locate::LocatedSpan;
 use serde::{Deserialize, Serialize};
+use test_strategy::Arbitrary;
 
 use crate::whitespace::whitespace1;
 use crate::{Dialect, NomSqlResult, SqlIdentifier};
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct UseStatement {
     pub database: SqlIdentifier,
 }
