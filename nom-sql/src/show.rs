@@ -7,6 +7,7 @@ use nom::sequence::{preceded, tuple};
 use nom_locate::LocatedSpan;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
+use test_strategy::Arbitrary;
 
 use crate::expression::expression;
 use crate::whitespace::{whitespace0, whitespace1};
@@ -14,7 +15,7 @@ use crate::{Dialect, Expr, NomSqlResult};
 
 pub type QueryID = String;
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum ShowStatement {
     Events,
     Tables(Tables),
@@ -150,7 +151,7 @@ pub fn show(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct Tables {
     pub full: bool,
     pub from_db: Option<String>,
@@ -202,7 +203,7 @@ fn show_tables(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum FilterPredicate {
     Like(String),
     Where(Expr),

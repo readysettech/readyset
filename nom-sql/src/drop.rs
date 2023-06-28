@@ -9,6 +9,7 @@ use nom::sequence::preceded;
 use nom_locate::LocatedSpan;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
+use test_strategy::Arbitrary;
 
 use crate::common::{statement_terminator, ws_sep_comma};
 use crate::table::{relation, table_list, Relation};
@@ -33,7 +34,7 @@ fn restrict_cascade(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], (bool, bool)> 
     Ok((i, (restrict.is_some(), cascade.is_some())))
 }
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct DropTableStatement {
     pub tables: Vec<Relation>,
     pub if_exists: bool,
@@ -77,7 +78,7 @@ pub fn drop_table(
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct DropCacheStatement {
     pub name: Relation,
 }
@@ -102,7 +103,7 @@ pub fn drop_cached_query(
     }
 }
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct DropViewStatement {
     pub views: Vec<Relation>,
     pub if_exists: bool,
@@ -143,7 +144,7 @@ pub fn drop_view(
     }
 }
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct DropAllCachesStatement {}
 
 impl Display for DropAllCachesStatement {
