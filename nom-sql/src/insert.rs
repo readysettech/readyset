@@ -8,6 +8,7 @@ use nom::sequence::{delimited, preceded, terminated, tuple};
 use nom_locate::LocatedSpan;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
+use test_strategy::Arbitrary;
 
 use crate::column::Column;
 use crate::common::{
@@ -17,7 +18,7 @@ use crate::table::{relation, Relation};
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Dialect, Expr, NomSqlResult};
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct InsertStatement {
     pub table: Relation,
     pub fields: Option<Vec<Column>>,

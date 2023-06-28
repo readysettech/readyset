@@ -6,6 +6,7 @@ use nom_locate::LocatedSpan;
 use readyset_util::fmt::fmt_with;
 use readyset_util::redacted::Sensitive;
 use serde::{Deserialize, Serialize};
+use test_strategy::Arbitrary;
 
 use crate::alter::{alter_table_statement, AlterTableStatement};
 use crate::comment::{comment, CommentStatement};
@@ -37,7 +38,7 @@ use crate::use_statement::{use_statement, UseStatement};
 use crate::whitespace::whitespace0;
 use crate::{Dialect, DropAllCachesStatement, Expr, NomSqlResult, SqlType, TableKey};
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 #[allow(clippy::large_enum_variant)]
 pub enum SqlQuery {
     CreateTable(CreateTableStatement),

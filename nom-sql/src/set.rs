@@ -19,7 +19,7 @@ use crate::literal::literal;
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Dialect, Expr, Literal, NomSqlError, NomSqlResult, SqlIdentifier};
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum SetStatement {
     Variable(SetVariables),
     Names(SetNames),
@@ -48,7 +48,7 @@ impl SetStatement {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum PostgresParameterScope {
     Session,
     Local,
@@ -70,7 +70,7 @@ fn postgres_parameter_scope(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Postgr
     ))(i)
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum SetPostgresParameterValue {
     Default,
     Value(PostgresParameterValue),
@@ -97,7 +97,7 @@ fn set_postgres_parameter_value(
 }
 
 /// A *single* value which can be used as the value for a postgres parameter
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum PostgresParameterValueInner {
     Identifier(SqlIdentifier),
     Literal(Literal),
@@ -114,7 +114,7 @@ impl PostgresParameterValueInner {
 
 /// The value for a postgres parameter, which can either be an identifier, a literal, or a list of
 /// those
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum PostgresParameterValue {
     Single(PostgresParameterValueInner),
     List(Vec<PostgresParameterValueInner>),
@@ -240,7 +240,7 @@ pub struct Variable {
     pub name: SqlIdentifier,
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct SetVariables {
     /// A list of variables and their assigned values
     pub variables: Vec<(Variable, Expr)>,
@@ -296,7 +296,7 @@ impl SetVariables {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct SetNames {
     pub charset: String,
     pub collation: Option<String>,
@@ -312,7 +312,7 @@ impl Display for SetNames {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct SetPostgresParameter {
     pub scope: Option<PostgresParameterScope>,
     pub name: SqlIdentifier,

@@ -83,7 +83,7 @@ impl Column {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum ColumnConstraint {
     Null,
     NotNull,
@@ -120,7 +120,7 @@ impl ColumnConstraint {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct ColumnSpecification {
     pub column: Column,
     pub sql_type: SqlType,
