@@ -7,7 +7,9 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
 
 use cidr::IpInet;
+use lazy_static::lazy_static;
 use readyset_errors::{ReadySetError, ReadySetResult};
+use regex::Regex;
 
 use crate::{Array, Collation, DfType, DfValue};
 
@@ -349,7 +351,16 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
     where
         I: FromStr<Err = ParseIntError> + Into<DfValue>,
     {
-        match str.trim().parse::<I>() {
+        lazy_static! {
+            static ref NUMERIC_PREFIX: Regex = Regex::new(r"^[[:space:]]*([+-]?\d+).*$").unwrap();
+        }
+
+        let numeric_prefix = NUMERIC_PREFIX
+            .captures(str)
+            .map(|caps| caps.get(1).expect("Regex has one capture group").as_str())
+            .unwrap_or(str);
+
+        match numeric_prefix.parse::<I>() {
             Ok(i) => Ok(i.into()),
             Err(e)
                 if *e.kind() == IntErrorKind::PosOverflow
@@ -833,6 +844,30 @@ mod tests {
                 .unwrap(),
             DfValue::UnsignedInt(0)
         );
+    }
+
+    #[test]
+    fn coerce_integer_prefix_text_to_integer() {
+        assert_eq!(
+            DfValue::from("5aaaa")
+                .coerce_to(&DfType::Int, &DfType::DEFAULT_TEXT)
+                .unwrap(),
+            DfValue::UnsignedInt(5),
+        );
+
+        assert_eq!(
+            DfValue::from("+5aaaa")
+                .coerce_to(&DfType::Int, &DfType::DEFAULT_TEXT)
+                .unwrap(),
+            DfValue::UnsignedInt(5),
+        );
+
+        assert_eq!(
+            DfValue::from("-5-aaaa")
+                .coerce_to(&DfType::Int, &DfType::DEFAULT_TEXT)
+                .unwrap(),
+            DfValue::Int(-5),
+        )
     }
 
     #[proptest]

@@ -12,8 +12,10 @@ bytes = "1.0.1"
 chrono = { version = "0.4.19", features = ["serde"] }
 eui48 = { workspace = true }
 itertools = "0.10"
+lazy_static = "1.4"
 mysql_common = { version = "0.29.2", features = ["chrono"] }
 proptest = "1.0.0"
+regex = "1.8"
 rust_decimal = { version = "1.26", features = ["db-tokio-postgres", "serde-str"] }
 serde = { version = "1.0.8", features = ["rc", "derive"] }
 serde_bytes = "0.11"
