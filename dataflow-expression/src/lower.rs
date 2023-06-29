@@ -439,6 +439,66 @@ impl BuiltinFunction {
     }
 }
 
+/// <https://dev.mysql.com/doc/refman/8.0/en/type-conversion.html>
+fn mysql_type_conversion(left_ty: &DfType, right_ty: &DfType) -> DfType {
+    match (left_ty, right_ty) {
+        //  If both arguments in a comparison operation are strings, they are compared as strings.
+        (DfType::Text(_), DfType::Text(_)) => DfType::DEFAULT_TEXT,
+
+        // If both arguments are integers, they are compared as integers.
+        (
+            DfType::TinyInt
+            | DfType::UnsignedTinyInt
+            | DfType::SmallInt
+            | DfType::UnsignedSmallInt
+            | DfType::Int
+            | DfType::UnsignedInt
+            | DfType::BigInt
+            | DfType::UnsignedBigInt,
+            DfType::TinyInt
+            | DfType::UnsignedTinyInt
+            | DfType::SmallInt
+            | DfType::UnsignedSmallInt
+            | DfType::Int
+            | DfType::UnsignedInt
+            | DfType::BigInt
+            | DfType::UnsignedBigInt,
+        ) => DfType::BigInt,
+
+        // > Hexadecimal values are treated as binary strings if not compared to a number.
+        // TODO
+
+        // > If one of the arguments is a TIMESTAMP or DATETIME column and the other argument is a
+        // > constant, the constant is converted to a timestamp before the comparison is performed.
+        // > This is done to be more ODBC-friendly. This is not done for the arguments to IN()
+        // TODO
+
+        // > If one of the arguments is a decimal value, comparison depends on the other argument.
+        // > The arguments are compared as decimal values if the other argument is a decimal or
+        // > integer value...
+        (
+            decimal @ DfType::Numeric { .. },
+            DfType::Numeric { .. }
+            | DfType::TinyInt
+            | DfType::UnsignedTinyInt
+            | DfType::SmallInt
+            | DfType::UnsignedSmallInt
+            | DfType::Int
+            | DfType::UnsignedInt
+            | DfType::BigInt
+            | DfType::UnsignedBigInt,
+        ) => decimal.clone(),
+
+        // > or as floating-point values if the other argument is a floating-point value.
+        (DfType::Numeric { .. }, DfType::Float | DfType::Double)
+        | (DfType::Float | DfType::Double, DfType::Numeric { .. }) => DfType::Double,
+
+        // > In all other cases, the arguments are compared as floating-point (double-precision)
+        // > numbers.
+        _ => DfType::Double,
+    }
+}
+
 impl BinaryOperator {
     /// Convert a [`nom_sql::BinaryOperator`] to a pair of `BinaryOperator` and a boolean indicating
     /// whether the result should be negated, within the context of a SQL [`Dialect`].
@@ -512,6 +572,7 @@ impl BinaryOperator {
         &self,
         left_type: &DfType,
         right_type: &DfType,
+        dialect: Dialect,
     ) -> ReadySetResult<(Option<DfType>, Option<DfType>)> {
         enum Side {
             Left,
@@ -542,14 +603,26 @@ impl BinaryOperator {
         use BinaryOperator::*;
         match self {
             Add | Subtract | Multiply | Divide | And | Or | Greater | GreaterOrEqual | Less
-            | LessOrEqual | Is => Ok((None, None)),
+            | LessOrEqual | Is => match dialect.engine() {
+                SqlEngine::PostgreSQL => Ok((None, None)),
+                SqlEngine::MySQL => {
+                    let ty = mysql_type_conversion(left_type, right_type);
+                    Ok((Some(ty.clone()), Some(ty)))
+                }
+            },
 
             Like | ILike => Ok((
                 coerce_to_text_type(left_type),
                 coerce_to_text_type(right_type),
             )),
 
-            Equal => Ok((None, Some(left_type.clone()))),
+            Equal => match dialect.engine() {
+                SqlEngine::PostgreSQL => Ok((None, Some(left_type.clone()))),
+                SqlEngine::MySQL => {
+                    let ty = mysql_type_conversion(left_type, right_type);
+                    Ok((Some(ty.clone()), Some(ty)))
+                }
+            },
 
             JsonExists => {
                 if left_type.is_known() && !left_type.is_jsonb() {
@@ -722,7 +795,7 @@ impl Expr {
 
                 let ty = op.output_type(left.ty(), right.ty())?;
                 let (left_coerce_target, right_coerce_target) =
-                    op.argument_type_coercions(left.ty(), right.ty())?;
+                    op.argument_type_coercions(left.ty(), right.ty(), dialect)?;
 
                 if let Some(ty) = left_coerce_target {
                     left = Box::new(Self::Cast {
@@ -983,7 +1056,7 @@ impl Expr {
         }
 
         let (left_coerce_target, right_coerce_target) =
-            op.argument_type_coercions(left.ty(), right_member_ty)?;
+            op.argument_type_coercions(left.ty(), right_member_ty, dialect)?;
 
         if let Some(ty) = left_coerce_target {
             left = Box::new(Self::Cast {
