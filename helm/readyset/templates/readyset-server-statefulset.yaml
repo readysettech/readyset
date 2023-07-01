@@ -87,7 +87,7 @@ spec:
                 curl http://127.0.0.1:8500/v1/health/node/$(hostname) \
                 2>/dev/null | grep -E '".+"'
         - name: readyset-server
-          image: {{ .Values.readyset.server.image.repository | default "public.ecr.aws/readyset" }}/readyset-server:{{ .Values.readyset.server.image.tag | default "latest"}}
+          image: {{ default (include "readyset.server.imageDefault" .) .Values.readyset.server.imageOverride }}
           env:
             # ReadySet Deployment Name (Unique per Consul Cluster)
             - name: DEPLOYMENT

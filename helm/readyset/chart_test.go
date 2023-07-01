@@ -17,7 +17,14 @@ import (
 	"github.com/gruntwork-io/terratest/modules/random"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"helm.sh/helm/v3/pkg/chart"
+	"helm.sh/helm/v3/pkg/chart/loader"
 )
+
+func loadChartYaml(path string) (*chart.Chart, error) {
+	chart, err := loader.Load(".")
+	return chart, err
+}
 
 func cliValues() map[string]string {
 	// provide the ability to define a default and allow for overrides
@@ -30,11 +37,12 @@ func cliValues() map[string]string {
 
 func defaultOptions(namespace string, values map[string]string) *helm.Options {
 	return &helm.Options{
-		ValuesFiles:       []string{"values.yaml"},
-		SetValues:         values,
-		KubectlOptions:    k8s.NewKubectlOptions("", "", namespace),
-		Version:           "readyset-0.8.0",
-		Logger:            logger.Discard,
+		ValuesFiles:    []string{"values.yaml"},
+		SetValues:      values,
+		KubectlOptions: k8s.NewKubectlOptions("", "", namespace),
+		Version:        "readyset-0.9.0",
+		Logger:         logger.Discard,
+		// ExtraArgs:         map[string][]string{"repoAdd": []string{"--repository-config", "testdata/test-repositories.yaml"}},
 		BuildDependencies: true,
 	}
 }
@@ -43,8 +51,16 @@ func generateNamespaceName() string {
 	return "readyset-" + strings.ToLower(random.UniqueId())
 }
 
+func TestChart(t *testing.T) {
+	_, err := loadChartYaml(".")
+	require.NoError(t, err)
+}
+
 func TestAdapterDeploymentDefault(t *testing.T) {
 	assert := assert.New(t)
+
+	chart, err := loadChartYaml(".")
+	require.NoError(t, err)
 
 	namespace := generateNamespaceName()
 	chartValues := cliValues()
@@ -54,17 +70,22 @@ func TestAdapterDeploymentDefault(t *testing.T) {
 	helmChartPath, err := filepath.Abs(".")
 	require.NoError(t, err)
 
+	helm.AddRepo(t, options, "readyset", "https://helm.releases.readyset.io")
+	helm.AddRepo(t, options, "hashicorp", "https://helm.releases.hashicorp.com")
+
 	deploymentName := "readyset-adapter"
 
 	var adapterDeployment appsv1.Deployment
 
-	renderedDeploymentTemplate := helm.RenderTemplate(t, options, helmChartPath, "readyset", []string{"templates/readyset-adapter-deployment.yaml"})
+	renderedDeploymentTemplate, err := helm.RenderTemplateE(t, options, helmChartPath, "readyset", []string{"templates/readyset-adapter-deployment.yaml"})
+	require.NoError(t, err)
 
 	helm.UnmarshalK8SYaml(t, renderedDeploymentTemplate, &adapterDeployment)
 
 	assert.Equal(deploymentName, adapterDeployment.Name, "Deployments should be equal")
 	assert.Equal(namespace, adapterDeployment.ObjectMeta.Namespace, "Namespaces should be equal")
 	assert.Equal(options.Version, adapterDeployment.ObjectMeta.Labels["helm.sh/chart"], "Versions should be equal")
+	assert.Equal(chart.Metadata.AppVersion, adapterDeployment.ObjectMeta.Labels["app.kubernetes.io/version"], "Versions should be equal")
 	// Containers[1].Env[4] in this case is the container "readyset-adapter" and the env var "QUERY_CACHING"
 	assert.Equal("explicit", adapterDeployment.Spec.Template.Spec.Containers[1].Env[4].Value, "Query caching mode should equal 'explicit'")
 }
@@ -76,18 +97,22 @@ func TestAdapterDeploymentCachingModeInRequestPath(t *testing.T) {
 	chartValues := cliValues()
 
 	// Set values as though they are passed via the CLI
-	chartValues["readyset.query_caching_mode"] = "in-request-path"
+	chartValues["readyset.queryCachingMode"] = "in-request-path"
 
 	options := defaultOptions(namespace, chartValues)
 
 	helmChartPath, err := filepath.Abs(".")
 	require.NoError(t, err)
 
+	helm.AddRepo(t, options, "readyset", "https://helm.releases.readyset.io")
+	helm.AddRepo(t, options, "hashicorp", "https://helm.releases.hashicorp.com")
+
 	deploymentName := "readyset-adapter"
 
 	var adapterDeployment appsv1.Deployment
 
-	renderedDeploymentTemplate := helm.RenderTemplate(t, options, helmChartPath, "readyset", []string{"templates/readyset-adapter-deployment.yaml"})
+	renderedDeploymentTemplate, err := helm.RenderTemplateE(t, options, helmChartPath, "readyset", []string{"templates/readyset-adapter-deployment.yaml"})
+	require.NoError(t, err)
 
 	helm.UnmarshalK8SYaml(t, renderedDeploymentTemplate, &adapterDeployment)
 
@@ -100,7 +125,7 @@ func TestAdapterDeploymentCachingModeInRequestPath(t *testing.T) {
 	adapterContainer := adapterDeployment.Spec.Template.Spec.Containers[1]
 
 	// Containers[1].Env[4] in this case is the container "readyset-adapter" and the env var "QUERY_CACHING"
-	assert.Equal(options.SetValues["readyset.query_caching_mode"], adapterContainer.Env[4].Value, "Query caching mode should equal 'in-request-path'")
+	assert.Equal(options.SetValues["readyset.queryCachingMode"], adapterContainer.Env[4].Value, "Query caching mode should equal 'in-request-path'")
 }
 
 func TestServerStatefulSetDefault(t *testing.T) {
@@ -114,11 +139,15 @@ func TestServerStatefulSetDefault(t *testing.T) {
 	helmChartPath, err := filepath.Abs(".")
 	require.NoError(t, err)
 
+	helm.AddRepo(t, options, "readyset", "https://helm.releases.readyset.io")
+	helm.AddRepo(t, options, "hashicorp", "https://helm.releases.hashicorp.com")
+
 	deploymentName := "readyset-server"
 
 	var serverStatefulSet appsv1.StatefulSet
 
-	renderedDeploymentTemplate := helm.RenderTemplate(t, options, helmChartPath, "readyset", []string{"templates/readyset-server-statefulset.yaml"})
+	renderedDeploymentTemplate, err := helm.RenderTemplateE(t, options, helmChartPath, "readyset", []string{"templates/readyset-server-statefulset.yaml"})
+	require.NoError(t, err)
 
 	helm.UnmarshalK8SYaml(t, renderedDeploymentTemplate, &serverStatefulSet)
 
@@ -157,11 +186,15 @@ func TestServerStatefulSetWithReplicationTables(t *testing.T) {
 	helmChartPath, err := filepath.Abs(".")
 	require.NoError(t, err)
 
+	helm.AddRepo(t, options, "readyset", "https://helm.releases.readyset.io")
+	helm.AddRepo(t, options, "hashicorp", "https://helm.releases.hashicorp.com")
+
 	deploymentName := "readyset-server"
 
 	var serverStatefulSet appsv1.StatefulSet
 
-	renderedDeploymentTemplate := helm.RenderTemplate(t, options, helmChartPath, "readyset", []string{"templates/readyset-server-statefulset.yaml"})
+	renderedDeploymentTemplate, err := helm.RenderTemplateE(t, options, helmChartPath, "readyset", []string{"templates/readyset-server-statefulset.yaml"})
+	require.NoError(t, err)
 
 	helm.UnmarshalK8SYaml(t, renderedDeploymentTemplate, &serverStatefulSet)
 
@@ -181,7 +214,11 @@ func TestAdapterRoles(t *testing.T) {
 	helmChartPath, err := filepath.Abs(".")
 	require.NoError(t, err)
 
+	helm.AddRepo(t, options, "readyset", "https://helm.releases.readyset.io")
+	helm.AddRepo(t, options, "hashicorp", "https://helm.releases.hashicorp.com")
+
 	var adapterRole rbacv1.Role
-	renderedRbacTemplate := helm.RenderTemplate(t, options, helmChartPath, "readyset", []string{"templates/readyset-adapter-role.yaml"})
+	renderedRbacTemplate, err := helm.RenderTemplateE(t, options, helmChartPath, "readyset", []string{"templates/readyset-adapter-role.yaml"})
+	require.NoError(t, err)
 	helm.UnmarshalK8SYaml(t, renderedRbacTemplate, &adapterRole)
 }

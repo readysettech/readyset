@@ -27,7 +27,7 @@ filegroup(
 )
 
 go_test(
-    name = "chart_render_test",
+    name = "chart_render_test_test",
     size = "small",
     srcs = ["chart_test.go"],
     data = [
@@ -36,6 +36,7 @@ go_test(
         "//templates:chart_helpers",
         "//templates:chart_notes",
         "//templates:chart_templates",
+        "//testdata",
     ],
     deps = [
         "@com_github_gruntwork_io_terratest//modules/helm",
@@ -46,5 +47,7 @@ go_test(
         "@com_github_stretchr_testify//require",
         "@io_k8s_api//apps/v1:apps",
         "@io_k8s_api//rbac/v1:rbac",
+        "@sh_helm_helm_v3//pkg/chart",
+        "@sh_helm_helm_v3//pkg/chart/loader",
     ],
 )

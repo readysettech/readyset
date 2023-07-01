@@ -1,65 +1,112 @@
-# Default values for readyset.
+# Default values for the readyset adapter and server, and consul
 # This is a YAML-formatted file.
 
 # Disclaimer: Removing any of the following items from the list
 # will likely break things in unspectacular ways.
 readyset:
-  # Deployment must be unique per consul cluster
+
+  # readyset.databaseUri -- (required)
+  databaseUri:
+
+  # readyset.deployment -- (required) A name that uniquely identifies the readyset-deployment
   deployment:
-  # query_caching_mode tells ReadySet how it should cache queries
-  # Accepted values: explicit, async, in-request-path
-  # Defaults to explicit mode
-  query_caching_mode: explicit
+
+  # readyset.queryCachingMode -- (optional) tells ReadySet how it should cache queries
+  # Accepted values: explicit (default), async, in-request-path
+  queryCachingMode: explicit
+
+  # readyset.adapter -- all configurable options for the readyset-adapter
   adapter:
-    query_log_ad_hoc: true
-    statement_logging: false
-    ingress:
-      enabled: true
+
+    # readyset.adapter.queryLogAdHoc -- (optional) Exposes queries to the prometheus exporter; Warning: increased probablility for high-cardinality series
+    queryLogAdHoc: true
+
+    # readyset.adapter.statementLogging -- (optional) Writes all statements to the adapter log file
+    statementLogging: false
+
+    # readyset.adapter.ingressEnabled -- (optional) Whether to enable ingress as opposed to a LoadBalancer; Currently a noop
+    ingressEnabled: true
+
+    # readyset.adapter.httpPort -- (optional) Port number the on which the adapter listens, serving a prometheus /metrics endpoint via HTTP
     httpPort: 6034
-    image:
-      repository: # "public.ecr.aws/readyset" # No trailing slash
-      tag: "latest"
-    port: 3306 # Or 5432
+
+    # readyset.adapter.imageRepository -- (optional) Specify the container repository URL without a trailing slash; Default: "public.ecr.aws/readyset"
+    imageRepository: # "public.ecr.aws/readyset" # No trailing slash
+
+    # readyset.adapter.imageTag -- (optional) Specify the readyset-adapter tag; Defaults to the current monthly release
+    imageTag:
+
+    # readyset.adapter.port -- (optional) Port the application, or other SQL clients will connect to; Defaults to MySQL's port, 3306.
+    port: 3306 # Or 5432 for PostgreSQL
+
+    # readyset.adapter.resources -- (optional) See https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
     resources:
       requests:
         storage: "50Gi"
-        cpu: "1000m"
+        cpu: "500m"
         memory: "2Gi"
-    type: "mysql" # Or 'postgresql'
+      limits:
+        storage: "1Ti"
+        cpu: "500m"
+        memory: "2Gi"
+
+  # readyset.server -- all configurable options for the readyset-server
   server:
-    # replication_tables - comma separated list of schema, table pairs delimited by a '.'
-    # To only replicate/snapshot all tables in the public schema, and only mytable in the myschema schema, you would pass
-    # "public.*,myschema.mytable"
-    # replication_tables: public.foo
-    # statement_logging
-    statement_logging: false
+    # readyset.server.replicationTables -- (optional) Comma separated list of schema, table pairs delimited by a '.'
+    # Example: To only replicate/snapshot all tables in the public schema, and only
+    # mytable in the myschema schema, you would pass "public.*,myschema.mytable"
+    # replicationTables:
+
+    # readyset.server.statementLogging -- (optional) Writes all statements to the adapter log file
+    statementLogging: false
+
+    # readyset.server.httpPort -- (optional) Port number the on which the adapter listens, serving a prometheus /metrics endpoint via HTTP
     httpPort: 6033
+
+    # readyset.server.resources -- See https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
     resources:
       requests:
-        # These values are the minimal for a successful deployment to GKE
-        # TODO: provide guidance on how to calculate optimal values
         storage: "100Gi"
         cpu: "1000m"
         memory: "4Gi"
-    image:
-      repository: # "public.ecr.aws/readyset" # No trailing slash
-      tag: "latest"
+      limits:
+        storage: "1Ti"
+        cpu: "1000m"
+        memory: "4Gi"
 
+    # readyset.server.imageRepository -- (optional) Specify the container repository URL without a trailing slash; Default: "public.ecr.aws/readyset"
+    # imageRepository: # "public.ecr.aws/readyset" # No trailing slash
+
+    # readyset.server.imageTag -- (optional) Specify the readyset-server tag; Defaults to the current monthly release
+    imageTag:
+
+# kubernetes -- See https://kubernetes.io/docs/
 kubernetes:
+  # kubernetes.storageClass -- (optional) Specify the kubernetes storage class
   storageClass: # Leave empty to use default provisioner
 
 # This configures the underlying consul service with 3 replicas
 # See: https://developer.hashicorp.com/consul/docs/k8s/helm for more information
 # on how to configure consul.
 consul:
+
+  # consul.enabled -- Whether to enable starting/running a consul cluster within this Kubernetes cluster
   enabled: true
+
+  # consul.server -- Options for the consul server
   server:
+
+    # consul.server.replicas -- Number of replicas to run
     replicas: 3
+
+    # consul.server.bootstrapExpect -- Number of replicas expected to be available to reach quorum
     bootstrapExpect: 3
+
+    # consul.server.resources -- See https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
     resources:
       requests:
         memory: "1Gi"
-        cpu: "1000m"
+        cpu: "500m"
       limits:
         memory: "1Gi"
-        cpu: "1000m"
+        cpu: "500m"

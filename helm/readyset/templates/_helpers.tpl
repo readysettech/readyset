@@ -19,6 +19,40 @@ For more information see: https://stackoverflow.com/questions/50412837/kubernete
 {{- end -}}
 
 {{/*
+readyset-adapter image default
+*/}}
+{{- define "readyset.adapter.imageDefault" -}}
+{{- if .Values.readyset -}}
+{{- if .Values.readyset.adapter -}}
+{{- if .Values.readyset.adapter.imageRepository }}
+{{- if .Values.readyset.server.imageTag }}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $imageRepository := default "public.ecr.aws/readyset" .Values.readyset.adapter.imageRepository -}}
+{{- $imageTag := default .Chart.AppVersion .Values.readyset.adapter.imageTag -}}
+{{- printf "%s/readyset:%s" (lower $imageRepository) (lower $imageTag) -}}
+{{- end -}}
+
+{{/*
+readyset-server image default
+*/}}
+{{- define "readyset.server.imageDefault" -}}
+{{- if .Values.readyset -}}
+{{- if .Values.readyset.server -}}
+{{- if .Values.readyset.server.imageRepository }}
+{{- if .Values.readyset.server.imageTag }}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $imageRepository := default "public.ecr.aws/readyset" .Values.readyset.server.imageRepository -}}
+{{- $imageTag := default .Chart.AppVersion .Values.readyset.server.imageTag -}}
+{{- printf "%s/readyset-server:%s" (lower $imageRepository) (lower $imageTag) -}}
+{{- end -}}
+
+{{/*
 Create chart name and version as used by the chart label.
 */}}
 {{- define "readyset.chart" -}}
@@ -39,7 +73,7 @@ app.kubernetes.io/managed-by: {{ .Release.Service | quote }}
 {{- end }}
 
 {{/*
-Readyset authority address configuration logic.
+Logic for adding selector labels based on adapter or server
 */}}
 {{- define "readyset.selectorLabels" -}}
 {{- if contains "readyset-adapter" .Template.Name -}}
@@ -50,47 +84,47 @@ app.kubernetes.io/component: server
 {{- end }}
 
 {{/*
-Default HTTP port for readyset-adapter
+readyset.adapter.httpPort -- Port for readyset-adapter
 */}}
 {{- define "readyset.adapter.httpPort" -}}
 6034
 {{- end }}
 
 {{/*
-Default HTTP port for readyset-server
+readyset.server.httpPort -- Port for readyset-server
 */}}
 {{- define "readyset.server.httpPort" -}}
 6033
 {{- end }}
 
 {{/*
-MySQL port number for readyset-adapter
+readyset.mysqlPort -- Port number for readyset-adapter
 */}}
 {{- define "readyset.mysqlPort" -}}
 3306
 {{- end }}
 
 {{/*
-PostgreSQL port number for readyset-adapter
+readyset.postgresqlPort -- Port number for readyset-adapter
 */}}
 {{- define "readyset.postgresqlPort" -}}
 5432
 {{- end }}
 
 {{/*
-Default storageClass is null, to default to the cluster's default provisioner. Do set this to what works best for your workload.
+readyset.defaultStorageClass is null, to default to the cluster's default provisioner. Do set this to what works best for your workload.
 */}}
 {{- define "readyset.defaultStorageClass" -}}
 null
 {{- end }}
 
 {{/*
-Define the database type we're connecting to
+readyset.queryCachingMode -- Ensure the value is one of the three currently accepted options
 */}}
-{{- define "readyset.query_caching_mode" -}}
-{{- $mode := mustRegexFind "async|explicit|in-request-path" .Values.readyset.query_caching_mode }}
+{{- define "readyset.queryCachingMode" -}}
+{{- $mode := mustRegexFind "async|explicit|in-request-path" .Values.readyset.queryCachingMode }}
 {{- if not $mode }}
-{{ fail "Must pass either 'async', 'explicit', 'in-request-path' to readyset.query_caching_mode" }}
+{{ fail "Must pass either 'async', 'explicit', 'in-request-path' to readyset.queryCachingMode" }}
 {{- else -}}
 {{- printf "%s" $mode -}}
 {{- end -}}

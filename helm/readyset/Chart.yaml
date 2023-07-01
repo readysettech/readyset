@@ -1,19 +1,57 @@
 apiVersion: v2
 name: readyset
 description: Official ReadySet Chart
-annotations:
-  category: Infrastructure
-type: application
-icon: https://readyset.io/favicon.png
 
 # Versions are expected to follow Semantic Versioning (https://semver.org/)
-version: 0.8.0
+version: 0.9.0
+
+# kubeVersion -- We'll aim to follow the same support Kubernetes offers with regard to supported versions; Currently this is a -2 minor version delta
+kubeVersion: ">=v1.25.0-0"
+
+# annoations -- Extra metadata about the chart
+annotations:
+  artifacthub.io/category: database
+  artifacthub.io/prerelease: "false"
+
+# type -- We are an application chart :)
+type: application
+
+icon: https://readyset.io/favicon.png
+
+# sources -- Where to find the source for this chart
+sources:
+  - https://github.com/readysettech/readyset/blob/main/helm/readyset
+
+home: https://readyset.io
 
 # appVersion is not expected to follow Semantic Versioning (https://semver.org)
-appVersion: "latest"
+appVersion: "beta-2023-06-28"
+
+# maintainers -- Individuals responsible for ongoing maintenance of this chart
+maintainers:
+  - name: "Ian Meyer"
+    email: "ian@readyset.io"
 
 dependencies:
 - condition: consul.enabled
   name: consul
   repository: "https://helm.releases.hashicorp.com"
-  version: 1.1.2
+  version: 1.2.0
+  # Chart source: https://github.com/hashicorp/consul-k8s/releases
+
+# annoations -- Extra metadata about the chart
+annotations:
+
+  # artifactoryhub.io/* -- See: https://artifacthub.io/docs/topics/annotations/helm/
+  artifacthub.io/category: database
+  artifacthub.io/prerelease: "false"
+  artifacthub.io/changes: |
+    - kind: changed
+      description: Doucment Chart.yaml, and values.yaml
+      links:
+        - name: GitHub Issue
+          url: https://github.com/readysettech/readyset/issues/66
+    - kind: added
+      description: Add helpers for image defaults in readyset.adapter and readyset.server
+    - kind: changed
+      description: Update value keys to camelCase format

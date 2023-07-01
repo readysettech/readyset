@@ -78,8 +78,8 @@ spec:
                 curl http://127.0.0.1:8500/v1/health/node/$(hostname) \
                 2>/dev/null | grep -E '".+"'
         - name: readyset-adapter
-          image: {{ .Values.readyset.adapter.image.repository | default "public.ecr.aws/readyset" }}/readyset:{{ .Values.readyset.adapter.image.tag | default "latest"}}
-          imagePullPolicy: Always
+          image: {{ default (include "readyset.adapter.imageDefault" .) .Values.readyset.adapter.imageOverride }}
+          imagePullPolicy: IfNotPresent
           securityContext:
             runAsGroup: 1000
             runAsUser: 1000
@@ -98,7 +98,7 @@ spec:
               value: "{{ required "readyset.deployment is a required value" .Values.readyset.deployment }}"
             # Identify this as a Helm deployment to TelemetryReporter
             - name: QUERY_CACHING
-              value: {{ (include "readyset.query_caching_mode" .) | default "explicit" }}
+              value: {{ (include "readyset.queryCachingMode" .) | default "explicit" }}
             - name: DEPLOYMENT_ENV
               value: "helm"
             - name: AUTHORITY_ADDRESS
@@ -115,13 +115,13 @@ spec:
               value: "1"
             - name: VIEWS_POLLING_INTERVAL
               value: "180"
-            {{- if .Values.readyset.adapter.query_log_ad_hoc }}
+            {{- if .Values.readyset.adapter.queryLogAdHoc }}
             - name: QUERY_LOG_AD_HOC
-              value: {{ .Values.readyset.adapter.query_log_ad_hoc | quote }}
+              value: {{ .Values.readyset.adapter.queryLogAdHoc | quote }}
             {{- end }}
-            {{- if .Values.readyset.adapter.statement_logging }}
+            {{- if .Values.readyset.adapter.statementLogging }}
             - name: STATEMENT_LOGGING
-              value: {{ .Values.readyset.adapter.statement_logging | quote }}
+              value: {{ .Values.readyset.adapter.statementLogging | quote }}
             {{- end }}
           resources:
             requests:

@@ -1,0 +1,21 @@
+apiVersion: ""
+generated: "0001-01-01T00:00:00Z"
+repositories:
+- caFile: ""
+  certFile: ""
+  insecure_skip_tls_verify: false
+  keyFile: ""
+  name: readyset
+  pass_credentials_all: false
+  password: ""
+  url: https://helm.releases.readyset.io
+  username: ""
+- caFile: ""
+  certFile: ""
+  insecure_skip_tls_verify: false
+  keyFile: ""
+  name: hashicorp
+  pass_credentials_all: false
+  password: ""
+  url: https://helm.releases.hashicorp.com
+  username: ""
