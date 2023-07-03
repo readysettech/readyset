@@ -34,7 +34,7 @@ use nom_sql::{
 use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use readyset_client::consistency::Timestamp;
 use readyset_client::internal::LocalNodeIndex;
-use readyset_client::recipe::changelist::{Change, ChangeList};
+use readyset_client::recipe::changelist::{Change, ChangeList, CreateCache};
 use readyset_client::{KeyComparison, Modification, SchemaType, ViewPlaceholder, ViewQuery};
 use readyset_data::{DfType, DfValue, Dialect};
 use readyset_errors::ReadySetError::{
@@ -9079,25 +9079,25 @@ async fn multiple_simultaneous_migrations() {
 
     let (r1, r2) = join!(
         g.extend_recipe(ChangeList::from_change(
-            Change::CreateCache {
+            Change::CreateCache(CreateCache {
                 name: Some("q1".into()),
                 statement: Box::new(
                     parse_select_statement(nom_sql::Dialect::MySQL, "SELECT * FROM t WHERE x = ?")
                         .unwrap()
                 ),
                 always: false
-            },
+            }),
             Dialect::DEFAULT_MYSQL
         )),
         g2.extend_recipe(ChangeList::from_change(
-            Change::CreateCache {
+            Change::CreateCache(CreateCache {
                 name: Some("q2".into()),
                 statement: Box::new(
                     parse_select_statement(nom_sql::Dialect::MySQL, "SELECT * FROM t WHERE y = ?")
                         .unwrap()
                 ),
                 always: false
-            },
+            }),
             Dialect::DEFAULT_MYSQL
         ))
     );

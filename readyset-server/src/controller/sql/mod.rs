@@ -284,12 +284,8 @@ impl SqlIncorporator {
                     self.invalidate_queries_for_added_relation(&stmt.name, mig)?;
                     self.add_view(stmt.name, definition, schema_search_path.clone())?;
                 }
-                Change::CreateCache {
-                    name,
-                    statement,
-                    always,
-                } => {
-                    self.add_query(name, *statement, always, &schema_search_path, mig)?;
+                Change::CreateCache(cc) => {
+                    self.add_query(cc.name, *cc.statement, cc.always, &schema_search_path, mig)?;
                 }
                 Change::AlterTable(_) => {
                     // The only ALTER TABLE changes that can end up here (currently) are ones that

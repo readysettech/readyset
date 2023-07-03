@@ -204,11 +204,11 @@ impl ChangeList {
                                         return Err(ReadySetError::UnparseableQuery { query })
                                     }
                                 };
-                                changes.push(Change::CreateCache {
+                                changes.push(Change::CreateCache(CreateCache {
                                     name,
                                     statement,
                                     always,
-                                })
+                                }))
                             }
                             SqlQuery::AlterTable(ats) => changes.push(Change::AlterTable(ats)),
                             SqlQuery::DropTable(dts) => {
@@ -302,6 +302,18 @@ pub enum AlterTypeChange {
     },
 }
 
+/// Change to add a new cached query to the graph
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateCache {
+    /// The name of the cache. If not provided, a name will be generated based on the statement
+    pub name: Option<Relation>,
+    /// The `SELECT` statement for the body of the cache
+    pub statement: Box<SelectStatement>,
+    /// If set to `true`, execution of this cache will bypass transaction handling in the
+    /// adapter
+    pub always: bool,
+}
+
 /// Describes a singe change to be made to the MIR and dataflow graphs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Change {
@@ -317,15 +329,7 @@ pub enum Change {
     /// Add a new view to the graph, represented by the given `CREATE VIEW` statement
     CreateView(CreateViewStatement),
     /// Add a new cached query to the graph
-    CreateCache {
-        /// The name of the cache. If not provided, a name will be generated based on the statement
-        name: Option<Relation>,
-        /// The `SELECT` statement for the body of the cache
-        statement: Box<SelectStatement>,
-        /// If set to `true`, execution of this cache will bypass transaction handling in the
-        /// adapter
-        always: bool,
-    },
+    CreateCache(CreateCache),
     /// Alter an existing table in the graph, making changes according to the given `ALTER TABLE`
     /// statement
     AlterTable(AlterTableStatement),
@@ -376,11 +380,11 @@ impl Change {
     where
         N: Into<Relation>,
     {
-        Self::CreateCache {
+        Self::CreateCache(CreateCache {
             name: Some(name.into()),
             statement: Box::new(statement),
             always,
-        }
+        })
     }
 
     /// Return true if this change requires noria to resnapshot the database in order to properly

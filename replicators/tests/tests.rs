@@ -12,7 +12,7 @@ use nom_sql::{parse_select_statement, Relation};
 use rand::distributions::Alphanumeric;
 use rand::{Rng, SeedableRng};
 use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
-use readyset_client::recipe::changelist::{Change, ChangeList};
+use readyset_client::recipe::changelist::{Change, ChangeList, CreateCache};
 use readyset_client::ReadySetHandle;
 use readyset_data::{Collation, DfValue, Dialect, TinyText};
 use readyset_errors::{ReadySetError, ReadySetResult};
@@ -378,7 +378,7 @@ impl TestHandle {
                         },
                         if_exists: true,
                     },
-                    Change::CreateCache {
+                    Change::CreateCache(CreateCache {
                         name: Some(Relation {
                             schema: Some("public".into()),
                             name: query_name.clone().into(),
@@ -391,7 +391,7 @@ impl TestHandle {
                             .unwrap(),
                         ),
                         always: false,
-                    },
+                    }),
                 ],
                 self.dialect,
             ))
@@ -1554,7 +1554,7 @@ async fn postgresql_ddl_replicate_drop_view_internal(url: &str) {
         .unwrap();
 
     // Create a cache that reads from the view to test the view exists
-    let create_cache_change = Change::CreateCache {
+    let create_cache_change = Change::CreateCache(CreateCache {
         name: Some(Relation {
             schema: Some("public".into()),
             name: "t2_view_q".into(),
@@ -1567,7 +1567,7 @@ async fn postgresql_ddl_replicate_drop_view_internal(url: &str) {
             .unwrap(),
         ),
         always: false,
-    };
+    });
     ctx.noria
         .extend_recipe(ChangeList::from_change(
             create_cache_change.clone(),
@@ -1630,7 +1630,7 @@ async fn postgresql_ddl_replicate_create_view_internal(url: &str) {
     eventually!(ctx
         .noria
         .extend_recipe(ChangeList::from_change(
-            Change::CreateCache {
+            Change::CreateCache(CreateCache {
                 name: Some(Relation {
                     schema: Some("public".into()),
                     name: "t2_view_q".into()
@@ -1643,7 +1643,7 @@ async fn postgresql_ddl_replicate_create_view_internal(url: &str) {
                     .unwrap()
                 ),
                 always: true
-            },
+            }),
             Dialect::DEFAULT_POSTGRESQL
         ))
         .await
