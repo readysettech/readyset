@@ -744,6 +744,52 @@ impl SqlToMirConverter {
             };
         }
 
+        // COUNT(*) is special (see comments below), so we handle it specially before all other
+        // aggregates
+        if function == FunctionExpr::CountStar {
+            // 1. Pick a column to aggregate over
+            let parent_cols = self.mir_graph.columns(parent);
+            let over_col = parent_cols
+                .first()
+                .ok_or_else(|| internal_err!("MIR node has no columns"))?;
+
+            // 2. Aggregation::Count discards all null values in its input, but in SQL `COUNT(*)` is
+            //    always expected to count all rows, regardless of if any of the columns (eg the
+            //    column we picked above, for example) is null. So before the aggregate node we
+            //    project out a `coalesce(col, 0)` expr to make sure that value is never `NULL`
+            let coalesce_alias = SqlIdentifier::from(format!("{}_over", name.display_unquoted()));
+            let project_coalesce = self.make_project_node(
+                query_name,
+                format!("{}_coalesce_over_col", name.display_unquoted()).into(),
+                parent,
+                vec![ProjectExpr::Expr {
+                    expr: Expr::Call(FunctionExpr::Call {
+                        name: "coalesce".into(),
+                        arguments: vec![
+                            Expr::Column(nom_sql::Column {
+                                table: over_col.table.clone(),
+                                name: over_col.name.clone(),
+                            }),
+                            Expr::Literal(0.into()),
+                        ],
+                    }),
+                    alias: coalesce_alias.clone(),
+                }],
+            );
+
+            // 3. Actually add the aggregate node
+            let grouped_node = self.make_grouped_node(
+                query_name,
+                name,
+                func_col,
+                (project_coalesce, Column::named(coalesce_alias)),
+                group_cols,
+                GroupedNodeType::Aggregation(Aggregation::Count),
+            );
+
+            return Ok(vec![project_coalesce, grouped_node]);
+        }
+
         let mut out_nodes = Vec::new();
 
         let mknode = |over: Column, t: GroupedNodeType, distinct: bool| {
@@ -794,9 +840,7 @@ impl SqlToMirConverter {
                 GroupedNodeType::Aggregation(Aggregation::Sum),
                 distinct,
             ),
-            CountStar => {
-                internal!("COUNT(*) should have been rewritten earlier!")
-            }
+            CountStar => internal!("Handled earlier"),
             Count {
                 expr: box Expr::Column(col),
                 distinct,

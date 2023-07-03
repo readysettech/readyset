@@ -9,7 +9,6 @@
 
 pub mod alias_removal;
 pub mod anonymize;
-mod count_star_rewrite;
 mod create_table_columns;
 mod detect_problematic_self_joins;
 pub mod detect_unsupported_placeholders;
@@ -38,7 +37,6 @@ use nom_sql::{
 use readyset_errors::ReadySetResult;
 
 pub use crate::alias_removal::AliasRemoval;
-pub use crate::count_star_rewrite::CountStarRewrite;
 pub use crate::create_table_columns::CreateTableColumns;
 pub use crate::detect_problematic_self_joins::DetectProblematicSelfJoins;
 pub use crate::detect_unsupported_placeholders::DetectUnsupportedPlaceholders;
@@ -171,7 +169,6 @@ impl Rewrite for SelectStatement {
             .expand_stars(context.view_schemas, context.non_replicated_relations)?
             .expand_implied_tables(context.view_schemas)?
             .normalize_topk_with_aggregate()?
-            .rewrite_count_star(context.view_schemas, context.non_replicated_relations)?
             .detect_problematic_self_joins()?
             .remove_numeric_field_references()?
             .order_limit_removal(context.base_schemas)

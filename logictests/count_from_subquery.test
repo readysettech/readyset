@@ -1,0 +1,10 @@
+statement ok
+create table t (x int);
+
+statement ok
+insert into t (x) values (1), (1), (1), (null);
+
+query I nosort
+select count(*) from (select x + 1 from t) sq;
+----
+4
