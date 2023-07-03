@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
 use std::iter;
 
+use itertools::Itertools;
 use nom_sql::analysis::visit::{self, Visitor};
 use nom_sql::{
     BinaryOperator, Column, ColumnConstraint, CreateTableBody, DeleteStatement, Expr,
@@ -10,7 +11,8 @@ use nom_sql::{
 use readyset_client::{Modification, Operation};
 use readyset_data::{DfType, DfValue, Dialect};
 use readyset_errors::{
-    bad_request_err, invariant, invariant_eq, unsupported, unsupported_err, ReadySetResult,
+    bad_request_err, invalid, invalid_err, invariant, invariant_eq, unsupported, unsupported_err,
+    ReadySetResult,
 };
 use readyset_util::hash::hash;
 
@@ -507,6 +509,52 @@ where
         .where_clause
         .ok_or_else(|| unsupported_err!("DELETE without WHERE is not supported"))?;
     extract_pkey_where(where_clause, params, schema)
+}
+
+/// Extract the rows for an INSERT statement from a list of params, coercing them to the expected
+/// types for the table
+pub(crate) fn extract_insert(
+    stmt: &InsertStatement,
+    params: &[DfValue],
+    schema: &CreateTableBody,
+    dialect: Dialect,
+) -> ReadySetResult<Vec<Vec<DfValue>>> {
+    let num_cols = stmt
+        .fields
+        .as_ref()
+        .map(|f| f.len())
+        .or_else(|| stmt.data.first().map(|r| r.len()))
+        .ok_or_else(|| invalid_err!("INSERT statement must have either fields or rows"))?;
+    let param_cols = insert_statement_parameter_columns(stmt);
+    params
+        .iter()
+        .chunks(num_cols)
+        .into_iter()
+        .map(|r| {
+            let row = r
+                .zip(&param_cols)
+                .map(|(val, col)| {
+                    let field = schema
+                        .fields
+                        .iter()
+                        .find(|field| col.name == field.column.name)
+                        .ok_or_else(|| {
+                            invalid_err!("Column {} not found in table", col.display_unquoted())
+                        })?;
+                    let target_type = DfType::from_sql_type(&field.sql_type, dialect, |_| None)?;
+                    val.coerce_to(
+                        &target_type,
+                        // Coercing from the raw parameters, so no prior type to use.
+                        &DfType::Unknown,
+                    )
+                })
+                .collect::<ReadySetResult<Vec<_>>>()?;
+            if row.len() != num_cols {
+                invalid!("Not enough parameters for INSERT");
+            }
+            Ok(row)
+        })
+        .collect()
 }
 
 /// coerce params to correct sql types

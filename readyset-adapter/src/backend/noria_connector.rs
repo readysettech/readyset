@@ -806,17 +806,8 @@ impl NoriaConnector {
                 let schema = putter.schema().ok_or_else(|| {
                     internal_err!("no schema for table {}", table.display_unquoted())
                 })?;
-                // unwrap: safe because we always pass in Some(params) so don't hit None path of
-                // coerce_params
-                let coerced_params = utils::coerce_params(
-                    Some(params),
-                    &SqlQuery::Insert(q.clone()),
-                    schema,
-                    self.dialect,
-                )
-                .unwrap()
-                .unwrap();
-                self.do_insert(q, vec![coerced_params]).await
+                let rows = utils::extract_insert(q, params, schema, self.dialect)?;
+                self.do_insert(q, rows).await
             }
             _ => {
                 internal!(

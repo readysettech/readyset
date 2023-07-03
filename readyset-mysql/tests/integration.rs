@@ -1315,6 +1315,23 @@ async fn exec_insert() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn exec_insert_multiple() {
+    let (opts, _handle, shutdown_tx) = setup().await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    conn.query_drop("CREATE TABLE t (x int)").await.unwrap();
+    sleep().await;
+
+    conn.exec_drop("INSERT INTO t (x) VALUES (?), (?)", (1, 2))
+        .await
+        .unwrap();
+
+    let res = conn.query::<(i32,), _>("SELECT x FROM t").await.unwrap();
+    assert_eq!(res, vec![(1,), (2,)]);
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn design_doc_topk_with_preload() {
     let (opts, _handle, shutdown_tx) = setup().await;
