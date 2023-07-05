@@ -1748,6 +1748,12 @@ impl PersistentState {
         self.compaction_threads.is_empty()
     }
 
+    pub fn wait_for_compaction(&mut self) {
+        for thread in &mut self.compaction_threads {
+            thread.join();
+        }
+    }
+
     fn enable_snapshot_mode(&mut self) {
         self.db.replication_offset = None; // Remove any replication offset first (although it should be None already)
         let meta = self.meta();

@@ -220,6 +220,9 @@ fn initialize_state(name: String, mode: DurabilityMode) -> PersistentState {
 
     state.set_snapshot_mode(SnapshotMode::SnapshotModeDisabled);
 
+    // Wait for compaction to finish
+    state.wait_for_compaction();
+
     state
 }
 
@@ -256,6 +259,9 @@ fn initialize_large_strings_state(name: String, mode: DurabilityMode) -> Persist
     }
 
     state.set_snapshot_mode(SnapshotMode::SnapshotModeDisabled);
+
+    // Wait for compaction to finish
+    state.wait_for_compaction();
 
     state
 }
