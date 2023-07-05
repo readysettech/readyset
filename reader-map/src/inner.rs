@@ -4,6 +4,7 @@ use std::fmt;
 use std::hash::{BuildHasher, Hash};
 use std::ops::{Bound, RangeBounds};
 
+use iter_enum::{ExactSizeIterator, Iterator};
 use itertools::Either;
 use partial_map::PartialMap;
 use readyset_client::internal::IndexType;
@@ -30,12 +31,12 @@ impl<K: Clone> Miss<&K> {
 }
 
 /// Data contains the mapping from Keys to sets of Values.
-#[derive(Clone)]
+#[derive(Clone, Iterator, ExactSizeIterator)]
 pub(crate) enum Data<K, V, S> {
     /// Data is stored in a BTreeMap, both point and range lookups are possible
-    BTreeMap { map: PartialMap<K, Values<V>> },
+    BTreeMap(PartialMap<K, Values<V>>),
     /// Data is stored in a HashMap, only point lookups are possible
-    HashMap { map: HashMap<K, Values<V>, S> },
+    HashMap(HashMap<K, Values<V>, S>),
 }
 
 impl<K, V, S> fmt::Debug for Data<K, V, S>
@@ -45,8 +46,8 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::BTreeMap { map, .. } => f.debug_struct("BTreeMap").field("map", &map).finish(),
-            Self::HashMap { map } => f.debug_struct("HashMap").field("map", &map).finish(),
+            Self::BTreeMap(map) => f.debug_struct("BTreeMap").field("map", &map).finish(),
+            Self::HashMap(map) => f.debug_struct("HashMap").field("map", &map).finish(),
         }
     }
 }
@@ -54,8 +55,8 @@ where
 macro_rules! with_map {
     ($data: expr, |$map: ident| $body: expr) => {
         match $data {
-            Data::BTreeMap { map: $map, .. } => $body,
-            Data::HashMap { map: $map } => $body,
+            Data::BTreeMap($map) => $body,
+            Data::HashMap($map) => $body,
         }
     };
 }
@@ -66,19 +67,15 @@ pub(crate) type Iter<'a, K, V> =
 impl<K, V, S> Data<K, V, S> {
     pub(crate) fn with_index_type_and_hasher(index_type: IndexType, hash_builder: S) -> Self {
         match index_type {
-            IndexType::HashMap => Self::HashMap {
-                map: HashMap::with_hasher(hash_builder),
-            },
-            IndexType::BTreeMap => Self::BTreeMap {
-                map: Default::default(),
-            },
+            IndexType::HashMap => Self::HashMap(HashMap::with_hasher(hash_builder)),
+            IndexType::BTreeMap => Self::BTreeMap(Default::default()),
         }
     }
 
     pub(crate) fn index_type(&self) -> IndexType {
         match self {
-            Self::BTreeMap { .. } => IndexType::BTreeMap,
-            Self::HashMap { .. } => IndexType::HashMap,
+            Self::BTreeMap(..) => IndexType::BTreeMap,
+            Self::HashMap(..) => IndexType::HashMap,
         }
     }
 
@@ -88,8 +85,8 @@ impl<K, V, S> Data<K, V, S> {
 
     pub(crate) fn len(&self) -> usize {
         match self {
-            Data::BTreeMap { map } => map.num_keys(),
-            Data::HashMap { map } => map.len(),
+            Data::BTreeMap(map) => map.num_keys(),
+            Data::HashMap(map) => map.len(),
         }
     }
 
@@ -99,10 +96,8 @@ impl<K, V, S> Data<K, V, S> {
         S: Clone,
     {
         match self {
-            Self::BTreeMap { .. } => Self::BTreeMap {
-                map: Default::default(),
-            },
-            Self::HashMap { map } => {
+            Self::BTreeMap(..) => Self::BTreeMap(Default::default()),
+            Self::HashMap(map) => {
                 Self::with_index_type_and_hasher(IndexType::HashMap, (*map.hasher()).clone())
             }
         }
@@ -110,17 +105,17 @@ impl<K, V, S> Data<K, V, S> {
 
     pub(crate) fn iter(&self) -> Iter<'_, K, V> {
         match self {
-            Self::BTreeMap { map, .. } => Either::Left(map.iter()),
-            Self::HashMap { map } => Either::Right(map.iter()),
+            Self::BTreeMap(map) => Either::Left(map.iter()),
+            Self::HashMap(map) => Either::Right(map.iter()),
         }
     }
 
     pub(crate) fn clear(&mut self) {
         match self {
-            Self::BTreeMap { map, .. } => {
+            Self::BTreeMap(map) => {
                 map.clear();
             }
-            Self::HashMap { map } => {
+            Self::HashMap(map) => {
                 map.clear();
             }
         }
@@ -136,8 +131,8 @@ impl<K, V, S> Data<K, V, S> {
         Q: Ord + ToOwned<Owned = K> + ?Sized,
     {
         match self {
-            Self::BTreeMap { map, .. } => map.range(range).map_err(Miss),
-            Self::HashMap { .. } => panic!("range called on a HashMap reader_map"),
+            Self::BTreeMap(map, ..) => map.range(range).map_err(Miss),
+            Self::HashMap(..) => panic!("range called on a HashMap reader_map"),
         }
     }
 
@@ -146,7 +141,7 @@ impl<K, V, S> Data<K, V, S> {
         R: RangeBounds<K>,
         K: Ord + Clone,
     {
-        if let Self::BTreeMap { ref mut map, .. } = self {
+        if let Self::BTreeMap(ref mut map, ..) = self {
             map.insert_range(range);
         }
     }
@@ -157,12 +152,12 @@ impl<K, V, S> Data<K, V, S> {
         K: Ord + Clone,
     {
         match self {
-            Self::BTreeMap { map, .. } => {
+            Self::BTreeMap(map, ..) => {
                 // Returns an iterator, but we don't actually care about the elements (and dropping
                 // the iterator still does all the removal)
                 let _ = map.remove_range(range);
             }
-            Self::HashMap { .. } => panic!("remove_range called on a HashMap reader_map"),
+            Self::HashMap(..) => panic!("remove_range called on a HashMap reader_map"),
         }
     }
 
@@ -172,8 +167,8 @@ impl<K, V, S> Data<K, V, S> {
         K: Ord,
     {
         match self {
-            Self::BTreeMap { map, .. } => map.contains_range(range),
-            Self::HashMap { .. } => panic!("contains_range called on a HashMap reader_map"),
+            Self::BTreeMap(map, ..) => map.contains_range(range),
+            Self::HashMap(..) => panic!("contains_range called on a HashMap reader_map"),
         }
     }
 
@@ -183,8 +178,8 @@ impl<K, V, S> Data<K, V, S> {
         K: Ord,
     {
         match self {
-            Self::BTreeMap { map, .. } => map.overlaps_range(range),
-            Self::HashMap { .. } => panic!("contains_range called on a HashMap reader_map"),
+            Self::BTreeMap(map, ..) => map.overlaps_range(range),
+            Self::HashMap(..) => panic!("contains_range called on a HashMap reader_map"),
         }
     }
 }
@@ -231,11 +226,11 @@ where
         K: Clone,
     {
         match self {
-            Data::BTreeMap { map, .. } => match map.entry(key) {
+            Data::BTreeMap(map) => match map.entry(key) {
                 partial_map::Entry::Vacant(v) => Entry::Vacant(VacantEntry::BTreeMap(v)),
                 partial_map::Entry::Occupied(o) => Entry::Occupied(OccupiedEntry::BTreeMap(o)),
             },
-            Data::HashMap { map } => match map.entry(key) {
+            Data::HashMap(map) => match map.entry(key) {
                 hash_map::Entry::Vacant(v) => Entry::Vacant(VacantEntry::HashMap(v)),
                 hash_map::Entry::Occupied(o) => Entry::Occupied(OccupiedEntry::HashMap(o)),
             },

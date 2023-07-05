@@ -279,7 +279,6 @@ impl LRUEviction {
         K: Ord + Clone,
         S: std::hash::BuildHasher,
     {
-        // TODO(vlad): implement exact size iterator for data iterator
         // First we collect all the meta values into a single vector
         let mut ctrs = data
             .iter()
