@@ -9,8 +9,6 @@ use dataflow_state::{
 use itertools::Itertools;
 use readyset_data::DfValue;
 
-const UNIQUE_ENTRIES: usize = 100000;
-
 lazy_static::lazy_static! {
     static ref LARGE_STRINGS: Vec<String> = ["a", "b", "c"]
         .iter()
@@ -18,9 +16,9 @@ lazy_static::lazy_static! {
         .collect::<Vec<_>>();
 }
 
-pub fn rocksdb_get_primary_key(c: &mut Criterion, state: &PersistentState) {
+pub fn rocksdb_get_primary_key(c: &mut Criterion, state: &PersistentState, unique_entries: usize) {
     let mut group = c.benchmark_group("RockDB get primary key");
-    let n = UNIQUE_ENTRIES / 1000;
+    let n = unique_entries / 1000;
     group.bench_function("lookup_multi", |b| {
         let mut iter = 0usize;
         b.iter(|| {
@@ -39,7 +37,7 @@ pub fn rocksdb_get_primary_key(c: &mut Criterion, state: &PersistentState) {
                     PointKey::Single((iter + n * 9).into()),
                 ],
             ));
-            iter = (iter + 1) % (UNIQUE_ENTRIES - n * 10);
+            iter = (iter + 1) % (unique_entries - n * 10);
         })
     });
 
@@ -58,7 +56,7 @@ pub fn rocksdb_get_primary_key(c: &mut Criterion, state: &PersistentState) {
                 state.lookup(&[0], &PointKey::Single((iter + n * 8).into())),
                 state.lookup(&[0], &PointKey::Single((iter + n * 9).into())),
             ));
-            iter = (iter + 1) % (UNIQUE_ENTRIES - n * 10);
+            iter = (iter + 1) % (unique_entries - n * 10);
         })
     });
 
@@ -91,9 +89,13 @@ pub fn rocksdb_get_secondary_key(c: &mut Criterion, state: &PersistentState) {
     group.finish();
 }
 
-pub fn rocksdb_get_secondary_unique_key(c: &mut Criterion, state: &PersistentState) {
+pub fn rocksdb_get_secondary_unique_key(
+    c: &mut Criterion,
+    state: &PersistentState,
+    unique_entries: usize,
+) {
     let mut group = c.benchmark_group("RockDB get secondary unique key");
-    let n = UNIQUE_ENTRIES / 1000;
+    let n = unique_entries / 1000;
     group.bench_function("lookup_multi", |b| {
         let mut iter = 0usize;
         b.iter(|| {
@@ -112,7 +114,7 @@ pub fn rocksdb_get_secondary_unique_key(c: &mut Criterion, state: &PersistentSta
                     PointKey::Single((iter + n * 9).into()),
                 ],
             ));
-            iter = (iter + 1) % (UNIQUE_ENTRIES - n * 10);
+            iter = (iter + 1) % (unique_entries - n * 10);
         })
     });
 
@@ -131,7 +133,7 @@ pub fn rocksdb_get_secondary_unique_key(c: &mut Criterion, state: &PersistentSta
                 state.lookup(&[3], &PointKey::Single((iter + n * 8).into())),
                 state.lookup(&[3], &PointKey::Single((iter + n * 9).into())),
             ));
-            iter = (iter + 1) % (UNIQUE_ENTRIES - n * 10);
+            iter = (iter + 1) % (unique_entries - n * 10);
         })
     });
 
@@ -183,87 +185,127 @@ struct PersistentStateBenchArgs {
     #[clap(long, hide(true))]
     /// Is present when executed with `cargo test`
     test: bool,
+    /// Specifies the number of entries that should be included in the database
+    #[clap(long, default_value = "100000")]
+    unique_entries: usize,
     /// If this value is set to "persistent", data from these benchmarks will be persisted in the
     /// current directory instead of in a tmp directory.
     #[clap(long, default_value = "memory")]
     durability_mode: DurabilityMode,
+    /// If this setting is true, the benchmarks will try to use a database that already exists on
+    /// disk instead of creating and seeding a new database. Databases are unique to the value
+    /// specified by `unique_entries`. In other words, with the durability mode set to
+    /// "persistent", if the benchmarks are run with the number of unique entries set to 100,000
+    /// and then again with the number of unique entries set to 10,000, two separate databases will
+    /// be created. You can only reuse a given database if the benchmarks have already been run
+    /// persistently with the same number of unique entries.
+    ///
+    /// It is an error to use this flag with `--durability-mode` set to any value other than
+    /// "persistent".
+    ///
+    /// **NOTE:** Only set this to true if you are **certain** that the previous run of these
+    /// benchmarks finished seeding the database correctly, *including finishing compaction*. If
+    /// the data is incomplete or corrupt, the benchmarks may fail to run or may return
+    /// inaccurate results.
+    #[clap(long, default_value = "false")]
+    reuse_persistence: bool,
+    /// If this setting is true, the benchmarks will seed a database with the given number of
+    /// unique entries and exit without running the benchmarks.
+    ///
+    /// It is an error to use this flag with `--durability-mode` set to any value other than
+    /// "persistent".
+    #[clap(long, default_value = "false")]
+    seed_only: bool,
 }
 
-fn initialize_state(name: String, mode: DurabilityMode) -> PersistentState {
-    let mut state = PersistentState::new(
-        name,
-        vec![&[0usize][..], &[3][..]],
-        &PersistenceParameters {
-            mode,
-            persistence_threads: 6,
-            ..PersistenceParameters::default()
-        },
-    )
-    .unwrap();
+impl PersistentStateBenchArgs {
+    fn initialize_state(&self) -> PersistentState {
+        let mut state = PersistentState::new(
+            format!("bench_{}", self.unique_entries),
+            vec![&[0usize][..], &[3][..]],
+            &PersistenceParameters {
+                mode: self.durability_mode,
+                persistence_threads: 6,
+                ..PersistenceParameters::default()
+            },
+        )
+        .unwrap();
 
-    state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
-    state.add_key(Index::new(IndexType::HashMap, vec![1, 2]), None);
-    state.add_key(Index::new(IndexType::HashMap, vec![3]), None);
+        // If `reuse_persistence` is false, seed the database with the appropriate data. If it's
+        // true, we assume that the state already contains the proper data from a previous run of
+        // the benchmarks.
+        if !self.reuse_persistence {
+            state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
+            state.add_key(Index::new(IndexType::HashMap, vec![1, 2]), None);
+            state.add_key(Index::new(IndexType::HashMap, vec![3]), None);
 
-    state.add_key(Index::new(IndexType::BTreeMap, vec![1]), None);
+            state.add_key(Index::new(IndexType::BTreeMap, vec![1]), None);
 
-    state.set_snapshot_mode(SnapshotMode::SnapshotModeEnabled);
+            state.set_snapshot_mode(SnapshotMode::SnapshotModeEnabled);
 
-    let animals = ["Cat", "Dog", "Bat"];
+            let animals = ["Cat", "Dog", "Bat"];
 
-    for i in 0..UNIQUE_ENTRIES {
-        let rec: Vec<DfValue> = vec![i.into(), animals[i % 3].into(), (i % 99).into(), i.into()];
+            for i in 0..self.unique_entries {
+                let rec: Vec<DfValue> =
+                    vec![i.into(), animals[i % 3].into(), (i % 99).into(), i.into()];
+                state
+                    .process_records(&mut vec![rec].into(), None, None)
+                    .unwrap();
+            }
+
+            state.set_snapshot_mode(SnapshotMode::SnapshotModeDisabled);
+
+            // Wait for compaction to finish
+            state.compaction_finished();
+        }
+
         state
-            .process_records(&mut vec![rec].into(), None, None)
-            .unwrap();
     }
 
-    state.set_snapshot_mode(SnapshotMode::SnapshotModeDisabled);
+    fn initialize_large_strings_state(&self) -> PersistentState {
+        let mut state = PersistentState::new(
+            format!("bench_{}_large_strings", self.unique_entries),
+            vec![&[0usize][..], &[3][..]],
+            &PersistenceParameters {
+                mode: self.durability_mode,
+                persistence_threads: 6,
+                ..PersistenceParameters::default()
+            },
+        )
+        .unwrap();
 
-    // Wait for compaction to finish
-    state.wait_for_compaction();
+        // If `reuse_persistence` is false, seed the database with the appropriate data. If it's
+        // true, we assume that the state already contains the proper data from a previous run of
+        // the benchmarks.
+        if !self.reuse_persistence {
+            state.set_snapshot_mode(SnapshotMode::SnapshotModeEnabled);
 
-    state
-}
+            state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
+            state.add_key(Index::new(IndexType::HashMap, vec![1]), None);
+            state.add_key(Index::new(IndexType::HashMap, vec![3]), None);
 
-fn initialize_large_strings_state(name: String, mode: DurabilityMode) -> PersistentState {
-    let mut state = PersistentState::new(
-        name,
-        vec![&[0usize][..], &[3][..]],
-        &PersistenceParameters {
-            mode,
-            persistence_threads: 6,
-            ..PersistenceParameters::default()
-        },
-    )
-    .unwrap();
+            state.add_key(Index::new(IndexType::BTreeMap, vec![1]), None);
 
-    state.set_snapshot_mode(SnapshotMode::SnapshotModeEnabled);
+            for i in 0..self.unique_entries {
+                let rec: Vec<DfValue> = vec![
+                    i.into(),
+                    LARGE_STRINGS[i % 3].clone().into(),
+                    (i % 99).into(),
+                    i.into(),
+                ];
+                state
+                    .process_records(&mut vec![rec].into(), None, None)
+                    .unwrap();
+            }
 
-    state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
-    state.add_key(Index::new(IndexType::HashMap, vec![1]), None);
-    state.add_key(Index::new(IndexType::HashMap, vec![3]), None);
+            state.set_snapshot_mode(SnapshotMode::SnapshotModeDisabled);
 
-    state.add_key(Index::new(IndexType::BTreeMap, vec![1]), None);
+            // Wait for compaction to finish
+            state.wait_for_compaction();
+        }
 
-    for i in 0..UNIQUE_ENTRIES {
-        let rec: Vec<DfValue> = vec![
-            i.into(),
-            LARGE_STRINGS[i % 3].clone().into(),
-            (i % 99).into(),
-            i.into(),
-        ];
         state
-            .process_records(&mut vec![rec].into(), None, None)
-            .unwrap();
     }
-
-    state.set_snapshot_mode(SnapshotMode::SnapshotModeDisabled);
-
-    // Wait for compaction to finish
-    state.wait_for_compaction();
-
-    state
 }
 
 fn main() -> anyhow::Result<()> {
@@ -274,27 +316,38 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let mut criterion = Criterion::default();
-    if let Some(ref filter) = args.benchname {
-        criterion = criterion.with_filter(filter);
-    }
-    if let Some(baseline) = args.save_baseline.take() {
-        criterion = criterion.save_baseline(baseline);
+    if !matches!(args.durability_mode, DurabilityMode::Permanent) && args.reuse_persistence {
+        anyhow::bail!(
+            "It only makes sense to reuse persistence if --durability-mode is set to \"permanent\""
+        );
     }
 
-    let state = initialize_state(format!("bench_{UNIQUE_ENTRIES}"), args.durability_mode);
-    let large_strings_state = initialize_large_strings_state(
-        format!("bench_{UNIQUE_ENTRIES}_large_strings"),
-        args.durability_mode,
-    );
+    if !matches!(args.durability_mode, DurabilityMode::Permanent) && args.seed_only {
+        anyhow::bail!(
+            "It only makes sense to seed a database if --durability-mode is set to \"permanent\""
+        );
+    }
 
-    rocksdb_get_primary_key(&mut criterion, &state);
-    rocksdb_get_secondary_key(&mut criterion, &state);
-    rocksdb_get_secondary_unique_key(&mut criterion, &state);
-    rocksdb_range_lookup(&mut criterion, &state);
-    rocksdb_range_lookup_large_strings(&mut criterion, &large_strings_state);
+    let state = args.initialize_state();
+    let large_strings_state = args.initialize_large_strings_state();
 
-    criterion.final_summary();
+    if !args.seed_only {
+        let mut criterion = Criterion::default();
+        if let Some(ref filter) = args.benchname {
+            criterion = criterion.with_filter(filter);
+        }
+        if let Some(baseline) = args.save_baseline.take() {
+            criterion = criterion.save_baseline(baseline);
+        }
+
+        rocksdb_get_primary_key(&mut criterion, &state, args.unique_entries);
+        rocksdb_get_secondary_key(&mut criterion, &state);
+        rocksdb_get_secondary_unique_key(&mut criterion, &state, args.unique_entries);
+        rocksdb_range_lookup(&mut criterion, &state);
+        rocksdb_range_lookup_large_strings(&mut criterion, &large_strings_state);
+
+        criterion.final_summary();
+    }
 
     Ok(())
 }
