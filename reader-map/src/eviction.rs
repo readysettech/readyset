@@ -1,5 +1,5 @@
 //! Implementations of various eviction strategies for the reader map.
-//! All of the strategies are incorprated into a single enum, [`EvictionStrategy`],
+//! All of the strategies are incorporated into a single enum, [`EvictionStrategy`],
 //! using a single enum allows for a faster dispatch than using a dyn object,
 //! for as long as the number of strategies is reasonable.
 //!

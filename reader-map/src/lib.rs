@@ -8,7 +8,7 @@
 //!
 //! The trade-off exposed by this type is one of eventual consistency: writes are not visible to
 //! readers except following explicit synchronization. Specifically, readers only see the
-//! operations that preceeded the last call to `WriteHandle::refresh` by a writer. This lets
+//! operations that preceded the last call to `WriteHandle::refresh` by a writer. This lets
 //! writers decide how stale they are willing to let reads get. They can refresh the map after
 //! every write to emulate a regular concurrent `HashMap`, or they can refresh only occasionally to
 //! reduce the synchronization overhead at the cost of stale reads.
@@ -23,7 +23,7 @@
 //! functionality on top of the semantics of this map (think about it -- what would the operational
 //! log contain?).
 //!
-//! To faciliate more advanced use-cases, each of the two maps also carry some customizeable
+//! To facilitate more advanced use-cases, each of the two maps also carry some customizable
 //! meta-information. The writers may update this at will, and when a refresh happens, the current
 //! meta will also be made visible to readers. This could be useful, for example, to indicate what
 //! time the refresh happened.
