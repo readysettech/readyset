@@ -334,11 +334,6 @@ pub enum DomainRequest {
         state: PrepareStateKind,
     },
 
-    /// Probe for the number of records in the given node's state
-    StateSizeProbe {
-        node: LocalNodeIndex,
-    },
-
     /// Ask domain to log its state size
     UpdateStateSize,
 

@@ -1570,12 +1570,6 @@ impl Domain {
                     .add_sharded_child(target_domain, ingress_node, num_shards, replication);
                 Ok(None)
             }
-            DomainRequest::StateSizeProbe { node } => {
-                let row_count = self.state.get(node).map(|r| r.row_count()).unwrap_or(0);
-                let mem_size = self.state.get(node).map(|s| s.deep_size_of()).unwrap_or(0);
-                let ret = (row_count, mem_size);
-                Ok(Some(bincode::serialize(&ret)?))
-            }
             DomainRequest::PrepareState { node, state } => {
                 match state {
                     PrepareStateKind::Partial {
