@@ -170,7 +170,7 @@ impl From<ItemPlaceholder> for Literal {
 }
 
 impl Literal {
-    pub fn display(&self, _dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| {
             macro_rules! write_real {
                 ($real:expr, $prec:expr) => {{
@@ -206,9 +206,14 @@ impl Literal {
                         .collect::<Vec<String>>()
                         .join(" ")
                 ),
-                Literal::ByteArray(b) => {
-                    write!(f, "E'\\x{}'", b.iter().map(|v| format!("{:x}", v)).join(""))
-                }
+                Literal::ByteArray(b) => match dialect {
+                    Dialect::PostgreSQL => {
+                        write!(f, "E'\\x{}'", b.iter().map(|v| format!("{:x}", v)).join(""))
+                    }
+                    Dialect::MySQL => {
+                        write!(f, "X'{}'", b.iter().map(|v| format!("{:02X}", v)).join(""))
+                    }
+                },
                 Literal::Placeholder(item) => write!(f, "{}", item.to_string()),
                 Literal::BitVector(ref b) => {
                     write!(
@@ -693,6 +698,20 @@ mod tests {
                 test_parse!(literal(dialect), b"FALSE"),
                 Literal::Boolean(false)
             );
+        }
+    }
+
+    mod mysql {
+        use super::*;
+
+        #[test]
+        fn mysql_hex_literal_round_trip() {
+            let input = "X'01aF'";
+            let parsed = test_parse!(literal(Dialect::MySQL), input.as_bytes());
+            let rt = parsed.display(Dialect::MySQL).to_string();
+            eprintln!("rt: {rt}");
+            let parsed_again = test_parse!(literal(Dialect::MySQL), rt.as_bytes());
+            assert_eq!(parsed, parsed_again);
         }
     }
 }
