@@ -56,7 +56,7 @@ impl CompoundSelectStatement {
             }
 
             if self.limit_clause.is_empty() {
-                write!(f, " {}", self.limit_clause)?;
+                write!(f, " {}", self.limit_clause.display(dialect))?;
             }
 
             Ok(())

@@ -1,7 +1,6 @@
-use std::fmt::{self, Display};
 use std::hash::{Hash, Hasher};
-use std::str;
 use std::str::FromStr;
+use std::{fmt, str};
 
 use bit_vec::BitVec;
 use eui48::{MacAddress, MacAddressFormat};
@@ -20,6 +19,7 @@ use readyset_util::arbitrary::{
     arbitrary_naive_time, arbitrary_positive_naive_date, arbitrary_timestamp_naive_date_time,
     arbitrary_uuid,
 };
+use readyset_util::fmt::fmt_with;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
@@ -169,56 +169,59 @@ impl From<ItemPlaceholder> for Literal {
     }
 }
 
-impl Display for Literal {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        macro_rules! write_real {
-            ($real:expr, $prec:expr) => {{
-                let precision = if $prec < 30 { $prec } else { 30 };
-                let fstr = format!("{:.*}", precision as usize, $real);
-                // Trim all trailing zeros, but leave one after the dot if this is a whole number
-                let res = fstr.trim_end_matches('0');
-                if res.ends_with('.') {
-                    write!(f, "{}0", res)
-                } else {
-                    write!(f, "{}", res)
+impl Literal {
+    pub fn display(&self, _dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+        fmt_with(move |f| {
+            macro_rules! write_real {
+                ($real:expr, $prec:expr) => {{
+                    let precision = if $prec < 30 { $prec } else { 30 };
+                    let fstr = format!("{:.*}", precision as usize, $real);
+                    // Trim all trailing zeros, but leave one after the dot if this is a whole
+                    // number
+                    let res = fstr.trim_end_matches('0');
+                    if res.ends_with('.') {
+                        write!(f, "{}0", res)
+                    } else {
+                        write!(f, "{}", res)
+                    }
+                }};
+            }
+            match self {
+                Literal::Null => write!(f, "NULL"),
+                Literal::Boolean(true) => write!(f, "TRUE"),
+                Literal::Boolean(false) => write!(f, "FALSE"),
+                Literal::Integer(i) => write!(f, "{}", i),
+                Literal::UnsignedInteger(i) => write!(f, "{}", i),
+                Literal::Float(float) => write_real!(float.value, float.precision),
+                Literal::Double(double) => write_real!(double.value, double.precision),
+                Literal::Numeric(val, scale) => {
+                    write!(f, "{}", Decimal::from_i128_with_scale(*val, *scale))
                 }
-            }};
-        }
-        match self {
-            Literal::Null => write!(f, "NULL"),
-            Literal::Boolean(true) => write!(f, "TRUE"),
-            Literal::Boolean(false) => write!(f, "FALSE"),
-            Literal::Integer(i) => write!(f, "{}", i),
-            Literal::UnsignedInteger(i) => write!(f, "{}", i),
-            Literal::Float(float) => write_real!(float.value, float.precision),
-            Literal::Double(double) => write_real!(double.value, double.precision),
-            Literal::Numeric(val, scale) => {
-                write!(f, "{}", Decimal::from_i128_with_scale(*val, *scale))
-            }
-            Literal::String(ref s) => display_string_literal(f, s),
-            Literal::Blob(ref bv) => write!(
-                f,
-                "{}",
-                bv.iter()
-                    .map(|v| format!("{:x}", v))
-                    .collect::<Vec<String>>()
-                    .join(" ")
-            ),
-            Literal::ByteArray(b) => {
-                write!(f, "E'\\x{}'", b.iter().map(|v| format!("{:x}", v)).join(""))
-            }
-            Literal::Placeholder(item) => write!(f, "{}", item.to_string()),
-            Literal::BitVector(ref b) => {
-                write!(
+                Literal::String(ref s) => display_string_literal(f, s),
+                Literal::Blob(ref bv) => write!(
                     f,
-                    "B'{}'",
-                    BitVec::from_bytes(b.as_slice())
-                        .iter()
-                        .map(|bit| if bit { "1" } else { "0" })
-                        .join("")
-                )
+                    "{}",
+                    bv.iter()
+                        .map(|v| format!("{:x}", v))
+                        .collect::<Vec<String>>()
+                        .join(" ")
+                ),
+                Literal::ByteArray(b) => {
+                    write!(f, "E'\\x{}'", b.iter().map(|v| format!("{:x}", v)).join(""))
+                }
+                Literal::Placeholder(item) => write!(f, "{}", item.to_string()),
+                Literal::BitVector(ref b) => {
+                    write!(
+                        f,
+                        "B'{}'",
+                        BitVec::from_bytes(b.as_slice())
+                            .iter()
+                            .map(|bit| if bit { "1" } else { "0" })
+                            .join("")
+                    )
+                }
             }
-        }
+        })
     }
 }
 
@@ -588,7 +591,7 @@ mod tests {
             value: 1.5,
             precision: u8::MAX,
         });
-        assert_eq!(f.to_string(), "1.5");
+        assert_eq!(f.display(Dialect::MySQL).to_string(), "1.5");
     }
 
     #[test]
@@ -597,7 +600,7 @@ mod tests {
             value: 0.0,
             precision: u8::MAX,
         });
-        assert_eq!(f.to_string(), "0.0");
+        assert_eq!(f.display(Dialect::MySQL).to_string(), "0.0");
     }
 
     #[test]
@@ -625,7 +628,7 @@ mod tests {
         ));
         match lit {
             Literal::BitVector(_) => {
-                let s = lit.to_string();
+                let s = lit.display(Dialect::MySQL).to_string();
                 assert_eq!(
                     literal(Dialect::PostgreSQL)(LocatedSpan::new(s.as_bytes()))
                         .unwrap()
@@ -635,7 +638,7 @@ mod tests {
             }
             // Positive integers are parsed as Unsigned
             Literal::Integer(i) if i > 0 => {
-                let s = lit.to_string();
+                let s = lit.display(Dialect::MySQL).to_string();
                 assert_eq!(
                     literal(Dialect::PostgreSQL)(LocatedSpan::new(s.as_bytes()))
                         .unwrap()
@@ -645,7 +648,7 @@ mod tests {
             }
             _ => {
                 for &dialect in Dialect::ALL {
-                    let s = lit.to_string();
+                    let s = lit.display(Dialect::MySQL).to_string();
                     assert_eq!(
                         literal(dialect)(LocatedSpan::new(s.as_bytes())).unwrap().1,
                         lit

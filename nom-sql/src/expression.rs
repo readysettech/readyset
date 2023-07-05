@@ -489,7 +489,7 @@ impl Expr {
     pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
         fmt_with(move |f| match self {
             Expr::Call(fe) => write!(f, "{}", fe.display(dialect)),
-            Expr::Literal(l) => write!(f, "{}", l),
+            Expr::Literal(l) => write!(f, "{}", l.display(dialect)),
             Expr::Column(col) => write!(f, "{}", col.display(dialect)),
             Expr::CaseWhen {
                 branches,

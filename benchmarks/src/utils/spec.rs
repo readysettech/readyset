@@ -213,7 +213,7 @@ impl DatabaseSchema {
                                 // Only keep the original value for each variable
                                 user_vars
                                     .entry(var.name.clone().into())
-                                    .or_insert_with(|| lit.to_string());
+                                    .or_insert_with(|| lit.display(Dialect::MySQL).to_string());
                             }
                         })
                     };

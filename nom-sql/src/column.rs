@@ -105,7 +105,7 @@ impl ColumnConstraint {
             Self::OnUpdateCurrentTimestamp(opt) => {
                 write!(f, "ON UPDATE CURRENT_TIMESTAMP")?;
                 if let Some(lit) = opt {
-                    write!(f, "({})", lit)?;
+                    write!(f, "({})", lit.display(dialect))?;
                 }
                 Ok(())
             }

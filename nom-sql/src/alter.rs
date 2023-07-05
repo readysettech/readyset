@@ -32,14 +32,14 @@ pub enum AlterColumnOperation {
     DropColumnDefault,
 }
 
-impl fmt::Display for AlterColumnOperation {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
+impl AlterColumnOperation {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+        fmt_with(move |f| match self {
             AlterColumnOperation::SetColumnDefault(val) => {
-                write!(f, "SET DEFAULT {}", val)
+                write!(f, "SET DEFAULT {}", val.display(dialect))
             }
             AlterColumnOperation::DropColumnDefault => write!(f, "DROP DEFAULT"),
-        }
+        })
     }
 }
 
@@ -122,7 +122,7 @@ impl AlterTableDefinition {
                     f,
                     "ALTER COLUMN {} {}",
                     dialect.quote_identifier(name),
-                    operation
+                    operation.display(dialect)
                 )
             }
             Self::DropColumn { name, behavior } => {

@@ -268,6 +268,7 @@ pub struct PreparedStatement {
     pub statement: DatabaseStatement,
     pub query: String,
     pub params: Vec<ParameterGenerationSpec>,
+    dialect: Dialect,
 }
 
 impl PreparedStatement {
@@ -284,6 +285,7 @@ impl PreparedStatement {
                 .collect(),
             query,
             statement,
+            dialect: conn.dialect(),
         })
     }
 
@@ -307,6 +309,7 @@ impl PreparedStatement {
             query,
             params,
             statement,
+            dialect: conn.dialect(),
         })
     }
 
@@ -329,7 +332,7 @@ impl PreparedStatement {
                 // with a query builder library of some sort to ensure that all values are escaped
                 // and quoted safely.
                 let value_string = if let Ok(s) = <&str>::try_from(value) {
-                    Literal::String(s.into()).to_string()
+                    Literal::String(s.into()).display(self.dialect).to_string()
                 } else {
                     value.to_string()
                 };

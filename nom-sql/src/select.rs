@@ -1,4 +1,3 @@
-use std::fmt::Formatter;
 use std::{fmt, str};
 
 use itertools::Itertools;
@@ -145,25 +144,33 @@ impl Default for LimitClause {
     }
 }
 
-impl fmt::Display for LimitClause {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            LimitClause::LimitOffset { limit, offset } => {
-                if let Some(limit) = limit {
-                    write!(f, "LIMIT {}", limit)?;
-                }
-                if let Some(offset) = offset {
-                    if limit.is_some() {
-                        write!(f, " ")?;
+impl LimitClause {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+        fmt_with(move |f| {
+            match self {
+                LimitClause::LimitOffset { limit, offset } => {
+                    if let Some(limit) = limit {
+                        write!(f, "LIMIT {}", limit.display(dialect))?;
                     }
-                    write!(f, "OFFSET {}", offset)?;
+                    if let Some(offset) = offset {
+                        if limit.is_some() {
+                            write!(f, " ")?;
+                        }
+                        write!(f, "OFFSET {}", offset.display(dialect))?;
+                    }
+                }
+                LimitClause::OffsetCommaLimit { offset, limit } => {
+                    write!(
+                        f,
+                        "LIMIT {}, {}",
+                        offset.display(dialect),
+                        limit.display(dialect)
+                    )?;
                 }
             }
-            LimitClause::OffsetCommaLimit { offset, limit } => {
-                write!(f, "LIMIT {}, {}", offset, limit)?;
-            }
-        }
-        Ok(())
+
+            Ok(())
+        })
     }
 }
 
@@ -257,7 +264,7 @@ impl SelectStatement {
                 write!(f, " {}", order.display(dialect))?;
             }
             if self.limit_clause.limit().is_some() || self.limit_clause.offset().is_some() {
-                write!(f, " {}", self.limit_clause)?;
+                write!(f, " {}", self.limit_clause.display(dialect))?;
             }
 
             Ok(())

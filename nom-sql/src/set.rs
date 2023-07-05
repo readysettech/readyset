@@ -32,7 +32,7 @@ impl SetStatement {
             match self {
                 Self::Variable(set) => write!(f, "{}", set.display(dialect)),
                 Self::Names(set) => write!(f, "{}", set),
-                Self::PostgresParameter(set) => write!(f, "{}", set),
+                Self::PostgresParameter(set) => write!(f, "{}", set.display(dialect)),
             }
         })
     }
@@ -75,12 +75,12 @@ pub enum SetPostgresParameterValue {
     Value(PostgresParameterValue),
 }
 
-impl Display for SetPostgresParameterValue {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+impl SetPostgresParameterValue {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+        fmt_with(move |f| match self {
             SetPostgresParameterValue::Default => write!(f, "DEFAULT"),
-            SetPostgresParameterValue::Value(val) => write!(f, "{}", val),
-        }
+            SetPostgresParameterValue::Value(val) => write!(f, "{}", val.display(dialect)),
+        })
     }
 }
 
@@ -102,12 +102,12 @@ pub enum PostgresParameterValueInner {
     Literal(Literal),
 }
 
-impl Display for PostgresParameterValueInner {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+impl PostgresParameterValueInner {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+        fmt_with(move |f| match self {
             PostgresParameterValueInner::Identifier(ident) => write!(f, "{}", ident),
-            PostgresParameterValueInner::Literal(lit) => write!(f, "{}", lit),
-        }
+            PostgresParameterValueInner::Literal(lit) => write!(f, "{}", lit.display(dialect)),
+        })
     }
 }
 
@@ -150,12 +150,20 @@ impl PostgresParameterValue {
     }
 }
 
-impl Display for PostgresParameterValue {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            PostgresParameterValue::Single(v) => write!(f, "{}", v),
-            PostgresParameterValue::List(l) => write!(f, "{}", l.iter().join(", ")),
-        }
+impl PostgresParameterValue {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+        fmt_with(move |f| match self {
+            PostgresParameterValue::Single(v) => write!(f, "{}", v.display(dialect)),
+            PostgresParameterValue::List(l) => {
+                for (i, v) in l.iter().enumerate() {
+                    if i != 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", v.display(dialect))?;
+                }
+                Ok(())
+            }
+        })
     }
 }
 
@@ -295,12 +303,14 @@ pub struct SetPostgresParameter {
     pub value: SetPostgresParameterValue,
 }
 
-impl Display for SetPostgresParameter {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(scope) = self.scope {
-            write!(f, "{} ", scope)?;
-        }
-        write!(f, "{} = {}", self.name, self.value)
+impl SetPostgresParameter {
+    pub fn display(&self, dialect: Dialect) -> impl fmt::Display + Copy + '_ {
+        fmt_with(move |f| {
+            if let Some(scope) = self.scope {
+                write!(f, "{} ", scope)?;
+            }
+            write!(f, "{} = {}", self.name, self.value.display(dialect))
+        })
     }
 }
 
