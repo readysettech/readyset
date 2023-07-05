@@ -1,7 +1,7 @@
 use std::ops::Bound;
 
 use clap::Parser;
-use common::{Index, IndexType};
+use common::{Index, IndexType, Record};
 use criterion::{black_box, Criterion};
 use dataflow_state::{
     DurabilityMode, PersistenceParameters, PersistentState, PointKey, RangeKey, SnapshotMode, State,
@@ -219,6 +219,8 @@ struct PersistentStateBenchArgs {
 }
 
 impl PersistentStateBenchArgs {
+    const INSERTION_BATCH_SIZE: usize = 100_000;
+
     fn initialize_state(&self) -> PersistentState {
         let mut state = PersistentState::new(
             format!("bench_{}", self.unique_entries),
@@ -245,11 +247,21 @@ impl PersistentStateBenchArgs {
 
             let animals = ["Cat", "Dog", "Bat"];
 
-            for i in 0..self.unique_entries {
-                let rec: Vec<DfValue> =
-                    vec![i.into(), animals[i % 3].into(), (i % 99).into(), i.into()];
+            let batches = (0..self.unique_entries)
+                .map(|i| {
+                    Record::from(vec![
+                        i.into(),
+                        animals[i % 3].into(),
+                        (i % 99).into(),
+                        i.into(),
+                    ])
+                })
+                .chunks(Self::INSERTION_BATCH_SIZE);
+
+            for batch_iter in &batches {
+                let batch = batch_iter.collect::<Vec<Record>>();
                 state
-                    .process_records(&mut vec![rec].into(), None, None)
+                    .process_records(&mut batch.into(), None, None)
                     .unwrap();
             }
 
@@ -286,15 +298,24 @@ impl PersistentStateBenchArgs {
 
             state.add_key(Index::new(IndexType::BTreeMap, vec![1]), None);
 
-            for i in 0..self.unique_entries {
-                let rec: Vec<DfValue> = vec![
-                    i.into(),
-                    LARGE_STRINGS[i % 3].clone().into(),
-                    (i % 99).into(),
-                    i.into(),
-                ];
+            let batches = (0..self.unique_entries)
+                .map(|i| {
+                    Record::from(vec![
+                        i.into(),
+                        LARGE_STRINGS[i % 3].clone().into(),
+                        (i % 99).into(),
+                        i.into(),
+                    ])
+                })
+                // Each large string is 10000 bytes, which means it is 3333x larger than the
+                // strings we insert in `Self::initialize_state`. Thus, the batch size should be
+                // 3333x smaller to use a consistent amount of memory
+                .chunks(Self::INSERTION_BATCH_SIZE / 3333);
+
+            for batch_iter in &batches {
+                let batch = batch_iter.collect::<Vec<Record>>();
                 state
-                    .process_records(&mut vec![rec].into(), None, None)
+                    .process_records(&mut batch.into(), None, None)
                     .unwrap();
             }
 
