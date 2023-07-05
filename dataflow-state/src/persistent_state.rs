@@ -200,7 +200,7 @@ impl SnapshotMode {
 }
 
 /// Indicates to what degree updates should be persisted.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, ValueEnum)]
+#[derive(Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq, ValueEnum)]
 pub enum DurabilityMode {
     /// Don't do any durability
     #[value(alias("memory"))]

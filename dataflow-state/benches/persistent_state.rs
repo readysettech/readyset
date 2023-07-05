@@ -1,9 +1,10 @@
 use std::ops::Bound;
 
+use clap::Parser;
 use common::{Index, IndexType};
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{black_box, Criterion};
 use dataflow_state::{
-    PersistenceParameters, PersistentState, PointKey, RangeKey, SnapshotMode, State,
+    DurabilityMode, PersistenceParameters, PersistentState, PointKey, RangeKey, SnapshotMode, State,
 };
 use itertools::Itertools;
 use readyset_data::DfValue;
@@ -11,76 +12,13 @@ use readyset_data::DfValue;
 const UNIQUE_ENTRIES: usize = 100000;
 
 lazy_static::lazy_static! {
-    static ref STATE: PersistentState = {
-        let mut state = PersistentState::new(
-            String::from("bench"),
-            vec![&[0usize][..], &[3][..]],
-            &PersistenceParameters::default(),
-        ).unwrap();
-
-        state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
-        state.add_key(Index::new(IndexType::HashMap, vec![1, 2]), None);
-        state.add_key(Index::new(IndexType::HashMap, vec![3]), None);
-
-        state.add_key(Index::new(IndexType::BTreeMap, vec![1]), None);
-
-        state.set_snapshot_mode(SnapshotMode::SnapshotModeEnabled);
-
-        let animals = ["Cat", "Dog", "Bat"];
-
-        for i in 0..UNIQUE_ENTRIES {
-            let rec: Vec<DfValue> = vec![
-                i.into(),
-                animals[i % 3].into(),
-                (i % 99).into(),
-                i.into(),
-            ];
-            state.process_records(&mut vec![rec].into(), None, None).unwrap();
-        }
-
-        state.set_snapshot_mode(SnapshotMode::SnapshotModeDisabled);
-
-        state
-    };
-
-    static ref LARGE_STRINGS: Vec<String> = ["a", "b", "c"].iter().map(|s| {
-        std::iter::once(s).cycle().take(10000).join("")
-    }).collect::<Vec<_>>();
-
-    static ref STATE_LARGE_STRINGS: PersistentState = {
-        let mut state = PersistentState::new(
-            String::from("bench"),
-            vec![&[0usize][..], &[3][..]],
-            &PersistenceParameters::default(),
-        ).unwrap();
-
-        state.set_snapshot_mode(SnapshotMode::SnapshotModeEnabled);
-
-        state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
-        state.add_key(Index::new(IndexType::HashMap, vec![1]), None);
-        state.add_key(Index::new(IndexType::HashMap, vec![3]), None);
-
-        state.add_key(Index::new(IndexType::BTreeMap, vec![1]), None);
-
-        for i in 0..UNIQUE_ENTRIES {
-            let rec: Vec<DfValue> = vec![
-                i.into(),
-                LARGE_STRINGS[i % 3].clone().into(),
-                (i % 99).into(),
-                i.into(),
-            ];
-            state.process_records(&mut vec![rec].into(), None, None).unwrap();
-        }
-
-        state.set_snapshot_mode(SnapshotMode::SnapshotModeDisabled);
-
-        state
-    };
+    static ref LARGE_STRINGS: Vec<String> = ["a", "b", "c"]
+        .iter()
+        .map(|s| std::iter::once(s).cycle().take(10000).join(""))
+        .collect::<Vec<_>>();
 }
 
-pub fn rocksdb_get_primary_key(c: &mut Criterion) {
-    let state = &*STATE;
-
+pub fn rocksdb_get_primary_key(c: &mut Criterion, state: &PersistentState) {
     let mut group = c.benchmark_group("RockDB get primary key");
     let n = UNIQUE_ENTRIES / 1000;
     group.bench_function("lookup_multi", |b| {
@@ -127,9 +65,7 @@ pub fn rocksdb_get_primary_key(c: &mut Criterion) {
     group.finish();
 }
 
-pub fn rocksdb_get_secondary_key(c: &mut Criterion) {
-    let state = &*STATE;
-
+pub fn rocksdb_get_secondary_key(c: &mut Criterion, state: &PersistentState) {
     let mut group = c.benchmark_group("RockDB get secondary key");
     group.bench_function("lookup_multi", |b| {
         b.iter(|| {
@@ -155,9 +91,7 @@ pub fn rocksdb_get_secondary_key(c: &mut Criterion) {
     group.finish();
 }
 
-pub fn rocksdb_get_secondary_unique_key(c: &mut Criterion) {
-    let state = &*STATE;
-
+pub fn rocksdb_get_secondary_unique_key(c: &mut Criterion, state: &PersistentState) {
     let mut group = c.benchmark_group("RockDB get secondary unique key");
     let n = UNIQUE_ENTRIES / 1000;
     group.bench_function("lookup_multi", |b| {
@@ -204,8 +138,7 @@ pub fn rocksdb_get_secondary_unique_key(c: &mut Criterion) {
     group.finish();
 }
 
-pub fn rocksdb_range_lookup(c: &mut Criterion) {
-    let state = &*STATE;
+pub fn rocksdb_range_lookup(c: &mut Criterion, state: &PersistentState) {
     let key = DfValue::from("D");
 
     let mut group = c.benchmark_group("RocksDB lookup_range");
@@ -220,8 +153,7 @@ pub fn rocksdb_range_lookup(c: &mut Criterion) {
     group.finish();
 }
 
-pub fn rocksdb_range_lookup_large_strings(c: &mut Criterion) {
-    let state = &*STATE_LARGE_STRINGS;
+pub fn rocksdb_range_lookup_large_strings(c: &mut Criterion, state: &PersistentState) {
     let key = DfValue::from(LARGE_STRINGS[0].clone());
 
     let mut group = c.benchmark_group("RocksDB with large strings");
@@ -236,12 +168,127 @@ pub fn rocksdb_range_lookup_large_strings(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(
-    benches,
-    rocksdb_get_primary_key,
-    rocksdb_get_secondary_key,
-    rocksdb_get_secondary_unique_key,
-    rocksdb_range_lookup,
-    rocksdb_range_lookup_large_strings,
-);
-criterion_main!(benches);
+#[derive(Parser, Debug)]
+struct PersistentStateBenchArgs {
+    /// If specified, only run benches containing this string in their names
+    // This argument is the first argument passed by `cargo bench`
+    #[clap(index(1))]
+    benchname: Option<String>,
+    /// Names an explicit baseline and enables overwriting the previous results.
+    #[clap(long)]
+    save_baseline: Option<String>,
+    /// Is present when executed with `cargo bench`
+    #[clap(long, hide(true))]
+    bench: bool,
+    #[clap(long, hide(true))]
+    /// Is present when executed with `cargo test`
+    test: bool,
+    /// If this value is set to "persistent", data from these benchmarks will be persisted in the
+    /// current directory instead of in a tmp directory.
+    #[clap(long, default_value = "memory")]
+    durability_mode: DurabilityMode,
+}
+
+fn initialize_state(name: String, mode: DurabilityMode) -> PersistentState {
+    let mut state = PersistentState::new(
+        name,
+        vec![&[0usize][..], &[3][..]],
+        &PersistenceParameters {
+            mode,
+            persistence_threads: 6,
+            ..PersistenceParameters::default()
+        },
+    )
+    .unwrap();
+
+    state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
+    state.add_key(Index::new(IndexType::HashMap, vec![1, 2]), None);
+    state.add_key(Index::new(IndexType::HashMap, vec![3]), None);
+
+    state.add_key(Index::new(IndexType::BTreeMap, vec![1]), None);
+
+    state.set_snapshot_mode(SnapshotMode::SnapshotModeEnabled);
+
+    let animals = ["Cat", "Dog", "Bat"];
+
+    for i in 0..UNIQUE_ENTRIES {
+        let rec: Vec<DfValue> = vec![i.into(), animals[i % 3].into(), (i % 99).into(), i.into()];
+        state
+            .process_records(&mut vec![rec].into(), None, None)
+            .unwrap();
+    }
+
+    state.set_snapshot_mode(SnapshotMode::SnapshotModeDisabled);
+
+    state
+}
+
+fn initialize_large_strings_state(name: String, mode: DurabilityMode) -> PersistentState {
+    let mut state = PersistentState::new(
+        name,
+        vec![&[0usize][..], &[3][..]],
+        &PersistenceParameters {
+            mode,
+            persistence_threads: 6,
+            ..PersistenceParameters::default()
+        },
+    )
+    .unwrap();
+
+    state.set_snapshot_mode(SnapshotMode::SnapshotModeEnabled);
+
+    state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
+    state.add_key(Index::new(IndexType::HashMap, vec![1]), None);
+    state.add_key(Index::new(IndexType::HashMap, vec![3]), None);
+
+    state.add_key(Index::new(IndexType::BTreeMap, vec![1]), None);
+
+    for i in 0..UNIQUE_ENTRIES {
+        let rec: Vec<DfValue> = vec![
+            i.into(),
+            LARGE_STRINGS[i % 3].clone().into(),
+            (i % 99).into(),
+            i.into(),
+        ];
+        state
+            .process_records(&mut vec![rec].into(), None, None)
+            .unwrap();
+    }
+
+    state.set_snapshot_mode(SnapshotMode::SnapshotModeDisabled);
+
+    state
+}
+
+fn main() -> anyhow::Result<()> {
+    let mut args = PersistentStateBenchArgs::parse();
+
+    if args.test {
+        // Move along citizen, no tests here
+        return Ok(());
+    }
+
+    let mut criterion = Criterion::default();
+    if let Some(ref filter) = args.benchname {
+        criterion = criterion.with_filter(filter);
+    }
+    if let Some(baseline) = args.save_baseline.take() {
+        criterion = criterion.save_baseline(baseline);
+    }
+
+    let state = initialize_state(format!("bench_{UNIQUE_ENTRIES}"), args.durability_mode);
+    let large_strings_state = initialize_large_strings_state(
+        format!("bench_{UNIQUE_ENTRIES}_large_strings"),
+        args.durability_mode,
+    );
+
+    rocksdb_get_primary_key(&mut criterion, &state);
+    rocksdb_get_secondary_key(&mut criterion, &state);
+    rocksdb_get_secondary_unique_key(&mut criterion, &state);
+    rocksdb_range_lookup(&mut criterion, &state);
+    rocksdb_range_lookup_large_strings(&mut criterion, &large_strings_state);
+
+    criterion.final_summary();
+
+    Ok(())
+}
