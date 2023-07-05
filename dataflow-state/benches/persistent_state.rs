@@ -8,7 +8,7 @@ use dataflow_state::{
 use itertools::Itertools;
 use readyset_data::DfValue;
 
-const UNIQUE_ENTIRES: usize = 100000;
+const UNIQUE_ENTRIES: usize = 100000;
 
 lazy_static::lazy_static! {
     static ref STATE: PersistentState = {
@@ -28,7 +28,7 @@ lazy_static::lazy_static! {
 
         let animals = ["Cat", "Dog", "Bat"];
 
-        for i in 0..UNIQUE_ENTIRES {
+        for i in 0..UNIQUE_ENTRIES {
             let rec: Vec<DfValue> = vec![
                 i.into(),
                 animals[i % 3].into(),
@@ -62,7 +62,7 @@ lazy_static::lazy_static! {
 
         state.add_key(Index::new(IndexType::BTreeMap, vec![1]), None);
 
-        for i in 0..UNIQUE_ENTIRES {
+        for i in 0..UNIQUE_ENTRIES {
             let rec: Vec<DfValue> = vec![
                 i.into(),
                 LARGE_STRINGS[i % 3].clone().into(),
@@ -82,6 +82,7 @@ pub fn rocksdb_get_primary_key(c: &mut Criterion) {
     let state = &*STATE;
 
     let mut group = c.benchmark_group("RockDB get primary key");
+    let n = UNIQUE_ENTRIES / 1000;
     group.bench_function("lookup_multi", |b| {
         let mut iter = 0usize;
         b.iter(|| {
@@ -89,18 +90,18 @@ pub fn rocksdb_get_primary_key(c: &mut Criterion) {
                 &[0],
                 &[
                     PointKey::Single(iter.into()),
-                    PointKey::Single((iter + 100).into()),
-                    PointKey::Single((iter + 200).into()),
-                    PointKey::Single((iter + 300).into()),
-                    PointKey::Single((iter + 400).into()),
-                    PointKey::Single((iter + 500).into()),
-                    PointKey::Single((iter + 600).into()),
-                    PointKey::Single((iter + 700).into()),
-                    PointKey::Single((iter + 800).into()),
-                    PointKey::Single((iter + 900).into()),
+                    PointKey::Single((iter + n).into()),
+                    PointKey::Single((iter + n * 2).into()),
+                    PointKey::Single((iter + n * 3).into()),
+                    PointKey::Single((iter + n * 4).into()),
+                    PointKey::Single((iter + n * 5).into()),
+                    PointKey::Single((iter + n * 6).into()),
+                    PointKey::Single((iter + n * 7).into()),
+                    PointKey::Single((iter + n * 8).into()),
+                    PointKey::Single((iter + n * 9).into()),
                 ],
             ));
-            iter = (iter + 1) % (UNIQUE_ENTIRES - 1000);
+            iter = (iter + 1) % (UNIQUE_ENTRIES - n * 10);
         })
     });
 
@@ -109,17 +110,17 @@ pub fn rocksdb_get_primary_key(c: &mut Criterion) {
         b.iter(|| {
             black_box((
                 state.lookup(&[0], &PointKey::Single(iter.into())),
-                state.lookup(&[0], &PointKey::Single((iter + 100).into())),
-                state.lookup(&[0], &PointKey::Single((iter + 200).into())),
-                state.lookup(&[0], &PointKey::Single((iter + 300).into())),
-                state.lookup(&[0], &PointKey::Single((iter + 400).into())),
-                state.lookup(&[0], &PointKey::Single((iter + 500).into())),
-                state.lookup(&[0], &PointKey::Single((iter + 600).into())),
-                state.lookup(&[0], &PointKey::Single((iter + 700).into())),
-                state.lookup(&[0], &PointKey::Single((iter + 800).into())),
-                state.lookup(&[0], &PointKey::Single((iter + 900).into())),
+                state.lookup(&[0], &PointKey::Single((iter + n).into())),
+                state.lookup(&[0], &PointKey::Single((iter + n * 2).into())),
+                state.lookup(&[0], &PointKey::Single((iter + n * 3).into())),
+                state.lookup(&[0], &PointKey::Single((iter + n * 4).into())),
+                state.lookup(&[0], &PointKey::Single((iter + n * 5).into())),
+                state.lookup(&[0], &PointKey::Single((iter + n * 6).into())),
+                state.lookup(&[0], &PointKey::Single((iter + n * 7).into())),
+                state.lookup(&[0], &PointKey::Single((iter + n * 8).into())),
+                state.lookup(&[0], &PointKey::Single((iter + n * 9).into())),
             ));
-            iter = (iter + 1) % (UNIQUE_ENTIRES - 1000);
+            iter = (iter + 1) % (UNIQUE_ENTRIES - n * 10);
         })
     });
 
@@ -158,6 +159,7 @@ pub fn rocksdb_get_secondary_unique_key(c: &mut Criterion) {
     let state = &*STATE;
 
     let mut group = c.benchmark_group("RockDB get secondary unique key");
+    let n = UNIQUE_ENTRIES / 1000;
     group.bench_function("lookup_multi", |b| {
         let mut iter = 0usize;
         b.iter(|| {
@@ -165,18 +167,18 @@ pub fn rocksdb_get_secondary_unique_key(c: &mut Criterion) {
                 &[3],
                 &[
                     PointKey::Single(iter.into()),
-                    PointKey::Single((iter + 100).into()),
-                    PointKey::Single((iter + 200).into()),
-                    PointKey::Single((iter + 300).into()),
-                    PointKey::Single((iter + 400).into()),
-                    PointKey::Single((iter + 500).into()),
-                    PointKey::Single((iter + 600).into()),
-                    PointKey::Single((iter + 700).into()),
-                    PointKey::Single((iter + 800).into()),
-                    PointKey::Single((iter + 900).into()),
+                    PointKey::Single((iter + n).into()),
+                    PointKey::Single((iter + n * 2).into()),
+                    PointKey::Single((iter + n * 3).into()),
+                    PointKey::Single((iter + n * 4).into()),
+                    PointKey::Single((iter + n * 5).into()),
+                    PointKey::Single((iter + n * 6).into()),
+                    PointKey::Single((iter + n * 7).into()),
+                    PointKey::Single((iter + n * 8).into()),
+                    PointKey::Single((iter + n * 9).into()),
                 ],
             ));
-            iter = (iter + 1) % (UNIQUE_ENTIRES - 1000);
+            iter = (iter + 1) % (UNIQUE_ENTRIES - n * 10);
         })
     });
 
@@ -185,17 +187,17 @@ pub fn rocksdb_get_secondary_unique_key(c: &mut Criterion) {
         b.iter(|| {
             black_box((
                 state.lookup(&[3], &PointKey::Single(iter.into())),
-                state.lookup(&[3], &PointKey::Single((iter + 100).into())),
-                state.lookup(&[3], &PointKey::Single((iter + 200).into())),
-                state.lookup(&[3], &PointKey::Single((iter + 300).into())),
-                state.lookup(&[3], &PointKey::Single((iter + 400).into())),
-                state.lookup(&[3], &PointKey::Single((iter + 500).into())),
-                state.lookup(&[3], &PointKey::Single((iter + 600).into())),
-                state.lookup(&[3], &PointKey::Single((iter + 700).into())),
-                state.lookup(&[3], &PointKey::Single((iter + 800).into())),
-                state.lookup(&[3], &PointKey::Single((iter + 900).into())),
+                state.lookup(&[3], &PointKey::Single((iter + n).into())),
+                state.lookup(&[3], &PointKey::Single((iter + n * 2).into())),
+                state.lookup(&[3], &PointKey::Single((iter + n * 3).into())),
+                state.lookup(&[3], &PointKey::Single((iter + n * 4).into())),
+                state.lookup(&[3], &PointKey::Single((iter + n * 5).into())),
+                state.lookup(&[3], &PointKey::Single((iter + n * 6).into())),
+                state.lookup(&[3], &PointKey::Single((iter + n * 7).into())),
+                state.lookup(&[3], &PointKey::Single((iter + n * 8).into())),
+                state.lookup(&[3], &PointKey::Single((iter + n * 9).into())),
             ));
-            iter = (iter + 1) % (UNIQUE_ENTIRES - 1000);
+            iter = (iter + 1) % (UNIQUE_ENTRIES - n * 10);
         })
     });
 
