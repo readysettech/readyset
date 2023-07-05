@@ -291,7 +291,7 @@ where
             .field("timestamp", &self.timestamp)
             .field("capacity", &self.capacity)
             .field("order", &self.insertion_order)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
