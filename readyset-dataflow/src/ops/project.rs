@@ -106,14 +106,20 @@ impl Ingredient for Project {
         _: &mut AuxiliaryNodeStateMap,
     ) -> ReadySetResult<ProcessingResult> {
         debug_assert_eq!(from, *self.src);
+        let mut log_error_once_flag = false;
         for r in &mut *rs {
             **r = self
                 .emit
                 .iter()
                 .map(|expr| match expr.eval(r) {
                     Ok(val) => val,
+                    // TODO (REA-2964): Handle expression eval errors
                     Err(error) => {
-                        error!(%error, "Error evaluating project expression");
+                        // only log this error once per on_input call
+                        if !log_error_once_flag {
+                            error!(%error, "Error evaluating project expression");
+                            log_error_once_flag = true;
+                        }
                         DfValue::None
                     }
                 })

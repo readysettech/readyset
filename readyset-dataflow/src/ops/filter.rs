@@ -4,6 +4,7 @@ use dataflow_expression::Expr;
 use dataflow_state::PointKey;
 use readyset_errors::ReadySetResult;
 use serde::{Deserialize, Serialize};
+use tracing::error;
 
 use crate::prelude::*;
 use crate::processing::{ColumnSource, IngredientLookupResult, LookupIndex, LookupMode};
@@ -53,8 +54,23 @@ impl Ingredient for Filter {
         _: &mut AuxiliaryNodeStateMap,
     ) -> ReadySetResult<ProcessingResult> {
         let mut results = Vec::new();
+        let mut log_error_once_flag = false;
         for r in rs {
-            if self.expression.eval(r.rec())?.is_truthy() {
+            // If expression evaluation fails, we will filter out the row.
+            let condition_res = match self.expression.eval(r.rec()) {
+                Ok(v) => v.is_truthy(),
+                // TODO (REA-2964): Handle expression eval errors
+                Err(e) => {
+                    // only log this error once per on_input call
+                    if !log_error_once_flag {
+                        error!(%e, "Error evaluating filter expression");
+                        log_error_once_flag = true;
+                    }
+                    false
+                }
+            };
+
+            if condition_res {
                 results.push(r);
             }
         }
