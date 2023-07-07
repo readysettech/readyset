@@ -9,6 +9,7 @@ use nom::combinator::{map_res, not, opt, peek};
 use nom::error::ErrorKind;
 use nom::multi::fold_many0;
 use nom::sequence::{delimited, preceded};
+use nom::{InputLength, InputTake};
 use nom_locate::LocatedSpan;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -88,17 +89,39 @@ impl Dialect {
     /// Parse a SQL identifier using this Dialect
     pub fn identifier(self) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlIdentifier> {
         move |i| match self {
-            Dialect::MySQL => map_res(
-                alt((
-                    preceded(
-                        not(peek(sql_keyword_or_builtin_function)),
-                        take_while1(is_sql_identifier),
-                    ),
-                    delimited(tag("`"), take_while1(|c| c != 0 && c != b'`'), tag("`")),
-                    delimited(tag("["), take_while1(is_sql_identifier), tag("]")),
-                )),
-                |v| str::from_utf8(&v).map(Into::into),
-            )(i),
+            Dialect::MySQL => {
+                fn quoted_ident_contents(
+                    i: LocatedSpan<&[u8]>,
+                ) -> NomSqlResult<&[u8], LocatedSpan<&[u8]>> {
+                    let mut idx = 0;
+                    while idx < i.len() {
+                        if i[idx] == b'`' && idx != (i.len() - 1) && i[idx + 1] == b'`' {
+                            idx += 2;
+                            continue;
+                        }
+
+                        if i[idx] == 0 || i[idx] == b'`' {
+                            return Ok(i.take_split(idx));
+                        }
+
+                        idx += 1;
+                    }
+
+                    Ok(i.take_split(i.input_len()))
+                }
+
+                map_res(
+                    alt((
+                        preceded(
+                            not(peek(sql_keyword_or_builtin_function)),
+                            take_while1(is_sql_identifier),
+                        ),
+                        delimited(tag("`"), quoted_ident_contents, tag("`")),
+                        delimited(tag("["), take_while1(is_sql_identifier), tag("]")),
+                    )),
+                    |v| str::from_utf8(&v).map(|s| s.replace("``", "`").into()),
+                )(i)
+            }
             Dialect::PostgreSQL => alt((
                 map_res(
                     preceded(
@@ -165,7 +188,10 @@ impl Dialect {
     /// Quotes the table/column identifier appropriately for this dialect.
     pub fn quote_identifier(self, ident: impl fmt::Display) -> impl fmt::Display {
         let quote = self.quote_identifier_char();
-        readyset_util::fmt_args!("{quote}{ident}{quote}")
+        readyset_util::fmt_args!(
+            "{quote}{}{quote}",
+            ident.to_string().replace(quote, &format!("{quote}{quote}"))
+        )
     }
 
     /// Parse the raw (byte) content of a string literal using this Dialect
@@ -295,6 +321,24 @@ mod tests {
             // Malformed string
             let res = Dialect::MySQL.bytes_literal()(LocatedSpan::new(b"''"));
             res.unwrap_err();
+        }
+
+        #[test]
+        fn ident_with_backtick() {
+            let res = test_parse!(Dialect::MySQL.identifier(), b"````");
+            assert_eq!(res, SqlIdentifier::from("`"));
+            let rt = Dialect::MySQL.quote_identifier(&res).to_string();
+            let res2 = test_parse!(Dialect::MySQL.identifier(), rt.as_bytes());
+            assert_eq!(res2, res);
+        }
+
+        #[test]
+        fn ident_with_backtick_and_other_chars() {
+            let res = test_parse!(Dialect::MySQL.identifier(), b"```i`");
+            assert_eq!(res, SqlIdentifier::from("`i"));
+            let rt = Dialect::MySQL.quote_identifier(&res).to_string();
+            let res2 = test_parse!(Dialect::MySQL.identifier(), rt.as_bytes());
+            assert_eq!(res2, res);
         }
     }
 

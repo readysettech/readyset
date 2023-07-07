@@ -57,7 +57,6 @@ pub use self::use_statement::UseStatement;
 
 pub mod parser;
 
-mod dialect;
 #[macro_use]
 mod macros;
 
@@ -70,6 +69,7 @@ mod compound_select;
 mod create;
 mod create_table_options;
 mod delete;
+mod dialect;
 mod drop;
 mod explain;
 mod expression;
