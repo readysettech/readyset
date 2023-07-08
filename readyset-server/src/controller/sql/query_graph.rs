@@ -915,52 +915,56 @@ fn default_row_for_select(st: &SelectStatement) -> Option<Vec<DfValue>> {
 #[allow(clippy::cognitive_complexity)]
 pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
     // a handy closure for making new relation nodes
-    let new_node =
-        |rel: Relation, preds: Vec<Expr>, st: &SelectStatement| -> ReadySetResult<QueryGraphNode> {
-            Ok(QueryGraphNode {
-                relation: rel.clone(),
-                predicates: preds,
-                columns: st
-                    .fields
-                    .iter()
-                    .map(|field| {
-                        Ok(match field {
-                            // unreachable because SQL rewrite passes will have expanded these
-                            // already
-                            FieldDefinitionExpr::All => {
-                                internal!("* should have been expanded already")
-                            }
-                            FieldDefinitionExpr::AllInTable(_) => {
-                                internal!("<table>.* should have been expanded already")
-                            }
-                            FieldDefinitionExpr::Expr {
-                                expr: Expr::Column(c),
-                                ..
-                            } => c.table.as_ref().and_then(|t| {
-                                if rel == *t {
-                                    Some(c.clone())
-                                } else {
-                                    None
-                                }
-                            }),
-                            FieldDefinitionExpr::Expr { .. } => {
-                                // No need to do anything for expressions here, since they aren't
-                                // associated with a relation (and thus have
-                                // no QGN) XXX(malte): don't drop
-                                // aggregation columns
+    let new_node = |rel: Relation,
+                    preds: Vec<Expr>,
+                    fields: &Vec<FieldDefinitionExpr>|
+     -> ReadySetResult<QueryGraphNode> {
+        Ok(QueryGraphNode {
+            relation: rel.clone(),
+            predicates: preds,
+            columns: fields
+                .iter()
+                .map(|field| {
+                    Ok(match field {
+                        // unreachable because SQL rewrite passes will have expanded these
+                        // already
+                        FieldDefinitionExpr::All => {
+                            internal!("* should have been expanded already")
+                        }
+                        FieldDefinitionExpr::AllInTable(_) => {
+                            internal!("<table>.* should have been expanded already")
+                        }
+                        FieldDefinitionExpr::Expr {
+                            expr: Expr::Column(c),
+                            ..
+                        } => c.table.as_ref().and_then(|t| {
+                            if rel == *t {
+                                Some(c.clone())
+                            } else {
                                 None
                             }
-                        })
+                        }),
+                        FieldDefinitionExpr::Expr { .. } => {
+                            // No need to do anything for expressions here, since they aren't
+                            // associated with a relation (and thus have
+                            // no QGN) XXX(malte): don't drop
+                            // aggregation columns
+                            None
+                        }
                     })
-                    // FIXME(eta): error handling overhead
-                    .collect::<ReadySetResult<Vec<_>>>()?
-                    .into_iter()
-                    .flatten()
-                    .collect(),
-                parameters: Vec::new(),
-                subgraph: None,
-            })
-        };
+                })
+                // FIXME(eta): error handling overhead
+                .collect::<ReadySetResult<Vec<_>>>()?
+                .into_iter()
+                .flatten()
+                .collect(),
+            parameters: Vec::new(),
+            subgraph: None,
+        })
+    };
+
+    let default_row = default_row_for_select(&stmt);
+    let is_correlated = is_correlated(&stmt);
 
     // Used later on to determine whether to classify predicates as "join predicates" or not
     let mut inner_join_rels = HashSet::new();
@@ -974,7 +978,7 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
         match &table_expr.inner {
             TableExprInner::Table(t) => {
                 if relations
-                    .insert(t.clone(), new_node(t.clone(), vec![], &stmt)?)
+                    .insert(t.clone(), new_node(t.clone(), vec![], &stmt.fields)?)
                     .is_some()
                 {
                     invalid!(
@@ -993,7 +997,7 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                         .clone(),
                 );
                 if let Entry::Vacant(e) = relations.entry(rel.clone()) {
-                    let mut node = new_node(rel.clone(), vec![], &stmt)?;
+                    let mut node = new_node(rel.clone(), vec![], &stmt.fields)?;
                     node.subgraph = Some(Box::new(to_query_graph((**sq).clone())?));
                     e.insert(node);
                 } else {
@@ -1044,16 +1048,16 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
             unsupported_err!("SELECT statements with no tables are unsupported")
         })?)?;
 
-    for jc in &stmt.join {
-        let rhs_relation = match &jc.right {
-            JoinRightSide::Table(te) => table_expr_name(te)?,
+    for jc in stmt.join {
+        let rhs_relation = match jc.right {
+            JoinRightSide::Table(te) => table_expr_name(&te)?,
             JoinRightSide::Tables(_) => unsupported!("JoinRightSide::Tables not yet implemented"),
         };
         // will be defined by join constraint
         let left_table;
         let right_table;
 
-        let join_preds = match &jc.constraint {
+        let join_preds = match jc.constraint {
             JoinConstraint::On(cond) => {
                 use nom_sql::analysis::ReferredTables;
 
@@ -1063,7 +1067,7 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                     cond.referred_tables().into_iter().collect();
 
                 let mut join_preds = vec![];
-                collect_join_predicates(cond.clone(), &mut join_preds)?;
+                collect_join_predicates(cond, &mut join_preds)?;
 
                 if tables_mentioned.len() == 2 {
                     // tables can appear in any order in the join predicate, but
@@ -1110,10 +1114,10 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
             JoinConstraint::Using(cols) => {
                 invariant_eq!(cols.len(), 1);
                 #[allow(clippy::unwrap_used)] // cols.len() == 1
-                let col = cols.iter().next().unwrap();
+                let col = cols.first().unwrap();
 
                 left_table = prev_table.clone();
-                right_table = rhs_relation.clone();
+                right_table = rhs_relation;
 
                 vec![JoinPredicate {
                     left: col_expr(&left_table, &col.name),
@@ -1122,14 +1126,13 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
             }
             JoinConstraint::Empty => {
                 left_table = prev_table.clone();
-                right_table = rhs_relation.clone();
+                right_table = rhs_relation;
                 // An empty predicate indicates a cartesian product is expected
                 vec![]
             }
         };
 
         // add edge for join
-        // FIXME(eta): inefficient cloning!
         if let std::collections::hash_map::Entry::Vacant(e) =
             edges.entry((left_table.clone(), right_table.clone()))
         {
@@ -1187,7 +1190,7 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                     let nn = new_node(
                         l.table.clone().ok_or_else(|| no_table_for_col())?,
                         Vec::new(),
-                        &stmt,
+                        &stmt.fields,
                     )?;
                     // If tables aren't already in the relations, add them.
                     relations
@@ -1458,13 +1461,13 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
         group_by,
         columns,
         fields: stmt.fields.clone(),
-        default_row: default_row_for_select(&stmt),
+        default_row,
         join_order,
         global_predicates,
         having_predicates,
         pagination,
         order,
-        is_correlated: is_correlated(&stmt),
+        is_correlated,
     })
 }
 
