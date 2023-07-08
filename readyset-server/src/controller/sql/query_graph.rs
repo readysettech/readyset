@@ -469,13 +469,10 @@ where
 //    nodes, since we cannot instantiate the parameters inside the data flow graph (except for
 //    non-materialized nodes).
 // 2. Extract local predicates
-// 3. Extract join predicates
-// 4. Collect remaining predicates as global predicates
+// 3. Collect remaining predicates as global predicates
 fn classify_conditionals(
     ce: &Expr,
-    inner_join_rels: &HashSet<Relation>,
     local: &mut HashMap<Relation, Vec<Expr>>,
-    join: &mut Vec<JoinPredicate>,
     global: &mut Vec<Expr>,
     params: &mut Vec<Parameter>,
 ) -> ReadySetResult<()> {
@@ -499,23 +496,18 @@ fn classify_conditionals(
                 //     local predicates discovered to decide if the OR is over one table (so it can
                 //     remain a local predicate) or over several (so it must be a global predicate)
                 let mut new_params = Vec::new();
-                let mut new_join = Vec::new();
                 let mut new_local = HashMap::new();
                 let mut new_global = Vec::new();
 
                 classify_conditionals(
                     lhs.as_ref(),
-                    inner_join_rels,
                     &mut new_local,
-                    &mut new_join,
                     &mut new_global,
                     &mut new_params,
                 )?;
                 classify_conditionals(
                     rhs.as_ref(),
-                    inner_join_rels,
                     &mut new_local,
-                    &mut new_join,
                     &mut new_global,
                     &mut new_params,
                 )?;
@@ -550,9 +542,6 @@ fn classify_conditionals(
                         global.extend(new_global);
                     }
                     LogicalOp::Or => {
-                        if !new_join.is_empty() {
-                            unsupported!("can't handle OR expressions between JOIN predicates")
-                        }
                         if !new_params.is_empty() {
                             unsupported!(
                                 "can't handle OR expressions between query parameter predicates"
@@ -582,104 +571,30 @@ fn classify_conditionals(
                     }
                 }
 
-                join.extend(new_join);
                 params.extend(new_params);
             } else if is_predicate(op) {
                 // atomic selection predicate
-                match **rhs {
-                    // right-hand side is a column, so this could be a join predicate
-                    Expr::Column(ref rf) => {
-                        match **lhs {
-                            // column/column comparison
-                            #[allow(clippy::unwrap_used)] // we check lf/rf.table.is_some()
-                            Expr::Column(ref lf)
-                                if lf.table.is_some()
-                                    && inner_join_rels.contains(lf.table.as_ref().unwrap())
-                                    && rf.table.is_some()
-                                    && inner_join_rels.contains(rf.table.as_ref().unwrap())
-                                    && lf.table != rf.table =>
-                            {
-                                // both columns' tables appear in table list and the tables are
-                                // different --> inner join predicate appearing in the WHERE clause
-                                if *op == BinaryOperator::Equal {
-                                    // equi-join between two tables
-                                    let mut jp = JoinPredicate {
-                                        left: (**lhs).clone(),
-                                        right: (**rhs).clone(),
-                                    };
-                                    if let Ordering::Less =
-                                        rf.table.as_ref().cmp(&lf.table.as_ref())
-                                    {
-                                        mem::swap(&mut jp.left, &mut jp.right);
-                                    }
-                                    join.push(jp);
-                                } else {
-                                    // non-equi-join?
-                                    global.push(ce.clone());
-                                }
-                            }
-                            _ => {
-                                // not a join predicate, just an ordinary comparison with a
-                                // computed column. This must be a global predicate because it
-                                // crosses "tables" (the computed column has no associated
-                                // table)
-                                global.push(ce.clone());
-                            }
-                        }
+                if let Expr::Literal(Literal::Placeholder(ref placeholder)) = **rhs {
+                    if let Expr::Column(ref lf) = **lhs {
+                        let idx = match placeholder {
+                            ItemPlaceholder::DollarNumber(idx) => Some(*idx as usize),
+                            _ => None,
+                        };
+                        params.push(Parameter {
+                            col: lf.clone(),
+                            op: *op,
+                            placeholder_idx: idx,
+                        });
                     }
-                    // right-hand side is a placeholder, so this must be a query parameter
-                    // We carry placeholder numbers all the way to reader nodes so that they can be
-                    // mapped to a reader key column
-                    Expr::Literal(Literal::Placeholder(ref placeholder)) => {
-                        if let Expr::Column(ref lf) = **lhs {
-                            let idx = match placeholder {
-                                ItemPlaceholder::DollarNumber(idx) => Some(*idx as usize),
-                                _ => None,
-                            };
-                            params.push(Parameter {
-                                col: lf.clone(),
-                                op: *op,
-                                placeholder_idx: idx,
-                            });
-                        }
-                    }
-                    // right-hand side is a non-placeholder expr, so this is a predicate
-                    Expr::Literal(_) | Expr::Array(_) => {
-                        if let Expr::Column(ref lf) = **lhs {
-                            // we assume that implied table names have previously been expanded
-                            // and thus all non-computed columns carry table names
-                            #[allow(clippy::unwrap_used)] // checked lf.table.is_some()
-                            if let Some(ref table) = lf.table {
-                                let e = local.entry(table.clone()).or_default();
-                                e.push(ce.clone());
-                            } else {
-                                // comparisons between computed columns and literals are global
-                                // predicates
-                                global.push(ce.clone());
-                            }
-                        }
-                    }
-                    Expr::NestedSelect(_) => {
-                        unsupported!("nested SELECTs are unsupported")
-                    }
-                    Expr::Call(_)
-                    | Expr::BinaryOp { .. }
-                    | Expr::OpAny { .. }
-                    | Expr::OpSome { .. }
-                    | Expr::OpAll { .. }
-                    | Expr::UnaryOp { .. }
-                    | Expr::CaseWhen { .. }
-                    | Expr::Exists(_)
-                    | Expr::Between { .. }
-                    | Expr::Cast { .. }
-                    | Expr::In { .. }
-                    | Expr::Variable(_) => {
-                        unsupported!(
-                            "Unsupported right-hand side of condition expression: {}",
-                            // FIXME(ENG-2499): Use correct dialect.
-                            rhs.display(nom_sql::Dialect::MySQL)
-                        )
-                    }
+                } else if let Expr::Column(Column {
+                    table: Some(table), ..
+                }) = &**lhs
+                {
+                    local.entry(table.clone()).or_default().push(ce.clone());
+                } else {
+                    // comparisons between computed columns and literals are global
+                    // predicates
+                    global.push(ce.clone());
                 }
             } else {
                 unsupported!("Arithmetic not supported here")
@@ -1033,7 +948,6 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
     //    predicates here already, but more may be added when processing the WHERE clause lateron.
 
     let mut edges = HashMap::new();
-    let mut join_predicates = Vec::new();
     let col_expr = |tbl: &Relation, col: &SqlIdentifier| -> Expr {
         Expr::Column(Column {
             table: Some(tbl.clone()),
@@ -1155,9 +1069,7 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
         // Let's classify the predicates we have in the query
         classify_conditionals(
             cond,
-            &inner_join_rels,
             &mut local_predicates,
-            &mut join_predicates,
             &mut global_predicates,
             &mut query_parameters,
         )?;
@@ -1168,54 +1080,17 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
 
         // 1. Add local predicates for each node that has them
         for (name, preds) in local_predicates {
-            if !relations.contains_key(&name) {
-                // can't have predicates on tables that do not appear in the FROM part of the
-                // statement
-                internal!(
-                    "predicate(s) {:?} on relation {} that is not in query graph",
-                    preds,
-                    name.display_unquoted()
-                );
+            if let Some(rel) = relations.get_mut(&name) {
+                rel.predicates.extend(preds);
             } else {
-                #[allow(clippy::unwrap_used)] // checked that this key is in qg.relations
-                relations.get_mut(&name).unwrap().predicates.extend(preds);
+                // This predicate is not on any relation in the query - it might be a correlated
+                // predicate (referencing an outer query), so just add it as a global predicate so
+                // we can try to decorrelate it later
+                global_predicates.extend(preds);
             }
         }
 
-        // 2. Add predicates for inner joins that had the join condition specified in the WHERE
-        //    clause (including, but not limited to, comma joins)
-        for jp in join_predicates {
-            if let Expr::Column(l) = &jp.left {
-                if let Expr::Column(r) = &jp.right {
-                    let nn = new_node(
-                        l.table.clone().ok_or_else(|| no_table_for_col())?,
-                        Vec::new(),
-                        &stmt.fields,
-                    )?;
-                    // If tables aren't already in the relations, add them.
-                    relations
-                        .entry(l.table.clone().ok_or_else(|| no_table_for_col())?)
-                        .or_insert_with(|| nn.clone());
-
-                    relations
-                        .entry(r.table.clone().ok_or_else(|| no_table_for_col())?)
-                        .or_insert_with(|| nn.clone());
-
-                    let e = edges
-                        .entry((
-                            l.table.clone().ok_or_else(|| no_table_for_col())?,
-                            r.table.clone().ok_or_else(|| no_table_for_col())?,
-                        ))
-                        .or_insert_with(|| QueryGraphEdge::Join { on: vec![] });
-                    match *e {
-                        QueryGraphEdge::Join { on: ref mut preds } => preds.push(jp.clone()),
-                        _ => internal!("Expected join edge for join condition {:#?}", jp),
-                    };
-                }
-            }
-        }
-
-        // 3. Add any columns that are query parameters, and which therefore must appear in the leaf
+        // 2. Add any columns that are query parameters, and which therefore must appear in the leaf
         //    node for this query. Such columns will be carried all the way through the operators
         //    implementing the query (unlike in a traditional query plan, where the predicates on
         //    parameters might be evaluated sooner).
