@@ -78,7 +78,6 @@ impl Signature for QueryGraph {
                 QueryGraphEdge::Join { on } | QueryGraphEdge::LeftJoin { on } => {
                     on.iter()
                         .flat_map(|p| vec![&p.left, &p.right])
-                        .flat_map(|p| p.referred_columns())
                         .for_each(&mut record_column);
                 }
             }

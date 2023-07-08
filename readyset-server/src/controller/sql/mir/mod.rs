@@ -988,14 +988,8 @@ impl SqlToMirConverter {
         let mut on = Vec::new();
 
         for jp in join_predicates {
-            let mut l_col = match jp.left {
-                Expr::Column(ref f) => Column::from(f),
-                _ => unsupported!("no multi-level joins yet"),
-            };
-            let r_col = match jp.right {
-                Expr::Column(ref f) => Column::from(f),
-                _ => unsupported!("no multi-level joins yet"),
-            };
+            let mut l_col = Column::from(jp.left.clone());
+            let r_col = Column::from(jp.right.clone());
 
             if kind == JoinKind::Inner {
                 // for inner joins, don't duplicate the join column in the output, but instead add
@@ -1320,8 +1314,8 @@ impl SqlToMirConverter {
                     query_name,
                     format!("{}_join", name.display_unquoted()).into(),
                     &[JoinPredicate {
-                        left: Expr::Column("__exists_join_key".into()),
-                        right: Expr::Column("__count_grp".into()),
+                        left: "__exists_join_key".into(),
+                        right: "__count_grp".into(),
                     }],
                     left_literal_join_key_proj,
                     gt_0_filter,

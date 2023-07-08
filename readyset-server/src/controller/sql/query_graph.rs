@@ -166,11 +166,11 @@ pub struct JoinRef {
     pub dst: Relation,
 }
 
-/// An equality predicate on two expressions, used as the key for a join
+/// An equality predicate on two columns, used as the key for a join
 #[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JoinPredicate {
-    pub left: Expr,
-    pub right: Expr,
+    pub left: Column,
+    pub right: Column,
 }
 
 /// An individual column on which a query is parameterized
@@ -660,13 +660,10 @@ fn collect_join_predicates(cond: Expr, out: &mut Vec<JoinPredicate>) -> ReadySet
     match cond {
         Expr::BinaryOp {
             op: BinaryOperator::Equal,
-            lhs,
-            rhs,
+            lhs: box Expr::Column(left),
+            rhs: box Expr::Column(right),
         } => {
-            out.push(JoinPredicate {
-                left: *lhs,
-                right: *rhs,
-            });
+            out.push(JoinPredicate { left, right });
             Ok(())
         }
         Expr::BinaryOp {
@@ -948,12 +945,6 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
     //    predicates here already, but more may be added when processing the WHERE clause lateron.
 
     let mut edges = HashMap::new();
-    let col_expr = |tbl: &Relation, col: &SqlIdentifier| -> Expr {
-        Expr::Column(Column {
-            table: Some(tbl.clone()),
-            name: col.clone(),
-        })
-    };
 
     // 2a. Explicit joins
     // The table specified in the query is available for USING joins.
@@ -1008,16 +999,13 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                     // their join order in the query; if so, flip them
                     // TODO(malte): this only deals with simple, flat join
                     // conditions for now.
-                    let l = match &pred.left {
-                        Expr::Column(f) => f,
-                        ref x => unsupported!("join condition not supported: {:?}", x),
-                    };
-                    let r = match &pred.right {
-                        Expr::Column(f) => f,
-                        ref x => unsupported!("join condition not supported: {:?}", x),
-                    };
-                    if *l.table.as_ref().ok_or_else(|| no_table_for_col())? == right_table
-                        && *r.table.as_ref().ok_or_else(|| no_table_for_col())? == left_table
+                    if *pred.left.table.as_ref().ok_or_else(|| no_table_for_col())? == right_table
+                        && *pred
+                            .right
+                            .table
+                            .as_ref()
+                            .ok_or_else(|| no_table_for_col())?
+                            == left_table
                     {
                         mem::swap(&mut pred.left, &mut pred.right);
                     }
@@ -1034,8 +1022,14 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                 right_table = rhs_relation;
 
                 vec![JoinPredicate {
-                    left: col_expr(&left_table, &col.name),
-                    right: col_expr(&right_table, &col.name),
+                    left: Column {
+                        table: Some(left_table.clone()),
+                        name: col.name.clone(),
+                    },
+                    right: Column {
+                        table: Some(right_table.clone()),
+                        name: col.name.clone(),
+                    },
                 }]
             }
             JoinConstraint::Empty => {
