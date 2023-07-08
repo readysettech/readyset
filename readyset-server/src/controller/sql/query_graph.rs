@@ -194,8 +194,13 @@ pub struct QueryGraphNode {
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub enum QueryGraphEdge {
-    Join { on: Vec<JoinPredicate> },
-    LeftJoin { on: Vec<JoinPredicate> },
+    Join {
+        on: Vec<JoinPredicate>,
+    },
+    LeftJoin {
+        on: Vec<JoinPredicate>,
+        extra_preds: Vec<Expr>,
+    },
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
@@ -656,27 +661,29 @@ fn classify_conditionals(
 
 /// Convert the given `Expr`, which should be a set of AND-ed together direct
 /// comparison predicates, into a list of predicate expressions
-fn collect_join_predicates(cond: Expr, out: &mut Vec<JoinPredicate>) -> ReadySetResult<()> {
+fn collect_join_predicates(
+    cond: Expr,
+    join_preds: &mut Vec<JoinPredicate>,
+    extra_preds: &mut Vec<Expr>,
+) {
     match cond {
         Expr::BinaryOp {
             op: BinaryOperator::Equal,
             lhs: box Expr::Column(left),
             rhs: box Expr::Column(right),
         } => {
-            out.push(JoinPredicate { left, right });
-            Ok(())
+            join_preds.push(JoinPredicate { left, right });
         }
         Expr::BinaryOp {
             lhs,
             op: BinaryOperator::And,
             rhs,
         } => {
-            collect_join_predicates(*lhs, out)?;
-            collect_join_predicates(*rhs, out)?;
-            Ok(())
+            collect_join_predicates(*lhs, join_preds, extra_preds);
+            collect_join_predicates(*rhs, join_preds, extra_preds);
         }
         _ => {
-            unsupported!("Only direct comparisons combined with AND supported for join conditions")
+            extra_preds.push(cond);
         }
     }
 }
@@ -947,6 +954,11 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
     let mut edges = HashMap::new();
 
     // 2a. Explicit joins
+
+    let mut local_predicates = HashMap::new();
+    let mut global_predicates = Vec::new();
+    let mut query_parameters = Vec::new();
+
     // The table specified in the query is available for USING joins.
     let prev_table =
         table_expr_name(stmt.tables.last().ok_or_else(|| {
@@ -962,7 +974,7 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
         let left_table;
         let right_table;
 
-        let join_preds = match jc.constraint {
+        let (on, extra_preds) = match jc.constraint {
             JoinConstraint::On(cond) => {
                 use nom_sql::analysis::ReferredTables;
 
@@ -972,7 +984,8 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                     cond.referred_tables().into_iter().collect();
 
                 let mut join_preds = vec![];
-                collect_join_predicates(cond, &mut join_preds)?;
+                let mut extra_preds = vec![];
+                collect_join_predicates(cond, &mut join_preds, &mut extra_preds);
 
                 if tables_mentioned.len() == 2 {
                     // tables can appear in any order in the join predicate, but
@@ -1011,7 +1024,7 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                     }
                 }
 
-                join_preds
+                (join_preds, extra_preds)
             }
             JoinConstraint::Using(cols) => {
                 invariant_eq!(cols.len(), 1);
@@ -1021,22 +1034,25 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
                 left_table = prev_table.clone();
                 right_table = rhs_relation;
 
-                vec![JoinPredicate {
-                    left: Column {
-                        table: Some(left_table.clone()),
-                        name: col.name.clone(),
-                    },
-                    right: Column {
-                        table: Some(right_table.clone()),
-                        name: col.name.clone(),
-                    },
-                }]
+                (
+                    vec![JoinPredicate {
+                        left: Column {
+                            table: Some(left_table.clone()),
+                            name: col.name.clone(),
+                        },
+                        right: Column {
+                            table: Some(right_table.clone()),
+                            name: col.name.clone(),
+                        },
+                    }],
+                    vec![],
+                )
             }
             JoinConstraint::Empty => {
                 left_table = prev_table.clone();
                 right_table = rhs_relation;
                 // An empty predicate indicates a cartesian product is expected
-                vec![]
+                (vec![], vec![])
             }
         };
 
@@ -1046,19 +1062,24 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
         {
             e.insert(match jc.operator {
                 JoinOperator::LeftJoin | JoinOperator::LeftOuterJoin => {
-                    QueryGraphEdge::LeftJoin { on: join_preds }
+                    QueryGraphEdge::LeftJoin { on, extra_preds }
                 }
                 JoinOperator::Join | JoinOperator::InnerJoin => {
-                    QueryGraphEdge::Join { on: join_preds }
+                    for pred in &extra_preds {
+                        classify_conditionals(
+                            pred,
+                            &mut local_predicates,
+                            &mut global_predicates,
+                            &mut query_parameters,
+                        )?;
+                    }
+                    QueryGraphEdge::Join { on }
                 }
                 _ => unsupported!("join operator not supported"),
             });
         }
     }
 
-    let mut local_predicates = HashMap::new();
-    let mut global_predicates = Vec::new();
-    let mut query_parameters = Vec::new();
     if let Some(ref cond) = stmt.where_clause {
         // Let's classify the predicates we have in the query
         classify_conditionals(
@@ -1067,44 +1088,44 @@ pub fn to_query_graph(stmt: SelectStatement) -> ReadySetResult<QueryGraph> {
             &mut global_predicates,
             &mut query_parameters,
         )?;
+    }
 
-        for (_, ces) in local_predicates.iter_mut() {
-            *ces = split_conjunctions(ces.iter());
+    for (_, ces) in local_predicates.iter_mut() {
+        *ces = split_conjunctions(ces.iter());
+    }
+
+    // 1. Add local predicates for each node that has them
+    for (name, preds) in local_predicates {
+        if let Some(rel) = relations.get_mut(&name) {
+            rel.predicates.extend(preds);
+        } else {
+            // This predicate is not on any relation in the query - it might be a correlated
+            // predicate (referencing an outer query), so just add it as a global predicate so
+            // we can try to decorrelate it later
+            global_predicates.extend(preds);
         }
+    }
 
-        // 1. Add local predicates for each node that has them
-        for (name, preds) in local_predicates {
-            if let Some(rel) = relations.get_mut(&name) {
-                rel.predicates.extend(preds);
-            } else {
-                // This predicate is not on any relation in the query - it might be a correlated
-                // predicate (referencing an outer query), so just add it as a global predicate so
-                // we can try to decorrelate it later
-                global_predicates.extend(preds);
+    // 2. Add any columns that are query parameters, and which therefore must appear in the leaf
+    //    node for this query. Such columns will be carried all the way through the operators
+    //    implementing the query (unlike in a traditional query plan, where the predicates on
+    //    parameters might be evaluated sooner).
+    for param in query_parameters.into_iter() {
+        if let Some(table) = &param.col.table {
+            let rel = relations.get_mut(table).ok_or_else(|| {
+                invalid_err!(
+                    "Column {} references non-existent table {}",
+                    param.col.name,
+                    table.display_unquoted()
+                )
+            })?;
+            if !rel.columns.contains(&param.col) {
+                rel.columns.push(param.col.clone());
             }
-        }
-
-        // 2. Add any columns that are query parameters, and which therefore must appear in the leaf
-        //    node for this query. Such columns will be carried all the way through the operators
-        //    implementing the query (unlike in a traditional query plan, where the predicates on
-        //    parameters might be evaluated sooner).
-        for param in query_parameters.into_iter() {
-            if let Some(table) = &param.col.table {
-                let rel = relations.get_mut(table).ok_or_else(|| {
-                    invalid_err!(
-                        "Column {} references non-existent table {}",
-                        param.col.name,
-                        table.display_unquoted()
-                    )
-                })?;
-                if !rel.columns.contains(&param.col) {
-                    rel.columns.push(param.col.clone());
-                }
-                // the parameter column is included in the projected columns of the output, but
-                // we also separately register it as a parameter so that we can set keys
-                // correctly on the leaf view
-                rel.parameters.push(param.clone());
-            }
+            // the parameter column is included in the projected columns of the output, but
+            // we also separately register it as a parameter so that we can set keys
+            // correctly on the leaf view
+            rel.parameters.push(param.clone());
         }
     }
 
@@ -1551,6 +1572,28 @@ mod tests {
     fn constant_filter() {
         let qg = make_query_graph("SELECT x FROM t WHERE x = $1 AND 1");
         assert_eq!(qg.global_predicates, vec![Expr::Literal(1u64.into())])
+    }
+
+    #[test]
+    fn local_pred_in_join_condition() {
+        let qg = make_query_graph("SELECT t1.x FROM t1 JOIN t2 ON t1.x = t2.x AND t2.y = 4");
+        assert_eq!(
+            qg.relations.get(&"t2".into()).unwrap().predicates,
+            vec![Expr::BinaryOp {
+                lhs: Box::new(Expr::Column("t2.y".into())),
+                op: BinaryOperator::Equal,
+                rhs: Box::new(Expr::Literal(4u64.into()))
+            }]
+        )
+    }
+
+    #[test]
+    fn global_pred_in_join_condition() {
+        let qg = make_query_graph("SELECT t1.x FROM t1 JOIN t2 ON t1.x = t2.x AND t2.is_thing");
+        assert_eq!(
+            qg.global_predicates,
+            vec![Expr::Column("t2.is_thing".into())]
+        )
     }
 
     mod view_key {

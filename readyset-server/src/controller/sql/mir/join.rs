@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use mir::NodeIndex;
 use nom_sql::Relation;
-use readyset_errors::{internal, internal_err, invariant, ReadySetResult};
+use readyset_errors::{internal, internal_err, invariant, unsupported, ReadySetResult};
 
 use super::JoinKind;
 use crate::controller::sql::mir::SqlToMirConverter;
@@ -47,7 +47,12 @@ pub(super) fn make_joins(
     for jref in qg.join_order.iter() {
         let (mut join_kind, jps) = match &qg.edges[&(jref.src.clone(), jref.dst.clone())] {
             QueryGraphEdge::Join { on } => (JoinKind::Inner, on),
-            QueryGraphEdge::LeftJoin { on } => (JoinKind::Left, on),
+            QueryGraphEdge::LeftJoin { on, extra_preds } => {
+                if !extra_preds.is_empty() {
+                    unsupported!("Non-equal predicates not (yet) supported in left joins");
+                }
+                (JoinKind::Left, on)
+            }
         };
 
         let (left_chain, right_chain) =

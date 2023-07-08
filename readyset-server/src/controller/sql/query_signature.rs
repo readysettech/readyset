@@ -75,9 +75,19 @@ impl Signature for QueryGraph {
 
         for e in self.edges.values() {
             match e {
-                QueryGraphEdge::Join { on } | QueryGraphEdge::LeftJoin { on } => {
+                QueryGraphEdge::Join { on } => {
                     on.iter()
                         .flat_map(|p| vec![&p.left, &p.right])
+                        .for_each(&mut record_column);
+                }
+                QueryGraphEdge::LeftJoin { on, extra_preds } => {
+                    on.iter()
+                        .flat_map(|p| vec![&p.left, &p.right])
+                        .for_each(&mut record_column);
+
+                    extra_preds
+                        .iter()
+                        .flat_map(|expr| expr.referred_columns())
                         .for_each(&mut record_column);
                 }
             }
