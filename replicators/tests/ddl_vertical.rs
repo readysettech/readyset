@@ -34,7 +34,9 @@ use nom_sql::SqlType;
 use proptest::prelude::*;
 use proptest::strategy::{BoxedStrategy, Just, Strategy};
 use proptest::{collection, sample};
-use proptest_stateful::{ModelState, ProptestStatefulConfig};
+use proptest_stateful::{
+    proptest_config_with_local_failure_persistence, ModelState, ProptestStatefulConfig,
+};
 use readyset_client_test_helpers::psql_helpers::{self, PostgreSQLAdapter};
 use readyset_client_test_helpers::TestBuilder;
 use readyset_data::{DfValue, TimestampTz};
@@ -1155,7 +1157,7 @@ fn run_cases() {
         min_ops: 7,
         max_ops: 13,
         test_case_timeout: Duration::from_secs(60),
-        proptest_config: ProptestConfig::default(),
+        proptest_config: proptest_config_with_local_failure_persistence!(),
     };
 
     proptest_stateful::test::<DDLModelState>(config);
