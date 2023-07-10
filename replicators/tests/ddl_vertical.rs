@@ -756,10 +756,13 @@ impl ModelState for DDLModelState {
                     .get(table)
                     .map_or(false, |table_keys| !table_keys.contains(pkey))
                     && self.tables.get(table).map_or(false, |table_cols| {
-                        table_cols
-                            .iter()
-                            .zip(col_types)
-                            .all(|(cs, row_type)| cs.sql_type == *row_type)
+                        // Must compare lengths before zipping and comparing individual types
+                        // because zip will drop elements if the Vec lengths don't match up:
+                        table_cols.len() == col_types.len()
+                            && table_cols
+                                .iter()
+                                .zip(col_types)
+                                .all(|(cs, row_type)| cs.sql_type == *row_type)
                     })
             }
             Operation::DeleteRow(table, key) => self
