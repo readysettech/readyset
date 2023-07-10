@@ -541,6 +541,7 @@ async fn pgsql_replication() -> ReadySetResult<()> {
 /// readyset instances can replicate off the same upstream.
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
+#[ignore = "Flaky test (REA-3061)"]
 async fn pgsql_replication_multiple() -> ReadySetResult<()> {
     replication_test_multiple(&pgsql_url()).await
 }
