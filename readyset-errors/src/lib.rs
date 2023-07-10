@@ -349,10 +349,6 @@ pub enum ReadySetError {
         source: Box<ReadySetError>,
     },
 
-    /// A user-provided SQL query referenced a function that does not exist
-    #[error("Function {0} does not exist")]
-    NoSuchFunction(String),
-
     /// A user-provided SQL query used the wrong number of arguments in a call to a built-in
     /// function
     #[error("Incorrect parameter count in the call to native function '{0}'")]

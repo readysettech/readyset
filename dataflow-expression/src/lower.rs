@@ -428,7 +428,7 @@ impl BuiltinFunction {
                     DfType::DEFAULT_TEXT,
                 )
             }
-            _ => return Err(ReadySetError::NoSuchFunction(name.to_owned())),
+            _ => unsupported!("Function {name} does not exist"),
         };
 
         if args.next().is_some() {
