@@ -402,3 +402,25 @@ where
         Err(e) => panic!("{}\n{}", e, runner),
     }
 }
+
+/// Return a [`ProptestConfig`] struct with default values for everything except `source_file` and
+/// `failure_persistence`, which will be set up with sane defaults for the current source file.
+///
+/// This is a useful macro for proptest-stateful tests because they are generally invoked by
+/// calling [`test`], which results in the proptest macros being used from within the
+/// proptest-stateful source files. Those macros use `file!()` to get the current source file, and
+/// use that to set some defaults for where we save the regressions, but generally a stateful
+/// property test suite would probably prefer to save regressions in the same place as the stateful
+/// property test source.
+#[macro_export]
+macro_rules! proptest_config_with_local_failure_persistence {
+    () => {
+        ProptestConfig {
+            failure_persistence: Some(Box::new(
+                proptest::test_runner::FileFailurePersistence::WithSource("proptest-regressions"),
+            )),
+            source_file: Some(file!()),
+            ..ProptestConfig::default()
+        }
+    };
+}
