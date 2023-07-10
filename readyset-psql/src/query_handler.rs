@@ -401,9 +401,9 @@ impl QueryHandler for PostgreSqlQueryHandler {
                     }
                 }
             },
-            SetStatement::Names(SetNames { charset, .. }) => {
-                SetBehavior::proxy_if(charset.to_lowercase() == "utf8")
-            }
+            SetStatement::Names(SetNames { charset, .. }) => SetBehavior::proxy_if(
+                charset.to_lowercase() == "utf8" || charset.to_lowercase() == "utf-8",
+            ),
             _ => SetBehavior::Unsupported,
         }
     }
@@ -437,6 +437,16 @@ mod tests {
     #[test]
     fn client_encoding_utf8_allowed() {
         is_proxy("SET client_encoding = 'UTF8'");
+    }
+
+    #[test]
+    fn set_name_utf8_variations() {
+        // The Postgres documentation lists "UTF8" as a supported Character Set. However, the
+        // Postgres server also accepts "UTF-8" and "utf-8" as correct Character Set names.
+        is_proxy("SET names 'UTF8'");
+        is_proxy("SET names 'UTF-8'");
+        is_proxy("SET names 'utf8'");
+        is_proxy("SET names 'utf-8'");
     }
 
     #[test]
