@@ -1,0 +1,28 @@
+statement ok
+create table table_1 (column_1 int);
+
+statement ok
+insert into table_1 values (0), (6)
+
+onlyif readyset
+statement ok
+CREATE CACHE multi_diamond_union FROM
+SELECT table_1.column_1
+FROM table_1 WHERE (
+  ((table_1.column_1 IS NULL) OR (table_1.column_1 IS NOT NULL))
+  AND table_1.column_1 NOT BETWEEN 1 AND 5
+  AND ((table_1.column_1 IS NULL) OR (table_1.column_1 IS NOT NULL))
+);
+
+graphviz
+
+query I valuesort
+SELECT table_1.column_1
+FROM table_1 WHERE (
+  ((table_1.column_1 IS NULL) OR (table_1.column_1 IS NOT NULL))
+  AND table_1.column_1 NOT BETWEEN 1 AND 5
+  AND ((table_1.column_1 IS NULL) OR (table_1.column_1 IS NOT NULL))
+);
+----
+0
+6
