@@ -444,14 +444,6 @@ pub enum ReadySetError {
         unknown_uri: Url,
     },
 
-    /// A request for reader replication into a worker failed, because the worker URI provided
-    /// could not be found in the list of registered workers.
-    #[error("Could not find worker at {unknown_uri} for reader replication")]
-    ReplicationUnknownWorker {
-        /// The URI of the worker that could not be found.
-        unknown_uri: Url,
-    },
-
     /// An RPC request was attempted against a worker that has failed.
     #[error("Worker at {uri} failed")]
     WorkerFailed {
