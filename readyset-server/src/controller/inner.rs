@@ -18,7 +18,6 @@ use futures::future::Fuse;
 use futures::FutureExt;
 use hyper::Method;
 use readyset_client::consensus::Authority;
-use readyset_client::internal::ReplicaAddress;
 use readyset_client::recipe::{ExtendRecipeResult, ExtendRecipeSpec, MigrationStatus};
 use readyset_client::replication::ReplicationOffset;
 use readyset_client::status::{ReadySetStatus, SnapshotStatus};
@@ -39,7 +38,6 @@ use tracing::{debug, error, info, warn};
 
 use crate::controller::state::{DfState, DfStateHandle};
 use crate::controller::{ControllerState, Worker, WorkerIdentifier};
-use crate::coordination::DomainDescriptor;
 use crate::worker::WorkerRequestKind;
 
 /// Maximum amount of time to wait for an `extend_recipe` request to run synchronously, before we
@@ -659,29 +657,7 @@ impl Leader {
                 domain_scheduling_config,
                 self.worker_request_timeout,
             );
-
-            let mut domain_addresses = Vec::new();
-            for (domain_index, handle) in &ds.domains {
-                for shard in 0..handle.num_shards() {
-                    for replica in 0..handle.num_replicas() {
-                        let replica_address = ReplicaAddress {
-                            domain_index: *domain_index,
-                            shard,
-                            replica,
-                        };
-                        let socket_addr = ds
-                            .channel_coordinator
-                            .get_addr(&replica_address)
-                            .ok_or_else(|| ReadySetError::NoSuchReplica {
-                                domain_index: domain_index.index(),
-                                shard,
-                                replica,
-                            })?;
-
-                        domain_addresses.push(DomainDescriptor::new(replica_address, socket_addr));
-                    }
-                }
-            }
+            let domain_addresses = ds.domain_addresses()?;
 
             // We currently require that any worker that enters the system has no domains.
             // If a worker has domains we are unaware of, we may try to perform a duplicate

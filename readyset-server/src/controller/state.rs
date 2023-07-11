@@ -841,6 +841,35 @@ impl DfState {
         Ok(domains)
     }
 
+    /// Returns a vector of [`DomainDescriptor`] giving information about the addresses of all
+    /// running domains within the cluster
+    pub(super) fn domain_addresses(&self) -> ReadySetResult<Vec<DomainDescriptor>> {
+        let mut domain_addresses = Vec::new();
+        for (domain_index, handle) in &self.domains {
+            for shard in 0..handle.num_shards() {
+                for replica in 0..handle.num_replicas() {
+                    let replica_address = ReplicaAddress {
+                        domain_index: *domain_index,
+                        shard,
+                        replica,
+                    };
+                    let socket_addr = self
+                        .channel_coordinator
+                        .get_addr(&replica_address)
+                        .ok_or_else(|| ReadySetError::NoSuchReplica {
+                            domain_index: domain_index.index(),
+                            shard,
+                            replica,
+                        })?;
+
+                    domain_addresses.push(DomainDescriptor::new(replica_address, socket_addr));
+                }
+            }
+        }
+
+        Ok(domain_addresses)
+    }
+
     /// Query the status of all known tables, including those not replicated by ReadySet
     pub(super) async fn table_statuses(&self) -> ReadySetResult<BTreeMap<Relation, TableStatus>> {
         let known_tables = self.tables();
