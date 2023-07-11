@@ -448,9 +448,12 @@ where
             mysql, readyset, ..
         } = ctxt;
 
-        let mysql_res = op.run(mysql, query, &tables).await.unwrap();
         let readyset_res = op.run(readyset, query, &tables).await.unwrap();
-        assert_eq!(mysql_res, readyset_res);
+        // `Operation::Evict` is ReadySet only
+        if !matches!(op, Operation::Evict { .. }) {
+            let mysql_res = op.run(mysql, query, &tables).await.unwrap();
+            assert_eq!(mysql_res, readyset_res);
+        }
     }
 
     async fn check_postconditions(&self, _ctxt: &mut Self::RunContext) {
