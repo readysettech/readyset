@@ -22,7 +22,7 @@
 //! Note that this test suite requires the *exact* configuration specified in that docker-compose
 //! configuration, including the port, username, and password.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::fmt::{Debug, Display, Formatter, Result};
 use std::iter::once;
 use std::panic::AssertUnwindSafe;
@@ -68,7 +68,7 @@ impl Debug for ColumnSpec {
 }
 
 impl Arbitrary for ColumnSpec {
-    type Parameters = HashMap<String, Vec<String>>;
+    type Parameters = BTreeMap<String, Vec<String>>;
     type Strategy = BoxedStrategy<Self>;
 
     fn arbitrary_with(enum_types: Self::Parameters) -> Self::Strategy {
@@ -199,7 +199,7 @@ enum Operation {
 
 /// Returns an iterator that yields names of tables that use the given type.
 fn tables_using_type<'a>(
-    tables: &'a HashMap<String, Vec<ColumnSpec>>,
+    tables: &'a BTreeMap<String, Vec<ColumnSpec>>,
     type_name: &'a str,
 ) -> impl Iterator<Item = &'a str> {
     tables.iter().filter_map(move |(name, columns)| {
@@ -214,7 +214,7 @@ fn tables_using_type<'a>(
 // Generators for Operation:
 
 fn gen_column_specs(
-    enum_types: HashMap<String, Vec<String>>,
+    enum_types: BTreeMap<String, Vec<String>>,
 ) -> impl Strategy<Value = Vec<ColumnSpec>> {
     collection::vec(any_with::<ColumnSpec>(enum_types), 1..4)
         .prop_filter("duplicate column names not allowed", |specs| {
@@ -231,7 +231,7 @@ prop_compose! {
 }
 
 prop_compose! {
-    fn gen_create_table(enum_types: HashMap<String, Vec<String>>)
+    fn gen_create_table(enum_types: BTreeMap<String, Vec<String>>)
                        (name in SQL_NAME_REGEX, cols in gen_column_specs(enum_types))
                        -> Operation {
         Operation::CreateTable(name, cols)
@@ -245,7 +245,7 @@ prop_compose! {
 }
 
 prop_compose! {
-    fn gen_write_row(tables: HashMap<String, Vec<ColumnSpec>>, pkeys: HashMap<String, Vec<i32>>)
+    fn gen_write_row(tables: BTreeMap<String, Vec<ColumnSpec>>, pkeys: BTreeMap<String, Vec<i32>>)
                     (t in sample::select(tables.keys().cloned().collect::<Vec<_>>()))
                     (col_vals in tables[&t].iter().map(|cs| cs.gen.clone()).collect::<Vec<_>>(),
                      col_types in Just(tables[&t].iter().map(|cs| cs.sql_type.clone()).collect()),
@@ -266,7 +266,7 @@ prop_compose! {
     }
 }
 
-fn gen_add_col(tables: HashMap<String, Vec<ColumnSpec>>) -> impl Strategy<Value = Operation> {
+fn gen_add_col(tables: BTreeMap<String, Vec<ColumnSpec>>) -> impl Strategy<Value = Operation> {
     gen_add_col_unfiltered(tables.keys().cloned().collect()).prop_filter(
         "Can't add a new column with a duplicate name",
         move |op| match op {
@@ -288,7 +288,7 @@ fn gen_non_id_col_name() -> impl Strategy<Value = String> {
 }
 
 prop_compose! {
-    fn gen_rename_col(tables: HashMap<String, Vec<ColumnSpec>>, tables_with_cols: Vec<String>)
+    fn gen_rename_col(tables: BTreeMap<String, Vec<ColumnSpec>>, tables_with_cols: Vec<String>)
                      (table in sample::select(tables_with_cols))
                      (col_name in sample::select(
                          tables[&table]
@@ -303,7 +303,7 @@ prop_compose! {
 }
 
 prop_compose! {
-    fn gen_drop_col(tables: HashMap<String, Vec<ColumnSpec>>, tables_with_cols: Vec<String>)
+    fn gen_drop_col(tables: BTreeMap<String, Vec<ColumnSpec>>, tables_with_cols: Vec<String>)
                    (table in sample::select(tables_with_cols))
                    (col_name in sample::select(
                        tables[&table]
@@ -317,7 +317,7 @@ prop_compose! {
 }
 
 prop_compose! {
-    fn gen_delete_row(non_empty_tables: Vec<String>, pkeys: HashMap<String, Vec<i32>>)
+    fn gen_delete_row(non_empty_tables: Vec<String>, pkeys: BTreeMap<String, Vec<i32>>)
                      (table in sample::select(non_empty_tables))
                      (key in sample::select(pkeys[&table].clone()),
                       table in Just(table))
@@ -367,7 +367,7 @@ prop_compose! {
 }
 
 fn gen_append_enum_value(
-    enum_types: HashMap<String, Vec<String>>,
+    enum_types: BTreeMap<String, Vec<String>>,
 ) -> impl Strategy<Value = Operation> {
     gen_append_enum_value_inner(enum_types.keys().cloned().collect()).prop_filter(
         "Can't add duplicate value to existing ENUM type",
@@ -391,7 +391,7 @@ prop_compose! {
 }
 
 prop_compose! {
-    fn gen_insert_enum_value(enum_types: HashMap<String, Vec<String>>)
+    fn gen_insert_enum_value(enum_types: BTreeMap<String, Vec<String>>)
                             (et in sample::select(enum_types.keys().cloned().collect::<Vec<_>>()))
                             (next_to_value in sample::select(enum_types[&et].clone()),
                              type_name in Just(et),
@@ -403,7 +403,7 @@ prop_compose! {
 }
 
 prop_compose! {
-    fn gen_rename_enum_value(enum_types: HashMap<String, Vec<String>>)
+    fn gen_rename_enum_value(enum_types: BTreeMap<String, Vec<String>>)
                             (et in sample::select(enum_types.keys().cloned().collect::<Vec<_>>()))
                             (value_name in sample::select(enum_types[&et].clone()),
                              type_name in Just(et),
@@ -442,14 +442,16 @@ struct DDLTestRunContext {
 /// steps against the system under test.
 #[derive(Clone, Debug, Default)]
 struct DDLModelState {
-    tables: HashMap<String, Vec<ColumnSpec>>,
+    // We use BTreeMap instead of HashMap so that the `keys()` method gives us a deterministic
+    // ordering, which allows us to reliably regenerate the same test case for a given seed.
+    tables: BTreeMap<String, Vec<ColumnSpec>>,
     deleted_tables: HashSet<String>,
-    pkeys: HashMap<String, Vec<i32>>, // Primary keys in use for each table
+    pkeys: BTreeMap<String, Vec<i32>>, // Primary keys in use for each table
     // Map of view name to view definition
-    views: HashMap<String, TestViewDef>,
+    views: BTreeMap<String, TestViewDef>,
     deleted_views: HashSet<String>,
     // Map of custom ENUM type names to type definitions (represented by a Vec of ENUM elements)
-    enum_types: HashMap<String, Vec<String>>,
+    enum_types: BTreeMap<String, Vec<String>>,
 }
 
 #[async_trait(?Send)]
@@ -1149,7 +1151,7 @@ fn rows_to_dfvalue_vec(rows: Vec<Row>) -> Vec<Vec<DfValue>> {
 
 async fn recreate_caches_using_type(
     type_name: &str,
-    tables: &HashMap<String, Vec<ColumnSpec>>,
+    tables: &BTreeMap<String, Vec<ColumnSpec>>,
     rs_conn: &Client,
 ) {
     for table in tables_using_type(tables, type_name) {
