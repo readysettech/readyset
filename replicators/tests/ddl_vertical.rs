@@ -224,12 +224,9 @@ fn gen_column_specs(
 
 prop_compose! {
     fn gen_enum_values()(values in collection::hash_set(SQL_NAME_REGEX, 1..4)) -> Vec<String> {
-        // Note that order is deterministic based on the HashSet iterator implementation. If we
-        // want the order to be random, we will have to be careful to make the random order
-        // deterministic on the test case being run, which probably means we add a generator for a
-        // random seed then use that to shuffle the resulting Vec below, since that way the
-        // generated seed will be based on the seed for the given test case.
-        values.into_iter().collect()
+        let mut res = values.into_iter().collect::<Vec<_>>();
+        res.sort();
+        res
     }
 }
 
@@ -356,7 +353,9 @@ prop_compose! {
 }
 
 prop_compose! {
-    fn gen_create_enum()(name in SQL_NAME_REGEX, values in gen_enum_values()) -> Operation {
+    fn gen_create_enum()
+                      (name in SQL_NAME_REGEX, values in gen_enum_values().prop_shuffle())
+                      -> Operation {
         Operation::CreateEnum(name, values)
     }
 }
