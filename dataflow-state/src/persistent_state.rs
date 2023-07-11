@@ -70,7 +70,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
-use std::{fmt, fs};
+use std::{fmt, fs, mem};
 
 use bincode::Options;
 use clap::ValueEnum;
@@ -758,8 +758,8 @@ impl State for PersistentState {
         }
     }
 
-    fn cloned_records(&self) -> Vec<Vec<DfValue>> {
-        self.db.cloned_records()
+    fn all_records(&self) -> crate::AllRecords {
+        self.read_handle().all_records()
     }
 
     /// Returns a *row* count estimate from RocksDB (not a key count as the function name would
@@ -1029,13 +1029,8 @@ impl State for PersistentStateHandle {
             .unwrap() as usize
     }
 
-    fn cloned_records(&self) -> Vec<Vec<DfValue>> {
-        let inner = self.inner();
-        let db = &inner.db;
-        let cf = db.cf_handle(&inner.indices[0].column_family).unwrap();
-        db.full_iterator_cf(cf, IteratorMode::Start)
-            .map(|res| deserialize_row(res.unwrap().1))
-            .collect()
+    fn all_records(&self) -> crate::AllRecords {
+        crate::AllRecords::Persistent(AllRecords(self.clone()))
     }
 
     fn evict_bytes(&mut self, _: usize) -> Option<crate::EvictBytesResult> {
@@ -1355,6 +1350,40 @@ fn compact_cf(table: &str, db: &DB, index: &PersistentIndex, opts: &CompactOptio
         if let Err(error) = db.set_options_cf(cf, &[("disable_auto_compactions", "false")]) {
             error!(%error, %table, "Error setting cf options");
         }
+    }
+}
+
+/// Handle to all the records in a persistent state.
+///
+/// This type exists as distinct from [`AllRecordsGuard`] to allow it to be sent between threads.
+pub struct AllRecords(PersistentStateHandle);
+
+/// RAII guard providing the ability to stream all the records out of a persistent state
+pub struct AllRecordsGuard<'a>(RwLockReadGuard<'a, SharedState>);
+
+impl AllRecords {
+    /// Construct an RAII guard providing the ability to stream all the records out of a persistent
+    /// state
+    pub fn read(&self) -> AllRecordsGuard<'_> {
+        AllRecordsGuard(self.0.inner())
+    }
+}
+
+impl<'a> AllRecordsGuard<'a> {
+    /// Construct an iterator over all the records in a persistent state
+    pub fn iter<'b>(&'a self) -> impl Iterator<Item = Vec<DfValue>> + 'b
+    where
+        'a: 'b,
+    {
+        let cf = self
+            .0
+            .db
+            .cf_handle(&self.0.indices[0].column_family)
+            .expect("Column families always exist for all indices");
+        self.0
+            .db
+            .full_iterator_cf(cf, IteratorMode::Start)
+            .map(|res| deserialize_row(res.unwrap().1))
     }
 }
 
@@ -2019,7 +2048,7 @@ impl SizeOf for PersistentStateHandle {
     }
 
     fn size_of(&self) -> u64 {
-        std::mem::size_of::<Self>() as u64
+        mem::size_of::<Self>() as u64
     }
 
     fn is_empty(&self) -> bool {
@@ -2034,7 +2063,7 @@ impl SizeOf for PersistentStateHandle {
 
 impl SizeOf for PersistentState {
     fn size_of(&self) -> u64 {
-        std::mem::size_of::<Self>() as u64
+        mem::size_of::<Self>() as u64
     }
 
     #[allow(clippy::panic)] // Can't return a result, panicking is the best we can do
@@ -2739,18 +2768,68 @@ mod tests {
         assert!(count > 0 && count < rows.len() * 2);
     }
 
-    #[test]
-    fn persistent_state_cloned_records() {
-        let mut state = setup_persistent("persistent_state_cloned_records", None);
-        let first: Vec<DfValue> = vec![10.into(), "Cat".into()];
-        let second: Vec<DfValue> = vec![20.into(), "Cat".into()];
-        state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
-        state.add_key(Index::new(IndexType::HashMap, vec![1]), None);
-        state
-            .process_records(&mut vec![first.clone(), second.clone()].into(), None, None)
-            .unwrap();
+    mod all_records {
+        use pretty_assertions::assert_eq;
 
-        assert_eq!(state.cloned_records(), vec![first, second]);
+        use super::*;
+
+        #[test]
+        fn simple_case() {
+            let mut state = setup_persistent("persistent_state_cloned_records", None);
+            let first: Vec<DfValue> = vec![10.into(), "Cat".into()];
+            let second: Vec<DfValue> = vec![20.into(), "Cat".into()];
+            state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
+            state.add_key(Index::new(IndexType::HashMap, vec![1]), None);
+            state
+                .process_records(&mut vec![first.clone(), second.clone()].into(), None, None)
+                .unwrap();
+
+            let mut all_records = state.all_records();
+            assert_eq!(
+                all_records.read().iter().collect::<Vec<_>>(),
+                vec![first, second]
+            );
+        }
+
+        #[test]
+        fn wonky_drop_order() {
+            let mut state = setup_persistent("persistent_state_cloned_records", None);
+            let first: Vec<DfValue> = vec![10.into(), "Cat".into()];
+            let second: Vec<DfValue> = vec![20.into(), "Cat".into()];
+            state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
+            state.add_key(Index::new(IndexType::HashMap, vec![1]), None);
+            state
+                .process_records(&mut vec![first.clone(), second.clone()].into(), None, None)
+                .unwrap();
+            let mut all_records = state.all_records();
+            drop(state);
+
+            assert_eq!(
+                all_records.read().iter().collect::<Vec<_>>(),
+                vec![first, second]
+            );
+        }
+
+        #[test]
+        fn writes_during_iter() {
+            let mut state = setup_persistent("persistent_state_cloned_records", None);
+            let first: Vec<DfValue> = vec![10.into(), "Cat".into()];
+            let second: Vec<DfValue> = vec![20.into(), "Cat".into()];
+            state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
+            state.add_key(Index::new(IndexType::HashMap, vec![1]), None);
+            state
+                .process_records(&mut vec![first.clone(), second.clone()].into(), None, None)
+                .unwrap();
+            let mut all_records = state.all_records();
+            let mut guard = all_records.read();
+            let iter = guard.iter();
+            state
+                .process_records(&mut vec![first.clone(), second.clone()].into(), None, None)
+                .unwrap();
+            drop(state);
+
+            assert_eq!(iter.collect::<Vec<_>>(), vec![first, second]);
+        }
     }
 
     #[test]

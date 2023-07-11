@@ -201,7 +201,8 @@ impl Base {
                 }
                 TableOperation::Truncate => {
                     records.clear();
-                    records.extend(db.cloned_records().into_iter().map(|r| Record::Negative(r)))
+                    let mut all_records = db.all_records();
+                    records.extend(all_records.read().iter().map(|r| Record::Negative(r)));
                 }
                 TableOperation::DeleteByKey { .. }
                 | TableOperation::InsertOrUpdate { .. }
@@ -297,7 +298,8 @@ impl Base {
             if !truncated {
                 debug!("Truncating base");
                 truncated = true;
-                results.extend(db.cloned_records().into_iter().map(|r| Record::Negative(r)));
+                let mut all_records = db.all_records();
+                results.extend(all_records.read().iter().map(|r| Record::Negative(r)));
             }
         }
 

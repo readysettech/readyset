@@ -13,8 +13,8 @@ use tracing::trace;
 use crate::keyed_state::KeyedState;
 use crate::single_state::SingleState;
 use crate::{
-    EvictBytesResult, EvictKeysResult, EvictRandomResult, LookupResult, PointKey, RangeKey,
-    RangeLookupResult, RecordResult, Row, Rows, State,
+    AllRecords, EvictBytesResult, EvictKeysResult, EvictRandomResult, LookupResult, PointKey,
+    RangeKey, RangeLookupResult, RecordResult, Row, Rows, State,
 };
 
 #[derive(Default)]
@@ -286,14 +286,14 @@ impl State for MemoryState {
         self.state[index].lookup_range(key)
     }
 
-    fn cloned_records(&self) -> Vec<Vec<DfValue>> {
+    fn all_records(&self) -> AllRecords {
         #[allow(clippy::ptr_arg)]
         fn fix(rs: &Rows) -> impl Iterator<Item = Vec<DfValue>> + '_ {
             rs.iter().map(|r| Vec::clone(&**r))
         }
 
         assert!(!self.state[0].partial());
-        self.state[0].values().flat_map(fix).collect()
+        AllRecords::Owned(self.state[0].values().flat_map(fix).collect())
     }
 
     /// Evicts `bytes` by evicting random keys from the state. The key are first evicted from the

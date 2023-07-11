@@ -18,6 +18,7 @@ use ahash::RandomState;
 use common::{Records, SizeOf, Tag};
 use derive_more::From;
 use hashbag::HashBag;
+use itertools::Either;
 pub use partial_map::PartialMap;
 use readyset_client::internal::Index;
 use readyset_client::replication::ReplicationOffset;
@@ -210,8 +211,9 @@ pub trait State: SizeOf + Send {
     /// state
     fn row_count(&self) -> usize;
 
-    /// Return a copy of all records. Panics if the state is only partially materialized.
-    fn cloned_records(&self) -> Vec<Vec<DfValue>>;
+    /// Return a handle that allows streaming a consistent snapshot of all records within this
+    /// state. Panics if the state is only partially materialized.
+    fn all_records(&self) -> AllRecords;
 
     /// Evict up to `bytes` by randomly selected keys, returning a struct representing the index
     /// chosen to evict from along with the keys evicted and the number of bytes evicted.
@@ -392,11 +394,11 @@ impl State for MaterializedNodeState {
         }
     }
 
-    fn cloned_records(&self) -> Vec<Vec<DfValue>> {
+    fn all_records(&self) -> AllRecords {
         match self {
-            MaterializedNodeState::Memory(ms) => ms.cloned_records(),
-            MaterializedNodeState::Persistent(ps) => ps.cloned_records(),
-            MaterializedNodeState::PersistentReadHandle(rh) => rh.cloned_records(),
+            MaterializedNodeState::Memory(ms) => ms.all_records(),
+            MaterializedNodeState::Persistent(ps) => ps.all_records(),
+            MaterializedNodeState::PersistentReadHandle(rh) => rh.all_records(),
         }
     }
 
@@ -437,6 +439,50 @@ impl State for MaterializedNodeState {
             MaterializedNodeState::Memory(ms) => ms.tear_down(),
             MaterializedNodeState::Persistent(ps) => ps.tear_down(),
             MaterializedNodeState::PersistentReadHandle(rh) => rh.tear_down(),
+        }
+    }
+}
+
+/// Handle to all the records in a state.
+///
+/// This type exists as distinct from [`AllRecordsGuard`] to allow it to be sent between threads.
+pub enum AllRecords {
+    /// Owned records taken from a [`MemoryState`]
+    Owned(Vec<Vec<DfValue>>),
+    /// Records streaming out of a [`PersistentState`]
+    Persistent(persistent_state::AllRecords),
+}
+
+/// RAII guard providing the ability to stream all the records out of a state
+pub enum AllRecordsGuard<'a> {
+    /// Owned records taken from a [`MemoryState`]
+    Owned(vec::IntoIter<Vec<DfValue>>),
+    /// Records streaming out of a [`PersistentState`]
+    Persistent(persistent_state::AllRecordsGuard<'a>),
+}
+
+impl AllRecords {
+    /// Construct an RAII guard providing the ability to stream all the records out of a state
+    pub fn read(&mut self) -> AllRecordsGuard<'_> {
+        match self {
+            AllRecords::Owned(i) => AllRecordsGuard::Owned(std::mem::take(i).into_iter()),
+            AllRecords::Persistent(g) => AllRecordsGuard::Persistent(g.read()),
+        }
+    }
+}
+
+impl<'a> AllRecordsGuard<'a> {
+    /// Construct an iterator over all the records in a state.
+    ///
+    /// Do not call this method multiple times on the same `guard` - doing so will yield an empty
+    /// result set.
+    pub fn iter<'b>(&'b mut self) -> impl Iterator<Item = Vec<DfValue>> + 'b
+    where
+        'a: 'b,
+    {
+        match self {
+            AllRecordsGuard::Owned(v) => Either::Left(v),
+            AllRecordsGuard::Persistent(g) => Either::Right(g.iter()),
         }
     }
 }

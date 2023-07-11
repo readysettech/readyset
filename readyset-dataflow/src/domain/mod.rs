@@ -36,7 +36,7 @@ use serde::{Deserialize, Serialize};
 use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
 use tokio::sync::mpsc::Sender;
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{debug, error, info, trace, warn, Instrument};
+use tracing::{debug, error, info, info_span, trace, warn, Instrument};
 use vec1::Vec1;
 
 pub(crate) use self::replay_paths::ReplayPath;
@@ -1924,14 +1924,16 @@ impl Domain {
                 // case, we wouldn't be able to do the replay, and the entire migration
                 // would fail.
                 //
-                // we clone the entire state so that we can continue to occasionally
-                // process incoming updates to the domain without disturbing the state that
-                // is being replayed.
+                // In the case of memory state, we clone the entire state so that we can continue to
+                // occasionally process incoming updates to the domain without disturbing the state
+                // that is being replayed. For persistent state, we can stream records from a
+                // consistent snapshot and avoid the allocations
                 let state = self
                     .state
                     .get(from)
-                    .expect("migration replay path started with non-materialized node")
-                    .cloned_records();
+                    .expect("migration replay path started with non-materialized node");
+                let is_empty = state.is_empty();
+                let mut all_records = state.all_records();
 
                 debug!(
                     μs = %start.elapsed().as_micros(),
@@ -1953,105 +1955,122 @@ impl Domain {
                     tag,
                     link,
                     context: ReplayPieceContext::Full {
-                        last: state.is_empty(),
+                        // NOTE: If we're replaying from persistent state this might be wrong, since
+                        // it's backed by an *estimate* of the number of keys in the state
+                        last: is_empty,
                     },
                     data: Vec::<Record>::new().into(),
                 });
 
-                if !state.is_empty() {
-                    let added_cols = self.ingress_inject.get(from).cloned();
-                    let default = {
-                        let n = self
-                            .nodes
-                            .get(from)
-                            .ok_or_else(|| ReadySetError::NoSuchNode(from.id()))?
-                            .borrow();
-                        let mut default = None;
-                        if let Some(b) = n.get_base() {
-                            let mut row = Vec::new();
-                            b.fix(&mut row);
-                            default = Some(row);
-                        }
-                        default
-                    };
-                    let fix = move |mut r: Vec<DfValue>| -> Vec<DfValue> {
-                        if let Some((start, ref added)) = added_cols {
-                            let rlen = r.len();
-                            r.extend(added.iter().skip(rlen - start).cloned());
-                        } else if let Some(ref defaults) = default {
-                            let rlen = r.len();
-                            r.extend(defaults.iter().skip(rlen).cloned());
-                        }
-                        r
-                    };
+                let added_cols = self.ingress_inject.get(from).cloned();
+                let default = {
+                    let n = self
+                        .nodes
+                        .get(from)
+                        .ok_or_else(|| ReadySetError::NoSuchNode(from.id()))?
+                        .borrow();
+                    let mut default = None;
+                    if let Some(b) = n.get_base() {
+                        let mut row = Vec::new();
+                        b.fix(&mut row);
+                        default = Some(row);
+                    }
+                    default
+                };
+                let fix = move |mut r: Vec<DfValue>| -> Vec<DfValue> {
+                    if let Some((start, ref added)) = added_cols {
+                        let rlen = r.len();
+                        r.extend(added.iter().skip(rlen - start).cloned());
+                    } else if let Some(ref defaults) = default {
+                        let rlen = r.len();
+                        r.extend(defaults.iter().skip(rlen).cloned());
+                    }
+                    r
+                };
 
-                    let replay_tx_desc = self.channel_coordinator.builder_for(&self.address())?;
+                let replay_tx_desc = self.channel_coordinator.builder_for(&self.address())?;
 
-                    // Have to get metrics here so we can move them to the thread
-                    let (replay_time_counter, replay_time_histogram) =
-                        self.metrics.recorders_for_chunked_replay(link.dst);
+                // Have to get metrics here so we can move them to the thread
+                let (replay_time_counter, replay_time_histogram) =
+                    self.metrics.recorders_for_chunked_replay(link.dst);
 
-                    thread::Builder::new()
-                        .name(format!(
-                            "replay{}.{}",
-                            #[allow(clippy::unwrap_used)] // self.nodes can't be empty
-                            self.nodes
-                                .values()
-                                .next()
-                                .unwrap()
-                                .borrow()
-                                .domain()
-                                .index(),
-                            link.src
-                        ))
-                        .spawn(move || {
-                            use itertools::Itertools;
+                let address = self.address();
+                thread::Builder::new()
+                    .name(format!("replay{}.{}", self.index(), link.src))
+                    .spawn(move || {
+                        let span = info_span!("full_replay", %address, src = %link.src);
+                        let _guard = span.enter();
+                        use itertools::Itertools;
 
-                            // TODO: make async
-                            let mut chunked_replay_tx = match replay_tx_desc.build_sync() {
-                                Ok(r) => r,
-                                Err(error) => {
-                                    error!(%error, "Error building channel for chunked replay");
-                                    return;
-                                }
-                            };
-
-                            let start = time::Instant::now();
-                            debug!(node = %link.dst, "starting state chunker");
-
-                            let iter = state.into_iter().chunks(BATCH_SIZE);
-                            let mut iter = iter.into_iter().enumerate().peekable();
-
-                            // process all records in state to completion within domain
-                            // and then forward on tx (if there is one)
-                            while let Some((i, chunk)) = iter.next() {
-                                let chunk = Records::from_iter(chunk.map(&fix));
-                                let len = chunk.len();
-                                let last = iter.peek().is_none();
-                                let p = Box::new(Packet::ReplayPiece {
-                                    tag,
-                                    link, // to is overwritten by receiver
-                                    context: ReplayPieceContext::Full { last },
-                                    data: chunk,
-                                });
-
-                                trace!(num = i, len, "sending batch");
-                                if chunked_replay_tx.send(p).is_err() {
-                                    warn!("replayer noticed domain shutdown");
-                                    break;
-                                }
+                        // TODO: make async
+                        let mut chunked_replay_tx = match replay_tx_desc.build_sync() {
+                            Ok(r) => r,
+                            Err(error) => {
+                                error!(%error, "Error building channel for chunked replay");
+                                return;
                             }
+                        };
 
-                            debug!(
-                               node = %link.dst,
-                               μs = %start.elapsed().as_micros(),
-                               "state chunker finished"
-                            );
+                        let start = time::Instant::now();
+                        debug!(node = %link.dst, "starting state chunker");
 
-                            replay_time_counter.increment(start.elapsed().as_micros() as u64);
-                            replay_time_histogram.record(start.elapsed().as_micros() as f64);
-                        })?;
-                }
+                        let mut guard = all_records.read();
+                        let iter = guard.iter().chunks(BATCH_SIZE);
+                        let mut iter = iter
+                            .into_iter()
+                            .map(|chunk| Records::from_iter(chunk.map(&fix)))
+                            .enumerate()
+                            .peekable();
+
+                        // process all records in state to completion within domain and then
+                        // forward on tx (if there is one)
+                        let mut sent_last = is_empty;
+                        while let Some((i, chunk)) = iter.next() {
+                            let len = chunk.len();
+                            let last = iter.peek().is_none();
+                            sent_last = last;
+                            let p = Box::new(Packet::ReplayPiece {
+                                tag,
+                                link, // to is overwritten by receiver
+                                context: ReplayPieceContext::Full { last },
+                                data: chunk,
+                            });
+
+                            trace!(num = i, len, "sending batch");
+                            if let Err(error) = chunked_replay_tx.send(p) {
+                                warn!(%error, "replayer noticed domain shutdown");
+                                break;
+                            }
+                        }
+
+                        // Since we're using `is_empty` above to send a `last: true` packet
+                        // before launching the thread, and that's based on a potentially
+                        // inaccurate estimate, it might be the case that we started this thread
+                        // with no records - if so, we need to send a `last: true` packet to
+                        // tell the target domain we're done
+                        if !sent_last {
+                            trace!("Sending empty last batch");
+                            if let Err(error) =
+                                chunked_replay_tx.send(Box::new(Packet::ReplayPiece {
+                                    tag,
+                                    link,
+                                    context: ReplayPieceContext::Full { last: true },
+                                    data: Default::default(),
+                                }))
+                            {
+                                warn!(%error, "replayer noticed domain shutdown");
+                            }
+                        }
+
+                        debug!(
+                           node = %link.dst,
+                           μs = %start.elapsed().as_micros(),
+                           "state chunker finished"
+                        );
+
+                        replay_time_counter.increment(start.elapsed().as_micros() as u64);
+                        replay_time_histogram.record(start.elapsed().as_micros() as f64);
+                    })?;
                 self.handle_replay(*p, executor)?;
 
                 self.total_replay_time.stop();
