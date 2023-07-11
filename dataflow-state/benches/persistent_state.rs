@@ -1,3 +1,41 @@
+//! This module contains [`criterion`] benchmarks which measure the performance of reads from
+//! RocksDB through [`PersistentState`]. These benchmarks may be useful to characterize cold read
+//! performance, as [`PersistentState`] is what stores base tables. It would make sense to run
+//! these benchmarks before and after making a change to [`PersistentState`] or the RocksDB
+//! configuration to make sure performance has not regressed.
+//!
+//! To run the benchmarks with the default settings (100k entries) with data stored in a temp
+//! directory and deleted after the benchmarks run:
+//! ```notrust
+//! $ cargo bench
+//! ```
+//!
+//! To run the benchmarks with a different number of entries than the default:
+//! ```notrust
+//! $ cargo bench -- --unique-entries=1000000
+//! ```
+//!
+//! To run the benchmarks with data stored in the current directory and persisted after the
+//! benchmakrs run:
+//! ```notrust
+//! $ cargo bench -- --durability-mode=persistent
+//! ```
+//!
+//! To run the benchmarks with a database created in a previous run (note that a new database is
+//! created for each value of `--unique-entries`):
+//! ```notrust
+//! $ cargo bench -- --durability-mode=persistent --reuse-persistence
+//! ```
+//!
+//! To seed the database for the given number of keys without running the benchmarks:
+//! ```notrust
+//! $ cargo bench -- --durability-mode=persistent --seed-only
+//! ```
+//!
+//! For more details about the CLI options:
+//! ```notrust
+//! $ cargo bench -- --help
+//! ```
 use std::ops::Bound;
 
 use clap::Parser;
