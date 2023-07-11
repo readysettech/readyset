@@ -23,7 +23,9 @@ use readyset_util::shutdown::ShutdownSender;
 use replicators::db_util::error_is_slot_not_found;
 use replicators::NoriaAdapter;
 use test_utils::slow;
-use tracing::{error, trace};
+use tokio::time::sleep;
+use tokio_postgres::error::SqlState;
+use tracing::{debug, error, trace};
 
 const MAX_ATTEMPTS: usize = 40;
 
@@ -179,9 +181,26 @@ impl DbConnection {
                 let (no_db_client, conn) = no_db_opts.connect(tokio_postgres::NoTls).await?;
                 tokio::spawn(conn);
 
-                no_db_client
-                    .simple_query(&format!("DROP DATABASE IF EXISTS {test_db_name}"))
-                    .await?;
+                loop {
+                    match no_db_client
+                        .simple_query(&format!("DROP DATABASE IF EXISTS {test_db_name}"))
+                        .await
+                    {
+                        Ok(_) => break,
+                        Err(e) => {
+                            if let Some(db_err) = e.as_db_error() {
+                                if *db_err.code() == SqlState::OBJECT_IN_USE {
+                                    debug!(
+                                        "Waiting for database \"{test_db_name}\" to not be in use"
+                                    );
+                                    sleep(Duration::from_millis(100)).await;
+                                    continue;
+                                }
+                            }
+                            return Err(e.into());
+                        }
+                    };
+                }
                 no_db_client
                     .simple_query(&format!("CREATE DATABASE {test_db_name}"))
                     .await?;
@@ -541,7 +560,6 @@ async fn pgsql_replication() -> ReadySetResult<()> {
 /// readyset instances can replicate off the same upstream.
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
-#[ignore = "Flaky test (REA-3061)"]
 async fn pgsql_replication_multiple() -> ReadySetResult<()> {
     replication_test_multiple(&pgsql_url()).await
 }
@@ -2421,7 +2439,6 @@ async fn pgsql_unsupported() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
-#[ignore = "Flaky test (REA-2878)"]
 async fn pgsql_delete_from_table_without_pk() {
     readyset_tracing::init_test_logging();
     let url = pgsql_url();
