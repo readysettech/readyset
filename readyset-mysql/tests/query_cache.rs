@@ -565,7 +565,7 @@ async fn out_of_band_prep_exec_with_fallback() {
     let res: Result<Vec<Row>> = conn.exec(&stmt, ()).await;
     res.unwrap();
     assert_eq!(query_status_cache.allow_list().len(), 0);
-    assert_eq!(query_status_cache.deny_list().len(), 0);
+    assert_eq!(query_status_cache.deny_list().len(), 1);
     assert_eq!(
         last_query_info(&mut conn).await.destination,
         QueryDestination::Upstream

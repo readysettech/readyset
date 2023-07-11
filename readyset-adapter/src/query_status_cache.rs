@@ -376,6 +376,9 @@ impl QueryStatusCache {
     where
         Q: QueryStatusKey,
     {
+        // Dropped should not be set manually
+        debug_assert!(!matches!(m, MigrationState::Dropped));
+
         q.with_mut_status(self, |s| {
             match s {
                 Some(mut s) => {
@@ -404,6 +407,31 @@ impl QueryStatusCache {
                         },
                     );
                 }
+            }
+        })
+    }
+
+    /// Marks a query as dropped by the user.
+    ///
+    /// NOTE: this should only be called after we successfully remove a View for this query. This is
+    /// relevant because we report that dropped queries are supported by ReadySet.
+    pub fn drop_query<Q>(&self, q: &Q)
+    where
+        Q: QueryStatusKey,
+    {
+        q.with_mut_status(self, |s| match s {
+            Some(mut s) => {
+                s.migration_state = MigrationState::Dropped;
+            }
+            None => {
+                self.insert_with_status(
+                    q.clone(),
+                    QueryStatus {
+                        migration_state: MigrationState::Dropped,
+                        execution_info: None,
+                        always: false,
+                    },
+                );
             }
         })
     }
@@ -467,6 +495,9 @@ impl QueryStatusCache {
     }
 
     /// Clear all queries currently marked as successful from the cache.
+    ///
+    /// NOTE: We do not mark cleared queries as dropped, since we are not explicitly deny-listing
+    /// cleared queries.
     pub fn clear(&self) {
         self.statuses
             .iter_mut()
@@ -592,7 +623,7 @@ impl QueryStatusCache {
                 .filter_map(|r| {
                     r.value().with_status(self, |s| {
                         s.and_then(|s| {
-                            if s.is_unsupported() {
+                            if s.is_unsupported() || s.is_dropped() {
                                 Some(DeniedQuery {
                                     id: *r.key(),
                                     query: r.value().clone(),
@@ -1018,5 +1049,26 @@ mod tests {
         assert_eq!(pending[0].literals().len(), 2);
         assert!(pending[0].literals().contains(&vec![DfValue::Max]));
         assert!(pending[0].literals().contains(&vec![DfValue::None]));
+    }
+
+    #[test]
+    fn drop_query() {
+        let cache = QueryStatusCache::new().style(MigrationStyle::Explicit);
+        let q = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
+
+        // Assert that if we have not seen this query, the query is marked as dropped. This may be
+        // relevant to multiple adapter configurations, or just after an adapter restart.
+        cache.drop_query(&q);
+        assert_eq!(cache.query_migration_state(&q).1, MigrationState::Dropped);
+
+        // Assert that we can drop a Successful query
+        cache.update_query_migration_state(&q, MigrationState::Successful);
+        cache.drop_query(&q);
+        assert_eq!(cache.query_migration_state(&q).1, MigrationState::Dropped);
+
+        // Assert that cleared queries are not marked as Dropped.
+        cache.update_query_migration_state(&q, MigrationState::Successful);
+        cache.clear();
+        assert_eq!(cache.query_migration_state(&q).1, MigrationState::Pending);
     }
 }

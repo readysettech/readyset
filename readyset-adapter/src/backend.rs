@@ -952,8 +952,8 @@ where
 
     /// Provides metadata required to prepare a select query
     fn plan_prepare_select(&mut self, stmt: nom_sql::SelectStatement) -> PrepareMeta {
-        match self.rewrite_select_and_check_noria(&stmt) {
-            Ok((rewritten, should_do_noria)) => {
+        match self.rewrite_select_and_check_readyset(&stmt) {
+            Ok((rewritten, should_do_readyset)) => {
                 let status = self
                     .state
                     .query_status_cache
@@ -967,7 +967,7 @@ where
                     PrepareMeta::Select(PrepareSelectMeta {
                         stmt,
                         rewritten,
-                        should_do_noria,
+                        should_do_noria: should_do_readyset,
                         // For select statements only InRequestPath should trigger migrations
                         // synchronously, or if no upstream is present.
                         must_migrate: self.settings.migration_mode == MigrationMode::InRequestPath
@@ -988,26 +988,28 @@ where
     }
 
     /// Rewrites the provided select, and checks if the select statement should be
-    /// handled by noria. If so, the second tuple member will be true. If the select should be
+    /// handled by readyset. If so, the second tuple member will be true. If the select should be
     /// handled by upstream, the second tuple member will be false.
     ///
     /// If the rewrite fails, the option will be None.
-    fn rewrite_select_and_check_noria(
+    fn rewrite_select_and_check_readyset(
         &mut self,
         stmt: &nom_sql::SelectStatement,
     ) -> ReadySetResult<(nom_sql::SelectStatement, bool)> {
         let mut rewritten = stmt.clone();
         rewrite::process_query(&mut rewritten, self.noria.server_supports_pagination())?;
-        let should_do_noria = self
-            .state
-            .query_status_cache
-            .query_migration_state(&ViewCreateRequest::new(
-                rewritten.clone(),
-                self.noria.schema_search_path().to_owned(),
-            ))
-            .1
-            != MigrationState::Unsupported;
-        Ok((rewritten, should_do_noria))
+        // Attempt ReadySet unless the query is unsupported or dropped
+        let should_do_readyset = !matches!(
+            self.state
+                .query_status_cache
+                .query_migration_state(&ViewCreateRequest::new(
+                    rewritten.clone(),
+                    self.noria.schema_search_path().to_owned(),
+                ))
+                .1,
+            MigrationState::Unsupported | MigrationState::Dropped
+        );
+        Ok((rewritten, should_do_readyset))
     }
 
     /// Provides metadata required to prepare a query
@@ -1666,9 +1668,8 @@ where
         let maybe_view_request = self.noria.view_create_request_from_name(name);
         self.noria.drop_view(name).await?;
         if let Some(view_request) = maybe_view_request {
-            self.state
-                .query_status_cache
-                .update_query_migration_state(&view_request, MigrationState::Pending);
+            // drop_query() should not be called if we have no view for this query.
+            self.state.query_status_cache.drop_query(&view_request);
             self.state
                 .query_status_cache
                 .always_attempt_readyset(&view_request, false);
@@ -1735,7 +1736,9 @@ where
             .into_iter()
             .map(|DeniedQuery { id, query, status }| {
                 let s = match status.migration_state {
-                    MigrationState::DryRunSucceeded | MigrationState::Successful => "yes",
+                    MigrationState::DryRunSucceeded
+                    | MigrationState::Successful
+                    | MigrationState::Dropped => "yes",
                     MigrationState::Pending | MigrationState::Inlined(_) => "pending",
                     MigrationState::Unsupported => "unsupported",
                 }
@@ -1889,18 +1892,23 @@ where
             false
         };
 
+        // Test several conditions to see if we should proxy
+        let upstream_exists = upstream.is_some();
+        let proxy_out_of_band = settings.migration_mode != MigrationMode::InRequestPath
+            && status.migration_state != MigrationState::Successful;
+        let unsupported_or_dropped = matches!(
+            status.migration_state,
+            MigrationState::Unsupported | MigrationState::Dropped
+        );
+        let exceeded_network_failure = status
+            .execution_info
+            .as_mut()
+            .map(|i| i.execute_network_failure_exceeded(settings.query_max_failure_duration))
+            .unwrap_or(false);
+
         if !status.always
-            && (upstream.is_some()
-                && (settings.migration_mode != MigrationMode::InRequestPath
-                    && status.migration_state != MigrationState::Successful)
-                || (status.migration_state == MigrationState::Unsupported)
-                || (status
-                    .execution_info
-                    .as_mut()
-                    .map(|i| {
-                        i.execute_network_failure_exceeded(settings.query_max_failure_duration)
-                    })
-                    .unwrap_or(false)))
+            && (upstream_exists
+                && (proxy_out_of_band || unsupported_or_dropped || exceeded_network_failure))
         {
             if did_work {
                 #[allow(clippy::unwrap_used)] // Validated by did_work.

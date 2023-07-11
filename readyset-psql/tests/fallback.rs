@@ -1183,3 +1183,114 @@ async fn replication_of_other_tables_succeeds_even_after_error() {
 
     shutdown_tx.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn drop_cache_implicit_caching() {
+    readyset_tracing::init_test_logging();
+
+    let (config, _handle, shutdown_tx) = TestBuilder::default()
+        .recreate_database(false)
+        .fallback_url(PostgreSQLAdapter::upstream_url("noria"))
+        .migration_mode(MigrationMode::InRequestPath)
+        .build::<PostgreSQLAdapter>()
+        .await;
+
+    let client = connect(config).await;
+
+    client
+        .simple_query("DROP TABLE IF EXISTS cats CASCADE")
+        .await
+        .unwrap();
+
+    client
+        .simple_query("CREATE TABLE cats (id SERIAL PRIMARY KEY, cuteness int)")
+        .await
+        .unwrap();
+
+    // Allow table to be replicated
+    sleep().await;
+    sleep().await;
+
+    // Cache an ad-hoc and prepared query
+    eventually! {
+        let _ = client
+            .simple_query("SELECT * FROM cats;")
+            .await
+            .unwrap();
+
+        last_statement_matches("readyset", "ok", &client).await
+    }
+
+    eventually! {
+        let _ = client.query("SELECT id FROM cats;", &[]).await.unwrap();
+
+        last_statement_matches("readyset", "ok", &client).await
+    }
+
+    // Obtain both cache names
+    let caches: Vec<String> = client
+        .simple_query("SHOW CACHES")
+        .await
+        .unwrap()
+        .iter()
+        .filter_map(|m| match m {
+            SimpleQueryMessage::Row(r) => Some(r.get(0).unwrap().to_string()),
+            _ => None,
+        })
+        .collect();
+
+    // Drop both caches
+    let _ = client
+        .simple_query(&format!("DROP CACHE {};", caches[0]))
+        .await
+        .unwrap();
+    let _ = client
+        .simple_query(&format!("DROP CACHE {};", caches[1]))
+        .await
+        .unwrap();
+
+    // Ensure that we go successfully to upstream. This indicates that we did not attempt to
+    // re-cache the query
+    eventually! {
+        let _ = client
+            .simple_query("SELECT * FROM cats;")
+            .await
+            .unwrap();
+
+        last_statement_matches("upstream", "ok", &client).await
+    }
+
+    eventually! {
+        let _ = client.query("SELECT id FROM cats;", &[]).await.unwrap();
+
+        last_statement_matches("upstream", "ok", &client).await
+    }
+
+    // Let's make sure we can re-cache the queries
+    let _ = client
+        .simple_query("CREATE CACHE FROM SELECT * FROM cats;")
+        .await
+        .unwrap();
+    let _ = client
+        .simple_query("CREATE CACHE FROM SELECT id FROM cats;")
+        .await
+        .unwrap();
+
+    eventually! {
+        let _ = client
+            .simple_query("SELECT * FROM cats;")
+            .await
+            .unwrap();
+
+        last_statement_matches("readyset", "ok", &client).await
+    }
+
+    eventually! {
+        let _ = client.query("SELECT id FROM cats;", &[]).await.unwrap();
+
+        last_statement_matches("readyset", "ok", &client).await
+    }
+
+    shutdown_tx.shutdown().await;
+}
