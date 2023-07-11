@@ -747,7 +747,7 @@ impl ModelState for DDLModelState {
             Operation::WriteRow {
                 table,
                 pkey,
-                col_vals: _,
+                col_vals,
                 col_types,
             } => {
                 // Make sure that the table doesn't already contain a row with this key, and also
@@ -760,10 +760,21 @@ impl ModelState for DDLModelState {
                         // Must compare lengths before zipping and comparing individual types
                         // because zip will drop elements if the Vec lengths don't match up:
                         table_cols.len() == col_types.len()
+                            // Make sure all types in the WriteRow match the table cols:
                             && table_cols
                                 .iter()
                                 .zip(col_types)
                                 .all(|(cs, row_type)| cs.sql_type == *row_type)
+                            // Make sure enum values being inserted are in the current enum defs:
+                            && col_types.iter().zip(col_vals).all(|(ct, cv)| match ct {
+                                SqlType::Other(enum_name) => self
+                                    .enum_types
+                                    .get(&enum_name.name.to_string())
+                                    .map_or(false, |enum_values| {
+                                        enum_values.contains(&cv.as_str().unwrap().to_string())
+                                    }),
+                                _ => true,
+                            })
                     })
             }
             Operation::DeleteRow(table, key) => self
