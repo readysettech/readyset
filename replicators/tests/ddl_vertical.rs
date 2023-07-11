@@ -733,7 +733,7 @@ impl ModelState for DDLModelState {
     fn preconditions_met(&self, op: &Self::Operation) -> bool {
         match op {
             Operation::CreateTable(name, cols) => {
-                !self.tables.contains_key(name)
+                !self.name_in_use(name)
                     && cols.iter().all(|cs| match cs {
                         ColumnSpec {
                             sql_type: SqlType::Other(type_name),
@@ -785,9 +785,7 @@ impl ModelState for DDLModelState {
                 t.iter().any(|cs| cs.name == *col_name) && t.iter().all(|cs| cs.name != *new_name)
             }),
             Operation::CreateSimpleView { name, table_source } => {
-                self.tables.contains_key(table_source)
-                    && !self.tables.contains_key(name)
-                    && !self.views.contains_key(name)
+                !self.name_in_use(name) && self.tables.contains_key(table_source)
             }
             Operation::CreateJoinView {
                 name,
@@ -800,7 +798,7 @@ impl ModelState for DDLModelState {
                     && !self.views.contains_key(name)
             }
             Operation::DropView(name) => self.views.contains_key(name),
-            Operation::CreateEnum(name, _values) => !self.enum_types.contains_key(name),
+            Operation::CreateEnum(name, _values) => !self.name_in_use(name),
             Operation::DropEnum(name) => tables_using_type(&self.tables, name).next().is_none(),
             Operation::AppendEnumValue {
                 type_name,
@@ -1089,6 +1087,20 @@ impl ModelState for DDLModelState {
 
     async fn clean_up_test_run(&self, ctxt: &mut Self::RunContext) {
         ctxt.shutdown_tx.take().unwrap().shutdown().await
+    }
+}
+
+impl DDLModelState {
+    /// Returns whether the given name is in use in the model state as any of a table, a view, or
+    /// an enum type.
+    ///
+    /// This is useful for checking preconditions, because Postgres does not let you reuse the same
+    /// name for any of these three things (e.g. you're not allowed to name a view and a type the
+    /// same thing).
+    fn name_in_use(&self, name: &String) -> bool {
+        self.tables.contains_key(name)
+            || self.views.contains_key(name)
+            || self.enum_types.contains_key(name)
     }
 }
 
