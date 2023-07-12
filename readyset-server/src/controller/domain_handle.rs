@@ -43,6 +43,11 @@ impl DomainHandle {
         self.shards.row_size()
     }
 
+    /// Have all replicas of all shards of this domain been placed onto a worker?
+    pub(super) fn all_replicas_placed(&self) -> bool {
+        self.shards.cells().iter().all(|addr| addr.is_some())
+    }
+
     /// Look up which worker the given shard/replica pair is assigned to
     ///
     /// Returns [`ReadySetError::NoSuchReplica`] if the replica has not been assigned to a worker.

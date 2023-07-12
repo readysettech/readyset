@@ -872,6 +872,15 @@ impl DfState {
         Ok(domain_addresses)
     }
 
+    /// Have all domain replicas been placed onto workers in the cluster?
+    pub(super) fn all_replicas_placed(&self) -> bool {
+        self.domain_nodes.keys().all(|d| {
+            self.domains
+                .get(d)
+                .map_or(false, |h| h.all_replicas_placed())
+        })
+    }
+
     /// Returns a map of nodes for domains which have not yet been placed onto a worker
     pub(super) fn unplaced_domain_nodes(&self) -> HashMap<DomainIndex, HashSet<NodeIndex>> {
         self.domain_nodes

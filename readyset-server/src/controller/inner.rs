@@ -60,14 +60,6 @@ type RunningMigration = Fuse<JoinHandle<ReadySetResult<()>>>;
 pub struct Leader {
     pub(super) dataflow_state_handle: Arc<DfStateHandle>,
 
-    /// Are we currently trying to place some domains onto workers which have not yet joined the
-    /// cluster?
-    ///
-    /// If this value is `true`, all domains are running on workers and healthy (and
-    /// [`DfState::unplaced_domain_nodes`] will return an empty map). If this value is `false`,
-    /// *some* domains are not running, but others *might* be running.
-    pending_recovery: bool,
-
     /// Number of workers to wait for before we start trying to run any domains at all
     min_workers: usize,
     controller_uri: Url,
@@ -423,12 +415,11 @@ impl Leader {
             }
             (&Method::POST, "/status") => {
                 let ds = self.dataflow_state_handle.read().await;
-                let replication_offsets =
-                    if self.pending_recovery || ds.workers.len() < self.min_workers {
-                        None
-                    } else {
-                        Some(ds.replication_offsets().await?)
-                    };
+                let replication_offsets = if ds.all_replicas_placed() {
+                    Some(ds.replication_offsets().await?)
+                } else {
+                    None
+                };
 
                 let status = ReadySetStatus {
                     // Use whether the leader is ready or not as a proxy for if we have
@@ -627,7 +618,7 @@ impl Leader {
             );
         }
 
-        let dmp = if ds.workers.len() >= self.min_workers && self.pending_recovery {
+        let dmp = if ds.workers.len() >= self.min_workers && !ds.all_replicas_placed() {
             let domain_nodes = ds.unplaced_domain_nodes();
             debug!(
                 num_unplaced_domains = domain_nodes.len(),
@@ -636,7 +627,6 @@ impl Leader {
             let dmp = ds.plan_recovery(&domain_nodes).await?;
 
             if dmp.failed_placement().is_empty() {
-                self.pending_recovery = false;
                 info!("Finished planning recovery with all domains placed");
             } else {
                 info!(
@@ -712,7 +702,7 @@ impl Leader {
             .await
     }
 
-    /// Construct `Leader` with a specified listening interface
+    /// Construct a new `Leader`
     pub(super) fn new(
         state: ControllerState,
         controller_uri: Url,
@@ -723,19 +713,10 @@ impl Leader {
     ) -> Self {
         assert_ne!(state.config.min_workers, 0);
 
-        // TODO(fran): I feel like this is a little bit hacky. It is true that
-        //   if we have more than 1 node (we know there's always going to be _at least_ 1,
-        //   namely the `self.source` node) then that means we are recovering; but maybe
-        //   we can be more explicit and store a `recovery` flag in the persisted
-        // [`ControllerState`]   itself.
-        let pending_recovery = state.dataflow_state.ingredients.node_indices().count() > 1;
-
         let dataflow_state_handle = Arc::new(DfStateHandle::new(state.dataflow_state));
 
         Leader {
             dataflow_state_handle,
-            pending_recovery,
-
             min_workers: state.config.min_workers,
 
             controller_uri,
