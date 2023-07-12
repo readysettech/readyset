@@ -582,7 +582,9 @@ impl NoriaConnector {
                             .map(move |(replica, worker)| {
                                 vec![
                                     DfValue::from(format!("{di}.{shard}.{replica}")),
-                                    DfValue::from(worker.to_string()),
+                                    DfValue::from(
+                                        worker.map(|w| w.to_string()).unwrap_or_default(),
+                                    ),
                                 ]
                             })
                     })

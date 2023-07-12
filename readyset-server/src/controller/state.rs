@@ -184,6 +184,9 @@ impl DfState {
         for (di, dh) in self.domains.iter() {
             for (shard, replicas) in dh.shards().enumerate() {
                 for (replica, url) in replicas.iter().enumerate() {
+                    let Some(url) = url else {
+                        continue;
+                    };
                     worker_info
                         .entry(url.clone())
                         .or_insert_with(HashMap::new)
@@ -1136,7 +1139,7 @@ impl DfState {
                 self.channel_coordinator
                     .insert_remote(replica_address, ret.external_addr);
                 domain_addresses.push(DomainDescriptor::new(replica_address, ret.external_addr));
-                shard_assignments.push(w.uri.clone());
+                shard_assignments.push(Some(w.uri.clone()));
             }
             assignments.push(shard_assignments);
         }

@@ -89,7 +89,7 @@ impl<'state> Scheduler<'state> {
                 .values()
                 .any(|ni| dataflow_state.ingredients[*ni].is_base());
             for (shard, replicas) in dh.shards().enumerate() {
-                for wi in replicas {
+                for wi in replicas.iter().flatten(/* some replicas might not be scheduled yet */) {
                     let stats = worker_stats.entry(wi).or_default();
                     stats.num_domain_shard_replicas += 1;
                     if is_base_table_domain {
@@ -112,8 +112,9 @@ impl<'state> Scheduler<'state> {
     /// Decide which workers the shards of the given `domain` (with the given list of `nodes`)
     /// should run on
     ///
-    /// Returns a 2-dimensional vector of `WorkerIdentifier` to schedule the domain's shards onto,
-    /// indexed by shard index first and replica index second
+    /// Returns a 2-dimensional vector, indexed by shard index first and replica index second, of
+    /// `Option<WorkerIdentifier>` - which will be `None` if that domain/shard/replica cannot be
+    /// scheduled.
     ///
     /// # Invariants
     ///

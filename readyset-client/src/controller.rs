@@ -712,7 +712,8 @@ impl ReadySetHandle {
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub fn domains(
         &mut self,
-    ) -> impl Future<Output = ReadySetResult<HashMap<DomainIndex, Vec<Vec<Url>>>>> + '_ {
+    ) -> impl Future<Output = ReadySetResult<HashMap<DomainIndex, Vec<Vec<Option<Url>>>>>> + '_
+    {
         self.rpc("domains", (), self.request_timeout)
     }
 

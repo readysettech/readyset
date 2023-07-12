@@ -15,13 +15,13 @@ use crate::worker::WorkerRequestKind;
 #[derive(Clone)]
 pub(super) struct DomainHandle {
     idx: DomainIndex,
-    /// Maps from shard index, to replica index, to address of the worker running that replica of
-    /// that shard of the domain
-    shards: Array2<WorkerIdentifier>,
+    /// Maps from shard index, to replica index, to (optional) address of the worker running that
+    /// replica of that shard of the domain
+    shards: Array2<Option<WorkerIdentifier>>,
 }
 
 impl DomainHandle {
-    pub fn new(idx: DomainIndex, shards: Array2<WorkerIdentifier>) -> Self {
+    pub fn new(idx: DomainIndex, shards: Array2<Option<WorkerIdentifier>>) -> Self {
         Self { idx, shards }
     }
 
@@ -29,7 +29,7 @@ impl DomainHandle {
         self.idx
     }
 
-    pub(super) fn shards(&self) -> impl Iterator<Item = &[WorkerIdentifier]> {
+    pub(super) fn shards(&self) -> impl Iterator<Item = &[Option<WorkerIdentifier>]> {
         self.shards.rows()
     }
 
@@ -53,6 +53,7 @@ impl DomainHandle {
     ) -> ReadySetResult<&WorkerIdentifier> {
         self.shards
             .get((shard, replica))
+            .and_then(|r| r.as_ref())
             .ok_or_else(|| ReadySetError::NoSuchReplica {
                 domain_index: self.idx.index(),
                 shard,
@@ -61,7 +62,11 @@ impl DomainHandle {
     }
 
     pub(super) fn is_assigned_to_worker(&self, worker: &WorkerIdentifier) -> bool {
-        self.shards.cells().iter().any(|s| s == worker)
+        self.shards
+            .cells()
+            .iter()
+            .flat_map(|s| s.as_ref())
+            .any(|s| s == worker)
     }
 
     pub(super) async fn send_to_healthy_shard_replica<R>(

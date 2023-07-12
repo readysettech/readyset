@@ -264,7 +264,7 @@ impl Leader {
             }
             (&Method::GET | &Method::POST, "/domains") => {
                 let ds = self.dataflow_state_handle.read().await;
-                let res: HashMap<DomainIndex, Vec<Vec<WorkerIdentifier>>> = ds
+                let res: HashMap<DomainIndex, Vec<Vec<Option<WorkerIdentifier>>>> = ds
                     .domains
                     .iter()
                     .map(|(di, dh)| (*di, dh.shards().map(|wis| wis.to_vec()).collect::<Vec<_>>()))
