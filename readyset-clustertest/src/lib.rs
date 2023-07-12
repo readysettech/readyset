@@ -159,7 +159,7 @@
 //!         .add_server(ServerParams::default().with_volume("v1"))
 //!         .add_server(ServerParams::default().with_volume("v2"))
 //!         .add_server(ServerParams::default().with_volume("v3"))
-//!         .quorum(3)
+//!         .min_workers(3)
 //!         .deploy_upstream()
 //!         .deploy_adapter()
 //!         .start()
@@ -358,7 +358,7 @@ pub struct ServerStartParams {
     /// Number of shards for dataflow nodes.
     shards: Option<usize>,
     /// Number of workers to wait for before starting.
-    quorum: usize,
+    min_workers: usize,
     /// The authority connect string the server is configured to use.
     authority_address: String,
     /// The authority type the server is configured to use.
@@ -385,7 +385,7 @@ pub struct DeploymentBuilder {
     /// Number of shards for dataflow nodes.
     shards: Option<usize>,
     /// Number of workers to wait for before starting.
-    quorum: usize,
+    min_workers: usize,
     /// Parameters for the set of readyset-server instances in the deployment.
     servers: Vec<ServerParams>,
     /// How many ReadySet adapter instances to deploy
@@ -495,7 +495,7 @@ impl DeploymentBuilder {
                 readyset: Some(readyset_path),
             },
             shards: None,
-            quorum: 1,
+            min_workers: 1,
             servers: vec![],
             adapters: 0,
             upstream: false,
@@ -530,8 +530,8 @@ impl DeploymentBuilder {
 
     /// The number of healthy servers required in the system before we begin
     /// accepting queries and performing migrations.
-    pub fn quorum(mut self, quorum: usize) -> Self {
-        self.quorum = quorum;
+    pub fn min_workers(mut self, min_workers: usize) -> Self {
+        self.min_workers = min_workers;
         self
     }
 
@@ -709,7 +709,7 @@ impl DeploymentBuilder {
             readyset_server_path: self.readyset_binaries.readyset_server.clone(),
             deployment_name: self.name.clone(),
             shards: self.shards,
-            quorum: self.quorum,
+            min_workers: self.min_workers,
             authority_address: self.authority_address.clone(),
             authority_type: self.authority.to_string(),
             replicator_restart_timeout_secs: self.replicator_restart_timeout_secs,
@@ -1251,7 +1251,7 @@ impl DeploymentHandle {
 
     /// Start a new readyset-server instance in the deployment using the provided
     /// [`ServerParams`]. Any deployment-wide configuration parameters, such as
-    /// sharing, quorum, authority, are passed to the new server.
+    /// sharing, min_workers, authority, are passed to the new server.
     pub async fn start_server(
         &mut self,
         params: ServerParams,
@@ -1522,7 +1522,7 @@ async fn start_server(
         .external_port(port)
         .authority_addr(&server_start_params.authority_address)
         .authority(&server_start_params.authority_type)
-        .quorum(server_start_params.quorum)
+        .min_workers(server_start_params.min_workers)
         .auto_restart(server_start_params.auto_restart);
 
     if let Some(shard) = server_start_params.shards {
@@ -1590,7 +1590,7 @@ async fn start_adapter(
             server_start_params,
             server_params,
         } = standalone_params;
-        builder = builder.quorum(server_start_params.quorum);
+        builder = builder.min_workers(server_start_params.min_workers);
 
         builder = builder.standalone();
 

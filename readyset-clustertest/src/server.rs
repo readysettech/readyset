@@ -161,8 +161,8 @@ impl ReadysetServerBuilder {
         self.push_arg_kv("--shards", &shards.to_string())
     }
 
-    pub fn quorum(self, quorum: usize) -> Self {
-        self.push_arg_kv("--quorum", &quorum.to_string())
+    pub fn min_workers(self, min_workers: usize) -> Self {
+        self.push_arg_kv("--min-workers", &min_workers.to_string())
     }
 
     pub fn external_port(self, external_port: u16) -> Self {
@@ -259,8 +259,8 @@ impl AdapterBuilder {
         self.push_arg_kv("--metrics-address", &format!("0.0.0.0:{}", port))
     }
 
-    pub fn quorum(self, quorum: usize) -> Self {
-        self.push_arg_kv("--quorum", &quorum.to_string())
+    pub fn min_workers(self, min_workers: usize) -> Self {
+        self.push_arg_kv("--min-workers", &min_workers.to_string())
     }
 
     pub fn standalone(self) -> Self {

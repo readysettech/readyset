@@ -66,7 +66,7 @@ impl Builder {
             0 | 1 => None,
             x => Some(x),
         });
-        builder.set_quorum(opts.quorum);
+        builder.set_min_workers(opts.min_workers);
         if opts.no_partial {
             builder.disable_partial();
         }
@@ -153,9 +153,9 @@ impl Builder {
 
     /// Set how many workers this worker should wait for before becoming a controller. More workers
     /// can join later, but they won't be assigned any of the initial domains.
-    pub fn set_quorum(&mut self, quorum: usize) {
-        assert_ne!(quorum, 0);
-        self.config.quorum = quorum;
+    pub fn set_min_workers(&mut self, min_workers: usize) {
+        assert_ne!(min_workers, 0);
+        self.config.min_workers = min_workers;
     }
 
     /// Set the memory limit (target) and how often we check it (in millis).

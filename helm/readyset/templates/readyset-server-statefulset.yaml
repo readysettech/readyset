@@ -93,7 +93,7 @@ spec:
             - name: DEPLOYMENT
               value: "{{ required "readyset.deployment is a required value" .Values.readyset.deployment }}"
             # ReadySet Server Configs
-            - name: NORIA_QUORUM
+            - name: MIN_WORKERS
               value: "1"
             - name: NORIA_MEMORY_BYTES
               value: "0"

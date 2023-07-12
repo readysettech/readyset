@@ -472,7 +472,9 @@ pub struct Config {
     pub(crate) materialization_config: materialization::Config,
     pub(crate) domain_config: DomainConfig,
     pub(crate) persistence: PersistenceParameters,
-    pub(crate) quorum: usize,
+    /// Number of workers to wait for before we start trying to run any domains at all
+    #[serde(alias = "quorum")]
+    pub(crate) min_workers: usize,
     pub(crate) reuse: Option<ReuseConfigType>,
     /// If set to true (the default), failing tokio tasks will cause a full-process abort.
     pub(crate) abort_on_task_failure: bool,
@@ -509,7 +511,7 @@ impl Default for Config {
                 eviction_kind: dataflow::EvictionKind::Random,
             },
             persistence: Default::default(),
-            quorum: 1,
+            min_workers: 1,
             reuse: None,
             abort_on_task_failure: true,
             mir_config: Default::default(),
@@ -579,8 +581,8 @@ pub struct WorkerOptions {
     pub enable_packet_filters: bool,
 
     /// Number of workers to wait for before starting (including this one)
-    #[clap(long, short = 'q', default_value = "1", env = "NORIA_QUORUM")]
-    pub quorum: usize,
+    #[clap(long, default_value = "1", env = "MIN_WORKERS")]
+    pub min_workers: usize,
 
     /// Shard the graph this many ways (<= 1 : disable sharding)
     #[clap(long, default_value = "0", env = "NORIA_SHARDS", hide = true)]

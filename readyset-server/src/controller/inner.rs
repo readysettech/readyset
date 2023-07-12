@@ -62,7 +62,8 @@ pub struct Leader {
 
     pending_recovery: bool,
 
-    quorum: usize,
+    /// Number of workers to wait for before we start trying to run any domains at all
+    min_workers: usize,
     controller_uri: Url,
 
     /// The amount of time to wait for a worker request to complete.
@@ -214,9 +215,9 @@ impl Leader {
 
         // *** Read methods that don't require a quorum***
 
-        macro_rules! check_quorum {
+        macro_rules! check_min_workers {
             ($ds:expr) => {{
-                if self.pending_recovery || $ds.workers.len() < self.quorum {
+                if self.pending_recovery || $ds.workers.len() < self.min_workers {
                     return Err(ReadySetError::NoQuorum);
                 }
             }};
@@ -311,51 +312,51 @@ impl Leader {
                 }
                 (&Method::POST, "/tables") => {
                     let ds = self.dataflow_state_handle.read().await;
-                    check_quorum!(ds);
+                    check_min_workers!(ds);
                     return_serialized!(ds.tables())
                 }
                 (&Method::POST, "/table_statuses") => {
                     let res = {
                         let ds = self.dataflow_state_handle.read().await;
-                        check_quorum!(ds);
+                        check_min_workers!(ds);
                         ds.table_statuses().await
                     };
                     return_serialized!(res)
                 }
                 (&Method::POST, "/non_replicated_relations") => {
                     let ds = self.dataflow_state_handle.read().await;
-                    check_quorum!(ds);
+                    check_min_workers!(ds);
                     return_serialized!(ds.non_replicated_relations())
                 }
                 (&Method::POST, "/views") => {
                     let ds = self.dataflow_state_handle.read().await;
-                    check_quorum!(ds);
+                    check_min_workers!(ds);
                     return_serialized!(ds.views())
                 }
                 (&Method::POST, "/verbose_views") => {
                     let ds = self.dataflow_state_handle.read().await;
-                    check_quorum!(ds);
+                    check_min_workers!(ds);
                     return_serialized!(ds.verbose_views())
                 }
                 (&Method::POST, "/view_statuses") => {
                     let (queries, dialect) = bincode::deserialize(&body)?;
                     let ds = self.dataflow_state_handle.read().await;
-                    check_quorum!(ds);
+                    check_min_workers!(ds);
                     return_serialized!(ds.view_statuses(queries, dialect))
                 }
                 (&Method::GET | &Method::POST, "/instances") => {
                     let ds = self.dataflow_state_handle.read().await;
-                    check_quorum!(ds);
+                    check_min_workers!(ds);
                     return_serialized!(ds.get_instances());
                 }
                 (&Method::GET | &Method::POST, "/workers") => {
                     let ds = self.dataflow_state_handle.read().await;
-                    check_quorum!(ds);
+                    check_min_workers!(ds);
                     return_serialized!(ds.workers.keys().collect::<Vec<_>>())
                 }
                 (&Method::GET | &Method::POST, "/healthy_workers") => {
                     let ds = self.dataflow_state_handle.read().await;
-                    check_quorum!(ds);
+                    check_min_workers!(ds);
                     return_serialized!(ds
                         .workers
                         .iter()
@@ -365,7 +366,7 @@ impl Leader {
                 }
                 (&Method::GET, "/nodes") => {
                     let ds = self.dataflow_state_handle.read().await;
-                    check_quorum!(ds);
+                    check_min_workers!(ds);
                     let nodes = if let Some(query) = &query {
                         let pairs = querystring::querify(query);
                         if let Some((_, worker)) = &pairs.into_iter().find(|(k, _)| *k == "w") {
@@ -408,7 +409,7 @@ impl Leader {
                     // because the receiving end expects a `ReadySetResult` to be serialized.
                     let body = bincode::deserialize(&body)?;
                     let ds = self.dataflow_state_handle.read().await;
-                    check_quorum!(ds);
+                    check_min_workers!(ds);
                     let ret = ds.table_builder(&body);
                     return_serialized!(ret);
                 }
@@ -417,7 +418,7 @@ impl Leader {
                     // because the receiving end expects a `ReadySetResult` to be serialized.
                     let body = bincode::deserialize(&body)?;
                     let ds = self.dataflow_state_handle.read().await;
-                    check_quorum!(ds);
+                    check_min_workers!(ds);
                     let ret = ds.table_builder_by_index(body);
                     return_serialized!(ret);
                 }
@@ -426,19 +427,19 @@ impl Leader {
                     require_leader_ready()?;
                     let body = bincode::deserialize(&body)?;
                     let ds = self.dataflow_state_handle.read().await;
-                    check_quorum!(ds);
+                    check_min_workers!(ds);
                     let ret = ds.view_builder(body);
                     return_serialized!(ret);
                 }
                 (&Method::POST, "/get_info") => {
                     let ds = self.dataflow_state_handle.read().await;
-                    check_quorum!(ds);
+                    check_min_workers!(ds);
                     return_serialized!(ds.get_info()?)
                 }
                 (&Method::POST, "/replication_offsets") => {
                     let res = {
                         let ds = self.dataflow_state_handle.read().await;
-                        check_quorum!(ds);
+                        check_min_workers!(ds);
                         ds.replication_offsets().await
                     }?;
                     return_serialized!(res);
@@ -446,7 +447,7 @@ impl Leader {
                 (&Method::POST, "/snapshotting_tables") => {
                     let res = {
                         let ds = self.dataflow_state_handle.read().await;
-                        check_quorum!(ds);
+                        check_min_workers!(ds);
                         ds.snapshotting_tables().await
                     }?;
                     return_serialized!(res);
@@ -454,7 +455,7 @@ impl Leader {
                 (&Method::POST, "/all_tables_compacted") => {
                     let res = {
                         let ds = self.dataflow_state_handle.read().await;
-                        check_quorum!(ds);
+                        check_min_workers!(ds);
                         ds.all_tables_compacted().await
                     }?;
                     return_serialized!(res);
@@ -472,7 +473,7 @@ impl Leader {
                 (&Method::POST, "/status") => {
                     let ds = self.dataflow_state_handle.read().await;
                     let replication_offsets =
-                        if self.pending_recovery || ds.workers.len() < self.quorum {
+                        if self.pending_recovery || ds.workers.len() < self.min_workers {
                             None
                         } else {
                             Some(ds.replication_offsets().await?)
@@ -503,7 +504,7 @@ impl Leader {
                     }
                     let mut state_copy: DfState = {
                         let reader = self.dataflow_state_handle.read().await;
-                        check_quorum!(reader);
+                        check_min_workers!(reader);
                         reader.clone()
                     };
                     state_copy.extend_recipe(body, true).await?;
@@ -518,7 +519,7 @@ impl Leader {
                 (&Method::POST, "/evict_single") => {
                     let body: Option<SingleKeyEviction> = bincode::deserialize(&body)?;
                     let ds = self.dataflow_state_handle.read().await;
-                    check_quorum!(ds);
+                    check_min_workers!(ds);
                     let key = ds.evict_single(body).await?;
                     return_serialized!(key);
                 }
@@ -532,7 +533,7 @@ impl Leader {
             (&Method::GET, "/flush_partial") => {
                 let ret = {
                     let mut writer = self.dataflow_state_handle.write().await;
-                    check_quorum!(writer.as_ref());
+                    check_min_workers!(writer.as_ref());
                     let r = writer.as_mut().flush_partial().await?;
                     self.dataflow_state_handle.commit(writer, authority).await?;
                     r
@@ -545,7 +546,7 @@ impl Leader {
                     require_leader_ready()?;
                 }
                 let ret = {
-                    check_quorum!(self.dataflow_state_handle.read().await);
+                    check_min_workers!(self.dataflow_state_handle.read().await);
 
                     // Start the migration running in the background
                     let dataflow_state_handle = Arc::clone(&self.dataflow_state_handle);
@@ -601,7 +602,7 @@ impl Leader {
                 require_leader_ready()?;
                 let query_name = bincode::deserialize(&body)?;
                 let mut writer = self.dataflow_state_handle.write().await;
-                check_quorum!(writer.as_ref());
+                check_min_workers!(writer.as_ref());
                 writer.as_mut().remove_query(&query_name).await?;
                 self.dataflow_state_handle.commit(writer, authority).await?;
                 return_serialized!(());
@@ -609,7 +610,7 @@ impl Leader {
             (&Method::POST, "/remove_all_queries") => {
                 require_leader_ready()?;
                 let mut writer = self.dataflow_state_handle.write().await;
-                check_quorum!(writer.as_ref());
+                check_min_workers!(writer.as_ref());
                 writer.as_mut().remove_all_queries().await?;
                 self.dataflow_state_handle.commit(writer, authority).await?;
                 return_serialized!(ReadySetResult::Ok(()));
@@ -617,7 +618,7 @@ impl Leader {
             (&Method::POST, "/set_schema_replication_offset") => {
                 let body: Option<ReplicationOffset> = bincode::deserialize(&body)?;
                 let mut writer = self.dataflow_state_handle.write().await;
-                check_quorum!(writer.as_ref());
+                check_min_workers!(writer.as_ref());
                 writer.as_mut().set_schema_replication_offset(body);
                 self.dataflow_state_handle.commit(writer, authority).await?;
                 return_serialized!(ReadySetResult::Ok(()));
@@ -626,7 +627,7 @@ impl Leader {
                 require_leader_ready()?;
                 let body = bincode::deserialize(&body)?;
                 let mut writer = self.dataflow_state_handle.write().await;
-                check_quorum!(writer.as_ref());
+                check_min_workers!(writer.as_ref());
                 writer.as_mut().remove_nodes(vec![body].as_slice()).await?;
                 self.dataflow_state_handle.commit(writer, authority).await?;
                 return_serialized!(());
@@ -687,11 +688,11 @@ impl Leader {
             info!(
                 "now have {} of {} required workers",
                 ds.workers.len(),
-                self.quorum
+                self.min_workers
             );
         }
 
-        let dmp = if ds.workers.len() >= self.quorum && self.pending_recovery {
+        let dmp = if ds.workers.len() >= self.min_workers && self.pending_recovery {
             self.pending_recovery = false;
             let domain_nodes = ds
                 .domain_nodes
@@ -777,7 +778,7 @@ impl Leader {
         replicator_config: UpstreamConfig,
         worker_request_timeout: Duration,
     ) -> Self {
-        assert_ne!(state.config.quorum, 0);
+        assert_ne!(state.config.min_workers, 0);
 
         // TODO(fran): I feel like this is a little bit hacky. It is true that
         //   if we have more than 1 node (we know there's always going to be _at least_ 1,
@@ -792,7 +793,7 @@ impl Leader {
             dataflow_state_handle,
             pending_recovery,
 
-            quorum: state.config.quorum,
+            min_workers: state.config.min_workers,
 
             controller_uri,
 

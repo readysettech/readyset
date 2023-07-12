@@ -183,7 +183,7 @@ async fn async_migrations_confidence_check() {
 async fn failure_during_query() {
     let mut deployment = readyset_mysql("ct_failure_during_query")
         .with_servers(2, ServerParams::default())
-        .quorum(2)
+        .min_workers(2)
         .start()
         .await
         .unwrap();
@@ -302,7 +302,7 @@ async fn query_cached_view_after_failure() {
 async fn test_fallback_recovery_period() {
     let mut deployment = readyset_mysql("test_fallback_recovery_period")
         .with_servers(1, ServerParams::default())
-        .quorum(1)
+        .min_workers(1)
         .query_max_failure_seconds(5)
         .fallback_recovery_seconds(1200)
         .start()
@@ -675,7 +675,7 @@ async fn cached_queries_filtering() {
 #[clustertest]
 async fn correct_data_after_restart() {
     let mut deployment = readyset_mysql("ct_correct_data_after_restart")
-        .quorum(2)
+        .min_workers(2)
         .add_server(ServerParams::default().with_volume("v1"))
         .add_server(ServerParams::default().with_volume("v2"))
         .start()
@@ -758,7 +758,7 @@ async fn correct_data_after_restart() {
 #[ignore = "Flaky test (ENG-1694)"]
 async fn create_view_after_worker_failure() {
     let mut deployment = readyset_mysql("ct_create_view_after_worker_failure")
-        .quorum(2)
+        .min_workers(2)
         .add_server(ServerParams::default().with_volume("v1"))
         .add_server(ServerParams::default().with_volume("v2"))
         .start()
@@ -831,7 +831,7 @@ async fn create_view_after_worker_failure() {
 #[clustertest]
 async fn update_during_failure() {
     let mut deployment = readyset_mysql("ct_update_during_failure")
-        .quorum(2)
+        .min_workers(2)
         .add_server(ServerParams::default())
         .add_server(ServerParams::default())
         .start()
@@ -939,7 +939,7 @@ async fn update_during_failure() {
 async fn upquery_to_failed_reader_domain() {
     let mut deployment = readyset_mysql("ct_upquery_failed_domain_immediately")
         .with_servers(1, ServerParams::default())
-        .quorum(1)
+        .min_workers(1)
         .start()
         .await
         .unwrap();
@@ -988,7 +988,7 @@ async fn upquery_to_failed_reader_domain() {
 async fn upquery_through_failed_domain() {
     let mut deployment = readyset_mysql("ct_failure_during_query")
         .with_servers(1, ServerParams::default())
-        .quorum(1)
+        .min_workers(1)
         .start()
         .await
         .unwrap();
@@ -1035,7 +1035,7 @@ async fn upquery_through_failed_domain() {
 async fn update_propagation_through_failed_domain() {
     let mut deployment = readyset_mysql("ct_update_propagation_through_failed_domain")
         .with_servers(2, ServerParams::default())
-        .quorum(2)
+        .min_workers(2)
         .start()
         .await
         .unwrap();
@@ -1121,7 +1121,7 @@ async fn update_propagation_through_failed_domain() {
 #[slow]
 async fn end_to_end_with_restarts() {
     let mut deployment = readyset_mysql("ct_end_to_end_with_restarts")
-        .quorum(2)
+        .min_workers(2)
         .add_server(ServerParams::default().with_volume("v1"))
         .add_server(ServerParams::default().with_volume("v2"))
         .start()
@@ -1200,7 +1200,7 @@ async fn end_to_end_with_restarts() {
 #[slow]
 async fn view_survives_restart() {
     let mut deployment = readyset_mysql("ct_view_survives_restarts")
-        .quorum(2)
+        .min_workers(2)
         .with_servers(2, ServerParams::default())
         .start()
         .await
@@ -1268,7 +1268,7 @@ async fn view_survives_restart() {
 #[slow]
 async fn writes_survive_restarts() {
     let mut deployment = readyset_mysql("ct_writes_survive_restarts")
-        .quorum(2)
+        .min_workers(2)
         .add_server(ServerParams::default().with_volume("v1"))
         .add_server(ServerParams::default().with_volume("v2"))
         .start()
@@ -1426,7 +1426,7 @@ async fn correct_deployment_permissions() {
     let mut deployment = readyset_mysql("ct_correct_deployment_permissions")
         .with_servers(1, ServerParams::default())
         .with_user("client", "password")
-        .quorum(1)
+        .min_workers(1)
         .start_with_seed(&[
             "CREATE USER IF NOT EXISTS 'client'@'%' IDENTIFIED BY 'password';",
             "REVOKE ALL PRIVILEGES ON *.* FROM 'client'@'%';",

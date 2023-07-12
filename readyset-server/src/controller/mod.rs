@@ -125,7 +125,7 @@ impl ControllerState {
         materializations.set_config(config.materialization_config.clone());
 
         let cc = Arc::new(ChannelCoordinator::new());
-        assert_ne!(config.quorum, 0);
+        assert_ne!(config.min_workers, 0);
 
         let recipe = Recipe::with_config(
             crate::sql::Config {
