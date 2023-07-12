@@ -59,7 +59,7 @@ use regex::Regex;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, MutexGuard, RwLock, RwLockReadGuard};
-use tracing::{debug, error, instrument, trace, warn};
+use tracing::{debug, error, info, instrument, trace, warn};
 use vec1::Vec1;
 
 use super::migrate::DomainSettings;
@@ -870,6 +870,15 @@ impl DfState {
         Ok(domain_addresses)
     }
 
+    /// Returns a map of nodes for domains which have not yet been placed onto a worker
+    pub(super) fn unplaced_domain_nodes(&self) -> HashMap<DomainIndex, HashSet<NodeIndex>> {
+        self.domain_nodes
+            .iter()
+            .filter(|(d, _)| !self.domains.contains_key(d))
+            .map(|(k, v)| (*k, v.values().copied().collect()))
+            .collect()
+    }
+
     /// Query the status of all known tables, including those not replicated by ReadySet
     pub(super) async fn table_statuses(&self) -> ReadySetResult<BTreeMap<Relation, TableStatus>> {
         let known_tables = self.tables();
@@ -1469,37 +1478,45 @@ impl DfState {
     /// [`crate::controller::migrate::assignment::assign`] must hold as well.
     ///  - `self.remap` and `self.node_restrictions` must be valid.
     /// - All the other fields should be empty or `[Default::default()]`.
+    #[instrument(level = "info", skip_all)]
     pub(super) async fn plan_recovery(
         &mut self,
         domain_nodes: &HashMap<DomainIndex, HashSet<NodeIndex>>,
     ) -> ReadySetResult<DomainMigrationPlan> {
+        info!("Planning recovery");
         let mut dmp = DomainMigrationPlan::new(self);
         let domain_nodes = domain_nodes
             .iter()
             .map(|(idx, nm)| (*idx, nm.iter().copied().collect::<Vec<_>>()))
             .collect::<HashMap<_, _>>();
+        let mut new = HashSet::new();
         {
             let mut scheduler = Scheduler::new(self, &None)?;
-            for (domain, nodes) in domain_nodes.iter() {
-                let workers = scheduler.schedule_domain(*domain, &nodes[..])?;
-                let num_shards = workers.num_rows();
-                let num_replicas = workers[0].len();
-                dmp.place_domain(*domain, workers, nodes.clone());
-                dmp.set_domain_settings(
-                    *domain,
-                    DomainSettings {
-                        num_shards,
-                        num_replicas,
-                    },
-                );
+            for (domain, nodes) in domain_nodes {
+                match scheduler.schedule_domain(domain, &nodes[..]) {
+                    Ok(workers) => {
+                        let num_shards = workers.num_rows();
+                        let num_replicas = workers[0].len();
+                        dmp.place_domain(domain, workers, nodes.clone());
+                        dmp.set_domain_settings(
+                            domain,
+                            DomainSettings {
+                                num_shards,
+                                num_replicas,
+                            },
+                        );
+                        new.extend(nodes);
+                    }
+                    Err(ReadySetError::NoAvailableWorkers { .. }) => {
+                        info!(%domain, "Could not schedule domain");
+                        dmp.domain_failed_placement(domain);
+                    }
+                    Err(e) => return Err(e),
+                }
             }
         }
-        let new = domain_nodes.values().flatten().copied().collect();
-        routing::connect(
-            &self.ingredients,
-            &mut dmp,
-            &self.ingredients.node_indices().collect(),
-        )?;
+
+        routing::connect(&self.ingredients, &mut dmp, &new)?;
 
         self.materializations.extend(&mut self.ingredients, &new)?;
 

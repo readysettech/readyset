@@ -207,6 +207,9 @@ pub struct DomainMigrationPlan {
     stored: VecDeque<StoredDomainRequest>,
     /// A list of domains to instantiate on application.
     place: Vec<PlaceRequest>,
+    /// A list of domains which could not be placed, because no worker was available for them to
+    /// run on
+    failed_placement: Vec<DomainIndex>,
     /// A map of valid domain indices to the settings for that domain.
     domains: HashMap<DomainIndex, DomainSettings>,
 }
@@ -273,6 +276,7 @@ impl DomainMigrationPlan {
                     )
                 })
                 .collect(),
+            failed_placement: vec![],
         }
     }
 
@@ -296,6 +300,12 @@ impl DomainMigrationPlan {
             shard_replica_workers,
             nodes,
         });
+    }
+
+    /// Mark that a given domain could not be placed because because no worker was available for it
+    /// to run on
+    pub fn domain_failed_placement(&mut self, idx: DomainIndex) {
+        self.failed_placement.push(idx);
     }
 
     /// Return the number of shards a given domain has.
@@ -325,10 +335,10 @@ impl DomainMigrationPlan {
     /// messages added since the last time this method was called.
     pub async fn apply(self, mainline: &mut DfState) -> ReadySetResult<()> {
         for place in self.place {
-            let d = mainline
+            let handle = mainline
                 .place_domain(place.idx, place.shard_replica_workers, place.nodes)
                 .await?;
-            mainline.domains.insert(place.idx, d);
+            mainline.domains.insert(place.idx, handle);
         }
 
         // Send all the stored requests to the domain.
@@ -421,6 +431,12 @@ impl DomainMigrationPlan {
         self.place.extend(other.place);
         self.stored.extend(other.stored);
         self.domains.extend(other.domains);
+    }
+
+    /// Returns list of domains which could not be placed because no worker was available for them
+    /// to run on
+    pub fn failed_placement(&self) -> &[DomainIndex] {
+        &self.failed_placement
     }
 }
 

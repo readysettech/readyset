@@ -60,6 +60,12 @@ type RunningMigration = Fuse<JoinHandle<ReadySetResult<()>>>;
 pub struct Leader {
     pub(super) dataflow_state_handle: Arc<DfStateHandle>,
 
+    /// Are we currently trying to place some domains onto workers which have not yet joined the
+    /// cluster?
+    ///
+    /// If this value is `true`, all domains are running on workers and healthy (and
+    /// [`DfState::unplaced_domain_nodes`] will return an empty map). If this value is `false`,
+    /// *some* domains are not running, but others *might* be running.
     pending_recovery: bool,
 
     /// Number of workers to wait for before we start trying to run any domains at all
@@ -660,9 +666,7 @@ impl Leader {
             );
             let domain_addresses = ds.domain_addresses()?;
 
-            // We currently require that any worker that enters the system has no domains.
-            // If a worker has domains we are unaware of, we may try to perform a duplicate
-            // operation during a migration.
+            // Clean up any potential stale domains that may have been running on that worker
             if let Err(e) = ws.rpc::<()>(WorkerRequestKind::ClearDomains).await {
                 error!(
                     %worker_uri,
@@ -671,6 +675,7 @@ impl Leader {
                 );
             }
 
+            // Then, tell the worker about the addresses of all the other domains within the cluster
             if let Err(e) = ws
                 .rpc::<()>(WorkerRequestKind::GossipDomainInformation(domain_addresses))
                 .await
@@ -693,14 +698,22 @@ impl Leader {
         }
 
         let dmp = if ds.workers.len() >= self.min_workers && self.pending_recovery {
-            self.pending_recovery = false;
-            let domain_nodes = ds
-                .domain_nodes
-                .iter()
-                .map(|(k, v)| (*k, v.values().copied().collect::<HashSet<_>>()))
-                .collect::<HashMap<_, _>>();
+            let domain_nodes = ds.unplaced_domain_nodes();
+            debug!(
+                num_unplaced_domains = domain_nodes.len(),
+                "Attempting to place unplaced domains"
+            );
             let dmp = ds.plan_recovery(&domain_nodes).await?;
-            info!("Finished restoring graph configuration");
+
+            if dmp.failed_placement().is_empty() {
+                self.pending_recovery = false;
+                info!("Finished planning recovery with all domains placed");
+            } else {
+                info!(
+                    num_unplaced_domains = dmp.failed_placement().len(),
+                    "Finished planning recovery with some domains unplaced"
+                );
+            }
             Some(dmp)
         } else {
             None
