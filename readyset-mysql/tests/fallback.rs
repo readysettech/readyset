@@ -879,9 +879,6 @@ async fn replication_failure_ignores_table() {
 
     sleep().await;
 
-    let res: Vec<(String, String, String)> = client.query("SHOW CACHES").await.unwrap();
-    assert!(res.is_empty());
-
     client
         .query_drop("CREATE CACHE FROM SELECT * FROM cats")
         .await
@@ -898,6 +895,34 @@ async fn replication_failure_ignores_table() {
             last_statement_matches("readyset_then_upstream", "view destroyed", &mut client).await
         );
     }
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn show_proxied_queries_show_caches_query_text_matches() {
+    readyset_tracing::init_test_logging();
+    let (opts, _handle, shutdown_tx) = setup().await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+
+    conn.query_drop("CREATE TABLE t (id INT)").await.unwrap();
+    conn.query_drop("SELECT id FROM t").await.unwrap();
+    sleep().await;
+
+    let cached_queries: Vec<(String, String, String, String)> =
+        conn.query("SHOW CACHES").await.unwrap();
+    let (_, cache_name, cached_query_text, _) = cached_queries.first().unwrap();
+
+    conn.query_drop(&format!("DROP CACHE {}", cache_name))
+        .await
+        .unwrap();
+
+    let proxied_queries: Vec<(String, String, String)> =
+        conn.query("SHOW PROXIED QUERIES").await.unwrap();
+    let (_, proxied_query_text, _) = proxied_queries.first().unwrap();
+
+    assert_eq!(proxied_query_text, cached_query_text);
 
     shutdown_tx.shutdown().await;
 }

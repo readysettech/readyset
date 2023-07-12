@@ -599,19 +599,22 @@ impl QueryStatusCache {
     }
 
     /// Returns a list of queries that have a state of [`QueryState::Successful`].
-    pub fn allow_list(&self) -> QueryList {
-        self.statuses
+    pub fn allow_list(&self) -> Vec<(QueryId, Arc<ViewCreateRequest>, QueryStatus)> {
+        self.ids
             .iter()
-            .filter(|r| r.is_successful())
-            .map(|r| ((*(r.key())).clone().into(), r.value().clone()))
-            .chain(
-                self.failed_parses
-                    .iter()
-                    .filter(|r| r.is_successful())
-                    .map(|r| ((*r.key()).clone().into(), r.value().clone())),
-            )
-            .collect::<Vec<(Query, QueryStatus)>>()
-            .into()
+            .filter_map(|r| match r.value() {
+                Query::Parsed(view) => view.with_status(self, |s| {
+                    s.and_then(|s| {
+                        if s.is_successful() {
+                            Some((*r.key(), view.clone(), s.clone()))
+                        } else {
+                            None
+                        }
+                    })
+                }),
+                Query::ParseFailed(_) => None,
+            })
+            .collect::<Vec<_>>()
     }
 
     /// Returns a list of queries that are in the deny list.

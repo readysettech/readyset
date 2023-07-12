@@ -26,8 +26,7 @@ use readyset_errors::{
     ReadySetResult,
 };
 use readyset_server::worker::readers::{CallResult, ReadRequestHandler};
-use readyset_sql_passes::anonymize::anonymize_literals;
-use readyset_util::redacted::{Sensitive, REDACT_SENSITIVE};
+use readyset_util::redacted::Sensitive;
 use tokio::sync::RwLock;
 use tracing::{error, info, instrument, trace, warn};
 
@@ -588,74 +587,6 @@ impl NoriaConnector {
         Ok(QueryResult::from_owned(schema, vec![Results::new(data)]))
     }
 
-    pub(crate) async fn verbose_views(
-        &mut self,
-        query_id: &Option<String>,
-    ) -> ReadySetResult<QueryResult<'static>> {
-        let noria = &mut self.inner.get_mut()?.noria;
-        let mut views = noria.verbose_views().await?;
-        if let Some(q_id) = query_id {
-            views.retain(|n, _| n.name.as_str() == q_id);
-        }
-        //TODO(DAN): this is ridiculous, update Meta instead
-        let select_schema = SelectSchema {
-            use_bogo: false,
-            schema: Cow::Owned(vec![
-                ColumnSchema {
-                    column: nom_sql::Column {
-                        name: "name".into(),
-                        table: None,
-                    },
-                    column_type: DfType::DEFAULT_TEXT,
-                    base: None,
-                },
-                ColumnSchema {
-                    column: nom_sql::Column {
-                        name: "query".into(),
-                        table: None,
-                    },
-                    column_type: DfType::DEFAULT_TEXT,
-                    base: None,
-                },
-                ColumnSchema {
-                    column: nom_sql::Column {
-                        name: "fallback behavior".into(),
-                        table: None,
-                    },
-                    column_type: DfType::DEFAULT_TEXT,
-                    base: None,
-                },
-            ]),
-
-            columns: Cow::Owned(vec![
-                "name".into(),
-                "query".into(),
-                "fallback behavior".into(),
-            ]),
-        };
-        let data = views
-            .into_iter()
-            .map(|(n, (mut q, always))| {
-                if REDACT_SENSITIVE {
-                    anonymize_literals(&mut q);
-                }
-                vec![
-                    DfValue::from(n.display(self.parse_dialect).to_string()),
-                    DfValue::from(q.display(self.parse_dialect).to_string()),
-                    DfValue::from(if always {
-                        "no fallback"
-                    } else {
-                        "fallback allowed"
-                    }),
-                ]
-            })
-            .collect::<Vec<_>>();
-        Ok(QueryResult::from_owned(
-            select_schema,
-            vec![Results::new(data)],
-        ))
-    }
-
     pub(crate) fn server_supports_pagination(&self) -> bool {
         self.inner
             .inner
@@ -1115,7 +1046,7 @@ impl NoriaConnector {
         Ok(())
     }
 
-    async fn get_view(
+    pub(crate) async fn get_view(
         &mut self,
         q: &nom_sql::SelectStatement,
         is_prepared: bool,

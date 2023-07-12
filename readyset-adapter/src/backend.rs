@@ -1764,6 +1764,70 @@ where
         ))
     }
 
+    /// Responds to a `SHOW CACHES` query
+    async fn show_caches(
+        &mut self,
+        query_id: &Option<String>,
+    ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
+        let create_dummy_column = |n: &str| ColumnSchema {
+            column: nom_sql::Column {
+                name: n.into(),
+                table: None,
+            },
+            column_type: DfType::DEFAULT_TEXT,
+            base: None,
+        };
+
+        let mut queries = self.state.query_status_cache.allow_list();
+
+        // Filter on query ID
+        if let Some(q_id) = query_id {
+            queries.retain(|(id, _, _)| id.to_string() == *q_id);
+        }
+
+        // Get the cache name for each query from the view cache
+        let mut results: Vec<Vec<DfValue>> = vec![];
+        for (id, view, status) in queries {
+            results.push(vec![
+                id.to_string().into(),
+                self.noria
+                    .get_view(&view.statement, false, false, None)
+                    .await?
+                    .display_unquoted()
+                    .to_string()
+                    .into(),
+                view.statement.display(DB::sql_dialect()).to_string().into(),
+                if status.always {
+                    "no fallback".into()
+                } else {
+                    "fallback allowed".into()
+                },
+            ]);
+        }
+
+        let select_schema = SelectSchema {
+            use_bogo: false,
+            schema: Cow::Owned(vec![
+                create_dummy_column("query id"),
+                create_dummy_column("cache name"),
+                create_dummy_column("query text"),
+                create_dummy_column("fallback behavior"),
+            ]),
+
+            columns: Cow::Owned(vec![
+                "query id".into(),
+                "cache name".into(),
+                "query text".into(),
+                "fallback behavior".into(),
+            ]),
+        };
+
+        Ok(noria_connector::QueryResult::from_owned(
+            select_schema,
+            vec![Results::new(results)],
+        ))
+    }
+
     async fn query_noria_extensions<'a>(
         &'a mut self,
         query: &'a SqlQuery,
@@ -1843,7 +1907,7 @@ where
                     trace!("No telemetry sender. not sending metric for SHOW CACHES");
                 }
 
-                self.noria.verbose_views(query_id).await
+                self.show_caches(query_id).await
             }
             SqlQuery::Show(ShowStatement::ReadySetStatus) => {
                 self.noria.readyset_status(&self.authority).await

@@ -628,43 +628,44 @@ async fn cached_queries_filtering() {
 
     let mut adapter = deployment.first_adapter().await;
     adapter
-        .query_drop(
-            r"CREATE TABLE t1 (
-        uid INT NOT NULL,
-        value INT NOT NULL
-    );",
-        )
-        .await
-        .unwrap();
-    adapter
-        .query_drop(r"INSERT INTO t1 VALUES (1, 4), (2, 5);")
-        .await
-        .unwrap();
-    adapter
-        .query_drop(r"CREATE CACHE q FROM SELECT * FROM t1 WHERE uid = ?")
+        .query_drop("CREATE TABLE t1 (uid INT)")
         .await
         .unwrap();
 
-    assert!(
-        query_until_expected(
-            &mut adapter,
-            QueryExecution::PrepareExecute(r"SELECT * FROM t1 where uid = ?", (2,)),
-            &EventuallyConsistentResults::empty_or(&[(2, 5)]),
-            PROPAGATION_DELAY_TIMEOUT,
-        )
+    // Cache two queries
+    adapter
+        .query_drop(r"CREATE CACHE FROM SELECT * FROM t1 WHERE uid = ?")
         .await
-    );
+        .unwrap();
+    adapter
+        .query_drop(r"CREATE CACHE FROM SELECT * FROM t1")
+        .await
+        .unwrap();
 
+    // Get all cached query IDs
+    let query_ids = adapter
+        .as_mysql_conn()
+        .unwrap()
+        .query::<(String, String, String, String), _>("SHOW CACHES")
+        .await
+        .unwrap();
+    assert_eq!(query_ids.len(), 2);
+
+    // Filter on one of the IDs
+    let (query_id, _, _, _) = query_ids.first().unwrap();
     let cached_queries = adapter
         .as_mysql_conn()
         .unwrap()
-        .query::<(String, String, String), _>("SHOW CACHES WHERE query_id = 'q';")
+        .query::<(String, String, String, String), _>(&format!(
+            "SHOW CACHES WHERE query_id = '{}'",
+            query_id
+        ))
         .await
         .unwrap();
 
     assert_eq!(cached_queries.len(), 1);
 
-    assert_eq!(cached_queries[0].0, "`q`");
+    assert_eq!(cached_queries[0].1, *query_id);
 
     deployment.teardown().await.unwrap();
 }

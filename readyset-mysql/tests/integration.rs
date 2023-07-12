@@ -1782,16 +1782,17 @@ async fn create_query_cache_where_in() {
         .unwrap();
     sleep().await;
 
-    let queries: Vec<(String, String, String)> = conn.query("SHOW CACHES;").await.unwrap();
+    let queries: Vec<(String, String, String, String)> = conn.query("SHOW CACHES;").await.unwrap();
     assert!(queries
         .iter()
-        .any(|(query_name, _, always)| query_name == "`test`" && always == "fallback allowed"));
+        .any(|(_, query_name, _, always)| query_name == "test" && always == "fallback allowed"));
 
     conn.query_drop("CREATE CACHE test FROM SELECT id FROM t WHERE id IN (?, ?);")
         .await
         .unwrap();
     sleep().await;
-    let new_queries: Vec<(String, String, String)> = conn.query("SHOW CACHES;").await.unwrap();
+    let new_queries: Vec<(String, String, String, String)> =
+        conn.query("SHOW CACHES;").await.unwrap();
     assert_eq!(new_queries.len(), queries.len());
 
     shutdown_tx.shutdown().await;
@@ -1808,10 +1809,10 @@ async fn show_caches_with_always() {
         .await
         .unwrap();
     sleep().await;
-    let queries: Vec<(String, String, String)> = conn.query("SHOW CACHES;").await.unwrap();
+    let queries: Vec<(String, String, String, String)> = conn.query("SHOW CACHES;").await.unwrap();
     assert!(queries
         .iter()
-        .any(|(query_name, _, always)| query_name == "`test_always`" && always == "no fallback"));
+        .any(|(_, query_name, _, always)| query_name == "test_always" && always == "no fallback"));
 
     shutdown_tx.shutdown().await;
 }

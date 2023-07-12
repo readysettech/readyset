@@ -989,13 +989,6 @@ async fn setup_for_replication_failure(client: &Client) {
 
 #[cfg(feature = "failure_injection")]
 async fn assert_table_ignored(client: &Client) {
-    let res = client.simple_query("SHOW CACHES").await.unwrap();
-    let res = res.first().unwrap();
-    assert!(matches!(
-        res,
-        SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 0, .. })
-    ));
-
     client
         .simple_query("CREATE CACHE FROM SELECT * FROM cats")
         .await
@@ -1374,6 +1367,42 @@ async fn drop_cache_implicit_caching() {
 
         last_statement_matches("readyset", "ok", &client).await
     }
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn show_proxied_queries_show_caches_query_text_matches() {
+    readyset_tracing::init_test_logging();
+    let (config, _handle, shutdown_tx) = setup().await;
+    let client = connect(config).await;
+
+    client
+        .simple_query("CREATE TABLE t (id INT)")
+        .await
+        .unwrap();
+    client.simple_query("SELECT id FROM t").await.unwrap();
+    sleep().await;
+
+    let cached_queries = client.simple_query("SHOW CACHES").await.unwrap();
+    let (cache_name, cached_query_text) = match cached_queries.first().unwrap() {
+        SimpleQueryMessage::Row(row) => (row.get(1).unwrap(), row.get(2).unwrap()),
+        _ => panic!(),
+    };
+
+    client
+        .simple_query(&format!("DROP CACHE {}", cache_name))
+        .await
+        .unwrap();
+
+    let proxied_queries = client.simple_query("SHOW PROXIED QUERIES").await.unwrap();
+    let proxied_query_text = match proxied_queries.first().unwrap() {
+        SimpleQueryMessage::Row(row) => row.get(1).unwrap(),
+        _ => panic!(),
+    };
+
+    assert_eq!(proxied_query_text, cached_query_text);
 
     shutdown_tx.shutdown().await;
 }
