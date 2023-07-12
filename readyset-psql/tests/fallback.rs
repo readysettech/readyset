@@ -6,6 +6,7 @@ use readyset_adapter::backend::{MigrationMode, UnsupportedSetMode};
 use readyset_adapter::BackendBuilder;
 use readyset_client_test_helpers::psql_helpers::{upstream_config, PostgreSQLAdapter};
 use readyset_client_test_helpers::{sleep, Adapter, TestBuilder};
+use readyset_data::DfValue;
 use readyset_server::Handle;
 use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
@@ -835,6 +836,49 @@ async fn alter_enum_rename_value() {
         let res = client.simple_query("SELECT e FROM t").await;
         AssertUnwindSafe(|| res)
     }, then_assert: |res| res().unwrap());
+
+    shutdown_tx.shutdown().await;
+}
+
+#[ignore = "REA-3108 Test reproduces error due to known bug"]
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn insert_enum_value_appended_after_create_table() {
+    readyset_tracing::init_test_logging();
+
+    let (config, _handle, shutdown_tx) = setup().await;
+    let client = connect(config).await;
+
+    client
+        .simple_query("CREATE TYPE et AS ENUM ('a')")
+        .await
+        .unwrap();
+
+    client.simple_query("CREATE TABLE t1 (e et)").await.unwrap();
+
+    client.query("SELECT * FROM t1", &[]).await.unwrap();
+
+    client
+        .simple_query("ALTER TYPE et ADD VALUE 'b'")
+        .await
+        .unwrap();
+
+    client.simple_query("CREATE TABLE t2 (e et)").await.unwrap();
+
+    // Due to the bug documented in REA-3108, this currently fails with "decode error: unknown enum
+    // variant: b". Note that in order to trigger this bug we must:
+    //  - Create a table using the enum type *and* select from it prior to altering the type (though
+    //    this doesn't have to be the same table we later insert into)
+    //  - Specifically insert the enum value that was added in the ALTER TYPE statement
+    //  - Insert using a parameter, not a hardcoded query (hence the use of `query_raw` here)
+    // Note also that the bug does not appear to be sensitive to timing; this is not the result of
+    // e.g. inserting before a resnapshot is done, and adding a ten second sleep here does not stop
+    // the bug from occurring.
+    let params: Vec<DfValue> = vec!["b".into()];
+    client
+        .query_raw("INSERT INTO t2 VALUES ($1)", &params)
+        .await
+        .unwrap();
 
     shutdown_tx.shutdown().await;
 }
