@@ -2274,8 +2274,6 @@ where
                 let fallback_res =
                     Self::query_fallback(self.upstream.as_mut(), query, &mut event).await;
                 if fallback_res.is_ok() {
-                    self.state.query_status_cache.insert(query);
-
                     let (id, _) = self.state.query_status_cache.insert(query);
                     if let Some(ref telemetry_sender) = self.telemetry_sender {
                         if let Err(e) = telemetry_sender
