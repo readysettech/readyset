@@ -109,8 +109,9 @@ impl StoredDomainRequest {
                     if dom
                         .send_to_healthy::<bool>(DomainRequest::QueryReplayDone, &mainline.workers)
                         .await?
+                        .into_cells()
                         .into_iter()
-                        .all(|replicas| replicas.into_iter().all(|done| done))
+                        .all(|done| done)
                     {
                         break;
                     }
@@ -142,8 +143,9 @@ impl StoredDomainRequest {
                 } else {
                     dom.send_to_healthy::<bool>(req, &mainline.workers)
                         .await?
+                        .into_cells()
                         .into_iter()
-                        .all(|v| v.into_iter().all(|t| t))
+                        .all(|t| t)
                 };
                 trace!(
                     request = ?self.req,

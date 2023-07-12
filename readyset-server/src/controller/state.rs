@@ -671,22 +671,16 @@ impl DfState {
             domains.extend(
                 s.send_to_healthy(DomainRequest::GetStatistics, workers)
                     .await?
-                    .into_iter()
-                    .enumerate()
-                    .flat_map(move |(shard, replicas)| {
-                        replicas
-                            .into_iter()
-                            .enumerate()
-                            .map(move |(replica, stats)| {
-                                (
-                                    ReplicaAddress {
-                                        domain_index,
-                                        shard,
-                                        replica,
-                                    },
-                                    stats,
-                                )
-                            })
+                    .into_entries()
+                    .map(|((shard, replica), stats)| {
+                        (
+                            ReplicaAddress {
+                                domain_index,
+                                shard,
+                                replica,
+                            },
+                            stats,
+                        )
                     }),
             );
         }
@@ -753,7 +747,7 @@ impl DfState {
     fn query_domains<'a, I, R>(
         &'a self,
         requests: I,
-    ) -> impl TryStream<Ok = (DomainIndex, Vec<Vec<R>>), Error = ReadySetError> + 'a
+    ) -> impl TryStream<Ok = (DomainIndex, Array2<R>), Error = ReadySetError> + 'a
     where
         I: IntoIterator<Item = (DomainIndex, DomainRequest)>,
         I::IntoIter: 'a,
@@ -785,32 +779,35 @@ impl DfState {
         .try_fold(
             ReplicationOffsets::with_schema_offset(self.schema_replication_offset.clone()),
             |mut acc, (domain, domain_offs)| async move {
-                for shard in domain_offs {
-                    for replica in shard {
-                        for (lni, offset) in replica {
-                            #[allow(clippy::indexing_slicing)] // came from self.domains
-                            let ni = self.domain_nodes[&domain].get(lni).ok_or_else(|| {
-                                internal_err!(
-                                    "Domain {} returned nonexistent local node {}",
-                                    domain,
-                                    lni
-                                )
-                            })?;
+                for replica in domain_offs.into_cells() {
+                    for (lni, offset) in replica {
+                        #[allow(clippy::indexing_slicing)] // came from self.domains
+                        let ni = self.domain_nodes[&domain].get(lni).ok_or_else(|| {
+                            internal_err!(
+                                "Domain {} returned nonexistent local node {}",
+                                domain,
+                                lni
+                            )
+                        })?;
 
-                            if !self.ingredients[*ni].is_base() {
-                                continue;
+                        if !self.ingredients[*ni].is_base() {
+                            continue;
+                        }
+
+                        #[allow(clippy::indexing_slicing)] // internal invariant
+                        let table_name = self.ingredients[*ni].name();
+                        match offset {
+                            ReplicationOffsetState::Initialized(offset) => {
+                                // TODO min of all shards
+                                acc.tables.insert(table_name.clone(), offset);
                             }
-
-                            #[allow(clippy::indexing_slicing)] // internal invariant
-                            let table_name = self.ingredients[*ni].name();
-                            match offset {
-                                ReplicationOffsetState::Initialized(offset) => {
-                                    // TODO min of all shards
-                                    acc.tables.insert(table_name.clone(), offset);
-                                }
-                                ReplicationOffsetState::Pending => {
-                                    internal!("Table {} does not have a replication offset because it is not ready yet. The caller should wait for all tables to be ready before requesting replication offsets", table_name.display_unquoted());
-                                }
+                            ReplicationOffsetState::Pending => {
+                                internal!(
+                                    "Table {} does not have a replication offset because it is \
+                                     not ready yet. The caller should wait for all tables to \
+                                     be ready before requesting replication offsets",
+                                    table_name.display_unquoted()
+                                );
                             }
                         }
                     }
@@ -922,8 +919,8 @@ impl DfState {
             .map_ok(|(di, local_indices)| {
                 stream::iter(
                     local_indices
+                        .into_cells()
                         .into_iter()
-                        .flatten()
                         .flatten()
                         .map(move |li| -> ReadySetResult<_> { Ok((di, li)) }),
                 )
@@ -955,7 +952,7 @@ impl DfState {
                     .into_iter()
                     .map(|domain| (domain, DomainRequest::AllTablesCompacted)),
             )
-            .map_ok(|(_, compacted)| compacted.iter().all(|c| c.iter().all(|finished| *finished)));
+            .map_ok(|(_, compacted)| compacted.cells().iter().all(|finished| *finished));
         while let Some(finished) = stream.next().await {
             if !finished? {
                 return Ok(false);
@@ -970,7 +967,7 @@ impl DfState {
         // lifetime compile error in `external_request` that occurs if we simply
         // use keys().map() to pass into query_domains directly.
         let domains: Vec<DomainIndex> = self.domains.keys().copied().collect();
-        let counts_per_domain: Vec<(DomainIndex, Vec<Vec<Vec<(NodeIndex, NodeSize)>>>)> = self
+        let counts_per_domain: Vec<(DomainIndex, Array2<Vec<(NodeIndex, NodeSize)>>)> = self
             .query_domains::<_, Vec<(NodeIndex, NodeSize)>>(
                 domains
                     .into_iter()
@@ -981,7 +978,7 @@ impl DfState {
         let flat_counts = counts_per_domain
             .into_iter()
             .flat_map(|(_domain, per_shard_counts)| {
-                per_shard_counts.into_iter().flatten().flatten()
+                per_shard_counts.into_cells().into_iter().flatten()
             });
         let mut res = HashMap::new();
         for (node_index, count) in flat_counts {
@@ -1257,8 +1254,8 @@ impl DfState {
                     workers,
                 )
                 .await?
+                .into_cells()
                 .into_iter()
-                .flatten()
                 .flat_map(move |(_, node_stats)| {
                     node_stats
                         .into_iter()
@@ -1344,10 +1341,9 @@ impl DfState {
                 &self.workers,
             )
             .await?
+            .into_cells()
             .pop()
-            .ok_or_else(|| internal_err!("expected a shard"))?
-            .pop()
-            .ok_or_else(|| internal_err!("expected a replica"))?
+            .ok_or_else(|| internal_err!("expected a shard+replica"))?
             .map(|key| SingleKeyEviction {
                 domain_idx: di,
                 tag: u32::from(tag),

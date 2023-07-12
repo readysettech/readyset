@@ -124,11 +124,11 @@ impl DomainHandle {
         &self,
         req: DomainRequest,
         workers: &HashMap<WorkerIdentifier, Worker>,
-    ) -> ReadySetResult<Vec<Vec<R>>>
+    ) -> ReadySetResult<Array2<R>>
     where
         R: DeserializeOwned,
     {
-        stream::iter(0..self.num_shards())
+        let results = stream::iter(0..self.num_shards())
             .then(move |shard| {
                 let req = req.clone();
                 stream::iter(0..self.num_replicas())
@@ -137,7 +137,9 @@ impl DomainHandle {
                     })
                     .try_collect()
             })
-            .try_collect()
-            .await
+            .try_collect::<Vec<_>>()
+            .await?;
+
+        Ok(Array2::from_rows(results))
     }
 }

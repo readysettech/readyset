@@ -20,7 +20,7 @@
 //! Internally, values are stored in a single continous allocation row-first, alongside the length
 //! of the row.
 
-#![feature(core_intrinsics)]
+#![feature(core_intrinsics, int_roundings)]
 use std::fmt::Debug;
 use std::intrinsics::unlikely;
 use std::ops::{Index, IndexMut};
@@ -177,6 +177,57 @@ impl<T> Array2<T> {
         self.cells.chunks(self.row_size)
     }
 
+    /// Construct an iterator over pairs of `((row, column), &value)` in this [`Array2`]
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use array2::Array2;
+    ///
+    /// let my_array2: Array2<i32> = Array2::from_rows(vec![vec![1, 2], vec![3, 4]]);
+    ///
+    /// assert_eq!(
+    ///     my_array2.entries().collect::<Vec<_>>(),
+    ///     vec![((0, 0), &1), ((0, 1), &2), ((1, 0), &3), ((1, 1), &4)]
+    /// )
+    /// ```
+    #[inline]
+    pub fn entries(&self) -> impl Iterator<Item = ((usize, usize), &T)> + ExactSizeIterator + '_ {
+        self.cells.iter().enumerate().map(move |(i, v)| {
+            let row = i.div_floor(self.row_size);
+            let col = i % self.row_size;
+            ((row, col), v)
+        })
+    }
+
+    /// Construct an iterator over pairs of `((row, column), value)` in this [`Array2`], consuming
+    /// `self`
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use array2::Array2;
+    ///
+    /// let my_array2: Array2<i32> = Array2::from_rows(vec![vec![1, 2], vec![3, 4]]);
+    ///
+    /// assert_eq!(
+    ///     my_array2.into_entries().collect::<Vec<_>>(),
+    ///     vec![((0, 0), 1), ((0, 1), 2), ((1, 0), 3), ((1, 1), 4)]
+    /// )
+    /// ```
+    #[inline]
+    pub fn into_entries(self) -> impl Iterator<Item = ((usize, usize), T)> + ExactSizeIterator {
+        self.cells
+            .into_vec()
+            .into_iter()
+            .enumerate()
+            .map(move |(i, v)| {
+                let row = i.div_floor(self.row_size);
+                let col = i % self.row_size;
+                ((row, col), v)
+            })
+    }
+
     /// Returns a slice of the cells in this [`Array2`], in row-first order.
     ///
     /// # Examples
@@ -192,6 +243,23 @@ impl<T> Array2<T> {
     #[inline]
     pub fn cells(&self) -> &[T] {
         &self.cells
+    }
+
+    /// Convert this [`Array2`] into an owned vector of cells
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use array2::Array2;
+    ///
+    /// let my_array2: Array2<i32> = Array2::from_rows(vec![vec![1, 2, 3], vec![4, 5, 6]]);
+    ///
+    /// assert_eq!(my_array2.into_cells(), vec![1, 2, 3, 4, 5, 6]);
+    /// ```
+    #[must_use]
+    #[inline]
+    pub fn into_cells(self) -> Vec<T> {
+        self.cells.into_vec()
     }
 
     /// Returns a reference to a row or cell depending on the type of the index, or `None` if the
