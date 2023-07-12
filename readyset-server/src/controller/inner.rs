@@ -219,327 +219,263 @@ impl Leader {
             }
         };
 
-        // *** Read methods that don't require a quorum***
-
-        macro_rules! check_min_workers {
-            ($ds:expr) => {{
-                if self.pending_recovery || $ds.workers.len() < self.min_workers {
-                    return Err(ReadySetError::NoQuorum);
-                }
-            }};
-        }
-
-        {
-            match (&method, path) {
-                (&Method::GET, "/simple_graph") => {
-                    let ds = self.dataflow_state_handle.read().await;
-                    return Ok(ds.graphviz(false, None).into_bytes());
-                }
-                (&Method::POST, "/simple_graphviz") => {
-                    let ds = self.dataflow_state_handle.read().await;
-                    return_serialized!(ds.graphviz(false, None));
-                }
-                (&Method::GET, "/graph") => {
-                    let ds = self.dataflow_state_handle.read().await;
-                    let node_sizes = ds.node_sizes().await?;
-                    return Ok(ds.graphviz(true, Some(node_sizes)).into_bytes());
-                }
-                (&Method::POST, "/graphviz") => {
-                    let ds = self.dataflow_state_handle.read().await;
-                    let node_sizes = ds.node_sizes().await?;
-                    return_serialized!(ds.graphviz(true, Some(node_sizes)));
-                }
-                (&Method::GET | &Method::POST, "/get_statistics") => {
-                    let ds = self.dataflow_state_handle.read().await;
-                    return_serialized!(ds.get_statistics().await);
-                }
-                (&Method::GET | &Method::POST, "/instances") => {
-                    let ds = self.dataflow_state_handle.read().await;
-                    return_serialized!(ds.get_instances());
-                }
-                (&Method::GET | &Method::POST, "/controller_uri") => {
-                    return_serialized!(self.controller_uri);
-                }
-                (&Method::GET, "/workers") | (&Method::POST, "/workers") => {
-                    let ds = self.dataflow_state_handle.read().await;
-                    return_serialized!(&ds.workers.keys().collect::<Vec<_>>())
-                }
-                (&Method::GET, "/healthy_workers") | (&Method::POST, "/healthy_workers") => {
-                    let ds = self.dataflow_state_handle.read().await;
-                    return_serialized!(&ds
-                        .workers
-                        .iter()
-                        .filter(|w| w.1.healthy)
-                        .map(|w| w.0)
-                        .collect::<Vec<_>>());
-                }
-                (&Method::GET | &Method::POST, "/domains") => {
-                    let ds = self.dataflow_state_handle.read().await;
-                    let res: HashMap<DomainIndex, Vec<Vec<WorkerIdentifier>>> = ds
-                        .domains
-                        .iter()
-                        .map(|(di, dh)| {
-                            (*di, dh.shards().map(|wis| wis.to_vec()).collect::<Vec<_>>())
-                        })
-                        .collect();
-                    return_serialized!(res)
-                }
-                (&Method::GET, "/allocated_bytes") => {
-                    let alloc_bytes = tikv_jemalloc_ctl::epoch::mib()
-                        .and_then(|m| m.advance())
-                        .and_then(|_| tikv_jemalloc_ctl::stats::allocated::mib())
-                        .and_then(|m| m.read())
-                        .ok();
-                    return_serialized!(alloc_bytes);
-                }
-                (&Method::POST, "/set_memory_limit") => {
-                    let (period, limit) = bincode::deserialize(&body)?;
-                    let res: Result<(), ReadySetError> = {
-                        let ds = self.dataflow_state_handle.read().await;
-                        for (_, worker) in ds.workers.iter() {
-                            worker
-                                .rpc::<()>(WorkerRequestKind::SetMemoryLimit { period, limit })
-                                .await?;
-                        }
-                        Ok(())
-                    };
-                    return_serialized!(res);
-                }
-                (&Method::GET | &Method::POST, "/version") => {
-                    return_serialized!(RELEASE_VERSION);
-                }
-                _ => {}
+        match (&method, path) {
+            (&Method::GET, "/simple_graph") => {
+                let ds = self.dataflow_state_handle.read().await;
+                Ok(ds.graphviz(false, None).into_bytes())
             }
-
-            // *** Read methods that do require quorum ***
-            match (&method, path) {
-                (&Method::GET | &Method::POST, "/controller_uri") => {
-                    return_serialized!(self.controller_uri);
-                }
-                (&Method::POST, "/tables") => {
+            (&Method::POST, "/simple_graphviz") => {
+                let ds = self.dataflow_state_handle.read().await;
+                return_serialized!(ds.graphviz(false, None));
+            }
+            (&Method::GET, "/graph") => {
+                let ds = self.dataflow_state_handle.read().await;
+                let node_sizes = ds.node_sizes().await?;
+                Ok(ds.graphviz(true, Some(node_sizes)).into_bytes())
+            }
+            (&Method::POST, "/graphviz") => {
+                let ds = self.dataflow_state_handle.read().await;
+                let node_sizes = ds.node_sizes().await?;
+                return_serialized!(ds.graphviz(true, Some(node_sizes)));
+            }
+            (&Method::GET | &Method::POST, "/get_statistics") => {
+                let ds = self.dataflow_state_handle.read().await;
+                return_serialized!(ds.get_statistics().await);
+            }
+            (&Method::GET | &Method::POST, "/instances") => {
+                let ds = self.dataflow_state_handle.read().await;
+                return_serialized!(ds.get_instances());
+            }
+            (&Method::GET | &Method::POST, "/controller_uri") => {
+                return_serialized!(self.controller_uri);
+            }
+            (&Method::GET, "/workers") | (&Method::POST, "/workers") => {
+                let ds = self.dataflow_state_handle.read().await;
+                return_serialized!(&ds.workers.keys().collect::<Vec<_>>())
+            }
+            (&Method::GET, "/healthy_workers") | (&Method::POST, "/healthy_workers") => {
+                let ds = self.dataflow_state_handle.read().await;
+                return_serialized!(&ds
+                    .workers
+                    .iter()
+                    .filter(|w| w.1.healthy)
+                    .map(|w| w.0)
+                    .collect::<Vec<_>>());
+            }
+            (&Method::GET | &Method::POST, "/domains") => {
+                let ds = self.dataflow_state_handle.read().await;
+                let res: HashMap<DomainIndex, Vec<Vec<WorkerIdentifier>>> = ds
+                    .domains
+                    .iter()
+                    .map(|(di, dh)| (*di, dh.shards().map(|wis| wis.to_vec()).collect::<Vec<_>>()))
+                    .collect();
+                return_serialized!(res)
+            }
+            (&Method::GET, "/allocated_bytes") => {
+                let alloc_bytes = tikv_jemalloc_ctl::epoch::mib()
+                    .and_then(|m| m.advance())
+                    .and_then(|_| tikv_jemalloc_ctl::stats::allocated::mib())
+                    .and_then(|m| m.read())
+                    .ok();
+                return_serialized!(alloc_bytes);
+            }
+            (&Method::POST, "/set_memory_limit") => {
+                let (period, limit) = bincode::deserialize(&body)?;
+                let res: Result<(), ReadySetError> = {
                     let ds = self.dataflow_state_handle.read().await;
-                    check_min_workers!(ds);
-                    return_serialized!(ds.tables())
-                }
-                (&Method::POST, "/table_statuses") => {
-                    let res = {
-                        let ds = self.dataflow_state_handle.read().await;
-                        check_min_workers!(ds);
-                        ds.table_statuses().await
-                    };
-                    return_serialized!(res)
-                }
-                (&Method::POST, "/non_replicated_relations") => {
+                    for (_, worker) in ds.workers.iter() {
+                        worker
+                            .rpc::<()>(WorkerRequestKind::SetMemoryLimit { period, limit })
+                            .await?;
+                    }
+                    Ok(())
+                };
+                return_serialized!(res);
+            }
+            (&Method::GET | &Method::POST, "/version") => {
+                return_serialized!(RELEASE_VERSION);
+            }
+            (&Method::POST, "/tables") => {
+                let ds = self.dataflow_state_handle.read().await;
+                return_serialized!(ds.tables())
+            }
+            (&Method::POST, "/table_statuses") => {
+                let res = {
                     let ds = self.dataflow_state_handle.read().await;
-                    check_min_workers!(ds);
-                    return_serialized!(ds.non_replicated_relations())
-                }
-                (&Method::POST, "/views") => {
-                    let ds = self.dataflow_state_handle.read().await;
-                    check_min_workers!(ds);
-                    return_serialized!(ds.views())
-                }
-                (&Method::POST, "/verbose_views") => {
-                    let ds = self.dataflow_state_handle.read().await;
-                    check_min_workers!(ds);
-                    return_serialized!(ds.verbose_views())
-                }
-                (&Method::POST, "/view_statuses") => {
-                    let (queries, dialect) = bincode::deserialize(&body)?;
-                    let ds = self.dataflow_state_handle.read().await;
-                    check_min_workers!(ds);
-                    return_serialized!(ds.view_statuses(queries, dialect))
-                }
-                (&Method::GET | &Method::POST, "/instances") => {
-                    let ds = self.dataflow_state_handle.read().await;
-                    check_min_workers!(ds);
-                    return_serialized!(ds.get_instances());
-                }
-                (&Method::GET | &Method::POST, "/workers") => {
-                    let ds = self.dataflow_state_handle.read().await;
-                    check_min_workers!(ds);
-                    return_serialized!(ds.workers.keys().collect::<Vec<_>>())
-                }
-                (&Method::GET | &Method::POST, "/healthy_workers") => {
-                    let ds = self.dataflow_state_handle.read().await;
-                    check_min_workers!(ds);
-                    return_serialized!(ds
-                        .workers
-                        .iter()
-                        .filter(|w| w.1.healthy)
-                        .map(|w| w.0)
-                        .collect::<Vec<_>>());
-                }
-                (&Method::GET, "/nodes") => {
-                    let ds = self.dataflow_state_handle.read().await;
-                    check_min_workers!(ds);
-                    let nodes = if let Some(query) = &query {
-                        let pairs = querystring::querify(query);
-                        if let Some((_, worker)) = &pairs.into_iter().find(|(k, _)| *k == "w") {
-                            ds.nodes_on_worker(Some(&worker.parse()?))
-                                .into_iter()
-                                .flat_map(|(_, ni)| ni)
-                                .collect::<Vec<_>>()
-                        } else {
-                            ds.nodes_on_worker(None)
-                                .into_iter()
-                                .flat_map(|(_, ni)| ni)
-                                .collect::<Vec<_>>()
-                        }
+                    ds.table_statuses().await
+                };
+                return_serialized!(res)
+            }
+            (&Method::POST, "/non_replicated_relations") => {
+                let ds = self.dataflow_state_handle.read().await;
+                return_serialized!(ds.non_replicated_relations())
+            }
+            (&Method::POST, "/views") => {
+                let ds = self.dataflow_state_handle.read().await;
+                return_serialized!(ds.views())
+            }
+            (&Method::POST, "/verbose_views") => {
+                let ds = self.dataflow_state_handle.read().await;
+                return_serialized!(ds.verbose_views())
+            }
+            (&Method::POST, "/view_statuses") => {
+                let (queries, dialect) = bincode::deserialize(&body)?;
+                let ds = self.dataflow_state_handle.read().await;
+                return_serialized!(ds.view_statuses(queries, dialect))
+            }
+            (&Method::GET, "/nodes") => {
+                let ds = self.dataflow_state_handle.read().await;
+                let nodes = if let Some(query) = &query {
+                    let pairs = querystring::querify(query);
+                    if let Some((_, worker)) = &pairs.into_iter().find(|(k, _)| *k == "w") {
+                        ds.nodes_on_worker(Some(&worker.parse()?))
+                            .into_iter()
+                            .flat_map(|(_, ni)| ni)
+                            .collect::<Vec<_>>()
                     } else {
-                        // all data-flow nodes
                         ds.nodes_on_worker(None)
                             .into_iter()
                             .flat_map(|(_, ni)| ni)
                             .collect::<Vec<_>>()
-                    };
-                    return_serialized!(&nodes
-                        .into_iter()
-                        .filter_map(|ni| {
-                            #[allow(clippy::indexing_slicing)]
-                            let n = &ds.ingredients[ni];
-                            if n.is_internal() {
-                                Some((ni, n.name(), n.description(true)))
-                            } else if n.is_base() {
-                                Some((ni, n.name(), "Base table".to_owned()))
-                            } else if n.is_reader() {
-                                Some((ni, n.name(), "Leaf view".to_owned()))
-                            } else {
-                                None
-                            }
-                        })
-                        .collect::<Vec<_>>())
-                }
-                (&Method::POST, "/table_builder") => {
-                    // NOTE(eta): there is DELIBERATELY no `?` after the `table_builder` call,
-                    // because the receiving end expects a `ReadySetResult` to be serialized.
-                    let body = bincode::deserialize(&body)?;
-                    let ds = self.dataflow_state_handle.read().await;
-                    check_min_workers!(ds);
-                    let ret = ds.table_builder(&body);
-                    return_serialized!(ret);
-                }
-                (&Method::POST, "/table_builder_by_index") => {
-                    // NOTE(eta): there is DELIBERATELY no `?` after the `table_builder` call,
-                    // because the receiving end expects a `ReadySetResult` to be serialized.
-                    let body = bincode::deserialize(&body)?;
-                    let ds = self.dataflow_state_handle.read().await;
-                    check_min_workers!(ds);
-                    let ret = ds.table_builder_by_index(body);
-                    return_serialized!(ret);
-                }
-                (&Method::POST, "/view_builder") => {
-                    // NOTE(eta): same as above applies
-                    require_leader_ready()?;
-                    let body = bincode::deserialize(&body)?;
-                    let ds = self.dataflow_state_handle.read().await;
-                    check_min_workers!(ds);
-                    let ret = ds.view_builder(body);
-                    return_serialized!(ret);
-                }
-                (&Method::POST, "/get_info") => {
-                    let ds = self.dataflow_state_handle.read().await;
-                    check_min_workers!(ds);
-                    return_serialized!(ds.get_info()?)
-                }
-                (&Method::POST, "/replication_offsets") => {
-                    let res = {
-                        let ds = self.dataflow_state_handle.read().await;
-                        check_min_workers!(ds);
-                        ds.replication_offsets().await
-                    }?;
-                    return_serialized!(res);
-                }
-                (&Method::POST, "/snapshotting_tables") => {
-                    let res = {
-                        let ds = self.dataflow_state_handle.read().await;
-                        check_min_workers!(ds);
-                        ds.snapshotting_tables().await
-                    }?;
-                    return_serialized!(res);
-                }
-                (&Method::POST, "/all_tables_compacted") => {
-                    let res = {
-                        let ds = self.dataflow_state_handle.read().await;
-                        check_min_workers!(ds);
-                        ds.all_tables_compacted().await
-                    }?;
-                    return_serialized!(res);
-                }
-                (&Method::POST, "/node_sizes") => {
-                    let res = {
-                        let ds = self.dataflow_state_handle.read().await;
-                        ds.node_sizes().await
-                    }?;
-                    return_serialized!(res);
-                }
-                (&Method::POST, "/leader_ready") => {
-                    return_serialized!(leader_ready);
-                }
-                (&Method::POST, "/status") => {
-                    let ds = self.dataflow_state_handle.read().await;
-                    let replication_offsets =
-                        if self.pending_recovery || ds.workers.len() < self.min_workers {
-                            None
-                        } else {
-                            Some(ds.replication_offsets().await?)
-                        };
-
-                    let status = ReadySetStatus {
-                        // Use whether the leader is ready or not as a proxy for if we have
-                        // completed snapshotting.
-                        snapshot_status: if leader_ready {
-                            SnapshotStatus::Completed
-                        } else {
-                            SnapshotStatus::InProgress
-                        },
-
-                        max_replication_offset: replication_offsets
-                            .as_ref()
-                            .and_then(|offs| offs.max_offset().ok().flatten().cloned()),
-                        min_replication_offset: replication_offsets
-                            .as_ref()
-                            .and_then(|offs| offs.min_present_offset().ok().flatten().cloned()),
-                    };
-                    return_serialized!(status);
-                }
-                (&Method::POST, "/dry_run") => {
-                    let body: ExtendRecipeSpec = bincode::deserialize(&body)?;
-                    if body.require_leader_ready {
-                        require_leader_ready()?;
                     }
-                    let mut state_copy: DfState = {
-                        let reader = self.dataflow_state_handle.read().await;
-                        check_min_workers!(reader);
-                        reader.clone()
-                    };
-                    state_copy.extend_recipe(body, true).await?;
-                    return_serialized!(ExtendRecipeResult::Done);
-                }
-                (&Method::GET | &Method::POST, "/supports_pagination") => {
-                    let ds = self.dataflow_state_handle.read().await;
-                    let supports =
-                        ds.recipe.mir_config().allow_paginate && ds.recipe.mir_config().allow_topk;
-                    return_serialized!(supports)
-                }
-                (&Method::POST, "/evict_single") => {
-                    let body: Option<SingleKeyEviction> = bincode::deserialize(&body)?;
-                    let ds = self.dataflow_state_handle.read().await;
-                    check_min_workers!(ds);
-                    let key = ds.evict_single(body).await?;
-                    return_serialized!(key);
-                }
-                _ => {}
+                } else {
+                    // all data-flow nodes
+                    ds.nodes_on_worker(None)
+                        .into_iter()
+                        .flat_map(|(_, ni)| ni)
+                        .collect::<Vec<_>>()
+                };
+                return_serialized!(&nodes
+                    .into_iter()
+                    .filter_map(|ni| {
+                        #[allow(clippy::indexing_slicing)]
+                        let n = &ds.ingredients[ni];
+                        if n.is_internal() {
+                            Some((ni, n.name(), n.description(true)))
+                        } else if n.is_base() {
+                            Some((ni, n.name(), "Base table".to_owned()))
+                        } else if n.is_reader() {
+                            Some((ni, n.name(), "Leaf view".to_owned()))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>())
             }
-        }
+            (&Method::POST, "/table_builder") => {
+                // NOTE(eta): there is DELIBERATELY no `?` after the `table_builder` call,
+                // because the receiving end expects a `ReadySetResult` to be serialized.
+                let body = bincode::deserialize(&body)?;
+                let ds = self.dataflow_state_handle.read().await;
+                let ret = ds.table_builder(&body);
+                return_serialized!(ret);
+            }
+            (&Method::POST, "/table_builder_by_index") => {
+                // NOTE(eta): there is DELIBERATELY no `?` after the `table_builder` call,
+                // because the receiving end expects a `ReadySetResult` to be serialized.
+                let body = bincode::deserialize(&body)?;
+                let ds = self.dataflow_state_handle.read().await;
+                let ret = ds.table_builder_by_index(body);
+                return_serialized!(ret);
+            }
+            (&Method::POST, "/view_builder") => {
+                // NOTE(eta): same as above applies
+                require_leader_ready()?;
+                let body = bincode::deserialize(&body)?;
+                let ds = self.dataflow_state_handle.read().await;
+                let ret = ds.view_builder(body);
+                return_serialized!(ret);
+            }
+            (&Method::POST, "/get_info") => {
+                let ds = self.dataflow_state_handle.read().await;
+                return_serialized!(ds.get_info()?)
+            }
+            (&Method::POST, "/replication_offsets") => {
+                let res = {
+                    let ds = self.dataflow_state_handle.read().await;
+                    ds.replication_offsets().await
+                }?;
+                return_serialized!(res);
+            }
+            (&Method::POST, "/snapshotting_tables") => {
+                let res = {
+                    let ds = self.dataflow_state_handle.read().await;
+                    ds.snapshotting_tables().await
+                }?;
+                return_serialized!(res);
+            }
+            (&Method::POST, "/all_tables_compacted") => {
+                let res = {
+                    let ds = self.dataflow_state_handle.read().await;
+                    ds.all_tables_compacted().await
+                }?;
+                return_serialized!(res);
+            }
+            (&Method::POST, "/node_sizes") => {
+                let res = {
+                    let ds = self.dataflow_state_handle.read().await;
+                    ds.node_sizes().await
+                }?;
+                return_serialized!(res);
+            }
+            (&Method::POST, "/leader_ready") => {
+                return_serialized!(leader_ready);
+            }
+            (&Method::POST, "/status") => {
+                let ds = self.dataflow_state_handle.read().await;
+                let replication_offsets =
+                    if self.pending_recovery || ds.workers.len() < self.min_workers {
+                        None
+                    } else {
+                        Some(ds.replication_offsets().await?)
+                    };
 
-        // *** Write methods (all of them require quorum) ***
+                let status = ReadySetStatus {
+                    // Use whether the leader is ready or not as a proxy for if we have
+                    // completed snapshotting.
+                    snapshot_status: if leader_ready {
+                        SnapshotStatus::Completed
+                    } else {
+                        SnapshotStatus::InProgress
+                    },
 
-        match (&method, path) {
+                    max_replication_offset: replication_offsets
+                        .as_ref()
+                        .and_then(|offs| offs.max_offset().ok().flatten().cloned()),
+                    min_replication_offset: replication_offsets
+                        .as_ref()
+                        .and_then(|offs| offs.min_present_offset().ok().flatten().cloned()),
+                };
+                return_serialized!(status);
+            }
+            (&Method::POST, "/dry_run") => {
+                let body: ExtendRecipeSpec = bincode::deserialize(&body)?;
+                if body.require_leader_ready {
+                    require_leader_ready()?;
+                }
+                let mut state_copy: DfState = {
+                    let reader = self.dataflow_state_handle.read().await;
+                    reader.clone()
+                };
+                state_copy.extend_recipe(body, true).await?;
+                return_serialized!(ExtendRecipeResult::Done);
+            }
+            (&Method::GET | &Method::POST, "/supports_pagination") => {
+                let ds = self.dataflow_state_handle.read().await;
+                let supports =
+                    ds.recipe.mir_config().allow_paginate && ds.recipe.mir_config().allow_topk;
+                return_serialized!(supports)
+            }
+            (&Method::POST, "/evict_single") => {
+                let body: Option<SingleKeyEviction> = bincode::deserialize(&body)?;
+                let ds = self.dataflow_state_handle.read().await;
+                let key = ds.evict_single(body).await?;
+                return_serialized!(key);
+            }
+
             (&Method::GET, "/flush_partial") => {
                 let ret = {
                     let mut writer = self.dataflow_state_handle.write().await;
-                    check_min_workers!(writer.as_ref());
                     let r = writer.as_mut().flush_partial().await?;
                     self.dataflow_state_handle.commit(writer, authority).await?;
                     r
@@ -552,8 +488,6 @@ impl Leader {
                     require_leader_ready()?;
                 }
                 let ret = {
-                    check_min_workers!(self.dataflow_state_handle.read().await);
-
                     // Start the migration running in the background
                     let dataflow_state_handle = Arc::clone(&self.dataflow_state_handle);
                     let authority = Arc::clone(authority);
@@ -608,7 +542,6 @@ impl Leader {
                 require_leader_ready()?;
                 let query_name = bincode::deserialize(&body)?;
                 let mut writer = self.dataflow_state_handle.write().await;
-                check_min_workers!(writer.as_ref());
                 writer.as_mut().remove_query(&query_name).await?;
                 self.dataflow_state_handle.commit(writer, authority).await?;
                 return_serialized!(());
@@ -616,7 +549,6 @@ impl Leader {
             (&Method::POST, "/remove_all_queries") => {
                 require_leader_ready()?;
                 let mut writer = self.dataflow_state_handle.write().await;
-                check_min_workers!(writer.as_ref());
                 writer.as_mut().remove_all_queries().await?;
                 self.dataflow_state_handle.commit(writer, authority).await?;
                 return_serialized!(ReadySetResult::Ok(()));
@@ -624,7 +556,6 @@ impl Leader {
             (&Method::POST, "/set_schema_replication_offset") => {
                 let body: Option<ReplicationOffset> = bincode::deserialize(&body)?;
                 let mut writer = self.dataflow_state_handle.write().await;
-                check_min_workers!(writer.as_ref());
                 writer.as_mut().set_schema_replication_offset(body);
                 self.dataflow_state_handle.commit(writer, authority).await?;
                 return_serialized!(ReadySetResult::Ok(()));
@@ -633,7 +564,6 @@ impl Leader {
                 require_leader_ready()?;
                 let body = bincode::deserialize(&body)?;
                 let mut writer = self.dataflow_state_handle.write().await;
-                check_min_workers!(writer.as_ref());
                 writer.as_mut().remove_nodes(vec![body].as_slice()).await?;
                 self.dataflow_state_handle.commit(writer, authority).await?;
                 return_serialized!(());
