@@ -400,12 +400,14 @@ impl DfState {
                     .map(|shard| {
                         let worker = domain.assignment(shard, replica)?;
 
-                        self.read_addrs
-                            .get(worker)
-                            .ok_or_else(|| ReadySetError::UnmappableDomain {
-                                domain_index: domain_index.index(),
-                            })
-                            .copied()
+                        Ok(Some(
+                            self.read_addrs
+                                .get(worker)
+                                .ok_or_else(|| ReadySetError::UnmappableDomain {
+                                    domain_index: domain_index.index(),
+                                })
+                                .copied()?,
+                        ))
                     })
                     .collect::<ReadySetResult<Vec<_>>>()
             })

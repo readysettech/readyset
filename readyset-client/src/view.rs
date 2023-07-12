@@ -893,8 +893,8 @@ pub struct ReaderHandleBuilder {
     pub columns: Arc<[SqlIdentifier]>,
     pub schema: Option<ViewSchema>,
 
-    /// replica -> shard index -> addr
-    pub replica_shard_addrs: Array2<SocketAddr>,
+    /// replica -> shard index -> addr (if running)
+    pub replica_shard_addrs: Array2<Option<SocketAddr>>,
 
     /// (view_placeholder, key_column_index) pairs according to their mapping. Contains exactly one
     /// entry for each key column at the reader.
@@ -963,7 +963,14 @@ impl ReaderHandleBuilder {
         for (shardi, shard_addr) in shards.iter().enumerate() {
             use std::collections::hash_map::Entry;
 
-            addrs.push(*shard_addr);
+            let Some(shard_addr) = *shard_addr else {
+                return Err(ReadySetError::ReaderReplicaNotRunning {
+                    replica: replica.unwrap_or(0),
+                    node
+                })
+            };
+
+            addrs.push(shard_addr);
 
             // one entry per shard so that we can send sharded requests in parallel even if
             // they happen to be targeting the same machine.
@@ -971,7 +978,7 @@ impl ReaderHandleBuilder {
                 .lock()
                 .map_err(|e| internal_err!("mutex was poisoned: '{}'", e))?;
             #[allow(clippy::significant_drop_in_scrutinee)]
-            let s = match rpcs.entry((*shard_addr, shardi)) {
+            let s = match rpcs.entry((shard_addr, shardi)) {
                 Entry::Occupied(e) => e.get().clone(),
                 Entry::Vacant(h) => {
                     // TODO: maybe always use the same local port?
@@ -979,7 +986,7 @@ impl ReaderHandleBuilder {
                         Timeout::new(
                             ConcurrencyLimit::new(
                                 Balance::new(make_views_discover(
-                                    *shard_addr,
+                                    shard_addr,
                                     self.view_request_timeout,
                                 )),
                                 crate::PENDING_LIMIT,

@@ -471,6 +471,10 @@ pub enum ReadySetError {
         num_replicas: usize,
     },
 
+    /// A view was attempted to be built for a reader whose domain is not running
+    #[error("Domain at replica {replica} for reader node {node:?} is not running")]
+    ReaderReplicaNotRunning { replica: usize, node: NodeIndex },
+
     /// A request for a domain replica was sent to a worker that doesn't have that domain replica.
     #[error("Could not find domain {domain_index}.{shard}.{replica} on worker")]
     NoSuchReplica {
