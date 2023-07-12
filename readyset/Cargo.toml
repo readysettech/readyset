@@ -5,8 +5,6 @@ publish = false
 authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
-[target.'cfg(not(target_env="msvc"))'.dependencies]
-tikv-jemallocator = "0.5"
 
 [dependencies]
 anyhow = "1.0"
@@ -17,6 +15,7 @@ fail = "0.5.0"
 failpoint-macros = { path = "../failpoint-macros" }
 metrics = "0.21"
 metrics-exporter-prometheus = "0.12.1"
+tikv-jemallocator = "0.5"
 tokio = { workspace = true, features = ["full"] }
 tokio-native-tls = "0.3.1"
 tokio-stream = { version = "0.1.5", features = ["net"] }

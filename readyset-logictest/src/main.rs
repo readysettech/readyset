@@ -39,7 +39,6 @@ use crate::runner::{NoriaOptions, RunOptions, TestScript};
 
 const REPORT_HANG: Duration = Duration::from_secs(20 * 60);
 
-#[cfg(not(target_env = "msvc"))]
 #[global_allocator]
 static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 

@@ -67,7 +67,6 @@ const UPSTREAM_CONNECTION_RETRY_INTERVAL: Duration = Duration::from_secs(1);
 /// Retry interval to use when attempting to load the schema search path from the upstream database
 const LOAD_SCHEMA_SEARCH_PATH_RETRY_INTERVAL: Duration = Duration::from_secs(1);
 
-#[cfg(not(target_env = "msvc"))]
 #[global_allocator]
 static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
