@@ -23,7 +23,7 @@ use tokio::io::{AsyncReadExt, BufReader, BufStream, BufWriter};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio_stream::wrappers::IntervalStream;
-use tracing::{debug, error, info_span, instrument, warn, Span};
+use tracing::{debug, error, info_span, instrument, trace, warn, Span};
 
 use super::ChannelCoordinator;
 
@@ -259,23 +259,25 @@ impl Replica {
             let tx = match connections.entry(replica_address) {
                 Occupied(entry) => entry.into_mut(),
                 Vacant(entry) => {
-                    // Only add  new entry if: coord.has(n) and coord.get_addr(n) is not banned or
-                    // None.
-                    entry.insert({
-                        while !coord.has(&replica_address) {
-                            tokio::task::yield_now().await;
-                        }
-                        // If the channel is to a remote domain that has failed,
-                        // drop the packets for the domain from this batch.
-                        if let Some(addr) = coord.get_addr(&replica_address) {
-                            if failed.lock().await.contains(&addr) {
-                                warn!(target = ?replica_address, "Skipping packets to domain as it may have failed");
-                                continue;
-                            }
-                        }
+                    let Some(addr) = coord.get_addr(&replica_address) else {
+                        trace!(
+                            target = %replica_address,
+                            num_messages = messages.len(),
+                            "Missing channel for domain, dropping messages"
+                        );
+                        continue;
+                    };
 
-                        coord.builder_for(&replica_address)?.build_async()?
-                    })
+                    if failed.lock().await.contains(&addr) {
+                        warn!(
+                            target = %replica_address,
+                            num_messages = messages.len(),
+                            "Skipping packets to domain as it may have failed"
+                        );
+                        continue;
+                    }
+
+                    entry.insert(coord.builder_for(&replica_address)?.build_async()?)
                 }
             };
 
