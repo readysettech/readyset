@@ -98,10 +98,19 @@ impl<T> Array2<T> {
             elems.extend(row);
         }
 
-        Ok(Self {
-            row_size,
-            cells: elems.into(),
-        })
+        Ok(Self::from_cells_and_row_size(elems, row_size))
+    }
+
+    /// Construct an [`Array2`] from a vector of cells and row size.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the number of cells is not divisible by the row size.
+    #[inline]
+    pub fn from_cells_and_row_size(cells: impl Into<Box<[T]>>, row_size: usize) -> Self {
+        let cells = cells.into();
+        assert_eq!(cells.len() % row_size, 0);
+        Self { cells, row_size }
     }
 
     /// Returns the total number of cells (rows times row size) in this [`Array2`]
@@ -260,6 +269,47 @@ impl<T> Array2<T> {
     #[inline]
     pub fn into_cells(self) -> Vec<T> {
         self.cells.into_vec()
+    }
+
+    /// Transform this [`Array2`] by mapping a function which can return an error over all the
+    /// entries in the [`Array2`], represented as tuples of `((row, column), value)`. If the
+    /// function returns an error for any entry, this entire method will return an error
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use array2::Array2;
+    ///
+    /// let my_array2: Array2<i32> = Array2::from_rows(vec![vec![1, 2], vec![3, 4]]);
+    ///
+    /// let res1 = my_array2
+    ///     .clone()
+    ///     .try_map_cells(|(_, i)| -> Result<i32, String> { Ok(i + 1) });
+    /// assert_eq!(
+    ///     res1.unwrap(),
+    ///     Array2::from_rows(vec![vec![2, 3], vec![4, 5]])
+    /// );
+    ///
+    /// let res2 = my_array2.try_map_cells(|(_, i)| -> Result<i32, String> {
+    ///     if i == 3 {
+    ///         Err("I hate the number three".into())
+    ///     } else {
+    ///         Ok(i + 1)
+    ///     }
+    /// });
+    /// assert_eq!(res2.unwrap_err(), "I hate the number three");
+    /// ```
+    pub fn try_map_cells<F, R, E>(self, f: F) -> std::result::Result<Array2<R>, E>
+    where
+        F: FnMut(((usize, usize), T)) -> std::result::Result<R, E>,
+    {
+        let row_size = self.row_size;
+        Ok(Array2::from_cells_and_row_size(
+            self.into_entries()
+                .map(f)
+                .collect::<std::result::Result<Vec<_>, _>>()?,
+            row_size,
+        ))
     }
 
     /// Returns a reference to a row or cell depending on the type of the index, or `None` if the

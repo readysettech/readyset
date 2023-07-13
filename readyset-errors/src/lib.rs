@@ -545,15 +545,6 @@ pub enum ReadySetError {
     #[error("Error during replication: {0}")]
     ReplicationFailed(String),
 
-    /// There are no available Workers to assign domains to.
-    #[error("Could not find healthy worker to place domain {domain_index}.{shard}")]
-    NoAvailableWorkers {
-        /// The index of the domain.
-        domain_index: usize,
-        /// The shard.
-        shard: usize,
-    },
-
     /// A dataflow ingredient received a record of the wrong length
     #[error("Record of invalid length received")]
     InvalidRecordLength,

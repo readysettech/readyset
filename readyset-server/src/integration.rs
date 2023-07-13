@@ -37,9 +37,7 @@ use readyset_client::internal::LocalNodeIndex;
 use readyset_client::recipe::changelist::{Change, ChangeList, CreateCache};
 use readyset_client::{KeyComparison, Modification, SchemaType, ViewPlaceholder, ViewQuery};
 use readyset_data::{DfType, DfValue, Dialect};
-use readyset_errors::ReadySetError::{
-    self, MigrationPlanFailed, RpcFailed, SelectQueryCreationFailed,
-};
+use readyset_errors::ReadySetError::{self, RpcFailed, SelectQueryCreationFailed};
 use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
 use rust_decimal::prelude::ToPrimitive;
@@ -7129,64 +7127,6 @@ async fn distinct_select_multi_col() {
     assert_eq!(res, vec![(1, 4), (2, 5), (3, 6), (3, 7)]);
 
     shutdown_tx.shutdown().await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn assign_nonreader_domains_to_nonreader_workers() {
-    let authority_store = Arc::new(LocalAuthorityStore::new());
-    let w1_authority = Arc::new(Authority::from(LocalAuthority::new_with_store(
-        authority_store.clone(),
-    )));
-    let w2_authority = Arc::new(Authority::from(LocalAuthority::new_with_store(
-        authority_store,
-    )));
-    let cluster_name = "assign_nonreader_domains_to_nonreader_workers";
-
-    let (mut w1, shutdown_tx_1) = build_custom(
-        cluster_name,
-        Some(DEFAULT_SHARDING),
-        true,
-        w1_authority,
-        true,
-        None,
-    )
-    .await;
-
-    let query = "CREATE TABLE test (id integer, name text);\
-        CREATE CACHE testquery FROM SELECT * FROM test;";
-    let result = w1
-        .extend_recipe(ChangeList::from_str(query, Dialect::DEFAULT_MYSQL).unwrap())
-        .await;
-
-    assert!(matches!(
-        result,
-        Err(ReadySetError::RpcFailed {
-            during: _,
-            // This 'box' keyword appears to be experimental.
-            // So if this test ever fails because of that, feel free to change this.
-            source: box MigrationPlanFailed { .. },
-        })
-    ));
-
-    let (_w2, shutdown_tx_2) = build_custom(
-        cluster_name,
-        Some(DEFAULT_SHARDING),
-        false,
-        w2_authority,
-        false,
-        None,
-    )
-    .await;
-
-    sleep().await;
-
-    let result = w1
-        .extend_recipe(ChangeList::from_str(query, Dialect::DEFAULT_MYSQL).unwrap())
-        .await;
-    println!("{:?}", result);
-    assert!(matches!(result, Ok(_)));
-
-    tokio::join!(shutdown_tx_1.shutdown(), shutdown_tx_2.shutdown());
 }
 
 #[tokio::test(flavor = "multi_thread")]

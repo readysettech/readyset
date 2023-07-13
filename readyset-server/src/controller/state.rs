@@ -398,16 +398,17 @@ impl DfState {
             .map(|replica| {
                 (0..domain.num_shards())
                     .map(|shard| {
-                        let worker = domain.assignment(shard, replica)?;
-
-                        Ok(Some(
-                            self.read_addrs
-                                .get(worker)
-                                .ok_or_else(|| ReadySetError::UnmappableDomain {
-                                    domain_index: domain_index.index(),
-                                })
-                                .copied()?,
-                        ))
+                        domain
+                            .assignment(shard, replica)
+                            .map(|worker| {
+                                self.read_addrs
+                                    .get(worker)
+                                    .ok_or_else(|| ReadySetError::UnmappableDomain {
+                                        domain_index: domain_index.index(),
+                                    })
+                                    .copied()
+                            })
+                            .transpose()
                     })
                     .collect::<ReadySetResult<Vec<_>>>()
             })
@@ -741,7 +742,9 @@ impl DfState {
 
     /// Issue all of `requests` to their corresponding domains asynchronously, and return a stream
     /// of the results, consisting of shard, then replica, then result (potentially in a different
-    /// order)
+    /// order).
+    ///
+    /// If any domains are not running on a worker, this method will return an error.
     ///
     /// # Invariants
     ///
@@ -759,7 +762,7 @@ impl DfState {
             .map(move |(domain, request)| {
                 #[allow(clippy::indexing_slicing)] // came from self.domains
                 self.domains[&domain]
-                    .send_to_healthy::<R>(request, &self.workers)
+                    .send_to_all::<R>(request, &self.workers)
                     .map(move |r| -> ReadySetResult<_> { Ok((domain, r?)) })
             })
             .buffer_unordered(CONCURRENT_REQUESTS)
@@ -1045,7 +1048,7 @@ impl DfState {
     pub(in crate::controller) async fn place_domain(
         &mut self,
         idx: DomainIndex,
-        shard_replica_workers: Array2<WorkerIdentifier>,
+        shard_replica_workers: Array2<Option<WorkerIdentifier>>,
         nodes: Vec<NodeIndex>,
     ) -> ReadySetResult<DomainHandle> {
         // Reader nodes are always assigned to their own domains, so it's good enough to see
@@ -1085,6 +1088,11 @@ impl DfState {
             let num_replicas = replicas.len();
             let mut shard_assignments = Vec::with_capacity(num_replicas);
             for (replica, worker_id) in replicas.iter().enumerate() {
+                let Some(worker_id) = worker_id else {
+                    shard_assignments.push(None);
+                    continue;
+                };
+
                 let replica_address = ReplicaAddress {
                     domain_index: idx,
                     shard,
@@ -1101,13 +1109,11 @@ impl DfState {
                     persistence_parameters: self.persistence.clone(),
                 };
 
-                let w = self
-                    .workers
-                    .get(worker_id)
-                    .ok_or(ReadySetError::NoAvailableWorkers {
-                        domain_index: idx.index(),
-                        shard,
-                    })?;
+                let w = self.workers.get(worker_id).ok_or_else(|| {
+                    internal_err!(
+                        "Domain {replica_address} scheduled onto nonexistent worker {worker_id}"
+                    )
+                })?;
 
                 let idx = domain.index;
 
@@ -1267,6 +1273,7 @@ impl DfState {
                 .await?
                 .into_cells()
                 .into_iter()
+                .flatten(/* Discard results from non-running domains */)
                 .flat_map(move |(_, node_stats)| {
                     node_stats
                         .into_iter()
@@ -1353,7 +1360,9 @@ impl DfState {
             )
             .await?
             .into_cells()
-            .pop()
+            .into_iter()
+            .flatten(/* Discard results from non-running domains */)
+            .next()
             .ok_or_else(|| internal_err!("expected a shard+replica"))?
             .map(|key| SingleKeyEviction {
                 domain_idx: di,
@@ -1503,26 +1512,29 @@ impl DfState {
         {
             let mut scheduler = Scheduler::new(self, &None)?;
             for (domain, nodes) in domain_nodes {
-                match scheduler.schedule_domain(domain, &nodes[..]) {
-                    Ok(workers) => {
-                        let num_shards = workers.num_rows();
-                        let num_replicas = workers[0].len();
-                        dmp.place_domain(domain, workers, nodes.clone());
-                        dmp.set_domain_settings(
-                            domain,
-                            DomainSettings {
-                                num_shards,
-                                num_replicas,
-                            },
-                        );
-                        new.extend(nodes);
+                let workers = scheduler.schedule_domain(domain, &nodes[..])?;
+
+                for ((shard, replica), worker) in workers.entries() {
+                    if worker.is_none() {
+                        dmp.replica_failed_placement(ReplicaAddress {
+                            domain_index: domain,
+                            shard,
+                            replica,
+                        });
                     }
-                    Err(ReadySetError::NoAvailableWorkers { .. }) => {
-                        info!(%domain, "Could not schedule domain");
-                        dmp.domain_failed_placement(domain);
-                    }
-                    Err(e) => return Err(e),
                 }
+
+                let num_shards = workers.num_rows();
+                let num_replicas = workers[0].len();
+                dmp.place_domain(domain, workers, nodes.clone());
+                dmp.set_domain_settings(
+                    domain,
+                    DomainSettings {
+                        num_shards,
+                        num_replicas,
+                    },
+                );
+                new.extend(nodes);
             }
         }
 

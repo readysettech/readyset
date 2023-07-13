@@ -111,7 +111,11 @@ impl StoredDomainRequest {
                         .await?
                         .into_cells()
                         .into_iter()
-                        .all(|done| done)
+                        .all(|done| {
+                            done.unwrap_or(
+                                true, /* If the domain isn't running, we don't care if it's done */
+                            )
+                        })
                     {
                         break;
                     }
@@ -139,13 +143,21 @@ impl StoredDomainRequest {
                     dom.send_to_healthy_shard::<bool>(shard, req, &mainline.workers)
                         .await?
                         .into_iter()
-                        .all(|t| t)
+                        .all(|t| {
+                            t.unwrap_or(
+                                true, /* If the domain isn't running, we don't care if it's ready */
+                            )
+                        })
                 } else {
                     dom.send_to_healthy::<bool>(req, &mainline.workers)
                         .await?
                         .into_cells()
                         .into_iter()
-                        .all(|t| t)
+                        .all(|t| {
+                            t.unwrap_or(
+                                true, /* If the domain isn't running, we don't care if it's ready */
+                            )
+                        })
                 };
                 trace!(
                     request = ?self.req,
@@ -185,7 +197,7 @@ pub struct PlaceRequest {
     /// The index the new domain will have.
     idx: DomainIndex,
     /// A map from domain shard, to replica index, to the worker to schedule the domain shard onto.
-    shard_replica_workers: Array2<WorkerIdentifier>,
+    shard_replica_workers: Array2<Option<WorkerIdentifier>>,
     /// Indices of new nodes to add.
     nodes: Vec<NodeIndex>,
 }
@@ -209,9 +221,9 @@ pub struct DomainMigrationPlan {
     stored: VecDeque<StoredDomainRequest>,
     /// A list of domains to instantiate on application.
     place: Vec<PlaceRequest>,
-    /// A list of domains which could not be placed, because no worker was available for them to
+    /// A list of replicas which could not be placed, because no worker was available for them to
     /// run on
-    failed_placement: Vec<DomainIndex>,
+    failed_placement: Vec<ReplicaAddress>,
     /// A map of valid domain indices to the settings for that domain.
     domains: HashMap<DomainIndex, DomainSettings>,
 }
@@ -294,7 +306,7 @@ impl DomainMigrationPlan {
     pub fn place_domain(
         &mut self,
         idx: DomainIndex,
-        shard_replica_workers: Array2<WorkerIdentifier>,
+        shard_replica_workers: Array2<Option<WorkerIdentifier>>,
         nodes: Vec<NodeIndex>,
     ) {
         self.place.push(PlaceRequest {
@@ -304,10 +316,10 @@ impl DomainMigrationPlan {
         });
     }
 
-    /// Mark that a given domain could not be placed because because no worker was available for it
+    /// Mark that a given replica could not be placed because because no worker was available for it
     /// to run on
-    pub fn domain_failed_placement(&mut self, idx: DomainIndex) {
-        self.failed_placement.push(idx);
+    pub fn replica_failed_placement(&mut self, replica: ReplicaAddress) {
+        self.failed_placement.push(replica);
     }
 
     /// Return the number of shards a given domain has.
@@ -437,7 +449,7 @@ impl DomainMigrationPlan {
 
     /// Returns list of domains which could not be placed because no worker was available for them
     /// to run on
-    pub fn failed_placement(&self) -> &[DomainIndex] {
+    pub fn failed_placement(&self) -> &[ReplicaAddress] {
         &self.failed_placement
     }
 }
@@ -1142,6 +1154,16 @@ fn plan_add_nodes(
             #[allow(clippy::unwrap_used)]
             let nodes = uninformed_domain_nodes.remove(&domain).unwrap();
             let worker_shards = scheduler.schedule_domain(domain, &nodes)?;
+
+            for ((shard, replica), worker) in worker_shards.entries() {
+                if worker.is_none() {
+                    dmp.replica_failed_placement(ReplicaAddress {
+                        domain_index: domain,
+                        shard,
+                        replica,
+                    });
+                }
+            }
 
             let num_shards = worker_shards.num_rows();
             let num_replicas = worker_shards.row_size();

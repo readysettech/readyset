@@ -126,7 +126,7 @@ impl<'state> Scheduler<'state> {
         &mut self,
         domain_index: DomainIndex,
         nodes: &[NodeIndex],
-    ) -> ReadySetResult<Array2<WorkerIdentifier>> {
+    ) -> ReadySetResult<Array2<Option<WorkerIdentifier>>> {
         let num_shards = self.dataflow_state.ingredients[nodes[0]]
             .sharded_by()
             .shards()
@@ -161,15 +161,16 @@ impl<'state> Scheduler<'state> {
             let mut replicas = Vec::with_capacity(num_replicas);
             // Filter out any workers that have a different replica of the same domain shard, to
             // avoid scheduling two replicas of the same shard onto the same worker
-            let available_workers = workers
-                .clone()
-                .filter(|(wi, _)| {
-                    self.scheduled_shards
-                        .get(wi)
-                        .map_or(true, |shards| !shards.contains(&(domain_index, shard)))
-                })
-                .collect::<Vec<_>>();
             for replica in 0..num_replicas {
+                let available_workers = workers
+                    .clone()
+                    .filter(|(wi, _)| {
+                        self.scheduled_shards
+                            .get(wi)
+                            .map_or(true, |shards| !shards.contains(&(domain_index, shard)))
+                    })
+                    .collect::<Vec<_>>();
+
                 // Shards of certain dataflow nodes may have restrictions that
                 // limit the workers they are placed upon.
                 let dataflow_node_restrictions = nodes
@@ -210,24 +211,25 @@ impl<'state> Scheduler<'state> {
                         worker_meets_restrictions(worker, &dataflow_node_restrictions)
                     })
                 }
-                .map(|(wi, _)| *wi)
-                .ok_or(ReadySetError::NoAvailableWorkers {
-                    domain_index: domain_index.index(),
-                    shard,
-                })?;
+                .map(|(wi, _)| *wi);
 
-                trace!(%shard, %replica, %worker_id, "Scheduled replica");
-                replicas.push(worker_id.clone());
+                match worker_id {
+                    Some(worker_id) => trace!(%shard, %replica, %worker_id, "Scheduled replica"),
+                    None => trace!(%shard, %replica, "Failed to schedule replica"),
+                }
+                replicas.push(worker_id.cloned());
 
-                self.scheduled_shards
-                    .entry(worker_id)
-                    .or_default()
-                    .insert((domain_index, shard));
+                if let Some(worker_id) = worker_id {
+                    self.scheduled_shards
+                        .entry(worker_id)
+                        .or_default()
+                        .insert((domain_index, shard));
 
-                let stats = self.worker_stats.entry(worker_id).or_default();
-                stats.num_domain_shard_replicas += 1;
-                if is_base_table_domain {
-                    stats.num_base_table_domain_shard_replicas += 1;
+                    let stats = self.worker_stats.entry(worker_id).or_default();
+                    stats.num_domain_shard_replicas += 1;
+                    if is_base_table_domain {
+                        stats.num_base_table_domain_shard_replicas += 1;
+                    }
                 }
             }
             res.push(replicas);

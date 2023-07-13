@@ -50,20 +50,9 @@ impl DomainHandle {
 
     /// Look up which worker the given shard/replica pair is assigned to
     ///
-    /// Returns [`ReadySetError::NoSuchReplica`] if the replica has not been assigned to a worker.
-    pub(super) fn assignment(
-        &self,
-        shard: usize,
-        replica: usize,
-    ) -> ReadySetResult<&WorkerIdentifier> {
-        self.shards
-            .get((shard, replica))
-            .and_then(|r| r.as_ref())
-            .ok_or_else(|| ReadySetError::NoSuchReplica {
-                domain_index: self.idx.index(),
-                shard,
-                replica,
-            })
+    /// Returns [`None`] if the replica has not been assigned to a worker.
+    pub(super) fn assignment(&self, shard: usize, replica: usize) -> Option<&WorkerIdentifier> {
+        self.shards.get((shard, replica)).and_then(|r| r.as_ref())
     }
 
     pub(super) fn is_assigned_to_worker(&self, worker: &WorkerIdentifier) -> bool {
@@ -80,11 +69,13 @@ impl DomainHandle {
         replica: usize,
         req: DomainRequest,
         workers: &HashMap<WorkerIdentifier, Worker>,
-    ) -> ReadySetResult<R>
+    ) -> ReadySetResult<Option<R>>
     where
         R: DeserializeOwned,
     {
-        let addr = self.assignment(shard, replica)?;
+        let Some(addr) = self.assignment(shard, replica) else {
+            return Ok(None);
+        };
         if let Some(worker) = workers.get(addr) {
             let req = req.clone();
             let replica_address = ReplicaAddress {
@@ -92,15 +83,17 @@ impl DomainHandle {
                 shard,
                 replica,
             };
-            Ok(worker
-                .rpc(WorkerRequestKind::DomainRequest {
-                    replica_address,
-                    request: Box::new(req),
-                })
-                .await
-                .map_err(|e| {
-                    rpc_err_no_downcast(format!("domain request to {}", replica_address), e)
-                })?)
+            Ok(Some(
+                worker
+                    .rpc(WorkerRequestKind::DomainRequest {
+                        replica_address,
+                        request: Box::new(req),
+                    })
+                    .await
+                    .map_err(|e| {
+                        rpc_err_no_downcast(format!("domain request to {}", replica_address), e)
+                    })?,
+            ))
         } else {
             error!(%addr, ?req, "tried to send domain request to failed worker");
             Err(ReadySetError::WorkerFailed { uri: addr.clone() })
@@ -112,7 +105,7 @@ impl DomainHandle {
         shard: usize,
         req: DomainRequest,
         workers: &HashMap<WorkerIdentifier, Worker>,
-    ) -> ReadySetResult<Vec<R>>
+    ) -> ReadySetResult<Vec<Option<R>>>
     where
         R: DeserializeOwned,
     {
@@ -124,12 +117,15 @@ impl DomainHandle {
             .await
     }
 
-    /// returns shard first, then replica
+    /// Send the given [`req`] to all *healthy* shard replicas of this domain. Returns a
+    /// 2-dimensional array, indexed in shard, replica order, of the results of sending each
+    /// request. Each result which was sent to a domain which has not yet been placed onto a worker
+    /// will be [`None`]
     pub(super) async fn send_to_healthy<R>(
         &self,
         req: DomainRequest,
         workers: &HashMap<WorkerIdentifier, Worker>,
-    ) -> ReadySetResult<Array2<R>>
+    ) -> ReadySetResult<Array2<Option<R>>>
     where
         R: DeserializeOwned,
     {
@@ -146,5 +142,28 @@ impl DomainHandle {
             .await?;
 
         Ok(Array2::from_rows(results))
+    }
+
+    /// Send the given [`req`] to *all* shard replicas of this domain. Returns a 2-dimensional
+    /// array, indexed in shard, replica order, of the results of sending each request. If any of
+    /// the replicas of the domain have not yet been placed onto a worker, this function will return
+    /// an error.
+    pub(super) async fn send_to_all<R>(
+        &self,
+        req: DomainRequest,
+        workers: &HashMap<WorkerIdentifier, Worker>,
+    ) -> ReadySetResult<Array2<R>>
+    where
+        R: DeserializeOwned,
+    {
+        self.send_to_healthy(req, workers)
+            .await?
+            .try_map_cells(|((shard, replica), r)| {
+                r.ok_or_else(|| ReadySetError::NoSuchReplica {
+                    domain_index: self.index().into(),
+                    shard,
+                    replica,
+                })
+            })
     }
 }
