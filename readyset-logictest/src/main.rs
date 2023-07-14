@@ -32,15 +32,15 @@ pub mod parser;
 pub mod permute;
 pub mod runner;
 
+// readyset_alloc initializes the global allocator
+extern crate readyset_alloc;
+
 use crate::from_query_log::FromQueryLog;
 use crate::generate::Generate;
 use crate::permute::Permute;
 use crate::runner::{NoriaOptions, RunOptions, TestScript};
 
 const REPORT_HANG: Duration = Duration::from_secs(20 * 60);
-
-#[global_allocator]
-static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 #[derive(Parser)]
 struct Opts {

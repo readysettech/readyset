@@ -15,7 +15,6 @@ fail = "0.5.0"
 failpoint-macros = { path = "../failpoint-macros" }
 metrics = "0.21"
 metrics-exporter-prometheus = "0.12.1"
-tikv-jemallocator = "0.5"
 tokio = { workspace = true, features = ["full"] }
 tokio-native-tls = "0.3.1"
 tokio-stream = { version = "0.1.5", features = ["net"] }
@@ -33,6 +32,7 @@ mysql-srv = { path = "../mysql-srv" }
 psql-srv = { path = "../psql-srv" }
 database-utils = { path = "../database-utils" }
 readyset-adapter = { path = "../readyset-adapter" }
+readyset-alloc = { path = "../readyset-alloc" }
 readyset-client = { path = "../readyset-client/" }
 readyset-client-metrics = { path = "../readyset-client-metrics" }
 readyset-data = { path = "../readyset-data" }

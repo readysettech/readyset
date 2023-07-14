@@ -58,6 +58,9 @@ use tokio_stream::wrappers::TcpListenerStream;
 use tracing::{debug, debug_span, error, info, info_span, span, warn, Level};
 use tracing_futures::Instrument;
 
+// readyset_alloc initializes the global allocator
+extern crate readyset_alloc;
+
 /// Timeout to use when connecting to the upstream database
 const UPSTREAM_CONNECTION_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -66,9 +69,6 @@ const UPSTREAM_CONNECTION_RETRY_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Retry interval to use when attempting to load the schema search path from the upstream database
 const LOAD_SCHEMA_SEARCH_PATH_RETRY_INTERVAL: Duration = Duration::from_secs(1);
-
-#[global_allocator]
-static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 #[async_trait]
 pub trait ConnectionHandler {

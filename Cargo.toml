@@ -28,6 +28,7 @@ members = [
     "reader-map",
     "readyset",
     "readyset-adapter",
+    "readyset-alloc",
     "readyset-client",
     "readyset-client-metrics",
     "readyset-client-test-helpers",

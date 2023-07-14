@@ -1863,6 +1863,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "fxhash"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c31b6d751ae2c7f11320402d34e41349dd1016f8d5d45e48c4312bc8625af50c"
+dependencies = [
+ "byteorder",
+]
+
+[[package]]
 name = "generator"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4237,6 +4246,7 @@ dependencies = [
  "nom-sql",
  "psql-srv",
  "readyset-adapter",
+ "readyset-alloc",
  "readyset-client",
  "readyset-client-metrics",
  "readyset-data",
@@ -4252,7 +4262,6 @@ dependencies = [
  "readyset-version",
  "replicators",
  "reqwest",
- "tikv-jemallocator",
  "tokio",
  "tokio-native-tls",
  "tokio-stream",
@@ -4317,6 +4326,19 @@ dependencies = [
  "tracing",
  "tracing-futures",
  "vec1",
+]
+
+[[package]]
+name = "readyset-alloc"
+version = "0.1.0"
+dependencies = [
+ "fxhash",
+ "lazy_static",
+ "libc",
+ "tempfile",
+ "tikv-jemalloc-ctl",
+ "tikv-jemalloc-sys",
+ "tikv-jemallocator",
 ]
 
 [[package]]
@@ -4654,6 +4676,7 @@ dependencies = [
  "psql-srv",
  "query-generator",
  "readyset-adapter",
+ "readyset-alloc",
  "readyset-client",
  "readyset-data",
  "readyset-mysql",
@@ -4849,6 +4872,7 @@ dependencies = [
  "proptest",
  "querystring",
  "rand 0.7.3",
+ "readyset-alloc",
  "readyset-client",
  "readyset-common",
  "readyset-data",
@@ -4880,7 +4904,6 @@ dependencies = [
  "test-utils",
  "thiserror",
  "tikv-jemalloc-ctl",
- "tikv-jemallocator",
  "timekeeper",
  "tokio",
  "tokio-retry",
