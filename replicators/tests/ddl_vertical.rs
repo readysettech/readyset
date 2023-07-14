@@ -1046,6 +1046,18 @@ impl ModelState for DDLModelState {
                 recreate_caches_using_type(type_name, &self.tables, rs_conn).await;
             }
         }
+        // If we change any previously created types, clear the client library type cache to
+        // prevent false positive test failures later on in the test:
+        if matches!(
+            op,
+            Operation::DropEnum(_)
+                | Operation::AppendEnumValue { .. }
+                | Operation::RenameEnumValue { .. }
+                | Operation::InsertEnumValue { .. }
+        ) {
+            rs_conn.clear_type_cache();
+            pg_conn.clear_type_cache();
+        }
     }
 
     async fn check_postconditions(&self, ctxt: &mut Self::RunContext) {
