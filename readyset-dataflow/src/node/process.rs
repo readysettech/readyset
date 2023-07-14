@@ -287,10 +287,11 @@ impl Node {
                         Packet::ReplayPiece {
                             ref mut data,
                             context: payload::ReplayPieceContext::Full { last },
+                            tag,
                             ..
                         } => {
-                            trace!(?data, last, "received full replay");
-                            (data, ReplayContext::Full { last })
+                            trace!(?data, %tag, last, "received full replay");
+                            (data, ReplayContext::Full { last, tag })
                         }
                         Packet::Message { ref mut data, .. } => {
                             trace!(?data, "received regular message");

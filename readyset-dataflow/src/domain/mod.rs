@@ -2925,6 +2925,12 @@ impl Domain {
                     // We would have bailed in a previous iteration (break 'outer, below) if
                     // it wasn't Some
                     if let Packet::ReplayPiece { ref mut tag, .. } = m.as_deref_mut().unwrap() {
+                        trace!(
+                            %force_tag,
+                            original_tag = %tag,
+                            node = %segment.node,
+                            "Forcing tag",
+                        );
                         *tag = force_tag;
                     }
                 }

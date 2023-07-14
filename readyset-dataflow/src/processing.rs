@@ -318,6 +318,7 @@ pub(crate) enum ReplayContext<'a> {
     },
     Full {
         last: bool,
+        tag: Tag,
     },
 }
 
@@ -334,6 +335,7 @@ impl<'a> ReplayContext<'a> {
     pub(crate) fn tag(&self) -> Option<Tag> {
         match self {
             Self::Partial { tag, .. } => Some(*tag),
+            Self::Full { tag, .. } => Some(*tag),
             _ => None,
         }
     }

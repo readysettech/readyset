@@ -56,14 +56,15 @@ enum Emit {
     },
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-enum FullWait {
-    None,
-    Ongoing {
-        started: HashSet<LocalNodeIndex>,
-        finished: usize,
-        buffered: Records,
-    },
+/// Part of a full replay that has been buffered at this union
+#[derive(Debug)]
+struct FullWait {
+    /// The set of parent nodes we've received replays from for this full replay
+    started: HashSet<LocalNodeIndex>,
+    /// The number of full replays we've received from our parents
+    finished: usize,
+    /// The records we've received and buffered as part of this full replay
+    buffered: Records,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -204,7 +205,59 @@ pub struct Union {
 
     required: usize,
 
-    full_wait_state: FullWait,
+    /// Map of buffered full replays *by tag*.
+    ///
+    /// Unions will receive replays as separate messages per parent, and need to wait until they've
+    /// received replays from all their parents before they release the replay downstream. But they
+    /// need to do this *by tag*, because unions with downstream unions will receive *multiple*
+    /// replays, split across parents, and might receive the pieces of those replays in any order.
+    /// For example, let's say we have the following graph:
+    ///
+    /// ```notrust
+    ///    s
+    ///    |
+    /// +--+--+
+    /// a     b
+    /// +--+--+
+    ///    |
+    ///   u_1
+    ///    |
+    /// +--+--+
+    /// c     d
+    /// +--+--+
+    ///    |
+    ///   u_2
+    ///    |
+    ///    v
+    /// ```
+    ///
+    /// That results in the following replay paths:
+    ///
+    /// 1. `s -> a -> u_1 -> c -> u_2 -> v`
+    /// 2. `s -> b -> u_1 -> c -> u_2 -> v`
+    /// 3. `s -> a -> u_1 -> d -> u_2 -> v`
+    /// 4. `s -> b -> u_1 -> d -> u_2 -> v`
+    ///
+    /// If v intitiates a replay from `s`, that'll result in four replays being sent to `u_1`, one
+    /// per path. But depending on how things happen concurrently, `u_1` might get the replays in
+    /// the following order:
+    ///
+    /// 1. replay with tag 1 from `a`
+    /// 2. replay with tag 3 from `a`
+    /// 3. replay with tag 4 from `b`
+    /// 4. replay with tag 2 from `b`
+    ///
+    /// What we want to do is buffer both replays 1 and 2 *separately* within the union, and only
+    /// release the records from 1 once we receive replay 4, and release the records from 2 once we
+    /// receive replay 3 (since those are the groups for downstream tags). We already have the
+    /// grouping done for us (the domain remaps tags based on [`ReplayPathSegment::force_tag_to`],
+    /// which is set based on tag grouping in the materialization planner), so we can pull that off
+    /// by just storing the buffered replay data keyed by the tag of the full replay.
+    ///
+    /// [`ReplayPathSegment::force_tag_to`]: crate::payload::ReplayPathSegment::force_tag_to
+    #[serde(skip)]
+    // We skip any state when serializing, as we will deserialize when recovering.
+    full_wait_state: HashMap<Tag, FullWait>,
 
     me: Option<NodeIndex>,
 }
@@ -217,7 +270,7 @@ impl Clone for Union {
             required: self.required,
             replay_key: Default::default(),
             replay_pieces: Default::default(),
-            full_wait_state: FullWait::None,
+            full_wait_state: Default::default(),
 
             me: self.me,
         }
@@ -266,7 +319,7 @@ impl Union {
             required: parents,
             replay_key: Default::default(),
             replay_pieces: Default::default(),
-            full_wait_state: FullWait::None,
+            full_wait_state: Default::default(),
             me: None,
         })
     }
@@ -280,7 +333,7 @@ impl Union {
             required: shards,
             replay_key: Default::default(),
             replay_pieces: Default::default(),
-            full_wait_state: FullWait::None,
+            full_wait_state: Default::default(),
             me: None,
         }
     }
@@ -450,20 +503,20 @@ impl Ingredient for Union {
         // below just work out.
         match replay {
             ReplayContext::None => {
-                // prepare for a little song-and-dance for the borrow-checker
-                let mut absorb_for_full = false;
-                if let FullWait::Ongoing { ref started, .. } = self.full_wait_state {
-                    // ongoing full replay. is this a record we need to not disappear (i.e.,
-                    // message 2 in the explanation)?
-                    if started.len() != self.required && started.contains(&from) {
-                        // yes! keep it.
-                        // but we can't borrow self mutably here to call on_input, since we
-                        // borrowed started immutably above...
-                        absorb_for_full = true;
-                    }
-                }
+                // Have any tags currently absorbed a full replay?
+                let absorb_for_full: Vec<Tag> = self
+                    .full_wait_state
+                    .iter()
+                    .filter_map(|(tag, FullWait { started, .. })| {
+                        // ongoing full replay. is this a record we need to not disappear (i.e.,
+                        // message 2 in the explanation)?
+                        (started.len() != self.required && started.contains(&from)).then_some(*tag)
+                    })
+                    .collect();
 
-                if absorb_for_full {
+                let mut out = None;
+                let mut rs = Some(rs); // we'll only take this once, to avoid cloning
+                for tag in absorb_for_full {
                     trace!("union absorbing update for full replay");
 
                     // we shouldn't be stepping on any partial materialization toes, but let's
@@ -478,28 +531,32 @@ impl Ingredient for Union {
                     // TODO: why is this an || past self?
                     invariant!(self.replay_key.is_empty() || self.replay_pieces.is_empty());
 
-                    // process the results (self is okay to have mutably borrowed here)
-                    let rs = self.on_input(from, rs, &replay, n, s, ans)?.results;
+                    // process the results, but only once (it'll always have the same result)
+                    let rs = match &mut out {
+                        None => out.insert(
+                            self.on_input(from, rs.take().unwrap(), &replay, n, s, ans)?
+                                .results,
+                        ),
+                        Some(rs) => rs,
+                    };
 
-                    // *then* borrow self.full_wait_state again
-                    if let FullWait::Ongoing {
-                        ref mut buffered, ..
-                    } = self.full_wait_state
-                    {
-                        // absorb into the buffer
-                        buffered.extend(rs.iter().cloned());
-                        // we clone above so that we can also return the processed results
-                        return Ok(RawProcessingResult::Regular(ProcessingResult {
-                            results: rs,
-                            ..Default::default()
-                        }));
-                    } else {
-                        // absorb_for_full will only be true if we've matched on this exactly. This
-                        // only appears to be here as a hack around the ownership system
-                        // regarding rs, so rs doesn't need to be cloned.
-                        unreachable!();
-                    }
+                    // *then* borrow self.full_wait_state again, to absorb into the buffer
+                    self.full_wait_state
+                        .get_mut(&tag)
+                        .unwrap()
+                        .buffered
+                        .extend(rs.iter().cloned());
                 }
+
+                if let Some(results) = out {
+                    // Also return the processed results
+                    return Ok(RawProcessingResult::Regular(ProcessingResult {
+                        results,
+                        ..Default::default()
+                    }));
+                }
+                // If we get here, we never took `rs` above, so we can do that now safely
+                let rs = rs.take().unwrap();
 
                 if self.replay_pieces.is_empty() {
                     // no replay going on, so we're done.
@@ -601,7 +658,7 @@ impl Ingredient for Union {
                     self.on_input(from, rs, &replay, n, s, ans)?,
                 ))
             }
-            ReplayContext::Full { last } => {
+            ReplayContext::Full { last, tag } => {
                 // this part is actually surpringly straightforward, but the *reason* it is
                 // straightforward is not. let's walk through what we know first:
                 //
@@ -617,8 +674,11 @@ impl Ingredient for Union {
                 //  2. ensure that all messages we forward after we allow the first replay message
                 //     through logically follow the replay.
                 //
-                // step 1 is pretty easy -- we only set last = true when we've seen last = true
-                // from all our ancestors. until that is the case, we just set last = false in all
+                // step 1 is not too hard -- we only set last = true when we've seen last = true
+                // from all our ancestors. The only thing we have to make sure about there is that
+                // we actually have received a replay from *each* ancestor, and not just two
+                // successive replays from the *same* ancestor. until that is the case, we just set
+                // last = false in all
                 // our outgoing messages (even if they had last set).
                 //
                 // step 2 is trickier. consider the following in a union U
@@ -656,9 +716,8 @@ impl Ingredient for Union {
                 // still emit 2 (i.e., not capture it), since it'll just be dropped by the target
                 // domain.
                 let mut rs = self.on_input(from, rs, &replay, n, s, ans)?.results;
-                let exit;
-                match self.full_wait_state {
-                    FullWait::None => {
+                match self.full_wait_state.entry(tag) {
+                    hash_map::Entry::Vacant(e) => {
                         if self.required == 1 {
                             // no need to ever buffer
                             return Ok(RawProcessingResult::FullReplay(rs, last));
@@ -670,20 +729,19 @@ impl Ingredient for Union {
                         );
 
                         // we need to hold this back until we've received one from every ancestor
-                        let mut s = HashSet::new();
-                        s.insert(from);
-                        self.full_wait_state = FullWait::Ongoing {
-                            started: s,
+                        e.insert(FullWait {
+                            started: HashSet::from([from]),
                             finished: usize::from(last),
                             buffered: rs,
-                        };
-                        return Ok(RawProcessingResult::CapturedFull);
+                        });
+                        Ok(RawProcessingResult::CapturedFull)
                     }
-                    FullWait::Ongoing {
-                        ref mut started,
-                        ref mut finished,
-                        ref mut buffered,
-                    } => {
+                    hash_map::Entry::Occupied(mut wait) => {
+                        let FullWait {
+                            started,
+                            finished,
+                            buffered,
+                        } = wait.get_mut();
                         if last {
                             *finished += 1;
                         }
@@ -693,9 +751,10 @@ impl Ingredient for Union {
                             // make sure to include what's in *this* replay.
                             buffered.append(&mut *rs);
                             debug!("union releasing end of full replay");
-                            exit =
+                            let res =
                                 RawProcessingResult::FullReplay(buffered.split_off(0).into(), true);
-                        // fall through to below match where we'll set FullWait::None
+                            wait.remove();
+                            Ok(res)
                         } else {
                             if started.len() != self.required {
                                 if started.insert(from) && started.len() == self.required {
@@ -723,15 +782,10 @@ impl Ingredient for Union {
                             // if we fell through here, it means we're still missing the first
                             // replay from at least one ancestor, so we need to buffer
                             buffered.append(&mut *rs);
-                            return Ok(RawProcessingResult::CapturedFull);
+                            Ok(RawProcessingResult::CapturedFull)
                         }
                     }
                 }
-
-                // we only fall through here if we're done!
-                // and it's only because we can't change self.full_wait_state while matching on it
-                self.full_wait_state = FullWait::None;
-                Ok(exit)
             }
             ReplayContext::Partial {
                 key_cols,
@@ -1311,6 +1365,164 @@ mod tests {
                     assert_eq!(keys, HashSet::from([key]));
                 }
                 _ => unreachable!("Expected replay piece, got: {:?}", res),
+            }
+        }
+
+        #[test]
+        fn left_then_left_then_right_then_right() {
+            let (mut g, left, right) = setup(DuplicateMode::UnionAll);
+            let t0 = Tag::new(0);
+            let t1 = Tag::new(1);
+
+            let res = g.input_raw(
+                left,
+                vec![vec![DfValue::from(1), DfValue::from("a")]],
+                ReplayContext::Full {
+                    last: true,
+                    tag: t0,
+                },
+                false,
+            );
+            assert!(matches!(res, RawProcessingResult::CapturedFull));
+
+            let res = g.input_raw(
+                left,
+                vec![vec![DfValue::from(1), DfValue::from("a")]],
+                ReplayContext::Full {
+                    last: true,
+                    tag: t1,
+                },
+                false,
+            );
+            assert!(matches!(res, RawProcessingResult::CapturedFull));
+
+            let res = g.input_raw(
+                right,
+                vec![vec![DfValue::from(2), DfValue::None, DfValue::from("b")]],
+                ReplayContext::Full {
+                    last: true,
+                    tag: t1,
+                },
+                false,
+            );
+            match res {
+                RawProcessingResult::FullReplay(records, last) => {
+                    assert!(last);
+                    assert_eq!(
+                        *records,
+                        vec![
+                            vec![DfValue::from(1), DfValue::from("a")].into(),
+                            vec![DfValue::from(2), DfValue::from("b")].into()
+                        ]
+                    )
+                }
+                _ => panic!(),
+            }
+
+            let res = g.input_raw(
+                right,
+                vec![vec![DfValue::from(2), DfValue::None, DfValue::from("b")]],
+                ReplayContext::Full {
+                    last: true,
+                    tag: t0,
+                },
+                false,
+            );
+            match res {
+                RawProcessingResult::FullReplay(records, last) => {
+                    assert!(last);
+                    assert_eq!(
+                        *records,
+                        vec![
+                            vec![DfValue::from(1), DfValue::from("a")].into(),
+                            vec![DfValue::from(2), DfValue::from("b")].into()
+                        ]
+                    )
+                }
+                _ => panic!(),
+            }
+        }
+
+        #[test]
+        fn left_then_left_then_update_then_right_then_right() {
+            let (mut g, left, right) = setup(DuplicateMode::UnionAll);
+            let t0 = Tag::new(0);
+            let t1 = Tag::new(1);
+
+            let res = g.input_raw(
+                left,
+                vec![vec![DfValue::from(1), DfValue::from("a")]],
+                ReplayContext::Full {
+                    last: true,
+                    tag: t0,
+                },
+                false,
+            );
+            assert!(matches!(res, RawProcessingResult::CapturedFull));
+
+            let res = g.input_raw(
+                left,
+                vec![vec![DfValue::from(1), DfValue::from("b")]],
+                ReplayContext::Full {
+                    last: true,
+                    tag: t1,
+                },
+                false,
+            );
+            assert!(matches!(res, RawProcessingResult::CapturedFull));
+
+            g.input(
+                left,
+                vec![vec![DfValue::from(10), DfValue::from("aa")]],
+                false,
+            );
+
+            let res = g.input_raw(
+                right,
+                vec![vec![DfValue::from(2), DfValue::None, DfValue::from("b")]],
+                ReplayContext::Full {
+                    last: true,
+                    tag: t1,
+                },
+                false,
+            );
+            match res {
+                RawProcessingResult::FullReplay(records, last) => {
+                    assert!(last);
+                    assert_eq!(
+                        *records,
+                        vec![
+                            vec![DfValue::from(1), DfValue::from("b")].into(),
+                            vec![DfValue::from(10), DfValue::from("aa")].into(),
+                            vec![DfValue::from(2), DfValue::from("b")].into()
+                        ]
+                    )
+                }
+                _ => panic!(),
+            }
+
+            let res = g.input_raw(
+                right,
+                vec![vec![DfValue::from(2), DfValue::None, DfValue::from("a")]],
+                ReplayContext::Full {
+                    last: true,
+                    tag: t0,
+                },
+                false,
+            );
+            match res {
+                RawProcessingResult::FullReplay(records, last) => {
+                    assert!(last);
+                    assert_eq!(
+                        *records,
+                        vec![
+                            vec![DfValue::from(1), DfValue::from("a")].into(),
+                            vec![DfValue::from(10), DfValue::from("aa")].into(),
+                            vec![DfValue::from(2), DfValue::from("a")].into()
+                        ]
+                    )
+                }
+                _ => panic!(),
             }
         }
     }
