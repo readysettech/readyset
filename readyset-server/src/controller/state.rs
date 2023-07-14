@@ -848,7 +848,7 @@ impl DfState {
 
     /// Returns a vector of [`DomainDescriptor`] giving information about the addresses of all
     /// running domains within the cluster
-    pub(super) fn domain_addresses(&self) -> ReadySetResult<Vec<DomainDescriptor>> {
+    pub(super) fn domain_addresses(&self) -> Vec<DomainDescriptor> {
         let mut domain_addresses = Vec::new();
         for (domain_index, handle) in &self.domains {
             for shard in 0..handle.num_shards() {
@@ -858,21 +858,15 @@ impl DfState {
                         shard,
                         replica,
                     };
-                    let socket_addr = self
-                        .channel_coordinator
-                        .get_addr(&replica_address)
-                        .ok_or_else(|| ReadySetError::NoSuchReplica {
-                            domain_index: domain_index.index(),
-                            shard,
-                            replica,
-                        })?;
 
-                    domain_addresses.push(DomainDescriptor::new(replica_address, socket_addr));
+                    if let Some(socket_addr) = self.channel_coordinator.get_addr(&replica_address) {
+                        domain_addresses.push(DomainDescriptor::new(replica_address, socket_addr));
+                    }
                 }
             }
         }
 
-        Ok(domain_addresses)
+        domain_addresses
     }
 
     /// Have all domain replicas been placed onto workers in the cluster?

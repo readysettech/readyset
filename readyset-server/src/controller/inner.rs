@@ -585,7 +585,7 @@ impl Leader {
                 domain_scheduling_config,
                 self.worker_request_timeout,
             );
-            let domain_addresses = ds.domain_addresses()?;
+            let domain_addresses = ds.domain_addresses();
 
             // Clean up any potential stale domains that may have been running on that worker
             if let Err(e) = ws.rpc::<()>(WorkerRequestKind::ClearDomains).await {
