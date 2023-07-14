@@ -48,6 +48,17 @@ impl DomainHandle {
         self.shards.cells().iter().all(|addr| addr.is_some())
     }
 
+    /// Merge all addresses from the given [`DomainHandle`] into this [`DomainHandle`]
+    pub(super) fn merge(&mut self, other: DomainHandle) {
+        debug_assert_eq!(other.idx, self.idx);
+        debug_assert_eq!(other.shards.shape(), self.shards.shape());
+        for (pos, wid) in other.shards.into_entries() {
+            if wid.is_some() {
+                self.shards[pos] = wid;
+            }
+        }
+    }
+
     /// Look up which worker the given shard/replica pair is assigned to
     ///
     /// Returns [`None`] if the replica has not been assigned to a worker.

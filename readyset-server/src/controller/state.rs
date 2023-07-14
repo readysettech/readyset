@@ -882,7 +882,11 @@ impl DfState {
     pub(super) fn unplaced_domain_nodes(&self) -> HashMap<DomainIndex, HashSet<NodeIndex>> {
         self.domain_nodes
             .iter()
-            .filter(|(d, _)| !self.domains.contains_key(d))
+            .filter(|(d, _)| {
+                self.domains
+                    .get(d)
+                    .map_or(true, |dh| !dh.all_replicas_placed())
+            })
             .map(|(k, v)| (*k, v.values().copied().collect()))
             .collect()
     }

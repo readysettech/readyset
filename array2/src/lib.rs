@@ -165,6 +165,24 @@ impl<T> Array2<T> {
         self.row_size
     }
 
+    /// Returns the shape of this [`Array2`], represented as a tuple of the row size and number of
+    /// rows
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use array2::Array2;
+    ///
+    /// let my_array2: Array2<i32> = Array2::from_rows(vec![vec![1, 2, 3], vec![4, 5, 6]]);
+    ///
+    /// assert_eq!(my_array2.shape(), (3, 2));
+    /// ```
+    #[must_use]
+    #[inline]
+    pub fn shape(&self) -> (usize, usize) {
+        (self.row_size, self.num_rows())
+    }
+
     /// Construct an iterator over slices of the rows in this [`Array2`]
     ///
     /// # Examples

@@ -31,7 +31,7 @@
 //!
 //! Beware, Here be slightly smaller dragons™
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{hash_map, HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
 use array2::Array2;
@@ -295,8 +295,7 @@ impl DomainMigrationPlan {
     }
 
     pub fn set_domain_settings(&mut self, idx: DomainIndex, settings: DomainSettings) {
-        let existing = self.domains.insert(idx, settings);
-        debug_assert!(existing.is_none(), "Domain {} already exists!", idx)
+        self.domains.insert(idx, settings);
     }
 
     /// Enqueues a request to add a new domain `idx` with `nodes`, running on a worker per-shard
@@ -352,7 +351,12 @@ impl DomainMigrationPlan {
             let handle = mainline
                 .place_domain(place.idx, place.shard_replica_workers, place.nodes)
                 .await?;
-            mainline.domains.insert(place.idx, handle);
+            match mainline.domains.entry(place.idx) {
+                hash_map::Entry::Occupied(mut e) => e.get_mut().merge(handle),
+                hash_map::Entry::Vacant(e) => {
+                    e.insert(handle);
+                }
+            }
         }
 
         // Send all the stored requests to the domain.

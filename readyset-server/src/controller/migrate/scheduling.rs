@@ -159,9 +159,21 @@ impl<'state> Scheduler<'state> {
         let mut res = Vec::with_capacity(num_shards);
         for shard in 0..num_shards {
             let mut replicas = Vec::with_capacity(num_replicas);
-            // Filter out any workers that have a different replica of the same domain shard, to
-            // avoid scheduling two replicas of the same shard onto the same worker
             for replica in 0..num_replicas {
+                // Don't schedule this replica if it's already been scheduled (eg in another run of
+                // recovery)
+                if let Some(wid) = self
+                    .dataflow_state
+                    .domains
+                    .get(&domain_index)
+                    .and_then(|dh| dh.assignment(shard, replica))
+                {
+                    replicas.push(Some(wid.clone()));
+                    continue;
+                }
+
+                // Filter out any workers that have a different replica of the same domain shard, to
+                // avoid scheduling two replicas of the same shard onto the same worker
                 let available_workers = workers
                     .clone()
                     .filter(|(wi, _)| {
