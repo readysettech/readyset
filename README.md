@@ -358,11 +358,6 @@ cargo test --skip integration_serial
 
 When running ReadySet in a performance-critical setting, make sure you compile with the `--release` flag.
 
-**Note:** This repository contains a snapshot of the current state of the
-ReadySet internal repository. Our team is currently working on getting our live
-codebase, including all development history, ready to be hosted on GitHub, at
-which point we'll force push to this repository.
-
 ## License
 
 ReadySet is licensed under the BSL 1.1 license, converting to the open-source Apache 2.0 license after 4 years. It is free to use on any number of nodes.
