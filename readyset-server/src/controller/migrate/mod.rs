@@ -122,7 +122,10 @@ impl StoredDomainRequest {
 
                     spins += 1;
                     if spins == 10 {
-                        info!("waiting for setup()-initiated replay to complete");
+                        info!(
+                            domain = %self.domain,
+                            "waiting for full replay to complete"
+                        );
                         spins = 0;
                     }
                     std::thread::sleep(Duration::from_millis(200));
