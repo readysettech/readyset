@@ -1225,7 +1225,7 @@ impl DfState {
 
             match self
                 .domains
-                .get_mut(&domain)
+                .get(&domain)
                 .ok_or_else(|| ReadySetError::NoSuchReplica {
                     domain_index: domain.index(),
                     shard: 0,
@@ -1262,7 +1262,7 @@ impl DfState {
         // and evict all state from partial nodes
         let workers = &self.workers;
         let mut to_evict = Vec::new();
-        for (di, s) in self.domains.iter_mut() {
+        for (di, s) in &self.domains {
             let domain_to_evict: Vec<(NodeIndex, u64)> = s
                 .send_to_healthy::<(DomainStats, HashMap<NodeIndex, NodeStats>)>(
                     DomainRequest::GetStatistics,
@@ -1294,7 +1294,7 @@ impl DfState {
                     .local_addr();
                 #[allow(clippy::unwrap_used)] // literally got the `di` from iterating `domains`
                 self.domains
-                    .get_mut(&di)
+                    .get(&di)
                     .unwrap()
                     .send_to_healthy::<()>(
                         DomainRequest::Packet(Packet::Evict(EvictRequest::Bytes {
