@@ -7,6 +7,7 @@
 // Modifications Summary:
 // - removed allocators other than jemalloc and related features
 // - updated crate documentation
+// - add parts of thread module from tikv_util
 //
 //! As of now ReadySet always uses jemalloc on Unix. Although libraries
 //! generally shouldn't be opinionated about their allocators like
@@ -61,7 +62,9 @@
 #[macro_use]
 extern crate lazy_static;
 
+pub mod defer;
 pub mod error;
+pub mod thread;
 pub mod trace;
 
 pub type AllocStats = Vec<(&'static str, usize)>;
@@ -69,7 +72,9 @@ pub type AllocStats = Vec<(&'static str, usize)>;
 #[path = "jemalloc.rs"]
 mod imp;
 
+pub use crate::defer::*;
 pub use crate::imp::*;
+pub use crate::thread::*;
 pub use crate::trace::*;
 
 #[global_allocator]

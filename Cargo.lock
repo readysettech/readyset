@@ -1813,6 +1813,7 @@ dependencies = [
  "futures-core",
  "futures-task",
  "futures-util",
+ "num_cpus",
 ]
 
 [[package]]
@@ -4332,6 +4333,7 @@ dependencies = [
 name = "readyset-alloc"
 version = "0.1.0"
 dependencies = [
+ "futures",
  "fxhash",
  "lazy_static",
  "libc",
@@ -4339,6 +4341,7 @@ dependencies = [
  "tikv-jemalloc-ctl",
  "tikv-jemalloc-sys",
  "tikv-jemallocator",
+ "tokio",
 ]
 
 [[package]]
