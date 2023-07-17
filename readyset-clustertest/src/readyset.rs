@@ -18,11 +18,12 @@ use crate::*;
 #[clustertest]
 #[ignore]
 async fn query_failure_recovery_with_volume_id() {
-    let mut deployment = DeploymentBuilder::new("ct_failure_recovery_with_volume_id")
-        .add_server(ServerParams::default().with_volume("v1"))
-        .start()
-        .await
-        .unwrap();
+    let mut deployment =
+        DeploymentBuilder::new(DatabaseType::MySQL, "ct_failure_recovery_with_volume_id")
+            .add_server(ServerParams::default().with_volume("v1"))
+            .start()
+            .await
+            .unwrap();
 
     deployment
         .leader_handle()
@@ -68,7 +69,7 @@ async fn query_failure_recovery_with_volume_id() {
 
 #[clustertest]
 async fn new_leader_worker_set() {
-    let mut deployment = DeploymentBuilder::new("ct_new_leader_worker_set")
+    let mut deployment = DeploymentBuilder::new(DatabaseType::MySQL, "ct_new_leader_worker_set")
         .with_servers(3, ServerParams::default())
         .start()
         .await
@@ -95,11 +96,12 @@ async fn new_leader_worker_set() {
 
 #[clustertest]
 async fn balance_base_table_domains() {
-    let mut deployment = DeploymentBuilder::new("ct_balance_base_table_domains")
-        .with_servers(2, ServerParams::default())
-        .start()
-        .await
-        .unwrap();
+    let mut deployment =
+        DeploymentBuilder::new(DatabaseType::MySQL, "ct_balance_base_table_domains")
+            .with_servers(2, ServerParams::default())
+            .start()
+            .await
+            .unwrap();
 
     deployment
         .leader_handle()
@@ -145,7 +147,7 @@ async fn get_metric(
 // `CONTROLLER_IS_LEADER` metric changes from 0 (not leader) to 1 (leader)
 #[clustertest]
 async fn new_leader_metrics() {
-    let mut deployment = DeploymentBuilder::new("ct_new_leader_metrics")
+    let mut deployment = DeploymentBuilder::new(DatabaseType::MySQL, "ct_new_leader_metrics")
         .add_server(ServerParams::default())
         .start()
         .await
@@ -201,13 +203,14 @@ async fn ensure_startup_timestamp_metric() {
         .unwrap()
         .as_millis() as f64;
 
-    let mut deployment = DeploymentBuilder::new("ct_ensure_startup_timestamp_metric")
-        .with_servers(2, ServerParams::default())
-        .deploy_upstream()
-        .deploy_adapter()
-        .start()
-        .await
-        .unwrap();
+    let mut deployment =
+        DeploymentBuilder::new(DatabaseType::MySQL, "ct_ensure_startup_timestamp_metric")
+            .with_servers(2, ServerParams::default())
+            .deploy_upstream()
+            .deploy_adapter()
+            .start()
+            .await
+            .unwrap();
 
     for address in deployment.server_addrs() {
         let found_timestamp = match get_metric(&mut deployment, address.clone(), recorded::NORIA_STARTUP_TIMESTAMP).await {
@@ -232,7 +235,7 @@ async fn ensure_startup_timestamp_metric() {
 
 #[clustertest]
 async fn replicated_readers() {
-    let mut deployment = DeploymentBuilder::new("ct_replicated_readers")
+    let mut deployment = DeploymentBuilder::new(DatabaseType::MySQL, "ct_replicated_readers")
         .with_servers(2, ServerParams::default())
         .reader_replicas(2)
         .start()
@@ -327,12 +330,13 @@ async fn replicated_readers() {
 
 #[clustertest]
 async fn replicated_readers_with_unions() {
-    let mut deployment = DeploymentBuilder::new("ct_replicated_readers_with_unions")
-        .with_servers(2, ServerParams::default())
-        .reader_replicas(2)
-        .start()
-        .await
-        .unwrap();
+    let mut deployment =
+        DeploymentBuilder::new(DatabaseType::MySQL, "ct_replicated_readers_with_unions")
+            .with_servers(2, ServerParams::default())
+            .reader_replicas(2)
+            .start()
+            .await
+            .unwrap();
     let lh = deployment.leader_handle();
 
     lh.extend_recipe(
@@ -399,12 +403,15 @@ async fn replicated_readers_with_unions() {
 
 #[clustertest]
 async fn no_readers_worker_doesnt_get_readers() {
-    let mut deployment = DeploymentBuilder::new("ct_no_readers_worker_doesnt_get_readers")
-        .add_server(ServerParams::default().no_readers())
-        .add_server(ServerParams::default())
-        .start()
-        .await
-        .unwrap();
+    let mut deployment = DeploymentBuilder::new(
+        DatabaseType::MySQL,
+        "ct_no_readers_worker_doesnt_get_readers",
+    )
+    .add_server(ServerParams::default().no_readers())
+    .add_server(ServerParams::default())
+    .start()
+    .await
+    .unwrap();
     let lh = deployment.leader_handle();
 
     lh.extend_recipe(
@@ -440,7 +447,7 @@ async fn no_readers_worker_doesnt_get_readers() {
 
 #[clustertest]
 async fn server_and_adapter_auto_restart() {
-    let mut deployment = DeploymentBuilder::new("ct_adapter_restart")
+    let mut deployment = DeploymentBuilder::new(DatabaseType::MySQL, "ct_adapter_restart")
         .add_server(ServerParams::default())
         .deploy_adapter()
         .auto_restart(true)
@@ -463,7 +470,7 @@ async fn server_and_adapter_auto_restart() {
 
 #[clustertest]
 async fn server_auto_restarts() {
-    let mut deployment = DeploymentBuilder::new("ct_server_restart")
+    let mut deployment = DeploymentBuilder::new(DatabaseType::MySQL, "ct_server_restart")
         .add_server(ServerParams::default())
         .auto_restart(true)
         .start()
@@ -537,7 +544,7 @@ async fn assert_deployment_health(mut dh: DeploymentHandle) {
 
 #[clustertest]
 async fn server_ready_before_adapter() {
-    let mut deployment = DeploymentBuilder::new("ct_server_before_adapter")
+    let mut deployment = DeploymentBuilder::new(DatabaseType::MySQL, "ct_server_before_adapter")
         .auto_restart(true)
         .start()
         .await
@@ -557,7 +564,7 @@ async fn server_ready_before_adapter() {
 
 #[clustertest]
 async fn adapter_ready_before_server() {
-    let mut deployment = DeploymentBuilder::new("ct_adapter_before_server")
+    let mut deployment = DeploymentBuilder::new(DatabaseType::MySQL, "ct_adapter_before_server")
         .auto_restart(true)
         .start()
         .await
@@ -579,7 +586,7 @@ async fn adapter_ready_before_server() {
 // Given a failpoint name, will assert that pausing that failpoint and then resuming it for the
 // server will result in first unhealthy status, and then healthy status.
 async fn assert_server_failpoint_pause_resume(deployment_name: &str, failpoint: &str) {
-    let mut deployment = DeploymentBuilder::new(deployment_name)
+    let mut deployment = DeploymentBuilder::new(DatabaseType::MySQL, deployment_name)
         .wait_for_failpoint(FailpointDestination::Server)
         .auto_restart(false)
         .start()
@@ -748,6 +755,7 @@ async fn test_deployment_startup_order(startup_order: Vec<ClusterComponent>) {
     info!(?startup_order, "Testing deployment startup");
 
     let mut deployment = DeploymentBuilder::new(
+        DatabaseType::MySQL,
         format!(
             "ct_{:?}_{:?}_{:?}_{:?}",
             startup_order[0], startup_order[1], startup_order[2], startup_order[3]

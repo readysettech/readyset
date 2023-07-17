@@ -80,7 +80,7 @@
 //! async fn example_clustertest() {
 //!     // DeploymentBuilder is a builder used to create the local
 //!     // deployment.
-//!     let mut deployment = DeploymentBuilder::new("ct_example")
+//!     let mut deployment = DeploymentBuilder::new(DatabaseType::MySQL, "ct_example")
 //!         .with_servers(2, ServerParams::default())
 //!         .start()
 //!         .await
@@ -155,7 +155,7 @@
 //! // Deploy a three server deployment with different volume IDs for each server, a readyset adapter,
 //! // and upstream database.
 //! async fn build_deployment() {
-//!     let mut deployment = DeploymentBuilder::new("ct_example")
+//!     let mut deployment = DeploymentBuilder::new(DatabaseType::MySQL, "ct_example")
 //!         .add_server(ServerParams::default().with_volume("v1"))
 //!         .add_server(ServerParams::default().with_volume("v2"))
 //!         .add_server(ServerParams::default().with_volume("v3"))
@@ -200,11 +200,11 @@
 
 mod server;
 
-#[cfg(all(test, not(feature = "postgres")))]
+#[cfg(test)]
 mod readyset;
-#[cfg(all(test, not(feature = "postgres")))]
+#[cfg(test)]
 mod readyset_mysql;
-#[cfg(all(test, feature = "postgres"))]
+#[cfg(test)]
 mod readyset_postgres;
 #[cfg(test)]
 mod utils;
@@ -220,7 +220,8 @@ use ::readyset_client::consensus::AuthorityType;
 use ::readyset_client::metrics::client::MetricsClient;
 use ::readyset_client::ReadySetHandle;
 use anyhow::{anyhow, Result};
-use database_utils::{DatabaseConnection, DatabaseType, DatabaseURL};
+pub use database_utils::DatabaseType;
+use database_utils::{DatabaseConnection, DatabaseURL};
 use futures::executor;
 use hyper::Client;
 use mysql_async::prelude::Queryable;
@@ -254,15 +255,21 @@ struct Env {
     mysql_port: String,
     #[serde(default = "default_postgresql_port")]
     postgresql_port: String,
-    #[serde(default = "default_database_user")]
-    database_user: String,
-    #[serde(default = "default_root_password")]
-    root_password: String,
-    #[serde(default = "default_database_type")]
-    database_type: String,
+    #[serde(default = "default_pguser")]
+    pguser: String,
+    #[serde(default = "default_pgpassword")]
+    pgpassword: String,
+    #[serde(default = "default_mysql_user")]
+    mysql_user: String,
+    #[serde(default = "default_mysql_password")]
+    mysql_password: String,
 }
 
-fn default_database_user() -> String {
+fn default_pguser() -> String {
+    "postgres".to_string()
+}
+
+fn default_mysql_user() -> String {
     "root".to_string()
 }
 
@@ -276,10 +283,6 @@ fn default_mysql_host() -> String {
 
 fn default_postgresql_host() -> String {
     "127.0.0.1".to_string()
-}
-
-fn default_database_type() -> String {
-    "mysql".to_string()
 }
 
 fn default_mysql_port() -> String {
@@ -302,7 +305,11 @@ fn default_binary_path() -> PathBuf {
     path
 }
 
-fn default_root_password() -> String {
+fn default_pgpassword() -> String {
+    "noria".to_string()
+}
+
+fn default_mysql_password() -> String {
     "noria".to_string()
 }
 
@@ -454,7 +461,7 @@ pub enum FailpointDestination {
 }
 
 impl DeploymentBuilder {
-    pub fn new(name: &str) -> Self {
+    pub fn new(database_type: DatabaseType, name: &str) -> Self {
         let env = envy::from_env::<Env>().unwrap();
 
         let mut readyset_server_path = env.binary_path.clone();
@@ -469,23 +476,19 @@ impl DeploymentBuilder {
         let name = name.to_string() + &rng.gen::<u32>().to_string();
 
         // Depending on what type of upstream we have, use the mysql or posgresql host/ports.
-        let database_type = env.database_type;
-        let (database_type, user, pass, host, port) = match database_type {
-            d if d == *"mysql" => (
-                DatabaseType::MySQL,
-                env.database_user,
-                env.root_password,
+        let (user, pass, host, port) = match database_type {
+            DatabaseType::MySQL => (
+                env.mysql_user,
+                env.mysql_password,
                 env.mysql_host,
                 env.mysql_port,
             ),
-            d if d == *"postgresql" => (
-                DatabaseType::PostgreSQL,
-                env.database_user,
-                env.root_password,
+            DatabaseType::PostgreSQL => (
+                env.pguser,
+                env.pgpassword,
                 env.postgresql_host,
                 env.postgresql_port,
             ),
-            _ => panic!("Invalid database type. must be one of mysql, postgresql"),
         };
 
         Self {
@@ -1693,7 +1696,7 @@ mod tests {
     // Verifies that the wrappers that create and teardown the deployment.
     #[clustertest]
     async fn clustertest_startup_teardown_test() {
-        let deployment = DeploymentBuilder::new("ct_startup_teardown")
+        let deployment = DeploymentBuilder::new(DatabaseType::MySQL, "ct_startup_teardown")
             .with_servers(2, ServerParams::default())
             .start()
             .await;
@@ -1723,13 +1726,16 @@ mod tests {
 
     #[clustertest]
     async fn clustertest_no_servers() {
-        let mut deployment = DeploymentBuilder::new("ct_empty").start().await.unwrap();
+        let mut deployment = DeploymentBuilder::new(DatabaseType::MySQL, "ct_empty")
+            .start()
+            .await
+            .unwrap();
         deployment.teardown().await.unwrap();
     }
 
     #[clustertest]
     async fn clustertest_minimal() {
-        let mut deployment = DeploymentBuilder::new("ct_minimal")
+        let mut deployment = DeploymentBuilder::new(DatabaseType::MySQL, "ct_minimal")
             .with_servers(2, ServerParams::default())
             .start()
             .await
@@ -1739,7 +1745,7 @@ mod tests {
 
     #[clustertest]
     async fn clustertest_with_binlog() {
-        let mut deployment = DeploymentBuilder::new("ct_with_binlog")
+        let mut deployment = DeploymentBuilder::new(DatabaseType::MySQL, "ct_with_binlog")
             .with_servers(2, ServerParams::default())
             .deploy_adapter()
             .start()
@@ -1764,7 +1770,7 @@ mod tests {
     #[serial]
     async fn clustertest_with_set_failpoint() {
         let cluster_name = "ct_with_set_failpoint";
-        let mut deployment = DeploymentBuilder::new(cluster_name)
+        let mut deployment = DeploymentBuilder::new(DatabaseType::MySQL, cluster_name)
             .add_server(ServerParams::default())
             .start()
             .await
@@ -1793,7 +1799,7 @@ mod tests {
     #[serial]
     async fn start_adapter_running_deployment() {
         let cluster_name = "ct_start_adapter_running_deployment";
-        let mut deployment = DeploymentBuilder::new(cluster_name)
+        let mut deployment = DeploymentBuilder::new(DatabaseType::MySQL, cluster_name)
             .add_server(ServerParams::default())
             .start()
             .await

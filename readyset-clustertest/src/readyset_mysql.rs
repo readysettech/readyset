@@ -17,7 +17,7 @@ use crate::*;
 pub const PROPAGATION_DELAY_TIMEOUT: Duration = Duration::from_secs(90);
 
 fn readyset_mysql(name: &str) -> DeploymentBuilder {
-    DeploymentBuilder::new(name)
+    DeploymentBuilder::new(DatabaseType::MySQL, name)
         .deploy_upstream()
         .deploy_adapter()
 }

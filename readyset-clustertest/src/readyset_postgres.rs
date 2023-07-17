@@ -4,14 +4,14 @@ use serial_test::serial;
 use crate::*;
 
 fn readyset_postgres(name: &str) -> DeploymentBuilder {
-    DeploymentBuilder::new(name)
+    DeploymentBuilder::new(DatabaseType::PostgreSQL, name)
         .standalone()
         .deploy_upstream()
         .deploy_adapter()
 }
 
 fn readyset_postgres_cleanup(name: &str) -> DeploymentBuilder {
-    DeploymentBuilder::new(name)
+    DeploymentBuilder::new(DatabaseType::PostgreSQL, name)
         .standalone()
         .cleanup()
         .deploy_upstream()

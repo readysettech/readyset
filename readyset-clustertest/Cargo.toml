@@ -46,5 +46,4 @@ harness = false
 
 [features]
 slow_bench = []
-postgres = []
 failure_injection = ["readyset-client/failure_injection"]
