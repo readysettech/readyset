@@ -337,4 +337,8 @@ impl AdapterBuilder {
     pub fn enable_experimental_placeholder_inlining(self) -> Self {
         self.push_arg("--experimental-placeholder-inlining")
     }
+
+    pub fn embedded_readers(self) -> Self {
+        self.push_arg("--embedded-readers")
+    }
 }

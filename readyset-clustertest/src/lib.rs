@@ -451,6 +451,8 @@ pub struct DeploymentBuilder {
     /// Whether to automatically create inlined migrations for a query with unsupported
     /// placeholders.
     enable_experimental_placeholder_inlining: bool,
+    /// Whether to enable embedded readers mode in the adapter
+    embedded_readers: bool,
 }
 
 pub enum FailpointDestination {
@@ -523,6 +525,7 @@ impl DeploymentBuilder {
             standalone: false,
             cleanup: false,
             enable_experimental_placeholder_inlining: false,
+            embedded_readers: false,
         }
     }
     /// The number of shards in the graph, `shards` <= 1 disables sharding.
@@ -680,6 +683,12 @@ impl DeploymentBuilder {
         self
     }
 
+    /// Sets whether to enable embedded readers mode in the adapter
+    pub fn embedded_readers(mut self, embedded_readers: bool) -> Self {
+        self.embedded_readers = embedded_readers;
+        self
+    }
+
     pub fn adapter_start_params(&self) -> AdapterStartParams {
         let wait_for_failpoint = matches!(
             self.wait_for_failpoint,
@@ -700,6 +709,7 @@ impl DeploymentBuilder {
             wait_for_failpoint,
             cleanup: self.cleanup,
             enable_experimental_placeholder_inlining: self.enable_experimental_placeholder_inlining,
+            embedded_readers: self.embedded_readers,
         }
     }
 
@@ -1512,6 +1522,8 @@ pub struct AdapterStartParams {
     /// Whether to automatically create inlined migrations for a query with unsupported
     /// placeholders.
     enable_experimental_placeholder_inlining: bool,
+    /// Whether to enable embedded readers mode
+    embedded_readers: bool,
 }
 
 async fn start_server(
@@ -1644,6 +1656,10 @@ async fn start_adapter(
 
     if params.enable_experimental_placeholder_inlining {
         builder = builder.enable_experimental_placeholder_inlining();
+    }
+
+    if params.embedded_readers {
+        builder = builder.embedded_readers();
     }
 
     builder.start().await
