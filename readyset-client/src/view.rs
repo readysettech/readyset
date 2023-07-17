@@ -941,18 +941,29 @@ impl ReaderHandleBuilder {
         replica: Option<usize>,
         rpcs: Arc<Mutex<HashMap<(SocketAddr, usize), ViewRpc>>>,
     ) -> ReadySetResult<ReaderHandle> {
+        let node = self.node;
+
         let shards = match replica {
             Some(replica) => self.replica_shard_addrs.get(replica),
             None if self.replica_shard_addrs.num_rows() == 1 => Some(&self.replica_shard_addrs[0]),
-            None => self.replica_shard_addrs.rows().choose(&mut thread_rng()),
+            None => self
+                .replica_shard_addrs
+                .rows()
+                .filter(|a| a.iter().all(|addr| addr.is_some()))
+                .choose(&mut thread_rng()),
         }
-        .ok_or_else(|| ReadySetError::ViewReplicaOutOfBounds {
-            replica: replica.unwrap_or(0),
-            view_name: self.name.clone().display_unquoted().to_string(),
-            num_replicas: self.replica_shard_addrs.num_rows(),
+        .ok_or_else(|| {
+            if replica.is_none() && self.replica_shard_addrs.num_rows() != 1 {
+                ReadySetError::ReaderReplicaNotRunning { replica: 0, node }
+            } else {
+                ReadySetError::ViewReplicaOutOfBounds {
+                    replica: replica.unwrap_or(0),
+                    view_name: self.name.clone().display_unquoted().to_string(),
+                    num_replicas: self.replica_shard_addrs.num_rows(),
+                }
+            }
         })?;
 
-        let node = self.node;
         let columns = self.columns.clone();
         let schema = self.schema.clone();
         let key_mapping = self.key_mapping.clone();
