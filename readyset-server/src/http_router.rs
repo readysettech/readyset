@@ -11,6 +11,7 @@ use health_reporter::{HealthReporter, State};
 use hyper::header::CONTENT_TYPE;
 use hyper::service::make_service_fn;
 use hyper::{self, Body, Method, Request, Response, StatusCode};
+use readyset_alloc::{dump_stats, memory_and_per_thread_stats};
 use readyset_client::consensus::Authority;
 use readyset_client::metrics::recorded;
 use readyset_errors::ReadySetError;
@@ -240,6 +241,37 @@ impl Service<Request<Body>> for NoriaServerHttpRouter {
                     };
                     Ok(res.unwrap())
                 })
+            }
+            // Returns a summary of memory usage for the entire process and per-thread memory usage
+            (&Method::POST, "/memory_stats") => {
+                let res =
+                    match memory_and_per_thread_stats() {
+                        Ok(stats) => res
+                            .status(200)
+                            .header(CONTENT_TYPE, "text/plain")
+                            .body(hyper::Body::from(stats)),
+                        Err(e) => res.status(500).header(CONTENT_TYPE, "text/plain").body(
+                            hyper::Body::from(format!("Error fetching memory stats: {e}")),
+                        ),
+                    };
+
+                Box::pin(async move { Ok(res.unwrap()) })
+            }
+            // Returns a large dump of jemalloc debugging information along with per-thread
+            // memory stats
+            (&Method::POST, "/memory_stats_verbose") => {
+                let res =
+                    match dump_stats() {
+                        Ok(stats) => res
+                            .status(200)
+                            .header(CONTENT_TYPE, "text/plain")
+                            .body(hyper::Body::from(stats)),
+                        Err(e) => res.status(500).header(CONTENT_TYPE, "text/plain").body(
+                            hyper::Body::from(format!("Error fetching memory stats: {e}")),
+                        ),
+                    };
+
+                Box::pin(async move { Ok(res.unwrap()) })
             }
             _ => {
                 metrics::increment_counter!(recorded::SERVER_CONTROLLER_REQUESTS);

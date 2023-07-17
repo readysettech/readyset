@@ -12,6 +12,7 @@ use hyper::header::CONTENT_TYPE;
 use hyper::service::make_service_fn;
 use hyper::{self, Body, Method, Request, Response};
 use metrics_exporter_prometheus::PrometheusHandle;
+use readyset_alloc::{dump_stats, memory_and_per_thread_stats};
 use readyset_client_metrics::recorded;
 use readyset_util::shutdown::ShutdownReceiver;
 use tokio::net::TcpListener;
@@ -208,6 +209,37 @@ impl Service<Request<Body>> for NoriaAdapterHttpRouter {
                         .status(404)
                         .body(hyper::Body::from("Prometheus metrics were not enabled. To fix this, run the adapter with --prometheus-metrics".to_string())),
                 };
+                Box::pin(async move { Ok(res.unwrap()) })
+            }
+            // Returns a summary of memory usage for the entire process and per-thread memory usage
+            (&Method::POST, "/memory_stats") => {
+                let res =
+                    match memory_and_per_thread_stats() {
+                        Ok(stats) => res
+                            .status(200)
+                            .header(CONTENT_TYPE, "text/plain")
+                            .body(hyper::Body::from(stats)),
+                        Err(e) => res.status(500).header(CONTENT_TYPE, "text/plain").body(
+                            hyper::Body::from(format!("Error fetching memory stats: {e}")),
+                        ),
+                    };
+
+                Box::pin(async move { Ok(res.unwrap()) })
+            }
+            // Returns a large dump of jemalloc debugging information along with per-thread
+            // memory stats
+            (&Method::POST, "/memory_stats_verbose") => {
+                let res =
+                    match dump_stats() {
+                        Ok(stats) => res
+                            .status(200)
+                            .header(CONTENT_TYPE, "text/plain")
+                            .body(hyper::Body::from(stats)),
+                        Err(e) => res.status(500).header(CONTENT_TYPE, "text/plain").body(
+                            hyper::Body::from(format!("Error fetching memory stats: {e}")),
+                        ),
+                    };
+
                 Box::pin(async move { Ok(res.unwrap()) })
             }
             _ => Box::pin(async move {

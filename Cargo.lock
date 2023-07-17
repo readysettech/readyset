@@ -4302,6 +4302,7 @@ dependencies = [
  "nom-sql",
  "parking_lot 0.11.2",
  "proptest",
+ "readyset-alloc",
  "readyset-client",
  "readyset-client-metrics",
  "readyset-data",
