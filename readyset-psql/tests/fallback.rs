@@ -840,7 +840,6 @@ async fn alter_enum_rename_value() {
     shutdown_tx.shutdown().await;
 }
 
-#[ignore = "REA-3108 Test reproduces error due to known bug"]
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn insert_enum_value_appended_after_create_table() {
@@ -865,15 +864,14 @@ async fn insert_enum_value_appended_after_create_table() {
 
     client.simple_query("CREATE TABLE t2 (e et)").await.unwrap();
 
-    // Due to the bug documented in REA-3108, this currently fails with "decode error: unknown enum
-    // variant: b". Note that in order to trigger this bug we must:
+    // Due to the bug documented in REA-3108, this used to fail with "decode error: unknown enum
+    // variant: b". Note that in order to trigger this bug we had to:
     //  - Create a table using the enum type *and* select from it prior to altering the type (though
     //    this doesn't have to be the same table we later insert into)
     //  - Specifically insert the enum value that was added in the ALTER TYPE statement
     //  - Insert using a parameter, not a hardcoded query (hence the use of `query_raw` here)
-    // Note also that the bug does not appear to be sensitive to timing; this is not the result of
-    // e.g. inserting before a resnapshot is done, and adding a ten second sleep here does not stop
-    // the bug from occurring.
+    // This turned out to be caused by an interation with a client library that cached types from
+    // upstream queries and didn't update the cached definitions after the type was altered.
     let params: Vec<DfValue> = vec!["b".into()];
     client
         .query_raw("INSERT INTO t2 VALUES ($1)", &params)
