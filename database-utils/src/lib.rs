@@ -25,7 +25,7 @@ pub mod error;
 
 pub use connection::{
     DatabaseConnection, DatabaseConnectionPool, DatabaseStatement, QueryResults,
-    QueryableConnection, Transaction,
+    QueryableConnection, SimpleQueryResults, Transaction,
 };
 pub use error::DatabaseError;
 

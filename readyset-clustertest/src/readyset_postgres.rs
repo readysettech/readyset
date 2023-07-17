@@ -1,4 +1,7 @@
-use database_utils::QueryableConnection;
+use database_utils::{QueryableConnection, SimpleQueryResults};
+use readyset_client_metrics::QueryDestination;
+use readyset_data::DfValue;
+use readyset_util::eventually;
 use serial_test::serial;
 
 use crate::*;
@@ -16,6 +19,17 @@ fn readyset_postgres_cleanup(name: &str) -> DeploymentBuilder {
         .cleanup()
         .deploy_upstream()
         .deploy_adapter()
+}
+
+async fn last_statement_destination(conn: &mut DatabaseConnection) -> QueryDestination {
+    match conn.simple_query("EXPLAIN LAST STATEMENT").await.unwrap() {
+        SimpleQueryResults::MySql(_) => panic!("MySQL connection in pg test"),
+        SimpleQueryResults::Postgres(res) => {
+            let row = res.into_iter().next().unwrap();
+            let dest = row.get("Query_destination").unwrap();
+            dest.try_into().unwrap()
+        }
+    }
 }
 
 async fn replication_slot_exists(conn: &mut DatabaseConnection) -> bool {
@@ -93,4 +107,54 @@ async fn cleanup_works() {
 
     assert!(!replication_slot_exists(&mut upstream).await);
     assert!(!publication_exists(&mut upstream).await);
+}
+
+/// Test that a deployment with embedded readers, configured to replicate readers n times, continues
+/// to work with a number of adapters < n.
+#[clustertest]
+async fn embedded_readers_adapters_lt_replicas() {
+    let deployment_name = "embedded_readers_adapters_lt_replicas";
+    let mut deployment = DeploymentBuilder::new(DatabaseType::PostgreSQL, deployment_name)
+        .deploy_upstream()
+        .reader_replicas(2)
+        .with_adapters(1)
+        .with_servers(1, ServerParams::default().no_readers())
+        .embedded_readers(true)
+        .start()
+        .await
+        .unwrap();
+
+    let mut adapter = deployment.first_adapter().await;
+
+    adapter.query_drop("CREATE TABLE t (x int);").await.unwrap();
+    adapter
+        .query_drop("INSERT INTO t (x) VALUES (1);")
+        .await
+        .unwrap();
+
+    eventually! {
+        adapter
+            .query_drop("CREATE CACHE FROM SELECT x FROM t;")
+            .await
+            .is_ok()
+    }
+
+    eventually! {
+        run_test: {
+            let res: Vec<Vec<DfValue>> = adapter
+                .query("SELECT x FROM t;")
+                .await
+                .unwrap()
+                .try_into()
+                .unwrap();
+            let dest = last_statement_destination(&mut adapter).await;
+            (res, dest)
+        },
+        then_assert: |(res, dest)| {
+            assert_eq!(dest, QueryDestination::Readyset);
+            assert_eq!(res, vec![vec![1.into()]]);
+        }
+    }
+
+    deployment.teardown().await.unwrap();
 }
