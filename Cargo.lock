@@ -3134,6 +3134,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "nom-sql-arbitrary"
+version = "0.1.0"
+dependencies = [
+ "nom-sql",
+ "proptest",
+]
+
+[[package]]
 name = "nom_locate"
 version = "4.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

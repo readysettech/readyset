@@ -22,6 +22,7 @@ members = [
     "mysql-srv",
     "mysql-time",
     "nom-sql",
+    "nom-sql-arbitrary",
     "partial-map",
     "psql-srv",
     "query-generator",

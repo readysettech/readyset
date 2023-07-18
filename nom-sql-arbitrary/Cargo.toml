@@ -1,8 +1,9 @@
 [package]
 name = "nom-sql-arbitrary"
+version = "0.1.0"
 publish = false
 authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
-edition = "2023"
+edition = "2021"
 
 homepage = "https://github.com/readysettech/readyset/tree/master/nom-sql-arbitrary"
 repository = "https://github.com/readysettech/readyset/tree/master/nom-sql-arbitrary"
@@ -10,3 +11,5 @@ repository = "https://github.com/readysettech/readyset/tree/master/nom-sql-arbit
 description = "A library with proptest utility to generate AST structs."
 
 [dependencies]
+nom-sql = { path = "../nom-sql" }
+proptest = "1.0.0"
