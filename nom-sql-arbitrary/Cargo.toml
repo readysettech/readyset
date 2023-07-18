@@ -1,0 +1,12 @@
+[package]
+name = "nom-sql-arbitrary"
+publish = false
+authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+edition = "2023"
+
+homepage = "https://github.com/readysettech/readyset/tree/master/nom-sql-arbitrary"
+repository = "https://github.com/readysettech/readyset/tree/master/nom-sql-arbitrary"
+
+description = "A library with proptest utility to generate AST structs."
+
+[dependencies]
