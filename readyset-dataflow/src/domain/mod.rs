@@ -2757,12 +2757,13 @@ impl Domain {
         let tag = m
             .tag()
             .ok_or_else(|| internal_err!("handle_replay called on an invalid message"))?;
-        #[allow(clippy::indexing_slicing)]
-        // tag came from an internal data structure that guarantees it exists
-        if self.nodes[self.replay_paths[tag].last_segment().node]
-            .borrow()
-            .is_dropped()
-        {
+        let path = self
+            .replay_paths
+            .get(tag)
+            .ok_or_else(|| internal_err!("Replay path not found with tag {tag:?}"))?;
+
+        #[allow(clippy::indexing_slicing)] // All nodes in replay paths definitely exist
+        if self.nodes[path.last_segment().node].borrow().is_dropped() {
             return Ok(());
         }
 
@@ -2773,8 +2774,7 @@ impl Domain {
         // this loop is just here so we have a way of giving up the borrow of self.replay_paths
         #[allow(clippy::never_loop)]
         'outer: loop {
-            #[allow(clippy::indexing_slicing)]
-            // tag came from an internal data structure that guarantees it exists
+            #[allow(clippy::indexing_slicing)] // Would have errored above if it didn't exist
             let rp = &self.replay_paths[tag];
             let &ReplayPath {
                 ref path,
