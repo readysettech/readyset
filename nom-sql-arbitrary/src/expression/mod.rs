@@ -3,12 +3,14 @@
 // TODO(fran): Generate more complex `Expr`:
 //   - Arrays
 //   - JSON
-use nom_sql::Expr;
+use nom_sql::{Dialect, Expr};
 use proptest::arbitrary::{any, any_with};
 use proptest::strategy::{BoxedStrategy, Just, Strategy};
 
+use crate::expression::bool::generate_bool;
 use crate::expression::expr::{generate_base_expr, ExprSpec};
 
+mod bool;
 mod expr;
 mod util;
 
@@ -27,7 +29,7 @@ pub struct ExprStrategy {
 /// Produces a [`Strategy`] that generates [`ExprStrategy`] structs, where
 /// the underlying [`Expr`] of said structs get recursively more complex.
 #[allow(dead_code)]
-fn arbitrary_expr_strategy() -> impl Strategy<Value = ExprStrategy> {
+fn arbitrary_expr_strategy(dialect: Dialect) -> impl Strategy<Value = ExprStrategy> {
     Just(ExprStrategy {
         bool: generate_base_expr(ExprSpec::Bool).boxed(),
         string: generate_base_expr(ExprSpec::String(
@@ -41,7 +43,7 @@ fn arbitrary_expr_strategy() -> impl Strategy<Value = ExprStrategy> {
     .prop_recursive(3, 32, 3, move |inner| {
         inner.prop_map(move |e| ExprStrategy {
             // TODO(fran): Replace this with respective recursive function for each type
-            bool: e.bool,
+            bool: generate_bool(e.clone(), &dialect).boxed(),
             string: e.string,
             integer: e.integer,
             float: e.float,
