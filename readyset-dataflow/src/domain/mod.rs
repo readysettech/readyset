@@ -24,6 +24,7 @@ use futures_util::TryFutureExt;
 pub use internal::{DomainIndex, ReplicaAddress};
 use merging_interval_tree::IntervalTreeSet;
 use petgraph::graph::NodeIndex;
+use readyset_alloc::StdThreadBuildWrapper;
 use readyset_client::internal::Index;
 use readyset_client::replication::ReplicationOffsetState;
 use readyset_client::{channel, internal, KeyComparison, KeyCount, ReaderAddress};
@@ -678,7 +679,7 @@ pub struct Domain {
 }
 
 /// Creates the materialized node state for the given node.
-/// This is used to deferred the creation of the persistent state to a separate thread, as we know
+/// This is used to deferred the creation of the persistent state to a separate task, as we know
 /// it takes a lot of time for large tables.
 /// Upon completion, this method will send the node index and the pointer to the new
 /// `PersistentState` through the `sender`.
@@ -690,7 +691,7 @@ async fn initialize_state(
     persistence_params: PersistenceParameters,
     sender: Sender<MaterializedState>,
 ) -> ReadySetResult<()> {
-    trace!("running separate thread to initialize base node persistent state");
+    trace!("running separate task to initialize base node persistent state");
     let reported_once = Arc::new(AtomicBool::new(false));
     let mut s = MaterializedNodeState::Persistent(
         report_progress_with(
@@ -1997,7 +1998,7 @@ impl Domain {
                 let address = self.address();
                 thread::Builder::new()
                     .name(format!("replay{}.{}", self.index(), link.src))
-                    .spawn(move || {
+                    .spawn_wrapper(move || {
                         let span = info_span!("full_replay", %address, src = %link.src);
                         let _guard = span.enter();
                         use itertools::Itertools;
@@ -2119,7 +2120,7 @@ impl Domain {
                             let init_state_tx = self.init_state_tx.clone();
                             let unique_keys = base.all_unique_keys();
 
-                            // run the base table initialization in a separate thread, as we know
+                            // run the base table initialization in a separate task, as we know
                             // this might take a lot of time for large
                             // tables. upon completion, we'll notify the
                             // domain and set the materialized state for

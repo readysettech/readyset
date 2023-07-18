@@ -8,6 +8,7 @@ use clap::builder::NonEmptyStringValueParser;
 use clap::Parser;
 use futures_util::future::{self, Either};
 use metrics_exporter_prometheus::PrometheusBuilder;
+use readyset_alloc::ThreadBuildWrapper;
 use readyset_client::metrics::recorded;
 use readyset_server::consensus::AuthorityType;
 use readyset_server::metrics::{
@@ -142,8 +143,9 @@ struct Options {
 fn main() -> anyhow::Result<()> {
     let opts: Options = Options::parse();
     let rt = tokio::runtime::Builder::new_multi_thread()
+        .with_sys_hooks()
         .enable_all()
-        .thread_name("worker")
+        .thread_name("Worker Runtime")
         .build()?;
 
     rt.block_on(async {

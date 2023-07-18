@@ -30,6 +30,7 @@ parking_lot = "0.12"
 
 # local deps
 common = { path = "../readyset-common", package = "readyset-common" }
+readyset-alloc = { path = "../readyset-alloc" }
 readyset-util = { path = "../readyset-util" }
 readyset-client = { path = "../readyset-client" }
 readyset-data = { path = "../readyset-data" }

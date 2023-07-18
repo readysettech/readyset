@@ -78,6 +78,7 @@ use common::{IndexType, Record, Records, SizeOf, Tag};
 use parking_lot::{
     MappedRwLockReadGuard, MappedRwLockWriteGuard, RwLock, RwLockReadGuard, RwLockWriteGuard,
 };
+use readyset_alloc::thread::StdThreadBuildWrapper;
 use readyset_client::internal::Index;
 use readyset_client::replication::ReplicationOffset;
 use readyset_client::{KeyComparison, KeyCount, SqlIdentifier};
@@ -1317,11 +1318,14 @@ fn compaction_progress_watcher(table_name: &str, db: &DB) -> anyhow::Result<impl
     };
 
     let table = table_name.to_owned();
-    std::thread::spawn(move || {
-        if let Err(err) = monitor() {
-            warn!(%err, %table, "Compaction monitor error");
-        }
-    });
+
+    let s = std::thread::Builder::new();
+    s.name("Compaction Monitor".to_string())
+        .spawn_wrapper(move || {
+            if let Err(err) = monitor() {
+                warn!(%err, %table, "Compaction monitor error");
+            }
+        })?;
 
     Ok(log_watcher)
 }
@@ -1791,15 +1795,23 @@ impl PersistentState {
             let table = self.name.clone();
             let read_handle = self.read_handle();
             let thread_opts = Arc::clone(&opts);
-            let compaction_thread = std::thread::spawn(move || {
-                let span = info_span!(
-                    "Compacting index",
-                    %table,
-                    column_family = %index.column_family
-                );
-                let _guard = span.enter();
-                compact_cf(&table, &read_handle.handle(), &index, &thread_opts);
-            });
+            let s = std::thread::Builder::new();
+            let name = format!(
+                "Compacting index table={}, cf={}",
+                table, index.column_family
+            );
+            let compaction_thread = s
+                .name(name)
+                .spawn_wrapper(move || {
+                    let span = info_span!(
+                        "Compacting index",
+                        %table,
+                        column_family = %index.column_family
+                    );
+                    let _guard = span.enter();
+                    compact_cf(&table, &read_handle.handle(), &index, &thread_opts);
+                })
+                .expect("spawn_wrapper failure");
 
             self.compaction_threads.push(CompactionThreadHandle {
                 handle: Some(compaction_thread),

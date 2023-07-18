@@ -16,6 +16,7 @@ use futures_util::future::TryFutureExt;
 use futures_util::sink::SinkExt;
 use futures_util::stream::StreamExt;
 use metrics::{counter, gauge, histogram};
+use readyset_alloc::StdThreadBuildWrapper;
 use readyset_client::channel;
 use readyset_client::internal::ReplicaAddress;
 use readyset_client::metrics::recorded;
@@ -330,7 +331,7 @@ impl Worker {
                 std::thread::Builder::new()
                     .name(format!("Domain {}", replica_addr))
                     .stack_size(2 * 1024 * 1024) // Use the same value tokio is using
-                    .spawn(move || {
+                    .spawn_wrapper(move || {
                         // The runtime will run until the abort signal is sent.
                         // This will happen either if the DomainHandle is dropped (and error is
                         // recieved) or an actual signal is sent on the
@@ -592,7 +593,7 @@ async fn do_eviction(
 }
 
 impl Drop for Worker {
-    /// This is only implemented for the sake of RockDB that doesn't really
+    /// This is only implemented for the sake of RocksDB that doesn't really
     /// like having its thread being destroyed while it is still open, so
     /// we need to join the threads nicely. It doesn't really matter that
     /// we do this by spawning a thread and blocking a drop, as the Worker
@@ -609,22 +610,26 @@ impl Drop for Worker {
         let mut domain_wait_queue = std::mem::take(domain_wait_queue);
 
         let rt = tokio::runtime::Handle::current();
-        std::thread::spawn(move || {
-            rt.block_on(async move {
-                while let Some((handle, replica_addr)) = domain_wait_queue.next().await {
-                    match handle {
-                        Ok(Err(e)) => {
-                            error!(domain = %replica_addr, err = %e, "domain failed during drop")
+
+        std::thread::Builder::new()
+            .name("Worker Drop".to_string())
+            .spawn_wrapper(move || {
+                rt.block_on(async move {
+                    while let Some((handle, replica_addr)) = domain_wait_queue.next().await {
+                        match handle {
+                            Ok(Err(e)) => {
+                                error!(domain = %replica_addr, err = %e, "domain failed during drop")
+                            }
+                            Err(e) if !e.is_cancelled() => {
+                                error!(domain = %replica_addr, err = %e, "domain failed during drop")
+                            }
+                            _ => {}
                         }
-                        Err(e) if !e.is_cancelled() => {
-                            error!(domain = %replica_addr, err = %e, "domain failed during drop")
-                        }
-                        _ => {}
                     }
-                }
-            });
-        })
-        .join()
-        .expect("This thread shouldn't panic");
+                });
+            })
+            .expect("failed to register thread")
+            .join()
+            .expect("This thread shouldn't panic");
     }
 }

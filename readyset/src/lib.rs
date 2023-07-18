@@ -38,6 +38,7 @@ use readyset_adapter::proxied_queries_reporter::ProxiedQueriesReporter;
 use readyset_adapter::query_status_cache::{MigrationStyle, QueryStatusCache};
 use readyset_adapter::views_synchronizer::ViewsSynchronizer;
 use readyset_adapter::{Backend, BackendBuilder, QueryHandler, UpstreamDatabase};
+use readyset_alloc::{StdThreadBuildWrapper, ThreadBuildWrapper};
 use readyset_client::consensus::AuthorityType;
 #[cfg(feature = "failure_injection")]
 use readyset_client::failpoints;
@@ -455,7 +456,12 @@ where
     H: ConnectionHandler + Clone + Send + Sync + 'static,
 {
     pub fn run(&mut self, options: Options) -> anyhow::Result<()> {
-        let rt = tokio::runtime::Runtime::new()?;
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .with_sys_hooks()
+            .enable_all()
+            .thread_name("Adapter Runtime")
+            .build()?;
+
         rt.block_on(async { options.tracing.init("adapter", options.deployment.as_ref()) })?;
         info!(?options, "Starting ReadySet adapter");
 
@@ -688,7 +694,7 @@ where
             std::thread::Builder::new()
                 .name("Query logger".to_string())
                 .stack_size(2 * 1024 * 1024) // Use the same value tokio is using
-                .spawn(move || {
+                .spawn_wrapper(move || {
                     runtime.block_on(query_logger::QueryLogger::run(qlog_receiver, shutdown_rx));
                     runtime.shutdown_background();
                 })?;
