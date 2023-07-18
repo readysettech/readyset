@@ -12,12 +12,14 @@ use crate::expression::expr::{generate_base_expr, ExprSpec};
 use crate::expression::float::generate_float;
 use crate::expression::integer::generate_integer;
 use crate::expression::string::generate_string;
+use crate::expression::timestamp::generate_timestamp;
 
 mod bool;
 mod expr;
 mod float;
 mod integer;
 mod string;
+mod timestamp;
 mod util;
 
 /// A struct that holds the [`Strategy`]s to generate
@@ -53,7 +55,7 @@ fn arbitrary_expr_strategy(dialect: Dialect) -> impl Strategy<Value = ExprStrate
             string: generate_string(e.clone(), &dialect).boxed(),
             integer: generate_integer(e.clone(), &dialect).boxed(),
             float: generate_float(e.clone(), &dialect).boxed(),
-            timestamp: e.timestamp,
+            timestamp: generate_timestamp(e, &dialect).boxed(),
         })
     })
 }
