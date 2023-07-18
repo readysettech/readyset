@@ -9,9 +9,11 @@ use proptest::strategy::{BoxedStrategy, Just, Strategy};
 
 use crate::expression::bool::generate_bool;
 use crate::expression::expr::{generate_base_expr, ExprSpec};
+use crate::expression::string::generate_string;
 
 mod bool;
 mod expr;
+mod string;
 mod util;
 
 /// A struct that holds the [`Strategy`]s to generate
@@ -44,7 +46,7 @@ fn arbitrary_expr_strategy(dialect: Dialect) -> impl Strategy<Value = ExprStrate
         inner.prop_map(move |e| ExprStrategy {
             // TODO(fran): Replace this with respective recursive function for each type
             bool: generate_bool(e.clone(), &dialect).boxed(),
-            string: e.string,
+            string: generate_string(e.clone(), &dialect).boxed(),
             integer: e.integer,
             float: e.float,
             timestamp: e.timestamp,
