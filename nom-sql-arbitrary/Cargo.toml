@@ -13,3 +13,4 @@ description = "A library with proptest utility to generate AST structs."
 [dependencies]
 nom-sql = { path = "../nom-sql" }
 proptest = "1.0.0"
+readyset-util = { path = "../readyset-util" }

@@ -3108,6 +3108,7 @@ dependencies = [
  "assert_approx_eq",
  "bincode",
  "bit-vec",
+ "chrono",
  "clap 4.3.2",
  "concrete-iter",
  "criterion",
@@ -3139,6 +3140,7 @@ version = "0.1.0"
 dependencies = [
  "nom-sql",
  "proptest",
+ "readyset-util",
 ]
 
 [[package]]
