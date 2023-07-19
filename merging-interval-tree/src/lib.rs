@@ -34,7 +34,7 @@ use std::ops::{Bound, Deref, RangeBounds};
 /// See [crate documentation](crate) for more details.
 #[derive(Clone, PartialEq, Eq)]
 pub struct IntervalTreeSet<T> {
-    /// The internal storage of [`Endpoint`], where for each non-ovelapping interval two
+    /// The internal storage of [`Endpoint`], where for each non-overlapping interval two
     /// [`Endpoint`]s are stored: the lower-bound endpoint and the upper-bound endpoint, which are
     /// of distinct variants.
     bound_set: BTreeSet<Endpoint<T>>,
@@ -73,7 +73,7 @@ enum Endpoint<T> {
 }
 
 /// This is the borrowed version of [`Endpoint<T>`]. Importantly it has the same layout as
-/// [`Endpoint<T>`], guranteed by using `#[repr(u8)]`
+/// [`Endpoint<T>`], guaranteed by using `#[repr(u8)]`
 /// https://doc.rust-lang.org/nomicon/other-reprs.html#repru-repri
 #[repr(u8)]
 #[derive(PartialEq, Eq, Debug)]
@@ -92,15 +92,15 @@ where
 
 /// [`OwnedOrPtr`] is the crux of the tree's ability to use borrowed representation for lookups.
 /// There are two layout equivalent structures [`OwnedOrPtr<T>`] and [`OwnedOrPtr<T,B>`] that are
-/// guranteed to have the same size and layout by using `#[repr(u8)]` and variants that have the
+/// guaranteed to have the same size and layout by using `#[repr(u8)]` and variants that have the
 /// same size.
 ///
 /// The [`OwnedOrPtr`] only ever uses the [`OwnedOrPtr::Owned`] variant and always contains owned
 /// data. It is crucial to never construct the [`OwnedOrPtr::Ptr`] variant or the safety breaks.
 ///
-/// On the other hand [`OwnedOrBorrowed`] is esentially equivalent to [`std::borrow::Cow`] except
+/// On the other hand [`OwnedOrBorrowed`] is essentially equivalent to [`std::borrow::Cow`] except
 /// that it has to have the same layout as [`OwnedOrPtr`]. As long as only the [`OwnedOrPtr::Owned`]
-/// variant is constucted, [`OwnedOrPtr<T>`] can be transmuted to any [`OwnedOrBorrowed<T, B>`]
+/// variant is constructed, [`OwnedOrPtr<T>`] can be transmuted to any [`OwnedOrBorrowed<T, B>`]
 /// safely, and a reference to it can be transmuted into a reference to [`OwnedOrBorrowed<T, B>`],
 /// which is done in the implementation for [`Borrow`].
 ///
@@ -363,7 +363,7 @@ impl<T> Endpoint<T> {
     }
 }
 
-/// Panics if the range is empty or decreasing, otherwse returns the bounds of the range.
+/// Panics if the range is empty or decreasing, otherwise returns the bounds of the range.
 #[track_caller]
 fn check_range<'a, B, R>(range: &'a R) -> (Bound<&'a B>, Bound<&'a B>)
 where
@@ -575,7 +575,7 @@ where
 
         // If the first removed limit was an upper limit or if no limits were removed but the next
         // limit is an upper limit, it means the removed interval begins in a middle of an existing
-        // interval. Therefore a new upper limit is required marking a new end to that exisiting
+        // interval. Therefore a new upper limit is required marking a new end to that existing
         // interval.
         match removed_nodes.first() {
             maybe_elem if maybe_elem.map(|e| e.is_upper()).unwrap_or(next_is_upper) => self
@@ -586,8 +586,8 @@ where
 
         // If the last removed limit was a lower limit or if no limits were removed but the next
         // limit is an upper limit, it means the removed interval ends in a middle of an existing
-        // interval. Therefore a new lower limit is requried marking a new beginning of that
-        // exisiting interval.
+        // interval. Therefore a new lower limit is required marking a new beginning of that
+        // existing interval.
         match removed_nodes.last() {
             maybe_elem if maybe_elem.map(|e| e.is_lower()).unwrap_or(next_is_upper) => self
                 .bound_set
@@ -858,7 +858,7 @@ where
 {
     /// Return the smaller of own `upper_bound` or `other_bound`. Once own `upper_bound` is
     /// returned, the method will keep returning [`None`]. The `max` in the name refers to the
-    /// maximum limit the interator stops at, and once it is reached the method returns
+    /// maximum limit the iterator stops at, and once it is reached the method returns
     /// [`None`].
     fn max_bound(&mut self, other_bound: Bound<&'a B>) -> Option<Bound<&'a B>> {
         let cur_upper = self.upper_bound.as_ref()?;
@@ -897,7 +897,7 @@ where
 {
     /// Return the smaller of own `upper_bound` or `other_bound`. Once own `upper_bound` is
     /// returned, the method will keep returning [`None`]. The `max` in the name refers to the
-    /// maximum limit the interator stops at, and once it is reached the method returns
+    /// maximum limit the iterator stops at, and once it is reached the method returns
     /// [`None`].
     fn max_bound(&mut self, other_bound: Bound<&'a B>) -> Option<Bound<&'a B>> {
         let cur_upper = self.upper_bound.as_ref()?;
@@ -1470,7 +1470,7 @@ mod tests {
 
             for int in all_intervals.iter() {
                 assert_invariant(&tree);
-                // Every previosuly added interval should still be covered
+                // Every previously added interval should still be covered
                 assert!(tree.covers_interval(int));
                 // There should be no interval differences, because interval is covered
                 assert!(tree.get_interval_difference(int).next().is_none());
@@ -1505,7 +1505,7 @@ mod tests {
 
             for int in all_intervals.iter() {
                 assert_invariant(&tree);
-                // Every previosuly removed interval should still be missing
+                // Every previously removed interval should still be missing
                 assert!(!tree.covers_interval(int));
                 // The interval difference should be the entire interval
                 let mut diffs = tree.get_interval_difference(int);

@@ -2216,7 +2216,7 @@ where
 
                 let res = match &query {
                     SqlQuery::Select(_) => unreachable!("read path returns prior"),
-                    // CREATE VIEW will still trigger migrations with epxlicit-migrations enabled
+                    // CREATE VIEW will still trigger migrations with explicit-migrations enabled
                     SqlQuery::CreateView(q) => noria.handle_create_view(q).await,
                     SqlQuery::CreateTable(q) => noria.handle_table_operation(q.clone()).await,
                     SqlQuery::AlterTable(q) => noria.handle_table_operation(q.clone()).await,

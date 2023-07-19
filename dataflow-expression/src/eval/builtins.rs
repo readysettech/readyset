@@ -117,7 +117,7 @@ fn mysql_date_format<T>(time: T, format_string: &str) -> ReadySetResult<String>
 where
     T: Timelike + Datelike,
 {
-    /// Calcluate the week (and year!) number of a date-like value according to the ...algorithm...
+    /// Calculate the week (and year!) number of a date-like value according to the ...algorithm...
     /// that MySQL uses. Returns a tuple of (week number, year), since in some operating modes a day
     /// may be part of the first week of the next year, or last week of the previous year.
     ///

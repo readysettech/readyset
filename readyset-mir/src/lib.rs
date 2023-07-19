@@ -13,7 +13,7 @@
 //! (the final representation we use for a query), but has several differences in its design that
 //! make it better suited for use as an intermediate representation. At a high level, while the
 //! structure of the dataflow graph is primarily optimized for the most efficient *execution* of a
-//! query, the structure of the MIR graph is primarily optmized for making it easiest for
+//! query, the structure of the MIR graph is primarily optimized for making it easiest for
 //! *developers* to deal with the graph. Most notably, while dataflow uses numeric column *indices*
 //! throughout to refer to columns in its parents, MIR uses *named* [column references]. This allows
 //! us to much more easily perform [rewrite passes] which may add new columns, remove columns, or

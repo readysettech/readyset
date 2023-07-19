@@ -108,7 +108,7 @@ pub fn other_error(err_kind: OtherErrorKind) -> io::Error {
         } => io::Error::new(
             io::ErrorKind::Other,
             format!(
-                "Failed to index into {} (attemped index: {}, length: {})",
+                "Failed to index into {} (attempted index: {}, length: {})",
                 data, index, length
             ),
         ),

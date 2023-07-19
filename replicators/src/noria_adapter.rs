@@ -73,7 +73,7 @@ pub(crate) trait Connector {
     /// advance the replication slot position on the server.
     ///
     /// * `until` - an optional position in the binlog to stop at, even if no actionable
-    /// occured. In that case the action [`ReplicationAction::LogPosition`] is returned.
+    /// occurred. In that case the action [`ReplicationAction::LogPosition`] is returned.
     /// Currently this is only used by MySQL replicator while catching up on replication.
     async fn next_action(
         &mut self,
@@ -354,7 +354,7 @@ impl NoriaAdapter {
 
                 snapshot_result?;
 
-                // Get updated offests, after potential replication happened
+                // Get updated offsets, after potential replication happened
                 replication_offsets = noria.replication_offsets().await?;
 
                 // If we have some offsets in `replication_offsets`, that means some tables were

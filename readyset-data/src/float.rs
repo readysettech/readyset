@@ -484,7 +484,7 @@ mod tests {
             .coerce_to(&DfType::UnsignedInt, &DfType::Unknown)
             .unwrap_err();
 
-        // Since u64 max is not accurately representable as a doulbe, there are no exact conversions
+        // Since u64 max is not accurately representable as a double, there are no exact conversions
         DfValue::Double(18446744073709551613.49)
             .coerce_to(&DfType::UnsignedBigInt, &DfType::Unknown)
             .unwrap_err();

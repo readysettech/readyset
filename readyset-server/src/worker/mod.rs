@@ -334,7 +334,7 @@ impl Worker {
                     .spawn_wrapper(move || {
                         // The runtime will run until the abort signal is sent.
                         // This will happen either if the DomainHandle is dropped (and error is
-                        // recieved) or an actual signal is sent on the
+                        // received) or an actual signal is sent on the
                         // channel
                         let _ = runtime.block_on(domain_abort_rx);
                         runtime.shutdown_background();

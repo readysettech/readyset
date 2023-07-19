@@ -588,7 +588,7 @@ impl<'df> Migration<'df> {
         // add to the graph
         let ni = self.dataflow_state.ingredients.add_node(i);
 
-        #[allow(clippy::indexing_slicing)] // ni was just aded to ingredients
+        #[allow(clippy::indexing_slicing)] // ni was just added to ingredients
         {
             debug!(
                 node = ni.index(),

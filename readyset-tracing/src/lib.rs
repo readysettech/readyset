@@ -253,7 +253,7 @@ impl Options {
     ///     let options = Options::parse();
     ///     options
     ///         .tracing
-    ///         .init("tracing-example", "example-deplyoment")
+    ///         .init("tracing-example", "example-deployment")
     ///         .unwrap();
     ///
     ///     // Perform work!

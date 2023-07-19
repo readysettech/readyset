@@ -110,7 +110,7 @@ pub struct Properties<'a> {
     pub deployment_id: &'a str,
 }
 
-/// Top-level wrapper for ReadySet-specifc Segment Track message
+/// Top-level wrapper for ReadySet-specific Segment Track message
 ///
 /// See:
 /// - https://segment.com/docs/connections/spec/common

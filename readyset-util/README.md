@@ -1,6 +1,6 @@
 # Launchpad
 
-This crate provides miscellanious utilities and extensions to the Rust standard
+This crate provides miscellaneous utilities and extensions to the Rust standard
 library, for use in all crates in this workspace.
 
 ## What belongs here?

@@ -2,7 +2,7 @@ use anyhow::{anyhow, Error};
 use readyset_client::consistency::Timestamp;
 use readyset_client::internal::LocalNodeIndex;
 
-/// Unique identifier for a client write discernable at both the
+/// Unique identifier for a client write discernible at both the
 /// debezium connector and the noria client.
 // TODO(andrew): Currently only MySQL is supported by the client.
 // https://app.clubhouse.io/readysettech/story/368

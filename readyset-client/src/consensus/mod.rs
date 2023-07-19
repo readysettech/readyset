@@ -125,7 +125,7 @@ pub trait AuthorityControl: Send + Sync {
     /// Initializes the authority. This performs any initialization that the authority client
     /// needs to perform with the backend. This should be performed before any other
     /// calls are made to AuthorityControl functions.
-    /// TODO(justin): Existing authorities should guarentee authority usage adheres to calling
+    /// TODO(justin): Existing authorities should guarantee authority usage adheres to calling
     /// init() before other functionality.
     async fn init(&self) -> ReadySetResult<()>;
 

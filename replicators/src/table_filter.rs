@@ -43,7 +43,7 @@ pub(crate) struct TableFilter {
 /// out
 ///
 /// If we start replicating all tables, adding tables to AllTablesExcept allows us to ignore them
-/// If we start with a specific set of tables to replicate, removing them from Tables also alows us
+/// If we start with a specific set of tables to replicate, removing them from Tables also allows us
 /// to no longer replicate them.
 ///
 /// Similarly to [`TableFilter`] a `BTreeSet` is used here, because the assumption is that

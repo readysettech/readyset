@@ -207,7 +207,7 @@ pub struct MemoryTraceSnapshot {
 ///     - mid2
 ///        - leaf3
 ///
-/// Its defination could be:
+/// Its definition could be:
 ///   mem_trace!(root, [(mid1, [leaf1, leaf2]), (mid2, [leaf3])])
 #[macro_export]
 macro_rules! mem_trace {

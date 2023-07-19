@@ -111,7 +111,7 @@ fn col_enc_len(c: &Column) -> usize {
 }
 
 // See https://dev.mysql.com/doc/internals/en/com-query-response.html for documentation
-fn write_column_defintion(c: &Column, buf: &mut Vec<u8>) {
+fn write_column_definition(c: &Column, buf: &mut Vec<u8>) {
     // The following unwraps are fine because writes to a Vec can't fail
 
     // Catalog (lenenc)
@@ -157,7 +157,7 @@ pub fn prepare_column_definitions(cols: &[Column]) -> Vec<u8> {
     for (seq, c) in cols.iter().enumerate() {
         let hdr = col_enc_len(c) as u32 | (((seq + 2) as u32) << 24);
         buf.write_u32::<LittleEndian>(hdr).unwrap();
-        write_column_defintion(c, &mut buf);
+        write_column_definition(c, &mut buf);
     }
     buf
 }
@@ -175,7 +175,7 @@ where
     for c in i {
         let mut buf = w.get_buffer();
         buf.reserve(col_enc_len(c));
-        write_column_defintion(c, &mut buf);
+        write_column_definition(c, &mut buf);
         w.enqueue_packet(buf);
         empty = false;
     }

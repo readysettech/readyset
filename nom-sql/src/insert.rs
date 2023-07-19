@@ -47,10 +47,7 @@ impl InsertStatement {
                 " VALUES {}",
                 self.data
                     .iter()
-                    .map(|datas| format!(
-                        "({})",
-                        datas.iter().map(|l| l.display(dialect)).join(", ")
-                    ))
+                    .map(|data| format!("({})", data.iter().map(|l| l.display(dialect)).join(", ")))
                     .join(", ")
             )
         })

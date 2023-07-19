@@ -26,7 +26,7 @@ enum QueuedPacket {
 }
 
 /// A helper function that performes a vector write to completion, since
-/// the `tokio` one is not guranteed to write all of the data.
+/// the `tokio` one is not guaranteed to write all of the data.
 async fn write_all_vectored<'a, W: AsyncWrite + Unpin>(
     w: &'a mut W,
     mut slices: &'a mut [IoSlice<'a>],
@@ -181,7 +181,7 @@ impl<W: AsyncWrite + Unpin> PacketWriter<W> {
     /// Clear the queued packets and return them to the pool of preallocated packets
     fn return_queued_to_pool(&mut self) {
         // Prefer to merge the shorter vector into the longer vector, thus minimizing the amount of
-        // copying neccessary. i.e. if `queue` already contains all the allocated vectors, no action
+        // copying necessary. i.e. if `queue` already contains all the allocated vectors, no action
         // is needed.
         if self.queue.len() > self.preallocated.len() {
             std::mem::swap(&mut self.queue, &mut self.preallocated);

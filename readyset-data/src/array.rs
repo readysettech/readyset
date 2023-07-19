@@ -22,7 +22,7 @@ use crate::{DfType, DfValue, DfValueKind};
 ///
 /// 1. Are n-dimensional, but always rectangular
 /// 2. Default to a lower bound of 1, but support changing dimensionality
-/// 3. Are always homogenously typed
+/// 3. Are always homogeneously typed
 ///
 /// This struct supports the first two features, but does not enforce the third.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -119,7 +119,7 @@ impl Array {
     }
 
     /// Returns `true` if the array does not contain a mix of inferred types.
-    pub fn is_homogenous(&self) -> bool {
+    pub fn is_homogeneous(&self) -> bool {
         let mut iter = self.values();
 
         let expected_type: DfType = match iter.next() {

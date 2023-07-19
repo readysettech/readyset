@@ -578,7 +578,7 @@ impl TableSpec {
 
     /// Generate `num_rows` rows of data for this table. If `random` is true, columns
     /// that are not unique and do not need to yield expected values, have their
-    /// DataGenerationSpec overriden with DataGenerationSpec::Random.
+    /// DataGenerationSpec overridden with DataGenerationSpec::Random.
     pub fn generate_data(
         &mut self,
         num_rows: usize,
@@ -589,7 +589,7 @@ impl TableSpec {
 
     /// Generate `num_rows` rows of data for this table starting with the index:
     /// `index`. If `random` is true, columns that are not unique and do not
-    /// need to yield expected values, have their DataGenerationSpec overriden
+    /// need to yield expected values, have their DataGenerationSpec overridden
     /// with DataGenerationSpec::Random.
     pub fn generate_data_from_index(
         &mut self,
@@ -707,7 +707,7 @@ impl GeneratorState {
 
     /// Generate `num_rows` rows of data for the table given by `table_name`.
     /// If `random` is passed on column data will be random in length for
-    /// variable length data, and value for fixed-lenght data.
+    /// variable length data, and value for fixed-length data.
     ///
     /// # Panics
     ///
@@ -2018,7 +2018,7 @@ impl QueryOperation {
         }
     }
 
-    /// Returns an iterator over all permuations of length 1..`max_depth` [`QueryOperation`]s.
+    /// Returns an iterator over all permutations of length 1..`max_depth` [`QueryOperation`]s.
     pub fn permute(max_depth: usize) -> impl Iterator<Item = Vec<&'static QueryOperation>> {
         (1..=max_depth).flat_map(|depth| ALL_OPERATIONS.iter().combinations(depth))
     }

@@ -42,7 +42,7 @@ impl Extremum {
     }
 }
 
-/// `ExtremumOperator` implementas a Soup node that performans common aggregation operations such
+/// `ExtremumOperator` implements a Dataflow node that performs common aggregation operations such
 /// as counts and sums.
 ///
 /// `ExtremumOperator` nodes are constructed through `Extremum` variants using `Extremum::new`.

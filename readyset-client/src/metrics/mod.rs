@@ -21,7 +21,7 @@ pub mod recorded {
     /// kube_pod_container_status_restarts metric)
     pub const NORIA_STARTUP_TIMESTAMP: &str = "readyset_startup_timestamp";
 
-    /// Counter: The number of lookup misses that occured during replay
+    /// Counter: The number of lookup misses that occurred during replay
     /// requests. Recorded at the domain on every lookup miss during a
     /// replay request.
     ///
@@ -29,7 +29,7 @@ pub mod recorded {
     /// | --- | ----------- |
     /// | domain | The index of the domain the replay miss is recorded in |
     /// | shard | The shard the replay miss is recorded in |
-    /// | miss_in | The LocalNodeIndex of the data flow node where the miss occured |
+    /// | miss_in | The LocalNodeIndex of the data flow node where the miss occurred |
     /// | needed_for | The client tag of the request that the replay is required for. |
     pub const DOMAIN_REPLAY_MISSES: &str = "readyset_domain.replay_misses";
 

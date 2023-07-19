@@ -1018,7 +1018,7 @@ fn make_distinct_node(
         // We're using Count to implement distinct here, because count already keeps track of how
         // many times we have seen a set of values. This means that if we get a row
         // deletion, we won't be removing it from our records of distinct rows unless there are no
-        // remaining occurances of the set.
+        // remaining occurrences of the set.
         //
         // We use 0 as a placeholder value
         Aggregation::Count.over(parent_na.address(), 0, &group_by_indx, &DfType::Unknown)?,

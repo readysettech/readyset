@@ -17,7 +17,7 @@
 //!
 //! # Internals
 //!
-//! Internally, values are stored in a single continous allocation row-first, alongside the length
+//! Internally, values are stored in a single continuous allocation row-first, alongside the length
 //! of the row.
 
 #![feature(core_intrinsics, int_roundings)]

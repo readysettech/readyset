@@ -207,7 +207,7 @@ async fn write_meta_table<W: AsyncWrite + Unpin>(
 }
 
 /// Writes a Vec of [`MetaVariable`] as a table with two columns, where each row represents one
-/// varaible, with the first column being the variable name and the second column its value
+/// variable, with the first column being the variable name and the second column its value
 async fn write_meta_variables<W: AsyncWrite + Unpin>(
     vars: Vec<MetaVariable>,
     results: QueryResultWriter<'_, W>,

@@ -462,7 +462,7 @@ async fn generated_columns() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
-async fn unsuported_numeric_scale() {
+async fn unsupported_numeric_scale() {
     // Tests that we handle tables that have NUMERIC values with scales > 28
     // by not snapshotting them and falling back to upstream
     readyset_tracing::init_test_logging();

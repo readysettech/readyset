@@ -182,7 +182,7 @@ pub fn shard(
                     let want_sharding_input: HashMap<_, _> =
                         want_sharding_input.into_iter().collect();
 
-                    // we can shard by the ouput column `want_sharding` *only* if we don't do
+                    // we can shard by the output column `want_sharding` *only* if we don't do
                     // lookups based on any *other* columns in any ancestor. if we do, we must
                     // force no sharding :(
                     let mut ok = true;
@@ -203,7 +203,7 @@ pub fn shard(
                             }
                         } else {
                             // we do lookups on this input column, but it's not the one we're
-                            // sharding output on -- no unambigous sharding.
+                            // sharding output on -- no unambiguous sharding.
                             debug!(
                                 wants = want_sharding,
                                 lookup = ?(ni, lookup_col),
@@ -557,7 +557,7 @@ pub fn shard(
             if let Some(current_grandp) = swaps.get(&(p, grandp)) {
                 // so, this is interesting... the parent of p has *already* been swapped, most
                 // likely by another (hoisted) sharder. it doesn't really matter to us here, but we
-                // will want to remove the duplication of sharders (whcih we'll do below).
+                // will want to remove the duplication of sharders (which we'll do below).
                 grandp = *current_grandp;
             }
 

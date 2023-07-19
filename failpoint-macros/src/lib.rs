@@ -1,6 +1,6 @@
 pub use failpoint_proc_macros::failpoint;
 
-/// Creates a [`fail::fail_point`] which can be used to programatically
+/// Creates a [`fail::fail_point`] which can be used to programmatically
 /// introduce failures from tests. This macro wraps [`fail::fail_point`]
 /// with our `failure_injection` feature.
 ///

@@ -1370,7 +1370,7 @@ pub enum ErrorKind {
     /// Event execution time is in the past and ON COMPLETION NOT PRESERVE is set. The event was
     /// dropped immediately after creation.
     ER_EVENT_CANNOT_ALTER_IN_THE_PAST = 1589,
-    /// The incident %s occured on the master. Message: %s
+    /// The incident %s occurred on the master. Message: %s
     ER_SLAVE_INCIDENT = 1590,
     /// Table has no partition for some existing values
     ER_NO_PARTITION_FOR_GIVEN_VALUE_SILENT = 1591,
@@ -1910,10 +1910,10 @@ pub enum ErrorKind {
     ER_NOT_VALID_PASSWORD = 1819,
     /// You must SET PASSWORD before executing this statement
     ER_MUST_CHANGE_PASSWORD = 1820,
-    /// Failed to add the foreign key constaint. Missing index for constraint '%s' in the foreign
+    /// Failed to add the foreign key constraint. Missing index for constraint '%s' in the foreign
     /// table '%s'
     ER_FK_NO_INDEX_CHILD = 1821,
-    /// Failed to add the foreign key constaint. Missing index for constraint '%s' in the
+    /// Failed to add the foreign key constraint. Missing index for constraint '%s' in the
     /// referenced table '%s'
     ER_FK_NO_INDEX_PARENT = 1822,
     /// Failed to add the foreign key constraint '%s' to system tables

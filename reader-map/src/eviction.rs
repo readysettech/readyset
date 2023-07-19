@@ -105,7 +105,7 @@ where
     F: FnMut(u64) -> bool,
     I: Iterator<Item = (u64, K)>,
 {
-    /// Return the next consective range of keys to be evicted, the first and the last items in the
+    /// Return the next consecutive range of keys to be evicted, the first and the last items in the
     /// group are the range bounds.
     pub fn next_range(&mut self) -> Option<EvictRangeGroup<'_, K, I, F>> {
         loop {
@@ -429,7 +429,7 @@ impl GenerationalEviction {
         // At this point at `bucket[0]` we have the count for keys in the current generation
         // `bucket[1]` for previous etc. We need to free a total of `nkeys`. We start from the
         // highest bucket, attempting to free an entire generation where possible. Finally if
-        // we don't have sufficient keys from freeing entire generations, we will parially evict
+        // we don't have sufficient keys from freeing entire generations, we will partially evict
         // another generation at random to get the required amount of keys
 
         // Everything before full_gen_to_evict, will be evicted fully
@@ -494,7 +494,7 @@ impl GenerationalEviction {
         // At this point at `bucket[0]` we have the count for keys in the current generation
         // `bucket[1]` for previous etc. We need to free a total of `nkeys`. We start from the
         // highest bucket, attempting to free an entire generation where possible. Finally if
-        // we don't have sufficient keys from freeing entire generations, we will parially evict
+        // we don't have sufficient keys from freeing entire generations, we will partially evict
         // another generation to get the required amount of keys.
 
         // Everything before full_gen_to_evict, will be evicted fully

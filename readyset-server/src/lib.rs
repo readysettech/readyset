@@ -278,7 +278,7 @@
 //!  - query the other side of the join by looking up the join key in the materialization we have
 //!    for that other ancestor (this is an upquery).
 //!  - look for anything that matches the join column(s) on the current record.
-//!  - emit the carthesian product of those records with the one we received.
+//!  - emit the cartesian product of those records with the one we received.
 //!
 //! It also sorts the batch of updates, like most ReadySet operators do, so that it only performs
 //! one lookup per key. In this particular case, the join finds no records in `vc`, and so no

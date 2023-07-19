@@ -335,7 +335,7 @@ impl Benchmark {
                         // The way percentage memory limit works is by getting the memory usage
                         // before the benchmark begins, this gives us a minimal baseline. Then we
                         // will compute how much *additional* memory the benchmark requires to be
-                        // fully cached, and add the percantage of *that* to the baseline.
+                        // fully cached, and add the percentage of *that* to the baseline.
                         set_memory_limit_bytes(Some(
                             bytes_before_workload + bytes_used * percent / 100,
                         ))?;
@@ -499,7 +499,7 @@ impl AdapterHandle {
             Fork::Child => {
                 // We don't want the benchmarking process and the server to share CPU cores, to
                 // reduce noise, therefore we schedule the processes to different
-                // CPU cores alltogether
+                // CPU cores altogether
                 #[cfg(not(target_os = "macos"))]
                 set_cpu_affinity(true);
                 drop(sock2);

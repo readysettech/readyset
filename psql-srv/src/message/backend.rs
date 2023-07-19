@@ -25,7 +25,7 @@ const SSL_RESPONSE_WILLING: u8 = b'S';
 /// # Type Parameters
 ///
 /// * `R` - Represents a row of data values. `BackendMessage` implementations are provided wherein a
-///   value of type `R` will, upon iteration, emit values that are convertable into type `Value`,
+///   value of type `R` will, upon iteration, emit values that are convertible into type `Value`,
 ///   which can be serialized along with the rest of the `BackendMessage`.
 #[derive(Debug, PartialEq, Eq)]
 #[allow(clippy::large_enum_variant)] // TODO: benchmark if this matters

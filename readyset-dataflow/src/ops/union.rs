@@ -594,7 +594,7 @@ impl Ingredient for Union {
                 //
                 // we have two options here. either, we iterate over the records in an outer loop
                 // and the buffered upquery responses in the inner loop, or the other way around.
-                // since iterating over the buffered upquery respones includes a btree loopup, we
+                // since iterating over the buffered upquery respones includes a btree lookup, we
                 // want to do fewer of those, so we do those in the outer loop.
                 let replays = self.replay_pieces.iter_mut();
                 let mut replay_key = None;
@@ -1014,7 +1014,7 @@ impl Ingredient for Union {
                 // now, what happens if there is a exactly one union on the upquery's path, at or
                 // above one of our parents. well, _that_ parent will have as many distinct path
                 // identifiers as that union has parents. we know that it will only produce _one_
-                // upquery response through (since the union will buffer), and that the repsonse
+                // upquery response through (since the union will buffer), and that the response
                 // will have (an arbitrary chosen) one of those path identifiers. we know that path
                 // discriminators are distinct, so whichever identifier our union ancestor chooses,
                 // it will be distinct from the paths that go through our _other_ parents.

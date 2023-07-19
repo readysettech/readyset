@@ -16,7 +16,7 @@
 //! ```
 //!
 //! To run the benchmarks with data stored in the current directory and persisted after the
-//! benchmakrs run:
+//! benchmarks run:
 //! ```notrust
 //! $ cargo bench -- --durability-mode=persistent
 //! ```

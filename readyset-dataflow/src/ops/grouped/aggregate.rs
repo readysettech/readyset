@@ -65,7 +65,7 @@ impl Aggregation {
     }
 }
 
-/// Aggregator implements a Soup node that performs common aggregation operations such as counts
+/// Aggregator implements a Dataflow node that performs common aggregation operations such as counts
 /// and sums
 ///
 /// `Aggregator` nodes are constructed through `Aggregation` variants using `Aggregation::new`.

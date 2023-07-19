@@ -3,7 +3,7 @@
 //! ReadySetVersion allows the ReadySet version information to be displayed from the `SHOW READYSET
 //! VERSION` SQL query.
 //!
-//! Also included in this modue are helper constants for use in logs (VERSION_STR_ONELINE) or
+//! Also included in this module are helper constants for use in logs (VERSION_STR_ONELINE) or
 //! returning from --version (VERSION_STR_PRETTY)
 
 use std::env;

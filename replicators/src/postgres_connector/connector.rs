@@ -226,7 +226,7 @@ impl PostgresWalConnector {
         })
     }
 
-    /// Creates a new `PUBLICATION name FOR ALL TABLES`, to be able to recieve WAL on that slot.
+    /// Creates a new `PUBLICATION name FOR ALL TABLES`, to be able to receive WAL on that slot.
     /// The user must have superuser privileges for that to work.
     async fn create_publication(&mut self, name: &str) -> ReadySetResult<()> {
         let query = format!("CREATE PUBLICATION {} FOR ALL TABLES", name);

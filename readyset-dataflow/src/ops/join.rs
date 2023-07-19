@@ -355,7 +355,7 @@ impl Ingredient for Join {
             // The semantics of NULL in SQL are tri-state - while obviously `1 = 1`, it is *not* the
             // case that `null = null`. Usually this is irrelevant for lookups into state since it's
             // impossible to upquery for null keys (since IS and IS NOT can't be parametrized,
-            // syntatically), but we *do* have to have an extra case here in the case of join
+            // syntactically), but we *do* have to have an extra case here in the case of join
             // lookups - two NULL join keys should *not* match each other in the semantics of the
             // join, even though they *would* match normally due to the semantics of the DfValue
             // type.

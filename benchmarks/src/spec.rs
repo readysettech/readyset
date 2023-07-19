@@ -8,7 +8,7 @@
 //!   * `name` - String. The name of the distribution, that may be referenced by queries.
 //!   * `zipf` - Float. Means data will be sampled with a zipfian distribution, with the given
 //!     parameter. Mutually exclusive with uniform.
-//!   * `uniform` - Empty. Means data will be sampled uniformely.  Mutually exclusive with zipf.
+//!   * `uniform` - Empty. Means data will be sampled uniformly.  Mutually exclusive with zipf.
 //!   * `range` - Data will be sampled from an integer (i64) range.
 //!     * `start` - Integer. Range start, inclusive
 //!     * `end` - Integer. Range end, exclusive.
@@ -19,7 +19,7 @@
 //!       * `start` - Integer. Range start, inclusive
 //!       * `end` - Integer. Range end, exclusive.
 //!     * `distance` - Second column will be the value of the first column plus a value sampled from
-//!       an integer (i64) range. Alway uniformly distributed in range.
+//!       an integer (i64) range. Always uniformly distributed in range.
 //!       * `start` - Integer. Distance start, inclusive
 //!       * `end` - Integer. Distance end, exclusive.
 //!   * `query` - String. Data will be sampled from the results of a SQL query, the query is run on
@@ -48,7 +48,7 @@
 //!
 //! * `queries` - A list of queries to run.
 //!   * `spec` - String. The query to run.
-//!   * `params` - List of parameteres to pass to the query. Each parameter corresponds to a single
+//!   * `params` - List of parameters to pass to the query. Each parameter corresponds to a single
 //!     `?` placeholder in spec. The number of parameters must be equal to the number of
 //!     placeholders.
 //!     * `sql_type` - String. The SQL type to coerce data to before making the query. I.e. int,
@@ -56,7 +56,7 @@
 //!     * `distribution` - String. Name of one of the distributions from the `distributions`
 //!       section.
 //!     * `col` - Integer. The column of the data to use from the distribution, if the rows contain
-//!       more than one column. There is a subtelty here. The data is sampled only when the column
+//!       more than one column. There is a subtlety here. The data is sampled only when the column
 //!       `0` is specified for a distribution, so for example using `col: 0` twice will sample two
 //!       rows from the dataset, however uing `col: 0` followed by `col: 1` will reuse the same row.
 //!   * `weight` - Integer. The absolute weight of the query. I.e. how often this query will be run.
@@ -129,7 +129,7 @@ pub struct WorkloadQuery {
     pub spec: String,
     /// The list of parameters to generate for each instance of the query
     pub params: Vec<WorkloadParam>,
-    /// Specify whever to call `CREATE CACHE` for this query
+    /// Specify wherever to call `CREATE CACHE` for this query
     pub migrate: bool,
     /// The absolute weight of this query. The relative weight will depend on the total weight of
     /// all queries.
@@ -263,7 +263,7 @@ impl WorkloadSpec {
             if *migrate {
                 let stmt = match spec.parse::<SqlQuery>() {
                     Ok(SqlQuery::Select(stmt)) => stmt,
-                    _ => panic!("Can only migrate SELECT statments"),
+                    _ => panic!("Can only migrate SELECT statements"),
                 };
 
                 let create_cache_query = nom_sql::CreateCacheStatement {

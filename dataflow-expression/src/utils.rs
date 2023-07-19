@@ -4,8 +4,8 @@ use serde::Serialize;
 use crate::{BuiltinFunction, Expr};
 
 /** These helpers initialize `Expr` variants with a type field. These are
- * not inteded for use outside of tests. A planned implementation of the type
- * inference system will make the type paramter of `Expr` generic, which
+ * not intended for use outside of tests. A planned implementation of the type
+ * inference system will make the type parameter of `Expr` generic, which
  * will allow variants to be constructed without any type information - leaving
  * that to the type inference system. These functions will then be removed */
 

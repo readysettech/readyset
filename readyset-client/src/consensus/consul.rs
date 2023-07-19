@@ -53,7 +53,7 @@
 //! dataflow state update. See [`next_state_version`] to see the two version names we alternate
 //! between.
 //!
-//! This is possible becasue of the following:
+//! This is possible because of the following:
 //! * We may only perform writes to *any* version of the dataflow state if and only if we are the
 //!   leader. This follows from  [^1].
 //! * The dataflow state referred to in `/state` is always immutable while it is in `/state, leaders
@@ -340,7 +340,7 @@ impl ConsulAuthority {
 
     fn get_session(&self) -> ReadySetResult<String> {
         let inner = self.read_inner()?;
-        // Both fields are guarenteed to be populated previously or
+        // Both fields are guaranteed to be populated previously or
         // above.
         #[allow(clippy::unwrap_used)]
         Ok(inner.session.as_ref().unwrap().clone())
@@ -895,7 +895,7 @@ impl AuthorityControl for ConsulAuthority {
     // TODO(justin): The set of workers includes failed workers, this set will grow
     // unbounded over a long-lived deployment with many failures. Introduce cleanup by
     // deleting keys without a session.
-    // TODO(justin): Combine this with worker data to prevent redundent calls.
+    // TODO(justin): Combine this with worker data to prevent redundant calls.
     async fn get_workers(&self) -> ReadySetResult<HashSet<WorkerId>> {
         set_failpoint!(failpoints::AUTHORITY, |_| internal!(
             "authority->server failure injected"

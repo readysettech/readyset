@@ -20,7 +20,7 @@ const HDD_BYTES_PER_SEC: f64 = 125_829_120.0;
 #[derive(Debug, Clone)]
 pub struct SimpleFallbackCache<R: Clone + Sized + Send + Sync> {
     /// A thread-safe hash map that holds a cache of unparsed and unsupported queries to their
-    /// repsective QueryResult.
+    /// respective QueryResult.
     queries: DashMap<String, QueryResult<R>>,
     /// The configured ttl for all queries cached in the FallbackCache.
     ttl: Duration,
@@ -190,7 +190,7 @@ where
         }
     }
 
-    /// Simulates an hdd by adding an async delay calculated based on the curent size of the in
+    /// Simulates an hdd by adding an async delay calculated based on the current size of the in
     /// memory cache, and average read/write rates for spinning disk.
     ///
     /// Takes in the current already elapsed time, which is used in combination with spinning disk

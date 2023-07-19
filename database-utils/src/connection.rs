@@ -62,7 +62,7 @@ where
     // *reference* to
     // `DatabaseStatementLike::MySqlStatement` implements
     // `mysql_async::prelude::StatementLike`, whereas we
-    // only need to requre that
+    // only need to require that
     // `DatabaseStatementLike::PostgresStatement` *itself*
     // implements `tokio_postgres::ToStatement`.
     for<'a> &'a Self::MySqlStatement: mysql_async::prelude::StatementLike,

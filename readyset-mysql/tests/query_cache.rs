@@ -111,7 +111,7 @@ async fn in_request_path_query_without_fallback() {
 // With the out_of_band query mode and fallback, both supported and unsupported
 // queries should be executed against fallback, they should not be added to the
 // allow list. Performing an explicit migration allows the query to be added to
-// the allow list on next exeution.
+// the allow list on next execution.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn out_of_band_query_with_fallback() {
@@ -479,7 +479,7 @@ async fn in_request_path_prep_without_fallback() {
 // With the out_of_band query mode and fallback, both supported and unsupported
 // queries should be executed against fallback, they should not be added to the
 // allow list. Performing an explicit migration allows the query to be added to
-// the allow list on next exeution.
+// the allow list on next execution.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn out_of_band_prep_exec_with_fallback() {
@@ -610,7 +610,7 @@ async fn in_request_path_rewritten_query_without_fallback() {
 }
 
 // With the out_of_band query mode without fallback, queries that are not
-// explicitely migrated are denied. We verify that two queries end up being
+// explicitly migrated are denied. We verify that two queries end up being
 // cached as the same query in the query status cache. Otherwise, the second
 // query will fail as being disallowed.
 #[tokio::test(flavor = "multi_thread")]

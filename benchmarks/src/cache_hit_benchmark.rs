@@ -57,7 +57,7 @@ impl BenchmarkControl for CacheHitBenchmark {
     }
 
     async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<BenchmarkResults> {
-        // Explicitely migrate the query before benchmarking.
+        // Explicitly migrate the query before benchmarking.
         let mut conn = DatabaseURL::from_str(&deployment.target_conn_str)?
             .connect(None)
             .await?;

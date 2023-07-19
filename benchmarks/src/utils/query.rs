@@ -420,7 +420,7 @@ impl From<(&DatabaseStatement, Vec<DfValue>)> for Query {
 pub struct CachingQueryGenerator {
     prepared_statement: PreparedStatement,
     /// A set of previously generated and executed statement. We can re-execute
-    /// this statement to guarentee a cache hit if we are not performing
+    /// this statement to guarantee a cache hit if we are not performing
     /// eviction.
     // TODO(justin): Replace with bloom filter for mem efficiency.
     seen: HashSet<Query>,

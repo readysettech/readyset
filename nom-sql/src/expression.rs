@@ -2835,7 +2835,7 @@ mod tests {
             #[test]
             fn double_pipe_operator() {
                 // Note that we currently only support the PG JSONB || operator. At some point this
-                // test may need to be entended to also handle the string concat || operator as
+                // test may need to be extended to also handle the string concat || operator as
                 // well as the MySQL boolean || operator.
                 let cond = "'[\"a\", \"b\"]'::jsonb || '[\"c\", \"d\"]'";
 

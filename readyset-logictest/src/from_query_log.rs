@@ -17,7 +17,7 @@ use querylog::{Command, Entry, Session, Stream};
 /// Convert a MySQL query log to a set of test scripts.
 #[derive(Parser)]
 pub struct FromQueryLog {
-    /// URL of a reference database to connect to, execute queries frmo the log, and record the
+    /// URL of a reference database to connect to, execute queries from the log, and record the
     /// results.  Currently supports `mysql://` URLs, but may be expanded in the future.
     #[clap(long)]
     pub database: DatabaseURL,

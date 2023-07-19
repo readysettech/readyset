@@ -727,7 +727,7 @@ impl ModelState for DDLModelState {
     /// We also check preconditions during runtime, and throw out any test cases where the
     /// preconditions aren't satisfied. This should be rare, though, because
     /// [`DDLModelState::op_generators`] should *usually* only generate cases where the
-    /// preconditions are already satisified. It's possible there are weird corner cases though
+    /// preconditions are already satisfied. It's possible there are weird corner cases though
     /// (such as multiple random strings happening to generate the same string value for two
     /// different table names) where preconditions could save us from a false positive test
     /// failure.

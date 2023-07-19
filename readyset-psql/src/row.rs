@@ -10,7 +10,7 @@ use crate::value::Value;
 pub struct Row {
     /// The values comprising the row, as returned from a ReadySet interface lookup. Only the
     /// indices within this vector listed in `project_fields` will actually be projected during
-    /// iteration. (See documentaion below for `project_fields`).
+    /// iteration. (See documentation below for `project_fields`).
     pub values: Vec<DfValue>,
 
     /// The data types of the projected fields for this row.

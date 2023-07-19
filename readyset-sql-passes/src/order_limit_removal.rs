@@ -27,7 +27,7 @@ fn is_unique_or_primary(
     // matching col.name. The pass also assumes that col will always have an associated table.
     // The last assumption will only hold true if this pass is run after the
     // expand_implied_tables() pass
-    // This pass should also be run after the key_def_coalition pass, beause this pass will only
+    // This pass should also be run after the key_def_coalition pass, because this pass will only
     // search for primary keys in the table.keys filed (and not in column.constraints)
     let table = col.table.as_ref().ok_or_else(|| {
         internal_err!("All columns must have an associated table name at this point")
@@ -113,7 +113,7 @@ fn compares_unique_key_against_literal(
                 || compares_unique_key_against_literal(rhs, base_schemas, table_exprs)?,
         ),
         // TODO(DAN): it may be possible to determine that a query will return a single (or no)
-        // resut if it has a nested select in the conditional
+        // result if it has a nested select in the conditional
         _ => Ok(false),
     }
 }

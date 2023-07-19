@@ -331,7 +331,7 @@ impl Service<Tagged<ReadQuery>> for ReadRequestHandler {
         async {
             match res {
                 CallResult::Immediate(immediate_response) => immediate_response,
-                CallResult::Async(async_reponse) => async_reponse.await,
+                CallResult::Async(async_response) => async_response.await,
             }
         }
     }

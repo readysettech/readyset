@@ -63,7 +63,7 @@ pub(super) struct Target(pub(crate) LocalNodeIndex);
 
 /// Information required to add a new replay path to the set of replay paths.
 ///
-/// Used primarily as a temporary data struct to avoid an unwieldly-long argument list in
+/// Used primarily as a temporary data struct to avoid an unwieldy argument list in
 /// [`ReplayPaths::insert`]
 pub(super) struct ReplayPathSpec {
     pub(super) tag: Tag,

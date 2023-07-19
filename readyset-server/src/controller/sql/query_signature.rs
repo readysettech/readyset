@@ -45,7 +45,7 @@ impl Signature for QueryGraph {
     ///  1) refer to the same relations
     ///  2) mention the same columns as attributes
     /// Importantly, this does *NOT* say anything about the operators used in comparisons, literal
-    /// values compared against, or even which columns are compared. It is the responsibilty of the
+    /// values compared against, or even which columns are compared. It is the responsibility of the
     /// caller to do a deeper comparison of the queries.
     fn signature(&self) -> QuerySignature {
         use std::collections::hash_map::DefaultHasher;

@@ -985,7 +985,7 @@ mod tests {
     }
 
     #[test]
-    fn eval_case_when_mutliple_branches() {
+    fn eval_case_when_multiple_branches() {
         let expr = Expr::CaseWhen {
             branches: vec![
                 CaseWhenBranch {

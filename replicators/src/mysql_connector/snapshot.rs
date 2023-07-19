@@ -406,7 +406,7 @@ impl MySqlReplicator {
                 Ok(Some(row)) => row,
                 Ok(None) => break,
                 Err(err) if cnt == nrows => {
-                    info!(error = %err, "Error encountered during snapshot, but all rows replicated succesfully");
+                    info!(error = %err, "Error encountered during snapshot, but all rows replicated successfully");
                     break;
                 }
                 Err(err) => {
@@ -508,7 +508,7 @@ impl MySqlReplicator {
             match conn.query_drop("LOCK INSTANCE FOR BACKUP").await {
                 Ok(_) => Some(conn),
                 Err(err) => {
-                    warn!(%err, "Failed to aquire instance lock, DDL changes may cause inconsistency");
+                    warn!(%err, "Failed to acquire instance lock, DDL changes may cause inconsistency");
                     None
                 }
             }

@@ -5,7 +5,7 @@
 //!   * `ReadySetStatus::try_from(_: Vec<(String, String)>)`
 //!   * `Vec<(String, String)>::from(_: ReadySetStatus)`
 //!
-//! These two converions are used to convert the [`ReadySetStatus`] structs to a format
+//! These two conversions are used to convert the [`ReadySetStatus`] structs to a format
 //! that can be passed to various SQL clients.
 use std::fmt::{self, Display};
 

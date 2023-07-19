@@ -697,7 +697,7 @@ impl<'a> PostgresReplicator<'a> {
         // be replicated), but refer to only tables in schema 2 that are all replicated. If we try
         // to process a view that points to unreplicated schemas, we will just fail and ignore that
         // view.
-        // Similary, custom types may have cross-schema references and aren't filtered initally
+        // Similarly, custom types may have cross-schema references and aren't filtered initially
 
         trace!(?table_list, "Loaded table list");
         trace!(?view_list, "Loaded view list");

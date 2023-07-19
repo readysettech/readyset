@@ -218,7 +218,7 @@ impl Handle {
         }
     }
 
-    /// Retreive results for multiple keys from the map under the same read guard, assuring that all
+    /// Retrieve results for multiple keys from the map under the same read guard, assuring that all
     /// of the values refer to the same state map.
     pub(super) fn get_multi<'a>(
         &self,
@@ -230,7 +230,7 @@ impl Handle {
         }
     }
 
-    /// Retreive results for multiple keys from the map under the same read guard, assuring that all
+    /// Retrieve results for multiple keys from the map under the same read guard, assuring that all
     /// of the values refer to the same state map. If the get misses, the provided closure will be
     /// used to map the results of the miss, also under the same read guard, ensuring no writer swap
     /// took place between the miss and the closure being called.

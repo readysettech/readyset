@@ -414,7 +414,7 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
             DfType::Blob => Ok(DfValue::ByteArray(str.as_bytes().to_vec().into())),
 
             DfType::Binary(l) if l as usize == str.len() => {
-                // Binary is sufficent to store whole string
+                // Binary is sufficient to store whole string
                 Ok(DfValue::ByteArray(str.as_bytes().to_vec().into()))
             }
 
@@ -427,7 +427,7 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
             }
 
             DfType::VarBinary(l) if l as usize >= str.len() => {
-                // VarBinary is sufficent to store whole string
+                // VarBinary is sufficient to store whole string
                 Ok(DfValue::ByteArray(str.as_bytes().to_vec().into()))
             }
 
@@ -458,9 +458,9 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
 
             DfType::Json | DfType::Jsonb => {
                 // Currently just validates the json
-                // TODO: this is very very wrong as there is no gurantee two equal json objects will
-                // be string equal, quite the opposite actually. And we can't just "normalize the
-                // json" as we do for MAC and UUID.
+                // TODO: this is very very wrong as there is no guarantee two equal json objects
+                // will be string equal, quite the opposite actually. And we can't
+                // just "normalize the json" as we do for MAC and UUID.
                 str.parse::<serde_json::Value>()
                     .map_err(|e| Self::coerce_err(to_ty, e))?;
                 Ok(self.clone().into())

@@ -1491,7 +1491,7 @@ impl DfState {
     /// and any other associated information).
     /// - `self.domain_nodes` must be valid. This means that all the nodes in `self.ingredients`
     /// (except for `self.source`) must belong to a domain; and there must not be any overlap
-    /// between the nodes owned by each domain. All the invariants for Domain assigment from
+    /// between the nodes owned by each domain. All the invariants for Domain assignment from
     /// [`crate::controller::migrate::assignment::assign`] must hold as well.
     ///  - `self.remap` and `self.node_restrictions` must be valid.
     /// - All the other fields should be empty or `[Default::default()]`.
@@ -1549,8 +1549,8 @@ impl DfState {
     /// This method is a hack to make sure the [`ControllerState`] "persisted" in the
     /// [`LocalAuthority`] is stored similarly to the way it would be, if it were serialized and
     /// then deserailized, but without paying the extreme performance penalty actually serializing
-    /// it costs. Esentially we either clear or assign defaults to the fields that are marked as
-    /// #[serde::skip], thus making sure things are consistent whever they are stored after
+    /// it costs. Essentially we either clear or assign defaults to the fields that are marked as
+    /// #[serde::skip], thus making sure things are consistent wherever they are stored after
     /// serialization or after this method is applied.
     /// If called prior to serialization or after desiarialization this would effectively be a noop,
     /// so don't bother calling it in authorities that serialize.
@@ -1580,7 +1580,7 @@ impl DfState {
 /// ## Reads
 /// Reads are performed by taking a read lock on the underlying [`DfStateReader`].
 /// This allows any thread to freely get a read-only view of the dataflow state without having
-/// to worry about other threads attemting to modify it.
+/// to worry about other threads attempting to modify it.
 ///
 /// The choice of using [`tokio::sync::RwLock`] instead of [`std::sync::RwLock`] or
 /// [`parking_lot::RwLock`] was made in order to ensure that:

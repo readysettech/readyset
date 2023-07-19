@@ -44,7 +44,7 @@ where
 ///
 /// In the basic form, we passing a single block of code and repeat it until it evaluates to
 /// `true`. However, this can be limiting for some tests since it doesn't catch panics, so test
-/// code that relies on unwraps and asserts will fail. To accomodate this, [eventually] can also be
+/// code that relies on unwraps and asserts will fail. To accommodate this, [eventually] can also be
 /// called in in `run_test`/`then_assert` form, which catches panics in the `then_assert` block and
 /// retries the entire test.
 ///

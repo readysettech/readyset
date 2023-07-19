@@ -10,7 +10,7 @@ use crate::LocalNodeIndex;
 /// The timestamp maps a each base table to a monotonically increasing
 /// identifier, the transaction id of the last transaction executed on the
 /// table. Timestamps may call `satisfies` to verify if another timestamp
-/// is sufficiently up to date to satisfy read-your-write guarentees.
+/// is sufficiently up to date to satisfy read-your-write guarantees.
 #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Timestamp {
     /// A map from  a base table's LocalNodeIndex to timestamp.
@@ -101,7 +101,7 @@ impl Timestamp {
     /// A timestamp `self` satisfies read-your-write consistency for `t2` if:
     /// Every base table timestamp in `self` is greater than the respective
     /// base table timestamp in `t2`. A base table timestamp without a value
-    /// in either timestamp is consdiered a value less than any valid timestamp.
+    /// in either timestamp is considered a value less than any valid timestamp.
     pub fn satisfies(&self, t2: &Timestamp) -> bool {
         for (table, timestamp) in t2.map.iter() {
             // If `self` does not have a timestamp for a base table in `self` then the '

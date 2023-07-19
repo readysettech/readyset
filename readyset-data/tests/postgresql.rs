@@ -1,7 +1,7 @@
 //! Tests for reading+writing noria-data types to+from postgres
 //!
 //! All tests in this module assume a postgresql database running with the configuration provided by
-//! `docker-compose.yml` and `docker-compose.override.exmaple`:
+//! `docker-compose.yml` and `docker-compose.override.example`:
 //!
 //! ```console
 //! $ cp docker-compose.override.yml.example docker-compose.override.yml

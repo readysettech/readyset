@@ -4,7 +4,7 @@ use std::marker::PhantomData;
 /// A [`Comparator`] can compare two items in the tournament to decide which is the winner.
 pub trait Comparator<I: ?Sized> {
     /// Compare two results in the tournament, the winner is the smaller of the two as decide
-    /// by [`Ordering::Less`]. [`Ordering::Equal`] is concidered a draw, and either contestant
+    /// by [`Ordering::Less`]. [`Ordering::Equal`] is considered a draw, and either contestant
     /// may be chosen as the winner.
     fn cmp(&self, a: &I, b: &I) -> Ordering;
 }

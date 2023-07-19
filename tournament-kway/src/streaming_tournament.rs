@@ -24,7 +24,7 @@ where
     T::Item: Ord,
 {
     /// A tournament that rates entries from smallest to largest.
-    /// The provided iterators must yeild data from smallest to largest or the results are
+    /// The provided iterators must yield data from smallest to largest or the results are
     /// undefined.
     pub fn from_iters_min<I: IntoIterator<Item = T>>(iters: I) -> Self {
         StreamingTournament::from_iters(iters, LessComparator::default())
@@ -37,7 +37,7 @@ where
     T::Item: Ord,
 {
     /// A tournament that rates entries from largest to smallest.
-    /// The provided iterators must yeild data from largest to smallest or the results are
+    /// The provided iterators must yield data from largest to smallest or the results are
     /// undefined.
     pub fn from_iters_max<I: IntoIterator<Item = T>>(iters: I) -> Self {
         StreamingTournament::from_iters(iters, GreaterComparator::default())

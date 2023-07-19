@@ -223,7 +223,7 @@ impl Sharder {
             // FIXME: we don't know how many shards in the destination domain our sibling Sharders
             // sent to, so we don't know what to put here. we *could* put self.txs.len() and send
             // empty messages to all other shards, which is probably pretty sensible, but that only
-            // solves half the problem. the destination shard domains will then recieve *multiple*
+            // solves half the problem. the destination shard domains will then receive *multiple*
             // replay pieces for each incoming replay piece, and needs to combine them somehow.
             // it's unclear how we do that.
             unsupported!("we don't know how to shard a shard");

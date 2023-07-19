@@ -1,4 +1,4 @@
-//! This crate provides miscellanious utilities and extensions to the Rust standard library, for use
+//! This crate provides miscellaneous utilities and extensions to the Rust standard library, for use
 //! in all crates in this workspace.
 #![deny(missing_docs, rustdoc::missing_crate_level_docs)]
 #![feature(step_trait, bound_as_ref, bound_map, rustc_attrs)]

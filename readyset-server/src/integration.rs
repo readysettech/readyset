@@ -276,7 +276,7 @@ async fn test_timestamp_propagation_multitable() {
 
     // Perform a non-blocking read with a timestamp that the reader should not
     // be able to satisfy. A non-blocking read of a satisfiable timestamp would
-    // suceed here due to the previous read materializing the data.
+    // succeed here due to the previous read materializing the data.
     assert!(matches!(
         cq.raw_lookup(ViewQuery::from((
             vec![KeyComparison::Equal(vec1![DfValue::Int(1)])],

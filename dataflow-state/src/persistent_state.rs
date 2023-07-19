@@ -1267,7 +1267,7 @@ fn compaction_progress_watcher(table_name: &str, db: &DB) -> anyhow::Result<impl
 
                 // In the first stage we have log entries of the form `Generated table #53:
                 // 3314046 keys, 268436084 bytes` we will be looking for the
-                // number of keys in the table, it seems when we have all of the keys proccessed
+                // number of keys in the table, it seems when we have all of the keys processed
                 // is when first stage is done.
                 if line.contains("Generated table") {
                     // Look for number of keys

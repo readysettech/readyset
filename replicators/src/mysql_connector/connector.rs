@@ -235,7 +235,7 @@ impl MySqlBinlogConnector {
     /// # Arguments
     ///
     /// * `until` - an optional position in the binlog to stop at, even if no actionable
-    /// occured. In that case the action [`ReplicationAction::LogPosition`] is returned.
+    /// occurred. In that case the action [`ReplicationAction::LogPosition`] is returned.
     pub(crate) async fn next_action_inner(
         &mut self,
         until: Option<&ReplicationOffset>,
@@ -487,9 +487,9 @@ impl MySqlBinlogConnector {
                 // used from 5.1.16 until
                 // mysql-5.6.
                 EventType::GTID_EVENT => {
-                    // GTID stands for Global Transaction IDentifier It is composed of two parts:
+                    // GTID stands for Global Transaction Identifier It is composed of two parts:
                     // SID for Source Identifier, and GNO for Group Number. The basic idea is to
-                    // Associate an identifier, the Global Transaction IDentifier or GTID, to every
+                    // Associate an identifier, the Global Transaction Identifier or GTID, to every
                     // transaction. When a transaction is copied to a slave,
                     // re-executed on the slave, and written to the
                     // slave's binary log, the GTID is preserved.  When a slave connects to a

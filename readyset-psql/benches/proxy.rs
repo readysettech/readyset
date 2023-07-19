@@ -1,4 +1,4 @@
-//! This module contains a [`criterion`] benchmark which compares mutliple different methods of
+//! This module contains a [`criterion`] benchmark which compares multiple different methods of
 //! proxying queries to postgresql:
 //!
 //! * No proxy, as a control

@@ -18,7 +18,7 @@ use strum::{EnumCount, IntoEnumIterator};
 use crate::domain::{LocalNodeIndex, Tag};
 use crate::{NodeMap, Packet, PacketDiscriminants};
 
-/// Contains hanldes to the varius metrics collected for a domain.
+/// Contains handles to the various metrics collected for a domain.
 /// Whenever possible the handles are generated at init time, others
 /// that require dynamic labels are created on demand and stored in
 /// a BTreeMap or a NodeMap.
@@ -37,7 +37,7 @@ pub(super) struct DomainMetrics {
     packets_sent: [Counter; PacketDiscriminants::COUNT],
 
     // using a BTree to look up metrics by tag/node, BTree is faster than HashMap for u32/u64 keys
-    chuncked_replay_start_time: BTreeMap<Tag, (Counter, Histogram)>,
+    chunked_replay_start_time: BTreeMap<Tag, (Counter, Histogram)>,
     total_replay_time: BTreeMap<Tag, (Counter, Histogram)>,
     seed_replay_time: BTreeMap<Tag, (Counter, Histogram)>,
     finish_replay_time: BTreeMap<Tag, (Counter, Histogram)>,
@@ -45,7 +45,7 @@ pub(super) struct DomainMetrics {
     replay_misses: BTreeMap<(LocalNodeIndex, Tag), Counter>,
 
     reader_replay_request_time: NodeMap<(Counter, Histogram)>,
-    chuncked_replay_time: NodeMap<(Counter, Histogram)>,
+    chunked_replay_time: NodeMap<(Counter, Histogram)>,
     base_table_lookups: NodeMap<Counter>,
     node_state_size: NodeMap<Gauge>,
 }
@@ -86,8 +86,8 @@ impl DomainMetrics {
             eviction_requests: register_counter!(recorded::EVICTION_REQUESTS, vec![],),
             eviction_time: register_histogram!(recorded::EVICTION_TIME, vec![]),
             eviction_size: register_histogram!(recorded::EVICTION_FREED_MEMORY, vec![],),
-            chuncked_replay_start_time: Default::default(),
-            chuncked_replay_time: Default::default(),
+            chunked_replay_start_time: Default::default(),
+            chunked_replay_time: Default::default(),
             total_replay_time: Default::default(),
             seed_replay_time: Default::default(),
             finish_replay_time: Default::default(),
@@ -112,7 +112,7 @@ impl DomainMetrics {
     }
 
     pub(super) fn rec_chunked_replay_start_time(&mut self, tag: Tag, time: Duration) {
-        if let Some((ctr, histo)) = self.chuncked_replay_start_time.get(&tag) {
+        if let Some((ctr, histo)) = self.chunked_replay_start_time.get(&tag) {
             ctr.increment(time.as_micros() as u64);
             histo.record(time.as_micros() as f64);
         } else {
@@ -133,7 +133,7 @@ impl DomainMetrics {
             ctr.increment(time.as_micros() as u64);
             histo.record(time.as_micros() as f64);
 
-            self.chuncked_replay_start_time.insert(tag, (ctr, histo));
+            self.chunked_replay_start_time.insert(tag, (ctr, histo));
         }
     }
 
@@ -141,7 +141,7 @@ impl DomainMetrics {
         &mut self,
         from_node: LocalNodeIndex,
     ) -> (Counter, Histogram) {
-        if let Some(recorders) = self.chuncked_replay_time.get(from_node) {
+        if let Some(recorders) = self.chunked_replay_time.get(from_node) {
             recorders.clone()
         } else {
             let recorders = (
@@ -159,7 +159,7 @@ impl DomainMetrics {
                 ),
             );
 
-            self.chuncked_replay_time
+            self.chunked_replay_time
                 .insert(from_node, recorders.clone());
             recorders
         }

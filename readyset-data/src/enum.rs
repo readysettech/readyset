@@ -19,7 +19,7 @@ pub(crate) fn coerce_enum(
         if idx == 0 {
             Ok(DfValue::from(""))
         } else if let Some(s) = enum_elements.get(idx - 1) {
-            // This match is solely here to accomodate for different length specifications in
+            // This match is solely here to accommodate for different length specifications in
             // char/varchar types. When Nikolai's apply_str_limit function is finished and merged,
             // we should be able to replace this logic with a simple call to that function:
             match to_ty {

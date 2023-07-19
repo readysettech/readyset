@@ -549,7 +549,7 @@ impl KeyedState {
             KeyedState::QuinBTree(ref mut m) => m.remove(&MakeKey::from_key(key)),
             KeyedState::SexBTree(ref mut m) => m.remove(&MakeKey::from_key(key)),
             // FIXME(eta): this clones unnecessarily, given we could make PartialMap do the Borrow
-            // thing. That requres making the unbounded-interval-tree crate do that as
+            // thing. That requires making the unbounded-interval-tree crate do that as
             // well, though, and that's painful. (also everything else in here clones --
             // I do wonder what the perf impacts of that are)
             KeyedState::MultiBTree(ref mut m, _) => m.remove(&key.to_owned()),

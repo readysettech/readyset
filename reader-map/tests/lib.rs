@@ -190,7 +190,7 @@ fn mapref() {
 #[test]
 #[cfg_attr(miri, ignore)]
 // https://github.com/rust-lang/miri/issues/658
-fn paniced_reader_doesnt_block_writer() {
+fn panicked_reader_doesnt_block_writer() {
     let (mut w, r) = reader_map::new();
     w.insert(1, "a");
     w.publish();
@@ -925,7 +925,7 @@ fn contains_range_works() {
 #[test]
 fn timestamp_changes_on_publish() {
     let (mut w, r) = with_meta_and_timestamp::<usize, usize, usize, usize>(42, 12);
-    // Map is unitialized before first publish, therefore the timestamp should not
+    // Map is uninitialized before first publish, therefore the timestamp should not
     // return a value.
     assert_eq!(r.timestamp(), Err(NotPublished));
     w.publish();

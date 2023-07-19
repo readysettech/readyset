@@ -383,7 +383,7 @@ pub enum ReadySetError {
         Sensitive(function)
     )]
     ProjectExprBuiltInFunctionError {
-        /// The built-in function the error occured in.
+        /// The built-in function the error occurred in.
         function: String,
         /// Details about the specific error.
         message: String,
@@ -541,7 +541,7 @@ pub enum ReadySetError {
     )]
     ReplicationOffsetLogDifferent(String, String),
 
-    /// An error that was encountered during snapshot/binlog/wal replication proccess
+    /// An error that was encountered during snapshot/binlog/wal replication process
     #[error("Error during replication: {0}")]
     ReplicationFailed(String),
 
@@ -570,7 +570,7 @@ pub enum ReadySetError {
     KeyAlreadyFilled,
 
     /// Attempted to fill a range, part of which has already been filled.
-    #[error("attempted to fill at least parially filled range")]
+    #[error("attempted to fill at least partially filled range")]
     RangeAlreadyFilled,
 
     /// Tried to look up non-existent column.
@@ -807,7 +807,7 @@ impl ReadySetError {
 /// Make a new [`ReadySetError::Internal`] with the provided format arguments.
 ///
 /// When building in debug mode, the returned error also captures file, line, and column information
-/// for futher debugging purposes
+/// for further debugging purposes
 ///
 /// When called with no arguments, generates an internal error with the text
 /// "entered unreachable code".
@@ -838,7 +838,7 @@ macro_rules! internal_err {
 /// Make a new [`ReadySetError::InvalidQuery`] with the provided format arguments.
 ///
 /// When building in debug mode, the returned error also captures file, line, and column information
-/// for futher debugging purposes
+/// for further debugging purposes
 ///
 /// # Examples
 ///
@@ -865,7 +865,7 @@ macro_rules! invalid_err {
 /// Make a new [`ReadySetError::Unsupported`] with the provided format arguments.
 ///
 /// When building in debug mode, the returned error also captures file, line, and column information
-/// for futher debugging purposes
+/// for further debugging purposes
 ///
 /// When called with no arguments, generates an unsupported error with the text "operation not
 /// implemented yet".

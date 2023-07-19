@@ -390,7 +390,7 @@ impl<B: MySqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
     /// Handle the client handshake messages for establishing capabilities and handling
     /// authentication.
     ///
-    /// First build a HandshakeV10 packet to send to the client, then attempt to receieve and parse
+    /// First build a HandshakeV10 packet to send to the client, then attempt to receive and parse
     /// the HandshakeResponse packet that the client should send back to us. More packets may be
     /// sent and received as needed to complete authentication.
     ///

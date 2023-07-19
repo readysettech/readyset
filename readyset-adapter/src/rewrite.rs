@@ -112,7 +112,7 @@ impl ProcessedQueryParams {
                     .and_then(|v| v.coerce_to(&DfType::UnsignedBigInt, &DfType::Unknown))?
                 {
                     DfValue::UnsignedInt(v) => Ok(v as usize),
-                    _ => unreachable!("Succesfully coerced"),
+                    _ => unreachable!("Successfully coerced"),
                 },
                 Literal::Integer(v) => {
                     usize::try_from(*v).map_err(|_| invalid_err!("Non negative integer expected"))
@@ -128,7 +128,7 @@ impl ProcessedQueryParams {
                         .coerce_to(&DfType::UnsignedBigInt, &DfType::Unknown)?
                     {
                         DfValue::UnsignedInt(v) => Ok(v as usize),
-                        _ => unreachable!("Succesfully coerced"),
+                        _ => unreachable!("Successfully coerced"),
                     }
                 }
                 _ => Err(invalid_err!("Non negative integer expected")),

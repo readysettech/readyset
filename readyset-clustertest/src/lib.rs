@@ -1,6 +1,6 @@
 //! A local multi-process deployment test framework for ReadySet. It enables
 //! local blackbox testing on multi-server deployments with support for
-//! programatically modifying the deployment, i.e. introducing faults,
+//! programmatically modifying the deployment, i.e. introducing faults,
 //! adding new servers, replicating readers.
 //!
 //! This makes this framework well suited for:
@@ -45,7 +45,7 @@
 //!
 //! Clustertests can be configured via environment variables. Any environment variables are also
 //! passed to the child readyset-server and readyset processes, as a result, these processes can be
-//! futher configured through environment variables. This is helpful for configuring logging
+//! further configured through environment variables. This is helpful for configuring logging
 //! environment variables, such as `LOG_LEVEL`. See [Configuring
 //! Logging](http://docs/running-readyset.html#configuring-logging) for more information.
 //!
@@ -173,7 +173,7 @@
 //!
 //! ### [`DeploymentHandle`]
 //!
-//! The [`DeploymentHandle`] allows clustertests writers to programatically
+//! The [`DeploymentHandle`] allows clustertests writers to programmatically
 //! modify the deployment and check controller / metrics properties. It
 //! primarily facilitates four operations:
 //!   1. Adding servers to the deployment. Clustertest can create any number
@@ -196,7 +196,7 @@
 //! ### [`DeploymentHandle::teardown`]
 //!
 //! All tests should end in a call to [`DeploymentHandle::teardown`]. To
-//! kill the deployment proceses and remove locally created files.
+//! kill the deployment processes and remove locally created files.
 
 mod server;
 
@@ -421,7 +421,7 @@ pub struct DeploymentBuilder {
     /// period. None if not enabled.
     query_max_failure_seconds: Option<u64>,
     /// The period in seconds that we enter into a fallback recovery mode for a given query, if
-    /// that query has continously failed for query_max_failure_seconds.
+    /// that query has continuously failed for query_max_failure_seconds.
     /// None if not enabled.
     fallback_recovery_seconds: Option<u64>,
     /// Specifies the polling interval for the adapter to request views from the Leader.
@@ -955,7 +955,7 @@ async fn wait_for_adapter_router(
     .await;
     match res {
         Ok(_) => debug!("Adapter http router is active"),
-        Err(_) => warn!("Adpater http router failed to become active"),
+        Err(_) => warn!("Adapter http router failed to become active"),
     }
 
     res
@@ -1503,7 +1503,7 @@ pub struct AdapterStartParams {
     /// period. None if not enabled.
     query_max_failure_seconds: Option<u64>,
     /// The period in seconds that we enter into a fallback recovery mode for a given query, if
-    /// that query has continously failed for query_max_failure_seconds.
+    /// that query has continuously failed for query_max_failure_seconds.
     /// None if not enabled.
     fallback_recovery_seconds: Option<u64>,
     /// Whether or not to automatically restart the adapter process.

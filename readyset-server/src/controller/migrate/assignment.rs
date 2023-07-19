@@ -8,7 +8,7 @@ use crate::controller::NodeRestrictionKey;
 
 /// Assigns domains to all the new nodes.
 ///
-/// # Domain assigment heuristics
+/// # Domain assignment heuristics
 /// The main idea is to have as few domains as possible.
 /// However, domains are assigned or created depending on the type of each node, heuristically.
 /// There are some nodes that have special invariants that must be held. See the Invariants section
@@ -158,7 +158,7 @@ pub fn assign(dataflow_state: &mut DfState, new_nodes: &[NodeIndex]) -> ReadySet
                         friendly_base.sharded_by().shards().unwrap_or(1),
                     );
 
-                    // TODO(fran): Is it possible that to have a scneario in which we have two nodes
+                    // TODO(fran): Is it possible that to have a scenario in which we have two nodes
                     // N1 and N2  with shards N1S1, N1S2 and N2S1, N2S2 and N2S3
                     // where:
                     //   - N1S1 is compatible with N2S2

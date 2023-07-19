@@ -189,7 +189,7 @@ pub struct PreInsertion {
     /// If an empty `Vec` is specified, rows are sorted in lexicographic order.
     order_by: Option<Vec<(usize, OrderType)>>,
     /// The set of column indices to group the aggregate by, `group_by` takes precedence over
-    /// `order_by` when determining row order, so that aggregates are proccessed one by one.
+    /// `order_by` when determining row order, so that aggregates are processed one by one.
     group_by: Option<Vec<usize>>,
 }
 

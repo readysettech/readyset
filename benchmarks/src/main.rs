@@ -161,7 +161,7 @@ impl BenchmarkRunner {
         }
 
         if self.deployment_params.prometheus_endpoint.is_none() {
-            warn!("No prometheus endpoint passed but this benchmark fowards metrics. The benchmark metrics may be incomplete.");
+            warn!("No prometheus endpoint passed but this benchmark forwards metrics. The benchmark metrics may be incomplete.");
             return None;
         }
 

@@ -109,7 +109,7 @@ pub trait Backend {
     /// Executes a previously prepared SQL query using the provided parameters.
     ///
     /// * `statement_id` - The identifier of the previously created prepared statement.
-    /// * `params` - The values to substitue for the prepared statement's parameter placeholders.
+    /// * `params` - The values to substitute for the prepared statement's parameter placeholders.
     /// * returns - A `QueryResponse` containing either the data retrieved (for a read query) or a
     ///   confirmation (for a write query), or else an `Error` if a failure occurs.
     async fn on_execute(

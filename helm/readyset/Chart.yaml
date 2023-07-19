@@ -47,7 +47,7 @@ annotations:
   artifacthub.io/prerelease: "false"
   artifacthub.io/changes: |
     - kind: changed
-      description: Doucment Chart.yaml, and values.yaml
+      description: Document Chart.yaml, and values.yaml
       links:
         - name: GitHub Issue
           url: https://github.com/readysettech/readyset/issues/66

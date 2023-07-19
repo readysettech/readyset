@@ -131,7 +131,7 @@ impl<'ast> Visitor<'ast> for UnsupportedPlaceholderVisitor {
     /// Otherwise, walk the expression and record any placeholder values we find in
     /// `Self::unsupported_placeholders`.
     fn visit_expr(&mut self, expr: &'ast nom_sql::Expr) -> Result<(), Self::Error> {
-        // Walk expresssion if we're not in the WHERE clause of any SELECT statement
+        // Walk expression if we're not in the WHERE clause of any SELECT statement
         if !self.context.in_where_clause {
             return walk_expr(self, expr);
         }

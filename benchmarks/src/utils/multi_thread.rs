@@ -50,7 +50,7 @@ async fn return_after_duration(duration: Option<Duration>) {
 /// Every `THREAD_UPDATE_INTERVAL`, the batch of benchmark results is
 /// passed to the MultithreadBenchmark's function: handle_benchmark_results().
 async fn benchmark_results_thread<B>(
-    mut reciever: UnboundedReceiver<B::BenchmarkResult>,
+    mut receiver: UnboundedReceiver<B::BenchmarkResult>,
     run_for: Option<Duration>,
 ) -> Result<BenchmarkResults>
 where
@@ -80,7 +80,7 @@ where
                 B::handle_benchmark_results(new_updates, elapsed, &mut results).await?;
             }
             // If we receive an update push it to the next batch of updates.
-            r = reciever.recv() => {
+            r = receiver.recv() => {
                 if let Some(r) = r {
                     updates.push(r);
                 } else {

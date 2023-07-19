@@ -234,7 +234,7 @@ where
 
     /// Retain elements for the given key using the provided predicate function.
     ///
-    /// The removed  values will only become inaccesible to readers after the next call to
+    /// The removed  values will only become inaccessible to readers after the next call to
     /// [`publish`](Self::publish)
     pub fn retain<F>(&mut self, k: K, f: F) -> &mut Self
     where

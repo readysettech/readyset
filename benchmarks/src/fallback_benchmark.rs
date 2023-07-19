@@ -72,7 +72,7 @@ impl BenchmarkControl for FallbackBenchmark {
             .generate(&deployment.setup_conn_str)
             .await?;
 
-        // Explicitely migrate the query before benchmarking.
+        // Explicitly migrate the query before benchmarking.
         let mut conn = DatabaseURL::from_str(&deployment.target_conn_str)?
             .connect(None)
             .await?;
@@ -84,7 +84,7 @@ impl BenchmarkControl for FallbackBenchmark {
     }
 
     async fn reset(&self, deployment: &DeploymentParameters) -> Result<()> {
-        // Explicitely migrate the query before benchmarking.
+        // Explicitly migrate the query before benchmarking.
         let mut conn = DatabaseURL::from_str(&deployment.target_conn_str)?
             .connect(None)
             .await?;
@@ -95,7 +95,7 @@ impl BenchmarkControl for FallbackBenchmark {
     }
 
     async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<BenchmarkResults> {
-        // Explicitely migrate the query before benchmarking.
+        // Explicitly migrate the query before benchmarking.
         let mut conn = DatabaseURL::from_str(&deployment.target_conn_str)?
             .connect(None)
             .await?;

@@ -432,9 +432,9 @@ impl DfValue {
     }
 
     /// Returns `true` if the value does not contain a mix of inferred types.
-    pub fn is_homogenous(&self) -> bool {
+    pub fn is_homogeneous(&self) -> bool {
         match self {
-            Self::Array(array) => array.is_homogenous(),
+            Self::Array(array) => array.is_homogeneous(),
             _ => true,
         }
     }
@@ -493,7 +493,7 @@ impl DfValue {
         let is_clone_coercible = || -> bool {
             // This check could produce invalid results for heterogenous arrays, but arrays are
             // never coerced with `Clone`.
-            debug_assert!(self.is_homogenous());
+            debug_assert!(self.is_homogeneous());
 
             to_ty.is_unknown()
                 || self.infer_dataflow_type().try_into_known().as_ref() == Some(to_ty)
@@ -2220,7 +2220,7 @@ mod tests {
         // isn't well-defined, so we skip that in our ord tests.
         //
         // This would be a problem, except that in the main place where having a proper ordering
-        // relation actually matters (persisted base table state) we only store homogenously-typed
+        // relation actually matters (persisted base table state) we only store homogeneously-typed
         // values. If that becomes *not* the case for whatever reason, we need to figure out how to
         // fix this.
         #[strategy(non_numeric())]
@@ -3279,7 +3279,7 @@ mod tests {
         assert_ne!(timestamp_tz.cmp(&timestamp_tz2), Ordering::Equal);
 
         // Test invariants
-        // 1. Text types always > everythign else
+        // 1. Text types always > everything else
         // 2. Double & float comparable directly with int
         let int1 = DfValue::Int(1);
         let float1 = DfValue::Float(1.2);
@@ -3322,7 +3322,7 @@ mod tests {
 
         #[proptest]
         fn same_type_is_identity(dt: DfValue) {
-            prop_assume!(dt.is_homogenous());
+            prop_assume!(dt.is_homogeneous());
 
             let ty = dt.infer_dataflow_type();
             prop_assume!(ty.is_strictly_known());

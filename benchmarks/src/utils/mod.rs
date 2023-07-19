@@ -74,7 +74,7 @@ pub async fn readyset_ready(target: &str) -> anyhow::Result<()> {
         }
     };
 
-    // Then query status until snaphot is completed
+    // Then query status until snapshot is completed
     let q = nom_sql::ShowStatement::ReadySetStatus;
     loop {
         // We have to use simple query here because ReadySet does not support preparing `SHOW`
