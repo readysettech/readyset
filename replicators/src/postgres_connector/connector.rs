@@ -345,7 +345,7 @@ impl PostgresWalConnector {
         Ok(())
     }
 
-    fn send_standy_status_update(&self, ack: PostgresPosition) -> ReadySetResult<()> {
+    fn send_standby_status_update(&self, ack: PostgresPosition) -> ReadySetResult<()> {
         use bytes::{BufMut, BytesMut};
 
         // The difference between UNIX and Postgres epoch
@@ -684,7 +684,7 @@ impl Connector for PostgresWalConnector {
                     }
                 }
                 WalEvent::WantsKeepaliveResponse => {
-                    self.send_standy_status_update(last_pos.into())?;
+                    self.send_standby_status_update(last_pos.into())?;
                 }
                 WalEvent::Commit => {
                     if !actions.is_empty() {
