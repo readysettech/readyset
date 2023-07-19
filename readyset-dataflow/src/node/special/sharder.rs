@@ -71,7 +71,7 @@ impl SharderTx {
 
 #[derive(Serialize, Deserialize)]
 pub struct Sharder {
-    txs: Vec<SharderTx>,
+    txs: VecMap<SharderTx>,
     #[serde(skip)]
     sharded: VecMap<Box<Packet>>,
     shard_by: usize,
@@ -82,7 +82,7 @@ impl Clone for Sharder {
         debug_assert!(self.txs.is_empty());
 
         Sharder {
-            txs: Vec::new(),
+            txs: Default::default(),
             sharded: Default::default(),
             shard_by: self.shard_by,
         }
@@ -117,11 +117,16 @@ impl Sharder {
     ) {
         debug_assert_eq!(self.txs.len(), 0);
         // TODO: add support for "shared" sharder?
-        self.txs.extend((0..num_shards).map(|shard| SharderTx {
-            node: dst_node,
-            domain_index: dst_domain,
-            shard,
-            replication,
+        self.txs.extend((0..num_shards).map(|shard| {
+            (
+                shard,
+                SharderTx {
+                    node: dst_node,
+                    domain_index: dst_domain,
+                    shard,
+                    replication,
+                },
+            )
         }))
     }
 
@@ -229,8 +234,8 @@ impl Sharder {
             unsupported!("we don't know how to shard a shard");
         }
 
-        for (i, tx) in self.txs.iter().enumerate() {
-            if let Some(mut m) = self.sharded.remove(i) {
+        for tx in self.txs.values() {
+            if let Some(mut m) = self.sharded.remove(tx.shard) {
                 m.link_mut().src = index;
                 m.link_mut().dst = tx.node;
                 tx.send(m, replica, output)?;
@@ -279,8 +284,8 @@ impl Sharder {
                 }
             }
 
-            for (i, tx) in self.txs.iter().enumerate() {
-                if let Some(shard) = self.sharded.remove(i) {
+            for (shard, tx) in self.txs.iter() {
+                if let Some(shard) = self.sharded.remove(shard) {
                     tx.send(shard, replica, output)?;
                 }
             }
@@ -289,7 +294,7 @@ impl Sharder {
             invariant!(!key_columns.contains(&self.shard_by));
 
             // send to all shards
-            for tx in &self.txs {
+            for tx in self.txs.values() {
                 tx.send(
                     Box::new(Packet::Evict(EvictRequest::Keys {
                         link: Link { src, dst: tx.node },

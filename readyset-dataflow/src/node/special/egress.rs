@@ -8,6 +8,14 @@ use crate::node::special::packet_filter::PacketFilter;
 use crate::payload::{ReplayPieceContext, SenderReplication};
 use crate::prelude::*;
 
+#[derive(Serialize, Deserialize, Hash, PartialEq, Eq, Clone, Copy)]
+struct EgressTxKey {
+    node: NodeIndex,
+    local: LocalNodeIndex,
+    domain_index: DomainIndex,
+    shard: usize,
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct EgressTx {
     node: NodeIndex,
@@ -41,6 +49,15 @@ impl EgressTx {
         }
     }
 
+    fn key(&self) -> EgressTxKey {
+        EgressTxKey {
+            node: self.node,
+            local: self.local,
+            domain_index: self.domain_index,
+            shard: self.shard,
+        }
+    }
+
     fn inc_sent(&mut self) {
         if let Some(ctr) = &self.sent_ctr {
             ctr.increment(1);
@@ -68,7 +85,8 @@ impl EgressTx {
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct Egress {
-    txs: Vec<EgressTx>,
+    #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
+    txs: HashMap<EgressTxKey, EgressTx>,
     #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
     tags: HashMap<Tag, NodeIndex>,
     packet_filter: PacketFilter,
@@ -79,7 +97,7 @@ impl Clone for Egress {
         assert!(self.txs.is_empty());
 
         Self {
-            txs: Vec::new(),
+            txs: Default::default(),
             tags: self.tags.clone(),
             packet_filter: self.packet_filter.clone(),
         }
@@ -88,7 +106,7 @@ impl Clone for Egress {
 
 impl Egress {
     pub fn add_tx(&mut self, tx: EgressTx) {
-        self.txs.push(tx);
+        self.txs.insert(tx.key(), tx);
     }
 
     pub fn add_for_filtering(&mut self, target: NodeIndex) {
@@ -131,7 +149,7 @@ impl Egress {
             })
             .transpose()?;
 
-        for (txi, ref mut tx) in txs.iter_mut().enumerate() {
+        for (txi, ref mut tx) in txs.values_mut().enumerate() {
             let mut take = txi == txn;
             if let Some(replay_to) = replay_to.as_ref() {
                 if *replay_to == tx.node {
