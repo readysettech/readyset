@@ -139,42 +139,44 @@ impl Reader {
         );
         // make sure we don't fill a partial materialization
         // hole with incomplete (i.e., non-replay) state.
-        if m.is_regular() && state.is_partial() {
+        if m.is_regular() {
             let data = m.mut_data();
             trace!(?data, "reader received regular message");
-            data.retain(|row| {
-                match state.contains_record(&row[..]) {
-                    Ok(false) => {
-                        // row would miss in partial state.
-                        // leave it blank so later lookup triggers replay.
-                        trace!(?row, "dropping row that hit partial hole");
-                        false
-                    }
-                    Ok(true) => {
-                        // state is already present,
-                        // so we can safely keep it up to date.
-                        true
-                    }
-                    Err(reader_map::Error::NotPublished) => {
-                        // If we got here it means we got a `NotReady` error type. This is
-                        // impossible, because when readers are instantiated we issue a
-                        // commit to the underlying map, which makes it Ready.
-                        unreachable!(
-                            "somehow found a NotReady reader even though we've
+            if state.is_partial() {
+                data.retain(|row| {
+                    match state.contains_record(&row[..]) {
+                        Ok(false) => {
+                            // row would miss in partial state.
+                            // leave it blank so later lookup triggers replay.
+                            trace!(?row, "dropping row that hit partial hole");
+                            false
+                        }
+                        Ok(true) => {
+                            // state is already present,
+                            // so we can safely keep it up to date.
+                            true
+                        }
+                        Err(reader_map::Error::NotPublished) => {
+                            // If we got here it means we got a `NotReady` error type. This is
+                            // impossible, because when readers are instantiated we issue a
+                            // commit to the underlying map, which makes it Ready.
+                            unreachable!(
+                                "somehow found a NotReady reader even though we've
                                     already initialized it with a commit"
-                        )
+                            )
+                        }
+                        Err(reader_map::Error::Destroyed) => {
+                            unreachable!(
+                                "somehow map was destroyed but we hold a mutable reference"
+                            )
+                        }
                     }
-                    Err(reader_map::Error::Destroyed) => {
-                        unreachable!("somehow map was destroyed but we hold a mutable reference")
-                    }
-                }
-            });
-        }
-
-        // it *can* happen that multiple readers miss (and thus request replay for) the
-        // same hole at the same time. we need to make sure that we ignore any such
-        // duplicated replay.
-        if !m.is_regular() && state.is_partial() {
+                });
+            }
+        } else if state.is_partial() {
+            // it *can* happen that multiple readers miss (and thus request replay for) the
+            // same hole at the same time. we need to make sure that we ignore any such
+            // duplicated replay.
             let data = m.mut_data();
             trace!(?data, "reader received replay");
             data.retain(|row| {
