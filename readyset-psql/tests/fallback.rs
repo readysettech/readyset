@@ -881,6 +881,48 @@ async fn insert_enum_value_appended_after_create_table() {
     shutdown_tx.shutdown().await;
 }
 
+#[ignore = "REA-3143 Test reproduces error due to known bug"]
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn insert_array_of_enum_value_appended_after_create_table() {
+    // This test is based off insert_enum_value_appended_after_create_table but inserts an array of
+    // enum values instead of a single value, which triggers a similar bug to the one that the
+    // former test did. The array version of the bug that this test reproduces is documented in
+    // REA-3143.
+
+    readyset_tracing::init_test_logging();
+
+    let (config, _handle, shutdown_tx) = setup().await;
+    let client = connect(config).await;
+
+    client
+        .simple_query("CREATE TYPE et AS ENUM ('a')")
+        .await
+        .unwrap();
+
+    client.simple_query("CREATE TABLE t1 (e et)").await.unwrap();
+
+    client.query("SELECT * FROM t1", &[]).await.unwrap();
+
+    client
+        .simple_query("ALTER TYPE et ADD VALUE 'b'")
+        .await
+        .unwrap();
+
+    client
+        .simple_query("CREATE TABLE t2 (e et[])")
+        .await
+        .unwrap();
+
+    let params: Vec<DfValue> = vec![DfValue::from(vec![DfValue::from("b")])];
+    client
+        .query_raw("INSERT INTO t2 VALUES ($1)", &params)
+        .await
+        .unwrap();
+
+    shutdown_tx.shutdown().await;
+}
+
 #[allow(dead_code)]
 async fn last_statement_matches(dest: &str, status: &str, client: &Client) -> bool {
     match &client
