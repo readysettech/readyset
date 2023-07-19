@@ -91,6 +91,25 @@ impl fmt::Display for FrontendMessage {
     }
 }
 
+impl FrontendMessage {
+    /// Indicates if this message must be flushed to the socket after processing.
+    /// By not immediately flushing, callers can optimize when flush is invoked;
+    /// that is, they can defer flush until a later signal.
+    ///
+    /// For example, when processing an extended query protocol interaction, only
+    /// `Sync` needs to actually flush, earlier messages in the chain can be buffered.
+    pub(crate) fn requires_flush(&self) -> bool {
+        !matches!(
+            self,
+            FrontendMessage::Parse { .. }
+                | FrontendMessage::Bind { .. }
+                | FrontendMessage::Describe { .. }
+                | FrontendMessage::Close { .. }
+                | FrontendMessage::Execute { .. }
+        )
+    }
+}
+
 /// Parsed body for the SASLInitialResponse message
 ///
 /// This is its own type because it can't be parsed during regular message parsing without context

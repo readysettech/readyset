@@ -103,20 +103,25 @@ impl<B: PsqlBackend, C: AsyncRead + AsyncWrite + Unpin> Runner<B, C> {
         if self.enable_statement_logging {
             info!(target: "client_statement", "{:?}", request);
         }
-        if request == FrontendMessage::Flush {
-            self.channel.flush().await?;
-        }
+
+        let requires_flush = request.requires_flush();
         let response = self
             .protocol
             .on_request(request, &mut self.backend, &mut self.channel)
             .await?;
         self.channel.send(response).await?;
+
+        if requires_flush {
+            self.channel.flush().await?;
+        }
+
         Ok(())
     }
 
     async fn handle_error(&mut self, error: Error) -> Result<(), Error> {
         let response = self.protocol.on_error::<B>(error).await?;
         self.channel.send(response).await?;
+        self.channel.flush().await?;
         Ok(())
     }
 

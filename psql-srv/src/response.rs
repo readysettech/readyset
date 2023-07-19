@@ -41,16 +41,11 @@ where
         match self {
             Empty => Ok(()),
 
-            Message(m) => sink.send(m).await,
+            Message(m) => sink.feed(m).await,
 
             Messages(ms) => {
-                let num_messages = ms.len();
-                for (i, m) in ms.into_iter().enumerate() {
-                    if i == num_messages - 1 {
-                        sink.send(m).await?;
-                    } else {
-                        sink.feed(m).await?
-                    }
+                for m in ms {
+                    sink.feed(m).await?
                 }
                 Ok(())
             }
@@ -91,7 +86,7 @@ where
                     sink.feed(trailer).await?;
                 }
 
-                sink.flush().await
+                Ok(())
             }
         }
     }
