@@ -286,11 +286,11 @@ impl Node {
                         }
                         Packet::ReplayPiece {
                             ref mut data,
-                            context: payload::ReplayPieceContext::Full { last },
+                            context: payload::ReplayPieceContext::Full { last, ref replicas },
                             tag,
                             ..
                         } => {
-                            trace!(?data, %tag, last, "received full replay");
+                            trace!(?data, %tag, last, ?replicas, "received full replay");
                             (data, ReplayContext::Full { last, tag })
                         }
                         Packet::Message { ref mut data, .. } => {
@@ -359,7 +359,7 @@ impl Node {
 
                     if let Some(new_last) = set_replay_last {
                         if let Packet::ReplayPiece {
-                            context: payload::ReplayPieceContext::Full { ref mut last },
+                            context: payload::ReplayPieceContext::Full { ref mut last, .. },
                             ..
                         } = **m
                         {

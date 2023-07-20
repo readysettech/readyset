@@ -1254,6 +1254,7 @@ impl Materializations {
                     DomainRequest::StartReplay {
                         tag: pending.tag,
                         from: pending.source,
+                        replicas: None, /* TODO */
                     },
                 )?;
             }

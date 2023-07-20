@@ -182,6 +182,10 @@ pub enum ReplayPieceContext {
     Full {
         /// Is this the last batch of records for this full replay?
         last: bool,
+        /// Optionally forward to only these replicas when we encounter a [`Fanout`] sender
+        ///
+        /// [`Fanout`]: SenderReplication::Fanout
+        replicas: Option<Vec<usize>>,
     },
 }
 
@@ -367,6 +371,8 @@ pub enum DomainRequest {
     StartReplay {
         tag: Tag,
         from: LocalNodeIndex,
+        /// Optionally replay to only these replicas
+        replicas: Option<Vec<usize>>,
     },
 
     /// Query whether a domain has finished replaying.

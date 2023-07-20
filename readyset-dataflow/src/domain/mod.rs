@@ -1883,7 +1883,11 @@ impl Domain {
                 })?;
                 Ok(None)
             }
-            DomainRequest::StartReplay { tag, from } => {
+            DomainRequest::StartReplay {
+                tag,
+                from,
+                replicas,
+            } => {
                 // if the node's state was not initialized yet, then just return and do nothing.
                 // we should only hit this for base nodes which are in the process of having their
                 // persistent state initialized.
@@ -1959,6 +1963,7 @@ impl Domain {
                         // NOTE: If we're replaying from persistent state this might be wrong, since
                         // it's backed by an *estimate* of the number of keys in the state
                         last: is_empty,
+                        replicas: replicas.clone(),
                     },
                     data: Vec::<Record>::new().into(),
                 });
@@ -2033,7 +2038,10 @@ impl Domain {
                             let p = Box::new(Packet::ReplayPiece {
                                 tag,
                                 link, // to is overwritten by receiver
-                                context: ReplayPieceContext::Full { last },
+                                context: ReplayPieceContext::Full {
+                                    last,
+                                    replicas: replicas.clone(),
+                                },
                                 data: chunk,
                             });
 
@@ -2055,7 +2063,10 @@ impl Domain {
                                 chunked_replay_tx.send(Box::new(Packet::ReplayPiece {
                                     tag,
                                     link,
-                                    context: ReplayPieceContext::Full { last: true },
+                                    context: ReplayPieceContext::Full {
+                                        last: true,
+                                        replicas: replicas.clone(),
+                                    },
                                     data: Default::default(),
                                 }))
                             {
@@ -3433,7 +3444,7 @@ impl Domain {
                 // We would have bailed earlier (break 'outer, above) if m wasn't Some
                 if m.as_ref().unwrap().is_empty() {
                     if let Packet::ReplayPiece {
-                        context: ReplayPieceContext::Full { last: false },
+                        context: ReplayPieceContext::Full { last: false, .. },
                         ..
                     } = m.as_deref().unwrap()
                     {
@@ -3488,7 +3499,7 @@ impl Domain {
             };
 
             match context {
-                ReplayPieceContext::Full { last } if last => {
+                ReplayPieceContext::Full { last, .. } if last => {
                     debug!(terminal = notify_done, "last batch processed");
                     if notify_done {
                         debug!(local = dst.id(), "last batch received");

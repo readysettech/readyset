@@ -192,35 +192,60 @@ impl Egress {
                     m,
                 ),
                 SenderReplication::Fanout { num_replicas } => {
-                    if let Some(ReplayPieceContext::Partial {
-                        requesting_replica, ..
-                    }) = m.replay_piece_context()
-                    {
-                        // If the message is a piece of a replay that was requested by a particular
-                        // replica, only replay to that replica
-                        invariant!(
-                            *requesting_replica < num_replicas,
-                            "Replica index for replay piece context out-of-bounds"
-                        );
-                        output.send(
-                            ReplicaAddress {
-                                domain_index: tx.domain_index,
-                                shard: tx.shard,
-                                replica: *requesting_replica,
-                            },
-                            m.clone(),
-                        )
-                    } else {
-                        // Otherwise, replay to all replicas
-                        for replica in 0..num_replicas {
+                    match m.replay_piece_context() {
+                        Some(ReplayPieceContext::Partial {
+                            requesting_replica, ..
+                        }) => {
+                            // If the message is a piece of a replay that was requested by a
+                            // particular replica, only replay to that
+                            // replica
+                            invariant!(
+                                *requesting_replica < num_replicas,
+                                "Replica index for replay piece context out-of-bounds"
+                            );
                             output.send(
                                 ReplicaAddress {
                                     domain_index: tx.domain_index,
                                     shard: tx.shard,
-                                    replica,
+                                    replica: *requesting_replica,
                                 },
                                 m.clone(),
                             )
+                        }
+                        Some(ReplayPieceContext::Full {
+                            replicas: Some(replicas),
+                            ..
+                        }) => {
+                            // Otherwise if the message is a piece of a full replay that was
+                            // intended for only a particular set of replicas, only replay to those
+                            // replicas
+                            invariant!(
+                                replicas.iter().all(|r| *r < num_replicas),
+                                "Replica index(es) for full replay piece context out-of-bounds"
+                            );
+                            for replica in replicas {
+                                output.send(
+                                    ReplicaAddress {
+                                        domain_index: tx.domain_index,
+                                        shard: tx.shard,
+                                        replica: *replica,
+                                    },
+                                    m.clone(),
+                                )
+                            }
+                        }
+                        _ => {
+                            // Otherwise, replay to all replicas
+                            for replica in 0..num_replicas {
+                                output.send(
+                                    ReplicaAddress {
+                                        domain_index: tx.domain_index,
+                                        shard: tx.shard,
+                                        replica,
+                                    },
+                                    m.clone(),
+                                )
+                            }
                         }
                     }
                 }
