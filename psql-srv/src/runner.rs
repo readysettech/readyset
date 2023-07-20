@@ -8,10 +8,10 @@ use crate::channel::Channel;
 use crate::error::Error;
 use crate::message::FrontendMessage;
 use crate::protocol::Protocol;
-use crate::{codec, Backend};
+use crate::{codec, PsqlBackend};
 
 /// A helper struct that can be used to run a `Protocol` on a `Backend` and `Channel`.
-pub struct Runner<B: Backend, C> {
+pub struct Runner<B: PsqlBackend, C> {
     /// ReadySet `Backend` to handle routing queries to the upstream or Readyset
     backend: B,
     /// Read and write stream. Handles io, TLS and protocol decoding/encoding
@@ -31,7 +31,7 @@ enum MainLoopStatus {
     RestartWithTls,
 }
 
-impl<B: Backend> Runner<B, tokio::net::TcpStream> {
+impl<B: PsqlBackend> Runner<B, tokio::net::TcpStream> {
     /// A simple run loop. For each `FrontendMessage` received on `channel`, use `protocol` to
     /// generate a response. Then send the response. If an error occurs, use `protocol` to generate
     /// an error response, then send the error response.
@@ -94,7 +94,7 @@ impl<B: Backend> Runner<B, tokio::net::TcpStream> {
     }
 }
 
-impl<B: Backend, C: AsyncRead + AsyncWrite + Unpin> Runner<B, C> {
+impl<B: PsqlBackend, C: AsyncRead + AsyncWrite + Unpin> Runner<B, C> {
     async fn handle_request(
         &mut self,
         request: Result<FrontendMessage, codec::DecodeError>,

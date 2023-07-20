@@ -25,7 +25,7 @@ use crate::scram::{
 };
 use crate::value::Value;
 use crate::QueryResponse::*;
-use crate::{Backend, Column, Credentials, PrepareResponse};
+use crate::{Column, Credentials, PrepareResponse, PsqlBackend};
 
 const ATTTYPMOD_NONE: i32 = -1;
 const TRANSFER_FORMAT_PLACEHOLDER: TransferFormat = TransferFormat::Text;
@@ -193,7 +193,7 @@ impl Protocol {
     ///   the frontend/backend protocol state in order to parse some types of frontend messages.)
     /// * returns - A `Response` representing a sequence of `BackendMessage`s to return to the
     ///   frontend, otherwise an `Error` if a failure occurs.
-    pub async fn on_request<B: Backend, C: AsyncRead + AsyncWrite + Unpin>(
+    pub async fn on_request<B: PsqlBackend, C: AsyncRead + AsyncWrite + Unpin>(
         &mut self,
         message: FrontendMessage,
         backend: &mut B,
@@ -730,7 +730,7 @@ impl Protocol {
     /// * `error` - an `Error` that has occurred while communicating with the frontend or handling
     ///   one of the frontend's requests.
     /// * returns - A `Response` containing an `ErrorResponse` message to send to the frontend.
-    pub async fn on_error<B: Backend>(
+    pub async fn on_error<B: PsqlBackend>(
         &mut self,
         error: Error,
     ) -> Result<Response<B::Row, B::Resultset>, Error> {
@@ -760,7 +760,7 @@ impl Protocol {
     }
 }
 
-async fn load_extended_types<B: Backend>(backend: &mut B) -> Result<HashMap<Oid, i16>, Error> {
+async fn load_extended_types<B: PsqlBackend>(backend: &mut B) -> Result<HashMap<Oid, i16>, Error> {
     let err = |m| {
         Error::InternalError(format!(
             "failed while loading extended type information: {m}"
@@ -790,7 +790,7 @@ async fn load_extended_types<B: Backend>(backend: &mut B) -> Result<HashMap<Oid,
     }
 }
 
-async fn make_field_description<B: Backend>(
+async fn make_field_description<B: PsqlBackend>(
     col: &Column,
     transfer_format: TransferFormat,
     backend: &mut B,
@@ -990,7 +990,7 @@ mod tests {
     }
 
     #[async_trait]
-    impl crate::Backend for Backend {
+    impl PsqlBackend for Backend {
         type Value = Value;
         type Row = Vec<Self::Value>;
         type Resultset = stream::Iter<vec::IntoIter<Result<Self::Row, Error>>>;

@@ -99,7 +99,7 @@ impl Backend {
 }
 
 #[async_trait]
-impl ps::Backend for Backend {
+impl ps::PsqlBackend for Backend {
     type Value = Value;
     type Row = Row;
     type Resultset = Resultset;

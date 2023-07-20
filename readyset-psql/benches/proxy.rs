@@ -23,7 +23,7 @@ use futures::future::{try_select, Either};
 use futures::stream::Peekable;
 use futures::{ready, Stream, StreamExt, TryStreamExt};
 use postgres_types::Type;
-use psql_srv::{Credentials, CredentialsNeeded, PrepareResponse, QueryResponse};
+use psql_srv::{Credentials, CredentialsNeeded, PrepareResponse, PsqlBackend, QueryResponse};
 use readyset_data::DfValue;
 use readyset_psql::{ParamRef, Value};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -128,7 +128,7 @@ impl Backend {
 }
 
 #[async_trait]
-impl psql_srv::Backend for Backend {
+impl PsqlBackend for Backend {
     type Value = Value;
     type Row = Vec<Self::Value>;
     type Resultset = ResultStream;

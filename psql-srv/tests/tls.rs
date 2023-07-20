@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use database_utils::{DatabaseURL, QueryableConnection};
 use futures::stream;
 use postgres_types::Type;
-use psql_srv::{run_backend, Backend, Credentials, CredentialsNeeded, Error};
+use psql_srv::{run_backend, Credentials, CredentialsNeeded, Error, PsqlBackend};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio_native_tls::{native_tls, TlsAcceptor};
@@ -24,7 +24,7 @@ impl TryFrom<TestValue> for psql_srv::Value {
 }
 
 #[async_trait]
-impl Backend for TestBackend {
+impl PsqlBackend for TestBackend {
     type Value = TestValue;
     type Row = Vec<Self::Value>;
     type Resultset = stream::Iter<vec::IntoIter<Result<Self::Row, Error>>>;

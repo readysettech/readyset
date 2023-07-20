@@ -6,7 +6,7 @@ use futures::{stream, Future};
 use postgres::NoTls;
 use postgres_types::Type;
 use psql_srv::{
-    run_backend, Backend, Column, Credentials, CredentialsNeeded, Error, PrepareResponse,
+    run_backend, Column, Credentials, CredentialsNeeded, Error, PrepareResponse, PsqlBackend,
     QueryResponse,
 };
 use tokio::join;
@@ -36,7 +36,7 @@ enum ErrorPosition {
 struct ErrorBackend(ErrorPosition);
 
 #[async_trait]
-impl Backend for ErrorBackend {
+impl PsqlBackend for ErrorBackend {
     type Value = Value;
     type Row = Vec<Value>;
     type Resultset = stream::Iter<vec::IntoIter<Result<Self::Row, psql_srv::Error>>>;

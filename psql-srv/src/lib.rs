@@ -58,7 +58,7 @@ pub enum Credentials<'a> {
 /// A trait for implementing a SQL backend that produces responses to SQL query statements. This
 /// trait is the primary interface for the `psql-srv` crate.
 #[async_trait]
-pub trait Backend {
+pub trait PsqlBackend {
     /// An associated type that can be converted into this crate's `Value` type.
     type Value: TryInto<Value, Error = Error>;
 
@@ -178,7 +178,7 @@ pub enum QueryResponse<R> {
 /// * `enable_statement_logging` - Whether to log statements received from the client.
 /// * `tls_acceptor` - An object that performs a TLS handshake and creates a `TlsStream` or returns
 ///   an error.
-pub async fn run_backend<B: Backend>(
+pub async fn run_backend<B: PsqlBackend>(
     backend: B,
     channel: tokio::net::TcpStream,
     enable_statement_logging: bool,
@@ -189,7 +189,7 @@ pub async fn run_backend<B: Backend>(
 
 pub async fn send_immediate_err<B, C>(channel: C, error: Error) -> Result<(), Error>
 where
-    B: Backend,
+    B: PsqlBackend,
     C: AsyncRead + AsyncWrite + Unpin,
 {
     let packet = Protocol::new().on_error::<B>(error).await?;
