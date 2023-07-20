@@ -15,7 +15,7 @@ pub struct Runner<B: PsqlBackend, C> {
     /// ReadySet `Backend` to handle routing queries to the upstream or Readyset
     backend: B,
     /// Read and write stream. Handles io, TLS and protocol decoding/encoding
-    channel: Channel<C, B::Row>,
+    channel: Channel<C>,
     /// Handles Postgres protocol messages and maintains protocol state
     protocol: Protocol,
     /// Whether to log statements received from the client

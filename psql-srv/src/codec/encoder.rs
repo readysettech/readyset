@@ -1,4 +1,4 @@
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 
 use bytes::{BufMut, BytesMut};
 use eui48::MacAddressFormat;
@@ -8,7 +8,6 @@ use tokio_util::codec::Encoder;
 
 use crate::codec::error::EncodeError as Error;
 use crate::codec::Codec;
-use crate::error::Error as BackendError;
 use crate::message::BackendMessage::{self, *};
 use crate::message::CommandCompleteTag::*;
 use crate::message::ErrorSeverity;
@@ -79,13 +78,10 @@ const TIMESTAMP_TZ_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.f %:z";
 const TIME_FORMAT: &str = "%H:%M:%S%.f";
 const DATE_FORMAT: &str = "%Y-%m-%d";
 
-impl<R> Encoder<BackendMessage<R>> for Codec<R>
-where
-    R: IntoIterator<Item: TryInto<PsqlValue, Error = BackendError>>,
-{
+impl Encoder<BackendMessage> for Codec {
     type Error = Error;
 
-    fn encode(&mut self, message: BackendMessage<R>, dst: &mut BytesMut) -> Result<(), Error> {
+    fn encode(&mut self, message: BackendMessage, dst: &mut BytesMut) -> Result<(), Error> {
         let start_ofs = dst.len();
         encode(message, dst).map_err(|e| {
             // On an encoding error, remove any partially encoded data.
@@ -95,10 +91,7 @@ where
     }
 }
 
-fn encode<R>(message: BackendMessage<R>, dst: &mut BytesMut) -> Result<(), Error>
-where
-    R: IntoIterator<Item: TryInto<PsqlValue, Error = BackendError>>,
-{
+fn encode(message: BackendMessage, dst: &mut BytesMut) -> Result<(), Error> {
     use std::io::Write;
 
     // Handle SSLResponse as a special case, since it has a nonstandard message format.
@@ -211,10 +204,6 @@ where
                     })?,
                     None => Text,
                 };
-
-                let v = v
-                    .try_into()
-                    .map_err(|e| Error::InternalError(e.to_string()))?;
 
                 match format {
                     Binary => put_binary_value(v, dst)?,
@@ -690,21 +679,10 @@ mod tests {
 
     use super::*;
     use crate::message::{FieldDescription, SqlState};
-    use crate::value::PsqlValue as DataValue;
-
-    struct Value(DataValue);
-
-    impl TryFrom<Value> for DataValue {
-        type Error = BackendError;
-
-        fn try_from(v: Value) -> Result<Self, Self::Error> {
-            Ok(v.0)
-        }
-    }
 
     #[test]
     fn test_encode_ssl_response() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         let mut buf = BytesMut::new();
         codec
             .encode(BackendMessage::ssl_response_unwilling(), &mut buf)
@@ -716,7 +694,7 @@ mod tests {
 
     #[test]
     fn test_encode_authentication_ok() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         let mut buf = BytesMut::new();
         codec.encode(AuthenticationOk, &mut buf).unwrap();
         let mut exp = BytesMut::new();
@@ -728,7 +706,7 @@ mod tests {
 
     #[test]
     fn test_encode_authentication_cleartext_password() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         let mut buf = BytesMut::new();
         codec
             .encode(AuthenticationCleartextPassword, &mut buf)
@@ -742,7 +720,7 @@ mod tests {
 
     #[test]
     fn test_encode_bind_complete() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         let mut buf = BytesMut::new();
         codec.encode(BindComplete, &mut buf).unwrap();
         let mut exp = BytesMut::new();
@@ -753,7 +731,7 @@ mod tests {
 
     #[test]
     fn test_encode_close_complete() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         let mut buf = BytesMut::new();
         codec.encode(CloseComplete, &mut buf).unwrap();
         let mut exp = BytesMut::new();
@@ -764,7 +742,7 @@ mod tests {
 
     #[test]
     fn test_encode_command_complete_delete() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         let mut buf = BytesMut::new();
         codec
             .encode(CommandComplete { tag: Delete(0) }, &mut buf)
@@ -778,7 +756,7 @@ mod tests {
 
     #[test]
     fn test_encode_command_complete_empty() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         let mut buf = BytesMut::new();
         codec
             .encode(CommandComplete { tag: Empty }, &mut buf)
@@ -792,7 +770,7 @@ mod tests {
 
     #[test]
     fn test_encode_command_complete_insert() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         let mut buf = BytesMut::new();
         codec
             .encode(CommandComplete { tag: Insert(1) }, &mut buf)
@@ -809,7 +787,7 @@ mod tests {
 
     #[test]
     fn test_encode_command_complete_select() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         let mut buf = BytesMut::new();
         codec
             .encode(CommandComplete { tag: Select(2) }, &mut buf)
@@ -823,7 +801,7 @@ mod tests {
 
     #[test]
     fn test_encode_command_complete_update() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         let mut buf = BytesMut::new();
         codec
             .encode(CommandComplete { tag: Update(3) }, &mut buf)
@@ -837,7 +815,7 @@ mod tests {
 
     #[test]
     fn test_encode_data_row_empty() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         let mut buf = BytesMut::new();
         codec
             .encode(
@@ -857,12 +835,12 @@ mod tests {
 
     #[test]
     fn test_encode_data_row_single() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         let mut buf = BytesMut::new();
         codec
             .encode(
                 DataRow {
-                    values: vec![Value(DataValue::Int(42))],
+                    values: vec![PsqlValue::Int(42)],
                     explicit_transfer_formats: Some(Arc::new(vec![Binary])),
                 },
                 &mut buf,
@@ -879,15 +857,15 @@ mod tests {
 
     #[test]
     fn test_encode_data_row_multiple() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         let mut buf = BytesMut::new();
         codec
             .encode(
                 DataRow {
                     values: vec![
-                        Value(DataValue::Int(42)),
-                        Value(DataValue::Null),
-                        Value(DataValue::Text("some text".into())),
+                        PsqlValue::Int(42),
+                        PsqlValue::Null,
+                        PsqlValue::Text("some text".into()),
                     ],
                     explicit_transfer_formats: Some(Arc::new(vec![Binary, Binary, Binary])),
                 },
@@ -908,7 +886,7 @@ mod tests {
 
     #[test]
     fn test_encode_passthrough_data_row() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         let mut buf = BytesMut::new();
         let mut data = BytesMut::new();
 
@@ -938,7 +916,7 @@ mod tests {
 
     #[test]
     fn test_encode_error_response() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         let mut buf = BytesMut::new();
         codec
             .encode(
@@ -979,27 +957,16 @@ mod tests {
 
     #[test]
     fn test_encode_error_response_after_encoding_failure() {
-        struct UnserializableValue;
-
-        impl TryFrom<UnserializableValue> for DataValue {
-            type Error = BackendError;
-
-            fn try_from(_v: UnserializableValue) -> Result<Self, Self::Error> {
-                Err(BackendError::Unsupported(
-                    "Unserializable value.".to_string(),
-                ))
-            }
-        }
-
-        let mut codec = Codec::<Vec<UnserializableValue>>::new();
+        let mut codec = Codec::new();
         let mut buf = BytesMut::new();
 
-        // Attempt to encode a message containing an unserializable value, resulting in an error.
+        // Attempt to encode a message containing the wrong Datarow transfer format length,
+        // resulting in an error.
         codec
             .encode(
                 DataRow {
-                    values: vec![UnserializableValue],
-                    explicit_transfer_formats: None,
+                    values: vec![PsqlValue::Null],
+                    explicit_transfer_formats: Some(Arc::new(vec![])),
                 },
                 &mut buf,
             )
@@ -1050,7 +1017,7 @@ mod tests {
 
     #[test]
     fn test_encode_parameter_description() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         let mut buf = BytesMut::new();
         codec
             .encode(
@@ -1071,7 +1038,7 @@ mod tests {
 
     #[test]
     fn test_encode_parameter_description_empty() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         let mut buf = BytesMut::new();
         codec
             .encode(
@@ -1090,7 +1057,7 @@ mod tests {
 
     #[test]
     fn test_encode_parse_complete() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         let mut buf = BytesMut::new();
         codec.encode(ParseComplete, &mut buf).unwrap();
         let mut exp = BytesMut::new();
@@ -1101,7 +1068,7 @@ mod tests {
 
     #[test]
     fn test_encode_ready_for_query() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         let mut buf = BytesMut::new();
         codec
             .encode(BackendMessage::ready_for_query_idle(), &mut buf)
@@ -1115,7 +1082,7 @@ mod tests {
 
     #[test]
     fn test_encode_row_description() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         let mut buf = BytesMut::new();
         codec
             .encode(
@@ -1187,7 +1154,7 @@ mod tests {
 
     #[test]
     fn test_encode_row_description_empty() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         let mut buf = BytesMut::new();
         codec
             .encode(
@@ -1206,7 +1173,7 @@ mod tests {
 
     #[test]
     fn test_encode_passthrough_row_description() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         let mut buf = BytesMut::new();
         codec
             .encode(
@@ -1241,7 +1208,7 @@ mod tests {
     #[test]
     fn test_encode_binary_null() {
         let mut buf = BytesMut::new();
-        put_binary_value(DataValue::Null, &mut buf).unwrap();
+        put_binary_value(PsqlValue::Null, &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(-1); // null sentinel
         assert_eq!(buf, exp);
@@ -1250,7 +1217,7 @@ mod tests {
     #[test]
     fn test_encode_binary_bool() {
         let mut buf = BytesMut::new();
-        put_binary_value(DataValue::Bool(true), &mut buf).unwrap();
+        put_binary_value(PsqlValue::Bool(true), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(1); // length
         exp.put_u8(1); // value
@@ -1260,7 +1227,7 @@ mod tests {
     #[test]
     fn test_encode_binary_char() {
         let mut buf = BytesMut::new();
-        put_binary_value(DataValue::Char(8), &mut buf).unwrap();
+        put_binary_value(PsqlValue::Char(8), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(1); // length
         exp.put_i8(8); // value
@@ -1270,7 +1237,7 @@ mod tests {
     #[test]
     fn test_encode_binary_varchar() {
         let mut buf = BytesMut::new();
-        put_binary_value(DataValue::VarChar("some stuff".into()), &mut buf).unwrap();
+        put_binary_value(PsqlValue::VarChar("some stuff".into()), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(10); // length
         exp.extend_from_slice(b"some stuff"); // value
@@ -1280,7 +1247,7 @@ mod tests {
     #[test]
     fn test_encode_binary_bpchar() {
         let mut buf = BytesMut::new();
-        put_binary_value(DataValue::BpChar("some stuff".into()), &mut buf).unwrap();
+        put_binary_value(PsqlValue::BpChar("some stuff".into()), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(10); // length
         exp.extend_from_slice(b"some stuff"); // value
@@ -1290,7 +1257,7 @@ mod tests {
     #[test]
     fn test_encode_binary_int() {
         let mut buf = BytesMut::new();
-        put_binary_value(DataValue::Int(0x1234567), &mut buf).unwrap();
+        put_binary_value(PsqlValue::Int(0x1234567), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(4); // length
         exp.put_i32(0x1234567); // value
@@ -1300,7 +1267,7 @@ mod tests {
     #[test]
     fn test_encode_binary_big_int() {
         let mut buf = BytesMut::new();
-        put_binary_value(DataValue::BigInt(0x1234567890abcdef), &mut buf).unwrap();
+        put_binary_value(PsqlValue::BigInt(0x1234567890abcdef), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(8); // length
         exp.put_i64(0x1234567890abcdef); // value
@@ -1310,7 +1277,7 @@ mod tests {
     #[test]
     fn test_encode_binary_small_int() {
         let mut buf = BytesMut::new();
-        put_binary_value(DataValue::SmallInt(0x1234), &mut buf).unwrap();
+        put_binary_value(PsqlValue::SmallInt(0x1234), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(2); // length
         exp.put_i16(0x1234); // value
@@ -1320,7 +1287,7 @@ mod tests {
     #[test]
     fn test_encode_binary_double() {
         let mut buf = BytesMut::new();
-        put_binary_value(DataValue::Double(0.1234567890123456), &mut buf).unwrap();
+        put_binary_value(PsqlValue::Double(0.1234567890123456), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(8); // length
         exp.put_f64(0.1234567890123456); // value
@@ -1330,7 +1297,7 @@ mod tests {
     #[test]
     fn test_encode_binary_real() {
         let mut buf = BytesMut::new();
-        put_binary_value(DataValue::Float(0.12345678), &mut buf).unwrap();
+        put_binary_value(PsqlValue::Float(0.12345678), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(4); // length
         exp.put_f32(0.12345678); // value
@@ -1341,7 +1308,7 @@ mod tests {
     fn test_encode_binary_numeric() {
         let mut buf = BytesMut::new();
         let decimal = Decimal::new(1234567890123456, 16);
-        put_binary_value(DataValue::Numeric(decimal), &mut buf).unwrap();
+        put_binary_value(PsqlValue::Numeric(decimal), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(-1); // length (placeholder)
         decimal.to_sql(&Type::NUMERIC, &mut exp).unwrap(); // add value
@@ -1357,7 +1324,7 @@ mod tests {
     #[test]
     fn test_encode_binary_text() {
         let mut buf = BytesMut::new();
-        put_binary_value(DataValue::Text("some text".into()), &mut buf).unwrap();
+        put_binary_value(PsqlValue::Text("some text".into()), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(9); // length
         exp.extend_from_slice(b"some text"); // value
@@ -1368,7 +1335,7 @@ mod tests {
     fn test_encode_binary_timestamp() {
         let dt = NaiveDateTime::from_timestamp(1_000_000_000, 42_000_000);
         let mut buf = BytesMut::new();
-        put_binary_value(DataValue::Timestamp(dt), &mut buf).unwrap();
+        put_binary_value(PsqlValue::Timestamp(dt), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(8); // length
         dt.to_sql(&Type::TIMESTAMP, &mut exp).unwrap(); // value
@@ -1379,7 +1346,7 @@ mod tests {
     fn test_encode_binary_bytea() {
         let mut buf = BytesMut::new();
         let bytes = vec![0, 8, 39, 92, 100, 128];
-        put_binary_value(DataValue::ByteArray(bytes.clone()), &mut buf).unwrap();
+        put_binary_value(PsqlValue::ByteArray(bytes.clone()), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(-1); // length (placeholder)
         bytes.to_sql(&Type::BYTEA, &mut exp).unwrap(); // add value
@@ -1397,7 +1364,7 @@ mod tests {
         // bits = 000000000000100000100111010111000110010010000000
         let bits = BitVec::from_bytes(&[0, 8, 39, 92, 100, 128]);
         let mut buf = BytesMut::new();
-        put_binary_value(DataValue::Bit(bits.clone()), &mut buf).unwrap();
+        put_binary_value(PsqlValue::Bit(bits.clone()), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         // 48 bits divided into groups of 8 (a byte) = 6 bytes, plus one u32 (4 bytes) to hold the
         // size = 10 bytes
@@ -1411,7 +1378,7 @@ mod tests {
         exp.put_i32(10); // size
         bits.to_sql(&Type::VARBIT, &mut exp).unwrap(); // add value
         let mut buf = BytesMut::new();
-        put_binary_value(DataValue::VarBit(bits.clone()), &mut buf).unwrap();
+        put_binary_value(PsqlValue::VarBit(bits.clone()), &mut buf).unwrap();
         assert_eq!(buf, exp);
     }
 
@@ -1419,7 +1386,7 @@ mod tests {
     fn test_encode_binary_macaddr() {
         let mut buf = BytesMut::new();
         let macaddr = MacAddress::new([18, 52, 86, 171, 205, 239]);
-        put_binary_value(DataValue::MacAddress(macaddr), &mut buf).unwrap();
+        put_binary_value(PsqlValue::MacAddress(macaddr), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(6);
         macaddr.to_sql(&Type::MACADDR, &mut exp).unwrap(); // add value
@@ -1432,7 +1399,7 @@ mod tests {
         let uuid = Uuid::from_bytes([
             85, 14, 132, 0, 226, 155, 65, 212, 167, 22, 68, 102, 85, 68, 0, 0,
         ]);
-        put_binary_value(DataValue::Uuid(uuid), &mut buf).unwrap();
+        put_binary_value(PsqlValue::Uuid(uuid), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(16);
         uuid.to_sql(&Type::UUID, &mut exp).unwrap(); // add value
@@ -1446,7 +1413,7 @@ mod tests {
             "{\"name\":\"John Doe\",\"age\":43,\"phones\":[\"+44 1234567\",\"+44 2345678\"]}",
         )
         .unwrap();
-        put_binary_value(DataValue::Json(json.clone()), &mut buf).unwrap();
+        put_binary_value(PsqlValue::Json(json.clone()), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(-1); // size placeholder
         json.to_sql(&Type::JSON, &mut exp).unwrap(); // add value
@@ -1459,7 +1426,7 @@ mod tests {
         assert_eq!(buf, exp);
 
         let mut buf = BytesMut::new();
-        put_binary_value(DataValue::Jsonb(json.clone()), &mut buf).unwrap();
+        put_binary_value(PsqlValue::Jsonb(json.clone()), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(-1); // size placeholder
         json.to_sql(&Type::JSONB, &mut exp).unwrap(); // add value
@@ -1482,7 +1449,7 @@ mod tests {
             FixedOffset::east(0),
         );
         let mut buf = BytesMut::new();
-        put_binary_value(DataValue::TimestampTz(dt), &mut buf).unwrap();
+        put_binary_value(PsqlValue::TimestampTz(dt), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(-1); // size (placeholder)
         dt.to_sql(&Type::TIMESTAMPTZ, &mut exp).unwrap(); // add value
@@ -1498,7 +1465,7 @@ mod tests {
     #[test]
     fn test_encode_text_null() {
         let mut buf = BytesMut::new();
-        put_text_value(DataValue::Null, &mut buf).unwrap();
+        put_text_value(PsqlValue::Null, &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(-1); // null sentinel
         assert_eq!(buf, exp);
@@ -1507,7 +1474,7 @@ mod tests {
     #[test]
     fn test_encode_text_bool() {
         let mut buf = BytesMut::new();
-        put_text_value(DataValue::Bool(true), &mut buf).unwrap();
+        put_text_value(PsqlValue::Bool(true), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(1); // length
         exp.extend_from_slice(b"t"); // value
@@ -1517,7 +1484,7 @@ mod tests {
     #[test]
     fn test_encode_text_char() {
         let mut buf = BytesMut::new();
-        put_text_value(DataValue::Char('d' as i8), &mut buf).unwrap();
+        put_text_value(PsqlValue::Char('d' as i8), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(1); // length
         exp.extend_from_slice(&[b'd']); // value
@@ -1527,7 +1494,7 @@ mod tests {
     #[test]
     fn test_encode_text_varchar() {
         let mut buf = BytesMut::new();
-        put_text_value(DataValue::VarChar("some stuff".into()), &mut buf).unwrap();
+        put_text_value(PsqlValue::VarChar("some stuff".into()), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(10); // length
         exp.extend_from_slice(b"some stuff"); // value
@@ -1537,7 +1504,7 @@ mod tests {
     #[test]
     fn test_encode_text_int() {
         let mut buf = BytesMut::new();
-        put_text_value(DataValue::Int(0x1234567), &mut buf).unwrap();
+        put_text_value(PsqlValue::Int(0x1234567), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(8); // length
         exp.extend_from_slice(b"19088743"); // value
@@ -1547,7 +1514,7 @@ mod tests {
     #[test]
     fn test_encode_text_big_int() {
         let mut buf = BytesMut::new();
-        put_text_value(DataValue::BigInt(0x1234567890abcdef), &mut buf).unwrap();
+        put_text_value(PsqlValue::BigInt(0x1234567890abcdef), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(19); // length
         exp.extend_from_slice(b"1311768467294899695"); // value
@@ -1557,7 +1524,7 @@ mod tests {
     #[test]
     fn test_encode_text_small_int() {
         let mut buf = BytesMut::new();
-        put_text_value(DataValue::SmallInt(0x1234), &mut buf).unwrap();
+        put_text_value(PsqlValue::SmallInt(0x1234), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(4); // length
         exp.extend_from_slice(b"4660"); // value
@@ -1567,7 +1534,7 @@ mod tests {
     #[test]
     fn test_encode_text_double() {
         let mut buf = BytesMut::new();
-        put_text_value(DataValue::Double(0.1234567890123456), &mut buf).unwrap();
+        put_text_value(PsqlValue::Double(0.1234567890123456), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(18); // size
         exp.extend_from_slice(b"0.1234567890123456"); // value
@@ -1577,7 +1544,7 @@ mod tests {
     #[test]
     fn test_encode_text_real() {
         let mut buf = BytesMut::new();
-        put_text_value(DataValue::Float(0.12345678), &mut buf).unwrap();
+        put_text_value(PsqlValue::Float(0.12345678), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(10); // size
         exp.extend_from_slice(b"0.12345678"); // value
@@ -1588,7 +1555,7 @@ mod tests {
     fn test_encode_text_numeric() {
         let mut buf = BytesMut::new();
         let decimal = Decimal::new(1234567890123456, 16);
-        put_text_value(DataValue::Numeric(decimal), &mut buf).unwrap();
+        put_text_value(PsqlValue::Numeric(decimal), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(18); // size
         exp.extend_from_slice(b"0.1234567890123456");
@@ -1598,7 +1565,7 @@ mod tests {
     #[test]
     fn test_encode_text_text() {
         let mut buf = BytesMut::new();
-        put_text_value(DataValue::Text("some text".into()), &mut buf).unwrap();
+        put_text_value(PsqlValue::Text("some text".into()), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(9); // length
         exp.extend_from_slice(b"some text"); // value
@@ -1609,7 +1576,7 @@ mod tests {
     fn test_encode_text_timestamp() {
         let mut buf = BytesMut::new();
         put_text_value(
-            DataValue::Timestamp(
+            PsqlValue::Timestamp(
                 NaiveDateTime::parse_from_str("2020-01-02 03:04:05.660", TIMESTAMP_FORMAT).unwrap(),
             ),
             &mut buf,
@@ -1625,7 +1592,7 @@ mod tests {
     fn test_encode_text_bytea() {
         let mut buf = BytesMut::new();
         let bytes = vec![0, 8, 39, 92, 100, 128];
-        put_text_value(DataValue::ByteArray(bytes), &mut buf).unwrap();
+        put_text_value(PsqlValue::ByteArray(bytes), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(12); // length (placeholder)
         exp.extend_from_slice(b"0008275c6480");
@@ -1636,7 +1603,7 @@ mod tests {
     fn test_encode_text_macaddr() {
         let mut buf = BytesMut::new();
         let macaddr = MacAddress::new([18, 52, 86, 171, 205, 239]);
-        put_text_value(DataValue::MacAddress(macaddr), &mut buf).unwrap();
+        put_text_value(PsqlValue::MacAddress(macaddr), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(17); // length (placeholder)
         exp.extend_from_slice(b"12:34:56:ab:cd:ef");
@@ -1649,7 +1616,7 @@ mod tests {
         let uuid = Uuid::from_bytes([
             85, 14, 132, 0, 226, 155, 65, 212, 167, 22, 68, 102, 85, 68, 0, 0,
         ]);
-        put_text_value(DataValue::Uuid(uuid), &mut buf).unwrap();
+        put_text_value(PsqlValue::Uuid(uuid), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(36); // length (placeholder)
         exp.extend_from_slice(b"550e8400-e29b-41d4-a716-446655440000");
@@ -1663,7 +1630,7 @@ mod tests {
             "{\"name\":\"John Doe\",\"age\":43,\"phones\":[\"+44 1234567\",\"+44 2345678\"]}",
         )
         .unwrap();
-        put_text_value(DataValue::Json(json.clone()), &mut buf).unwrap();
+        put_text_value(PsqlValue::Json(json.clone()), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(67); // length (placeholder)
         exp.extend_from_slice(
@@ -1672,7 +1639,7 @@ mod tests {
         assert_eq!(buf, exp);
 
         let mut buf = BytesMut::new();
-        put_text_value(DataValue::Jsonb(json), &mut buf).unwrap();
+        put_text_value(PsqlValue::Jsonb(json), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(67); // length (placeholder)
         exp.extend_from_slice(
@@ -1686,14 +1653,14 @@ mod tests {
         let mut buf = BytesMut::new();
         // bits = 000000000000100000100111010111000110010010000000
         let bits = BitVec::from_bytes(&[0, 8, 39, 92, 100, 128]);
-        put_text_value(DataValue::Bit(bits.clone()), &mut buf).unwrap();
+        put_text_value(PsqlValue::Bit(bits.clone()), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(48); // size = 48 bit characters
         exp.extend_from_slice(b"000000000000100000100111010111000110010010000000"); // add value
         assert_eq!(buf, exp);
 
         let mut buf = BytesMut::new();
-        put_text_value(DataValue::Bit(bits), &mut buf).unwrap();
+        put_text_value(PsqlValue::Bit(bits), &mut buf).unwrap();
         assert_eq!(buf, exp);
     }
 
@@ -1707,7 +1674,7 @@ mod tests {
             FixedOffset::east(18000), // +05:00
         );
         let mut buf = BytesMut::new();
-        put_text_value(DataValue::TimestampTz(dt), &mut buf).unwrap();
+        put_text_value(PsqlValue::TimestampTz(dt), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(30);
         exp.extend_from_slice(b"2020-01-02 08:04:05.660 +05:00");

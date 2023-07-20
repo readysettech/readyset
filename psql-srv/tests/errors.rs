@@ -1,4 +1,3 @@
-use std::convert::TryFrom;
 use std::vec;
 
 use async_trait::async_trait;
@@ -14,16 +13,6 @@ use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio_postgres::Client;
 
-struct Value(Result<PsqlValue, Error>);
-
-impl TryFrom<Value> for PsqlValue {
-    type Error = Error;
-
-    fn try_from(v: Value) -> Result<Self, Self::Error> {
-        v.0
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ErrorPosition {
     Query,
@@ -37,9 +26,7 @@ struct ErrorBackend(ErrorPosition);
 
 #[async_trait]
 impl PsqlBackend for ErrorBackend {
-    type Value = Value;
-    type Row = Vec<Value>;
-    type Resultset = stream::Iter<vec::IntoIter<Result<Self::Row, psql_srv::Error>>>;
+    type Resultset = stream::Iter<vec::IntoIter<Result<Vec<PsqlValue>, psql_srv::Error>>>;
 
     fn credentials_for_user(&self, _user: &str) -> Option<Credentials> {
         Some(Credentials::Any)
@@ -91,9 +78,7 @@ impl PsqlBackend for ErrorBackend {
                     name: "x".to_owned(),
                     col_type: Type::BOOL,
                 }],
-                resultset: stream::iter(vec![Ok(vec![Value(Err(Error::InternalError(
-                    "factory".to_owned(),
-                )))])]),
+                resultset: stream::iter(vec![Err(Error::InternalError("factory".to_owned()))]),
             }),
             _ => Ok(QueryResponse::Select {
                 schema: vec![],
@@ -225,7 +210,7 @@ async fn serialize_error() {
         assert!(res.is_err());
         assert_eq!(
             res.err().unwrap().as_db_error().unwrap().message(),
-            "encode error: internal error: internal error: factory"
+            "internal error: factory"
         );
     })
     .await

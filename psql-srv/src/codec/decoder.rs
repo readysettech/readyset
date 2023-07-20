@@ -1,5 +1,5 @@
 use std::borrow::Borrow;
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 use std::str;
 
 use bit_vec::BitVec;
@@ -18,7 +18,6 @@ use crate::bytes::BytesStr;
 use crate::codec::error::DecodeError as Error;
 use crate::codec::error::DecodeError::InvalidTextByteArrayValue;
 use crate::codec::{Codec, DecodeError};
-use crate::error::Error as BackendError;
 use crate::message::FrontendMessage::{self, *};
 use crate::message::SaslInitialResponse;
 use crate::message::StatementName::*;
@@ -55,7 +54,7 @@ const NUL_BYTE: u8 = b'\0';
 const TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.f";
 const TIMESTAMP_TZ_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.f %:z";
 
-impl<R: IntoIterator<Item: TryInto<PsqlValue, Error = BackendError>>> Decoder for Codec<R> {
+impl Decoder for Codec {
     type Item = FrontendMessage;
     type Error = Error;
 
@@ -481,6 +480,7 @@ mod tests {
     use postgres_types::ToSql;
 
     use super::*;
+    use crate::error::Error as BackendError;
     use crate::value::PsqlValue;
 
     struct Value(PsqlValue);
@@ -501,7 +501,7 @@ mod tests {
 
     #[test]
     fn test_decode_ssl_request() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         let mut buf = BytesMut::new();
         buf.put_i32(8); // size
         buf.put_i32(80877103); // ssl request code
@@ -510,7 +510,7 @@ mod tests {
 
     #[test]
     fn test_decode_ssl_request_extra_data() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         let mut buf = BytesMut::new();
         buf.put_i32(9); // size
         buf.put_i32(80877103); // ssl request code
@@ -520,7 +520,7 @@ mod tests {
 
     #[test]
     fn test_decode_startup_message() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         let mut buf = BytesMut::new();
         buf.put_i32(4 + 4 + 5 + 10 + 9 + 14 + 1); // size
         buf.put_i32(196608); // standard protocol version
@@ -539,7 +539,7 @@ mod tests {
 
     #[test]
     fn test_decode_startup_message_ends_early() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         let mut buf = BytesMut::new();
         buf.put_i32(4 + 2); // size
         buf.put_i16(0); // incomplete protocol version
@@ -548,7 +548,7 @@ mod tests {
 
     #[test]
     fn test_decode_startup_message_missing_nul() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         let mut buf = BytesMut::new();
         buf.put_i32(4 + 4 + 5 + 9); // size
         buf.put_i32(196608); // standard protocol version
@@ -559,7 +559,7 @@ mod tests {
 
     #[test]
     fn test_decode_startup_message_missing_field() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         let mut buf = BytesMut::new();
         buf.put_i32(4 + 4 + 5); // size
         buf.put_i32(196608); // standard protocol version
@@ -570,7 +570,7 @@ mod tests {
 
     #[test]
     fn test_decode_startup_partial_header() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         let mut buf = BytesMut::new();
         buf.put_i16(5); // partial size
                         // header incomplete
@@ -580,7 +580,7 @@ mod tests {
 
     #[test]
     fn test_decode_startup_partial_message() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         let mut buf = BytesMut::new();
         buf.put_i32(8); // size
         buf.put_i16(4); // data
@@ -591,7 +591,7 @@ mod tests {
 
     #[test]
     fn test_decode_regular_partial_header() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         codec.set_start_up_complete();
         let mut buf = BytesMut::new();
         buf.put_u8(b'F'); // message id
@@ -603,7 +603,7 @@ mod tests {
 
     #[test]
     fn test_decode_regular_partial_message() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         codec.set_start_up_complete();
         let mut buf = BytesMut::new();
         buf.put_u8(b'F'); // message id
@@ -616,7 +616,7 @@ mod tests {
 
     #[test]
     fn test_decode_bind_simple() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         codec.set_start_up_complete();
         codec.set_statement_param_types("prepared_statement_name", vec![]);
         let mut buf = BytesMut::new();
@@ -638,7 +638,7 @@ mod tests {
 
     #[test]
     fn test_decode_bind_complex() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         codec.set_start_up_complete();
         codec.set_statement_param_types("prepared_statement_name", vec![Type::INT4, Type::TEXT]);
         let mut buf = BytesMut::new();
@@ -669,7 +669,7 @@ mod tests {
 
     #[test]
     fn test_decode_bind_null() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         codec.set_start_up_complete();
         codec.set_statement_param_types("prepared_statement_name", vec![Type::TEXT]);
         let mut buf = BytesMut::new();
@@ -693,7 +693,7 @@ mod tests {
 
     #[test]
     fn test_decode_bind_invalid_value() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         codec.set_start_up_complete();
         codec.set_statement_param_types("prepared_statement_name", vec![Type::TEXT]);
         let mut buf = BytesMut::new();
@@ -712,7 +712,7 @@ mod tests {
 
     #[test]
     fn test_decode_bind_incomplete_format() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         codec.set_start_up_complete();
         codec.set_statement_param_types("prepared_statement_name", vec![]);
         let mut buf = BytesMut::new();
@@ -729,7 +729,7 @@ mod tests {
 
     #[test]
     fn test_decode_close_portal() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         codec.set_start_up_complete();
         let mut buf = BytesMut::new();
         buf.put_u8(b'C'); // message id
@@ -744,7 +744,7 @@ mod tests {
 
     #[test]
     fn test_decode_close_prepared_statement() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         codec.set_start_up_complete();
         let mut buf = BytesMut::new();
         buf.put_u8(b'C'); // message id
@@ -759,7 +759,7 @@ mod tests {
 
     #[test]
     fn test_decode_close_invalid() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         codec.set_start_up_complete();
         let mut buf = BytesMut::new();
         buf.put_u8(b'C'); // message id
@@ -771,7 +771,7 @@ mod tests {
 
     #[test]
     fn test_decode_close_missing_type() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         codec.set_start_up_complete();
         let mut buf = BytesMut::new();
         buf.put_u8(b'C'); // message id
@@ -781,7 +781,7 @@ mod tests {
 
     #[test]
     fn test_decode_describe_portal() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         codec.set_start_up_complete();
         let mut buf = BytesMut::new();
         buf.put_u8(b'D'); // message id
@@ -796,7 +796,7 @@ mod tests {
 
     #[test]
     fn test_decode_describe_prepared_statement() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         codec.set_start_up_complete();
         let mut buf = BytesMut::new();
         buf.put_u8(b'D'); // message id
@@ -811,7 +811,7 @@ mod tests {
 
     #[test]
     fn test_decode_describe_invalid() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         codec.set_start_up_complete();
         let mut buf = BytesMut::new();
         buf.put_u8(b'D'); // message id
@@ -823,7 +823,7 @@ mod tests {
 
     #[test]
     fn test_decode_execute() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         codec.set_start_up_complete();
         let mut buf = BytesMut::new();
         buf.put_u8(b'E'); // message id
@@ -839,7 +839,7 @@ mod tests {
 
     #[test]
     fn test_decode_parse_no_param_types() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         codec.set_start_up_complete();
         let mut buf = BytesMut::new();
         buf.put_u8(b'P'); // message id
@@ -857,7 +857,7 @@ mod tests {
 
     #[test]
     fn test_decode_parse_with_param_types() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         codec.set_start_up_complete();
         let mut buf = BytesMut::new();
         buf.put_u8(b'P'); // message id
@@ -877,7 +877,7 @@ mod tests {
 
     #[test]
     fn test_decode_parse_with_incomplete_type() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         codec.set_start_up_complete();
         let mut buf = BytesMut::new();
         buf.put_u8(b'P'); // message id
@@ -891,7 +891,7 @@ mod tests {
 
     #[test]
     fn test_decode_parse_with_missing_type() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         codec.set_start_up_complete();
         let mut buf = BytesMut::new();
         buf.put_u8(b'P'); // message id
@@ -906,7 +906,7 @@ mod tests {
 
     #[test]
     fn test_decode_query() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         codec.set_start_up_complete();
         let mut buf = BytesMut::new();
         buf.put_u8(b'Q'); // message id
@@ -920,7 +920,7 @@ mod tests {
 
     #[test]
     fn test_decode_query_missing_nul() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         codec.set_start_up_complete();
         let mut buf = BytesMut::new();
         buf.put_u8(b'Q'); // message id
@@ -931,7 +931,7 @@ mod tests {
 
     #[test]
     fn test_decode_query_extra_data() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         codec.set_start_up_complete();
         let mut buf = BytesMut::new();
         buf.put_u8(b'Q'); // message id
@@ -943,7 +943,7 @@ mod tests {
 
     #[test]
     fn test_decode_sync() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         codec.set_start_up_complete();
         let mut buf = BytesMut::new();
         buf.put_u8(b'S'); // message id
@@ -953,7 +953,7 @@ mod tests {
 
     #[test]
     fn test_decode_sync_after_invalid_message() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         codec.set_start_up_complete();
         let mut buf = BytesMut::new();
 
@@ -977,7 +977,7 @@ mod tests {
 
     #[test]
     fn test_decode_terminate() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         codec.set_start_up_complete();
         let mut buf = BytesMut::new();
         buf.put_u8(b'X'); // message id
@@ -1499,7 +1499,7 @@ mod tests {
 
     #[test]
     fn test_parse_msg_with_undefined_type() {
-        let mut codec = Codec::<Vec<Value>>::new();
+        let mut codec = Codec::new();
         codec.is_starting_up = false;
         let mut header = BytesMut::with_capacity(HEADER_LENGTH);
         let mut body = BytesMut::new();

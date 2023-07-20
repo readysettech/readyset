@@ -17,8 +17,6 @@ use crate::error::Error;
 use crate::query_handler::PostgreSqlQueryHandler;
 use crate::response::{PrepareResponse, QueryResponse};
 use crate::resultset::Resultset;
-use crate::row::Row;
-use crate::value::TypedDfValue;
 use crate::PostgreSqlUpstream;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
@@ -101,8 +99,6 @@ impl Backend {
 
 #[async_trait]
 impl ps::PsqlBackend for Backend {
-    type Value = TypedDfValue;
-    type Row = Row;
     type Resultset = Resultset;
 
     fn version(&self) -> String {

@@ -33,9 +33,7 @@ struct ScramSha256Backend {
 
 #[async_trait]
 impl PsqlBackend for ScramSha256Backend {
-    type Value = Value;
-    type Row = Vec<Value>;
-    type Resultset = stream::Iter<vec::IntoIter<Result<Self::Row, psql_srv::Error>>>;
+    type Resultset = stream::Iter<vec::IntoIter<Result<Vec<PsqlValue>, psql_srv::Error>>>;
 
     fn version(&self) -> String {
         "13.4 ReadySet".to_string()

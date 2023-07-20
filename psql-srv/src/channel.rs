@@ -1,5 +1,3 @@
-use std::convert::TryInto;
-
 use futures::prelude::*;
 use postgres_types::Type;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -22,14 +20,13 @@ const CHANNEL_INITIAL_CAPACITY: usize = 4096;
 /// dependent upon on the frontend-backend communication state. Since `Channel` does not directly
 /// expose a `Codec`, it provides functions for updating the frontend-backend communication state,
 /// forwarding all updates to `Codec`.
-pub struct Channel<C, R>(Framed<C, Codec<R>>);
+pub struct Channel<C>(Framed<C, Codec>);
 
-impl<C, R> Channel<C, R>
+impl<C> Channel<C>
 where
     C: AsyncRead + AsyncWrite + Unpin,
-    R: IntoIterator<Item: TryInto<PsqlValue, Error = Error>>,
 {
-    pub fn new(inner: C) -> Channel<C, R> {
+    pub fn new(inner: C) -> Channel<C> {
         let codec = Codec::new();
         Channel(Framed::with_capacity(
             inner,
@@ -67,9 +64,9 @@ where
     }
 
     /// Write a `Response` (actually the `BackendMessage`s generated a `Response`) to the channel.
-    pub async fn send<S>(&mut self, item: Response<R, S>) -> Result<(), EncodeError>
+    pub async fn send<S>(&mut self, item: Response<S>) -> Result<(), EncodeError>
     where
-        S: Stream<Item = Result<R, Error>> + Unpin,
+        S: Stream<Item = Result<Vec<PsqlValue>, Error>> + Unpin,
     {
         item.write(&mut self.0).await
     }

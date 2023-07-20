@@ -3,32 +3,25 @@ mod encoder;
 mod error;
 
 use std::collections::HashMap;
-use std::convert::TryInto;
-use std::marker::PhantomData;
 
 pub use error::{DecodeError, EncodeError};
 use postgres_types::Type;
-
-use crate::error::Error;
-use crate::value::PsqlValue;
 
 /// A [`Decoder`] implementation that deserializes `FrontendMessage` and [`Encoder`] implementation
 /// that serializes `BackendMessage`.
 ///
 /// [`Decoder`]: https://docs.rs/tokio-util/0.2.0/tokio_util/codec/trait.Decoder.html
 /// [`Encoder`]: https://docs.rs/tokio-util/0.2.0/tokio_util/codec/trait.Encoder.html
-pub struct Codec<R> {
+pub struct Codec {
     is_starting_up: bool,
     statement_param_types: HashMap<String, Vec<Type>>,
-    _unused: PhantomData<R>,
 }
 
-impl<R: IntoIterator<Item: TryInto<PsqlValue, Error = Error>>> Codec<R> {
-    pub fn new() -> Codec<R> {
+impl Codec {
+    pub fn new() -> Codec {
         Codec {
             is_starting_up: true,
             statement_param_types: HashMap::new(),
-            _unused: PhantomData,
         }
     }
 

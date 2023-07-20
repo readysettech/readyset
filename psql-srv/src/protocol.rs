@@ -197,8 +197,8 @@ impl Protocol {
         &mut self,
         message: FrontendMessage,
         backend: &mut B,
-        channel: &mut Channel<C, B::Row>,
-    ) -> Result<Response<B::Row, B::Resultset>, Error> {
+        channel: &mut Channel<C>,
+    ) -> Result<Response<B::Resultset>, Error> {
         let get_ready_message = |version| {
             smallvec![
                 AuthenticationOk,
@@ -733,7 +733,7 @@ impl Protocol {
     pub async fn on_error<B: PsqlBackend>(
         &mut self,
         error: Error,
-    ) -> Result<Response<B::Row, B::Resultset>, Error> {
+    ) -> Result<Response<B::Resultset>, Error> {
         match self.state {
             State::StartingUp | State::Extended => {
                 self.state = State::Error;
@@ -944,17 +944,6 @@ mod tests {
         BytesStr::try_from(buf.freeze()).unwrap()
     }
 
-    #[derive(Debug, PartialEq)]
-    struct Value(PsqlValue);
-
-    impl TryFrom<Value> for PsqlValue {
-        type Error = Error;
-
-        fn try_from(v: Value) -> Result<Self, Self::Error> {
-            Ok(v.0)
-        }
-    }
-
     // A dummy `Backend` that records the values passed to it and can return a few hard-coded
     // responses.
     struct Backend {
@@ -991,9 +980,7 @@ mod tests {
 
     #[async_trait]
     impl PsqlBackend for Backend {
-        type Value = Value;
-        type Row = Vec<Self::Value>;
-        type Resultset = stream::Iter<vec::IntoIter<Result<Self::Row, Error>>>;
+        type Resultset = stream::Iter<vec::IntoIter<Result<Vec<PsqlValue>, Error>>>;
 
         fn version(&self) -> String {
             "14.5 ReadySet".to_string()
@@ -1028,14 +1015,8 @@ mod tests {
                         },
                     ],
                     resultset: stream::iter(vec![
-                        Ok(vec![
-                            Value(PsqlValue::Int(88)),
-                            Value(PsqlValue::Double(0.123)),
-                        ]),
-                        Ok(vec![
-                            Value(PsqlValue::Int(22)),
-                            Value(PsqlValue::Double(0.456)),
-                        ]),
+                        Ok(vec![PsqlValue::Int(88), PsqlValue::Double(0.123)]),
+                        Ok(vec![PsqlValue::Int(22), PsqlValue::Double(0.456)]),
                     ]),
                 })
             } else {
@@ -1091,14 +1072,8 @@ mod tests {
                         },
                     ],
                     resultset: stream::iter(vec![
-                        Ok(vec![
-                            Value(PsqlValue::Int(88)),
-                            Value(PsqlValue::Double(0.123)),
-                        ]),
-                        Ok(vec![
-                            Value(PsqlValue::Int(22)),
-                            Value(PsqlValue::Double(0.456)),
-                        ]),
+                        Ok(vec![PsqlValue::Int(88), PsqlValue::Double(0.123)]),
+                        Ok(vec![PsqlValue::Int(22), PsqlValue::Double(0.456)]),
                     ]),
                 })
             } else {
@@ -1148,7 +1123,7 @@ mod tests {
         let mut protocol = Protocol::new();
         let request = FrontendMessage::SSLRequest;
         let mut backend = Backend::new();
-        let mut channel = Channel::<NullBytestream, Vec<Value>>::new(NullBytestream);
+        let mut channel = Channel::<NullBytestream>::new(NullBytestream);
         // SSLRequest is not allowed by the protocol by default.
         match block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap() {
             Response::Message(msg) => assert_eq!(msg, BackendMessage::ssl_response_unwilling()),
@@ -1177,7 +1152,7 @@ mod tests {
             database: Some(bytes_str("database_name")),
         };
         let mut backend = Backend::new();
-        let mut channel = Channel::<NullBytestream, Vec<Value>>::new(NullBytestream);
+        let mut channel = Channel::<NullBytestream>::new(NullBytestream);
         // A StartupMessage with a database specified is accepted.
         match block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap() {
             Response::Messages(ms) => assert_eq!(
@@ -1228,7 +1203,7 @@ mod tests {
         };
         let mut backend = Backend::new();
         backend.needed_credentials = Some(Credentials::CleartextPassword(expected_password));
-        let mut channel = Channel::<NullBytestream, Vec<Value>>::new(NullBytestream);
+        let mut channel = Channel::<NullBytestream>::new(NullBytestream);
         match block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap() {
             Response::Messages(ms) => assert_eq!(
                 ms.as_ref(),
@@ -1293,7 +1268,7 @@ mod tests {
         };
         let mut backend = Backend::new();
         backend.needed_credentials = Some(Credentials::CleartextPassword(expected_password));
-        let mut channel = Channel::<NullBytestream, Vec<Value>>::new(NullBytestream);
+        let mut channel = Channel::<NullBytestream>::new(NullBytestream);
         match block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap() {
             Response::Messages(ms) => assert_eq!(
                 ms.as_ref(),
@@ -1333,7 +1308,7 @@ mod tests {
             database: None,
         };
         let mut backend = Backend::new();
-        let mut channel = Channel::<NullBytestream, Vec<Value>>::new(NullBytestream);
+        let mut channel = Channel::<NullBytestream>::new(NullBytestream);
         // A StartupMessage with no database specified triggers an error.
         block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap_err();
     }
@@ -1343,7 +1318,7 @@ mod tests {
         let mut protocol = Protocol::new();
         let request = FrontendMessage::Sync;
         let mut backend = Backend::new();
-        let mut channel = Channel::<NullBytestream, Vec<Value>>::new(NullBytestream);
+        let mut channel = Channel::<NullBytestream>::new(NullBytestream);
         // A Sync message cannot be sent until after a StartupMessage has been sent.
         block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap_err();
     }
@@ -1352,7 +1327,7 @@ mod tests {
     fn startup_message_repeated() {
         let mut protocol = Protocol::new();
         let mut backend = Backend::new();
-        let mut channel = Channel::<NullBytestream, Vec<Value>>::new(NullBytestream);
+        let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
         let startup_request = FrontendMessage::StartupMessage {
             protocol_version: 12345,
@@ -1374,7 +1349,7 @@ mod tests {
     fn sync() {
         let mut protocol = Protocol::new();
         let mut backend = Backend::new();
-        let mut channel = Channel::<NullBytestream, Vec<Value>>::new(NullBytestream);
+        let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
         let startup_request = FrontendMessage::StartupMessage {
             protocol_version: 12345,
@@ -1395,7 +1370,7 @@ mod tests {
     fn terminate() {
         let mut protocol = Protocol::new();
         let mut backend = Backend::new();
-        let mut channel = Channel::<NullBytestream, Vec<Value>>::new(NullBytestream);
+        let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
         let startup_request = FrontendMessage::StartupMessage {
             protocol_version: 12345,
@@ -1416,7 +1391,7 @@ mod tests {
     async fn query_read() {
         let mut protocol = Protocol::new();
         let mut backend = Backend::new();
-        let mut channel = Channel::<NullBytestream, Vec<Value>>::new(NullBytestream);
+        let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
         let startup_request = FrontendMessage::StartupMessage {
             protocol_version: 12345,
@@ -1473,8 +1448,8 @@ mod tests {
                 assert_eq!(
                     resultset.try_collect::<Vec<_>>().await.unwrap(),
                     vec![
-                        vec![Value(PsqlValue::Int(88)), Value(PsqlValue::Double(0.123))],
-                        vec![Value(PsqlValue::Int(22)), Value(PsqlValue::Double(0.456))]
+                        vec![PsqlValue::Int(88), PsqlValue::Double(0.123)],
+                        vec![PsqlValue::Int(22), PsqlValue::Double(0.456)]
                     ]
                 );
             }
@@ -1488,7 +1463,7 @@ mod tests {
         let mut protocol = Protocol::new();
         let mut backend = Backend::new();
         backend.is_query_err = true;
-        let mut channel = Channel::<NullBytestream, Vec<Value>>::new(NullBytestream);
+        let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
         let startup_request = FrontendMessage::StartupMessage {
             protocol_version: 12345,
@@ -1509,7 +1484,7 @@ mod tests {
         let mut protocol = Protocol::new();
         let mut backend = Backend::new();
         backend.is_query_read = false;
-        let mut channel = Channel::<NullBytestream, Vec<Value>>::new(NullBytestream);
+        let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
         let startup_request = FrontendMessage::StartupMessage {
             protocol_version: 12345,
@@ -1541,7 +1516,7 @@ mod tests {
     fn parse() {
         let mut protocol = Protocol::new();
         let mut backend = Backend::new();
-        let mut channel = Channel::<NullBytestream, Vec<Value>>::new(NullBytestream);
+        let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
         let startup_request = FrontendMessage::StartupMessage {
             protocol_version: 12345,
@@ -1589,7 +1564,7 @@ mod tests {
         let mut protocol = Protocol::new();
         let mut backend = Backend::new();
         backend.is_prepare_err = true;
-        let mut channel = Channel::<NullBytestream, Vec<Value>>::new(NullBytestream);
+        let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
         let startup_request = FrontendMessage::StartupMessage {
             protocol_version: 12345,
@@ -1611,7 +1586,7 @@ mod tests {
     fn bind() {
         let mut protocol = Protocol::new();
         let mut backend = Backend::new();
-        let mut channel = Channel::<NullBytestream, Vec<Value>>::new(NullBytestream);
+        let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
         let startup_request = FrontendMessage::StartupMessage {
             protocol_version: 12345,
@@ -1657,7 +1632,7 @@ mod tests {
     fn bind_no_result_transfer_formats() {
         let mut protocol = Protocol::new();
         let mut backend = Backend::new();
-        let mut channel = Channel::<NullBytestream, Vec<Value>>::new(NullBytestream);
+        let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
         let startup_request = FrontendMessage::StartupMessage {
             protocol_version: 12345,
@@ -1701,7 +1676,7 @@ mod tests {
     fn bind_single_result_transfer_format() {
         let mut protocol = Protocol::new();
         let mut backend = Backend::new();
-        let mut channel = Channel::<NullBytestream, Vec<Value>>::new(NullBytestream);
+        let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
         let startup_request = FrontendMessage::StartupMessage {
             protocol_version: 12345,
@@ -1748,7 +1723,7 @@ mod tests {
     fn bind_invalid_result_transfer_formats() {
         let mut protocol = Protocol::new();
         let mut backend = Backend::new();
-        let mut channel = Channel::<NullBytestream, Vec<Value>>::new(NullBytestream);
+        let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
         let startup_request = FrontendMessage::StartupMessage {
             protocol_version: 12345,
@@ -1782,7 +1757,7 @@ mod tests {
     fn bind_missing_prepared_statement() {
         let mut protocol = Protocol::new();
         let mut backend = Backend::new();
-        let mut channel = Channel::<NullBytestream, Vec<Value>>::new(NullBytestream);
+        let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
         let startup_request = FrontendMessage::StartupMessage {
             protocol_version: 12345,
@@ -1812,7 +1787,7 @@ mod tests {
     fn close_prepared_statement() {
         let mut protocol = Protocol::new();
         let mut backend = Backend::new();
-        let mut channel = Channel::<NullBytestream, Vec<Value>>::new(NullBytestream);
+        let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
         let startup_request = FrontendMessage::StartupMessage {
             protocol_version: 12345,
@@ -1846,7 +1821,7 @@ mod tests {
     fn close_missing_prepared_statement() {
         let mut protocol = Protocol::new();
         let mut backend = Backend::new();
-        let mut channel = Channel::<NullBytestream, Vec<Value>>::new(NullBytestream);
+        let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
         let startup_request = FrontendMessage::StartupMessage {
             protocol_version: 12345,
@@ -1869,7 +1844,7 @@ mod tests {
     fn close_portal() {
         let mut protocol = Protocol::new();
         let mut backend = Backend::new();
-        let mut channel = Channel::<NullBytestream, Vec<Value>>::new(NullBytestream);
+        let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
         let startup_request = FrontendMessage::StartupMessage {
             protocol_version: 12345,
@@ -1912,7 +1887,7 @@ mod tests {
     fn close_missing_portal() {
         let mut protocol = Protocol::new();
         let mut backend = Backend::new();
-        let mut channel = Channel::<NullBytestream, Vec<Value>>::new(NullBytestream);
+        let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
         let startup_request = FrontendMessage::StartupMessage {
             protocol_version: 12345,
@@ -1935,7 +1910,7 @@ mod tests {
     fn describe_prepared_statement() {
         let mut protocol = Protocol::new();
         let mut backend = Backend::new();
-        let mut channel = Channel::<NullBytestream, Vec<Value>>::new(NullBytestream);
+        let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
         let startup_request = FrontendMessage::StartupMessage {
             protocol_version: 12345,
@@ -1995,7 +1970,7 @@ mod tests {
     fn describe_missing_prepared_statement() {
         let mut protocol = Protocol::new();
         let mut backend = Backend::new();
-        let mut channel = Channel::<NullBytestream, Vec<Value>>::new(NullBytestream);
+        let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
         let startup_request = FrontendMessage::StartupMessage {
             protocol_version: 12345,
@@ -2015,7 +1990,7 @@ mod tests {
     fn describe_portal() {
         let mut protocol = Protocol::new();
         let mut backend = Backend::new();
-        let mut channel = Channel::<NullBytestream, Vec<Value>>::new(NullBytestream);
+        let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
         let startup_request = FrontendMessage::StartupMessage {
             protocol_version: 12345,
@@ -2081,7 +2056,7 @@ mod tests {
     fn describe_missing_portal() {
         let mut protocol = Protocol::new();
         let mut backend = Backend::new();
-        let mut channel = Channel::<NullBytestream, Vec<Value>>::new(NullBytestream);
+        let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
         let startup_request = FrontendMessage::StartupMessage {
             protocol_version: 12345,
@@ -2101,7 +2076,7 @@ mod tests {
     async fn execute_read() {
         let mut protocol = Protocol::new();
         let mut backend = Backend::new();
-        let mut channel = Channel::<NullBytestream, Vec<Value>>::new(NullBytestream);
+        let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
         let startup_request = FrontendMessage::StartupMessage {
             protocol_version: 12345,
@@ -2158,8 +2133,8 @@ mod tests {
                 assert_eq!(
                     resultset.try_collect::<Vec<_>>().await.unwrap(),
                     vec![
-                        vec![Value(PsqlValue::Int(88)), Value(PsqlValue::Double(0.123))],
-                        vec![Value(PsqlValue::Int(22)), Value(PsqlValue::Double(0.456))]
+                        vec![PsqlValue::Int(88), PsqlValue::Double(0.123)],
+                        vec![PsqlValue::Int(22), PsqlValue::Double(0.456)]
                     ]
                 );
                 assert_eq!(
@@ -2182,7 +2157,7 @@ mod tests {
         let mut protocol = Protocol::new();
         let mut backend = Backend::new();
         backend.is_query_err = true;
-        let mut channel = Channel::<NullBytestream, Vec<Value>>::new(NullBytestream);
+        let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
         let startup_request = FrontendMessage::StartupMessage {
             protocol_version: 12345,
@@ -2223,7 +2198,7 @@ mod tests {
         let mut protocol = Protocol::new();
         let mut backend = Backend::new();
         backend.is_query_read = false;
-        let mut channel = Channel::<NullBytestream, Vec<Value>>::new(NullBytestream);
+        let mut channel = Channel::<NullBytestream>::new(NullBytestream);
 
         let startup_request = FrontendMessage::StartupMessage {
             protocol_version: 12345,

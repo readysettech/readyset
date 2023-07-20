@@ -1,4 +1,3 @@
-use std::convert::TryInto;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -8,7 +7,6 @@ use postgres::SimpleQueryRow;
 use postgres_types::Type;
 use tokio_postgres::OwnedField;
 
-use crate::error::Error;
 use crate::message::TransferFormat;
 use crate::value::PsqlValue;
 
@@ -27,9 +25,9 @@ const SSL_RESPONSE_WILLING: u8 = b'S';
 /// * `R` - Represents a row of data values. `BackendMessage` implementations are provided wherein a
 ///   value of type `R` will, upon iteration, emit values that are convertible into type
 ///   `PsqlValue`, which can be serialized along with the rest of the `BackendMessage`.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 #[allow(clippy::large_enum_variant)] // TODO: benchmark if this matters
-pub enum BackendMessage<R> {
+pub enum BackendMessage {
     AuthenticationCleartextPassword,
     AuthenticationSasl {
         allow_channel_binding: bool,
@@ -48,7 +46,7 @@ pub enum BackendMessage<R> {
     },
     PassThroughCommandComplete(Bytes),
     DataRow {
-        values: R,
+        values: Vec<PsqlValue>,
         explicit_transfer_formats: Option<Arc<Vec<TransferFormat>>>,
     },
     ErrorResponse {
@@ -89,20 +87,20 @@ pub enum BackendMessage<R> {
     },
 }
 
-impl<R: IntoIterator<Item: TryInto<PsqlValue, Error = Error>>> BackendMessage<R> {
-    pub fn ready_for_query_idle() -> BackendMessage<R> {
+impl BackendMessage {
+    pub fn ready_for_query_idle() -> BackendMessage {
         BackendMessage::ReadyForQuery {
             status: READY_FOR_QUERY_IDLE,
         }
     }
 
-    pub fn ssl_response_unwilling() -> BackendMessage<R> {
+    pub fn ssl_response_unwilling() -> BackendMessage {
         BackendMessage::SSLResponse {
             byte: SSL_RESPONSE_UNWILLING,
         }
     }
 
-    pub fn ssl_response_willing() -> BackendMessage<R> {
+    pub fn ssl_response_willing() -> BackendMessage {
         BackendMessage::SSLResponse {
             byte: SSL_RESPONSE_WILLING,
         }

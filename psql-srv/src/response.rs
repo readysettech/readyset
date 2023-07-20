@@ -1,4 +1,3 @@
-use std::convert::TryInto;
 use std::sync::Arc;
 
 use futures::prelude::*;
@@ -12,32 +11,31 @@ use crate::value::PsqlValue;
 /// An encapsulation of a complete response produced by a Postgresql backend in response to a
 /// request. The response will be sent to the frontend as a sequence of zero or more
 /// `BackendMessage`s.
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, PartialEq)]
 #[warn(variant_size_differences)]
-pub enum Response<R, S> {
+pub enum Response<S> {
     Empty,
-    Message(BackendMessage<R>),
+    Message(BackendMessage),
     /// Send multiple messages at once
-    Messages(SmallVec<[BackendMessage<R>; 2]>),
+    Messages(SmallVec<[BackendMessage; 2]>),
 
     /// `Select` is the most complex variant, containing data rows to be sent to the frontend in
     /// response to a select query.
     Select {
-        header: Option<BackendMessage<R>>,
+        header: Option<BackendMessage>,
         resultset: S,
         result_transfer_formats: Option<Arc<Vec<TransferFormat>>>,
-        trailer: Option<BackendMessage<R>>,
+        trailer: Option<BackendMessage>,
     },
 }
 
-impl<R, S> Response<R, S>
+impl<S> Response<S>
 where
-    R: IntoIterator<Item: TryInto<PsqlValue, Error = Error>>,
-    S: Stream<Item = Result<R, Error>> + Unpin,
+    S: Stream<Item = Result<Vec<PsqlValue>, Error>> + Unpin,
 {
     pub async fn write<K>(self, sink: &mut K) -> Result<(), EncodeError>
     where
-        K: Sink<BackendMessage<R>, Error = EncodeError> + Unpin,
+        K: Sink<BackendMessage, Error = EncodeError> + Unpin,
     {
         use Response::*;
         match self {
@@ -101,8 +99,6 @@ where
 
 #[cfg(test)]
 mod tests {
-
-    use std::convert::TryFrom;
     use std::vec;
 
     use smallvec::smallvec;
@@ -111,24 +107,12 @@ mod tests {
     use super::*;
     use crate::value::PsqlValue;
 
-    #[derive(Clone, Debug, PartialEq)]
-    struct Value(PsqlValue);
-
-    impl TryFrom<Value> for PsqlValue {
-        type Error = Error;
-
-        fn try_from(v: Value) -> Result<Self, Self::Error> {
-            Ok(v.0)
-        }
-    }
-
-    type TestResponse =
-        Response<Vec<Value>, stream::Iter<vec::IntoIter<Result<Vec<Value>, Error>>>>;
+    type TestResponse = Response<stream::Iter<vec::IntoIter<Result<Vec<PsqlValue>, Error>>>>;
 
     #[test]
     fn write_empty() {
         let response = TestResponse::Empty;
-        let validating_sink = sink::unfold(0, |_i, _m: BackendMessage<Vec<Value>>| {
+        let validating_sink = sink::unfold(0, |_i, _m: BackendMessage| {
             async move {
                 // No messages are expected.
                 panic!();
@@ -141,7 +125,7 @@ mod tests {
     #[test]
     fn write_message() {
         let response = TestResponse::Empty;
-        let validating_sink = sink::unfold(0, |i, m: BackendMessage<Vec<Value>>| {
+        let validating_sink = sink::unfold(0, |i, m: BackendMessage| {
             async move {
                 match i {
                     0 => assert_eq!(m, BackendMessage::BindComplete),
@@ -161,7 +145,7 @@ mod tests {
             BackendMessage::BindComplete,
             BackendMessage::CloseComplete,
         ]);
-        let validating_sink = sink::unfold(0, |i, m: BackendMessage<Vec<Value>>| {
+        let validating_sink = sink::unfold(0, |i, m: BackendMessage| {
             async move {
                 match i {
                     0 => assert_eq!(m, BackendMessage::BindComplete),
@@ -184,7 +168,7 @@ mod tests {
             result_transfer_formats: None,
             trailer: None,
         };
-        let validating_sink = sink::unfold(0, |i, m: BackendMessage<Vec<Value>>| {
+        let validating_sink = sink::unfold(0, |i, m: BackendMessage| {
             async move {
                 match i {
                     0 => assert_eq!(
@@ -210,14 +194,8 @@ mod tests {
                 field_descriptions: vec![],
             }),
             resultset: stream::iter(vec![
-                Ok(vec![
-                    Value(PsqlValue::Int(5)),
-                    Value(PsqlValue::Double(0.123)),
-                ]),
-                Ok(vec![
-                    Value(PsqlValue::Int(99)),
-                    Value(PsqlValue::Double(0.456)),
-                ]),
+                Ok(vec![PsqlValue::Int(5), PsqlValue::Double(0.123)]),
+                Ok(vec![PsqlValue::Int(99), PsqlValue::Double(0.456)]),
             ]),
             result_transfer_formats: Some(Arc::new(vec![
                 TransferFormat::Text,
@@ -225,7 +203,7 @@ mod tests {
             ])),
             trailer: Some(BackendMessage::ready_for_query_idle()),
         };
-        let validating_sink = sink::unfold(0, |i, m: BackendMessage<Vec<Value>>| {
+        let validating_sink = sink::unfold(0, |i, m: BackendMessage| {
             async move {
                 match i {
                     0 => assert_eq!(
@@ -237,7 +215,7 @@ mod tests {
                     1 => assert_eq!(
                         m,
                         BackendMessage::DataRow {
-                            values: vec![Value(PsqlValue::Int(5)), Value(PsqlValue::Double(0.123))],
+                            values: vec![PsqlValue::Int(5), PsqlValue::Double(0.123)],
                             explicit_transfer_formats: Some(Arc::new(vec![
                                 TransferFormat::Text,
                                 TransferFormat::Binary
@@ -247,10 +225,7 @@ mod tests {
                     2 => assert_eq!(
                         m,
                         BackendMessage::DataRow {
-                            values: vec![
-                                Value(PsqlValue::Int(99)),
-                                Value(PsqlValue::Double(0.456))
-                            ],
+                            values: vec![PsqlValue::Int(99), PsqlValue::Double(0.456)],
                             explicit_transfer_formats: Some(Arc::new(vec![
                                 TransferFormat::Text,
                                 TransferFormat::Binary

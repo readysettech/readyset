@@ -23,7 +23,9 @@ use futures::future::{try_select, Either};
 use futures::stream::Peekable;
 use futures::{ready, Stream, StreamExt, TryStreamExt};
 use postgres_types::Type;
-use psql_srv::{Credentials, CredentialsNeeded, PrepareResponse, PsqlBackend, QueryResponse};
+use psql_srv::{
+    Credentials, CredentialsNeeded, PrepareResponse, PsqlBackend, PsqlValue, QueryResponse,
+};
 use readyset_data::DfValue;
 use readyset_psql::{ParamRef, TypedDfValue};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -82,27 +84,29 @@ enum ResultStream {
 }
 
 impl Stream for ResultStream {
-    type Item = Result<Vec<TypedDfValue>, psql_srv::Error>;
+    type Item = Result<Vec<PsqlValue>, psql_srv::Error>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match self.get_mut() {
             ResultStream::Owned(iter) => Poll::Ready(iter.next().map(|r| {
-                Ok((0..r.len())
+                (0..r.len())
                     .map(|i| TypedDfValue {
                         col_type: r.columns()[i].type_().clone(),
                         value: r.get(i),
                     })
-                    .collect())
+                    .map(PsqlValue::try_from)
+                    .collect()
             })),
             ResultStream::Streaming(stream) => {
                 Poll::Ready(ready!(stream.as_mut().poll_next(cx)).map(|res| {
                     match res {
-                        Ok(r) => Ok((0..r.len())
+                        Ok(r) => (0..r.len())
                             .map(|i| TypedDfValue {
                                 col_type: r.columns()[i].type_().clone(),
                                 value: r.get(i),
                             })
-                            .collect()),
+                            .map(PsqlValue::try_from)
+                            .collect(),
                         Err(e) => Err(e.into()),
                     }
                 }))
@@ -129,8 +133,6 @@ impl Backend {
 
 #[async_trait]
 impl PsqlBackend for Backend {
-    type Value = TypedDfValue;
-    type Row = Vec<Self::Value>;
     type Resultset = ResultStream;
 
     fn version(&self) -> String {

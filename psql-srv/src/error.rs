@@ -68,7 +68,7 @@ pub enum Error {
     PostgresError(#[from] tokio_postgres::error::Error),
 }
 
-impl<R> From<Error> for BackendMessage<R> {
+impl From<Error> for BackendMessage {
     fn from(error: Error) -> Self {
         let sqlstate = match error {
             Error::AuthenticationFailure { .. } => SqlState::INVALID_PASSWORD,

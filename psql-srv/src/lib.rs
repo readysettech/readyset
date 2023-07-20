@@ -26,7 +26,6 @@ mod scram;
 pub mod util;
 mod value;
 
-use std::convert::TryInto;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -59,16 +58,9 @@ pub enum Credentials<'a> {
 /// trait is the primary interface for the `psql-srv` crate.
 #[async_trait]
 pub trait PsqlBackend {
-    /// An associated type that can be converted into this crate's `PsqlValue` type.
-    type Value: TryInto<PsqlValue, Error = Error>;
-
-    /// An associated type representing a row returned by a SQL query, which can be iterated to
-    /// produce `Self::Value`s.
-    type Row: IntoIterator<Item = Self::Value>;
-
     /// An associated type representing a resultset returned by a SQL query, which can be iterated
     /// to produce `Self::Row`s.
-    type Resultset: Stream<Item = Result<Self::Row, Error>> + Unpin;
+    type Resultset: Stream<Item = Result<Vec<PsqlValue>, Error>> + Unpin;
 
     /// The postgresql server version number to send to the client on startup, along with ReadySet
     /// info

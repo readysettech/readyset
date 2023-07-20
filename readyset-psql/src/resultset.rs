@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use futures::{ready, Stream};
+use ps::PsqlValue;
 use psql_srv as ps;
 use readyset_client::results::ResultIterator;
 use tokio_postgres::types::Type;
@@ -74,7 +75,7 @@ impl Resultset {
 }
 
 impl Stream for Resultset {
-    type Item = Result<Row, psql_srv::Error>;
+    type Item = Result<Vec<PsqlValue>, psql_srv::Error>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let project_field_types = self.project_field_types.clone();
@@ -113,10 +114,11 @@ impl Stream for Resultset {
         };
 
         Poll::Ready(next.map(|values| {
-            Ok(Row {
+            let row = Row {
                 values: values?,
                 project_field_types,
-            })
+            };
+            row.into_iter().map(PsqlValue::try_from).collect()
         }))
     }
 }
@@ -124,7 +126,6 @@ impl Stream for Resultset {
 #[cfg(test)]
 mod tests {
     use std::borrow::Cow;
-    use std::convert::TryFrom;
 
     use futures::{StreamExt, TryStreamExt};
     use psql_srv::PsqlValue;
@@ -137,13 +138,7 @@ mod tests {
 
     async fn collect_resultset_values(resultset: Resultset) -> Vec<Vec<PsqlValue>> {
         resultset
-            .map(|r| {
-                r.map(|r| {
-                    r.into_iter()
-                        .map(|v| PsqlValue::try_from(v).unwrap())
-                        .collect::<Vec<PsqlValue>>()
-                })
-            })
+            .map(|r| r.map(|r| r.into_iter().collect::<Vec<PsqlValue>>()))
             .try_collect()
             .await
             .unwrap()
