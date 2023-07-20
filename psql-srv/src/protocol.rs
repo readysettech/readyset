@@ -23,7 +23,7 @@ use crate::scram::{
     ClientChannelBindingSupport, ClientFinalMessage, ClientFirstMessage, ServerFirstMessage,
     SCRAM_SHA_256_AUTHENTICATION_METHOD, SCRAM_SHA_256_SSL_AUTHENTICATION_METHOD,
 };
-use crate::value::Value;
+use crate::value::PsqlValue;
 use crate::QueryResponse::*;
 use crate::{Column, Credentials, PrepareResponse, PsqlBackend};
 
@@ -154,7 +154,7 @@ struct PreparedStatementData {
 struct PortalData {
     prepared_statement_id: u32,
     prepared_statement_name: String,
-    params: Vec<Value>,
+    params: Vec<PsqlValue>,
     result_transfer_formats: Arc<Vec<TransferFormat>>,
 }
 
@@ -935,7 +935,7 @@ mod tests {
     use super::*;
     use crate::bytes::BytesStr;
     use crate::message::ErrorSeverity;
-    use crate::value::Value as DataValue;
+    use crate::value::PsqlValue;
     use crate::{Credentials, CredentialsNeeded, PrepareResponse, QueryResponse};
 
     fn bytes_str(s: &str) -> BytesStr {
@@ -945,9 +945,9 @@ mod tests {
     }
 
     #[derive(Debug, PartialEq)]
-    struct Value(DataValue);
+    struct Value(PsqlValue);
 
-    impl TryFrom<Value> for DataValue {
+    impl TryFrom<Value> for PsqlValue {
         type Error = Error;
 
         fn try_from(v: Value) -> Result<Self, Self::Error> {
@@ -968,7 +968,7 @@ mod tests {
         last_prepare: Option<String>,
         last_close: Option<u32>,
         last_execute_id: Option<u32>,
-        last_execute_params: Option<Vec<DataValue>>,
+        last_execute_params: Option<Vec<PsqlValue>>,
         needed_credentials: Option<Credentials<'static>>,
     }
 
@@ -1029,12 +1029,12 @@ mod tests {
                     ],
                     resultset: stream::iter(vec![
                         Ok(vec![
-                            Value(DataValue::Int(88)),
-                            Value(DataValue::Double(0.123)),
+                            Value(PsqlValue::Int(88)),
+                            Value(PsqlValue::Double(0.123)),
                         ]),
                         Ok(vec![
-                            Value(DataValue::Int(22)),
-                            Value(DataValue::Double(0.456)),
+                            Value(PsqlValue::Int(22)),
+                            Value(PsqlValue::Double(0.456)),
                         ]),
                     ]),
                 })
@@ -1072,7 +1072,7 @@ mod tests {
         async fn on_execute(
             &mut self,
             statement_id: u32,
-            params: &[DataValue],
+            params: &[PsqlValue],
         ) -> Result<QueryResponse<Self::Resultset>, Error> {
             self.last_execute_id = Some(statement_id);
             self.last_execute_params = Some(params.to_vec());
@@ -1092,12 +1092,12 @@ mod tests {
                     ],
                     resultset: stream::iter(vec![
                         Ok(vec![
-                            Value(DataValue::Int(88)),
-                            Value(DataValue::Double(0.123)),
+                            Value(PsqlValue::Int(88)),
+                            Value(PsqlValue::Double(0.123)),
                         ]),
                         Ok(vec![
-                            Value(DataValue::Int(22)),
-                            Value(DataValue::Double(0.456)),
+                            Value(PsqlValue::Int(22)),
+                            Value(PsqlValue::Double(0.456)),
                         ]),
                     ]),
                 })
@@ -1473,8 +1473,8 @@ mod tests {
                 assert_eq!(
                     resultset.try_collect::<Vec<_>>().await.unwrap(),
                     vec![
-                        vec![Value(DataValue::Int(88)), Value(DataValue::Double(0.123))],
-                        vec![Value(DataValue::Int(22)), Value(DataValue::Double(0.456))]
+                        vec![Value(PsqlValue::Int(88)), Value(PsqlValue::Double(0.123))],
+                        vec![Value(PsqlValue::Int(22)), Value(PsqlValue::Double(0.456))]
                     ]
                 );
             }
@@ -1632,7 +1632,7 @@ mod tests {
         let request = FrontendMessage::Bind {
             prepared_statement_name: bytes_str("prepared1"),
             portal_name: bytes_str("portal1"),
-            params: vec![DataValue::Double(0.8887), DataValue::Int(45678)],
+            params: vec![PsqlValue::Double(0.8887), PsqlValue::Int(45678)],
             result_transfer_formats: vec![TransferFormat::Text, TransferFormat::Binary],
         };
         assert!(matches!(
@@ -1644,7 +1644,7 @@ mod tests {
             PortalData {
                 prepared_statement_id: 0,
                 prepared_statement_name: "prepared1".to_string(),
-                params: vec![DataValue::Double(0.8887), DataValue::Int(45678)],
+                params: vec![PsqlValue::Double(0.8887), PsqlValue::Int(45678)],
                 result_transfer_formats: Arc::new(vec![
                     TransferFormat::Text,
                     TransferFormat::Binary
@@ -1678,7 +1678,7 @@ mod tests {
         let request = FrontendMessage::Bind {
             prepared_statement_name: bytes_str("prepared1"),
             portal_name: bytes_str("portal1"),
-            params: vec![DataValue::Double(0.8887), DataValue::Int(45678)],
+            params: vec![PsqlValue::Double(0.8887), PsqlValue::Int(45678)],
             result_transfer_formats: vec![],
         };
         assert!(matches!(
@@ -1690,7 +1690,7 @@ mod tests {
             PortalData {
                 prepared_statement_id: 0,
                 prepared_statement_name: "prepared1".to_string(),
-                params: vec![DataValue::Double(0.8887), DataValue::Int(45678)],
+                params: vec![PsqlValue::Double(0.8887), PsqlValue::Int(45678)],
                 // The transfer formats are set to the default value (Text).
                 result_transfer_formats: Arc::new(vec![TransferFormat::Text, TransferFormat::Text])
             }
@@ -1722,7 +1722,7 @@ mod tests {
         let request = FrontendMessage::Bind {
             prepared_statement_name: bytes_str("prepared1"),
             portal_name: bytes_str("portal1"),
-            params: vec![DataValue::Double(0.8887), DataValue::Int(45678)],
+            params: vec![PsqlValue::Double(0.8887), PsqlValue::Int(45678)],
             result_transfer_formats: vec![TransferFormat::Binary],
         };
         assert!(matches!(
@@ -1734,7 +1734,7 @@ mod tests {
             PortalData {
                 prepared_statement_id: 0,
                 prepared_statement_name: "prepared1".to_string(),
-                params: vec![DataValue::Double(0.8887), DataValue::Int(45678)],
+                params: vec![PsqlValue::Double(0.8887), PsqlValue::Int(45678)],
                 // The single transfer format is applied to both fields.
                 result_transfer_formats: Arc::new(vec![
                     TransferFormat::Binary,
@@ -1768,7 +1768,7 @@ mod tests {
         let request = FrontendMessage::Bind {
             prepared_statement_name: bytes_str("prepared1"),
             portal_name: bytes_str("portal1"),
-            params: vec![DataValue::Double(0.8887), DataValue::Int(45678)],
+            params: vec![PsqlValue::Double(0.8887), PsqlValue::Int(45678)],
             result_transfer_formats: vec![
                 TransferFormat::Binary,
                 TransferFormat::Binary,
@@ -1802,7 +1802,7 @@ mod tests {
         let request = FrontendMessage::Bind {
             prepared_statement_name: bytes_str("prepared_invalid name"),
             portal_name: bytes_str("portal1"),
-            params: vec![DataValue::Double(0.8887), DataValue::Int(45678)],
+            params: vec![PsqlValue::Double(0.8887), PsqlValue::Int(45678)],
             result_transfer_formats: vec![],
         };
         block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap_err();
@@ -1888,7 +1888,7 @@ mod tests {
         let bind_request = FrontendMessage::Bind {
             prepared_statement_name: bytes_str("prepared1"),
             portal_name: bytes_str("portal1"),
-            params: vec![DataValue::Double(0.8887), DataValue::Int(45678)],
+            params: vec![PsqlValue::Double(0.8887), PsqlValue::Int(45678)],
             result_transfer_formats: vec![TransferFormat::Text, TransferFormat::Binary],
         };
         assert!(matches!(
@@ -2035,7 +2035,7 @@ mod tests {
         let bind_request = FrontendMessage::Bind {
             prepared_statement_name: bytes_str("prepared1"),
             portal_name: bytes_str("portal1"),
-            params: vec![DataValue::Double(0.8887), DataValue::Int(45678)],
+            params: vec![PsqlValue::Double(0.8887), PsqlValue::Int(45678)],
             result_transfer_formats: vec![TransferFormat::Text, TransferFormat::Binary],
         };
         assert!(matches!(
@@ -2127,7 +2127,7 @@ mod tests {
         let bind_request = FrontendMessage::Bind {
             prepared_statement_name: bytes_str("prepared1"),
             portal_name: bytes_str("portal1"),
-            params: vec![DataValue::Double(0.8887), DataValue::Int(45678)],
+            params: vec![PsqlValue::Double(0.8887), PsqlValue::Int(45678)],
             result_transfer_formats: vec![TransferFormat::Text, TransferFormat::Binary],
         };
         assert!(matches!(
@@ -2158,8 +2158,8 @@ mod tests {
                 assert_eq!(
                     resultset.try_collect::<Vec<_>>().await.unwrap(),
                     vec![
-                        vec![Value(DataValue::Int(88)), Value(DataValue::Double(0.123))],
-                        vec![Value(DataValue::Int(22)), Value(DataValue::Double(0.456))]
+                        vec![Value(PsqlValue::Int(88)), Value(PsqlValue::Double(0.123))],
+                        vec![Value(PsqlValue::Int(22)), Value(PsqlValue::Double(0.456))]
                     ]
                 );
                 assert_eq!(
@@ -2173,7 +2173,7 @@ mod tests {
         assert_eq!(backend.last_execute_id.unwrap(), 0);
         assert_eq!(
             backend.last_execute_params.unwrap(),
-            vec![DataValue::Double(0.8887), DataValue::Int(45678)]
+            vec![PsqlValue::Double(0.8887), PsqlValue::Int(45678)]
         );
     }
 
@@ -2202,7 +2202,7 @@ mod tests {
         let bind_request = FrontendMessage::Bind {
             prepared_statement_name: bytes_str("prepared1"),
             portal_name: bytes_str("portal1"),
-            params: vec![DataValue::Double(0.8887), DataValue::Int(45678)],
+            params: vec![PsqlValue::Double(0.8887), PsqlValue::Int(45678)],
             result_transfer_formats: vec![TransferFormat::Text, TransferFormat::Binary],
         };
         assert!(matches!(
@@ -2243,7 +2243,7 @@ mod tests {
         let bind_request = FrontendMessage::Bind {
             prepared_statement_name: bytes_str("prepared1"),
             portal_name: bytes_str("portal1"),
-            params: vec![DataValue::Double(0.8887), DataValue::Int(45678)],
+            params: vec![PsqlValue::Double(0.8887), PsqlValue::Int(45678)],
             result_transfer_formats: vec![TransferFormat::Text, TransferFormat::Binary],
         };
         assert!(matches!(
@@ -2265,7 +2265,7 @@ mod tests {
         assert_eq!(backend.last_execute_id.unwrap(), 0);
         assert_eq!(
             backend.last_execute_params.unwrap(),
-            vec![DataValue::Double(0.8887), DataValue::Int(45678)]
+            vec![PsqlValue::Double(0.8887), PsqlValue::Int(45678)]
         );
     }
 

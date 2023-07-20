@@ -6,7 +6,7 @@ use tokio_postgres::types::Type;
 use crate::value::TypedDfValue;
 
 /// A structure containing a `Vec<DfValue>`, representing one row of data, which facilitates
-/// iteration over the values within this row as `Value` structures.
+/// iteration over the values within this row.
 pub struct Row {
     /// The values comprising the row, as returned from a ReadySet interface lookup. Only the
     /// indices within this vector listed in `project_fields` will actually be projected during
@@ -51,15 +51,15 @@ impl Iterator for RowIterator {
 mod tests {
     use std::convert::TryFrom;
 
-    use psql_srv as ps;
+    use psql_srv::PsqlValue;
     use rust_decimal::Decimal;
 
     use super::*;
 
-    fn collect_row_values(row: Row) -> Vec<ps::Value> {
+    fn collect_row_values(row: Row) -> Vec<PsqlValue> {
         row.into_iter()
-            .map(|v| ps::Value::try_from(v).unwrap())
-            .collect::<Vec<ps::Value>>()
+            .map(|v| PsqlValue::try_from(v).unwrap())
+            .collect::<Vec<PsqlValue>>()
     }
 
     #[test]
@@ -68,7 +68,7 @@ mod tests {
             values: vec![],
             project_field_types: Arc::new(vec![]),
         };
-        assert_eq!(collect_row_values(row), Vec::<ps::Value>::new());
+        assert_eq!(collect_row_values(row), Vec::<PsqlValue>::new());
     }
 
     #[test]
@@ -77,7 +77,7 @@ mod tests {
             values: vec![DfValue::Int(43)],
             project_field_types: Arc::new(vec![Type::INT4]),
         };
-        assert_eq!(collect_row_values(row), vec![ps::Value::Int(43)]);
+        assert_eq!(collect_row_values(row), vec![PsqlValue::Int(43)]);
     }
 
     #[test]
@@ -101,11 +101,11 @@ mod tests {
         assert_eq!(
             collect_row_values(row),
             vec![
-                ps::Value::Int(43),
-                ps::Value::Text("abcde".into()),
-                ps::Value::Double(10.000000222),
-                ps::Value::Float(8.99),
-                ps::Value::Numeric(Decimal::new(35901234, 4)),
+                PsqlValue::Int(43),
+                PsqlValue::Text("abcde".into()),
+                PsqlValue::Double(10.000000222),
+                PsqlValue::Float(8.99),
+                PsqlValue::Numeric(Decimal::new(35901234, 4)),
             ]
         );
     }

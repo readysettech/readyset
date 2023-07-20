@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use clap::ValueEnum;
 use eui48::MacAddressFormat;
 use postgres_types::Type;
+use ps::PsqlValue;
 use psql_srv as ps;
 use readyset_adapter::backend as cl;
 use readyset_data::DfValue;
@@ -143,7 +144,7 @@ impl ps::PsqlBackend for Backend {
     async fn on_execute(
         &mut self,
         statement_id: u32,
-        params: &[ps::Value],
+        params: &[PsqlValue],
     ) -> Result<ps::QueryResponse<Resultset>, ps::Error> {
         let params = params
             .iter()
@@ -157,43 +158,43 @@ impl ps::PsqlBackend for Backend {
     }
 }
 
-/// A simple wrapper around a request parameter `psql_srv::Value` reference, facilitiating
+/// A simple wrapper around a request parameter `psql_srv::PsqlValue` reference, facilitiating
 /// conversion to `DfValue`.
-pub struct ParamRef<'a>(pub &'a ps::Value);
+pub struct ParamRef<'a>(pub &'a PsqlValue);
 
 impl TryFrom<ParamRef<'_>> for DfValue {
     type Error = ps::Error;
 
     fn try_from(v: ParamRef) -> Result<Self, Self::Error> {
         match v.0 {
-            ps::Value::Null => Ok(DfValue::None),
-            ps::Value::Bool(b) => Ok(DfValue::from(*b)),
-            ps::Value::BpChar(v)
-            | ps::Value::VarChar(v)
-            | ps::Value::Name(v)
-            | ps::Value::Text(v) => Ok(v.as_str().into()),
-            ps::Value::Char(v) => Ok((*v).into()),
-            ps::Value::Int(v) => Ok((*v).into()),
-            ps::Value::BigInt(v) => Ok((*v).into()),
-            ps::Value::SmallInt(v) => Ok((*v).into()),
-            ps::Value::Oid(v) => Ok((*v).into()),
-            ps::Value::Double(v) => DfValue::try_from(*v)
+            PsqlValue::Null => Ok(DfValue::None),
+            PsqlValue::Bool(b) => Ok(DfValue::from(*b)),
+            PsqlValue::BpChar(v)
+            | PsqlValue::VarChar(v)
+            | PsqlValue::Name(v)
+            | PsqlValue::Text(v) => Ok(v.as_str().into()),
+            PsqlValue::Char(v) => Ok((*v).into()),
+            PsqlValue::Int(v) => Ok((*v).into()),
+            PsqlValue::BigInt(v) => Ok((*v).into()),
+            PsqlValue::SmallInt(v) => Ok((*v).into()),
+            PsqlValue::Oid(v) => Ok((*v).into()),
+            PsqlValue::Double(v) => DfValue::try_from(*v)
                 .map_err(|_| ps::Error::Unsupported(format!("f64 with value `{}`", v))),
-            ps::Value::Float(v) => DfValue::try_from(*v)
+            PsqlValue::Float(v) => DfValue::try_from(*v)
                 .map_err(|_| ps::Error::Unsupported(format!("f32 with value `{}`", v))),
-            ps::Value::Numeric(d) => Ok(DfValue::from(*d)),
-            ps::Value::Timestamp(v) => Ok((*v).into()),
-            ps::Value::TimestampTz(v) => Ok(DfValue::from(*v)),
-            ps::Value::Date(v) => Ok((*v).into()),
-            ps::Value::Time(v) => Ok((*v).into()),
-            ps::Value::ByteArray(b) => Ok(DfValue::ByteArray(Arc::new(b.clone()))),
-            ps::Value::MacAddress(m) => Ok(DfValue::from(m.to_string(MacAddressFormat::HexString))),
-            ps::Value::Inet(ip) => Ok(DfValue::from(ip.to_string())),
-            ps::Value::Uuid(uuid) => Ok(DfValue::from(uuid.to_string())),
-            ps::Value::Json(v) | ps::Value::Jsonb(v) => Ok(DfValue::from(v.to_string())),
-            ps::Value::Bit(bits) | ps::Value::VarBit(bits) => Ok(DfValue::from(bits.clone())),
-            ps::Value::Array(arr, _) => Ok(DfValue::from(arr.clone())),
-            ps::Value::PassThrough(p) => Ok(DfValue::PassThrough(Arc::new(p.clone()))),
+            PsqlValue::Numeric(d) => Ok(DfValue::from(*d)),
+            PsqlValue::Timestamp(v) => Ok((*v).into()),
+            PsqlValue::TimestampTz(v) => Ok(DfValue::from(*v)),
+            PsqlValue::Date(v) => Ok((*v).into()),
+            PsqlValue::Time(v) => Ok((*v).into()),
+            PsqlValue::ByteArray(b) => Ok(DfValue::ByteArray(Arc::new(b.clone()))),
+            PsqlValue::MacAddress(m) => Ok(DfValue::from(m.to_string(MacAddressFormat::HexString))),
+            PsqlValue::Inet(ip) => Ok(DfValue::from(ip.to_string())),
+            PsqlValue::Uuid(uuid) => Ok(DfValue::from(uuid.to_string())),
+            PsqlValue::Json(v) | PsqlValue::Jsonb(v) => Ok(DfValue::from(v.to_string())),
+            PsqlValue::Bit(bits) | PsqlValue::VarBit(bits) => Ok(DfValue::from(bits.clone())),
+            PsqlValue::Array(arr, _) => Ok(DfValue::from(arr.clone())),
+            PsqlValue::PassThrough(p) => Ok(DfValue::PassThrough(Arc::new(p.clone()))),
         }
     }
 }

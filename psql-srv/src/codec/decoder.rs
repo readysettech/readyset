@@ -23,7 +23,7 @@ use crate::message::FrontendMessage::{self, *};
 use crate::message::SaslInitialResponse;
 use crate::message::StatementName::*;
 use crate::message::TransferFormat::{self, *};
-use crate::value::Value;
+use crate::value::PsqlValue;
 
 const ID_AUTHENTICATE: u8 = b'p';
 const ID_BIND: u8 = b'B';
@@ -55,7 +55,7 @@ const NUL_BYTE: u8 = b'\0';
 const TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.f";
 const TIMESTAMP_TZ_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.f %:z";
 
-impl<R: IntoIterator<Item: TryInto<Value, Error = BackendError>>> Decoder for Codec<R> {
+impl<R: IntoIterator<Item: TryInto<PsqlValue, Error = BackendError>>> Decoder for Codec<R> {
     type Item = FrontendMessage;
     type Error = Error;
 
@@ -182,7 +182,7 @@ impl<R: IntoIterator<Item: TryInto<Value, Error = BackendError>>> Decoder for Co
                         Binary => get_binary_value(msg, t),
                         Text => get_text_value(msg, t),
                     })
-                    .collect::<Result<Vec<Value>, Error>>()?;
+                    .collect::<Result<Vec<PsqlValue>, Error>>()?;
 
                 let n_result_format_codes = msg.get_i16();
                 let result_transfer_formats = (0..n_result_format_codes)
@@ -336,56 +336,59 @@ fn get_type(src: &mut Bytes) -> Result<Type, Error> {
     }
 }
 
-fn get_binary_value(src: &mut Bytes, t: &Type) -> Result<Value, Error> {
+fn get_binary_value(src: &mut Bytes, t: &Type) -> Result<PsqlValue, Error> {
     let len = get_i32(src)?;
     if len == LENGTH_NULL_SENTINEL {
-        return Ok(Value::Null);
+        return Ok(PsqlValue::Null);
     }
 
     let buf = &mut src.split_to(usize::try_from(len)?);
 
     match t.kind() {
-        Kind::Array(member_type) => Ok(Value::Array(Array::from_sql(t, buf)?, member_type.clone())),
-        Kind::Enum(_) => Ok(Value::Text(str::from_utf8(buf)?.into())),
+        Kind::Array(member_type) => Ok(PsqlValue::Array(
+            Array::from_sql(t, buf)?,
+            member_type.clone(),
+        )),
+        Kind::Enum(_) => Ok(PsqlValue::Text(str::from_utf8(buf)?.into())),
         _ => match *t {
             // Postgres does not allow interior 0 bytes, even though it is valid UTF-8
             Type::BPCHAR | Type::VARCHAR | Type::TEXT | Type::NAME if buf.contains(&0) => {
                 Err(Error::InvalidUtf8)
             }
-            Type::BOOL => Ok(Value::Bool(bool::from_sql(t, buf)?)),
-            Type::VARCHAR => Ok(Value::VarChar(<&str>::from_sql(t, buf)?.into())),
-            Type::BPCHAR => Ok(Value::BpChar(<&str>::from_sql(t, buf)?.into())),
-            Type::NAME => Ok(Value::Name(<&str>::from_sql(t, buf)?.into())),
-            Type::CHAR => Ok(Value::Char(i8::from_sql(t, buf)?)),
-            Type::INT4 => Ok(Value::Int(i32::from_sql(t, buf)?)),
-            Type::INT8 => Ok(Value::BigInt(i64::from_sql(t, buf)?)),
-            Type::INT2 => Ok(Value::SmallInt(i16::from_sql(t, buf)?)),
-            Type::OID => Ok(Value::Oid(u32::from_sql(t, buf)?)),
-            Type::FLOAT8 => Ok(Value::Double(f64::from_sql(t, buf)?)),
-            Type::FLOAT4 => Ok(Value::Float(f32::from_sql(t, buf)?)),
-            Type::NUMERIC => Ok(Value::Numeric(Decimal::from_sql(t, buf)?)),
-            Type::TEXT => Ok(Value::Text(<&str>::from_sql(t, buf)?.into())),
-            Type::DATE => Ok(Value::Date(NaiveDate::from_sql(t, buf)?)),
-            Type::TIME => Ok(Value::Time(NaiveTime::from_sql(t, buf)?)),
-            Type::TIMESTAMP => Ok(Value::Timestamp(NaiveDateTime::from_sql(t, buf)?)),
-            Type::TIMESTAMPTZ => Ok(Value::TimestampTz(DateTime::<FixedOffset>::from_sql(
+            Type::BOOL => Ok(PsqlValue::Bool(bool::from_sql(t, buf)?)),
+            Type::VARCHAR => Ok(PsqlValue::VarChar(<&str>::from_sql(t, buf)?.into())),
+            Type::BPCHAR => Ok(PsqlValue::BpChar(<&str>::from_sql(t, buf)?.into())),
+            Type::NAME => Ok(PsqlValue::Name(<&str>::from_sql(t, buf)?.into())),
+            Type::CHAR => Ok(PsqlValue::Char(i8::from_sql(t, buf)?)),
+            Type::INT4 => Ok(PsqlValue::Int(i32::from_sql(t, buf)?)),
+            Type::INT8 => Ok(PsqlValue::BigInt(i64::from_sql(t, buf)?)),
+            Type::INT2 => Ok(PsqlValue::SmallInt(i16::from_sql(t, buf)?)),
+            Type::OID => Ok(PsqlValue::Oid(u32::from_sql(t, buf)?)),
+            Type::FLOAT8 => Ok(PsqlValue::Double(f64::from_sql(t, buf)?)),
+            Type::FLOAT4 => Ok(PsqlValue::Float(f32::from_sql(t, buf)?)),
+            Type::NUMERIC => Ok(PsqlValue::Numeric(Decimal::from_sql(t, buf)?)),
+            Type::TEXT => Ok(PsqlValue::Text(<&str>::from_sql(t, buf)?.into())),
+            Type::DATE => Ok(PsqlValue::Date(NaiveDate::from_sql(t, buf)?)),
+            Type::TIME => Ok(PsqlValue::Time(NaiveTime::from_sql(t, buf)?)),
+            Type::TIMESTAMP => Ok(PsqlValue::Timestamp(NaiveDateTime::from_sql(t, buf)?)),
+            Type::TIMESTAMPTZ => Ok(PsqlValue::TimestampTz(DateTime::<FixedOffset>::from_sql(
                 t, buf,
             )?)),
-            Type::BYTEA => Ok(Value::ByteArray(<Vec<u8>>::from_sql(t, buf)?)),
-            Type::MACADDR => Ok(Value::MacAddress(MacAddress::from_sql(t, buf)?)),
-            Type::INET => Ok(Value::Inet(IpInet::from_sql(t, buf)?)),
-            Type::UUID => Ok(Value::Uuid(Uuid::from_sql(t, buf)?)),
-            Type::JSON => Ok(Value::Json(serde_json::Value::from_sql(t, buf)?)),
-            Type::JSONB => Ok(Value::Jsonb(serde_json::Value::from_sql(t, buf)?)),
-            Type::BIT => Ok(Value::Bit(BitVec::from_sql(t, buf)?)),
-            Type::VARBIT => Ok(Value::VarBit(BitVec::from_sql(t, buf)?)),
-            ref t if t.name() == "citext" => {
-                Ok(Value::Text(readyset_data::Text::from_str_with_collation(
+            Type::BYTEA => Ok(PsqlValue::ByteArray(<Vec<u8>>::from_sql(t, buf)?)),
+            Type::MACADDR => Ok(PsqlValue::MacAddress(MacAddress::from_sql(t, buf)?)),
+            Type::INET => Ok(PsqlValue::Inet(IpInet::from_sql(t, buf)?)),
+            Type::UUID => Ok(PsqlValue::Uuid(Uuid::from_sql(t, buf)?)),
+            Type::JSON => Ok(PsqlValue::Json(serde_json::Value::from_sql(t, buf)?)),
+            Type::JSONB => Ok(PsqlValue::Jsonb(serde_json::Value::from_sql(t, buf)?)),
+            Type::BIT => Ok(PsqlValue::Bit(BitVec::from_sql(t, buf)?)),
+            Type::VARBIT => Ok(PsqlValue::VarBit(BitVec::from_sql(t, buf)?)),
+            ref t if t.name() == "citext" => Ok(PsqlValue::Text(
+                readyset_data::Text::from_str_with_collation(
                     <&str>::from_sql(t, buf)?,
                     Collation::Citext,
-                )))
-            }
-            _ => Ok(Value::PassThrough(readyset_data::PassThrough {
+                ),
+            )),
+            _ => Ok(PsqlValue::PassThrough(readyset_data::PassThrough {
                 ty: t.clone(),
                 data: buf.to_vec().into_boxed_slice(),
             })),
@@ -405,69 +408,68 @@ fn get_bitvec_from_str(bit_str: &str) -> Result<BitVec, Error> {
     Ok(bits)
 }
 
-fn get_text_value(src: &mut Bytes, t: &Type) -> Result<Value, Error> {
+fn get_text_value(src: &mut Bytes, t: &Type) -> Result<PsqlValue, Error> {
     let len = get_i32(src)?;
     if len == LENGTH_NULL_SENTINEL {
-        return Ok(Value::Null);
+        return Ok(PsqlValue::Null);
     }
 
     let text = BytesStr::try_from(src.split_to(usize::try_from(len)?))?;
     let text_str: &str = text.borrow();
     match *t {
-        Type::BOOL => Ok(Value::Bool(text_str == BOOL_TRUE_TEXT_REP)),
-        Type::VARCHAR => Ok(Value::VarChar(text_str.into())),
-        Type::NAME => Ok(Value::Name(text_str.into())),
-        Type::BPCHAR => Ok(Value::BpChar(text_str.into())),
-        Type::INT4 => Ok(Value::Int(text_str.parse::<i32>()?)),
-        Type::INT8 => Ok(Value::BigInt(text_str.parse::<i64>()?)),
-        Type::INT2 => Ok(Value::SmallInt(text_str.parse::<i16>()?)),
-        Type::CHAR => Ok(Value::Char(text_str.parse::<i8>()?)),
-        Type::OID => Ok(Value::Oid(text_str.parse::<u32>()?)),
+        Type::BOOL => Ok(PsqlValue::Bool(text_str == BOOL_TRUE_TEXT_REP)),
+        Type::VARCHAR => Ok(PsqlValue::VarChar(text_str.into())),
+        Type::NAME => Ok(PsqlValue::Name(text_str.into())),
+        Type::BPCHAR => Ok(PsqlValue::BpChar(text_str.into())),
+        Type::INT4 => Ok(PsqlValue::Int(text_str.parse::<i32>()?)),
+        Type::INT8 => Ok(PsqlValue::BigInt(text_str.parse::<i64>()?)),
+        Type::INT2 => Ok(PsqlValue::SmallInt(text_str.parse::<i16>()?)),
+        Type::CHAR => Ok(PsqlValue::Char(text_str.parse::<i8>()?)),
+        Type::OID => Ok(PsqlValue::Oid(text_str.parse::<u32>()?)),
         Type::FLOAT8 => {
             // TODO: Ensure all values are properly parsed, including +/-0 and +/-inf.
-            Ok(Value::Double(text_str.parse::<f64>()?))
+            Ok(PsqlValue::Double(text_str.parse::<f64>()?))
         }
         Type::FLOAT4 => {
             // TODO: Ensure all values are properly parsed, including +/-0 and +/-inf.
-            Ok(Value::Float(text_str.parse::<f32>()?))
+            Ok(PsqlValue::Float(text_str.parse::<f32>()?))
         }
-        Type::NUMERIC => Ok(Value::Numeric(Decimal::from_str(text_str)?)),
-        Type::TEXT => Ok(Value::Text(text_str.into())),
+        Type::NUMERIC => Ok(PsqlValue::Numeric(Decimal::from_str(text_str)?)),
+        Type::TEXT => Ok(PsqlValue::Text(text_str.into())),
         Type::TIMESTAMP => {
             // TODO: Does not correctly handle all valid timestamp representations. For example,
             // 8601/SQL timestamp format is assumed; infinity/-infinity are not supported.
-            Ok(Value::Timestamp(NaiveDateTime::parse_from_str(
+            Ok(PsqlValue::Timestamp(NaiveDateTime::parse_from_str(
                 text_str,
                 TIMESTAMP_FORMAT,
             )?))
         }
-        Type::TIMESTAMPTZ => Ok(Value::TimestampTz(DateTime::<FixedOffset>::parse_from_str(
-            text_str,
-            TIMESTAMP_TZ_FORMAT,
-        )?)),
+        Type::TIMESTAMPTZ => Ok(PsqlValue::TimestampTz(
+            DateTime::<FixedOffset>::parse_from_str(text_str, TIMESTAMP_TZ_FORMAT)?,
+        )),
         Type::BYTEA => {
             let bytes = hex::decode(text_str).map_err(InvalidTextByteArrayValue)?;
-            Ok(Value::ByteArray(bytes))
+            Ok(PsqlValue::ByteArray(bytes))
         }
         Type::MACADDR => MacAddress::parse_str(text_str)
             .map_err(DecodeError::InvalidTextMacAddressValue)
-            .map(Value::MacAddress),
+            .map(PsqlValue::MacAddress),
         Type::INET => text_str
             .parse::<IpInet>()
             .map_err(DecodeError::InvalidTextIpAddressValue)
-            .map(Value::Inet),
+            .map(PsqlValue::Inet),
         Type::UUID => Uuid::parse_str(text_str)
             .map_err(DecodeError::InvalidTextUuidValue)
-            .map(Value::Uuid),
+            .map(PsqlValue::Uuid),
         Type::JSON => serde_json::from_str::<serde_json::Value>(text_str)
             .map_err(DecodeError::InvalidTextJsonValue)
-            .map(Value::Json),
+            .map(PsqlValue::Json),
         Type::JSONB => serde_json::from_str::<serde_json::Value>(text_str)
             .map_err(DecodeError::InvalidTextJsonValue)
-            .map(Value::Jsonb),
-        Type::BIT => get_bitvec_from_str(text_str).map(Value::Bit),
-        Type::VARBIT => get_bitvec_from_str(text_str).map(Value::VarBit),
-        ref t if t.name() == "citext" => Ok(Value::Text(text_str.into())),
+            .map(PsqlValue::Jsonb),
+        Type::BIT => get_bitvec_from_str(text_str).map(PsqlValue::Bit),
+        Type::VARBIT => get_bitvec_from_str(text_str).map(PsqlValue::VarBit),
+        ref t if t.name() == "citext" => Ok(PsqlValue::Text(text_str.into())),
         _ => Err(Error::UnsupportedType(t.clone())),
     }
 }
@@ -479,11 +481,11 @@ mod tests {
     use postgres_types::ToSql;
 
     use super::*;
-    use crate::value::Value as DataValue;
+    use crate::value::PsqlValue;
 
-    struct Value(DataValue);
+    struct Value(PsqlValue);
 
-    impl TryFrom<Value> for DataValue {
+    impl TryFrom<Value> for PsqlValue {
         type Error = BackendError;
 
         fn try_from(v: Value) -> Result<Self, Self::Error> {
@@ -659,7 +661,7 @@ mod tests {
         let expected = Some(Bind {
             portal_name: bytes_str("portal_name"),
             prepared_statement_name: bytes_str("prepared_statement_name"),
-            params: vec![DataValue::Int(42), DataValue::Text("some text".into())],
+            params: vec![PsqlValue::Int(42), PsqlValue::Text("some text".into())],
             result_transfer_formats: vec![Binary, Binary, Text],
         });
         assert_eq!(codec.decode(&mut buf).unwrap(), expected);
@@ -683,7 +685,7 @@ mod tests {
         let expected = Some(Bind {
             portal_name: bytes_str("portal_name"),
             prepared_statement_name: bytes_str("prepared_statement_name"),
-            params: vec![DataValue::Null],
+            params: vec![PsqlValue::Null],
             result_transfer_formats: vec![],
         });
         assert_eq!(codec.decode(&mut buf).unwrap(), expected);
@@ -989,7 +991,7 @@ mod tests {
         buf.put_i32(-1); // size
         assert_eq!(
             get_binary_value(&mut buf.freeze(), &Type::INT4).unwrap(),
-            DataValue::Null
+            PsqlValue::Null
         );
     }
 
@@ -1000,7 +1002,7 @@ mod tests {
         buf.put_u8(true as u8); // value
         assert_eq!(
             get_binary_value(&mut buf.freeze(), &Type::BOOL).unwrap(),
-            DataValue::Bool(true)
+            PsqlValue::Bool(true)
         );
     }
 
@@ -1011,7 +1013,7 @@ mod tests {
         buf.put_i8(8); // value
         assert_eq!(
             get_binary_value(&mut buf.freeze(), &Type::CHAR).unwrap(),
-            DataValue::Char(8)
+            PsqlValue::Char(8)
         );
     }
 
@@ -1022,7 +1024,7 @@ mod tests {
         buf.extend_from_slice(b"mighty"); // value
         assert_eq!(
             get_binary_value(&mut buf.freeze(), &Type::VARCHAR).unwrap(),
-            DataValue::VarChar("mighty".into())
+            PsqlValue::VarChar("mighty".into())
         );
     }
 
@@ -1033,7 +1035,7 @@ mod tests {
         buf.extend_from_slice(b"mighty"); // value
         assert_eq!(
             get_binary_value(&mut buf.freeze(), &Type::BPCHAR).unwrap(),
-            DataValue::BpChar("mighty".into())
+            PsqlValue::BpChar("mighty".into())
         );
     }
 
@@ -1044,7 +1046,7 @@ mod tests {
         buf.put_i32(0x12345678); // value
         assert_eq!(
             get_binary_value(&mut buf.freeze(), &Type::INT4).unwrap(),
-            DataValue::Int(0x12345678)
+            PsqlValue::Int(0x12345678)
         );
     }
 
@@ -1055,7 +1057,7 @@ mod tests {
         buf.put_i64(0x1234567890abcdef); // value
         assert_eq!(
             get_binary_value(&mut buf.freeze(), &Type::INT8).unwrap(),
-            DataValue::BigInt(0x1234567890abcdef)
+            PsqlValue::BigInt(0x1234567890abcdef)
         );
     }
 
@@ -1066,7 +1068,7 @@ mod tests {
         buf.put_i16(0x1234); // value
         assert_eq!(
             get_binary_value(&mut buf.freeze(), &Type::INT2).unwrap(),
-            DataValue::SmallInt(0x1234)
+            PsqlValue::SmallInt(0x1234)
         );
     }
 
@@ -1077,7 +1079,7 @@ mod tests {
         buf.put_f64(0.1234567890123456); // value
         assert_eq!(
             get_binary_value(&mut buf.freeze(), &Type::FLOAT8).unwrap(),
-            DataValue::Double(0.1234567890123456)
+            PsqlValue::Double(0.1234567890123456)
         );
     }
 
@@ -1088,7 +1090,7 @@ mod tests {
         buf.put_f32(0.12345678); // value
         assert_eq!(
             get_binary_value(&mut buf.freeze(), &Type::FLOAT4).unwrap(),
-            DataValue::Float(0.12345678)
+            PsqlValue::Float(0.12345678)
         );
     }
 
@@ -1106,7 +1108,7 @@ mod tests {
         window.put_i32(value_len as i32); // put the actual length
         assert_eq!(
             get_binary_value(&mut buf.freeze(), &Type::NUMERIC).unwrap(),
-            DataValue::Numeric(decimal)
+            PsqlValue::Numeric(decimal)
         );
     }
 
@@ -1117,7 +1119,7 @@ mod tests {
         buf.extend_from_slice(b"mighty"); // value
         assert_eq!(
             get_binary_value(&mut buf.freeze(), &Type::TEXT).unwrap(),
-            DataValue::Text("mighty".into())
+            PsqlValue::Text("mighty".into())
         );
     }
 
@@ -1129,7 +1131,7 @@ mod tests {
         dt.to_sql(&Type::TIMESTAMP, &mut buf).unwrap(); // value
         assert_eq!(
             get_binary_value(&mut buf.freeze(), &Type::TIMESTAMP).unwrap(),
-            DataValue::Timestamp(dt)
+            PsqlValue::Timestamp(dt)
         );
     }
 
@@ -1147,7 +1149,7 @@ mod tests {
         window.put_i32(value_len as i32); // put the actual length
         assert_eq!(
             get_binary_value(&mut buf.freeze(), &Type::BYTEA).unwrap(),
-            DataValue::ByteArray(bytes)
+            PsqlValue::ByteArray(bytes)
         );
     }
 
@@ -1159,7 +1161,7 @@ mod tests {
         macaddr.to_sql(&Type::MACADDR, &mut buf).unwrap(); // add value
         assert_eq!(
             get_binary_value(&mut buf.freeze(), &Type::MACADDR).unwrap(),
-            DataValue::MacAddress(macaddr)
+            PsqlValue::MacAddress(macaddr)
         );
     }
 
@@ -1173,7 +1175,7 @@ mod tests {
         uuid.to_sql(&Type::UUID, &mut buf).unwrap(); // add value
         assert_eq!(
             get_binary_value(&mut buf.freeze(), &Type::UUID).unwrap(),
-            DataValue::Uuid(uuid)
+            PsqlValue::Uuid(uuid)
         );
     }
 
@@ -1194,7 +1196,7 @@ mod tests {
         window.put_i32(value_len as i32); // put the actual length
         assert_eq!(
             get_binary_value(&mut buf.freeze(), &Type::JSON).unwrap(),
-            DataValue::Json(json.clone())
+            PsqlValue::Json(json.clone())
         );
 
         let mut buf = BytesMut::new();
@@ -1208,7 +1210,7 @@ mod tests {
         window.put_i32(value_len as i32); // put the actual length
         assert_eq!(
             get_binary_value(&mut buf.freeze(), &Type::JSONB).unwrap(),
-            DataValue::Jsonb(json)
+            PsqlValue::Jsonb(json)
         );
     }
 
@@ -1223,7 +1225,7 @@ mod tests {
         bits.to_sql(&Type::BIT, &mut buf).unwrap(); // add value
         assert_eq!(
             get_binary_value(&mut buf.freeze(), &Type::BIT).unwrap(),
-            DataValue::Bit(bits.clone())
+            PsqlValue::Bit(bits.clone())
         );
 
         let mut buf = BytesMut::new();
@@ -1231,7 +1233,7 @@ mod tests {
         bits.to_sql(&Type::VARBIT, &mut buf).unwrap(); // add value
         assert_eq!(
             get_binary_value(&mut buf.freeze(), &Type::VARBIT).unwrap(),
-            DataValue::VarBit(bits)
+            PsqlValue::VarBit(bits)
         );
     }
 
@@ -1255,7 +1257,7 @@ mod tests {
         window.put_i32(value_len as i32); // put the actual length
         assert_eq!(
             get_binary_value(&mut buf.freeze(), &Type::TIMESTAMPTZ).unwrap(),
-            DataValue::TimestampTz(dt)
+            PsqlValue::TimestampTz(dt)
         );
     }
 
@@ -1265,7 +1267,7 @@ mod tests {
         buf.put_i32(-1); // size
         assert_eq!(
             get_text_value(&mut buf.freeze(), &Type::INT4).unwrap(),
-            DataValue::Null
+            PsqlValue::Null
         );
     }
 
@@ -1276,7 +1278,7 @@ mod tests {
         buf.extend_from_slice(b"t"); // value
         assert_eq!(
             get_text_value(&mut buf.freeze(), &Type::BOOL).unwrap(),
-            DataValue::Bool(true)
+            PsqlValue::Bool(true)
         );
     }
 
@@ -1287,7 +1289,7 @@ mod tests {
         buf.extend_from_slice(b"8"); // value
         assert_eq!(
             get_text_value(&mut buf.freeze(), &Type::CHAR).unwrap(),
-            DataValue::Char(8)
+            PsqlValue::Char(8)
         );
     }
 
@@ -1298,7 +1300,7 @@ mod tests {
         buf.extend_from_slice(b"mighty"); // value
         assert_eq!(
             get_text_value(&mut buf.freeze(), &Type::VARCHAR).unwrap(),
-            DataValue::VarChar("mighty".into())
+            PsqlValue::VarChar("mighty".into())
         );
     }
 
@@ -1309,7 +1311,7 @@ mod tests {
         buf.extend_from_slice(b"mighty"); // value
         assert_eq!(
             get_text_value(&mut buf.freeze(), &Type::BPCHAR).unwrap(),
-            DataValue::BpChar("mighty".into())
+            PsqlValue::BpChar("mighty".into())
         );
     }
 
@@ -1320,7 +1322,7 @@ mod tests {
         buf.extend_from_slice(b"305419896"); // value
         assert_eq!(
             get_text_value(&mut buf.freeze(), &Type::INT4).unwrap(),
-            DataValue::Int(0x12345678)
+            PsqlValue::Int(0x12345678)
         );
     }
 
@@ -1331,7 +1333,7 @@ mod tests {
         buf.extend_from_slice(b"1311768467294899695"); // value
         assert_eq!(
             get_text_value(&mut buf.freeze(), &Type::INT8).unwrap(),
-            DataValue::BigInt(0x1234567890abcdef)
+            PsqlValue::BigInt(0x1234567890abcdef)
         );
     }
 
@@ -1342,7 +1344,7 @@ mod tests {
         buf.extend_from_slice(b"4660"); // value
         assert_eq!(
             get_text_value(&mut buf.freeze(), &Type::INT2).unwrap(),
-            DataValue::SmallInt(0x1234)
+            PsqlValue::SmallInt(0x1234)
         );
     }
 
@@ -1353,7 +1355,7 @@ mod tests {
         buf.extend_from_slice(b"0.1234567890123456"); // value
         assert_eq!(
             get_text_value(&mut buf.freeze(), &Type::FLOAT8).unwrap(),
-            DataValue::Double(0.1234567890123456)
+            PsqlValue::Double(0.1234567890123456)
         );
     }
 
@@ -1364,7 +1366,7 @@ mod tests {
         buf.extend_from_slice(b"0.12345678"); // value
         assert_eq!(
             get_text_value(&mut buf.freeze(), &Type::FLOAT4).unwrap(),
-            DataValue::Float(0.12345678)
+            PsqlValue::Float(0.12345678)
         );
     }
 
@@ -1375,7 +1377,7 @@ mod tests {
         buf.extend_from_slice(b"0.1234567890123456"); // value
         assert_eq!(
             get_text_value(&mut buf.freeze(), &Type::NUMERIC).unwrap(),
-            DataValue::Numeric(Decimal::new(1234567890123456, 16))
+            PsqlValue::Numeric(Decimal::new(1234567890123456, 16))
         );
     }
 
@@ -1386,7 +1388,7 @@ mod tests {
         buf.extend_from_slice(b"mighty"); // value
         assert_eq!(
             get_text_value(&mut buf.freeze(), &Type::TEXT).unwrap(),
-            DataValue::Text("mighty".into())
+            PsqlValue::Text("mighty".into())
         );
     }
 
@@ -1397,7 +1399,7 @@ mod tests {
         buf.extend_from_slice(b"2020-01-02 03:04:05.66"); // value
         assert_eq!(
             get_text_value(&mut buf.freeze(), &Type::TIMESTAMP).unwrap(),
-            DataValue::Timestamp(
+            PsqlValue::Timestamp(
                 NaiveDateTime::parse_from_str("2020-01-02 03:04:05.66", TIMESTAMP_FORMAT).unwrap()
             )
         );
@@ -1410,7 +1412,7 @@ mod tests {
         buf.extend_from_slice(b"0008275c6480");
         assert_eq!(
             get_text_value(&mut buf.freeze(), &Type::BYTEA).unwrap(),
-            DataValue::ByteArray(vec![0, 8, 39, 92, 100, 128])
+            PsqlValue::ByteArray(vec![0, 8, 39, 92, 100, 128])
         );
     }
 
@@ -1421,7 +1423,7 @@ mod tests {
         buf.extend_from_slice(b"12:34:56:AB:CD:EF");
         assert_eq!(
             get_text_value(&mut buf.freeze(), &Type::MACADDR).unwrap(),
-            DataValue::MacAddress(MacAddress::new([18, 52, 86, 171, 205, 239]))
+            PsqlValue::MacAddress(MacAddress::new([18, 52, 86, 171, 205, 239]))
         );
     }
 
@@ -1432,7 +1434,7 @@ mod tests {
         buf.extend_from_slice(b"550e8400-e29b-41d4-a716-446655440000");
         assert_eq!(
             get_text_value(&mut buf.freeze(), &Type::UUID).unwrap(),
-            DataValue::Uuid(Uuid::from_bytes([
+            PsqlValue::Uuid(Uuid::from_bytes([
                 85, 14, 132, 0, 226, 155, 65, 212, 167, 22, 68, 102, 85, 68, 0, 0
             ]))
         );
@@ -1448,7 +1450,7 @@ mod tests {
         buf.extend_from_slice(json_str.as_bytes());
         assert_eq!(
             get_text_value(&mut buf.freeze(), &Type::JSON).unwrap(),
-            DataValue::Json(expected.clone())
+            PsqlValue::Json(expected.clone())
         );
 
         let mut buf = BytesMut::new();
@@ -1456,7 +1458,7 @@ mod tests {
         buf.extend_from_slice(json_str.as_bytes());
         assert_eq!(
             get_text_value(&mut buf.freeze(), &Type::JSONB).unwrap(),
-            DataValue::Jsonb(expected)
+            PsqlValue::Jsonb(expected)
         );
     }
 
@@ -1467,12 +1469,12 @@ mod tests {
         buf.extend_from_slice(b"000000000000100000100111010111000110010010000000");
         assert_eq!(
             get_text_value(&mut buf.clone().freeze(), &Type::BIT).unwrap(),
-            DataValue::Bit(BitVec::from_bytes(&[0, 8, 39, 92, 100, 128]))
+            PsqlValue::Bit(BitVec::from_bytes(&[0, 8, 39, 92, 100, 128]))
         );
 
         assert_eq!(
             get_text_value(&mut buf.freeze(), &Type::VARBIT).unwrap(),
-            DataValue::VarBit(BitVec::from_bytes(&[0, 8, 39, 92, 100, 128]))
+            PsqlValue::VarBit(BitVec::from_bytes(&[0, 8, 39, 92, 100, 128]))
         );
     }
 
@@ -1491,7 +1493,7 @@ mod tests {
         buf.extend_from_slice(dt_string.as_bytes());
         assert_eq!(
             get_text_value(&mut buf.freeze(), &Type::TIMESTAMPTZ).unwrap(),
-            DataValue::TimestampTz(expected)
+            PsqlValue::TimestampTz(expected)
         );
     }
 

@@ -15,7 +15,7 @@ use tokio_postgres::Config;
 struct TestBackend;
 struct TestValue;
 
-impl TryFrom<TestValue> for psql_srv::Value {
+impl TryFrom<TestValue> for psql_srv::PsqlValue {
     type Error = Error;
 
     fn try_from(_: TestValue) -> Result<Self, Self::Error> {
@@ -59,7 +59,7 @@ impl PsqlBackend for TestBackend {
     async fn on_execute(
         &mut self,
         _statement_id: u32,
-        _params: &[psql_srv::Value],
+        _params: &[psql_srv::PsqlValue],
     ) -> Result<psql_srv::QueryResponse<Self::Resultset>, psql_srv::Error> {
         panic!() // never called
     }

@@ -14,7 +14,7 @@ use crate::message::CommandCompleteTag::*;
 use crate::message::ErrorSeverity;
 use crate::message::TransferFormat::{self, *};
 use crate::scram::{SCRAM_SHA_256_AUTHENTICATION_METHOD, SCRAM_SHA_256_SSL_AUTHENTICATION_METHOD};
-use crate::value::Value;
+use crate::value::PsqlValue;
 
 const ID_AUTHENTICATION_REQUEST: u8 = b'R';
 const ID_BIND_COMPLETE: u8 = b'2';
@@ -81,7 +81,7 @@ const DATE_FORMAT: &str = "%Y-%m-%d";
 
 impl<R> Encoder<BackendMessage<R>> for Codec<R>
 where
-    R: IntoIterator<Item: TryInto<Value, Error = BackendError>>,
+    R: IntoIterator<Item: TryInto<PsqlValue, Error = BackendError>>,
 {
     type Error = Error;
 
@@ -97,7 +97,7 @@ where
 
 fn encode<R>(message: BackendMessage<R>, dst: &mut BytesMut) -> Result<(), Error>
 where
-    R: IntoIterator<Item: TryInto<Value, Error = BackendError>>,
+    R: IntoIterator<Item: TryInto<PsqlValue, Error = BackendError>>,
 {
     use std::io::Write;
 
@@ -463,8 +463,8 @@ fn put_type(val: Type, dst: &mut BytesMut) -> Result<(), Error> {
     Ok(())
 }
 
-fn put_binary_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
-    if val == Value::Null {
+fn put_binary_value(val: PsqlValue, dst: &mut BytesMut) -> Result<(), Error> {
+    if val == PsqlValue::Null {
         put_i32(LENGTH_NULL_SENTINEL, dst);
         return Ok(());
     }
@@ -473,88 +473,88 @@ fn put_binary_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
     put_i32(LENGTH_PLACEHOLDER, dst);
     match val {
         #[allow(clippy::unreachable)]
-        Value::Null => {
+        PsqlValue::Null => {
             unreachable!("Null is handled as a special case above.");
         }
-        Value::Bool(v) => {
+        PsqlValue::Bool(v) => {
             v.to_sql(&Type::BOOL, dst)?;
         }
-        Value::VarChar(v) => {
+        PsqlValue::VarChar(v) => {
             v.as_bytes().to_sql(&Type::VARCHAR, dst)?;
         }
-        Value::Name(v) => {
+        PsqlValue::Name(v) => {
             v.as_bytes().to_sql(&Type::NAME, dst)?;
         }
-        Value::BpChar(v) => {
+        PsqlValue::BpChar(v) => {
             v.as_bytes().to_sql(&Type::BPCHAR, dst)?;
         }
-        Value::Char(v) => {
+        PsqlValue::Char(v) => {
             v.to_sql(&Type::CHAR, dst)?;
         }
-        Value::Int(v) => {
+        PsqlValue::Int(v) => {
             v.to_sql(&Type::INT4, dst)?;
         }
-        Value::BigInt(v) => {
+        PsqlValue::BigInt(v) => {
             v.to_sql(&Type::INT8, dst)?;
         }
-        Value::SmallInt(v) => {
+        PsqlValue::SmallInt(v) => {
             v.to_sql(&Type::INT2, dst)?;
         }
-        Value::Oid(v) => {
+        PsqlValue::Oid(v) => {
             v.to_sql(&Type::OID, dst)?;
         }
-        Value::Double(v) => {
+        PsqlValue::Double(v) => {
             v.to_sql(&Type::FLOAT8, dst)?;
         }
-        Value::Float(v) => {
+        PsqlValue::Float(v) => {
             v.to_sql(&Type::FLOAT4, dst)?;
         }
-        Value::Numeric(v) => {
+        PsqlValue::Numeric(v) => {
             v.to_sql(&Type::NUMERIC, dst)?;
         }
-        Value::Text(v) => {
+        PsqlValue::Text(v) => {
             v.as_bytes().to_sql(&Type::TEXT, dst)?;
         }
-        Value::Timestamp(v) => {
+        PsqlValue::Timestamp(v) => {
             v.to_sql(&Type::TIMESTAMP, dst)?;
         }
-        Value::TimestampTz(v) => {
+        PsqlValue::TimestampTz(v) => {
             v.to_sql(&Type::TIMESTAMPTZ, dst)?;
         }
-        Value::Date(v) => {
+        PsqlValue::Date(v) => {
             v.to_sql(&Type::DATE, dst)?;
         }
-        Value::Time(v) => {
+        PsqlValue::Time(v) => {
             v.to_sql(&Type::TIME, dst)?;
         }
-        Value::ByteArray(b) => {
+        PsqlValue::ByteArray(b) => {
             b.to_sql(&Type::BYTEA, dst)?;
         }
-        Value::MacAddress(m) => {
+        PsqlValue::MacAddress(m) => {
             m.to_sql(&Type::MACADDR, dst)?;
         }
-        Value::Inet(ip) => {
+        PsqlValue::Inet(ip) => {
             ip.to_sql(&Type::INET, dst)?;
         }
-        Value::Uuid(u) => {
+        PsqlValue::Uuid(u) => {
             u.to_sql(&Type::UUID, dst)?;
         }
-        Value::Json(v) => {
+        PsqlValue::Json(v) => {
             v.to_sql(&Type::JSON, dst)?;
         }
-        Value::Jsonb(v) => {
+        PsqlValue::Jsonb(v) => {
             v.to_sql(&Type::JSONB, dst)?;
         }
-        Value::Bit(bits) => {
+        PsqlValue::Bit(bits) => {
             bits.to_sql(&Type::BIT, dst)?;
         }
-        Value::VarBit(bits) => {
+        PsqlValue::VarBit(bits) => {
             bits.to_sql(&Type::VARBIT, dst)?;
         }
-        Value::Array(arr, ty) => {
+        PsqlValue::Array(arr, ty) => {
             arr.to_sql(&ty, dst)?;
         }
-        Value::PassThrough(p) => {
+        PsqlValue::PassThrough(p) => {
             dst.put(&p.data[..]);
         }
     };
@@ -565,12 +565,13 @@ fn put_binary_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
     Ok(())
 }
 
-fn put_text_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
+fn put_text_value(val: PsqlValue, dst: &mut BytesMut) -> Result<(), Error> {
     use std::fmt::Write;
 
     // A void type (OID 2278) indicates that the called function returns no value. This is handled
     // as a special case since we don't support PassThrough values in the Text protocol
-    if val == Value::Null || matches!(val, Value::PassThrough(ref p) if p.ty.oid() == 2278) {
+    if val == PsqlValue::Null || matches!(val, PsqlValue::PassThrough(ref p) if p.ty.oid() == 2278)
+    {
         put_i32(LENGTH_NULL_SENTINEL, dst);
         return Ok(());
     }
@@ -579,10 +580,10 @@ fn put_text_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
     put_i32(LENGTH_PLACEHOLDER, dst);
     match val {
         #[allow(clippy::unreachable)]
-        Value::Null => {
+        PsqlValue::Null => {
             unreachable!("Null is handled as a special case above.");
         }
-        Value::Bool(v) => {
+        PsqlValue::Bool(v) => {
             let text = if v {
                 BOOL_TRUE_TEXT_REP
             } else {
@@ -590,52 +591,52 @@ fn put_text_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
             };
             write!(dst, "{}", text)?;
         }
-        Value::BpChar(v) | Value::VarChar(v) | Value::Name(v) | Value::Text(v) => {
+        PsqlValue::BpChar(v) | PsqlValue::VarChar(v) | PsqlValue::Name(v) | PsqlValue::Text(v) => {
             dst.extend_from_slice(v.as_bytes());
         }
-        Value::Char(v) => {
+        PsqlValue::Char(v) => {
             dst.put_i8(v);
         }
-        Value::Int(v) => {
+        PsqlValue::Int(v) => {
             write!(dst, "{}", v)?;
         }
-        Value::BigInt(v) => {
+        PsqlValue::BigInt(v) => {
             write!(dst, "{}", v)?;
         }
-        Value::SmallInt(v) => {
+        PsqlValue::SmallInt(v) => {
             write!(dst, "{}", v)?;
         }
-        Value::Oid(v) => {
+        PsqlValue::Oid(v) => {
             write!(dst, "{}", v)?;
         }
-        Value::Double(v) => {
+        PsqlValue::Double(v) => {
             // TODO: Ensure all values are properly serialized, including +/-0 and +/-inf.
             write!(dst, "{}", v)?;
         }
-        Value::Float(v) => {
+        PsqlValue::Float(v) => {
             // TODO: Ensure all values are properly serialized, including +/-0 and +/-inf.
             write!(dst, "{}", v)?;
         }
-        Value::Numeric(v) => {
+        PsqlValue::Numeric(v) => {
             write!(dst, "{}", v)?;
         }
-        Value::Timestamp(v) => {
+        PsqlValue::Timestamp(v) => {
             // TODO: Does not correctly handle all valid timestamp representations. For example,
             // 8601/SQL timestamp format is assumed; infinity/-infinity are not supported.
             write!(dst, "{}", v.format(TIMESTAMP_FORMAT))?;
         }
-        Value::TimestampTz(v) => {
+        PsqlValue::TimestampTz(v) => {
             // TODO: Does not correctly handle all valid timestamp representations. For example,
             // 8601/SQL timestamp format is assumed; infinity/-infinity are not supported.
             write!(dst, "{}", v.format(TIMESTAMP_TZ_FORMAT))?;
         }
-        Value::Date(v) => {
+        PsqlValue::Date(v) => {
             write!(dst, "{}", v.format(DATE_FORMAT))?;
         }
-        Value::Time(v) => {
+        PsqlValue::Time(v) => {
             write!(dst, "{}", v.format(TIME_FORMAT))?;
         }
-        Value::ByteArray(b) => {
+        PsqlValue::ByteArray(b) => {
             write!(
                 dst,
                 "{}",
@@ -645,12 +646,12 @@ fn put_text_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
                     .join("")
             )?;
         }
-        Value::MacAddress(m) => write!(dst, "{}", m.to_string(MacAddressFormat::HexString))?,
-        Value::Inet(ip) => write!(dst, "{}", ip)?,
-        Value::Uuid(u) => write!(dst, "{}", u)?,
-        Value::Json(v) => write!(dst, "{}", v)?,
-        Value::Jsonb(v) => write!(dst, "{}", v)?,
-        Value::Bit(bits) | Value::VarBit(bits) => write!(
+        PsqlValue::MacAddress(m) => write!(dst, "{}", m.to_string(MacAddressFormat::HexString))?,
+        PsqlValue::Inet(ip) => write!(dst, "{}", ip)?,
+        PsqlValue::Uuid(u) => write!(dst, "{}", u)?,
+        PsqlValue::Json(v) => write!(dst, "{}", v)?,
+        PsqlValue::Jsonb(v) => write!(dst, "{}", v)?,
+        PsqlValue::Bit(bits) | PsqlValue::VarBit(bits) => write!(
             dst,
             "{}",
             bits.iter()
@@ -658,8 +659,8 @@ fn put_text_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
                 .collect::<Vec<String>>()
                 .join("")
         )?,
-        Value::Array(arr, _) => write!(dst, "{}", arr)?,
-        Value::PassThrough(p) => {
+        PsqlValue::Array(arr, _) => write!(dst, "{}", arr)?,
+        PsqlValue::PassThrough(p) => {
             return Err(Error::InternalError(format!(
                 "Data of type {} unsupported in text mode",
                 p.ty
@@ -689,7 +690,7 @@ mod tests {
 
     use super::*;
     use crate::message::{FieldDescription, SqlState};
-    use crate::value::Value as DataValue;
+    use crate::value::PsqlValue as DataValue;
 
     struct Value(DataValue);
 

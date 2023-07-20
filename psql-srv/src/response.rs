@@ -7,7 +7,7 @@ use smallvec::SmallVec;
 use crate::codec::EncodeError;
 use crate::error::Error;
 use crate::message::{BackendMessage, CommandCompleteTag, TransferFormat};
-use crate::value::Value;
+use crate::value::PsqlValue;
 
 /// An encapsulation of a complete response produced by a Postgresql backend in response to a
 /// request. The response will be sent to the frontend as a sequence of zero or more
@@ -32,7 +32,7 @@ pub enum Response<R, S> {
 
 impl<R, S> Response<R, S>
 where
-    R: IntoIterator<Item: TryInto<Value, Error = Error>>,
+    R: IntoIterator<Item: TryInto<PsqlValue, Error = Error>>,
     S: Stream<Item = Result<R, Error>> + Unpin,
 {
     pub async fn write<K>(self, sink: &mut K) -> Result<(), EncodeError>
@@ -109,12 +109,12 @@ mod tests {
     use tokio_test::block_on;
 
     use super::*;
-    use crate::value::Value as DataValue;
+    use crate::value::PsqlValue;
 
     #[derive(Clone, Debug, PartialEq)]
-    struct Value(DataValue);
+    struct Value(PsqlValue);
 
-    impl TryFrom<Value> for DataValue {
+    impl TryFrom<Value> for PsqlValue {
         type Error = Error;
 
         fn try_from(v: Value) -> Result<Self, Self::Error> {
@@ -211,12 +211,12 @@ mod tests {
             }),
             resultset: stream::iter(vec![
                 Ok(vec![
-                    Value(DataValue::Int(5)),
-                    Value(DataValue::Double(0.123)),
+                    Value(PsqlValue::Int(5)),
+                    Value(PsqlValue::Double(0.123)),
                 ]),
                 Ok(vec![
-                    Value(DataValue::Int(99)),
-                    Value(DataValue::Double(0.456)),
+                    Value(PsqlValue::Int(99)),
+                    Value(PsqlValue::Double(0.456)),
                 ]),
             ]),
             result_transfer_formats: Some(Arc::new(vec![
@@ -237,7 +237,7 @@ mod tests {
                     1 => assert_eq!(
                         m,
                         BackendMessage::DataRow {
-                            values: vec![Value(DataValue::Int(5)), Value(DataValue::Double(0.123))],
+                            values: vec![Value(PsqlValue::Int(5)), Value(PsqlValue::Double(0.123))],
                             explicit_transfer_formats: Some(Arc::new(vec![
                                 TransferFormat::Text,
                                 TransferFormat::Binary
@@ -248,8 +248,8 @@ mod tests {
                         m,
                         BackendMessage::DataRow {
                             values: vec![
-                                Value(DataValue::Int(99)),
-                                Value(DataValue::Double(0.456))
+                                Value(PsqlValue::Int(99)),
+                                Value(PsqlValue::Double(0.456))
                             ],
                             explicit_transfer_formats: Some(Arc::new(vec![
                                 TransferFormat::Text,

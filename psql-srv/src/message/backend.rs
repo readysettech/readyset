@@ -10,7 +10,7 @@ use tokio_postgres::OwnedField;
 
 use crate::error::Error;
 use crate::message::TransferFormat;
-use crate::value::Value;
+use crate::value::PsqlValue;
 
 const READY_FOR_QUERY_IDLE: u8 = b'I';
 const SSL_RESPONSE_UNWILLING: u8 = b'N';
@@ -25,8 +25,8 @@ const SSL_RESPONSE_WILLING: u8 = b'S';
 /// # Type Parameters
 ///
 /// * `R` - Represents a row of data values. `BackendMessage` implementations are provided wherein a
-///   value of type `R` will, upon iteration, emit values that are convertible into type `Value`,
-///   which can be serialized along with the rest of the `BackendMessage`.
+///   value of type `R` will, upon iteration, emit values that are convertible into type
+///   `PsqlValue`, which can be serialized along with the rest of the `BackendMessage`.
 #[derive(Debug, PartialEq, Eq)]
 #[allow(clippy::large_enum_variant)] // TODO: benchmark if this matters
 pub enum BackendMessage<R> {
@@ -89,7 +89,7 @@ pub enum BackendMessage<R> {
     },
 }
 
-impl<R: IntoIterator<Item: TryInto<Value, Error = Error>>> BackendMessage<R> {
+impl<R: IntoIterator<Item: TryInto<PsqlValue, Error = Error>>> BackendMessage<R> {
     pub fn ready_for_query_idle() -> BackendMessage<R> {
         BackendMessage::ReadyForQuery {
             status: READY_FOR_QUERY_IDLE,

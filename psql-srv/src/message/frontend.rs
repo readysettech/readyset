@@ -5,7 +5,7 @@ use postgres_types::Type;
 
 use crate::bytes::BytesStr;
 use crate::message::TransferFormat;
-use crate::value::Value;
+use crate::value::PsqlValue;
 
 /// A message received from a Postgresql frontend (client). The different types of frontend
 /// messages, and the fields they contain, are described in the
@@ -30,7 +30,7 @@ pub enum FrontendMessage {
     Bind {
         portal_name: BytesStr,
         prepared_statement_name: BytesStr,
-        params: Vec<Value>,
+        params: Vec<PsqlValue>,
         result_transfer_formats: Vec<TransferFormat>,
     },
     Close {

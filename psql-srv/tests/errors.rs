@@ -7,16 +7,16 @@ use postgres::NoTls;
 use postgres_types::Type;
 use psql_srv::{
     run_backend, Column, Credentials, CredentialsNeeded, Error, PrepareResponse, PsqlBackend,
-    QueryResponse,
+    PsqlValue, QueryResponse,
 };
 use tokio::join;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio_postgres::Client;
 
-struct Value(Result<psql_srv::Value, Error>);
+struct Value(Result<PsqlValue, Error>);
 
-impl TryFrom<Value> for psql_srv::Value {
+impl TryFrom<Value> for PsqlValue {
     type Error = Error;
 
     fn try_from(v: Value) -> Result<Self, Self::Error> {
@@ -82,7 +82,7 @@ impl PsqlBackend for ErrorBackend {
     async fn on_execute(
         &mut self,
         _statement_id: u32,
-        _params: &[psql_srv::Value],
+        _params: &[PsqlValue],
     ) -> Result<QueryResponse<Self::Resultset>, Error> {
         match self.0 {
             ErrorPosition::Execute => Err(Error::InternalError("a database".to_owned())),

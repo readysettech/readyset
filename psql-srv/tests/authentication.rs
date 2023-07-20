@@ -8,15 +8,16 @@ use postgres::error::SqlState;
 use postgres::NoTls;
 use postgres_types::Type;
 use psql_srv::{
-    run_backend, Credentials, CredentialsNeeded, Error, PrepareResponse, PsqlBackend, QueryResponse,
+    run_backend, Credentials, CredentialsNeeded, Error, PrepareResponse, PsqlBackend, PsqlValue,
+    QueryResponse,
 };
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio_native_tls::{native_tls, TlsAcceptor};
 
-struct Value(Result<psql_srv::Value, Error>);
+struct Value(Result<PsqlValue, Error>);
 
-impl TryFrom<Value> for psql_srv::Value {
+impl TryFrom<Value> for PsqlValue {
     type Error = Error;
 
     fn try_from(v: Value) -> Result<Self, Self::Error> {
@@ -67,7 +68,7 @@ impl PsqlBackend for ScramSha256Backend {
     async fn on_execute(
         &mut self,
         _statement_id: u32,
-        _params: &[psql_srv::Value],
+        _params: &[PsqlValue],
     ) -> Result<QueryResponse<Self::Resultset>, Error> {
         unreachable!()
     }

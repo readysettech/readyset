@@ -39,7 +39,7 @@ use tokio_native_tls::TlsAcceptor;
 
 pub use crate::bytes::BytesStr;
 pub use crate::error::Error;
-pub use crate::value::Value;
+pub use crate::value::PsqlValue;
 
 pub enum CredentialsNeeded {
     None,
@@ -59,8 +59,8 @@ pub enum Credentials<'a> {
 /// trait is the primary interface for the `psql-srv` crate.
 #[async_trait]
 pub trait PsqlBackend {
-    /// An associated type that can be converted into this crate's `Value` type.
-    type Value: TryInto<Value, Error = Error>;
+    /// An associated type that can be converted into this crate's `PsqlValue` type.
+    type Value: TryInto<PsqlValue, Error = Error>;
 
     /// An associated type representing a row returned by a SQL query, which can be iterated to
     /// produce `Self::Value`s.
@@ -115,7 +115,7 @@ pub trait PsqlBackend {
     async fn on_execute(
         &mut self,
         statement_id: u32,
-        params: &[Value],
+        params: &[PsqlValue],
     ) -> Result<QueryResponse<Self::Resultset>, Error>;
 
     /// Closes (deallocates) a prepared statement.

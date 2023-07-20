@@ -204,7 +204,7 @@ impl PsqlBackend for Backend {
     async fn on_execute(
         &mut self,
         statement_id: u32,
-        params: &[psql_srv::Value],
+        params: &[psql_srv::PsqlValue],
     ) -> Result<QueryResponse<Self::Resultset>, psql_srv::Error> {
         let stmt = self
             .statements

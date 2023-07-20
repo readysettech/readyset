@@ -10,7 +10,7 @@ pub use error::{DecodeError, EncodeError};
 use postgres_types::Type;
 
 use crate::error::Error;
-use crate::value::Value;
+use crate::value::PsqlValue;
 
 /// A [`Decoder`] implementation that deserializes `FrontendMessage` and [`Encoder`] implementation
 /// that serializes `BackendMessage`.
@@ -23,7 +23,7 @@ pub struct Codec<R> {
     _unused: PhantomData<R>,
 }
 
-impl<R: IntoIterator<Item: TryInto<Value, Error = Error>>> Codec<R> {
+impl<R: IntoIterator<Item: TryInto<PsqlValue, Error = Error>>> Codec<R> {
     pub fn new() -> Codec<R> {
         Codec {
             is_starting_up: true,

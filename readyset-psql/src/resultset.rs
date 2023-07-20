@@ -127,6 +127,7 @@ mod tests {
     use std::convert::TryFrom;
 
     use futures::{StreamExt, TryStreamExt};
+    use psql_srv::PsqlValue;
     use readyset_adapter::backend as cl;
     use readyset_client::results::Results;
     use readyset_client::ColumnSchema;
@@ -134,13 +135,13 @@ mod tests {
 
     use super::*;
 
-    async fn collect_resultset_values(resultset: Resultset) -> Vec<Vec<ps::Value>> {
+    async fn collect_resultset_values(resultset: Resultset) -> Vec<Vec<PsqlValue>> {
         resultset
             .map(|r| {
                 r.map(|r| {
                     r.into_iter()
-                        .map(|v| ps::Value::try_from(v).unwrap())
-                        .collect::<Vec<ps::Value>>()
+                        .map(|v| PsqlValue::try_from(v).unwrap())
+                        .collect::<Vec<PsqlValue>>()
                 })
             })
             .try_collect()
@@ -164,7 +165,7 @@ mod tests {
         assert_eq!(resultset.project_field_types, Arc::new(vec![Type::INT8]));
         assert_eq!(
             collect_resultset_values(resultset).await,
-            Vec::<Vec<ps::Value>>::new()
+            Vec::<Vec<PsqlValue>>::new()
         );
     }
 
@@ -183,7 +184,7 @@ mod tests {
         let resultset = Resultset::from_readyset(ResultIterator::owned(results), &schema).unwrap();
         assert_eq!(
             collect_resultset_values(resultset).await,
-            vec![vec![ps::Value::BigInt(10)]]
+            vec![vec![PsqlValue::BigInt(10)]]
         );
     }
 
@@ -207,9 +208,9 @@ mod tests {
         assert_eq!(
             collect_resultset_values(resultset).await,
             vec![
-                vec![ps::Value::BigInt(10)],
-                vec![ps::Value::BigInt(11)],
-                vec![ps::Value::BigInt(12)]
+                vec![PsqlValue::BigInt(10)],
+                vec![PsqlValue::BigInt(11)],
+                vec![PsqlValue::BigInt(12)]
             ]
         );
     }
