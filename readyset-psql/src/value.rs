@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 /// An encapsulation of a ReadySet `DfValue` value that facilitates conversion of this `DfValue`
 /// into a `psql_srv::Value`.
-pub struct Value {
+pub struct TypedDfValue {
     /// A type attribute used to determine which variant of `psql_srv::Value` the `value` attribute
     /// should be converted to.
     pub col_type: Type,
@@ -22,10 +22,10 @@ pub struct Value {
     pub value: DfValue,
 }
 
-impl TryFrom<Value> for ps::Value {
+impl TryFrom<TypedDfValue> for ps::Value {
     type Error = ps::Error;
 
-    fn try_from(v: Value) -> Result<Self, Self::Error> {
+    fn try_from(v: TypedDfValue) -> Result<Self, Self::Error> {
         let convert_enum_value = |vs: &[String], val| {
             let idx = u64::try_from(val).map_err(|e| {
                 ps::Error::InternalError(format!("Invalid representation for enum value: {e}"))
@@ -165,7 +165,7 @@ mod tests {
 
     #[test]
     fn i8_char() {
-        let val = Value {
+        let val = TypedDfValue {
             col_type: Type::CHAR,
             value: DfValue::Int(8i8 as _),
         };
@@ -174,7 +174,7 @@ mod tests {
 
     #[test]
     fn tiny_text_varchar() {
-        let val = Value {
+        let val = TypedDfValue {
             col_type: Type::VARCHAR,
             value: DfValue::TinyText(TinyText::from_arr(b"aaaaaaaaaaaaaa")),
         };
@@ -186,7 +186,7 @@ mod tests {
 
     #[test]
     fn tiny_text_text() {
-        let val = Value {
+        let val = TypedDfValue {
             col_type: Type::TEXT,
             value: DfValue::TinyText(TinyText::from_arr(b"aaaaaaaaaaaaaa")),
         };

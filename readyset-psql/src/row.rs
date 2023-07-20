@@ -3,7 +3,7 @@ use std::sync::Arc;
 use readyset_data::DfValue;
 use tokio_postgres::types::Type;
 
-use crate::value::Value;
+use crate::value::TypedDfValue;
 
 /// A structure containing a `Vec<DfValue>`, representing one row of data, which facilitates
 /// iteration over the values within this row as `Value` structures.
@@ -18,7 +18,7 @@ pub struct Row {
 }
 
 impl IntoIterator for Row {
-    type Item = Value;
+    type Item = TypedDfValue;
     type IntoIter = RowIterator;
 
     fn into_iter(self) -> Self::IntoIter {
@@ -37,13 +37,13 @@ pub struct RowIterator {
 }
 
 impl Iterator for RowIterator {
-    type Item = Value;
+    type Item = TypedDfValue;
 
-    fn next(&mut self) -> Option<Value> {
+    fn next(&mut self) -> Option<TypedDfValue> {
         let col_type = self.row.project_field_types.get(self.pos)?.clone();
         let value = self.row.values.get(self.pos)?.clone();
         self.pos += 1;
-        Some(Value { col_type, value })
+        Some(TypedDfValue { col_type, value })
     }
 }
 

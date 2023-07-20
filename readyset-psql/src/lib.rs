@@ -13,4 +13,4 @@ pub use crate::backend::{AuthenticationMethod, Backend, ParamRef};
 pub use crate::error::Error;
 pub use crate::query_handler::PostgreSqlQueryHandler;
 pub use crate::upstream::PostgreSqlUpstream;
-pub use crate::value::Value;
+pub use crate::value::TypedDfValue;
