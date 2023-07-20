@@ -274,25 +274,12 @@ impl<'df> MigrationPlan<'df> {
 }
 
 impl DomainMigrationPlan {
-    /// Make a new `DomainMigrationPlan`, noting which domains are valid based off the provided
-    /// controller.
-    pub fn new(mainline: &DfState) -> Self {
+    /// Make a new `DomainMigrationPlan` with the given domains
+    pub fn new(domains: HashMap<DomainIndex, DomainSettings>) -> Self {
         Self {
             stored: VecDeque::new(),
             place: vec![],
-            domains: mainline
-                .domains
-                .iter()
-                .map(|(idx, hdl)| {
-                    (
-                        *idx,
-                        DomainSettings {
-                            num_shards: hdl.num_shards(),
-                            num_replicas: hdl.num_replicas(),
-                        },
-                    )
-                })
-                .collect(),
+            domains,
             failed_placement: vec![],
         }
     }
@@ -862,7 +849,7 @@ impl<'df> Migration<'df> {
 
         let start = self.start;
         let dataflow_state = self.dataflow_state;
-        let mut dmp = DomainMigrationPlan::new(dataflow_state);
+        let mut dmp = DomainMigrationPlan::new(dataflow_state.domain_settings());
 
         let mut added = 0;
         let mut dropped = 0;
@@ -1148,7 +1135,7 @@ fn plan_add_nodes(
 
         // Boot up new domains (they'll ignore all updates for now)
         debug!("booting new domains");
-        let mut dmp = DomainMigrationPlan::new(dataflow_state);
+        let mut dmp = DomainMigrationPlan::new(dataflow_state.domain_settings());
         let mut scheduler = Scheduler::new(dataflow_state, worker)?;
 
         for domain in changed_domains {
@@ -1285,7 +1272,7 @@ fn plan_drop_nodes(
     dataflow_state: &mut DfState,
     removals: HashSet<NodeIndex>,
 ) -> ReadySetResult<DomainMigrationPlan> {
-    let mut dmp = DomainMigrationPlan::new(dataflow_state);
+    let mut dmp = DomainMigrationPlan::new(dataflow_state.domain_settings());
     remove_nodes(dataflow_state, &mut dmp, &removals)?;
     Ok(dmp)
 }

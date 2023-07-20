@@ -823,6 +823,21 @@ impl DfState {
         .await
     }
 
+    pub(super) fn domain_settings(&self) -> HashMap<DomainIndex, DomainSettings> {
+        self.domains
+            .iter()
+            .map(|(idx, hdl)| {
+                (
+                    *idx,
+                    DomainSettings {
+                        num_shards: hdl.num_shards(),
+                        num_replicas: hdl.num_replicas(),
+                    },
+                )
+            })
+            .collect()
+    }
+
     /// Collects a unique list of domains that might contain base tables. Errors out if a domain
     /// retrieved does not appears in self.domains.
     async fn domains_with_base_tables(&self) -> ReadySetResult<HashSet<DomainIndex>> {
@@ -1501,7 +1516,7 @@ impl DfState {
         domain_nodes: &HashMap<DomainIndex, HashSet<NodeIndex>>,
     ) -> ReadySetResult<DomainMigrationPlan> {
         info!("Planning recovery");
-        let mut dmp = DomainMigrationPlan::new(self);
+        let mut dmp = DomainMigrationPlan::new(self.domain_settings());
         let domain_nodes = domain_nodes
             .iter()
             .map(|(idx, nm)| (*idx, nm.iter().copied().collect::<Vec<_>>()))
