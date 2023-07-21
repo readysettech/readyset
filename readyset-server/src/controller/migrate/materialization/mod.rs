@@ -1226,7 +1226,7 @@ impl Materializations {
             plan.finalize()?
         };
         // grr `HashMap` doesn't implement `IndexMut`
-        self.paths.get_mut(&ni).unwrap().extend(paths);
+        self.paths.entry(ni).or_default().extend(paths);
 
         if !pending.is_empty() {
             trace!("all domains ready for replay");

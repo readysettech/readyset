@@ -58,8 +58,8 @@ pub(super) struct Plan<'a> {
     parent_indexes: HashMap<NodeIndex, HashSet<Index>>,
     /// New paths added in this run of the planner.
     paths: HashMap<Tag, Vec<NodeIndex>>,
-    /// Paths that already exist for this node.
-    old_paths: HashMap<Tag, Vec<NodeIndex>>,
+    /// Do we already have some replay paths for this node?
+    has_paths: bool,
     pending: Vec<PendingReplay>,
 }
 
@@ -78,11 +78,7 @@ impl<'a> Plan<'a> {
         dmp: &'a mut DomainMigrationPlan,
     ) -> Plan<'a> {
         let partial = m.partial.contains(&node);
-        let old_paths = m
-            .paths
-            .entry(node)
-            .or_insert_with(|| HashMap::new())
-            .clone();
+        let has_paths = m.paths.get(&node).map_or(false, |paths| !paths.is_empty());
         Plan {
             m,
             graph,
@@ -93,7 +89,7 @@ impl<'a> Plan<'a> {
             indexes: Default::default(),
             parent_indexes: Default::default(),
             paths: Default::default(),
-            old_paths,
+            has_paths,
             pending: Vec::new(),
         }
     }
@@ -160,14 +156,11 @@ impl<'a> Plan<'a> {
         // if we are recovering, we must build the paths again. Otherwise
         // if we're full and we already have some paths added... (either this run, or from previous
         // runs)
-        if !self.m.pending_recovery
-            && !self.partial
-            && (!self.paths.is_empty() || !self.old_paths.is_empty())
-        {
-            // ...don't add any more replay paths, because...
-            // non-partial views should not have one replay path per index. that would cause us to
-            // replay several times, even though one full replay should always be sufficient.
-            // we do need to keep track of the fact that there should be an index here though.
+        if !self.m.pending_recovery && !self.partial && (!self.paths.is_empty() || self.has_paths) {
+            // ...don't add any more replay paths, because fully materialized nodes should not have
+            // one replay path per index. that would cause us to replay several times, even though
+            // one full replay should always be sufficient.  we do need to keep track of the fact
+            // that there should be an index here though.
             self.indexes.entry(index_on).or_default();
             return Ok(());
         }
