@@ -93,6 +93,10 @@ impl<'a> Iterator for Params<'a> {
                     }
                 }
                 self.input = rest;
+            } else if !rest.is_empty() {
+                // remove the new_params_bind_flag byte
+                let (_, rest) = self.input.split_at(1);
+                self.input = rest;
             }
         }
 
