@@ -1553,3 +1553,147 @@ async fn same_query_different_search_path() {
 
     shutdown_tx.shutdown().await;
 }
+
+mod multiple_create_and_drop {
+    use itertools::Itertools;
+    use readyset_util::eventually;
+    use tokio_postgres::Client;
+
+    use crate::common::connect;
+    use crate::setup;
+
+    async fn create_query(conn: &Client, query_name: &str, query: &str) {
+        conn.simple_query(&format!("CREATE CACHE {query_name} FROM {query}"))
+            .await
+            .unwrap();
+    }
+
+    async fn drop_query(conn: &Client, query_name: &str) {
+        conn.simple_query(&format!("DROP CACHE {query_name}"))
+            .await
+            .unwrap();
+    }
+
+    async fn insert_values(conn: &Client, s1: Vec<i32>, s2: Vec<i32>, result: &mut Vec<i32>) {
+        conn.simple_query(&format!(
+            "INSERT INTO s1.t (a) values ({})",
+            s1.iter().join("), (")
+        ))
+        .await
+        .unwrap();
+        conn.simple_query(&format!(
+            "INSERT INTO s2.t (a) values ({})",
+            s2.iter().join("), (")
+        ))
+        .await
+        .unwrap();
+
+        for val1 in &s1 {
+            for val2 in &s2 {
+                if val1 == val2 {
+                    result.push(*val1);
+                }
+            }
+        }
+    }
+
+    #[ignore = "REA-3159"]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn same_query_name() {
+        readyset_tracing::init_test_logging();
+        let (opts, _handle, shutdown_tx) = setup().await;
+        let conn = connect(opts).await;
+
+        conn.simple_query("CREATE TABLE s1.t (a int)")
+            .await
+            .unwrap();
+        conn.simple_query("CREATE TABLE s2.t (a int)")
+            .await
+            .unwrap();
+
+        let mut results = Vec::new();
+        let query_name = "q";
+        let query = "SELECT s1.t.a FROM s1.t JOIN s2.t ON s1.t.a = s2.t.a";
+
+        insert_values(&conn, vec![1, 2, 3], vec![2, 3, 4], &mut results).await;
+        create_query(&conn, query_name, query).await;
+
+        eventually!(
+            run_test: { conn.query(query, &[])
+                .await
+                .unwrap()
+                .iter()
+                .map(|row| row.get::<_, i32>(0))
+                .collect::<Vec<_>>() },
+            then_assert: |r| assert_eq!(r, results)
+        );
+
+        drop_query(&conn, query_name).await;
+        insert_values(&conn, vec![10, 11, 12], vec![11, 13, 14], &mut results).await;
+        create_query(&conn, query_name, query).await;
+
+        eventually!(
+            run_test: {
+                conn.query(query, &[])
+                .await
+                .unwrap()
+                .iter()
+                .map(|row| row.get::<_, i32>(0))
+                .collect::<Vec<_>>()
+            },
+            then_assert: |r| assert_eq!(r, results)
+        );
+
+        shutdown_tx.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn different_query_name() {
+        readyset_tracing::init_test_logging();
+        let (opts, _handle, shutdown_tx) = setup().await;
+        let conn = connect(opts).await;
+
+        conn.simple_query("CREATE TABLE s1.t (a int)")
+            .await
+            .unwrap();
+        conn.simple_query("CREATE TABLE s2.t (a int)")
+            .await
+            .unwrap();
+
+        let mut results = Vec::new();
+        let query = "SELECT s1.t.a FROM s1.t JOIN s2.t ON s1.t.a = s2.t.a";
+
+        insert_values(&conn, vec![1, 2, 3], vec![2, 3, 4], &mut results).await;
+        create_query(&conn, "q1", query).await;
+
+        eventually!(
+            run_test: {
+                conn.query(query, &[])
+                .await
+                .unwrap()
+                .iter()
+                .map(|row| row.get::<_, i32>(0))
+                .collect::<Vec<_>>()
+            },
+            then_assert: |r| assert_eq!(r, results)
+        );
+
+        drop_query(&conn, "q1").await;
+        insert_values(&conn, vec![10, 11, 12], vec![11, 13, 14], &mut results).await;
+        create_query(&conn, "q2", query).await;
+
+        eventually!(
+            run_test: {
+                conn.query(query, &[])
+                .await
+                .unwrap()
+                .iter()
+                .map(|row| row.get::<_, i32>(0))
+                .collect::<Vec<_>>()
+            },
+            then_assert: |r| assert_eq!(r, results)
+        );
+
+        shutdown_tx.shutdown().await;
+    }
+}
