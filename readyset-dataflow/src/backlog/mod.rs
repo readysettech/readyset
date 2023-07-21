@@ -137,9 +137,10 @@ fn new_inner(
     };
 
     let (notifier, receiver) = tokio::sync::broadcast::channel(1);
-
+    let partial = trigger.is_some();
     let w = WriteHandle {
-        partial: trigger.is_some(),
+        partial,
+        replay_done: partial,
         handle: w,
         index: index.clone(),
         cols,
@@ -175,6 +176,8 @@ fn key_to_single(k: Key) -> Cow<DfValue> {
 pub(crate) struct WriteHandle {
     handle: multiw::Handle,
     partial: bool,
+    /// If this reeader is fully materialized, has it received a complete full replay yet?
+    replay_done: bool,
     cols: usize,
     index: Index,
     contiguous: bool,
@@ -431,6 +434,15 @@ impl WriteHandle {
     /// The index type of the underlying state
     pub(crate) fn index_type(&self) -> IndexType {
         self.index.index_type
+    }
+
+    pub(crate) fn set_replay_done(&mut self, replay_done: bool) {
+        debug_assert!(!self.is_partial());
+        self.replay_done = replay_done;
+    }
+
+    pub(crate) fn replay_done(&self) -> bool {
+        self.replay_done
     }
 }
 

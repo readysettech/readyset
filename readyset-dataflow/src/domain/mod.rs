@@ -450,7 +450,6 @@ impl DomainBuilder {
             total_forward_time: Timer::new(),
 
             aggressively_update_state_sizes: self.config.aggressively_update_state_sizes,
-            replay_completed: false,
 
             metrics: domain_metrics::DomainMetrics::new(address),
 
@@ -665,8 +664,6 @@ pub struct Domain {
     /// worker. This causes a (minor) runtime cost, with the upside being that the materialization
     /// state sizes will never be out-of-date.
     pub aggressively_update_state_sizes: bool,
-
-    replay_completed: bool,
 
     metrics: domain_metrics::DomainMetrics,
     eviction_kind: crate::EvictionKind,
@@ -2302,9 +2299,20 @@ impl Domain {
                 self.handle_packet(Box::new(pkt), executor)?;
                 Ok(None)
             }
-            DomainRequest::QueryReplayDone => {
-                let ret = self.replay_completed;
-                self.replay_completed = false;
+            DomainRequest::QueryReplayDone { node } => {
+                let ret = self
+                    .state
+                    .get(node)
+                    .map(|s| s.replay_done())
+                    .or_else(|| {
+                        self.reader_write_handles
+                            .get(node)
+                            .map(|rwh| rwh.replay_done())
+                    })
+                    .unwrap_or_else(|| {
+                        error!(%node, "Received QueryReplayDone for non-materialized node");
+                        true
+                    });
                 Ok(Some(bincode::serialize(&ret)?))
             }
             DomainRequest::GeneratedColumns { node, index, tag } => {
@@ -3782,7 +3790,17 @@ impl Domain {
             if self.replay_paths[tag].notify_done {
                 // NOTE: this will only be Some for non-partial replays
                 debug!(node = node.id(), "noting replay completed");
-                self.replay_completed = true;
+                self.state
+                    .get_mut(node)
+                    .map(|n| n.set_replay_done(true))
+                    .or_else(|| {
+                        self.reader_write_handles
+                            .get_mut(node)
+                            .map(|rwh| rwh.set_replay_done(true))
+                    })
+                    .ok_or_else(|| {
+                        internal_err!("Replayed to non-materialized, non-reader node {node}")
+                    })?;
                 Ok(())
             } else {
                 internal!();

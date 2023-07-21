@@ -112,6 +112,11 @@ pub trait State: SizeOf + Send {
     /// Returns true if this state is partially materialized
     fn is_partial(&self) -> bool;
 
+    /// Returns `true` if this state is fully materialized and has received its full replay.
+    ///
+    /// If this state is partial, the return value of this method is unspecified
+    fn replay_done(&self) -> bool;
+
     /// Inserts or removes each record into State. Records that miss all indices in partial state
     /// are removed from `records` (thus the mutable reference).
     ///
@@ -236,6 +241,17 @@ pub trait State: SizeOf + Send {
     fn tear_down(self) -> ReadySetResult<()>;
 }
 
+impl MaterializedNodeState {
+    /// Set whether or not this state, which should be fully materialized, has received its full
+    /// replay
+    pub fn set_replay_done(&mut self, replay_done: bool) {
+        debug_assert!(!self.is_partial());
+        if let MaterializedNodeState::Memory(ms) = self {
+            ms.replay_done = replay_done;
+        }
+    }
+}
+
 impl SizeOf for MaterializedNodeState {
     fn deep_size_of(&self) -> u64 {
         match self {
@@ -292,6 +308,14 @@ impl State for MaterializedNodeState {
             MaterializedNodeState::Memory(ms) => ms.is_partial(),
             MaterializedNodeState::Persistent(ps) => ps.is_partial(),
             MaterializedNodeState::PersistentReadHandle(rh) => rh.is_partial(),
+        }
+    }
+
+    fn replay_done(&self) -> bool {
+        match self {
+            MaterializedNodeState::Memory(ms) => ms.replay_done(),
+            MaterializedNodeState::Persistent(ps) => ps.replay_done(),
+            MaterializedNodeState::PersistentReadHandle(rh) => rh.replay_done(),
         }
     }
 

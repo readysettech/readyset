@@ -1268,7 +1268,12 @@ impl Materializations {
                domain = %target.index(),
                "waiting for done message from target"
             );
-            dmp.add_message(target, DomainRequest::QueryReplayDone)?;
+            dmp.add_message(
+                target,
+                DomainRequest::QueryReplayDone {
+                    node: graph[ni].local_addr(),
+                },
+            )?;
         }
         Ok(())
     }

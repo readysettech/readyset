@@ -375,8 +375,10 @@ pub enum DomainRequest {
         replicas: Option<Vec<usize>>,
     },
 
-    /// Query whether a domain has finished replaying.
-    QueryReplayDone,
+    /// Query whether a domain has received a complete full replay for the given node.
+    QueryReplayDone {
+        node: LocalNodeIndex,
+    },
 
     /// Sent to instruct a domain that a particular node should be considered ready to process
     /// updates.

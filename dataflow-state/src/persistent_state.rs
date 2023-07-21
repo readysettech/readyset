@@ -783,6 +783,11 @@ impl State for PersistentState {
         false
     }
 
+    fn replay_done(&self) -> bool {
+        // Base tables by definition have always been "replayed to"
+        true
+    }
+
     /// Panics if called
     #[allow(clippy::unreachable)] // this should never happen!
     fn mark_filled(&mut self, _: KeyComparison, _: Tag) {
@@ -882,6 +887,11 @@ impl State for PersistentStateHandle {
 
     fn is_partial(&self) -> bool {
         false
+    }
+
+    fn replay_done(&self) -> bool {
+        // Base tables by definition have always been "replayed to"
+        true
     }
 
     fn replication_offset(&self) -> Option<&ReplicationOffset> {

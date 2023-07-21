@@ -97,7 +97,7 @@ impl StoredDomainRequest {
                 })?;
 
         match self.req {
-            DomainRequest::QueryReplayDone => {
+            DomainRequest::QueryReplayDone { node } => {
                 debug!("waiting for a done message");
 
                 invariant!(self.shard.is_none()); // QueryReplayDone isn't ever sent to just one shard
@@ -107,7 +107,10 @@ impl StoredDomainRequest {
                 // FIXME(eta): this is a bit of a hack... (also, timeouts?)
                 loop {
                     if dom
-                        .send_to_healthy::<bool>(DomainRequest::QueryReplayDone, &mainline.workers)
+                        .send_to_healthy::<bool>(
+                            DomainRequest::QueryReplayDone { node },
+                            &mainline.workers,
+                        )
                         .await?
                         .into_cells()
                         .into_iter()

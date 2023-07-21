@@ -26,6 +26,8 @@ pub struct MemoryState {
     /// The latest replication offset that has been written to the base table backed by this
     /// [`MemoryState`], it is only used when [`LocalAuthority`] is the ReadySet authority.
     replication_offset: Option<ReplicationOffset>,
+    /// If this state is fully materialized, has it received a complete full replay yet?
+    pub(crate) replay_done: bool,
 }
 
 impl SizeOf for MemoryState {
@@ -100,6 +102,10 @@ impl State for MemoryState {
 
     fn is_partial(&self) -> bool {
         self.state.iter().any(SingleState::partial)
+    }
+
+    fn replay_done(&self) -> bool {
+        self.replay_done
     }
 
     fn process_records(
