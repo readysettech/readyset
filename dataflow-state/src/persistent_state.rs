@@ -80,11 +80,11 @@ use parking_lot::{
 };
 use readyset_alloc::thread::StdThreadBuildWrapper;
 use readyset_client::internal::Index;
-use readyset_client::replication::ReplicationOffset;
 use readyset_client::{KeyComparison, KeyCount, SqlIdentifier};
 use readyset_data::DfValue;
 use readyset_errors::{internal_err, invariant, ReadySetError, ReadySetResult};
 use readyset_util::intervals::BoundPair;
+use replication_offset::ReplicationOffset;
 use rocksdb::{
     self, BlockBasedOptions, ColumnFamilyDescriptor, CompactOptions, IteratorMode, SliceTransform,
     WriteBatch, DB,

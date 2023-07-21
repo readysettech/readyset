@@ -4,9 +4,9 @@ use std::mem;
 
 use dataflow_state::{MaterializedNodeState, SnapshotMode};
 use readyset_client::consistency::Timestamp;
-use readyset_client::replication::ReplicationOffset;
 use readyset_client::{KeyComparison, PacketData};
 use readyset_errors::ReadySetResult;
+use replication_offset::ReplicationOffset;
 use tracing::{debug_span, trace};
 
 use crate::node::special::base::{BaseWrite, SetSnapshotMode};

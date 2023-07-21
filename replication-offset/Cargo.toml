@@ -1,0 +1,11 @@
+[package]
+name = "replication-offset"
+version = "0.1.0"
+publish = false
+authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+edition = "2021"
+
+[dependencies]
+nom-sql = { path = "../nom-sql" }
+readyset-errors = { path = "../readyset-errors" }
+serde = { version = "1.0", features = ["derive"] }

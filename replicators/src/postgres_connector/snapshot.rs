@@ -15,15 +15,15 @@ use nom_sql::{
 use postgres_types::{accepts, FromSql, Kind, Type};
 use readyset_client::metrics::recorded;
 use readyset_client::recipe::changelist::{Change, ChangeList};
-use readyset_client::replication::ReplicationOffset;
 use readyset_client::TableOperation;
 use readyset_data::{DfType, DfValue, Dialect as DataDialect, PgEnumMetadata};
 use readyset_errors::{internal, internal_err, unsupported, ReadySetError, ReadySetResult};
+use replication_offset::postgres::PostgresPosition;
+use replication_offset::ReplicationOffset;
 use tokio_postgres as pgsql;
 use tracing::{debug, info, info_span, trace, warn, Instrument};
 
 use super::connector::CreatedSlot;
-use super::PostgresPosition;
 use crate::db_util::CreateSchema;
 use crate::table_filter::TableFilter;
 

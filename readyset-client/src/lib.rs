@@ -241,7 +241,7 @@ use std::ops::AddAssign;
 
 use nom_sql::Relation;
 use readyset_tracing::propagation::Instrumented;
-use replication::ReplicationOffset;
+use replication_offset::ReplicationOffset;
 use tokio_tower::multiplex;
 
 #[cfg(feature = "failure_injection")]

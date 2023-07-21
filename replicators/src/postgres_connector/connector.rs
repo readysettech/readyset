@@ -9,16 +9,17 @@ use postgres_native_tls::MakeTlsConnector;
 use postgres_protocol::escape::escape_literal;
 #[cfg(feature = "failure_injection")]
 use readyset_client::failpoints;
-use readyset_client::replication::ReplicationOffset;
 use readyset_client::TableOperation;
 use readyset_errors::{invariant, set_failpoint_return_err, ReadySetError, ReadySetResult};
 use readyset_util::select;
+use replication_offset::postgres::PostgresPosition;
+use replication_offset::ReplicationOffset;
 use tokio_postgres as pgsql;
 use tracing::{debug, error, info, trace, warn};
 
 use super::ddl_replication::setup_ddl_replication;
 use super::wal_reader::{WalEvent, WalReader};
-use super::{PostgresPosition, PUBLICATION_NAME};
+use super::PUBLICATION_NAME;
 use crate::db_util::error_is_slot_not_found;
 use crate::noria_adapter::{Connector, ReplicationAction};
 use crate::postgres_connector::wal::{TableErrorKind, WalError};

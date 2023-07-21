@@ -9,8 +9,7 @@ use std::convert::{TryFrom, TryInto};
 use bytes::Bytes;
 use nom_sql::Relation;
 use readyset_errors::ReadySetError;
-
-use crate::postgres_connector::lsn::Lsn;
+use replication_offset::postgres::Lsn;
 
 /// An parse error
 #[derive(Debug)]

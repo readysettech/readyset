@@ -18,7 +18,6 @@ use readyset_client::consistency::Timestamp;
 use readyset_client::failpoints;
 use readyset_client::metrics::recorded::{self, SnapshotStatusTag};
 use readyset_client::recipe::changelist::{Change, ChangeList};
-use readyset_client::replication::{ReplicationOffset, ReplicationOffsets};
 use readyset_client::{ReadySetHandle, Table, TableOperation};
 use readyset_data::Dialect;
 use readyset_errors::{
@@ -26,6 +25,7 @@ use readyset_errors::{
 };
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 use readyset_util::select;
+use replication_offset::{ReplicationOffset, ReplicationOffsets};
 use tokio::sync::Notify;
 use tracing::{debug, error, info, info_span, trace, warn, Instrument};
 use {mysql_async as mysql, tokio_postgres as pgsql};
@@ -268,7 +268,7 @@ impl NoriaAdapter {
         telemetry_sender: &TelemetrySender,
         enable_statement_logging: bool,
     ) -> ReadySetResult<!> {
-        use crate::mysql_connector::BinlogPosition;
+        use replication_offset::mysql::MySqlPosition;
 
         if let Some(cert_path) = config.ssl_root_cert.clone() {
             let ssl_opts = SslOpts::default().with_root_cert_path(Some(cert_path));
@@ -366,7 +366,7 @@ impl NoriaAdapter {
                 // can do this "catching up" by just starting replication at
                 // the old offset. Note that at the very least we will
                 // always have the schema offset for the minimum.
-                let pos: BinlogPosition = replication_offsets
+                let pos: MySqlPosition = replication_offsets
                     .min_present_offset()?
                     .expect("Minimal offset must be present after snapshot")
                     .clone()

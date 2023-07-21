@@ -9,9 +9,8 @@
 //! that can be passed to various SQL clients.
 use std::fmt::{self, Display};
 
+use replication_offset::ReplicationOffset;
 use serde::{Deserialize, Serialize};
-
-use crate::replication::ReplicationOffset;
 
 // Consts for variable names.
 

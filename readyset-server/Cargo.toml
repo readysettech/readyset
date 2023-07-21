@@ -96,6 +96,7 @@ readyset-version = { path = "../readyset-version" }
 health-reporter = { path = "../health-reporter" }
 database-utils = { path = "../database-utils" }
 catalog-tables = { path = "../catalog-tables" }
+replication-offset = { path = "../replication-offset" }
 
 [dev-dependencies]
 dataflow = { path = "../readyset-dataflow", package = "readyset-dataflow", features = ["bench"] }

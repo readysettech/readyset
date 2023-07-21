@@ -61,6 +61,7 @@ partial-map = { path = "../partial-map" }
 failpoint-macros = { path = "../failpoint-macros" }
 dataflow-state = { path = "../dataflow-state" }
 dataflow-expression = { path = "../dataflow-expression" }
+replication-offset = { path = "../replication-offset" }
 
 [features]
 bench = ["criterion"]

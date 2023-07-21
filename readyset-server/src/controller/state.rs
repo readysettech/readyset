@@ -46,7 +46,6 @@ use readyset_client::internal::{MaterializationStatus, ReplicaAddress};
 use readyset_client::metrics::recorded;
 use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::recipe::ExtendRecipeSpec;
-use readyset_client::replication::{ReplicationOffset, ReplicationOffsetState, ReplicationOffsets};
 use readyset_client::{
     NodeSize, SingleKeyEviction, TableReplicationStatus, TableStatus, ViewCreateRequest,
     ViewFilter, ViewRequest, ViewSchema,
@@ -56,6 +55,7 @@ use readyset_errors::{
     internal, internal_err, invariant_eq, NodeType, ReadySetError, ReadySetResult,
 };
 use regex::Regex;
+use replication_offset::{ReplicationOffset, ReplicationOffsetState, ReplicationOffsets};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, MutexGuard, RwLock, RwLockReadGuard};

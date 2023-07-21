@@ -36,6 +36,7 @@ readyset-client = { path = "../readyset-client" }
 readyset-data = { path = "../readyset-data" }
 readyset-errors = { path = "../readyset-errors" }
 partial-map = { path = "../partial-map" }
+replication-offset = { path = "../replication-offset" }
 
 [dev-dependencies]
 pretty_assertions = "0.7.2"

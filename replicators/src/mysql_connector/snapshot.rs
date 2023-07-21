@@ -15,14 +15,14 @@ use mysql_async as mysql;
 use nom_sql::Relation;
 use readyset_client::metrics::recorded;
 use readyset_client::recipe::changelist::{Change, ChangeList};
-use readyset_client::replication::{ReplicationOffset, ReplicationOffsets};
 use readyset_data::Dialect;
 use readyset_errors::{internal_err, ReadySetResult};
+use replication_offset::mysql::MySqlPosition;
+use replication_offset::{ReplicationOffset, ReplicationOffsets};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, info_span, warn};
 use tracing_futures::Instrument;
 
-use super::BinlogPosition;
 use crate::db_util::DatabaseSchemas;
 use crate::table_filter::TableFilter;
 
@@ -338,7 +338,7 @@ impl MySqlReplicator {
 
     /// Use the SHOW MASTER STATUS statement to determine the current binary log
     /// file name and position.
-    async fn get_binlog_position(&self) -> mysql::Result<BinlogPosition> {
+    async fn get_binlog_position(&self) -> mysql::Result<MySqlPosition> {
         let mut conn = self.pool.get_conn().await?;
         let query = "SHOW MASTER STATUS";
         let pos: mysql::Row = conn.query_first(query).await?.ok_or_else(|| {
@@ -352,7 +352,7 @@ impl MySqlReplicator {
         let file: String = pos.get(0).expect("Binlog file name");
         let offset: u32 = pos.get(1).expect("Binlog offset");
 
-        Ok(BinlogPosition {
+        Ok(MySqlPosition {
             binlog_file: file,
             position: offset,
         })

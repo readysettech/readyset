@@ -4,10 +4,10 @@ use std::rc::Rc;
 use common::{IndexType, Record, Records, SizeOf, Tag};
 use rand::{self, Rng};
 use readyset_client::internal::Index;
-use readyset_client::replication::ReplicationOffset;
 use readyset_client::{KeyComparison, KeyCount};
 use readyset_data::DfValue;
 use readyset_errors::ReadySetResult;
+use replication_offset::ReplicationOffset;
 use tracing::trace;
 
 use crate::keyed_state::KeyedState;

@@ -7,13 +7,13 @@ use mysql_time::MySqlTime;
 use postgres_types::Kind;
 use readyset_data::{Array, Collation, DfType, DfValue, Dialect};
 use readyset_errors::{unsupported, ReadySetError};
+use replication_offset::postgres::Lsn;
 use rust_decimal::prelude::FromStr;
 use rust_decimal::Decimal;
 use tokio_postgres as pgsql;
 use tracing::{debug, error, trace};
 
 use super::ddl_replication::DdlEvent;
-use super::lsn::Lsn;
 use super::wal::{self, RelationMapping, WalData, WalError, WalRecord};
 use crate::postgres_connector::wal::{TableErrorKind, TupleEntry};
 

@@ -14,9 +14,9 @@ pub(crate) mod table_filter;
 
 use std::time::Duration;
 
-pub use mysql_connector::BinlogPosition;
 pub use noria_adapter::{cleanup, NoriaAdapter};
-pub use postgres_connector::PostgresPosition;
+pub use replication_offset::mysql::MySqlPosition;
+pub use replication_offset::postgres::PostgresPosition;
 
 /// Provide a simplistic human-readable estimate for how much time remains to complete an operation
 pub(crate) fn estimate_remaining_time(elapsed: Duration, progress: f64, total: f64) -> String {

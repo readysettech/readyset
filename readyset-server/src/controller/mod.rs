@@ -1113,10 +1113,10 @@ mod tests {
     use dataflow::DomainIndex;
     use nom_sql::{parse_create_table, parse_select_statement, Dialect, Relation};
     use readyset_client::recipe::changelist::{Change, ChangeList};
-    use readyset_client::replication::ReplicationOffset;
     use readyset_client::{KeyCount, TableReplicationStatus, TableStatus, ViewCreateRequest};
     use readyset_data::Dialect as DataDialect;
     use readyset_util::eventually;
+    use replication_offset::ReplicationOffset;
 
     use crate::integration_utils::start_simple;
 

@@ -51,6 +51,7 @@ members = [
     "readyset-tracing",
     "readyset-util",
     "readyset-version",
+    "replication-offset",
     "replicators",
     "proptest-stateful",
     "system-benchmarks",

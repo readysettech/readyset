@@ -21,10 +21,10 @@ use hashbag::HashBag;
 use itertools::Either;
 pub use partial_map::PartialMap;
 use readyset_client::internal::Index;
-use readyset_client::replication::ReplicationOffset;
 use readyset_client::{KeyComparison, KeyCount};
 use readyset_data::DfValue;
 use readyset_errors::ReadySetResult;
+use replication_offset::ReplicationOffset;
 
 pub use crate::key::{PointKey, RangeKey};
 pub use crate::memory_state::MemoryState;

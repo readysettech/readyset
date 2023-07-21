@@ -21,6 +21,7 @@ use readyset_data::DfValue;
 use readyset_errors::{
     internal, internal_err, rpc_err, table_err, unsupported, ReadySetError, ReadySetResult,
 };
+use replication_offset::ReplicationOffset;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 use tokio_tower::multiplex;
@@ -33,7 +34,6 @@ use vec_map::VecMap;
 
 use crate::channel::CONNECTION_FROM_BASE;
 use crate::internal::*;
-use crate::replication::ReplicationOffset;
 use crate::{consistency, Tagged, Tagger};
 
 // TODO(justin): Make write propagation sample rate configurable.

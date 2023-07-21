@@ -1240,6 +1240,7 @@ dependencies = [
  "readyset-data",
  "readyset-errors",
  "readyset-util",
+ "replication-offset",
  "rocksdb",
  "rust_decimal",
  "serde",
@@ -4407,6 +4408,7 @@ dependencies = [
  "readyset-sql-passes",
  "readyset-tracing",
  "readyset-util",
+ "replication-offset",
  "reqwest",
  "rmp-serde",
  "rocksdb",
@@ -4618,6 +4620,7 @@ dependencies = [
  "readyset-errors",
  "readyset-util",
  "regex",
+ "replication-offset",
  "serde",
  "serde_derive",
  "serde_json",
@@ -4905,6 +4908,7 @@ dependencies = [
  "readyset-util",
  "readyset-version",
  "regex",
+ "replication-offset",
  "replicators",
  "reqwest",
  "rust_decimal",
@@ -5105,6 +5109,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "436b050e76ed2903236f032a59761c1eb99e1b0aead2c257922771dab1fc8c78"
 
 [[package]]
+name = "replication-offset"
+version = "0.1.0"
+dependencies = [
+ "nom-sql",
+ "readyset-errors",
+ "serde",
+]
+
+[[package]]
 name = "replicators"
 version = "0.1.0"
 dependencies = [
@@ -5144,6 +5157,7 @@ dependencies = [
  "readyset-telemetry-reporter",
  "readyset-tracing",
  "readyset-util",
+ "replication-offset",
  "reqwest",
  "rust_decimal",
  "serde",

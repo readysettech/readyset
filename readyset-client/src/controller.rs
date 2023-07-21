@@ -14,6 +14,7 @@ use petgraph::graph::NodeIndex;
 use readyset_errors::{
     internal, internal_err, rpc_err, rpc_err_no_downcast, ReadySetError, ReadySetResult,
 };
+use replication_offset::ReplicationOffsets;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tower::buffer::Buffer;
@@ -29,7 +30,6 @@ use crate::internal::DomainIndex;
 use crate::metrics::MetricsDump;
 use crate::recipe::changelist::ChangeList;
 use crate::recipe::{ExtendRecipeResult, ExtendRecipeSpec, MigrationStatus};
-use crate::replication::ReplicationOffsets;
 use crate::status::ReadySetStatus;
 use crate::table::{Table, TableBuilder, TableRpc};
 use crate::view::{View, ViewBuilder, ViewRpc};
