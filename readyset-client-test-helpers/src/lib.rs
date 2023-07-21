@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::env;
 use std::str::FromStr;
 use std::sync::atomic::AtomicUsize;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -19,6 +19,7 @@ use readyset_client::ViewCreateRequest;
 use readyset_server::{Builder, Handle, LocalAuthority, ReadySetHandle};
 use readyset_util::shutdown::ShutdownSender;
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::RwLock;
 
 #[cfg(feature = "mysql")]
 pub mod mysql_helpers;

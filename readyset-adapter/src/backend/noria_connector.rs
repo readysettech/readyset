@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
-use std::sync::{atomic, Arc, RwLock};
+use std::sync::{atomic, Arc};
 
 use itertools::Itertools;
 use nom_sql::analysis::visit::Visitor;
@@ -27,6 +27,7 @@ use readyset_errors::{
 use readyset_server::worker::readers::{CallResult, ReadRequestHandler};
 use readyset_sql_passes::anonymize::anonymize_literals;
 use readyset_util::redacted::{Sensitive, REDACT_SENSITIVE};
+use tokio::sync::RwLock;
 use tracing::{error, info, instrument, trace, warn};
 
 use crate::backend::SelectSchema;
@@ -295,6 +296,7 @@ impl<'a> QueryResult<'a> {
 }
 
 #[derive(Clone)]
+/// Global and thread-local cache of view endpoints and prepared statements.
 pub struct ViewCache {
     /// Global cache of view endpoints and prepared statements.
     global: Arc<RwLock<HashMap<ViewCreateRequest, Relation>>>,
@@ -312,28 +314,26 @@ impl ViewCache {
     }
 
     /// Registers a statement with the provided name into both the local and global view caches.
-    pub fn register_statement(&mut self, name: &Relation, view_request: ViewCreateRequest) {
+    pub async fn register_statement(&mut self, name: &Relation, view_request: ViewCreateRequest) {
         self.local
             .entry(view_request.clone())
             .or_insert_with(|| name.clone());
-        tokio::task::block_in_place(move || {
-            self.global
-                .write()
-                .unwrap()
-                .entry(view_request)
-                .or_insert_with(|| name.clone());
-        });
+        self.global
+            .write()
+            .await
+            .entry(view_request)
+            .or_insert_with(|| name.clone());
     }
 
     /// Retrieves the name for the provided statement if it's in the cache. We first check local
     /// cache, and if it's not there we check global cache. If it's in global but not local, we
     /// backfill local cache before returning the result.
-    pub fn statement_name(&mut self, view_request: &ViewCreateRequest) -> Option<Relation> {
+    pub async fn statement_name(&mut self, view_request: &ViewCreateRequest) -> Option<Relation> {
         let maybe_name = if let Some(name) = self.local.get(view_request) {
             return Some(name.clone());
         } else {
             // Didn't find it in local, so let's check global.
-            let gc = tokio::task::block_in_place(|| self.global.read().unwrap());
+            let gc = self.global.read().await;
             gc.get(view_request).cloned()
         };
 
@@ -345,38 +345,29 @@ impl ViewCache {
     }
 
     /// Removes the statement with the given name from both the global and local caches.
-    pub fn remove_statement(&mut self, name: &Relation) {
+    pub async fn remove_statement(&mut self, name: &Relation) {
         self.local.retain(|_, v| v != name);
-        tokio::task::block_in_place(|| {
-            self.global.write().unwrap().retain(|_, v| v != name);
-        });
+        self.global.write().await.retain(|_, v| v != name);
     }
 
     /// Clears all statements from all caches
-    fn clear(&mut self) {
+    async fn clear(&mut self) {
         self.local.clear();
-        tokio::task::block_in_place(|| {
-            self.global.write().unwrap().clear();
-        })
+        self.global.write().await.clear();
     }
 
     /// Returns the original view create request based on a provided name if it exists in either the
     /// local or global caches.
-    pub fn view_create_request_from_name(&self, name: &Relation) -> Option<ViewCreateRequest> {
-        self.local
-            .iter()
-            .find(|(_, n)| *n == name)
-            .map(|(v, _)| v.clone())
-            .or_else(|| {
-                tokio::task::block_in_place(|| {
-                    self.global
-                        .read()
-                        .unwrap()
-                        .iter()
-                        .find(|(_, n)| *n == name)
-                        .map(|(v, _)| v.clone())
-                })
-            })
+    pub async fn view_create_request_from_name(
+        &self,
+        name: &Relation,
+    ) -> Option<ViewCreateRequest> {
+        if let Some((v, _)) = self.local.iter().find(|(_, n)| *n == name) {
+            return Some(v.clone());
+        }
+
+        let gc = self.global.read().await;
+        gc.iter().find(|(_, n)| *n == name).map(|(v, _)| v.clone())
     }
 }
 
@@ -1097,10 +1088,12 @@ impl NoriaConnector {
         // If the query is already in there with a different name, we don't need to make a new name
         // for it, as *lookups* only need one of the names for the query, and when we drop it we'll
         // be hitting noria anyway
-        self.view_cache.register_statement(
-            &name,
-            ViewCreateRequest::new(statement.clone(), schema_search_path),
-        );
+        self.view_cache
+            .register_statement(
+                &name,
+                ViewCreateRequest::new(statement.clone(), schema_search_path),
+            )
+            .await;
 
         Ok(())
     }
@@ -1115,7 +1108,7 @@ impl NoriaConnector {
         let search_path =
             override_schema_search_path.unwrap_or_else(|| self.schema_search_path().to_vec());
         let view_request = ViewCreateRequest::new(q.clone(), search_path.clone());
-        match self.view_cache.statement_name(&view_request) {
+        match self.view_cache.statement_name(&view_request).await {
             None => {
                 let qname: Relation = utils::generate_query_name(q, &search_path).into();
 
@@ -1168,7 +1161,9 @@ impl NoriaConnector {
                         }
                     }
                 }
-                self.view_cache.register_statement(&qname, view_request);
+                self.view_cache
+                    .register_statement(&qname, view_request)
+                    .await;
 
                 Ok(qname)
             }
@@ -1183,7 +1178,7 @@ impl NoriaConnector {
             self.inner.get_mut()?,
             self.inner.get_mut()?.noria.remove_query(name)
         )?;
-        self.view_cache.remove_statement(name);
+        self.view_cache.remove_statement(name).await;
         Ok(())
     }
 
@@ -1193,12 +1188,15 @@ impl NoriaConnector {
             self.inner.get_mut()?,
             self.inner.get_mut()?.noria.remove_all_queries()
         )?;
-        self.view_cache.clear();
+        self.view_cache.clear().await;
         Ok(())
     }
 
-    pub fn view_create_request_from_name(&self, name: &Relation) -> Option<ViewCreateRequest> {
-        self.view_cache.view_create_request_from_name(name)
+    pub async fn view_create_request_from_name(
+        &self,
+        name: &Relation,
+    ) -> Option<ViewCreateRequest> {
+        self.view_cache.view_create_request_from_name(name).await
     }
 
     async fn do_insert(
@@ -1244,109 +1242,103 @@ impl NoriaConnector {
         }
 
         let ai = &mut self.auto_increments;
-        tokio::task::block_in_place(|| {
-            let ai_lock = ai.read().unwrap();
-            if ai_lock.get(table).is_none() {
-                drop(ai_lock);
-                ai.write()
-                    .unwrap()
-                    .entry(table.clone())
-                    .or_insert_with(|| atomic::AtomicUsize::new(0));
-            }
-        });
+        let ai_lock = ai.read().await;
+        if ai_lock.get(table).is_none() {
+            drop(ai_lock);
+            ai.write()
+                .await
+                .entry(table.clone())
+                .or_insert_with(|| atomic::AtomicUsize::new(0));
+        }
         let mut buf = vec![vec![DfValue::None; schema.fields.len()]; data.len()];
         let mut first_inserted_id = None;
-        tokio::task::block_in_place(|| -> ReadySetResult<_> {
-            let ai_lock = ai.read().unwrap();
-            let last_insert_id = &ai_lock[table];
+        let ai_lock = ai.read().await;
+        let last_insert_id = &ai_lock[table];
 
-            // handle default values
-            trace!("insert::default values");
-            let mut default_value_columns = vec![];
-            for c in &schema.fields {
-                for cc in &c.constraints {
-                    if let ColumnConstraint::DefaultValue(ref def) = *cc {
-                        match def {
-                            Expr::Literal(v) => {
-                                default_value_columns.push((c.column.clone(), v.clone()))
-                            }
-                            _ => {
-                                unsupported!("Only literal values are supported in default values")
-                            }
+        // handle default values
+        trace!("insert::default values");
+        let mut default_value_columns = vec![];
+        for c in &schema.fields {
+            for cc in &c.constraints {
+                if let ColumnConstraint::DefaultValue(ref def) = *cc {
+                    match def {
+                        Expr::Literal(v) => {
+                            default_value_columns.push((c.column.clone(), v.clone()))
+                        }
+                        _ => {
+                            unsupported!("Only literal values are supported in default values")
                         }
                     }
                 }
             }
+        }
 
-            trace!("insert::construct ops");
+        trace!("insert::construct ops");
 
-            for (ri, row) in data.iter().enumerate() {
-                if let Some(col) = auto_increment_columns.get(0) {
-                    let idx = schema
-                        .fields
-                        .iter()
-                        .position(|f| f == *col)
-                        .ok_or_else(|| {
-                            table_err(
-                                table.clone(),
-                                ReadySetError::NoSuchColumn(col.column.name.to_string()),
-                            )
-                        })?;
-                    // query can specify an explicit AUTO_INCREMENT value
-                    if !columns_specified.contains(&col.column) {
-                        let id = last_insert_id.fetch_add(1, atomic::Ordering::SeqCst) as i64 + 1;
-                        if first_inserted_id.is_none() {
-                            first_inserted_id = Some(id);
-                        }
-                        buf[ri][idx] = DfValue::from(id);
+        for (ri, row) in data.iter().enumerate() {
+            if let Some(col) = auto_increment_columns.get(0) {
+                let idx = schema
+                    .fields
+                    .iter()
+                    .position(|f| f == *col)
+                    .ok_or_else(|| {
+                        table_err(
+                            table.clone(),
+                            ReadySetError::NoSuchColumn(col.column.name.to_string()),
+                        )
+                    })?;
+                // query can specify an explicit AUTO_INCREMENT value
+                if !columns_specified.contains(&col.column) {
+                    let id = last_insert_id.fetch_add(1, atomic::Ordering::SeqCst) as i64 + 1;
+                    if first_inserted_id.is_none() {
+                        first_inserted_id = Some(id);
                     }
-                }
-
-                for (c, v) in default_value_columns.drain(..) {
-                    let idx = schema
-                        .fields
-                        .iter()
-                        .position(|f| f.column == c)
-                        .ok_or_else(|| {
-                            table_err(
-                                table.clone(),
-                                ReadySetError::NoSuchColumn(c.name.to_string()),
-                            )
-                        })?;
-                    // only use default value if query doesn't specify one
-                    if !columns_specified.contains(&c) {
-                        buf[ri][idx] = v.try_into()?;
-                    }
-                }
-
-                for (ci, c) in columns_specified.iter().enumerate() {
-                    let (idx, field) = schema
-                        .fields
-                        .iter()
-                        .find_position(|f| f.column == *c)
-                        .ok_or_else(|| {
-                            table_err(
-                                putter.table_name().clone(),
-                                ReadySetError::NoSuchColumn(c.name.to_string()),
-                            )
-                        })?;
-
-                    let target_type =
-                        DfType::from_sql_type(&field.sql_type, self.dialect, |_| None)?;
-
-                    let value = row
-                        .get(ci)
-                        .ok_or_else(|| {
-                            internal_err!(
-                                "Row returned from readyset-server had the wrong number of columns",
-                            )
-                        })?
-                        .coerce_to(&target_type, &DfType::Unknown)?; // No from_ty, we're inserting literals
-                    buf[ri][idx] = value;
+                    buf[ri][idx] = DfValue::from(id);
                 }
             }
-            Ok(())
-        })?;
+
+            for (c, v) in default_value_columns.drain(..) {
+                let idx = schema
+                    .fields
+                    .iter()
+                    .position(|f| f.column == c)
+                    .ok_or_else(|| {
+                        table_err(
+                            table.clone(),
+                            ReadySetError::NoSuchColumn(c.name.to_string()),
+                        )
+                    })?;
+                // only use default value if query doesn't specify one
+                if !columns_specified.contains(&c) {
+                    buf[ri][idx] = v.try_into()?;
+                }
+            }
+
+            for (ci, c) in columns_specified.iter().enumerate() {
+                let (idx, field) = schema
+                    .fields
+                    .iter()
+                    .find_position(|f| f.column == *c)
+                    .ok_or_else(|| {
+                        table_err(
+                            putter.table_name().clone(),
+                            ReadySetError::NoSuchColumn(c.name.to_string()),
+                        )
+                    })?;
+
+                let target_type = DfType::from_sql_type(&field.sql_type, self.dialect, |_| None)?;
+
+                let value = row
+                    .get(ci)
+                    .ok_or_else(|| {
+                        internal_err!(
+                            "Row returned from readyset-server had the wrong number of columns",
+                        )
+                    })?
+                    .coerce_to(&target_type, &DfType::Unknown)?; // No from_ty, we're inserting literals
+                buf[ri][idx] = value;
+            }
+        }
 
         let result = if let Some(ref update_fields) = q.on_duplicate {
             trace!("insert::complex");
@@ -1803,8 +1795,8 @@ mod tests {
 
         use super::*;
 
-        #[test]
-        fn register_and_remove_statement() {
+        #[tokio::test]
+        async fn register_and_remove_statement() {
             let global = Arc::new(RwLock::new(HashMap::new()));
             let mut view_cache = ViewCache::new(global);
 
@@ -1812,17 +1804,19 @@ mod tests {
             let statement = parse_select_statement(Dialect::MySQL, "SELECT a_col FROM t1").unwrap();
             let view_request = ViewCreateRequest::new(statement, vec!["s1".into()]);
 
-            view_cache.register_statement(&name, view_request.clone());
-            let retrieved_request = view_cache.view_create_request_from_name(&name);
+            view_cache
+                .register_statement(&name, view_request.clone())
+                .await;
+            let retrieved_request = view_cache.view_create_request_from_name(&name).await;
             assert_eq!(Some(view_request), retrieved_request);
 
-            view_cache.remove_statement(&name);
-            let retrieved_request = view_cache.view_create_request_from_name(&name);
+            view_cache.remove_statement(&name).await;
+            let retrieved_request = view_cache.view_create_request_from_name(&name).await;
             assert_eq!(None, retrieved_request);
         }
 
-        #[test]
-        fn clear() {
+        #[tokio::test]
+        async fn clear() {
             let global = Arc::new(RwLock::new(HashMap::new()));
             let mut view_cache = ViewCache::new(global.clone());
 
@@ -1831,23 +1825,33 @@ mod tests {
             let create_request_1 = ViewCreateRequest::new(statement1, vec!["schema1".into()]);
             let create_request_2 = ViewCreateRequest::new(statement2, vec!["schema2".into()]);
 
-            view_cache.register_statement(&"q1".into(), create_request_1.clone());
-            view_cache.register_statement(&"q2".into(), create_request_2.clone());
+            view_cache
+                .register_statement(&"q1".into(), create_request_1.clone())
+                .await;
+            view_cache
+                .register_statement(&"q2".into(), create_request_2.clone())
+                .await;
 
             assert_eq!(
-                view_cache.view_create_request_from_name(&"q1".into()),
+                view_cache.view_create_request_from_name(&"q1".into()).await,
                 Some(create_request_1)
             );
             assert_eq!(
-                view_cache.view_create_request_from_name(&"q2".into()),
+                view_cache.view_create_request_from_name(&"q2".into()).await,
                 Some(create_request_2)
             );
 
-            view_cache.clear();
+            view_cache.clear().await;
 
-            assert_eq!(view_cache.view_create_request_from_name(&"q1".into()), None);
-            assert_eq!(view_cache.view_create_request_from_name(&"q2".into()), None);
-            assert!(global.read().unwrap().is_empty());
+            assert_eq!(
+                view_cache.view_create_request_from_name(&"q1".into()).await,
+                None
+            );
+            assert_eq!(
+                view_cache.view_create_request_from_name(&"q2".into()).await,
+                None
+            );
+            assert!(global.read().await.is_empty());
         }
     }
 

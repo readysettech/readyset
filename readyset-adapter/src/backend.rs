@@ -1615,7 +1615,7 @@ where
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         // If we have another query with the same name, drop that query first
         if let Some(name) = name {
-            if let Some(view_request) = self.noria.view_create_request_from_name(name) {
+            if let Some(view_request) = self.noria.view_create_request_from_name(name).await {
                 warn!(
                     // FIXME(ENG-2499): Use correct dialect.
                     statement = %Sensitive(&view_request.statement.display(nom_sql::Dialect::MySQL)),
@@ -1665,7 +1665,7 @@ where
         &mut self,
         name: &Relation,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
-        let maybe_view_request = self.noria.view_create_request_from_name(name);
+        let maybe_view_request = self.noria.view_create_request_from_name(name).await;
         self.noria.drop_view(name).await?;
         if let Some(view_request) = maybe_view_request {
             // drop_query() should not be called if we have no view for this query.

@@ -18,7 +18,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
-use std::sync::{mpsc, Arc, RwLock};
+use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
 use benchmarks::utils::backend::Backend;
@@ -33,6 +33,7 @@ use readyset_adapter::backend::noria_connector::{NoriaConnector, ReadBehavior};
 use readyset_client::consensus::AuthorityType;
 use readyset_client::{KeyComparison, ReadySetHandle, View, ViewCreateRequest, ViewQuery};
 use readyset_data::{DfValue, Dialect};
+use tokio::sync::RwLock;
 use vec1::Vec1;
 
 static REPORTING_INTERVAL: Duration = Duration::from_secs(10);

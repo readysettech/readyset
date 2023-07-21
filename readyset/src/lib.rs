@@ -13,7 +13,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::atomic::AtomicUsize;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, bail, ensure};
@@ -54,6 +54,7 @@ use readyset_util::redacted::RedactedString;
 use readyset_util::shutdown;
 use readyset_version::*;
 use tokio::net;
+use tokio::sync::RwLock;
 use tokio::time::timeout;
 use tokio_stream::wrappers::TcpListenerStream;
 use tracing::{debug, debug_span, error, info, info_span, span, warn, Level};

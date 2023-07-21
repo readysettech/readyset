@@ -5,7 +5,7 @@ use std::io::Write;
 use std::iter::FromIterator;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicUsize;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::{io, mem};
 
@@ -25,6 +25,7 @@ use readyset_mysql::{MySqlQueryHandler, MySqlUpstream};
 use readyset_psql::{PostgreSqlQueryHandler, PostgreSqlUpstream};
 use readyset_server::{Builder, LocalAuthority, ReuseConfigType};
 use readyset_util::shutdown::ShutdownSender;
+use tokio::sync::RwLock;
 use tokio::time::sleep;
 use {mysql_async as mysql, tokio_postgres as pgsql};
 
