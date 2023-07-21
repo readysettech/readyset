@@ -68,7 +68,7 @@ use super::sql::Recipe;
 use crate::controller::domain_handle::DomainHandle;
 use crate::controller::migrate::materialization::Materializations;
 use crate::controller::migrate::scheduling::Scheduler;
-use crate::controller::migrate::{routing, DomainMigrationPlan, Migration};
+use crate::controller::migrate::{routing, DomainMigrationMode, DomainMigrationPlan, Migration};
 use crate::controller::sql::Schema;
 use crate::controller::{
     schema, ControllerState, DomainPlacementRestriction, NodeRestrictionKey, Worker,
@@ -1516,7 +1516,8 @@ impl DfState {
         domain_nodes: &HashMap<DomainIndex, HashSet<NodeIndex>>,
     ) -> ReadySetResult<DomainMigrationPlan> {
         info!("Planning recovery");
-        let mut dmp = DomainMigrationPlan::new(self.domain_settings());
+        let mut dmp =
+            DomainMigrationPlan::new(DomainMigrationMode::Recover, self.domain_settings());
         let domain_nodes = domain_nodes
             .iter()
             .map(|(idx, nm)| (*idx, nm.iter().copied().collect::<Vec<_>>()))
@@ -1580,7 +1581,6 @@ impl DfState {
         new_materializations.redundant_partial = self.materializations.redundant_partial.clone();
         new_materializations.tag_generator = self.materializations.tag_generator;
         new_materializations.config = self.materializations.config.clone();
-        new_materializations.pending_recovery = true;
 
         self.materializations = new_materializations;
     }

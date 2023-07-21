@@ -156,7 +156,7 @@ impl<'a> Plan<'a> {
         // if we are recovering, we must build the paths again. Otherwise
         // if we're full and we already have some paths added... (either this run, or from previous
         // runs)
-        if !self.m.pending_recovery && !self.partial && (!self.paths.is_empty() || self.has_paths) {
+        if !self.dmp.is_recovery() && !self.partial && (!self.paths.is_empty() || self.has_paths) {
             // ...don't add any more replay paths, because fully materialized nodes should not have
             // one replay path per index. that would cause us to replay several times, even though
             // one full replay should always be sufficient.  we do need to keep track of the fact

@@ -139,16 +139,7 @@ pub(in crate::controller) struct Materializations {
 
     pub(in crate::controller) tag_generator: usize,
 
-    #[serde(skip, default = "get_pending_recovery")]
-    pub(in crate::controller) pending_recovery: bool,
-
     pub(crate) config: Config,
-}
-
-/// Helper function to deserialize the `pending_recovery` field
-/// as `true`.
-fn get_pending_recovery() -> bool {
-    true
 }
 
 impl Materializations {
@@ -168,8 +159,6 @@ impl Materializations {
             partial: HashSet::default(),
 
             tag_generator: 0,
-
-            pending_recovery: false,
 
             config: Default::default(),
         }
@@ -1132,8 +1121,6 @@ impl Materializations {
         }
 
         self.added.clear();
-        self.pending_recovery = false;
-
         Ok(())
     }
 

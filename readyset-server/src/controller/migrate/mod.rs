@@ -214,12 +214,33 @@ pub struct DomainSettings {
     pub num_replicas: usize,
 }
 
+/// Mode for constructing and executing a [`DomainMigrationPlan`]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DomainMigrationMode {
+    /// This plan is adding new nodes to an existing graph
+    Extend,
+    /// This plan is constructing domains, recovering the replay paths and performing full replays
+    /// for running (replicas of) domains already within the graph
+    Recover,
+}
+
+impl DomainMigrationMode {
+    /// Returns `true` if the domain migration mode is [`Recover`].
+    ///
+    /// [`Recover`]: DomainMigrationMode::Recover
+    #[must_use]
+    pub fn is_recover(&self) -> bool {
+        matches!(self, Self::Recover)
+    }
+}
+
 /// A store for planned migration operations (spawning domains and sending messages).
 ///
 /// This behaves a bit like a map of `DomainHandle`s.
 #[derive(Debug)]
 #[must_use]
 pub struct DomainMigrationPlan {
+    mode: DomainMigrationMode,
     /// An (ordered!) list of domain requests to send on application.
     stored: VecDeque<StoredDomainRequest>,
     /// A list of domains to instantiate on application.
@@ -274,11 +295,12 @@ impl<'df> MigrationPlan<'df> {
 }
 
 impl DomainMigrationPlan {
-    /// Make a new `DomainMigrationPlan` with the given domains
-    pub fn new(domains: HashMap<DomainIndex, DomainSettings>) -> Self {
+    /// Make a new `DomainMigrationPlan` with the given mode and domains
+    pub fn new(mode: DomainMigrationMode, domains: HashMap<DomainIndex, DomainSettings>) -> Self {
         Self {
             stored: VecDeque::new(),
             place: vec![],
+            mode,
             domains,
             failed_placement: vec![],
         }
@@ -445,6 +467,17 @@ impl DomainMigrationPlan {
     /// to run on
     pub fn failed_placement(&self) -> &[ReplicaAddress] {
         &self.failed_placement
+    }
+
+    /// Return the [`DomainMigrationMode`] for this plan
+    pub fn mode(&self) -> DomainMigrationMode {
+        self.mode
+    }
+
+    /// Returns true if this plan is recovering the replay paths and performing replays for existing
+    /// nodes, or `false` if we adding new nodes to an existing graph
+    pub fn is_recovery(&self) -> bool {
+        self.mode().is_recover()
     }
 }
 
@@ -849,7 +882,10 @@ impl<'df> Migration<'df> {
 
         let start = self.start;
         let dataflow_state = self.dataflow_state;
-        let mut dmp = DomainMigrationPlan::new(dataflow_state.domain_settings());
+        let mut dmp = DomainMigrationPlan::new(
+            DomainMigrationMode::Extend,
+            dataflow_state.domain_settings(),
+        );
 
         let mut added = 0;
         let mut dropped = 0;
@@ -1135,7 +1171,10 @@ fn plan_add_nodes(
 
         // Boot up new domains (they'll ignore all updates for now)
         debug!("booting new domains");
-        let mut dmp = DomainMigrationPlan::new(dataflow_state.domain_settings());
+        let mut dmp = DomainMigrationPlan::new(
+            DomainMigrationMode::Extend,
+            dataflow_state.domain_settings(),
+        );
         let mut scheduler = Scheduler::new(dataflow_state, worker)?;
 
         for domain in changed_domains {
@@ -1272,7 +1311,10 @@ fn plan_drop_nodes(
     dataflow_state: &mut DfState,
     removals: HashSet<NodeIndex>,
 ) -> ReadySetResult<DomainMigrationPlan> {
-    let mut dmp = DomainMigrationPlan::new(dataflow_state.domain_settings());
+    let mut dmp = DomainMigrationPlan::new(
+        DomainMigrationMode::Extend,
+        dataflow_state.domain_settings(),
+    );
     remove_nodes(dataflow_state, &mut dmp, &removals)?;
     Ok(dmp)
 }
