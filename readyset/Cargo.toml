@@ -9,7 +9,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0"
 async-trait = "0.1"
-clap = { version = "4.2", features = ["derive","env"] }
+clap = { workspace = true, features = ["derive","env"] }
 futures-util = "0.3.0"
 fail = "0.5.0"
 failpoint-macros = { path = "../failpoint-macros" }

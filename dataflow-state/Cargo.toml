@@ -9,7 +9,7 @@ edition = "2021"
 ahash = "0.7"
 anyhow = "1.0"
 bincode = "1.0.0"
-clap = { version = "4.2", features = ["derive","env"] }
+clap = { workspace = true, features = ["derive","env"] }
 derive_more = "0.99.11"
 hashbag = "0.1.2"
 indexmap = "1.1.0"

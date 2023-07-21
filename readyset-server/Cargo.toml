@@ -22,7 +22,7 @@ redact_sensitive = ["readyset-util/redact_sensitive"]
 
 
 [dependencies]
-clap = { version = "4.2", features = ["derive","env"] }
+clap = { workspace = true, features = ["derive","env"] }
 anyhow = "1.0"
 thiserror = "1.0.26"
 ahash = "0.7"

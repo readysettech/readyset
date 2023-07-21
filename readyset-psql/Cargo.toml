@@ -7,7 +7,7 @@ edition = "2021"
 
 
 [dependencies]
-clap = { version = "4.2", features = ["derive","env"] }
+clap = { workspace = true, features = ["derive","env"] }
 async-trait = "0.1"
 lazy_static = "1.0"
 readyset-client = { path = "../readyset-client/" }

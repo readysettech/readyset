@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.38"
-clap = { version = "4.2", features = ["derive","env"] }
+clap = { workspace = true, features = ["derive","env"] }
 console = "0.15.5"
 derive_more = "0.99.11"
 hex = "0.4.3"

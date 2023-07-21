@@ -14,7 +14,7 @@ thiserror = "1.0.30"
 tokio = { workspace = true, features = ["full"] }
 tokio-postgres = { workspace = true, features = ["with-chrono-0_4"] }
 postgres-native-tls = { workspace = true }
-clap = { version = "4.2", features = ["derive","env"] }
+clap = { workspace = true, features = ["derive","env"] }
 serde = { version = "1.0", features = ["derive"] }
 readyset-util = { path = "../readyset-util" }
 readyset-errors = { path = "../readyset-errors" }
