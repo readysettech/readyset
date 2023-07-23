@@ -18,15 +18,15 @@ pub use mir::{Column, NodeIndex};
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
     BinaryOperator, ColumnSpecification, CompoundSelectOperator, CreateTableBody, Expr,
-    FieldDefinitionExpr, FieldReference, FunctionExpr, LimitClause, Literal, OrderClause,
+    FieldDefinitionExpr, FieldReference, FunctionExpr, InValue, LimitClause, Literal, OrderClause,
     OrderType, Relation, SqlIdentifier, TableKey,
 };
 use petgraph::visit::Reversed;
 use petgraph::Direction;
 use readyset_client::ViewPlaceholder;
 use readyset_errors::{
-    internal, internal_err, invalid_err, invariant, invariant_eq, unsupported, ReadySetError,
-    ReadySetResult,
+    internal, internal_err, invalid, invalid_err, invariant, invariant_eq, unsupported,
+    ReadySetError, ReadySetResult,
 };
 use readyset_sql_passes::is_correlated;
 use readyset_util::redacted::Sensitive;
@@ -1328,6 +1328,88 @@ impl SqlToMirConverter {
             }
             Expr::Call(_) => {
                 internal!("Function calls should have been handled by projection earlier")
+            }
+            Expr::In {
+                lhs,
+                rhs: InValue::Subquery(subquery),
+                negated,
+            } => {
+                // σ[lhs IN (π[x]R₂)](R₁)
+                //
+                // is compiled like
+                //
+                // R₁ ⋈[lhs ≡ rhs] π[DISTINCT x AS rhs](R₂)
+
+                if *negated {
+                    unsupported!("NOT IN is not yet supported")
+                }
+                let (lhs, parent) = match &**lhs {
+                    Expr::Column(col) => (col.clone(), parent),
+                    expr => {
+                        // The lhs is a non-column expr, so we need to project it first
+                        let label = lhs.display(nom_sql::Dialect::MySQL).to_string();
+                        let prj = self.make_project_node(
+                            query_name,
+                            self.generate_label(&"in_lhs_project".into()),
+                            parent,
+                            self.mir_graph
+                                .columns(parent)
+                                .into_iter()
+                                .map(ProjectExpr::Column)
+                                .chain(iter::once(ProjectExpr::Expr {
+                                    alias: label.clone().into(),
+                                    expr: expr.clone(),
+                                }))
+                                .collect(),
+                        );
+                        (
+                            nom_sql::Column {
+                                name: label.into(),
+                                table: None,
+                            },
+                            prj,
+                        )
+                    }
+                };
+
+                let query_graph = to_query_graph((**subquery).clone())?;
+                let subquery_leaf = self.named_query_to_mir(
+                    query_name,
+                    &query_graph,
+                    &HashMap::new(),
+                    LeafBehavior::Anonymous,
+                )?;
+
+                let cols = self.columns(subquery_leaf);
+                if cols.len() != 1 {
+                    invalid!("Subquery on right-hand side of IN must have exactly one column");
+                }
+                let col = cols.into_iter().next().expect("Just checked");
+                let distinct = self.make_distinct_node(
+                    query_name,
+                    self.generate_label(&"in_subquery_distinct".into()),
+                    subquery_leaf,
+                    vec![col.clone()],
+                );
+
+                self.make_join_node(
+                    query_name,
+                    self.generate_label(&"join_in_subquery".into()),
+                    &[JoinPredicate {
+                        left: lhs,
+                        right: nom_sql::Column {
+                            name: col.name,
+                            table: col.table,
+                        },
+                    }],
+                    parent,
+                    distinct,
+                    if is_correlated(subquery) {
+                        JoinKind::Dependent
+                    } else {
+                        JoinKind::Inner
+                    },
+                )?
             }
             Expr::NestedSelect(_) => unsupported!("Nested selects not supported in filters"),
             _ => self.make_filter_node(

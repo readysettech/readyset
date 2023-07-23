@@ -1,0 +1,46 @@
+statement ok
+create table t1 (x int, y int);
+
+statement ok
+create table t2 (x int, y int);
+
+statement ok
+insert into t1 (x, y)
+values
+(1, 1),
+(2, 2),
+(3, 3);
+
+statement ok
+insert into t2 (x, y)
+values
+(1, 1),
+(1, 1);
+
+
+query I nosort
+select count(*) from t1 where x in (select x from t2);
+----
+1
+
+
+query I nosort
+select y from t1 where x in (select x + 1 from t2 where y = 1);
+----
+2
+
+
+query I nosort
+select y from t1 where (x + 1) in (select x + 1 from t2 where y = 1);
+----
+1
+
+
+query I rowsort
+select y from t1
+where
+(x + 1) in (select x + 1 from t2 where y = 1)
+OR y = 2
+----
+1
+2
