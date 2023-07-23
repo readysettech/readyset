@@ -1035,6 +1035,52 @@ impl SqlToMirConverter {
         ))
     }
 
+    /// Make a series of nodes coresponding to an "antijoin" - emitting all rows in the left node
+    /// that do *not* join to any of the rows in the right based on the given join predicate
+    fn make_antijoin(
+        &mut self,
+        query_name: &Relation,
+        name: Relation,
+        join_predicates: &[JoinPredicate],
+        left_node: NodeIndex,
+        right_node: NodeIndex,
+    ) -> ReadySetResult<NodeIndex> {
+        let mark_col = SqlIdentifier::from("__mark");
+        let right_mark = self.make_project_node(
+            query_name,
+            self.generate_label(&format!("{}_antijoin_mark", name.display_unquoted()).into()),
+            right_node,
+            self.columns(right_node)
+                .into_iter()
+                .map(ProjectExpr::Column)
+                .chain(iter::once(ProjectExpr::Expr {
+                    expr: Expr::Literal(Literal::Integer(0)),
+                    alias: mark_col.clone(),
+                }))
+                .collect(),
+        );
+
+        let join = self.make_join_node(
+            query_name,
+            name.clone(),
+            join_predicates,
+            left_node,
+            right_mark,
+            JoinKind::Left,
+        )?;
+
+        Ok(self.make_filter_node(
+            query_name,
+            self.generate_label(&format!("{}_antijoin_filter", name.display_unquoted()).into()),
+            join,
+            Expr::BinaryOp {
+                lhs: Box::new(Expr::Column(mark_col.into())),
+                op: BinaryOperator::Is,
+                rhs: Box::new(Expr::Literal(Literal::Null)),
+            },
+        ))
+    }
+
     fn make_join_aggregates_node(
         &mut self,
         query_name: &Relation,
@@ -1334,15 +1380,20 @@ impl SqlToMirConverter {
                 rhs: InValue::Subquery(subquery),
                 negated,
             } => {
-                // σ[lhs IN (π[x]R₂)](R₁)
+                //     σ[lhs IN π[x]R₂](R₁)
                 //
                 // is compiled like
                 //
-                // R₁ ⋈[lhs ≡ rhs] π[DISTINCT x AS rhs](R₂)
+                //     R₁ ⋈[lhs ≡ rhs] π[DISTINCT x AS rhs](R₂)
+                //
+                // and
+                //
+                //     σ[lhs NOT IN π[x]R₂](R₁)
+                //
+                // is compiled like
+                //
+                //     σ[mark IS NULL](R₁ ⟕[lhs ≡ rhs] π[DISTINCT x AS rhs, 0 AS mark](R₂))
 
-                if *negated {
-                    unsupported!("NOT IN is not yet supported")
-                }
                 let (lhs, parent) = match &**lhs {
                     Expr::Column(col) => (col.clone(), parent),
                     expr => {
@@ -1392,24 +1443,36 @@ impl SqlToMirConverter {
                     vec![col.clone()],
                 );
 
-                self.make_join_node(
-                    query_name,
-                    self.generate_label(&"join_in_subquery".into()),
-                    &[JoinPredicate {
-                        left: lhs,
-                        right: nom_sql::Column {
-                            name: col.name,
-                            table: col.table,
-                        },
-                    }],
-                    parent,
-                    distinct,
-                    if is_correlated(subquery) {
-                        JoinKind::Dependent
-                    } else {
-                        JoinKind::Inner
+                let join_preds = &[JoinPredicate {
+                    left: lhs,
+                    right: nom_sql::Column {
+                        name: col.name,
+                        table: col.table,
                     },
-                )?
+                }];
+
+                if *negated {
+                    self.make_antijoin(
+                        query_name,
+                        self.generate_label(&"join_not_in_subquery".into()),
+                        join_preds,
+                        parent,
+                        distinct,
+                    )?
+                } else {
+                    self.make_join_node(
+                        query_name,
+                        self.generate_label(&"join_in_subquery".into()),
+                        join_preds,
+                        parent,
+                        distinct,
+                        if is_correlated(subquery) {
+                            JoinKind::Dependent
+                        } else {
+                            JoinKind::Inner
+                        },
+                    )?
+                }
             }
             Expr::NestedSelect(_) => unsupported!("Nested selects not supported in filters"),
             _ => self.make_filter_node(

@@ -44,3 +44,10 @@ OR y = 2
 ----
 1
 2
+
+query I rowsort
+select y from t1
+where x not in (select x from t2)
+----
+2
+3
