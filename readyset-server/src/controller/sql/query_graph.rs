@@ -642,8 +642,8 @@ fn classify_conditionals(
         Expr::In {
             rhs: InValue::Subquery(..),
             ..
-        } => unsupported!("IN with subqueries is not yet supported"),
-        Expr::Call(_)
+        }
+        | Expr::Call(_)
         | Expr::Literal(_)
         | Expr::UnaryOp { .. }
         | Expr::OpAny { .. }
