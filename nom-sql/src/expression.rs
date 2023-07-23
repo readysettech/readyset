@@ -788,6 +788,8 @@ fn operator_suffix(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], OperatorSuffix>
 #[derive(Debug, Clone)]
 enum TokenTree {
     Infix(BinaryOperator),
+    In,
+    NotIn,
     Prefix(UnaryOperator),
     Primary(Expr),
     Group(Vec<TokenTree>),
@@ -877,8 +879,20 @@ fn binary_operator_no_and_or(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Binar
     ))(i)
 }
 
+fn in_or_not_in(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], TokenTree> {
+    alt((value(TokenTree::In, tag_no_case("in")), |i| {
+        let (i, _) = tag_no_case("not")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("in")(i)?;
+        Ok((i, TokenTree::NotIn))
+    }))(i)
+}
+
 fn infix_no_and_or(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], TokenTree> {
-    map(binary_operator_no_and_or, TokenTree::Infix)(i)
+    alt((
+        in_or_not_in,
+        map(binary_operator_no_and_or, TokenTree::Infix),
+    ))(i)
 }
 
 fn binary_operator(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], BinaryOperator> {
@@ -894,7 +908,7 @@ fn binary_operator(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], BinaryOperator>
 }
 
 fn infix(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], TokenTree> {
-    map(binary_operator, TokenTree::Infix)(i)
+    alt((in_or_not_in, map(binary_operator, TokenTree::Infix)))(i)
 }
 
 fn prefix(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], TokenTree> {
@@ -1087,6 +1101,7 @@ where
             Infix(LessOrEqual) => Affix::Infix(Precedence(7), Associativity::Right),
             Infix(Is) => Affix::Infix(Precedence(7), Associativity::Right),
             Infix(IsNot) => Affix::Infix(Precedence(7), Associativity::Right),
+            In | NotIn => Affix::Infix(Precedence(7), Associativity::Right),
             Infix(Add) => Affix::Infix(Precedence(11), Associativity::Right),
             Infix(Subtract) => Affix::Infix(Precedence(11), Associativity::Right),
             Infix(Multiply) => Affix::Infix(Precedence(12), Associativity::Right),
@@ -1152,6 +1167,34 @@ where
     ) -> Result<Self::Output, Self::Error> {
         let op = match op {
             TokenTree::Infix(op) => op,
+            TokenTree::In | TokenTree::NotIn => {
+                let rhs = match rhs {
+                    Expr::NestedSelect(stmt) => InValue::Subquery(stmt),
+                    // We checked for an opening paren when parsing IN, so this *must* be `lhs IN
+                    // (ROW(...))`
+                    expr @ Expr::Row { explicit: true, .. } => InValue::List(vec![expr]),
+                    // This is either
+                    //   `lhs IN (1, 2, ...)`
+                    // or
+                    //   `expr IN ((1, 2, ...))`
+                    //
+                    // The latter case we handle incorrectly right now (TODO) because we don't
+                    // support row exprs.
+                    Expr::Row {
+                        explicit: false,
+                        exprs,
+                    } => InValue::List(exprs),
+                    // We checked for an opening paren when parsing IN, so this *must* be `lhs IN
+                    // (expr)`
+                    expr => InValue::List(vec![expr]),
+                };
+
+                return Ok(Expr::In {
+                    lhs: Box::new(lhs),
+                    rhs,
+                    negated: matches!(op, TokenTree::NotIn),
+                });
+            }
             _ => unreachable!("Invalid fixity for infix op"),
         };
 
@@ -1180,56 +1223,6 @@ where
         _op: Self::Input,
     ) -> Result<Self::Output, Self::Error> {
         unreachable!("No postfix operators yet")
-    }
-}
-
-fn in_lhs(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Expr> {
-    move |i| {
-        alt((
-            map(function_expr(dialect), Expr::Call),
-            map(literal(dialect), Expr::Literal),
-            case_when_expr(dialect),
-            map(column_identifier_no_alias(dialect), Expr::Column),
-        ))(i)
-    }
-}
-
-fn in_rhs(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], InValue> {
-    move |i| {
-        alt((
-            map(nested_selection(dialect), |sel| {
-                InValue::Subquery(Box::new(sel))
-            }),
-            map(
-                separated_list0(ws_sep_comma, expression(dialect)),
-                InValue::List,
-            ),
-        ))(i)
-    }
-}
-
-fn in_expr(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Expr> {
-    move |i| {
-        let (i, lhs) = terminated(in_lhs(dialect), whitespace1)(i)?;
-
-        let (i, not) = opt(terminated(tag_no_case("not"), whitespace1))(i)?;
-        let (i, _) = tag_no_case("in")(i)?;
-        let (i, _) = whitespace0(i)?;
-
-        let (i, _) = char('(')(i)?;
-        let (i, _) = whitespace0(i)?;
-        let (i, rhs) = in_rhs(dialect)(i)?;
-        let (i, _) = whitespace0(i)?;
-        let (i, _) = char(')')(i)?;
-
-        Ok((
-            i,
-            Expr::In {
-                lhs: Box::new(lhs),
-                rhs,
-                negated: not.is_some(),
-            },
-        ))
     }
 }
 
@@ -1509,7 +1502,6 @@ pub(crate) fn simple_expr(
             nested_select(dialect),
             exists_expr(dialect),
             between_expr(dialect),
-            in_expr(dialect),
             row_expr_explicit(dialect),
             row_expr_implicit(dialect),
             map(function_expr(dialect), Expr::Call),
@@ -1554,6 +1546,23 @@ mod tests {
     #[proptest]
     fn arbitrary_expr_doesnt_stack_overflow(_expr: Expr) {}
 
+    #[test]
+    fn in_lhs_parens() {
+        let res = test_parse!(expression(Dialect::MySQL), b"(x + 1) IN (2)");
+        assert_eq!(
+            res,
+            Expr::In {
+                lhs: Box::new(Expr::BinaryOp {
+                    lhs: Box::new(Expr::Column("x".into())),
+                    op: BinaryOperator::Add,
+                    rhs: Box::new(Expr::Literal(1u32.into()))
+                }),
+                rhs: InValue::List(vec![Expr::Literal(2u32.into())]),
+                negated: false
+            }
+        );
+    }
+
     pub mod precedence {
         use super::*;
 
@@ -1588,6 +1597,11 @@ mod tests {
                 "(table_1.column_2 NOT BETWEEN 1 AND 5 OR table_1.column_2 NOT BETWEEN 1 AND 5)",
                 "(table_1.column_2 NOT BETWEEN 1 AND 5) OR (table_1.column_2 NOT BETWEEN 1 AND 5)",
             )
+        }
+
+        #[test]
+        fn plus_and_in() {
+            parses_same(Dialect::MySQL, "x + 1 in (2)", "((x + 1) in (2))");
         }
     }
 
@@ -2841,6 +2855,16 @@ mod tests {
                     "'[1, 2, 3]'::json ->> 0 like '[3, 2, 1]'::json ->> 2",
                     "('[1, 2, 3]'::json ->> 0) like ('[3, 2, 1]'::json ->> 2)",
                 )
+            }
+
+            #[test]
+            #[ignore = "TODO once we support ROW exprs in dataflow"]
+            fn in_rhs_row_expr() {
+                parses_same(
+                    Dialect::PostgreSQL,
+                    "lhs IN ((rhs1, rhs2))",
+                    "lhs IN (ROW(rhs1, rhs2))",
+                );
             }
         }
 
