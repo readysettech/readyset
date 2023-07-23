@@ -23,6 +23,12 @@ pub struct Column {
     pub table: Option<Relation>,
 }
 
+impl From<SqlIdentifier> for Column {
+    fn from(name: SqlIdentifier) -> Self {
+        Column { name, table: None }
+    }
+}
+
 impl<'a> From<&'a str> for Column {
     fn from(c: &str) -> Column {
         match c.split_once('.') {
