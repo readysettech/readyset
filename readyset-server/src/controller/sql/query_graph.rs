@@ -654,6 +654,7 @@ fn classify_conditionals(
         | Expr::NestedSelect(_)
         | Expr::Cast { .. }
         | Expr::Array(_)
+        | Expr::Row { .. }
         | Expr::Variable(_) => global.push(ce.clone()),
     }
     Ok(())

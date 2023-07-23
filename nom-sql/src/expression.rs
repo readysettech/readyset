@@ -8,7 +8,7 @@ use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::character::complete::char;
 use nom::combinator::{complete, map, opt, value};
-use nom::multi::{many0, many1, separated_list0};
+use nom::multi::{many0, many1, separated_list0, separated_list1};
 use nom::sequence::{delimited, pair, preceded, terminated, tuple};
 use nom::Parser;
 use nom_locate::LocatedSpan;
@@ -485,6 +485,13 @@ pub enum Expr {
     /// `ARRAY[expr1, expr2, ...]`
     Array(Vec<Expr>),
 
+    /// `ROW` constructor: `ROW(expr1, expr2, ...)` or `(expr1, expr2, ...)`
+    Row {
+        /// Is the `ROW` keyword explicit?
+        explicit: bool,
+        exprs: Vec<Expr>,
+    },
+
     /// A variable reference
     Variable(Variable),
 }
@@ -604,6 +611,19 @@ impl Expr {
                     write_value(expr, dialect, f)?;
                 }
                 write!(f, "]")
+            }
+            Expr::Row { explicit, exprs } => {
+                if *explicit {
+                    write!(f, "ROW")?;
+                }
+                write!(f, "(")?;
+                for (i, expr) in exprs.iter().enumerate() {
+                    if i != 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", expr.display(dialect))?;
+                }
+                write!(f, ")")
             }
             Expr::Variable(var) => write!(f, "{}", var),
         })
@@ -1426,6 +1446,59 @@ fn array_expr(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&
     }
 }
 
+fn row_expr_explicit(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Expr> {
+    move |i| {
+        let (i, _) = tag_no_case("row")(i)?;
+        let (i, _) = whitespace0(i)?;
+        let (i, _) = tag("(")(i)?;
+        let (i, exprs) = separated_list1(
+            ws_sep_comma,
+            alt((
+                expression(dialect),
+                map(bracketed_expr_list(dialect), Expr::Array),
+            )),
+        )(i)?;
+        let (i, _) = tag(")")(i)?;
+
+        Ok((
+            i,
+            Expr::Row {
+                explicit: true,
+                exprs,
+            },
+        ))
+    }
+}
+
+fn row_expr_implicit(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Expr> {
+    move |i| {
+        // Implicit row exprs must have two or more elements
+        let (i, _) = tag("(")(i)?;
+        let (i, first_expr) = expression(dialect)(i)?;
+        let (i, _) = ws_sep_comma(i)?;
+        let (i, rest_exprs) = separated_list1(
+            ws_sep_comma,
+            alt((
+                expression(dialect),
+                map(bracketed_expr_list(dialect), Expr::Array),
+            )),
+        )(i)?;
+        let (i, _) = tag(")")(i)?;
+
+        let mut exprs = Vec::with_capacity(rest_exprs.len() + 1);
+        exprs.push(first_expr);
+        exprs.extend(rest_exprs);
+
+        Ok((
+            i,
+            Expr::Row {
+                explicit: false,
+                exprs,
+            },
+        ))
+    }
+}
+
 // Expressions without (binary or unary) operators
 pub(crate) fn simple_expr(
     dialect: Dialect,
@@ -1437,6 +1510,8 @@ pub(crate) fn simple_expr(
             exists_expr(dialect),
             between_expr(dialect),
             in_expr(dialect),
+            row_expr_explicit(dialect),
+            row_expr_implicit(dialect),
             map(function_expr(dialect), Expr::Call),
             map(literal(dialect), Expr::Literal),
             case_when_expr(dialect),
@@ -3120,6 +3195,49 @@ mod tests {
             let res = expr.display(Dialect::PostgreSQL).to_string();
 
             assert_eq!(res, "ARRAY[[1,('2'::INT)]]");
+        }
+
+        #[test]
+        fn row_expr_explicit() {
+            assert_eq!(
+                test_parse!(expression(Dialect::PostgreSQL), b"ROW(1,2,3)"),
+                Expr::Row {
+                    explicit: true,
+                    exprs: vec![
+                        Expr::Literal(1u32.into()),
+                        Expr::Literal(2u32.into()),
+                        Expr::Literal(3u32.into())
+                    ]
+                }
+            );
+            assert_eq!(
+                test_parse!(expression(Dialect::PostgreSQL), b"ROW(7)"),
+                Expr::Row {
+                    explicit: true,
+                    exprs: vec![Expr::Literal(7u32.into())]
+                }
+            );
+        }
+
+        #[test]
+        fn row_expr_implicit() {
+            assert_eq!(
+                test_parse!(expression(Dialect::PostgreSQL), b"(1,2,3)"),
+                Expr::Row {
+                    explicit: false,
+                    exprs: vec![
+                        Expr::Literal(1u32.into()),
+                        Expr::Literal(2u32.into()),
+                        Expr::Literal(3u32.into())
+                    ]
+                }
+            );
+
+            // Only one expr is not a ROW expr
+            assert_eq!(
+                test_parse!(expression(Dialect::PostgreSQL), b"(7)"),
+                Expr::Literal(7u32.into())
+            );
         }
     }
 }

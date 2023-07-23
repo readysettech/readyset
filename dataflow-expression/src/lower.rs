@@ -1001,6 +1001,7 @@ impl Expr {
                     ty,
                 })
             }
+            AstExpr::Row { .. } => unsupported!("Row expressions not currently supported"),
             AstExpr::Exists(_) => unsupported!("EXISTS not currently supported"),
             AstExpr::Variable(_) => unsupported!("Variables not currently supported"),
             AstExpr::Between { .. } | AstExpr::NestedSelect(_) | AstExpr::In { .. } => {

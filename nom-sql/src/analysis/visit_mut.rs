@@ -474,6 +474,12 @@ pub fn walk_expr<'ast, V: VisitorMut<'ast>>(
             }
             Ok(())
         }
+        Expr::Row { exprs, .. } => {
+            for expr in exprs {
+                visitor.visit_expr(expr)?;
+            }
+            Ok(())
+        }
         Expr::Variable(var) => visitor.visit_variable(var),
     }
 }

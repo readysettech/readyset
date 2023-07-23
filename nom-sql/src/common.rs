@@ -8,7 +8,7 @@ use itertools::Itertools;
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case, take_until};
 use nom::character::complete::{digit1, line_ending};
-use nom::combinator::{map, map_res, opt};
+use nom::combinator::{map, map_res, not, opt, peek};
 use nom::error::{ErrorKind, ParseError};
 use nom::multi::{separated_list0, separated_list1};
 use nom::sequence::{delimited, pair, preceded, separated_pair, terminated, tuple};
@@ -606,7 +606,16 @@ pub fn column_identifier_no_alias(
             (Some(t), None) | (None, Some(t)) => Some(Relation::from(t)),
             (None, None) => None,
         };
+
         let (i, name) = dialect.identifier()(i)?;
+
+        let i = if name == "row" {
+            let (i, _) = not(peek(terminated(whitespace0, tag("("))))(i)?;
+            i
+        } else {
+            i
+        };
+
         Ok((i, Column { name, table }))
     }
 }

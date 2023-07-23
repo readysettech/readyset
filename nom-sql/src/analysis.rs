@@ -77,10 +77,12 @@ impl<'a> ReferredColumnsIter<'a> {
                     }
                 }
             }
-            Expr::Array(exprs) => exprs.split_first().and_then(|(expr, exprs)| {
-                self.exprs_to_visit.extend(exprs);
-                self.visit_expr(expr)
-            }),
+            Expr::Array(exprs) | Expr::Row { exprs, .. } => {
+                exprs.split_first().and_then(|(expr, exprs)| {
+                    self.exprs_to_visit.extend(exprs);
+                    self.visit_expr(expr)
+                })
+            }
             Expr::NestedSelect(_) => None,
             Expr::Variable(_) => None,
         }
@@ -186,10 +188,12 @@ impl<'a> ReferredColumnsMut<'a> {
                     }),
                 }
             }
-            Expr::Array(exprs) => exprs.split_first_mut().and_then(|(expr, exprs)| {
-                self.exprs_to_visit.extend(exprs);
-                self.visit_expr(expr)
-            }),
+            Expr::Array(exprs) | Expr::Row { exprs, .. } => {
+                exprs.split_first_mut().and_then(|(expr, exprs)| {
+                    self.exprs_to_visit.extend(exprs);
+                    self.visit_expr(expr)
+                })
+            }
             Expr::NestedSelect(_) => None,
             Expr::Variable(_) => None,
         }
@@ -380,7 +384,7 @@ pub fn contains_aggregate(expr: &Expr) -> bool {
                     InValue::List(exprs) => exprs.iter().any(contains_aggregate),
                 }
         }
-        Expr::Array(exprs) => exprs.iter().any(contains_aggregate),
+        Expr::Array(exprs) | Expr::Row { exprs, .. } => exprs.iter().any(contains_aggregate),
         Expr::Variable(_) => false,
     }
 }
@@ -466,7 +470,7 @@ impl Expr {
                 rhs: InValue::Subquery(_),
                 ..
             } => Box::new(iter::once(lhs.as_ref())) as _,
-            Expr::Array(exprs) => Box::new(exprs.iter()),
+            Expr::Array(exprs) | Expr::Row { exprs, .. } => Box::new(exprs.iter()),
         }
     }
 
