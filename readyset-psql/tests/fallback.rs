@@ -881,7 +881,6 @@ async fn insert_enum_value_appended_after_create_table() {
     shutdown_tx.shutdown().await;
 }
 
-#[ignore = "REA-3143 Test reproduces error due to known bug"]
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn insert_array_of_enum_value_appended_after_create_table() {

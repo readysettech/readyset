@@ -1813,18 +1813,7 @@ impl<'a> FromSql<'a> for DfValue {
         }
         match ty.kind() {
             Kind::Array(_) => mk_from_sql!(Array),
-            Kind::Enum(variants) => {
-                let variant_str = str::from_utf8(raw)?;
-                Ok(DfValue::from(
-                    variants
-                        .iter()
-                        .position(|v| v == variant_str)
-                        .ok_or("Unknown enum variant")?
-                        // To be compatible with mysql enums, we always represent enum values as
-                        // *1-indexed* (since mysql needs 0 to represent invalid values)
-                        + 1,
-                ))
-            }
+            Kind::Enum(_) => mk_from_sql!(&str),
             _ => match *ty {
                 Type::BOOL => mk_from_sql!(bool),
                 Type::CHAR => mk_from_sql!(i8),
