@@ -35,6 +35,7 @@ pub type VolumeId = String;
 pub type WorkerId = String;
 
 const CREATE_CACHE_STATEMENTS_PATH: &str = "create_cache_statements";
+const PERSISTENT_STATS_PATH: &str = "persistent_stats";
 
 /// A response to a `worker_heartbeat`, to inform the worker of its
 /// status within the system.
@@ -248,6 +249,22 @@ pub trait AuthorityControl: Send + Sync {
             stmts.extend(new_stmts.clone());
         })
         .await
+    }
+
+    /// Returns stats persisted in the authority. Wrapper around `Self::try_read`.
+    async fn persistent_stats<P: DeserializeOwned>(&self) -> ReadySetResult<Option<P>> {
+        self.try_read(PERSISTENT_STATS_PATH).await
+    }
+
+    /// Update the stats persisted in the authority. Wrapper around `read_modify_write`.
+    async fn update_persistent_stats<F, P: 'static>(&self, f: F) -> ReadySetResult<P>
+    where
+        F: Send + FnMut(Option<P>) -> ReadySetResult<P>,
+        P: Send + Serialize + DeserializeOwned + Clone,
+    {
+        self.read_modify_write(PERSISTENT_STATS_PATH, f)
+            .await
+            .flatten()
     }
 }
 

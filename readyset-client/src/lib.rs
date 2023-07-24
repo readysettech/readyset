@@ -138,6 +138,7 @@
 //! that wish to continue to issue ad-hoc MySQL or PostgreSQL queries through existing SQL client
 //! libraries.
 #![feature(
+    result_flattening,
     type_alias_impl_trait,
     stmt_expr_attributes,
     bound_map,
