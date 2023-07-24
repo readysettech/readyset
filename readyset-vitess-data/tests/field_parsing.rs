@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use readyset_data::DfValue;
 use readyset_vitess_data::field_parsing::vstream_value_to_noria_value;
 use vitess_grpc::query::Type;
@@ -17,7 +19,104 @@ fn int_parsing() {
         assert!(res.is_ok());
         assert_eq!(res.unwrap(), DfValue::Int(42));
 
-        let res = vstream_value_to_noria_value("hello".as_bytes(), Type::Int16);
+        let res = vstream_value_to_noria_value("hello".as_bytes(), *t);
         assert!(res.is_err());
     });
+}
+
+#[test]
+fn date_parsing() {
+    let res = vstream_value_to_noria_value("2023-07-24".as_bytes(), Type::Date);
+    assert!(res.is_ok());
+    assert_eq!(res.unwrap(), "2023-07-24".try_into().unwrap());
+
+    let res = vstream_value_to_noria_value("hello".as_bytes(), Type::Date);
+    assert!(res.is_err());
+}
+
+#[test]
+fn datetime_parsing() {
+    let res = vstream_value_to_noria_value("2023-07-24 12:34:56".as_bytes(), Type::Datetime);
+    assert!(res.is_ok());
+    assert_eq!(res.unwrap(), "2023-07-24 12:34:56".try_into().unwrap());
+
+    let res = vstream_value_to_noria_value("hello".as_bytes(), Type::Datetime);
+    assert!(res.is_err());
+}
+
+#[test]
+fn time_parsing() {
+    let res = vstream_value_to_noria_value("-12:34:56".as_bytes(), Type::Time);
+    assert!(res.is_ok());
+    assert_eq!(res.unwrap(), "-12:34:56".try_into().unwrap());
+
+    let res = vstream_value_to_noria_value("12:34:56".as_bytes(), Type::Time);
+    assert!(res.is_ok());
+    assert_eq!(res.unwrap(), "12:34:56".try_into().unwrap());
+
+    let res = vstream_value_to_noria_value("120:34:56".as_bytes(), Type::Time);
+    assert!(res.is_ok());
+    assert_eq!(res.unwrap(), "120:34:56".try_into().unwrap());
+
+    let res = vstream_value_to_noria_value("hello".as_bytes(), Type::Time);
+    assert!(res.is_err());
+}
+
+#[test]
+fn timestamp_parsing() {
+    let res =
+        vstream_value_to_noria_value("2038-01-19 03:14:07.499999".as_bytes(), Type::Timestamp);
+    assert!(res.is_ok());
+    assert_eq!(
+        res.unwrap(),
+        "2038-01-19 03:14:07.499999".try_into().unwrap()
+    );
+
+    let res = vstream_value_to_noria_value("hello".as_bytes(), Type::Timestamp);
+    assert!(res.is_err());
+}
+
+#[test]
+fn year_parsing() {
+    let res = vstream_value_to_noria_value("2023".as_bytes(), Type::Year);
+    assert!(res.is_ok());
+    assert_eq!(res.unwrap(), DfValue::Int(2023));
+
+    let res = vstream_value_to_noria_value("hello".as_bytes(), Type::Year);
+    assert!(res.is_err());
+}
+
+#[test]
+fn text_parsing() {
+    let res = vstream_value_to_noria_value("Hello, world!".as_bytes(), Type::Text);
+    assert!(res.is_ok());
+    assert_eq!(res.unwrap(), DfValue::Text("Hello, world!".into()));
+
+    let res = vstream_value_to_noria_value("Lorem ipsum.".as_bytes(), Type::Char);
+    assert!(res.is_ok());
+    assert_eq!(res.unwrap(), DfValue::Text("Lorem ipsum.".into()));
+
+    let res = vstream_value_to_noria_value("Short text".as_bytes(), Type::Varchar);
+    assert!(res.is_ok());
+    assert_eq!(res.unwrap(), DfValue::Text("Short text".into()));
+
+    let json = "{\"x\": 123}";
+    let res = vstream_value_to_noria_value(json.as_bytes(), Type::Json);
+    assert!(res.is_ok());
+    assert_eq!(res.unwrap(), DfValue::Text(json.into()));
+}
+
+#[test]
+fn binary_parsing() {
+    let raw_value = "binary data".as_bytes();
+    let binary_types = [Type::Blob, Type::Binary, Type::Varbinary];
+
+    for binary_type in binary_types.iter() {
+        let res = vstream_value_to_noria_value(raw_value, *binary_type);
+        assert!(res.is_ok());
+        assert_eq!(
+            res.unwrap(),
+            DfValue::ByteArray(Arc::new(raw_value.to_vec()))
+        );
+    }
 }
