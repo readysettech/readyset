@@ -81,7 +81,13 @@ impl Stream for Resultset {
         let project_field_types = self.project_field_types.clone();
         let next = match &mut self.get_mut().results {
             ResultsetInner::Empty => None,
-            ResultsetInner::ReadySet(i) => i.next().map(Ok),
+            ResultsetInner::ReadySet(i) => i.next().map(|values| {
+                let row = Row {
+                    values,
+                    project_field_types,
+                };
+                row.into_iter().map(PsqlValue::try_from).collect()
+            }),
             ResultsetInner::Stream { first_row, stream } => {
                 let row = match first_row.take() {
                     Some(row) => Some(Ok(row)),
@@ -113,13 +119,7 @@ impl Stream for Resultset {
             }
         };
 
-        Poll::Ready(next.map(|values| {
-            let row = Row {
-                values: values?,
-                project_field_types,
-            };
-            row.into_iter().map(PsqlValue::try_from).collect()
-        }))
+        Poll::Ready(next)
     }
 }
 
