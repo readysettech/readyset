@@ -993,21 +993,35 @@ impl DfState {
         // Copying the keys into a vec here is a workaround for a higher order
         // lifetime compile error in `external_request` that occurs if we simply
         // use keys().map() to pass into query_domains directly.
-        let domains: Vec<DomainIndex> = self.domains.keys().copied().collect();
-        let counts_per_domain: Vec<(DomainIndex, Array2<Vec<(NodeIndex, NodeSize)>>)> = self
-            .query_domains::<_, Vec<(NodeIndex, NodeSize)>>(
-                domains
-                    .into_iter()
-                    .map(|di| (di, DomainRequest::RequestNodeSizes)),
-            )
-            .try_collect()
-            .await?;
+        let counts_per_domain: Vec<(DomainIndex, Array2<Option<Vec<(NodeIndex, NodeSize)>>>)> = {
+            let requests = self
+                .domains
+                .keys()
+                .map(|di| (*di, DomainRequest::RequestNodeSizes))
+                .collect::<Vec<_>>();
+
+            stream::iter(requests)
+                .map(move |(domain, request)| {
+                    #[allow(clippy::indexing_slicing)] // came from self.domains
+                    self.domains[&domain]
+                        .send_to_healthy::<Vec<(NodeIndex, NodeSize)>>(request, &self.workers)
+                        .map(move |r| -> ReadySetResult<_> { Ok((domain, r?)) })
+                })
+                .buffer_unordered(CONCURRENT_REQUESTS)
+        }
+        .try_collect()
+        .await?;
+
+        let mut res = HashMap::new();
         let flat_counts = counts_per_domain
             .into_iter()
             .flat_map(|(_domain, per_shard_counts)| {
-                per_shard_counts.into_cells().into_iter().flatten()
+                per_shard_counts
+                    .into_cells()
+                    .into_iter()
+                    .flatten()
+                    .flatten()
             });
-        let mut res = HashMap::new();
         for (node_index, count) in flat_counts {
             // We may have multiple entries for the same node in the case of sharding, so this code
             // adds together the key counts for any duplicate nodes we come across:
