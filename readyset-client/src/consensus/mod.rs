@@ -23,6 +23,7 @@ mod standalone;
 pub use self::consul::ConsulAuthority;
 pub use self::local::{LocalAuthority, LocalAuthorityStore};
 pub use self::standalone::StandaloneAuthority;
+use crate::debug::stats::PersistentStats;
 use crate::ControllerDescriptor;
 
 // This should be an associated type on Authority but since Authority will only have one possible
@@ -252,15 +253,14 @@ pub trait AuthorityControl: Send + Sync {
     }
 
     /// Returns stats persisted in the authority. Wrapper around `Self::try_read`.
-    async fn persistent_stats<P: DeserializeOwned>(&self) -> ReadySetResult<Option<P>> {
+    async fn persistent_stats(&self) -> ReadySetResult<Option<PersistentStats>> {
         self.try_read(PERSISTENT_STATS_PATH).await
     }
 
     /// Update the stats persisted in the authority. Wrapper around `read_modify_write`.
-    async fn update_persistent_stats<F, P: 'static>(&self, f: F) -> ReadySetResult<P>
+    async fn update_persistent_stats<F>(&self, f: F) -> ReadySetResult<PersistentStats>
     where
-        F: Send + FnMut(Option<P>) -> ReadySetResult<P>,
-        P: Send + Serialize + DeserializeOwned + Clone,
+        F: Send + FnMut(Option<PersistentStats>) -> ReadySetResult<PersistentStats>,
     {
         self.read_modify_write(PERSISTENT_STATS_PATH, f)
             .await

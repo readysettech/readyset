@@ -44,6 +44,13 @@ pub struct NodeStats {
     pub probe_result: HashMap<String, String>,
 }
 
+/// Status that we persist in the Authority to make it available across restarts.
+#[derive(Clone, Default, Serialize, Deserialize)]
+pub struct PersistentStats {
+    /// Time in millis when the last snapshot was completed.
+    pub last_completed_snapshot: Option<u64>,
+}
+
 /// Statistics about the Soup data-flow.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GraphStats {

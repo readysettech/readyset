@@ -3,7 +3,7 @@ use std::fmt::{Debug, Formatter};
 use std::future;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{format_err, Context};
 use dataflow::node::{self, Column};
@@ -17,6 +17,7 @@ use readyset_client::consensus::{
     Authority, AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult,
     WorkerDescriptor, WorkerId, WorkerSchedulingConfig,
 };
+use readyset_client::debug::stats::PersistentStats;
 #[cfg(feature = "failure_injection")]
 use readyset_client::failpoints;
 use readyset_client::metrics::recorded;
@@ -678,6 +679,19 @@ impl Controller {
                 }
                 _ = self.leader_ready_notification.notified() => {
                     self.leader_ready.store(true, Ordering::Release);
+
+                    let now = SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap()
+                            .as_millis() as u64;
+
+                    if let Err(error) = self.authority.update_persistent_stats(|stats: Option<PersistentStats>| {
+                        let mut stats = stats.unwrap_or_default();
+                        stats.last_completed_snapshot = Some(now);
+                        Ok(stats)
+                    }).await {
+                        error!(%error, "Failed to persist status in the Authority");
+                    }
                 }
                 _ = self.shutdown_rx.recv() => {
                     info!("Controller shutting down after shutdown signal received");
