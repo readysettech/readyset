@@ -156,8 +156,6 @@ where
 macro_rules! eventually {
     ($(attempts: $attempts: expr,)? $(sleep: $sleep: expr,)? run_test: { $($test_body: tt)* },
             then_assert: |$test_res: pat_param| $($assert_body: tt)+) => {
-        use futures::FutureExt;
-
         let attempts = 40;
         let sleep = std::time::Duration::from_millis(500);
         // Shadow the above defaults if custom values were provided:
@@ -171,7 +169,7 @@ macro_rules! eventually {
                 // in the test failure results if they occur:
                 async { $($assert_body)* }.await;
             } else {
-                if async { $($assert_body)* }.catch_unwind().await.is_err() {
+                if ::futures::FutureExt::catch_unwind(async { $($assert_body)* }).await.is_err() {
                     println!("Assertion failed on attempt {attempt}, retrying after delay...");
                     tokio::time::sleep(sleep).await;
                 } else {
