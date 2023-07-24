@@ -480,18 +480,7 @@ mod tests {
     use postgres_types::ToSql;
 
     use super::*;
-    use crate::error::Error as BackendError;
     use crate::value::PsqlValue;
-
-    struct Value(PsqlValue);
-
-    impl TryFrom<Value> for PsqlValue {
-        type Error = BackendError;
-
-        fn try_from(v: Value) -> Result<Self, Self::Error> {
-            Ok(v.0)
-        }
-    }
 
     fn bytes_str(s: &str) -> BytesStr {
         let mut buf = BytesMut::new();
