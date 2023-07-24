@@ -435,6 +435,36 @@ impl<T> Array2<T> {
             })
         }
     }
+
+    /// Construct a new [`Array2`] of the same shape as `self` but with a different value type, by
+    /// mapping a function over all the values
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use array2::Array2;
+    ///
+    /// let mut my_array2: Array2<i32> = Array2::from_rows(vec![vec![1, 2, 3], vec![4, 5, 6]]);
+    ///
+    /// let res: Array2<String> = my_array2.map(|i| i.to_string());
+    /// assert_eq!(
+    ///     res,
+    ///     Array2::from_rows(vec![
+    ///         vec!["1".to_owned(), "2".to_owned(), "3".to_owned()],
+    ///         vec!["4".to_owned(), "5".to_owned(), "6".to_owned()]
+    ///     ])
+    /// );
+    /// ```
+    #[inline]
+    pub fn map<F, R>(&self, f: F) -> Array2<R>
+    where
+        F: Fn(&T) -> R,
+    {
+        Array2 {
+            row_size: self.row_size,
+            cells: self.cells.iter().map(f).collect(),
+        }
+    }
 }
 
 mod private {

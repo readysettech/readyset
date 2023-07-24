@@ -51,7 +51,6 @@ impl DomainHandle {
     /// Merge all addresses from the given [`DomainHandle`] into this [`DomainHandle`]
     pub(super) fn merge(&mut self, other: DomainHandle) {
         debug_assert_eq!(other.idx, self.idx);
-        debug_assert_eq!(other.shards.shape(), self.shards.shape());
         for (pos, wid) in other.shards.into_entries() {
             if wid.is_some() {
                 self.shards[pos] = wid;
@@ -176,5 +175,11 @@ impl DomainHandle {
                     replica,
                 })
             })
+    }
+
+    /// Returns a 2-dimensional array mapping shard index, to replica index, to whether that shard
+    /// replica has been placed onto a worker
+    pub(crate) fn placed_shard_replicas(&self) -> Array2<bool> {
+        self.shards.map(|addr| addr.is_some())
     }
 }

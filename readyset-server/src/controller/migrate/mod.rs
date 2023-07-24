@@ -86,7 +86,11 @@ impl StoredDomainRequest {
     ///
     /// Optionally returns another request to be sent afterwards as a follow up (up to the caller to
     /// decide when to send it).
-    pub async fn apply(self, mainline: &DfState) -> ReadySetResult<Option<StoredDomainRequest>> {
+    pub async fn apply(
+        mut self,
+        mainline: &DfState,
+        just_placed_shard_replicas: &HashMap<DomainIndex, Array2<bool>>,
+    ) -> ReadySetResult<Option<StoredDomainRequest>> {
         trace!(req=?self, "Applying domain request");
         let dom =
             mainline
@@ -178,6 +182,47 @@ impl StoredDomainRequest {
                         shard: self.shard,
                         req: DomainRequest::IsReady { node },
                     }));
+                }
+            }
+            DomainRequest::StartReplay {
+                ref mut replicas,
+                targeting_domain,
+                ..
+            } => {
+                let target_domain = just_placed_shard_replicas
+                    .get(&targeting_domain)
+                    .ok_or_else(|| ReadySetError::UnknownDomain {
+                        domain_index: targeting_domain.into(),
+                    })?;
+
+                if !target_domain.cells().iter().all(|x| *x) {
+                    *replicas = Some(match self.shard {
+                        Some(shard) => target_domain
+                            .get_column(shard)
+                            .ok_or_else(|| ReadySetError::ShardIndexOutOfBounds {
+                                shard,
+                                domain_index: targeting_domain.into(),
+                                num_shards: target_domain.row_size(),
+                            })?
+                            .enumerate()
+                            .filter_map(|(replica, placed)| (*placed).then_some(replica))
+                            .collect(),
+                        None => target_domain
+                            .columns()
+                            .enumerate()
+                            .filter_map(|(replica, mut shards)| {
+                                shards.all(|placed| *placed).then_some(replica)
+                            })
+                            .collect(),
+                    })
+                }
+
+                if let Some(shard) = self.shard {
+                    dom.send_to_healthy_shard::<()>(shard, self.req, &mainline.workers)
+                        .await?;
+                } else {
+                    dom.send_to_healthy::<()>(self.req, &mainline.workers)
+                        .await?;
                 }
             }
             _ => {
@@ -362,10 +407,32 @@ impl DomainMigrationPlan {
     /// Apply all stored changes using the given controller object, placing new domains and sending
     /// messages added since the last time this method was called.
     pub async fn apply(self, mainline: &mut DfState) -> ReadySetResult<()> {
+        // First, tell all the workers to run the domains
+        //
+        // While we're doing this, we also maintain a map of all the domains' shard replicas which
+        // have *just* been placed, so that we know what (if not all) replicas to send messages to
+        let mut just_placed_shard_replicas = mainline
+            .domains
+            .iter()
+            .map(|(di, dh)| (*di, dh.placed_shard_replicas()))
+            .collect::<HashMap<_, _>>();
         for place in self.place {
+            match just_placed_shard_replicas.entry(place.idx) {
+                hash_map::Entry::Occupied(mut e) => {
+                    for (pos, addr) in place.shard_replica_workers.entries() {
+                        // Only true if the replica was *not* placed before, and is now
+                        e.get_mut()[pos] ^= addr.is_some();
+                    }
+                }
+                hash_map::Entry::Vacant(e) => {
+                    e.insert(place.shard_replica_workers.map(|addr| addr.is_some()));
+                }
+            }
+
             let handle = mainline
                 .place_domain(place.idx, place.shard_replica_workers, place.nodes)
                 .await?;
+
             match mainline.domains.entry(place.idx) {
                 hash_map::Entry::Occupied(mut e) => e.get_mut().merge(handle),
                 hash_map::Entry::Vacant(e) => {
@@ -388,7 +455,7 @@ impl DomainMigrationPlan {
         };
         let mut retry_strategy = create_exponential_backoff();
         while let Some(req) = stored.pop_front() {
-            if let Some(req) = req.apply(mainline).await? {
+            if let Some(req) = req.apply(mainline, &just_placed_shard_replicas).await? {
                 // Initializing base table nodes might take a lot of time, so we try to wait using
                 // an exponential backoff strategy.
                 stored.push_front(req);

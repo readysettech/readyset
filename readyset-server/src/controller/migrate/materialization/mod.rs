@@ -1232,7 +1232,9 @@ impl Materializations {
         // grr `HashMap` doesn't implement `IndexMut`
         self.paths.entry(ni).or_default().extend(paths);
 
-        if !pending.is_empty() {
+        if pending.is_empty() {
+            trace!("No replays to do");
+        } else {
             trace!("all domains ready for replay");
             // prepare for, start, and wait for replays
             for pending in pending {
@@ -1258,7 +1260,8 @@ impl Materializations {
                     DomainRequest::StartReplay {
                         tag: pending.tag,
                         from: pending.source,
-                        replicas: None, /* TODO */
+                        replicas: None,
+                        targeting_domain: pending.target_domain,
                     },
                 )?;
             }

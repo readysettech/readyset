@@ -68,6 +68,7 @@ pub(super) struct PendingReplay {
     pub(super) tag: Tag,
     pub(super) source: LocalNodeIndex,
     pub(super) source_domain: DomainIndex,
+    pub(super) target_domain: DomainIndex,
 }
 
 impl<'a> Plan<'a> {
@@ -738,6 +739,10 @@ impl<'a> Plan<'a> {
                                     tag,
                                     source: self.graph[first_domain_node_key.0].local_addr(),
                                     source_domain: first_domain_segments_data.0,
+                                    target_domain: segments
+                                        .last()
+                                        .ok_or_else(|| internal_err!())?
+                                        .0,
                                 });
                             }
                         }

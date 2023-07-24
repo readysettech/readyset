@@ -1884,6 +1884,7 @@ impl Domain {
                 tag,
                 from,
                 replicas,
+                targeting_domain: _,
             } => {
                 // if the node's state was not initialized yet, then just return and do nothing.
                 // we should only hit this for base nodes which are in the process of having their

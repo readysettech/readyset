@@ -373,6 +373,12 @@ pub enum DomainRequest {
         from: LocalNodeIndex,
         /// Optionally replay to only these replicas
         replicas: Option<Vec<usize>>,
+        /// Index of the domain that will eventually receive the replay.
+        ///
+        /// Not used by the domain itself, but used when sending the message to set the list of
+        /// replicas above, if we've just recovered some replicas due to a worker joining the
+        /// cluster
+        targeting_domain: DomainIndex,
     },
 
     /// Query whether a domain has received a complete full replay for the given node.
