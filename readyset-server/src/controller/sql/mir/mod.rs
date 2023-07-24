@@ -19,7 +19,7 @@ use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
     BinaryOperator, ColumnSpecification, CompoundSelectOperator, CreateTableBody, Expr,
     FieldDefinitionExpr, FieldReference, FunctionExpr, InValue, LimitClause, Literal, OrderClause,
-    OrderType, Relation, SqlIdentifier, TableKey,
+    OrderType, Relation, SelectStatement, SqlIdentifier, TableKey,
 };
 use petgraph::visit::Reversed;
 use petgraph::Direction;
@@ -38,7 +38,9 @@ use crate::controller::sql::mir::grouped::{
     post_lookup_aggregates,
 };
 use crate::controller::sql::mir::join::{make_cross_joins, make_joins};
-use crate::controller::sql::query_graph::{to_query_graph, OutputColumn, Pagination, QueryGraph};
+use crate::controller::sql::query_graph::{
+    to_query_graph, ExprColumn, OutputColumn, Pagination, QueryGraph,
+};
 use crate::controller::sql::query_signature::Signature;
 
 mod grouped;
@@ -1096,6 +1098,116 @@ impl SqlToMirConverter {
         ))
     }
 
+    /// Project out a column representing an `IN (subquery)` expr.
+    ///
+    /// Internally, these are compiled via a LEFT JOIN with a DISTINCT and a marker column on the
+    /// right-hand side, followed by an `IS NULL` expr projected out for the result
+    fn project_in_subquery(
+        &mut self,
+        query_name: &Relation,
+        parent: NodeIndex,
+        name: &str,
+        lhs: &Expr,
+        subquery: SelectStatement,
+        negated: bool,
+    ) -> ReadySetResult<NodeIndex> {
+        let (lhs, parent) = match lhs {
+            Expr::Column(col) => (col.clone(), parent),
+            expr => {
+                // The lhs is a non-column expr, so we need to project it first
+                let label = lhs.display(nom_sql::Dialect::MySQL).to_string();
+                let prj = self.make_project_node(
+                    query_name,
+                    self.generate_label(&"in_lhs_project".into()),
+                    parent,
+                    vec![ProjectExpr::Expr {
+                        alias: label.clone().into(),
+                        expr: expr.clone(),
+                    }],
+                );
+                (
+                    nom_sql::Column {
+                        name: label.into(),
+                        table: None,
+                    },
+                    prj,
+                )
+            }
+        };
+
+        let query_graph = to_query_graph(subquery)?;
+        let subquery_leaf = self.named_query_to_mir(
+            query_name,
+            &query_graph,
+            &HashMap::new(),
+            LeafBehavior::Anonymous,
+        )?;
+
+        let cols = self.columns(subquery_leaf);
+        if cols.len() != 1 {
+            invalid!("Subquery on right-hand side of IN must have exactly one column");
+        }
+        let col = cols.into_iter().next().expect("Just checked");
+        let distinct = self.make_distinct_node(
+            query_name,
+            self.generate_label(&"in_subquery_distinct".into()),
+            subquery_leaf,
+            vec![col.clone()],
+        );
+
+        let mark_col = SqlIdentifier::from("__mark");
+        let right_mark = self.make_project_node(
+            query_name,
+            self.generate_label(&format!("{name}_in_mark").into()),
+            distinct,
+            self.columns(distinct)
+                .into_iter()
+                .map(ProjectExpr::Column)
+                .chain(iter::once(ProjectExpr::Expr {
+                    expr: Expr::Literal(Literal::Integer(0)),
+                    alias: mark_col.clone(),
+                }))
+                .collect(),
+        );
+
+        let join = self.make_join_node(
+            query_name,
+            self.generate_label(&format!("{name}_join").into()),
+            &[JoinPredicate {
+                left: lhs,
+                right: nom_sql::Column {
+                    name: col.name,
+                    table: col.table,
+                },
+            }],
+            parent,
+            right_mark,
+            JoinKind::Left,
+        )?;
+
+        Ok(self.make_project_node(
+            query_name,
+            self.generate_label(&format!("project_{name}").into()),
+            join,
+            self.columns(join)
+                .into_iter()
+                .map(ProjectExpr::Column)
+                .chain(iter::once(ProjectExpr::Expr {
+                    expr: Expr::BinaryOp {
+                        lhs: Box::new(Expr::Column(mark_col.into())),
+                        op: if negated {
+                            BinaryOperator::Is
+                        } else {
+                            BinaryOperator::IsNot
+                        },
+                        rhs: Box::new(Expr::Literal(Literal::Null)),
+                    },
+                    alias: name.into(),
+                }))
+                .collect(),
+        ))
+    }
+
     fn make_project_node(
         &mut self,
         query_name: &Relation,
@@ -1867,12 +1979,38 @@ impl SqlToMirConverter {
             // 10. Generate leaf views that expose the query result
 
             // We may already have added some of the expression and literal columns
-            let (_, already_computed): (Vec<_>, Vec<_>) = value_columns_needed_for_predicates(
+            let (_, mut already_computed): (Vec<_>, Vec<_>) = value_columns_needed_for_predicates(
                 &query_graph.columns,
                 &query_graph.global_predicates,
             )
             .into_iter()
             .unzip();
+
+            // Project out any columns that need special handling
+            for oc in &query_graph.columns {
+                if let OutputColumn::Expr(ExprColumn {
+                    name,
+                    table: None,
+                    expression:
+                        Expr::In {
+                            lhs,
+                            rhs: InValue::Subquery(subquery),
+                            negated,
+                        },
+                }) = oc
+                {
+                    final_node = self.project_in_subquery(
+                        query_name,
+                        final_node,
+                        name,
+                        lhs,
+                        (**subquery).clone(),
+                        *negated,
+                    )?;
+                    already_computed.push(oc.clone());
+                }
+            }
+
             let mut emit = query_graph
                 .columns
                 .iter()
