@@ -24,6 +24,7 @@ redact_sensitive = ["readyset-util/redact_sensitive"]
 [dependencies]
 clap = { workspace = true, features = ["derive","env"] }
 anyhow = "1.0"
+bimap = { version = "0.6.3", features = ["serde"] }
 thiserror = "1.0.26"
 ahash = "0.7"
 futures = "0.3"

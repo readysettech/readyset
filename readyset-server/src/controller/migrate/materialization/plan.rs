@@ -57,7 +57,7 @@ pub(super) struct Plan<'a> {
     /// if two different downstream sets of columns remap to the same set of columns in the parent
     parent_indexes: HashMap<NodeIndex, HashSet<Index>>,
     /// New paths added in this run of the planner.
-    paths: HashMap<Tag, Vec<NodeIndex>>,
+    paths: HashMap<Tag, (Index, Vec<NodeIndex>)>,
     /// Do we already have some replay paths for this node?
     has_paths: bool,
     pending: Vec<PendingReplay>,
@@ -292,7 +292,10 @@ impl<'a> Plan<'a> {
         // improve cache locality, but could perhaps also allow further optimizations later (?).
 
         // find all paths through each union with the same suffix
-        let assigned_tags: Vec<_> = paths.iter().map(|_| self.m.next_tag()).collect();
+        let assigned_tags: Vec<_> = paths
+            .iter()
+            .map(|path| self.m.tag_for_path(&index_on, path))
+            .collect();
         let union_suffixes = paths
             .iter()
             .enumerate()
@@ -348,10 +351,13 @@ impl<'a> Plan<'a> {
             // TODO(eta): figure out a way to check partial replay path idempotency
             self.paths.insert(
                 tag,
-                path.segments()
-                    .iter()
-                    .map(|&IndexRef { node, .. }| node)
-                    .collect(),
+                (
+                    index_on.clone(),
+                    path.segments()
+                        .iter()
+                        .map(|&IndexRef { node, .. }| node)
+                        .collect(),
+                ),
             );
 
             if path.has_extension() {
@@ -796,7 +802,7 @@ impl<'a> Plan<'a> {
     /// and a set of replay paths for this node indexed by tag.
     pub(super) fn finalize(
         mut self,
-    ) -> ReadySetResult<(Vec<PendingReplay>, HashMap<Tag, Vec<NodeIndex>>)> {
+    ) -> ReadySetResult<(Vec<PendingReplay>, HashMap<Tag, (Index, Vec<NodeIndex>)>)> {
         use dataflow::payload::PrepareStateKind;
 
         #[allow(clippy::indexing_slicing)] // the node index we were created with is in graph...

@@ -7,6 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use bimap::BiHashMap;
 use dataflow::prelude::*;
 use dataflow::{DomainRequest, LookupIndex};
 use petgraph::graph::NodeIndex;
@@ -14,7 +15,7 @@ use readyset_errors::{internal, internal_err, invariant, ReadySetError, ReadySet
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info_span, trace};
 
-use crate::controller::keys;
+use crate::controller::keys::{self, RawReplayPath};
 use crate::controller::migrate::DomainMigrationPlan;
 use crate::controller::state::graphviz;
 
@@ -125,7 +126,7 @@ pub(in crate::controller) struct Materializations {
 
     /// A list of replay paths for each node, indexed by tag.
     #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
-    pub(in crate::controller) paths: HashMap<NodeIndex, HashMap<Tag, Vec<NodeIndex>>>,
+    pub(in crate::controller) paths: HashMap<NodeIndex, BiHashMap<Tag, (Index, Vec<NodeIndex>)>>,
 
     /// Map of full nodes that are duplicates of partial nodes. Entries are added when we perform
     /// rerouting of full nodes found below partial nodes in migration planning.
@@ -187,6 +188,22 @@ impl Materializations {
     fn next_tag(&mut self) -> Tag {
         self.tag_generator += 1;
         Tag::new(self.tag_generator as u32)
+    }
+
+    fn tag_for_path(&mut self, index: &Index, path: &RawReplayPath) -> Tag {
+        self.paths
+            .get(&path.last_segment().node)
+            .and_then(|paths_for_node| {
+                paths_for_node.get_by_right(&(
+                    index.clone(),
+                    path.segments()
+                        .iter()
+                        .map(|segment| segment.node)
+                        .collect::<Vec<_>>(),
+                ))
+            })
+            .copied()
+            .unwrap_or_else(|| self.next_tag())
     }
 
     /// Extend the current set of materializations with any additional materializations needed to
