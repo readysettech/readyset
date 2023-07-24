@@ -52,6 +52,7 @@ members = [
     "readyset-util",
     "readyset-version",
     "replication-offset",
+    "readyset-vitess-data",
     "replicators",
     "proptest-stateful",
     "system-benchmarks",

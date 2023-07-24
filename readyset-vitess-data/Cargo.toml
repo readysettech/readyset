@@ -1,0 +1,12 @@
+[package]
+name = "readyset-vitess-data"
+version = "0.0.1"
+publish = false
+authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0"
+vitess-grpc = "0.1.2"
+
+readyset-data = { path = "../readyset-data" }
