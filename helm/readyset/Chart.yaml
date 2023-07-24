@@ -8,11 +8,6 @@ version: 0.9.0
 # kubeVersion -- We'll aim to follow the same support Kubernetes offers with regard to supported versions; Currently this is a -2 minor version delta
 kubeVersion: ">=v1.25.0-0"
 
-# annoations -- Extra metadata about the chart
-annotations:
-  artifacthub.io/category: database
-  artifacthub.io/prerelease: "false"
-
 # type -- We are an application chart :)
 type: application
 
