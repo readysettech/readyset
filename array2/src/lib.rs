@@ -24,6 +24,7 @@
 use std::fmt::Debug;
 use std::intrinsics::unlikely;
 use std::ops::{Index, IndexMut};
+use std::usize;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -384,6 +385,56 @@ impl<T> Array2<T> {
     {
         index.get_mut(self)
     }
+
+    /// Construct an iterator over to the [`Column`]s of this [`Array2`], which themselves are
+    /// iterators over references to cells.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use array2::Array2;
+    ///
+    /// let mut my_array2: Array2<i32> = Array2::from_rows(vec![vec![1, 2, 3], vec![4, 5, 6]]);
+    ///
+    /// let transposed = my_array2
+    ///     .columns()
+    ///     .map(|col| col.copied().collect())
+    ///     .collect::<Vec<Vec<_>>>();
+    ///
+    /// assert_eq!(transposed, vec![vec![1, 4], vec![2, 5], vec![3, 6]]);
+    /// ```
+    #[must_use]
+    #[inline]
+    pub fn columns(&self) -> Columns<T> {
+        Columns { col: 0, arr2: self }
+    }
+
+    /// Return a reference to a single column of this [`Array2`], which is itself an iterator over
+    /// references to the cells in that column
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use array2::Array2;
+    ///
+    /// let mut my_array2: Array2<i32> = Array2::from_rows(vec![vec![1, 2, 3], vec![4, 5, 6]]);
+    ///
+    /// let col = my_array2.get_column(1).unwrap().collect::<Vec<_>>();
+    /// assert_eq!(col, vec![&2, &5]);
+    /// ```
+    #[must_use]
+    #[inline]
+    pub fn get_column(&self, col: usize) -> Option<Column<T>> {
+        if col >= self.row_size() {
+            None
+        } else {
+            Some(Column {
+                row: 0,
+                col,
+                arr2: self,
+            })
+        }
+    }
 }
 
 mod private {
@@ -481,5 +532,51 @@ where
     #[inline]
     fn index_mut(&mut self, index: I) -> &mut Self::Output {
         index.index_mut(self)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Columns<'a, T> {
+    col: usize,
+    arr2: &'a Array2<T>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Column<'a, T> {
+    row: usize,
+    col: usize,
+    arr2: &'a Array2<T>,
+}
+
+/// An iterator over the [`Column`]s of an [`Array2`]. Constructed via [`Array2::columns`].
+impl<'a, T> Iterator for Columns<'a, T> {
+    type Item = Column<'a, T>;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        let res = if self.col >= self.arr2.row_size {
+            None
+        } else {
+            Some(Column {
+                row: 0,
+                col: self.col,
+                arr2: self.arr2,
+            })
+        };
+        self.col += 1;
+        res
+    }
+}
+
+/// An iterator over the cells in a single column of an [`Array2`]. Yielded as the iterated item by
+/// [`Columns`].
+impl<'a, T> Iterator for Column<'a, T> {
+    type Item = &'a T;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        let res = self.arr2.get((self.row, self.col));
+        self.row += 1;
+        res
     }
 }
