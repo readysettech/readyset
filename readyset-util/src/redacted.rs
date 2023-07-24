@@ -17,7 +17,7 @@ pub const REDACT_SENSITIVE: bool = false;
 pub const REDACT_SENSITIVE: bool = false;
 
 /// Wraps a type that implements Display and Debug, overriding both implementations if the
-/// `redact_literals` feature is enabled
+/// `redact_sensitive` feature is enabled
 pub struct Sensitive<'a, T: ?Sized>(pub &'a T);
 
 impl<'a, T> Display for Sensitive<'a, T>
@@ -48,8 +48,8 @@ where
     }
 }
 
-/// Wraps a given string, replacing its contents with "<anonymized>" when debug
-/// printed
+/// Wraps a given string, replacing its contents with "<redacted>" when debug
+/// printed if the `redact_sensitive` feature is enabled.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RedactedString(pub String);
 
@@ -61,9 +61,25 @@ impl Deref for RedactedString {
     }
 }
 
-impl std::fmt::Debug for RedactedString {
+impl Display for RedactedString {
+    #[cfg(not(feature = "redact_sensitive"))]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("<redacted>")
+        write!(f, "{}", self.0)
+    }
+    #[cfg(feature = "redact_sensitive")]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "<redacted>")
+    }
+}
+
+impl Debug for RedactedString {
+    #[cfg(not(feature = "redact_sensitive"))]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.0)
+    }
+    #[cfg(feature = "redact_sensitive")]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "<redacted>")
     }
 }
 
