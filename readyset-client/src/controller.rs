@@ -116,10 +116,18 @@ impl Service<ControllerRequest> for Controller {
                     );
                 }
                 if url.is_none() {
-                    let descriptor: ControllerDescriptor = auth
-                        .get_leader()
-                        .await
-                        .map_err(|e| internal_err!("failed to get current leader: {}", e))?;
+                    let descriptor: ControllerDescriptor =
+                        match tokio::time::timeout(request_timeout - elapsed, auth.get_leader())
+                            .await
+                        {
+                            Ok(Ok(url)) => url,
+                            Ok(Err(e)) => internal!("failed to get current leader: {e}"),
+                            Err(_) => internal!(
+                                "request timeout reached; last error: {}",
+                                last_error_desc
+                                    .unwrap_or_else(|| "failed to get current leader".into())
+                            ),
+                        };
 
                     url = Some(descriptor.controller_uri);
                 }
