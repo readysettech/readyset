@@ -19,7 +19,7 @@ export READYSET_USER=your-username
 export READYSET_PASS=your-password
 export DATABASE_NAME=your-database-name
 export DATABASE_HOST=your-database-host
-export DATABASE_TYPE=your-database-type # mysql OR psql
+export DATABASE_TYPE=your-database-type # mysql OR postgresql
 export DATABASE_URI="${DATABASE_TYPE}://${READYSET_USER}:${READYSET_PASS}@${DATABASE_HOST}/${DATABASE_NAME}"
 
 # The name `readyset-upstream-database` is expected by the chart, do not rename it!
