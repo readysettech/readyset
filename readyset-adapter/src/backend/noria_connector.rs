@@ -1000,14 +1000,18 @@ impl NoriaConnector {
     }
 
     pub(crate) async fn readyset_status(&mut self) -> ReadySetResult<QueryResult<'static>> {
-        let status = noria_await!(self.inner.get_mut()?, self.inner.get_mut()?.noria.status())?;
+        let status = match noria_await!(self.inner.get_mut()?, self.inner.get_mut()?.noria.status())
+        {
+            Ok(s) => <Vec<(String, String)>>::from(s),
+            Err(_) => vec![(
+                "ReadySet Controller Status".to_string(),
+                "Unavailable".to_string(),
+            )],
+        };
 
         // Converts from ReadySetStatus -> Vec<(String, String)> -> QueryResult
         Ok(QueryResult::MetaVariables(
-            <Vec<(String, String)>>::from(status)
-                .into_iter()
-                .map(MetaVariable::from)
-                .collect(),
+            status.into_iter().map(MetaVariable::from).collect(),
         ))
     }
 
