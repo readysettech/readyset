@@ -9,7 +9,7 @@
 //! To run these benchmarks:
 //!
 //! ```notrust
-//! $ cargo criterion -p noria-psql --bench proxy
+//! $ cargo criterion -p readyset-psql --bench proxy
 //! ```
 
 use std::net::SocketAddr;
@@ -27,7 +27,7 @@ use psql_srv::{
     Credentials, CredentialsNeeded, PrepareResponse, PsqlBackend, PsqlValue, QueryResponse,
 };
 use readyset_data::DfValue;
-use readyset_psql::{ParamRef, TypedDfValue};
+use readyset_psql::ParamRef;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, ToSocketAddrs};
 use tokio::runtime::Runtime;
@@ -88,27 +88,14 @@ impl Stream for ResultStream {
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match self.get_mut() {
-            ResultStream::Owned(iter) => Poll::Ready(iter.next().map(|r| {
-                (0..r.len())
-                    .map(|i| TypedDfValue {
-                        col_type: r.columns()[i].type_().clone(),
-                        value: r.get(i),
-                    })
-                    .map(PsqlValue::try_from)
-                    .collect()
-            })),
+            ResultStream::Owned(iter) => Poll::Ready(
+                iter.next()
+                    .map(|r| (0..r.len()).map(|i| Ok(r.get(i))).collect()),
+            ),
             ResultStream::Streaming(stream) => {
-                Poll::Ready(ready!(stream.as_mut().poll_next(cx)).map(|res| {
-                    match res {
-                        Ok(r) => (0..r.len())
-                            .map(|i| TypedDfValue {
-                                col_type: r.columns()[i].type_().clone(),
-                                value: r.get(i),
-                            })
-                            .map(PsqlValue::try_from)
-                            .collect(),
-                        Err(e) => Err(e.into()),
-                    }
+                Poll::Ready(ready!(stream.as_mut().poll_next(cx)).map(|res| match res {
+                    Ok(r) => (0..r.len()).map(|i| Ok(r.get(i))).collect(),
+                    Err(e) => Err(e.into()),
                 }))
             }
         }
