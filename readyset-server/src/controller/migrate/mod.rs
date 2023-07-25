@@ -31,7 +31,7 @@
 //!
 //! Beware, Here be slightly smaller dragons™
 
-use std::collections::{hash_map, HashMap, HashSet, VecDeque};
+use std::collections::{hash_map, BTreeSet, HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
 use array2::Array2;
@@ -100,6 +100,31 @@ impl StoredDomainRequest {
                     domain_index: self.domain.index(),
                 })?;
 
+        let placed_replicas = |domain: DomainIndex| -> ReadySetResult<Option<Vec<usize>>> {
+            just_placed_shard_replicas
+                .get(&domain)
+                .map(|placed| match self.shard {
+                    Some(shard) => Ok(placed
+                        .get_column(shard)
+                        .ok_or_else(|| ReadySetError::ShardIndexOutOfBounds {
+                            shard,
+                            domain_index: domain.into(),
+                            num_shards: placed.row_size(),
+                        })?
+                        .enumerate()
+                        .filter_map(|(replica, placed)| (*placed).then_some(replica))
+                        .collect()),
+                    None => Ok(placed
+                        .columns()
+                        .enumerate()
+                        .filter_map(|(replica, mut shards)| {
+                            shards.all(|placed| *placed).then_some(replica)
+                        })
+                        .collect()),
+                })
+                .transpose()
+        };
+
         match self.req {
             DomainRequest::QueryReplayDone { node } => {
                 debug!("waiting for a done message");
@@ -107,23 +132,49 @@ impl StoredDomainRequest {
                 invariant!(self.shard.is_none()); // QueryReplayDone isn't ever sent to just one shard
 
                 let mut spins = 0;
+                let mut non_completed_replicas: BTreeSet<_> = match placed_replicas(self.domain)? {
+                    Some(replicas) => replicas.into_iter().collect(),
+                    None => {
+                        let dh = mainline.domains.get(&self.domain).ok_or_else(|| {
+                            ReadySetError::UnknownDomain {
+                                domain_index: self.domain.into(),
+                            }
+                        })?;
+                        (0..dh.num_replicas()).collect()
+                    }
+                };
 
                 // FIXME(eta): this is a bit of a hack... (also, timeouts?)
                 loop {
-                    if dom
-                        .send_to_healthy::<bool>(
+                    if non_completed_replicas.is_empty() {
+                        break;
+                    }
+
+                    let res = dom
+                        .send_to_healthy_replicas::<bool, _>(
                             DomainRequest::QueryReplayDone { node },
+                            non_completed_replicas.iter().copied(),
                             &mainline.workers,
                         )
-                        .await?
-                        .into_cells()
-                        .into_iter()
-                        .all(|done| {
-                            done.unwrap_or(
-                                true, /* If the domain isn't running, we don't care if it's done */
-                            )
-                        })
-                    {
+                        .await?;
+
+                    for replicas_done in res.rows() {
+                        for (replica, done) in non_completed_replicas
+                            .clone()
+                            .into_iter()
+                            .zip(replicas_done)
+                        {
+                            if done.unwrap_or(true) {
+                                non_completed_replicas.remove(&replica);
+                            }
+                        }
+                    }
+
+                    if res.into_cells().into_iter().all(|done| {
+                        done.unwrap_or(
+                            true, /* If the domain isn't running, we don't care if it's done */
+                        )
+                    }) {
                         break;
                     }
 
@@ -196,25 +247,7 @@ impl StoredDomainRequest {
                     })?;
 
                 if !target_domain.cells().iter().all(|x| *x) {
-                    *replicas = Some(match self.shard {
-                        Some(shard) => target_domain
-                            .get_column(shard)
-                            .ok_or_else(|| ReadySetError::ShardIndexOutOfBounds {
-                                shard,
-                                domain_index: targeting_domain.into(),
-                                num_shards: target_domain.row_size(),
-                            })?
-                            .enumerate()
-                            .filter_map(|(replica, placed)| (*placed).then_some(replica))
-                            .collect(),
-                        None => target_domain
-                            .columns()
-                            .enumerate()
-                            .filter_map(|(replica, mut shards)| {
-                                shards.all(|placed| *placed).then_some(replica)
-                            })
-                            .collect(),
-                    })
+                    *replicas = placed_replicas(targeting_domain)?;
                 }
 
                 if let Some(shard) = self.shard {

@@ -127,6 +127,37 @@ impl DomainHandle {
             .await
     }
 
+    /// Send the given [`req`] to the given *healthy* replicas of all shards of this domain. Returns
+    /// a 2-dimensional array, indexed in shard, replica order, where the order of replicas matches
+    /// the order of replica indexes given, of the results of sending each request. Each result
+    /// which was sent to a shard-replica which has not yet been placed onto a worker will be
+    /// [`None`]
+    pub(super) async fn send_to_healthy_replicas<R, I>(
+        &self,
+        req: DomainRequest,
+        replicas: I,
+        workers: &HashMap<WorkerIdentifier, Worker>,
+    ) -> ReadySetResult<Array2<Option<R>>>
+    where
+        R: DeserializeOwned,
+        I: IntoIterator<Item = usize> + Clone,
+    {
+        let results = stream::iter(0..self.num_shards())
+            .then(move |shard| {
+                let req = req.clone();
+                let replicas = replicas.clone();
+                stream::iter(replicas)
+                    .then(move |replica| {
+                        self.send_to_healthy_shard_replica(shard, replica, req.clone(), workers)
+                    })
+                    .try_collect()
+            })
+            .try_collect::<Vec<_>>()
+            .await?;
+
+        Ok(Array2::from_rows(results))
+    }
+
     /// Send the given [`req`] to all *healthy* shard replicas of this domain. Returns a
     /// 2-dimensional array, indexed in shard, replica order, of the results of sending each
     /// request. Each result which was sent to a domain which has not yet been placed onto a worker
@@ -139,19 +170,8 @@ impl DomainHandle {
     where
         R: DeserializeOwned,
     {
-        let results = stream::iter(0..self.num_shards())
-            .then(move |shard| {
-                let req = req.clone();
-                stream::iter(0..self.num_replicas())
-                    .then(move |replica| {
-                        self.send_to_healthy_shard_replica(shard, replica, req.clone(), workers)
-                    })
-                    .try_collect()
-            })
-            .try_collect::<Vec<_>>()
-            .await?;
-
-        Ok(Array2::from_rows(results))
+        self.send_to_healthy_replicas(req, 0..self.num_replicas(), workers)
+            .await
     }
 
     /// Send the given [`req`] to *all* shard replicas of this domain. Returns a 2-dimensional
