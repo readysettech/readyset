@@ -1742,3 +1742,41 @@ async fn enable_experimental_placeholder_inlining() {
 
     deployment.teardown().await.unwrap();
 }
+
+#[clustertest]
+async fn aliased_query_explicitly_cached() {
+    readyset_tracing::init_test_logging();
+    let mut deployment = readyset_mysql("aliased_query_explicitly_cached")
+        .add_server(ServerParams::default())
+        .explicit_migrations(1000)
+        .start()
+        .await
+        .unwrap();
+    let mut adapter = deployment.first_adapter().await;
+
+    adapter.query_drop("CREATE TABLE t (c INT)").await.unwrap();
+
+    // Confirm that the query is proxied to begin with
+    adapter.query_drop("SELECT c FROM t").await.unwrap();
+    assert_eq!(
+        last_statement_destination(adapter.as_mysql_conn().unwrap()).await,
+        QueryDestination::Upstream
+    );
+
+    // Cache an equivalent query
+    eventually! {
+        adapter
+            .query_drop("CREATE CACHE FROM SELECT * FROM t")
+            .await
+            .is_ok()
+    }
+
+    // Run the query again. It should get cached automatically, as it aliases to
+    // the previously cached query.
+    eventually! {
+        adapter.query_drop("SELECT c FROM t").await.unwrap();
+        last_statement_destination(adapter.as_mysql_conn().unwrap()).await == QueryDestination::Readyset
+    }
+
+    deployment.teardown().await.unwrap();
+}

@@ -598,6 +598,15 @@ impl QueryStatusCache {
             .into()
     }
 
+    pub fn dry_run_succeeded(&self) -> QueryList {
+        self.statuses
+            .iter()
+            .filter(|r| r.is_dry_run_succeeded())
+            .map(|r| ((*r.key()).clone().into(), r.value().clone()))
+            .collect::<Vec<(Query, QueryStatus)>>()
+            .into()
+    }
+
     /// Returns a list of queries that have a state of [`QueryState::Successful`].
     pub fn allow_list(&self) -> Vec<(QueryId, Arc<ViewCreateRequest>, QueryStatus)> {
         self.ids

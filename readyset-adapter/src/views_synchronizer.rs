@@ -2,12 +2,15 @@ use std::sync::Arc;
 
 use dataflow_expression::Dialect;
 use readyset_client::query::MigrationState;
+use readyset_client::recipe::changelist::Change;
+use readyset_client::recipe::ChangeList;
 use readyset_client::ReadySetHandle;
 use readyset_util::shutdown::ShutdownReceiver;
 use tokio::select;
 use tracing::{debug, info, instrument, trace, warn};
 
 use crate::query_status_cache::QueryStatusCache;
+use crate::utils;
 
 pub struct ViewsSynchronizer {
     /// The noria connector used to query
@@ -67,6 +70,7 @@ impl ViewsSynchronizer {
             .query_status_cache
             .pending_migration()
             .into_iter()
+            .chain(self.query_status_cache.dry_run_succeeded().into_iter())
             .filter_map(|(q, _)| q.into_parsed().map(Arc::unwrap_or_clone))
             .collect::<Vec<_>>();
 
@@ -84,8 +88,42 @@ impl ViewsSynchronizer {
                         "Loaded query status from controller"
                     );
                     if migrated {
-                        self.query_status_cache
-                            .update_query_migration_state(&query, MigrationState::Successful)
+                        // Explicitly migrate the query.
+                        // This adds the query hash as an alias for the existing cache, allowing
+                        // it to be treated as a cache name e.g. for use in a `DROP CACHE`
+                        // statement.
+                        // We don't need to do any rewrites here, as they have already been done on
+                        // the statements in the QueryStatusCache.
+                        // The value for `always` is ignored, as any statements we cache here are
+                        // guaranteed to alias to an existing cached statement.
+                        match self
+                            .controller
+                            .extend_recipe(
+                                ChangeList::from_change(
+                                    Change::create_cache(
+                                        // Rehashing the query here is simpler
+                                        // than a reverse-lookup into
+                                        // `self.query_status_cache.ids`.
+                                        utils::generate_query_name(
+                                            &query.statement,
+                                            &query.schema_search_path,
+                                        ),
+                                        query.statement.clone(),
+                                        false,
+                                    ),
+                                    self.dialect,
+                                )
+                                .with_schema_search_path(query.schema_search_path.clone()),
+                            )
+                            .await
+                        {
+                            Ok(_) => self
+                                .query_status_cache
+                                .update_query_migration_state(&query, MigrationState::Successful),
+                            Err(_) => self
+                                .query_status_cache
+                                .update_query_migration_state(&query, MigrationState::Unsupported),
+                        }
                     }
                 }
             }
