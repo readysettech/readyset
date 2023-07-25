@@ -14,6 +14,10 @@ pub fn vstream_value_to_noria_value(
     field_type: Type,
     type_name: Option<&String>, // TODO: Pass a reference to the list of enum values
 ) -> Result<DfValue> {
+    if raw_value.is_empty() {
+        return Ok(DfValue::None);
+    }
+
     match field_type {
         Type::NullType => Ok(DfValue::None),
         Type::Uint8 | Type::Uint16 | Type::Uint24 | Type::Uint32 | Type::Uint64 | Type::Year => {
@@ -97,14 +101,11 @@ pub fn vstream_value_to_noria_value(
         | Type::Hexnum
         | Type::Hexval
         | Type::Bitnum
-        | Type::Tuple => {
-            let str_value = std::str::from_utf8(raw_value)?;
-            Err(anyhow::anyhow!(
-                "Not implemented yet: type={:?}, val={}",
-                field_type,
-                str_value
-            ))
-        }
+        | Type::Tuple => Err(anyhow::anyhow!(
+            "MySQL Type parsing is not implemented for type={:?}. Raw value={:?}",
+            field_type,
+            raw_value
+        )),
     }
 }
 

@@ -1,4 +1,5 @@
 use anyhow::Result;
+use readyset_data::DfValue;
 use vitess_grpc::binlogdata::FieldEvent;
 use vitess_grpc::query::{Row, Type};
 
@@ -13,13 +14,19 @@ pub fn vstream_row_to_noria_row(row: &Row, field_event: &FieldEvent) -> Result<N
     for field_idx in 0..field_count {
         let field = &field_event.fields[field_idx];
         if let Some(field_type) = Type::from_i32(field.r#type) {
-            let len = row.lengths[field_idx] as usize;
-            let raw_value = &row.values[field_start..field_start + len];
+            let len = row.lengths[field_idx] as i32;
+            if len < 1 {
+                noria_row.push(DfValue::None);
+                continue;
+            }
+
+            println!("field_start: {}, len: {}", field_start, len);
+            let raw_value = &row.values[field_start..field_start + len as usize];
             // TODO: Pass a reference to the list of enum values pre-calculated upfront
             let value =
                 vstream_value_to_noria_value(raw_value, field_type, Some(&field.column_type))?;
             noria_row.push(value);
-            field_start += len;
+            field_start += len as usize;
         } else {
             return Err(anyhow::anyhow!(
                 "Unknown field type value: {}",
