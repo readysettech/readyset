@@ -9,8 +9,8 @@ use readyset_client::results::ResultIterator;
 use tokio_postgres::types::Type;
 use tokio_postgres::{GenericResult, ResultStream};
 
-use crate::row::Row;
 use crate::schema::{type_to_pgsql, SelectSchema};
+use crate::TypedDfValue;
 
 enum ResultsetInner {
     Empty,
@@ -82,11 +82,11 @@ impl Stream for Resultset {
         let next = match &mut self.get_mut().results {
             ResultsetInner::Empty => None,
             ResultsetInner::ReadySet(i) => i.next().map(|values| {
-                let row = Row {
-                    values,
-                    project_field_types,
-                };
-                row.into_iter().map(PsqlValue::try_from).collect()
+                values
+                    .into_iter()
+                    .zip(project_field_types.iter())
+                    .map(|(value, col_type)| PsqlValue::try_from(TypedDfValue { value, col_type }))
+                    .collect()
             }),
             ResultsetInner::Stream { first_row, stream } => {
                 let row = match first_row.take() {

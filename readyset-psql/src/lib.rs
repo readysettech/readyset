@@ -4,7 +4,6 @@ mod error;
 mod query_handler;
 mod response;
 mod resultset;
-mod row;
 mod schema;
 mod upstream;
 mod value;
