@@ -11,10 +11,13 @@ pub fn vstream_row_to_noria_row(row: &Row, field_event: &FieldEvent) -> Result<N
     let mut field_start = 0;
 
     for field_idx in 0..field_count {
-        if let Some(field_type) = Type::from_i32(field_event.fields[field_idx].r#type) {
+        let field = &field_event.fields[field_idx];
+        if let Some(field_type) = Type::from_i32(field.r#type) {
             let len = row.lengths[field_idx] as usize;
             let raw_value = &row.values[field_start..field_start + len];
-            let value = vstream_value_to_noria_value(raw_value, field_type)?;
+            // TODO: Pass a reference to the list of enum values pre-calculated upfront
+            let value =
+                vstream_value_to_noria_value(raw_value, field_type, Some(&field.column_type))?;
             noria_row.push(value);
             field_start += len;
         } else {
