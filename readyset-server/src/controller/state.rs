@@ -1543,7 +1543,13 @@ impl DfState {
                 let workers = scheduler.schedule_domain(domain, &nodes[..])?;
 
                 for ((shard, replica), worker) in workers.entries() {
-                    if worker.is_none() {
+                    let not_already_placed = self
+                        .domains
+                        .get(&domain)
+                        .and_then(|dh| dh.assignment(shard, replica))
+                        .is_none();
+
+                    if not_already_placed && worker.is_none() {
                         dmp.replica_failed_placement(ReplicaAddress {
                             domain_index: domain,
                             shard,

@@ -114,7 +114,7 @@ impl<'state> Scheduler<'state> {
     ///
     /// Returns a 2-dimensional vector, indexed by shard index first and replica index second, of
     /// `Option<WorkerIdentifier>` - which will be `None` if that domain/shard/replica cannot be
-    /// scheduled.
+    /// scheduled or has already been scheduled.
     ///
     /// # Invariants
     ///
@@ -162,13 +162,14 @@ impl<'state> Scheduler<'state> {
             for replica in 0..num_replicas {
                 // Don't schedule this replica if it's already been scheduled (eg in another run of
                 // recovery)
-                if let Some(wid) = self
+                if self
                     .dataflow_state
                     .domains
                     .get(&domain_index)
                     .and_then(|dh| dh.assignment(shard, replica))
+                    .is_some()
                 {
-                    replicas.push(Some(wid.clone()));
+                    replicas.push(None);
                     continue;
                 }
 
