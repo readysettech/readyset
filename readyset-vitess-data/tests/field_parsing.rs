@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use bit_vec::BitVec;
 use readyset_data::DfValue;
 use readyset_vitess_data::field_parsing::vstream_value_to_noria_value;
 use vitess_grpc::query::Type;
@@ -122,4 +123,28 @@ fn binary_parsing() {
             DfValue::ByteArray(Arc::new(raw_value.to_vec()))
         );
     }
+}
+
+#[test]
+fn bit_parsing_empty() {
+    let res = vstream_value_to_noria_value(&[], Type::Bit, None);
+    assert!(res.is_ok());
+    let expected = BitVec::from_bytes(&[]);
+    assert_eq!(res.unwrap(), DfValue::BitVector(Arc::new(expected)));
+}
+
+#[test]
+fn bit_parsing_single_byte() {
+    let res = vstream_value_to_noria_value(&[0b10101010], Type::Bit, None);
+    assert!(res.is_ok());
+    let expected = BitVec::from_bytes(&[0b10101010]);
+    assert_eq!(res.unwrap(), DfValue::BitVector(Arc::new(expected)));
+}
+
+#[test]
+fn bit_parsing_multiple_bytes() {
+    let res = vstream_value_to_noria_value(&[0b10101010, 0b11001100], Type::Bit, None);
+    assert!(res.is_ok());
+    let expected = BitVec::from_bytes(&[0b10101010, 0b11001100]);
+    assert_eq!(res.unwrap(), DfValue::BitVector(Arc::new(expected)));
 }

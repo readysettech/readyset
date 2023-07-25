@@ -12,3 +12,4 @@ rust_decimal = { version = "1.26" }
 
 readyset-data = { path = "../readyset-data" }
 mysql-time = { path = "../mysql-time" }
+bit-vec = { version = "0.6", features = ["serde"] }
