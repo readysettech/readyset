@@ -10,7 +10,7 @@ use tokio_postgres::types::Type;
 use tokio_postgres::{GenericResult, ResultStream};
 
 use crate::schema::{type_to_pgsql, SelectSchema};
-use crate::TypedDfValue;
+use crate::value::TypedDfValue;
 
 enum ResultsetInner {
     Empty,

@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 /// An encapsulation of a ReadySet `DfValue` value that facilitates conversion of this `DfValue`
 /// into a `psql_srv::PsqlValue`.
-pub struct TypedDfValue<'a> {
+pub(crate) struct TypedDfValue<'a> {
     /// A type attribute used to determine which variant of `psql_srv::PsqlValue` the `value`
     /// attribute should be converted to.
     pub col_type: &'a Type,
