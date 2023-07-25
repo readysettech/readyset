@@ -655,6 +655,10 @@ pub enum ReadySetError {
     /// Incorrect Auxiliary node state was found
     #[error("Incorrect Auxiliary Node State for {0} Node")]
     IncorrectNodeState(String),
+
+    /// Failed to reach the Controller
+    #[error("The ReadySet Controller could not be reached")]
+    ControllerUnavailable,
 }
 
 impl ReadySetError {

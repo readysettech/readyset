@@ -121,12 +121,9 @@ impl Service<ControllerRequest> for Controller {
                             .await
                         {
                             Ok(Ok(url)) => url,
-                            Ok(Err(e)) => internal!("failed to get current leader: {e}"),
-                            Err(_) => internal!(
-                                "request timeout reached; last error: {}",
-                                last_error_desc
-                                    .unwrap_or_else(|| "failed to get current leader".into())
-                            ),
+                            Ok(Err(_)) | Err(_) => {
+                                return Err(ReadySetError::ControllerUnavailable);
+                            }
                         };
 
                     url = Some(descriptor.controller_uri);
@@ -311,7 +308,7 @@ impl ReadySetHandle {
             .ready()
             .await
             .map_err(rpc_err!(format_args!("ReadySetHandle::{}", path)))?
-            .call(ControllerRequest::new(path, (), None)?)
+            .call(ControllerRequest::new(path, (), self.request_timeout)?)
             .await
             .map_err(rpc_err!(format_args!("ReadySetHandle::{}", path)))?;
 
