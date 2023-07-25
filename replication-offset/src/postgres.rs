@@ -1,48 +1,31 @@
 use std::fmt::{self, Formatter};
 
+use serde::{Deserialize, Serialize};
+
 use crate::ReplicationOffset;
 
-/// Represents a position within in the Postgres write-ahead log
-#[derive(Debug, PartialEq, PartialOrd, Ord, Eq, Clone, Copy, Default)]
+/// Represents a position within the Postgres write-ahead log
+#[derive(Debug, PartialEq, PartialOrd, Ord, Eq, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct PostgresPosition {
     /// Postgres Log Sequence Number
     pub lsn: Lsn,
 }
 
-impl From<&PostgresPosition> for ReplicationOffset {
-    fn from(value: &PostgresPosition) -> Self {
-        ReplicationOffset {
-            replication_log_name: String::new(),
-            offset: value.lsn.0 as u128,
-        }
-    }
-}
-
 impl From<PostgresPosition> for ReplicationOffset {
     fn from(value: PostgresPosition) -> Self {
-        (&value).into()
-    }
-}
-
-impl From<ReplicationOffset> for PostgresPosition {
-    fn from(val: ReplicationOffset) -> Self {
-        PostgresPosition {
-            lsn: Lsn(val.offset as i64),
-        }
-    }
-}
-
-impl From<&ReplicationOffset> for PostgresPosition {
-    fn from(val: &ReplicationOffset) -> Self {
-        PostgresPosition {
-            lsn: Lsn(val.offset as i64),
-        }
+        Self::Postgres(value)
     }
 }
 
 impl From<i64> for PostgresPosition {
     fn from(i: i64) -> Self {
         PostgresPosition { lsn: i.into() }
+    }
+}
+
+impl From<Lsn> for PostgresPosition {
+    fn from(lsn: Lsn) -> Self {
+        PostgresPosition { lsn }
     }
 }
 
@@ -53,7 +36,7 @@ impl fmt::Display for PostgresPosition {
 }
 
 /// Postgres's "log sequence number"
-#[derive(PartialEq, PartialOrd, Ord, Eq, Clone, Copy, Default)]
+#[derive(PartialEq, PartialOrd, Ord, Eq, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct Lsn(pub i64);
 
 impl fmt::Display for Lsn {
@@ -74,23 +57,8 @@ impl From<i64> for Lsn {
     }
 }
 
-impl From<Lsn> for PostgresPosition {
-    fn from(lsn: Lsn) -> Self {
-        PostgresPosition { lsn }
-    }
-}
-
 impl From<Lsn> for ReplicationOffset {
     fn from(lsn: Lsn) -> Self {
-        (&lsn).into()
-    }
-}
-
-impl From<&Lsn> for ReplicationOffset {
-    fn from(lsn: &Lsn) -> Self {
-        ReplicationOffset {
-            replication_log_name: String::new(),
-            offset: lsn.0 as _,
-        }
+        Self::Postgres(PostgresPosition { lsn })
     }
 }

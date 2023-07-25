@@ -4,13 +4,15 @@ pub mod mysql;
 pub mod postgres;
 
 use std::borrow::Borrow;
-use std::cmp::{min_by_key, Ordering};
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt;
 use std::hash::Hash;
 
+use mysql::MySqlPosition;
 use nom_sql::Relation;
-use readyset_errors::{ReadySetError, ReadySetResult};
+use postgres::PostgresPosition;
+use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
 /// Enum representing whether a base table node was already initialized (and has a replication
@@ -31,43 +33,70 @@ pub enum ReplicationOffsetState {
 /// See [the documentation for PersistentState](::readyset_dataflow::state::persistent_state) for
 /// more information about how replication offsets are used and persisted
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
-pub struct ReplicationOffset {
-    /// The actual offset within the replication log
-    pub offset: u128,
+pub enum ReplicationOffset {
+    MySql(MySqlPosition),
+    Postgres(PostgresPosition),
+}
 
-    /// The name of the replication log that this offset is within. [`ReplicationOffset`]s with
-    /// different log names are not comparable
-    pub replication_log_name: String,
+impl TryFrom<ReplicationOffset> for MySqlPosition {
+    type Error = ReadySetError;
+
+    fn try_from(offset: ReplicationOffset) -> Result<Self, Self::Error> {
+        if let ReplicationOffset::MySql(offset) = offset {
+            Ok(offset)
+        } else {
+            Err(internal_err!(
+                "cannot extract MySqlPosition from Postgres ReplicationOffset"
+            ))
+        }
+    }
+}
+
+impl TryFrom<&ReplicationOffset> for MySqlPosition {
+    type Error = ReadySetError;
+
+    fn try_from(offset: &ReplicationOffset) -> Result<Self, Self::Error> {
+        offset.clone().try_into()
+    }
+}
+
+impl TryFrom<ReplicationOffset> for PostgresPosition {
+    type Error = ReadySetError;
+
+    fn try_from(offset: ReplicationOffset) -> Result<Self, Self::Error> {
+        if let ReplicationOffset::Postgres(offset) = offset {
+            Ok(offset)
+        } else {
+            Err(internal_err!(
+                "cannot extract PostgresPosition from MySQL ReplicationOffset"
+            ))
+        }
+    }
+}
+
+impl TryFrom<&ReplicationOffset> for PostgresPosition {
+    type Error = ReadySetError;
+
+    fn try_from(offset: &ReplicationOffset) -> Result<Self, Self::Error> {
+        offset.clone().try_into()
+    }
 }
 
 impl fmt::Display for ReplicationOffset {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if !self.replication_log_name.is_empty() {
-            // Wish we could simply convert to BinlogPosition, but including it in the manifest
-            // creates a cyclic dependency hell, so duplicate the code here.
-            let suffix_len = (self.offset >> 123) as usize;
-            let suffix = (self.offset >> 64) as u32;
-            let position = self.offset as u32;
-            write!(
-                f,
-                "{0}.{1:02$}:{3}",
-                self.replication_log_name, suffix, suffix_len, position
-            )
-        } else {
-            // Wish we could simply convert to Lsn, but it's not quite worth extracting an entire
-            // crate for Lsn to live in yet, so just duplicate the formatting here.
-            let lsn = self.offset as i64;
-            write!(f, "wal[{:X}/{:X}]", lsn >> 32, lsn & 0xffffffff)
+        match self {
+            Self::MySql(pos) => write!(f, "{pos}"),
+            Self::Postgres(pos) => write!(f, "{pos}"),
         }
     }
 }
 
 impl PartialOrd for ReplicationOffset {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        if other.replication_log_name != self.replication_log_name {
-            None
-        } else {
-            self.offset.partial_cmp(&other.offset)
+        match (self, other) {
+            (Self::MySql(pos), Self::MySql(other_pos)) => pos.partial_cmp(other_pos),
+            (Self::Postgres(pos), Self::Postgres(other_pos)) => pos.partial_cmp(other_pos),
+            _ => None,
         }
     }
 }
@@ -79,22 +108,36 @@ impl ReplicationOffset {
     /// If the offsets are from different replication logs, returns an error with
     /// [`ReadySetError::ReplicationOffsetLogDifferent`]
     pub fn try_max_into(&self, other: &mut Option<ReplicationOffset>) -> ReadySetResult<()> {
-        if let Some(other) = other {
-            if self.replication_log_name != other.replication_log_name {
-                return Err(ReadySetError::ReplicationOffsetLogDifferent(
-                    self.replication_log_name.clone(),
-                    other.replication_log_name.clone(),
-                ));
-            }
-
-            if self.offset > other.offset {
-                other.offset = self.offset
-            }
-        } else {
-            *other = Some(self.clone())
+        if matches!(other, Some(other) if self.try_partial_cmp(other)?.is_gt()) || other.is_none() {
+            *other = Some(self.clone());
         }
 
         Ok(())
+    }
+
+    /// This method compares `self` and `other`, returning an [`Ordering`] if the two replication
+    /// offsets are comparable and an error otherwise. Whether two replication offsets are
+    /// comparable is an implementation detail of the representation of the log position for the
+    /// underlying database backend.
+    pub fn try_partial_cmp(&self, other: &Self) -> ReadySetResult<Ordering> {
+        match (self, other) {
+            (Self::MySql(offset), Self::MySql(other_offset)) => {
+                offset.try_partial_cmp(other_offset)
+            }
+            (Self::Postgres(offset), Self::Postgres(other_offset)) => Ok(offset.cmp(other_offset)),
+            _ => Err(internal_err!(
+                "Cannot compare replication offsets from different database backends"
+            )),
+        }
+    }
+
+    /// Returns the minimum of the two replication offsets if the values are comparable; otherwise,
+    /// returns an error. The first argument is returned if the values are equal.
+    pub fn try_min<'a>(offset1: &'a Self, offset2: &'a Self) -> ReadySetResult<&'a Self> {
+        match offset1.try_partial_cmp(offset2)? {
+            Ordering::Less | Ordering::Equal => Ok(offset1),
+            Ordering::Greater => Ok(offset2),
+        }
     }
 }
 
@@ -152,15 +195,17 @@ impl ReplicationOffsets {
     /// A table that is present returns `true`:
     ///
     /// ```rust
+    /// use replication_offset::mysql::MySqlPosition;
     /// use replication_offset::{ReplicationOffset, ReplicationOffsets};
     ///
     /// let mut replication_offsets = ReplicationOffsets::default();
     /// replication_offsets.tables.insert(
     ///     "table_1".into(),
-    ///     Some(ReplicationOffset {
-    ///         replication_log_name: "binlog".to_string(),
-    ///         offset: 1,
-    ///     }),
+    ///     Some(
+    ///         MySqlPosition::from_file_name_and_position("binlog.00001".into(), 1)
+    ///             .unwrap()
+    ///             .into(),
+    ///     ),
     /// );
     /// assert!(replication_offsets.has_table(&"table_1".into()));
     /// ```
@@ -191,13 +236,8 @@ impl ReplicationOffsets {
                 Some(offset) => offset,
                 None => return Ok(None),
             };
-            if res.replication_log_name != offset.replication_log_name {
-                return Err(ReadySetError::ReplicationOffsetLogDifferent(
-                    res.replication_log_name.clone(),
-                    offset.replication_log_name.clone(),
-                ));
-            }
-            if offset.offset > res.offset {
+
+            if offset.try_partial_cmp(res)?.is_gt() {
                 res = offset;
             }
         }
@@ -217,14 +257,8 @@ impl ReplicationOffsets {
         let mut res: Option<&ReplicationOffset> = None;
         for offset in self.schema.iter().chain(self.tables.values().flatten()) {
             match (res, offset) {
-                (Some(off1), off2) if off1.replication_log_name != off2.replication_log_name => {
-                    return Err(ReadySetError::ReplicationOffsetLogDifferent(
-                        off1.replication_log_name.clone(),
-                        off2.replication_log_name.clone(),
-                    ));
-                }
                 (Some(off1), off2) => {
-                    res = Some(min_by_key(off1, off2, |off| off.offset));
+                    res = Some(ReplicationOffset::try_min(off1, off2)?);
                 }
                 (None, off) => {
                     res = Some(off);
@@ -237,11 +271,19 @@ impl ReplicationOffsets {
     /// Advance replication offset for the schema and all tables to the given offset.
     /// Replication offsets will not change if they are ahead of the provided offset.
     pub fn advance_offset(&mut self, offset: ReplicationOffset) -> ReadySetResult<()> {
-        for table_offset in self.tables.values_mut() {
-            offset.try_max_into(table_offset)?;
+        for table_offset in self.tables.values_mut().flatten() {
+            if offset.try_partial_cmp(table_offset)?.is_gt() {
+                *table_offset = offset.clone();
+            }
         }
 
-        offset.try_max_into(&mut self.schema)
+        if let Some(ref mut schema_offset) = self.schema {
+            if offset.try_partial_cmp(schema_offset)?.is_gt() {
+                *schema_offset = offset;
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -255,53 +297,59 @@ mod tests {
         #[test]
         fn all_present_and_matching() {
             let offsets = ReplicationOffsets {
-                schema: Some(ReplicationOffset {
-                    offset: 1,
-                    replication_log_name: "test".to_owned(),
-                }),
+                schema: Some(
+                    MySqlPosition::from_file_name_and_position("test.00001".into(), 1)
+                        .unwrap()
+                        .into(),
+                ),
                 tables: HashMap::from([
                     (
                         "t1".into(),
-                        Some(ReplicationOffset {
-                            offset: 2,
-                            replication_log_name: "test".to_owned(),
-                        }),
+                        Some(
+                            MySqlPosition::from_file_name_and_position("test.00001".into(), 2)
+                                .unwrap()
+                                .into(),
+                        ),
                     ),
                     (
                         "t2".into(),
-                        Some(ReplicationOffset {
-                            offset: 3,
-                            replication_log_name: "test".to_owned(),
-                        }),
+                        Some(
+                            MySqlPosition::from_file_name_and_position("test.00001".into(), 3)
+                                .unwrap()
+                                .into(),
+                        ),
                     ),
                 ]),
             };
-            let res = offsets.max_offset().unwrap().unwrap();
-            assert_eq!(res.replication_log_name, "test");
-            assert_eq!(res.offset, 3);
+            let res: MySqlPosition = offsets.max_offset().unwrap().unwrap().try_into().unwrap();
+            assert_eq!(res.binlog_file_name().to_string(), "test.00001");
+            assert_eq!(res.position, 3);
         }
 
         #[test]
         fn all_present_not_matching() {
             let offsets = ReplicationOffsets {
-                schema: Some(ReplicationOffset {
-                    offset: 1,
-                    replication_log_name: "binlog".to_owned(),
-                }),
+                schema: Some(
+                    MySqlPosition::from_file_name_and_position("binlog.00001".into(), 1)
+                        .unwrap()
+                        .into(),
+                ),
                 tables: HashMap::from([
                     (
                         "t1".into(),
-                        Some(ReplicationOffset {
-                            offset: 2,
-                            replication_log_name: "test".to_owned(),
-                        }),
+                        Some(
+                            MySqlPosition::from_file_name_and_position("test.00001".into(), 2)
+                                .unwrap()
+                                .into(),
+                        ),
                     ),
                     (
                         "t2".into(),
-                        Some(ReplicationOffset {
-                            offset: 3,
-                            replication_log_name: "test".to_owned(),
-                        }),
+                        Some(
+                            MySqlPosition::from_file_name_and_position("test.00001".into(), 3)
+                                .unwrap()
+                                .into(),
+                        ),
                     ),
                 ]),
             };
@@ -316,17 +364,19 @@ mod tests {
                 tables: HashMap::from([
                     (
                         "t1".into(),
-                        Some(ReplicationOffset {
-                            offset: 2,
-                            replication_log_name: "test".to_owned(),
-                        }),
+                        Some(
+                            MySqlPosition::from_file_name_and_position("test.00001".into(), 2)
+                                .unwrap()
+                                .into(),
+                        ),
                     ),
                     (
                         "t2".into(),
-                        Some(ReplicationOffset {
-                            offset: 3,
-                            replication_log_name: "test".to_owned(),
-                        }),
+                        Some(
+                            MySqlPosition::from_file_name_and_position("test.00001".into(), 3)
+                                .unwrap()
+                                .into(),
+                        ),
                     ),
                 ]),
             };
@@ -337,17 +387,19 @@ mod tests {
         #[test]
         fn table_missing() {
             let offsets = ReplicationOffsets {
-                schema: Some(ReplicationOffset {
-                    offset: 1,
-                    replication_log_name: "test".to_owned(),
-                }),
+                schema: Some(
+                    MySqlPosition::from_file_name_and_position("test.00001".into(), 1)
+                        .unwrap()
+                        .into(),
+                ),
                 tables: HashMap::from([
                     (
                         "t1".into(),
-                        Some(ReplicationOffset {
-                            offset: 2,
-                            replication_log_name: "test".to_owned(),
-                        }),
+                        Some(
+                            MySqlPosition::from_file_name_and_position("test.00001".into(), 2)
+                                .unwrap()
+                                .into(),
+                        ),
                     ),
                     ("t2".into(), None),
                 ]),

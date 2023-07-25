@@ -370,7 +370,7 @@ impl NoriaAdapter {
                     .min_present_offset()?
                     .expect("Minimal offset must be present after snapshot")
                     .clone()
-                    .into();
+                    .try_into()?;
 
                 span.in_scope(|| info!("Snapshot finished"));
                 histogram!(
@@ -390,7 +390,7 @@ impl NoriaAdapter {
 
                 pos
             }
-            (Some(pos), _) => pos.clone().into(),
+            (Some(pos), _) => pos.clone().try_into()?,
         };
 
         // TODO: it is possible that the binlog position from noria is no longer
@@ -480,7 +480,10 @@ impl NoriaAdapter {
         // Attempt to retrieve the latest replication offset from ReadySet-server, if none is
         // present begin the snapshot process
         let replication_offsets = noria.replication_offsets().await?;
-        let pos = replication_offsets.max_offset()?.map(Into::into);
+        let pos = replication_offsets
+            .max_offset()?
+            .map(TryInto::try_into)
+            .transpose()?;
         let snapshot_report_interval_secs = config.snapshot_report_interval_secs;
 
         let table_filter = TableFilter::try_new(

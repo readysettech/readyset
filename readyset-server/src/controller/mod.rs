@@ -1131,6 +1131,7 @@ mod tests {
     use readyset_data::Dialect as DataDialect;
     use readyset_util::eventually;
     use replication_offset::ReplicationOffset;
+    use replicators::MySqlPosition;
 
     use crate::integration_utils::start_simple;
 
@@ -1192,10 +1193,9 @@ mod tests {
     async fn replication_offsets() {
         let (mut noria, shutdown_tx) = start_simple("all_tables").await;
 
-        let offset = ReplicationOffset {
-            offset: 1,
-            replication_log_name: "binlog".to_owned(),
-        };
+        let offset = ReplicationOffset::MySql(
+            MySqlPosition::from_file_name_and_position("binlog.00001".to_owned(), 1).unwrap(),
+        );
 
         noria
             .set_schema_replication_offset(Some(&offset))
@@ -1217,25 +1217,37 @@ mod tests {
         let mut t1 = noria.table("t1").await.unwrap();
         let mut t2 = noria.table("t2").await.unwrap();
 
-        t1.set_replication_offset(ReplicationOffset {
-            offset: 2,
-            ..offset.clone()
-        })
+        t1.set_replication_offset(ReplicationOffset::MySql(
+            MySqlPosition::from_file_name_and_position("binlog.00001".to_owned(), 2).unwrap(),
+        ))
         .await
         .unwrap();
 
-        t2.set_replication_offset(ReplicationOffset {
-            offset: 3,
-            ..offset.clone()
-        })
+        t2.set_replication_offset(ReplicationOffset::MySql(
+            MySqlPosition::from_file_name_and_position("binlog.00001".to_owned(), 3).unwrap(),
+        ))
         .await
         .unwrap();
 
         let offsets = noria.replication_offsets().await.unwrap();
 
-        assert_eq!(offsets.schema.unwrap().offset, 1);
-        assert_eq!(offsets.tables[&"t1".into()].as_ref().unwrap().offset, 2);
-        assert_eq!(offsets.tables[&"t2".into()].as_ref().unwrap().offset, 3);
+        let mysql_pos: MySqlPosition = offsets.schema.unwrap().try_into().unwrap();
+        assert_eq!(mysql_pos.position, 1);
+
+        let mysql_pos: MySqlPosition = offsets.tables[&"t1".into()]
+            .as_ref()
+            .unwrap()
+            .try_into()
+            .unwrap();
+        assert_eq!(mysql_pos.position, 2);
+
+        let mysql_pos: MySqlPosition = offsets.tables[&"t2".into()]
+            .as_ref()
+            .unwrap()
+            .try_into()
+            .unwrap();
+        assert_eq!(mysql_pos.position, 3);
+
         assert_eq!(offsets.tables[&"t3".into()], None);
 
         shutdown_tx.shutdown().await;
@@ -1476,10 +1488,9 @@ mod tests {
             .unwrap();
         snapshotted.set_snapshot_mode(false).await.unwrap();
         snapshotted
-            .set_replication_offset(ReplicationOffset {
-                offset: 1,
-                replication_log_name: "log".into(),
-            })
+            .set_replication_offset(ReplicationOffset::MySql(
+                MySqlPosition::from_file_name_and_position("log.00001".into(), 1).unwrap(),
+            ))
             .await
             .unwrap();
 

@@ -702,7 +702,7 @@ impl Connector for PostgresWalConnector {
                     }
                 }
                 WalEvent::WantsKeepaliveResponse => {
-                    self.send_standby_status_update(last_pos.into())?;
+                    self.send_standby_status_update(last_pos.try_into()?)?;
                 }
                 WalEvent::Commit { lsn } => {
                     if !actions.is_empty() {

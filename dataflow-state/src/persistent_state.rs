@@ -2127,6 +2127,7 @@ mod tests {
 
     use pretty_assertions::assert_eq;
     use readyset_data::Collation;
+    use replication_offset::mysql::MySqlPosition;
     use rust_decimal::Decimal;
     use test_strategy::proptest;
 
@@ -2927,14 +2928,26 @@ mod tests {
     }
 
     #[test]
-    fn replication_offset_roundtrip() {
-        let mut state = setup_persistent("replication_offset_roundtrip", None);
+    fn replication_offset_roundtrip_mysql() {
+        let mut state = setup_persistent("replication_offset_roundtrip_mysql", None);
         state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
         let mut records: Records = vec![(vec![1.into(), "A".into()], true)].into();
-        let replication_offset = ReplicationOffset {
-            offset: 12,
-            replication_log_name: "binlog".to_owned(),
-        };
+        let replication_offset = ReplicationOffset::MySql(
+            MySqlPosition::from_file_name_and_position("binlog.00001".to_owned(), 12).unwrap(),
+        );
+        state
+            .process_records(&mut records, None, Some(replication_offset.clone()))
+            .unwrap();
+        let result = state.replication_offset();
+        assert_eq!(result, Some(&replication_offset));
+    }
+
+    #[test]
+    fn replication_offset_roundtrip_postgres() {
+        let mut state = setup_persistent("replication_offset_roundtrip_postgres", None);
+        state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
+        let mut records: Records = vec![(vec![1.into(), "A".into()], true)].into();
+        let replication_offset = ReplicationOffset::Postgres(12.into());
         state
             .process_records(&mut records, None, Some(replication_offset.clone()))
             .unwrap();
@@ -2997,10 +3010,7 @@ mod tests {
                     .map(|n| Record::from(vec![n.into()]))
                     .collect::<Records>(),
                 None,
-                Some(ReplicationOffset {
-                    offset: 1,
-                    replication_log_name: String::new(),
-                }),
+                Some(ReplicationOffset::Postgres(1.into())),
             )
             .unwrap();
 
@@ -3015,10 +3025,7 @@ mod tests {
                     .map(|n| Record::from(vec![n.into()]))
                     .collect::<Records>(),
                 None,
-                Some(ReplicationOffset {
-                    offset: 2,
-                    replication_log_name: String::new(),
-                }),
+                Some(ReplicationOffset::Postgres(2.into())),
             )
             .unwrap();
 
@@ -3028,10 +3035,7 @@ mod tests {
         rh.process_records(
             &mut Records::from(Vec::<Record>::new()),
             None,
-            Some(ReplicationOffset {
-                offset: 2,
-                replication_log_name: String::new(),
-            }),
+            Some(ReplicationOffset::Postgres(2.into())),
         )
         .unwrap();
 
