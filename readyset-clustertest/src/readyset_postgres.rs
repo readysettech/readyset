@@ -156,5 +156,27 @@ async fn embedded_readers_adapters_lt_replicas() {
         }
     }
 
+    adapter
+        .query_drop("INSERT INTO t (x) VALUES (2);")
+        .await
+        .unwrap();
+
+    eventually! {
+        run_test: {
+            let mut res: Vec<Vec<DfValue>> = adapter
+                .query("SELECT x FROM t;")
+                .await
+                .unwrap()
+                .try_into()
+                .unwrap();
+            res.sort();
+            let dest = last_statement_destination(&mut adapter).await;
+            (res, dest)
+        },
+        then_assert: |(res, dest)| {
+            assert_eq!(dest, QueryDestination::Readyset);
+            assert_eq!(res, vec![vec![1.into()], vec![2.into()]]);
+        }
+    }
     deployment.teardown().await.unwrap();
 }
