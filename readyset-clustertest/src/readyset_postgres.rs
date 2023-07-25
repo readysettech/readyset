@@ -140,9 +140,33 @@ async fn embedded_readers_adapters_lt_replicas() {
     }
 
     eventually! {
+        adapter
+            .query_drop("CREATE CACHE FROM SELECT count(*) FROM t WHERE x = $1;")
+            .await
+            .is_ok()
+    }
+
+    eventually! {
         run_test: {
             let res: Vec<Vec<DfValue>> = adapter
                 .query("SELECT x FROM t;")
+                .await
+                .unwrap()
+                .try_into()
+                .unwrap();
+            let dest = last_statement_destination(&mut adapter).await;
+            (res, dest)
+        },
+        then_assert: |(res, dest)| {
+            assert_eq!(dest, QueryDestination::Readyset);
+            assert_eq!(res, vec![vec![1.into()]]);
+        }
+    }
+
+    eventually! {
+        run_test: {
+            let res: Vec<Vec<DfValue>> = adapter
+                .execute(&"SELECT count(*) FROM t WHERE x = $1;", [DfValue::from(1i32)])
                 .await
                 .unwrap()
                 .try_into()
@@ -178,5 +202,28 @@ async fn embedded_readers_adapters_lt_replicas() {
             assert_eq!(res, vec![vec![1.into()], vec![2.into()]]);
         }
     }
+
+    adapter
+        .query_drop("INSERT INTO t (x) VALUES (1);")
+        .await
+        .unwrap();
+
+    eventually! {
+        run_test: {
+            let res: Vec<Vec<DfValue>> = adapter
+                .execute(&"SELECT count(*) FROM t WHERE x = $1;", [DfValue::from(1i32)])
+                .await
+                .unwrap()
+                .try_into()
+                .unwrap();
+            let dest = last_statement_destination(&mut adapter).await;
+            (res, dest)
+        },
+        then_assert: |(res, dest)| {
+            assert_eq!(dest, QueryDestination::Readyset);
+            assert_eq!(res, vec![vec![2.into()]]);
+        }
+    }
+
     deployment.teardown().await.unwrap();
 }
