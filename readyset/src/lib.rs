@@ -16,7 +16,7 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use anyhow::{anyhow, bail, ensure};
+use anyhow::{anyhow, bail};
 use async_trait::async_trait;
 use clap::builder::NonEmptyStringValueParser;
 use clap::{ArgGroup, Parser, ValueEnum};
@@ -993,11 +993,6 @@ where
 
         health_reporter.set_state(AdapterState::Healthy);
 
-        if internal_server_handle.is_none() {
-            // Validate compatibility with the external readyset-server instance
-            rt.block_on(async { check_server_version_compatibility(&mut rh.clone()).await })?;
-        }
-
         rs_connect.in_scope(|| info!(supported = %server_supports_pagination));
 
         let expr_dialect = self.expr_dialect;
@@ -1200,18 +1195,6 @@ where
 
         Ok(())
     }
-}
-
-async fn check_server_version_compatibility(rh: &mut ReadySetHandle) -> anyhow::Result<()> {
-    let server_version = rh.version().await?;
-    debug!(server_version);
-    ensure!(
-        RELEASE_VERSION == server_version,
-        "Adapter and server version mismatch. Expected {} found {}",
-        RELEASE_VERSION,
-        server_version
-    );
-    Ok(())
 }
 
 #[cfg(test)]
