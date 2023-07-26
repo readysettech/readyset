@@ -1574,7 +1574,8 @@ impl DfState {
 
         routing::connect(&self.ingredients, &mut dmp, &new)?;
 
-        self.materializations.extend(&mut self.ingredients, &new)?;
+        self.materializations
+            .extend(&mut self.ingredients, &new, &dmp)?;
 
         self.materializations
             .commit(&mut self.ingredients, &new, &mut dmp)?;

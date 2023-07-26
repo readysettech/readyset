@@ -1316,9 +1316,11 @@ fn plan_add_nodes(
         // And now, the last piece of the puzzle -- set up materializations
         debug!("initializing new materializations");
 
-        dataflow_state
-            .materializations
-            .extend(&mut dataflow_state.ingredients, &new_nodes)?;
+        dataflow_state.materializations.extend(
+            &mut dataflow_state.ingredients,
+            &new_nodes,
+            &dmp,
+        )?;
 
         // Check to see if we've just tried to add a fully materialized node below an existing
         // partially materialized node
