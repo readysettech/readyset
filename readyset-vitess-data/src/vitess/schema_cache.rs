@@ -38,11 +38,7 @@ impl SchemaCache {
         }
 
         let mut table = Table::new(keyspace, table_name);
-        table.columns = field_event
-            .fields
-            .iter()
-            .map(|field| field.into())
-            .collect();
+        table.set_columns(&field_event.fields);
 
         self.add_table(table);
     }

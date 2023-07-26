@@ -15,13 +15,13 @@ fn process_field_event() {
     assert_eq!(schema.tables.len(), 1);
     assert!(schema.tables.contains_key(TABLE));
 
-    let table_schema = schema.tables.get(TABLE).unwrap();
+    let table = schema.tables.get(TABLE).unwrap();
 
-    assert_eq!(table_schema.columns.len(), 3);
+    assert_eq!(table.columns_count(), 3);
 
-    assert!(table_schema.columns.iter().any(|c| c.name == "sku"));
-    assert!(table_schema.columns.iter().any(|c| c.name == "description"));
-    assert!(table_schema.columns.iter().any(|c| c.name == "price"));
+    assert!(table.column_by_name("sku").is_some());
+    assert!(table.column_by_name("description").is_some());
+    assert!(table.column_by_name("price").is_some());
 }
 
 #[test]
@@ -35,7 +35,7 @@ fn schema_update() {
     assert_eq!(schema.tables.len(), 1);
 
     let table = schema.tables.get(TABLE).unwrap();
-    assert_eq!(table.columns.len(), 1);
+    assert_eq!(table.columns_count(), 1);
 
     field_event.fields.push(field_description());
 
@@ -43,5 +43,5 @@ fn schema_update() {
     assert_eq!(schema.tables.len(), 1);
 
     let table = schema.tables.get(TABLE).unwrap();
-    assert_eq!(table.columns.len(), 2);
+    assert_eq!(table.columns_count(), 2);
 }
