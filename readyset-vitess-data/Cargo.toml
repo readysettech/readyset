@@ -9,7 +9,7 @@ edition = "2021"
 anyhow = "1.0"
 vitess-grpc = "0.1.2"
 rust_decimal = { version = "1.26" }
+bit-vec = { version = "0.6", features = ["serde"] }
 
 readyset-data = { path = "../readyset-data" }
 mysql-time = { path = "../mysql-time" }
-bit-vec = { version = "0.6", features = ["serde"] }

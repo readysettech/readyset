@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use bit_vec::BitVec;
 use readyset_data::DfValue;
-use readyset_vitess_data::field_parsing::vstream_value_to_noria_value;
+use readyset_vitess_data::vstream_value_to_noria_value;
 use vitess_grpc::query::Type;
 
 #[test]
