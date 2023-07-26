@@ -1821,7 +1821,6 @@ async fn show_readyset_status() {
     let (opts, _handle, shutdown_tx) = setup().await;
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
     let ret: Vec<mysql::Row> = conn.query("SHOW READYSET STATUS;").await.unwrap();
-    assert_eq!(ret.len(), 1);
     assert_eq!(
         ret.first().unwrap().get::<String, _>(0).unwrap(),
         "Snapshot Status"

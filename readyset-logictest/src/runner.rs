@@ -544,7 +544,7 @@ impl TestScript {
         };
         let addr = listener.local_addr().unwrap();
 
-        let mut rh = ReadySetHandle::new(authority).await;
+        let mut rh = ReadySetHandle::new(authority.clone()).await;
 
         let server_supports_pagination = rh.supports_pagination().await.unwrap();
 
@@ -589,7 +589,7 @@ impl TestScript {
                     BackendBuilder::new()
                         .require_authentication(false)
                         .dialect($dialect)
-                        .build::<_, $handler>(noria, upstream, query_status_cache)
+                        .build::<_, $handler>(noria, upstream, query_status_cache, authority)
                 }};
             }
 

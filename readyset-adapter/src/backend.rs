@@ -84,6 +84,7 @@ use nom_sql::{
     InsertStatement, Relation, SelectStatement, SetStatement, ShowStatement, SqlIdentifier,
     SqlQuery, UpdateStatement, UseStatement,
 };
+use readyset_client::consensus::Authority;
 use readyset_client::consistency::Timestamp;
 use readyset_client::query::*;
 use readyset_client::results::Results;
@@ -297,6 +298,7 @@ impl BackendBuilder {
         noria: NoriaConnector,
         upstream: Option<DB>,
         query_status_cache: &'static QueryStatusCache,
+        authority: Arc<Authority>,
     ) -> Backend<DB, Handler> {
         metrics::increment_gauge!(recorded::CONNECTED_CLIENTS, 1.0);
 
@@ -333,6 +335,7 @@ impl BackendBuilder {
                     .enable_experimental_placeholder_inlining,
             },
             telemetry_sender: self.telemetry_sender,
+            authority,
             _query_handler: PhantomData,
         }
     }
@@ -501,6 +504,10 @@ where
 
     /// Provides the ability to send [`TelemetryEvent`]s to Segment
     telemetry_sender: Option<TelemetrySender>,
+
+    /// Handle to the Authority. A handle is also stored in Self::noria where it is used to find
+    /// the Controller.
+    authority: Arc<Authority>,
 
     _query_handler: PhantomData<Handler>,
 }
@@ -1838,7 +1845,9 @@ where
 
                 self.noria.verbose_views(query_id).await
             }
-            SqlQuery::Show(ShowStatement::ReadySetStatus) => self.noria.readyset_status().await,
+            SqlQuery::Show(ShowStatement::ReadySetStatus) => {
+                self.noria.readyset_status(&self.authority).await
+            }
             SqlQuery::Show(ShowStatement::ReadySetVersion) => readyset_version(),
             SqlQuery::Show(ShowStatement::ReadySetTables) => self.noria.table_statuses().await,
             SqlQuery::Show(ShowStatement::ProxiedQueries(q_id)) => {

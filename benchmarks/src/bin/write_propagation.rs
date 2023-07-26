@@ -30,7 +30,7 @@ use data_generator::ColumnGenerationSpec;
 use database_utils::DatabaseURL;
 use nom_sql::Relation;
 use readyset_adapter::backend::noria_connector::{NoriaConnector, ReadBehavior};
-use readyset_client::consensus::AuthorityType;
+use readyset_client::consensus::{Authority, AuthorityType};
 use readyset_client::{KeyComparison, ReadySetHandle, View, ViewCreateRequest, ViewQuery};
 use readyset_data::{DfValue, Dialect};
 use tokio::sync::RwLock;
@@ -96,6 +96,7 @@ impl Writer {
         schema: DatabaseSchema,
         run_for: &Option<u32>,
         mut ch: ReadySetHandle,
+        authority: Arc<Authority>,
     ) -> anyhow::Result<()> {
         let mut next_report = Instant::now() + REPORTING_INTERVAL;
         let mut writer_update = WriterThreadUpdate {
@@ -124,7 +125,7 @@ impl Writer {
         )
         .await;
 
-        let mut b = Backend::new(&self.database_url, noria).await?;
+        let mut b = Backend::new(&self.database_url, noria, authority).await?;
 
         let mut view = ch.view("w").await.unwrap();
 
@@ -284,13 +285,14 @@ impl Writer {
             let schema = news_app_schema.clone();
             let articles = current_articles.clone();
             let thread_tx = tx.clone();
-            let auth = self
-                .authority
-                .to_authority(&self.authority_address, &self.deployment);
-            let ch = ReadySetHandle::new(auth).await;
+            let auth = Arc::new(
+                self.authority
+                    .to_authority(&self.authority_address, &self.deployment),
+            );
+            let ch = ReadySetHandle::new(auth.clone()).await;
 
             threads.push(tokio::spawn(async move {
-                self.generate_writes(articles, thread_tx, schema, &self.run_for, ch)
+                self.generate_writes(articles, thread_tx, schema, &self.run_for, ch, auth)
                     .await
             }))
         }

@@ -560,8 +560,8 @@ where
         let rs_connect = span!(Level::INFO, "Connecting to RS server");
         rs_connect.in_scope(|| info!(%options.authority_address, %options.deployment));
 
-        let authority = options.authority.clone();
-        let authority_address = match authority {
+        let authority_type = options.authority.clone();
+        let authority_address = match authority_type {
             AuthorityType::Standalone => deployment_dir
                 .clone()
                 .into_os_string()
@@ -570,6 +570,9 @@ where
             _ => options.authority_address.clone(),
         };
         let deployment = options.deployment.clone();
+        let adapter_authority =
+            Arc::new(authority_type.to_authority(&authority_address, &deployment));
+
         let migration_request_timeout = options.migration_request_timeout_ms;
         let controller_request_timeout = options.controller_request_timeout_ms;
         let server_supports_pagination = options
@@ -581,11 +584,9 @@ where
         let no_upstream_connections = options.no_upstream_connections;
 
         let rh = rt.block_on(async {
-            let authority = authority.to_authority(&authority_address, &deployment);
-
             Ok::<ReadySetHandle, ReadySetError>(
                 ReadySetHandle::with_timeouts(
-                    authority,
+                    adapter_authority.clone(),
                     Some(Duration::from_millis(controller_request_timeout)),
                     Some(Duration::from_millis(migration_request_timeout)),
                 )
@@ -998,6 +999,7 @@ where
 
             // bunch of stuff to move into the async block below
             let rh = rh.clone();
+            let adapter_authority = adapter_authority.clone();
             let (auto_increments, query_cache) = (auto_increments.clone(), query_cache.clone());
             let mut connection_handler = self.connection_handler.clone();
             let backend_builder = BackendBuilder::new()
@@ -1094,6 +1096,7 @@ where
                                     noria,
                                     upstream,
                                     query_status_cache,
+                                    adapter_authority.clone(),
                                 );
                                 connection_handler.process_connection(s, backend).await;
                             }

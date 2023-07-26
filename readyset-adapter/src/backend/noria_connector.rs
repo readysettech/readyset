@@ -10,6 +10,7 @@ use nom_sql::{
     self, ColumnConstraint, DeleteStatement, Expr, InsertStatement, Literal, Relation,
     SelectStatement, SqlIdentifier, SqlQuery, UnaryOperator, UpdateStatement,
 };
+use readyset_client::consensus::{Authority, AuthorityControl};
 use readyset_client::consistency::Timestamp;
 use readyset_client::internal::LocalNodeIndex;
 use readyset_client::recipe::changelist::{Change, ChangeList, IntoChanges};
@@ -999,15 +1000,24 @@ impl NoriaConnector {
         Ok(QueryResult::Empty)
     }
 
-    pub(crate) async fn readyset_status(&mut self) -> ReadySetResult<QueryResult<'static>> {
-        let status = match noria_await!(self.inner.get_mut()?, self.inner.get_mut()?.noria.status())
-        {
-            Ok(s) => <Vec<(String, String)>>::from(s),
-            Err(_) => vec![(
-                "ReadySet Controller Status".to_string(),
-                "Unavailable".to_string(),
-            )],
-        };
+    pub(crate) async fn readyset_status(
+        &mut self,
+        authority: &Authority,
+    ) -> ReadySetResult<QueryResult<'static>> {
+        let mut status =
+            match noria_await!(self.inner.get_mut()?, self.inner.get_mut()?.noria.status()) {
+                Ok(s) => <Vec<(String, String)>>::from(s),
+                Err(_) => vec![(
+                    "ReadySet Controller Status".to_string(),
+                    "Unavailable".to_string(),
+                )],
+            };
+
+        if let Ok(Some(stats)) = authority.persistent_stats().await {
+            stats.last_completed_snapshot.iter().for_each(|time| {
+                status.push(("Last Completed Snapshot".to_string(), time.to_string()))
+            })
+        }
 
         // Converts from ReadySetStatus -> Vec<(String, String)> -> QueryResult
         Ok(QueryResult::MetaVariables(

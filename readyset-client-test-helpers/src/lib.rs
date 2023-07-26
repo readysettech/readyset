@@ -232,7 +232,6 @@ impl TestBuilder {
                     let query_cache = query_cache.clone();
                     let backend_builder = self.backend_builder.clone();
                     let auto_increments = auto_increments.clone();
-                    let authority = authority.clone();
 
                     // backend either has upstream or noria writer
                     let mut upstream = if let Some(f) = &fallback_url {
@@ -247,7 +246,7 @@ impl TestBuilder {
                         Default::default()
                     };
 
-                    let mut rh = ReadySetHandle::new(authority).await;
+                    let mut rh = ReadySetHandle::new(authority.clone()).await;
                     let server_supports_pagination = rh.supports_pagination().await.unwrap();
                     let noria = NoriaConnector::new(
                         rh,
@@ -264,7 +263,7 @@ impl TestBuilder {
                     let backend = backend_builder
                         .dialect(A::DIALECT)
                         .migration_mode(self.migration_mode)
-                        .build(noria, upstream, query_status_cache);
+                        .build(noria, upstream, query_status_cache, authority.clone());
 
                     let mut backend_shutdown_rx_clone = backend_shutdown_rx_connection.clone();
                     tokio::spawn(async move {

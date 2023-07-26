@@ -1,10 +1,12 @@
 use std::str::FromStr;
+use std::sync::Arc;
 
 use database_utils::{DatabaseURL, UpstreamConfig};
 use nom_sql::Dialect;
 use readyset_adapter::backend::{BackendBuilder, NoriaConnector};
 use readyset_adapter::query_status_cache::QueryStatusCache;
 use readyset_adapter::UpstreamDatabase;
+use readyset_client::consensus::Authority;
 use readyset_mysql::{MySqlQueryHandler, MySqlUpstream};
 use readyset_psql::{PostgreSqlQueryHandler, PostgreSqlUpstream};
 
@@ -15,7 +17,11 @@ pub enum Backend {
 }
 
 impl Backend {
-    pub async fn new(url: &str, noria: NoriaConnector) -> anyhow::Result<Self> {
+    pub async fn new(
+        url: &str,
+        noria: NoriaConnector,
+        authority: Arc<Authority>,
+    ) -> anyhow::Result<Self> {
         let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
 
         match DatabaseURL::from_str(url)? {
@@ -26,7 +32,7 @@ impl Backend {
                     BackendBuilder::new()
                         .require_authentication(false)
                         .enable_ryw(true)
-                        .build(noria, Some(upstream), query_status_cache),
+                        .build(noria, Some(upstream), query_status_cache, authority),
                 ))
             }
             DatabaseURL::PostgreSQL(_) => {
@@ -37,7 +43,7 @@ impl Backend {
                     BackendBuilder::new()
                         .require_authentication(false)
                         .enable_ryw(true)
-                        .build(noria, Some(upstream), query_status_cache),
+                        .build(noria, Some(upstream), query_status_cache, authority),
                 ))
             }
         }
