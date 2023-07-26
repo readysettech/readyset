@@ -2,8 +2,7 @@ use anyhow::Result;
 use readyset_data::DfValue;
 use vitess_grpc::query::{Field, Row};
 
-use crate::vitess::Column;
-use crate::vstream_value_to_noria_value;
+use crate::Column;
 
 type NoriaRow = Vec<DfValue>;
 
@@ -49,12 +48,7 @@ impl Table {
 
             println!("field_start: {}, len: {}", field_start, len);
             let raw_value = &row.values[field_start..field_start + len as usize];
-            // TODO: Pass a reference to the list of enum values pre-calculated upfront
-            let value = vstream_value_to_noria_value(
-                raw_value,
-                column.grpc_type,
-                Some(&column.column_type),
-            )?;
+            let value = column.vstream_value_to_noria_value(raw_value)?;
             noria_row.push(value);
             field_start += len as usize;
         }

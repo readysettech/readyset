@@ -1,4 +1,7 @@
-pub mod field_parsing;
-pub mod vitess;
+mod column;
+mod schema_cache;
+mod table;
 
-pub use field_parsing::vstream_value_to_noria_value;
+pub use column::Column;
+pub use schema_cache::SchemaCache;
+pub use table::Table;

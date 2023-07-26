@@ -1,4 +1,4 @@
-use readyset_vitess_data::vitess::SchemaCache;
+use readyset_vitess_data::SchemaCache;
 
 mod helpers;
 use helpers::*;

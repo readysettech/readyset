@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use readyset_data::DfValue;
-use readyset_vitess_data::vitess::Table;
+use readyset_vitess_data::Table;
 use vitess_grpc::query::Row;
 
 mod helpers;

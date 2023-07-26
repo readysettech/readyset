@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use vitess_grpc::binlogdata::FieldEvent;
 
-use crate::vitess::Table;
+use crate::Table;
 
 pub struct SchemaCache {
     pub keyspace: String,
