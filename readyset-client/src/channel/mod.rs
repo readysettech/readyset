@@ -218,6 +218,15 @@ impl<K: Eq + Hash + Clone, T> ChannelCoordinator<K, T> {
         guard.addrs.insert(key, addr);
     }
 
+    pub fn remove(&self, key: K) {
+        #[allow(clippy::expect_used)]
+        // This can only fail if the mutex is poisoned, in which case we can't recover,
+        // so we allow to panic if that happens.
+        let mut guard = self.inner.write().expect("poisoned mutex");
+        guard.addrs.remove(&key);
+        guard.locals.remove(&key);
+    }
+
     pub fn insert_local(&self, key: K, chan: tokio::sync::mpsc::UnboundedSender<T>) {
         #[allow(clippy::expect_used)]
         // This can only fail if the mutex is poisoned, in which case we can't recover,

@@ -228,6 +228,32 @@ impl<T> Array2<T> {
         })
     }
 
+    /// Construct an iterator over pairs of `((row, column), &mut value)` in this [`Array2`]
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use array2::Array2;
+    ///
+    /// let mut my_array2: Array2<i32> = Array2::from_rows(vec![vec![1, 2], vec![3, 4]]);
+    /// for ((i, j), v) in my_array2.entries_mut() {
+    ///     *v += (i + j) as i32;
+    /// }
+    ///
+    /// assert_eq!(my_array2, Array2::from_rows(vec![vec![1, 3], vec![4, 6]]))
+    /// ```
+    #[inline]
+    pub fn entries_mut(
+        &mut self,
+    ) -> impl Iterator<Item = ((usize, usize), &mut T)> + ExactSizeIterator + '_ {
+        let row_size = self.row_size;
+        self.cells.iter_mut().enumerate().map(move |(i, v)| {
+            let row = i.div_floor(row_size);
+            let col = i % row_size;
+            ((row, col), v)
+        })
+    }
+
     /// Construct an iterator over pairs of `((row, column), value)` in this [`Array2`], consuming
     /// `self`
     ///

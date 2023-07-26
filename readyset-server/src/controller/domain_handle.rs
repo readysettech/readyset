@@ -73,13 +73,27 @@ impl DomainHandle {
             .any(|s| s == worker)
     }
 
-    /// Remove the given worker identifier from all shard/replica assignments of this domain
-    pub(crate) fn remove_worker(&mut self, wi: &WorkerIdentifier) {
-        for assignment in self.shards.cells_mut() {
-            if assignment.as_ref() == Some(wi) {
-                *assignment = None;
-            }
-        }
+    /// Remove the given worker identifier from all shard/replica assignments of this domain,
+    /// returning an iterator over all replica addresses that the worker was previously assigned to
+    pub(crate) fn remove_worker<'a>(
+        &'a mut self,
+        wi: &'a WorkerIdentifier,
+    ) -> impl Iterator<Item = ReplicaAddress> + 'a {
+        let domain_index = self.idx;
+        self.shards
+            .entries_mut()
+            .filter_map(move |((shard, replica), assignment)| {
+                if assignment.as_ref() == Some(wi) {
+                    *assignment = None;
+                    Some(ReplicaAddress {
+                        domain_index,
+                        shard,
+                        replica,
+                    })
+                } else {
+                    None
+                }
+            })
     }
 
     pub(super) async fn send_to_healthy_shard_replica<R>(

@@ -1515,7 +1515,9 @@ impl DfState {
         self.workers.remove(wi);
         self.read_addrs.remove(wi);
         for dh in self.domains.values_mut() {
-            dh.remove_worker(wi);
+            for replica_addr in dh.remove_worker(wi) {
+                self.channel_coordinator.remove(replica_addr);
+            }
         }
     }
 
