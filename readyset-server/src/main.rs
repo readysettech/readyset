@@ -247,7 +247,7 @@ fn main() -> anyhow::Result<()> {
     let deployment = opts.deployment;
     let external_port = opts.external_port;
     let (_handle, shutdown_tx) = rt.block_on(async move {
-        let authority = authority.to_authority(&authority_addr, &deployment).await;
+        let authority = authority.to_authority(&authority_addr, &deployment);
 
         let external_addr = external_addr.await.unwrap_or_else(|error| {
             error!(%error, "Error obtaining external IP address");

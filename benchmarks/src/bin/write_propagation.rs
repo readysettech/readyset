@@ -286,8 +286,7 @@ impl Writer {
             let thread_tx = tx.clone();
             let auth = self
                 .authority
-                .to_authority(&self.authority_address, &self.deployment)
-                .await;
+                .to_authority(&self.authority_address, &self.deployment);
             let ch = ReadySetHandle::new(auth).await;
 
             threads.push(tokio::spawn(async move {

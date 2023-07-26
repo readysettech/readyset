@@ -581,9 +581,7 @@ where
         let no_upstream_connections = options.no_upstream_connections;
 
         let rh = rt.block_on(async {
-            let authority = authority
-                .to_authority(&authority_address, &deployment)
-                .await;
+            let authority = authority.to_authority(&authority_address, &deployment);
 
             Ok::<ReadySetHandle, ReadySetError>(
                 ReadySetHandle::with_timeouts(
@@ -968,11 +966,7 @@ where
             }
 
             let server_handle = rt.block_on(async move {
-                let authority = Arc::new(
-                    authority
-                        .to_authority(&authority_address, &deployment)
-                        .await,
-                );
+                let authority = Arc::new(authority.to_authority(&authority_address, &deployment));
 
                 builder
                     .start_with_readers(

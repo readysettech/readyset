@@ -418,8 +418,7 @@ impl Verify {
             let deployment_name = script.name();
             let authority = Arc::new(
                 self.authority
-                    .to_authority(&self.authority_address, &deployment_name)
-                    .await,
+                    .to_authority(&self.authority_address, &deployment_name),
             );
 
             let noria_opts = NoriaOptions { authority };

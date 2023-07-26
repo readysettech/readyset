@@ -842,8 +842,7 @@ impl DeploymentBuilder {
 
         let authority = self
             .authority
-            .to_authority(&self.authority_address, &self.name)
-            .await;
+            .to_authority(&self.authority_address, &self.name);
         let handle = ReadySetHandle::new(authority).await;
 
         let metrics = MetricsClient::new(handle.clone()).unwrap();

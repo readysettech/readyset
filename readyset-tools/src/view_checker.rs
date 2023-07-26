@@ -25,8 +25,7 @@ impl ViewChecker {
     pub async fn run(self) -> anyhow::Result<()> {
         let authority = self
             .authority
-            .to_authority(&self.authority_address, &self.deployment)
-            .await;
+            .to_authority(&self.authority_address, &self.deployment);
 
         let mut handle: ReadySetHandle = ReadySetHandle::new(authority).await;
         handle.ready().await.unwrap();

@@ -277,8 +277,7 @@ impl NoriaExecutor {
     async fn init(opts: NoriaClientOpts) -> Self {
         let authority = opts
             .authority
-            .to_authority(&opts.authority_address, &opts.deployment.unwrap())
-            .await;
+            .to_authority(&opts.authority_address, &opts.deployment.unwrap());
         let mut handle: ReadySetHandle = ReadySetHandle::new(authority).await;
         handle.ready().await.unwrap();
 
