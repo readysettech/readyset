@@ -173,7 +173,6 @@ impl BenchmarkControl for WriteBenchmark {
 
         let ddl = std::fs::read_to_string(self.schema.as_path())?;
         let schema = DatabaseSchema::new(&ddl, (&conn).into())?;
-
         conn.query_drop(&ddl).await?;
         if let Some(num_indices) = self.indices_per_table {
             create_indices(&mut conn, num_indices, &schema).await?;
@@ -281,35 +280,6 @@ impl MultithreadBenchmark for WriteBenchmark {
             .pool_builder(None)?
             .max_connections(params.pool_size)
             .build()?;
-
-        let insert = {
-            // TODO(justin): Evaluate if we can improve performance by precomputing these
-            // variables outside of the loop.
-            let mut rng = rand::thread_rng();
-            let index: usize = rng.gen_range(0..(params.tables.len()));
-            let mut spec = params.tables.get(index).unwrap().lock();
-            let table_name = spec.name.clone();
-            let data = spec.generate_data_from_index(1, 0, false);
-            let columns = spec.columns.keys().collect::<Vec<_>>();
-            nom_sql::InsertStatement {
-                table: table_name.into(),
-                fields: Some(columns.iter().map(|cn| (*cn).clone().into()).collect()),
-                data: data
-                    .into_iter()
-                    .map(|mut row| {
-                        columns
-                            .iter()
-                            .map(|col| Expr::Literal(row.remove(col).unwrap().try_into().unwrap()))
-                            .collect()
-                    })
-                    .collect(),
-                ignore: false,
-                on_duplicate: None,
-            }
-            .display(dialect)
-            .to_string()
-        };
-
         let mut throttle_interval =
             multi_thread::throttle_interval(params.target_qps, params.threads);
         let (err_tx, mut err_rx) = mpsc::channel::<DatabaseError>(1);
@@ -317,15 +287,41 @@ impl MultithreadBenchmark for WriteBenchmark {
             if let Some(interval) = &mut throttle_interval {
                 interval.tick().await;
             }
-
             if let Ok(err) = err_rx.try_recv() {
                 return Err(err.into());
             }
-
             let pool = pool.clone();
             let sender = sender.clone();
-            let insert = insert.clone();
             let err_tx = err_tx.clone();
+            let insert = {
+                // TODO(justin): Evaluate if we can improve performance by precomputing these
+                // variables outside of the loop.
+                let mut rng = rand::thread_rng();
+                let index: usize = rng.gen_range(0..(params.tables.len()));
+                let mut spec = params.tables.get(index).unwrap().lock();
+                let table_name = spec.name.clone();
+                let data = spec.generate_data_from_index(1, 0, true);
+                let columns = spec.columns.keys().collect::<Vec<_>>();
+                nom_sql::InsertStatement {
+                    table: table_name.into(),
+                    fields: Some(columns.iter().map(|cn| (*cn).clone().into()).collect()),
+                    data: data
+                        .into_iter()
+                        .map(|mut row| {
+                            columns
+                                .iter()
+                                .map(|col| {
+                                    Expr::Literal(row.remove(col).unwrap().try_into().unwrap())
+                                })
+                                .collect()
+                        })
+                        .collect(),
+                    ignore: false,
+                    on_duplicate: None,
+                }
+                .display(dialect)
+                .to_string()
+            };
             tokio::spawn(async move {
                 match pool.get_conn().await {
                     Ok(mut conn) => {

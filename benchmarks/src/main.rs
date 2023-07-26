@@ -81,6 +81,14 @@ struct BenchmarkRunner {
     #[clap(long)]
     local: bool,
 
+    /// When running the benchmark in `--local` or `--local_with_upstream` mode, by default, the
+    /// data is not persisted to the underlying RocksDB storage (durability = MEMORY_ONLY). To
+    /// enable durability in local mode use the `--persistent` option. When `--persistent` is
+    /// specified, data is persisted to RocksDB, but it gets automatically deleted when the
+    /// benchmark finishes.
+    #[clap(long)]
+    persistent: bool,
+
     /// Runs the benchmarks against a noria adapter and server run in the same process with the
     /// provided external upstream database. When using `--local` benchmark results may vary
     /// based on compiler optimizations, using `--release` will drastically improve results.
@@ -202,7 +210,8 @@ impl BenchmarkRunner {
         )
         .recreate_database(false)
         .migration_mode(MigrationMode::OutOfBand)
-        .read_behavior(ReadBehavior::Blocking);
+        .read_behavior(ReadBehavior::Blocking)
+        .persistent(self.persistent);
 
         if let Some(addr) = &upstream_addr {
             test_builder = test_builder.fallback_url(addr.clone());

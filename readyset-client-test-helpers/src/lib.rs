@@ -79,6 +79,7 @@ pub struct TestBuilder {
     migration_mode: MigrationMode,
     recreate_database: bool,
     query_status_cache: Option<&'static QueryStatusCache>,
+    persistent: bool,
 }
 
 impl Default for TestBuilder {
@@ -98,6 +99,7 @@ impl TestBuilder {
             migration_mode: MigrationMode::InRequestPath,
             recreate_database: true,
             query_status_cache: None,
+            persistent: false,
         }
     }
 
@@ -122,6 +124,11 @@ impl TestBuilder {
 
     pub fn partial(mut self, partial: bool) -> Self {
         self.partial = partial;
+        self
+    }
+
+    pub fn persistent(mut self, persistent: bool) -> Self {
+        self.persistent = persistent;
         self
     }
 
@@ -186,6 +193,15 @@ impl TestBuilder {
         ))));
 
         let mut builder = Builder::for_tests();
+        let persistence = readyset_server::PersistenceParameters {
+            mode: if self.persistent {
+                readyset_server::DurabilityMode::DeleteOnExit
+            } else {
+                readyset_server::DurabilityMode::MemoryOnly
+            },
+            ..Default::default()
+        };
+        builder.set_persistence(persistence);
         builder.set_allow_topk(true);
         builder.set_allow_paginate(true);
         builder.set_allow_mixed_comparisons(true);
