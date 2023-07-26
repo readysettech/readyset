@@ -971,9 +971,10 @@ impl ModelState for DDLModelState {
                 // with duplicate column names in the resulting view
                 let select_list: Vec<String> = self.tables[table_a]
                     .iter()
-                    .chain(self.tables[table_b].iter())
+                    .map(|cs| (table_a, &cs.name))
+                    .chain(self.tables[table_b].iter().map(|cs| (table_b, &cs.name)))
                     .enumerate()
-                    .map(|(i, cs)| format!("\"{}\" AS c{}", cs.name, i))
+                    .map(|(i, (tab, col))| format!("\"{tab}\".\"{col}\" AS c{i}"))
                     .collect();
                 let select_list = select_list.join(", ");
                 let view_def = format!(
