@@ -273,6 +273,24 @@ impl<T> Array2<T> {
         &self.cells
     }
 
+    /// Returns a mutable slice of the cells in this [`Array2`], in row-first order.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use array2::Array2;
+    ///
+    /// let mut my_array2: Array2<i32> = Array2::from_rows(vec![vec![1, 2, 3], vec![4, 5, 6]]);
+    ///
+    /// my_array2.cells_mut()[3] *= 10;
+    /// assert_eq!(my_array2[(1, 0)], 40);
+    /// ```
+    #[must_use]
+    #[inline]
+    pub fn cells_mut(&mut self) -> &mut [T] {
+        &mut self.cells
+    }
+
     /// Convert this [`Array2`] into an owned vector of cells
     ///
     /// # Examples

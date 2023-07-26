@@ -1509,6 +1509,16 @@ impl DfState {
         .await
     }
 
+    /// Remove all references to the given [`WorkerIdentifier`] from the runtime state of the
+    /// dataflow graph
+    pub(super) fn remove_worker(&mut self, wi: &WorkerIdentifier) {
+        self.workers.remove(wi);
+        self.read_addrs.remove(wi);
+        for dh in self.domains.values_mut() {
+            dh.remove_worker(wi);
+        }
+    }
+
     /// Runs all the necessary steps to recover the full [`DfState`], when said state only
     /// has the bare minimum information.
     ///

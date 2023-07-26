@@ -7,7 +7,7 @@
     clippy::unreachable
 )]
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -679,23 +679,11 @@ impl Leader {
         let mut writer = self.dataflow_state_handle.write().await;
         let ds = writer.as_mut();
 
-        // first, translate from the affected workers to affected data-flow nodes
-        let mut affected_nodes = HashMap::new();
+        // Remove references to the worker from any internal state
         for wi in failed {
             warn!(worker = %wi, "handling failure of worker");
-            let mut domain_nodes_on_worker = ds.nodes_on_worker(Some(&wi));
-            for (domain_index, node_indices) in domain_nodes_on_worker.drain() {
-                ds.domains.remove(&domain_index);
-                ds.materializations.remove_nodes(&node_indices);
-                affected_nodes
-                    .entry(domain_index)
-                    .or_insert_with(|| HashSet::new())
-                    .extend(node_indices);
-            }
-            ds.workers.remove(&wi);
+            ds.remove_worker(&wi);
         }
-
-        ds.plan_recovery(&affected_nodes).await?.apply(ds).await?;
 
         self.dataflow_state_handle
             .commit(writer, &self.authority)
