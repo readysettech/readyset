@@ -935,4 +935,26 @@ vertical_tests! {
             key_columns: [2, 2],
         )
     );
+
+    // Join on a different key than the one in the WHERE clause. This is mainly meant to exercise
+    // the eviction code by re-creating the kind of corner case described in section 4.5.2 of the
+    // Noria thesis under the "Incongruent Joins" heading:
+    partial_incongruent_join(
+        "SELECT posts.id, posts.title, users.name
+         FROM posts
+         JOIN users ON posts.author_id = users.id
+         WHERE posts.id = ?";
+        "posts" => (
+            "CREATE TABLE posts (id INT, title TEXT, author_id INT, PRIMARY KEY (id))",
+            schema: [id: i32, title: String, author_id: foreign_key("users", 0)],
+            primary_key: 0,
+            key_columns: [],
+        ),
+        "users" => (
+            "CREATE TABLE users (id INT, name TEXT, PRIMARY KEY (id))",
+            schema: [id: i32, name: String],
+            primary_key: 0,
+            key_columns: [0],
+        )
+    );
 }
