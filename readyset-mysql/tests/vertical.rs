@@ -957,4 +957,23 @@ vertical_tests! {
             key_columns: [0],
         )
     );
+
+    partial_left_outer_join(
+        "SELECT posts.id, posts.title, users.name
+         FROM posts
+         LEFT OUTER JOIN users ON posts.author_id = users.id
+         WHERE users.id = ?";
+        "posts" => (
+            "CREATE TABLE posts (id INT, title TEXT, author_id INT, PRIMARY KEY (id))",
+            schema: [id: i32, title: String, author_id: foreign_key("users", 0)],
+            primary_key: 0,
+            key_columns: [],
+        ),
+        "users" => (
+            "CREATE TABLE users (id INT, name TEXT, PRIMARY KEY (id))",
+            schema: [id: i32, name: String],
+            primary_key: 0,
+            key_columns: [0],
+        )
+    );
 }
