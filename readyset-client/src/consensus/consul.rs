@@ -160,7 +160,7 @@ const SESSION_LOCK_DELAY: &str = "0";
 const SESSION_RELEASE_BEHAVIOR: &str = "release";
 /// The amount of time to wait for a heartbeat before declaring a
 /// session as dead.
-const SESSION_TTL: &str = "20s";
+const SESSION_TTL: &str = "10s";
 /// The size of each chunk stored in Consul. Consul converts the chunk's bytes to base64
 /// encoding, the encoded base64 bytes must be less than 512KB.
 const CHUNK_SIZE: usize = 256000;
