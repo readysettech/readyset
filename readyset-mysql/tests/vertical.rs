@@ -26,7 +26,9 @@
 
 use std::cell::RefCell;
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
+// We use BTreeSet and BTreeMap instead of HashSet and HashMap to avoid non-deterministic
+// ordering when generating test cases, which is important when re-running failing seeds:
+use std::collections::{BTreeMap, BTreeSet};
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::marker::PhantomData;
@@ -122,7 +124,7 @@ impl RowStrategy {
             .collect()
     }
 
-    fn foreign_tables(&self) -> HashSet<&'static str> {
+    fn foreign_tables(&self) -> BTreeSet<&'static str> {
         self.0
             .iter()
             .filter_map(|column_strat| match column_strat {
@@ -138,7 +140,7 @@ struct DataflowModelState<T>
 where
     T: TestDef + 'static,
 {
-    rows: HashMap<&'static str, Vec<Vec<DfValue>>>,
+    rows: BTreeMap<&'static str, Vec<Vec<DfValue>>>,
     _test_def: PhantomData<T>,
 }
 
@@ -189,12 +191,12 @@ where
             .collect::<Vec<_>>()
     }
 
-    /// Return a [`HashMap`] with a key for each test table where the values are other tables that
+    /// Return a [`BTreeMap`] with a key for each test table where the values are other tables that
     /// the key table contains foreign keys for.
     ///
     /// Useful as a helper for other code that does things like decide whether we will be able to
     /// fill in all the foreign keys on a generated row or not.
-    fn table_dependencies(&self) -> HashMap<&'static str, HashSet<&'static str>> {
+    fn table_dependencies(&self) -> BTreeMap<&'static str, BTreeSet<&'static str>> {
         T::row_strategies()
             .into_iter()
             .map(|(table, row_strat)| (table, row_strat.foreign_tables()))
@@ -561,7 +563,7 @@ impl Operation {
         &self,
         conn: &mut mysql_async::Conn,
         query: &str,
-        tables: &HashMap<&str, Table>,
+        tables: &BTreeMap<&str, Table>,
     ) -> Result<OperationResult, TestCaseError> {
         fn to_values(dts: &[DfValue]) -> Result<Vec<Value>, TestCaseError> {
             dts.iter()
@@ -683,7 +685,7 @@ macro_rules! vertical_tests {
                     $query
                 }
 
-                fn test_tables() -> HashMap<&'static str, Table> {
+                fn test_tables() -> BTreeMap<&'static str, Table> {
                     vertical_tests!(@tables $($tables)*)
                 }
 
@@ -691,7 +693,7 @@ macro_rules! vertical_tests {
                     vertical_tests!(@key_columns $($tables)*)
                 }
 
-                fn row_strategies() -> HashMap<&'static str, RowStrategy> {
+                fn row_strategies() -> BTreeMap<&'static str, RowStrategy> {
                     vertical_tests!(@row_strategies $($tables)*)
                 }
 
@@ -730,7 +732,7 @@ macro_rules! vertical_tests {
         vec![$($(($table_name, $kc),)*)*]
     };
 
-    // Build up the hashmap of Tables
+    // Build up the map of Tables
     (@tables $($table_name: expr => (
         $create_table: expr,
         schema: [$($col_name: ident : $col_strat: expr),* $(,)?],
@@ -738,7 +740,7 @@ macro_rules! vertical_tests {
         key_columns: [$($kc: expr),* $(,)?]
         $(,)?
     )),* $(,)?) => {
-        HashMap::from([
+        BTreeMap::from([
             $(($table_name, Table {
                 name: $table_name,
                 create_statement: $create_table,
@@ -748,7 +750,7 @@ macro_rules! vertical_tests {
         ])
     };
 
-    // Build up the hashmap of row_strategies
+    // Build up the map of row_strategies
     (@row_strategies $($table_name: expr => (
         $create_table: expr,
         schema: [$($schema:tt)*],
@@ -756,7 +758,7 @@ macro_rules! vertical_tests {
         key_columns: [$($kc: expr),* $(,)?]
         $(,)?
     )),* $(,)?) => {
-        HashMap::from([
+        BTreeMap::from([
             $(($table_name, vertical_tests!(@row_strategy $($schema)*)),)*
         ])
     };
@@ -794,10 +796,10 @@ macro_rules! vertical_tests {
 
 trait TestDef: Clone + Debug + Default {
     fn test_query() -> &'static str;
-    fn test_tables() -> HashMap<&'static str, Table>;
+    fn test_tables() -> BTreeMap<&'static str, Table>;
 
     fn key_columns() -> Vec<(&'static str, usize)>;
-    fn row_strategies() -> HashMap<&'static str, RowStrategy>;
+    fn row_strategies() -> BTreeMap<&'static str, RowStrategy>;
     fn extra_key_strategies() -> Vec<BoxedStrategy<DfValue>>;
 }
 
