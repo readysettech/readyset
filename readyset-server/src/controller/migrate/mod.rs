@@ -61,11 +61,14 @@ pub(in crate::controller) mod routing;
 pub(in crate::controller) mod scheduling;
 mod sharding;
 
-/// The initial delay used when sending follow up requests
-/// to a domain, for the exponential backoff strategy
-const DOMAIN_REQUEST_INITIAL_DELAY_IN_MS: u64 = 200;
-/// The max possible delay used when sending follow up requests
-/// to a domain, for the exponential backoff strategy
+/// The base delay used when sending follow up requests to a domain, for the exponential backoff
+/// strategy
+const DOMAIN_REQUEST_DELAY_BASE_BACKOFF_MS: u64 = 2;
+/// The multiplication factor used when sending follow up requests to a domain, for the exponential
+/// backoff strategy
+const DOMAIN_REQUEST_DELAY_BACKOFF_FACTOR: u64 = 2;
+/// The max possible delay used when sending follow up requests to a domain, for the exponential
+/// backoff strategy
 const DOMAIN_REQUEST_MAX_DELAY_IN_MS: u64 = 1000 * 60; // 1 min
 
 /// A [`DomainRequest`] with associated domain/shard information describing which domain it's for.
@@ -482,8 +485,8 @@ impl DomainMigrationPlan {
         //  abstraction.
         let mut stored = self.stored;
         let create_exponential_backoff = || {
-            ExponentialBackoff::from_millis(DOMAIN_REQUEST_INITIAL_DELAY_IN_MS)
-                // Cap at 30 minutes
+            ExponentialBackoff::from_millis(DOMAIN_REQUEST_DELAY_BASE_BACKOFF_MS)
+                .factor(DOMAIN_REQUEST_DELAY_BACKOFF_FACTOR)
                 .max_delay(Duration::from_millis(DOMAIN_REQUEST_MAX_DELAY_IN_MS))
         };
         let mut retry_strategy = create_exponential_backoff();
