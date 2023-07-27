@@ -21,9 +21,9 @@ use strawpoll::Strawpoll;
 use time::Duration;
 use tokio::io::{AsyncReadExt, BufReader, BufStream, BufWriter};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
 use tokio_stream::wrappers::IntervalStream;
-use tracing::{debug, error, info_span, instrument, trace, warn, Span};
+use tracing::{debug, error, info, info_span, instrument, trace, warn, Span};
 
 use super::ChannelCoordinator;
 
@@ -257,7 +257,10 @@ impl Replica {
             }
 
             let tx = match connections.entry(replica_address) {
-                Occupied(entry) => entry.into_mut(),
+                Occupied(entry) => {
+                    trace!(%replica_address, "Reusing existing domain connection");
+                    entry.into_mut()
+                }
                 Vacant(entry) => {
                     let Some(addr) = coord.get_addr(&replica_address) else {
                         trace!(
@@ -277,6 +280,7 @@ impl Replica {
                         continue;
                     }
 
+                    debug!(%replica_address, %addr, "Establishing connection to domain");
                     entry.insert(coord.builder_for(&replica_address)?.build_async()?)
                 }
             };
@@ -349,6 +353,8 @@ impl Replica {
             init_state_reqs,
         } = &mut self;
 
+        let mut channel_changes = coord.subscribe();
+
         loop {
             // we have three logical input sources: receives from local domains, receives from
             // remote domains, and remote mutators.
@@ -372,6 +378,32 @@ impl Replica {
 
                     connections.insert(token, tcp);
                 },
+
+                // Handle changes to the addresses of individual domain replicas
+                replica_addr = channel_changes.recv() => {
+                    match replica_addr {
+                        Ok(replica_addr) => {
+                            // We've received a notification that the socket address for a replica
+                            // has changed - remove its cached connection from `outputs` so that
+                            // when we try to send to it later we re-lookup the addr and reconnect
+                            info!(%replica_addr, "Removing connection for replica");
+                            outputs.lock().await.remove(&replica_addr);
+                        }
+                        Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                            // If we've lagged behind, that means we've missed some changes to
+                            // replica addresses, so we need to consider all connections invalid
+                            warn!(
+                                %skipped,
+                                "Coordinator change broadcast receiver lagged behind; reconnecting \
+                                to all replicas"
+                            );
+                            outputs.lock().await.clear();
+                        }
+                        Err(broadcast::error::RecvError::Closed) => {
+                            panic!("ChannelCoordinator dropped!");
+                        }
+                    }
+                }
 
                 // Handle domain requests
                 domain_req = requests.recv() => match domain_req {
