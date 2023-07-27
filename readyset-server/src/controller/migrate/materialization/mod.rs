@@ -1016,7 +1016,11 @@ impl Materializations {
         }
 
         // Track a set of nodes which we haven't already waited to be ready
-        let mut non_ready_nodes = make.iter().copied().collect::<HashSet<_>>();
+        let mut non_ready_nodes = make
+            .iter()
+            .copied()
+            .map(|n| (graph[n].domain(), graph[n].local_addr()))
+            .collect::<HashSet<_>>();
 
         // first, we add any new indices to existing nodes
         for node in reindex {
@@ -1131,14 +1135,8 @@ impl Materializations {
 
         // Wait for each of the nodes to be ready which we didn't already (eg because we wanted to
         // replay from them)
-        for ni in non_ready_nodes {
-            let n = &graph[ni];
-            dmp.add_message(
-                n.domain(),
-                DomainRequest::IsReady {
-                    node: n.local_addr(),
-                },
-            )?;
+        for (domain, node) in non_ready_nodes {
+            dmp.add_message(domain, DomainRequest::IsReady { node })?;
         }
 
         self.added.clear();
@@ -1151,7 +1149,7 @@ impl Materializations {
         &mut self,
         ni: NodeIndex,
         index_on: &mut Indices,
-        non_ready_nodes: &mut HashSet<NodeIndex>,
+        non_ready_nodes: &mut HashSet<(DomainIndex, LocalNodeIndex)>,
         graph: &Graph,
         dmp: &mut DomainMigrationPlan,
     ) -> Result<(), ReadySetError> {
@@ -1208,7 +1206,7 @@ impl Materializations {
         &mut self,
         ni: NodeIndex,
         index_on: &mut Indices,
-        non_ready_nodes: &mut HashSet<NodeIndex>,
+        non_ready_nodes: &mut HashSet<(DomainIndex, LocalNodeIndex)>,
         graph: &Graph,
         dmp: &mut DomainMigrationPlan,
     ) -> Result<(), ReadySetError> {
@@ -1248,9 +1246,9 @@ impl Materializations {
                     "telling root domain to start replay"
                 );
 
-                // Before we try to replay from the node, wait for it to be ready (but only if we
-                // haven't done so already)
-                if non_ready_nodes.remove(&ni) {
+                // Before we try to replay from the source node, wait for it to be ready (but only
+                // if we haven't done so already)
+                if non_ready_nodes.remove(&(pending.source_domain, pending.source)) {
                     dmp.add_message(
                         pending.source_domain,
                         DomainRequest::IsReady {

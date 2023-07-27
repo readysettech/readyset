@@ -2147,6 +2147,7 @@ impl Domain {
                                     .instrument(tracing::trace_span!(
                                         "initialize_state",
                                         name = %base_name,
+                                        node = %node_idx,
                                     ))
                                     .map_err(move |e| {
                                 error!(error = %e, "Domain failed while initializing base table");
