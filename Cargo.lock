@@ -5114,6 +5114,7 @@ version = "0.1.0"
 dependencies = [
  "nom-sql",
  "readyset-errors",
+ "readyset-util",
  "serde",
 ]
 

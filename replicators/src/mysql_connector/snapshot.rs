@@ -1,4 +1,4 @@
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 use std::error::Error;
 use std::fmt::{self, Display};
 use std::future;
@@ -291,7 +291,7 @@ impl MySqlReplicator {
         let binlog_position = self.get_binlog_position().await?;
 
         noria
-            .set_schema_replication_offset(Some(&binlog_position.try_into()?))
+            .set_schema_replication_offset(Some(&binlog_position.into()))
             .await?;
 
         let table_list = replicated_tables
@@ -352,10 +352,8 @@ impl MySqlReplicator {
         let file: String = pos.get(0).expect("Binlog file name");
         let offset: u32 = pos.get(1).expect("Binlog offset");
 
-        Ok(MySqlPosition {
-            binlog_file: file,
-            position: offset,
-        })
+        MySqlPosition::from_file_name_and_position(file, offset)
+            .map_err(|err| mysql_async::Error::Other(Box::new(err)))
     }
 
     /// Issue a `LOCK TABLES tbl_name READ` for the table name provided
@@ -547,7 +545,7 @@ impl MySqlReplicator {
         let mut read_lock = self.lock_table(&table).await?;
         // We acquire the position for each table individually, since it changes from
         // one lock to the other
-        let repl_offset = ReplicationOffset::try_from(self.get_binlog_position().await?)?;
+        let repl_offset = ReplicationOffset::from(self.get_binlog_position().await?);
         span.in_scope(|| info!("Snapshotting table"));
 
         let dumper = self.dump_table(&table).instrument(span.clone()).await?;

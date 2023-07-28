@@ -417,7 +417,7 @@ impl NoriaAdapter {
             dialect: Dialect::DEFAULT_MYSQL,
         };
 
-        let mut current_pos: ReplicationOffset = pos.try_into()?;
+        let mut current_pos: ReplicationOffset = pos.into();
 
         // At this point it is possible that we just finished replication, but
         // our schema and our tables are taken at different position in the binlog.

@@ -78,9 +78,11 @@ impl MySqlBinlogConnector {
     /// After we have registered as a replica, we can request the binlog
     async fn request_binlog(&mut self) -> mysql::Result<()> {
         info!(next_position = %self.next_position, "Starting binlog replication");
+        let filename = self.next_position.binlog_file_name().to_string();
+
         let cmd = mysql_common::packets::ComBinlogDump::new(self.server_id())
             .with_pos(self.next_position.position)
-            .with_filename(self.next_position.binlog_file.as_bytes());
+            .with_filename(filename.as_bytes());
 
         self.connection.write_command(&cmd).await?;
         self.connection.read_packet().await?;
@@ -168,12 +170,17 @@ impl MySqlBinlogConnector {
                         info!(target: "replicator_statement", "{:?}", ev);
                     }
 
-                    self.next_position = MySqlPosition {
-                        binlog_file: ev.name().to_string(),
+                    self.next_position = MySqlPosition::from_file_name_and_position(
+                        ev.name().to_string(),
                         // This should never happen, but better to panic than to get the wrong
                         // position
-                        position: u32::try_from(ev.position()).unwrap(),
-                    };
+                        u32::try_from(ev.position()).unwrap(),
+                    )
+                    .map_err(|e| {
+                        mysql_async::Error::Other(Box::new(internal_err!(
+                            "Failed to create MySqlPosition: {e}"
+                        )))
+                    })?;
 
                     return Ok((ReplicationAction::LogPosition, &self.next_position));
                 }
@@ -583,6 +590,6 @@ impl Connector for MySqlBinlogConnector {
         until: Option<&ReplicationOffset>,
     ) -> ReadySetResult<(ReplicationAction, ReplicationOffset)> {
         let (action, pos) = self.next_action_inner(until).await?;
-        Ok((action, pos.try_into()?))
+        Ok((action, pos.into()))
     }
 }
