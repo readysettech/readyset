@@ -155,8 +155,8 @@ pub struct Options {
     #[clap(long, short = 'a', env = "LISTEN_ADDRESS")]
     address: Option<SocketAddr>,
 
-    /// ReadySet deployment ID to attach to
-    #[clap(long, env = "DEPLOYMENT", value_parser = NonEmptyStringValueParser::new())]
+    /// ReadySet deployment ID. All nodes in a deployment must have the same deployment ID.
+    #[clap(long, env = "DEPLOYMENT", default_value = "tmp-readyset", value_parser = NonEmptyStringValueParser::new())]
     deployment: String,
 
     /// Database engine protocol to emulate. If omitted, will be inferred from the

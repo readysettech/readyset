@@ -78,8 +78,13 @@ struct Options {
     #[clap(long)]
     use_aws_external_address: bool,
 
-    /// ReadySet deployment ID.
-    #[clap(long, env = "DEPLOYMENT", value_parser = NonEmptyStringValueParser::new())]
+    /// ReadySet deployment ID. All nodes in a deployment must have the same deployment ID.
+    #[clap(
+        long,
+        env = "DEPLOYMENT",
+        default_value = "tmp-readyset",
+        value_parser = NonEmptyStringValueParser::new()
+    )]
     deployment: String,
 
     /// The authority to use
