@@ -206,7 +206,8 @@ impl RelationMapping {
 pub enum WalRecord {
     /// Sent to indicate a transaction block
     Begin {
-        /// The final LSN of the transaction.
+        /// The final LSN of the transaction. This corresponds to the `lsn` field in
+        /// `WalRecord::Commit`.
         final_lsn: Lsn,
         /// Commit timestamp of the transaction. The value is in number of microseconds since
         /// PostgreSQL epoch (2000-01-01).

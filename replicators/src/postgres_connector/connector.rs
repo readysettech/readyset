@@ -17,7 +17,6 @@ use tokio_postgres as pgsql;
 use tracing::{debug, error, info, trace, warn};
 
 use super::ddl_replication::setup_ddl_replication;
-use super::lsn::Lsn;
 use super::wal_reader::{WalEvent, WalReader};
 use super::{PostgresPosition, PUBLICATION_NAME};
 use crate::db_util::error_is_slot_not_found;
@@ -44,7 +43,7 @@ pub struct PostgresWalConnector {
     /// Reader is a decoder for binlog events
     reader: Option<WalReader>,
     /// Stores an event or error that was read but not handled
-    peek: Option<Result<(WalEvent, Lsn), WalError>>,
+    peek: Option<Result<WalEvent, WalError>>,
     /// If we just want to continue reading the log from a previous point
     next_position: Option<PostgresPosition>,
     /// The replication slot if was created for this connector
@@ -175,7 +174,7 @@ impl PostgresWalConnector {
 
     /// Waits and returns the next WAL event, while monitoring the connection
     /// handle for errors.
-    async fn next_event(&mut self) -> Result<(WalEvent, Lsn), WalError> {
+    async fn next_event(&mut self) -> Result<WalEvent, WalError> {
         let PostgresWalConnector {
             reader,
             connection_handle,
@@ -520,24 +519,44 @@ impl Connector for PostgresWalConnector {
                 None => self.next_event().await,
             };
 
-            // If our next event is an error, flush any buffered actions. Otherwise, buffer up to
-            // MAX_QUEUED_INDEPENDENT_ACTIONS unless we're collecting a series of events that reuse
-            // the same LSN, as we have to make sure they all end up in the same batch.
-            //
-            // If we have no buffered actions but our offset exceeds the given 'until', report our
-            // position in the logs.
-            if event.is_err() && !actions.is_empty() || actions.len() >= MAX_QUEUED_INDEPENDENT_ACTIONS && matches!(event, Ok((_, lsn)) if lsn != cur_lsn.lsn) {
-                self.peek = Some(event);
-                return Ok((
-                    ReplicationAction::TableAction {
-                        table: cur_table,
-                        actions,
-                        txid: None,
-                    },
-                    cur_lsn.into(),
-                ));
-            } else if let Some(until) = until && actions.is_empty() && ReplicationOffset::from(cur_lsn) >= *until {
-                return Ok((ReplicationAction::LogPosition, cur_lsn.into()));
+            match &event.as_ref().map(|ev| ev.lsn()) {
+                // If our next event is an error but there are buffered actions, we need to flush
+                // the buffered actions before handling the error
+                Err(_) if !actions.is_empty() => {
+                    self.peek = Some(event);
+                    return Ok((
+                        ReplicationAction::TableAction {
+                            table: cur_table,
+                            actions,
+                            txid: None,
+                        },
+                        cur_lsn.into(),
+                    ));
+                }
+                // If our next event has an LSN, if our batch size has exceeded the max, and if the
+                // LSN of the event does not match the LSN of the prior event, we need to flush the
+                // buffered actions.
+                Ok(Some(lsn))
+                    if actions.len() >= MAX_QUEUED_INDEPENDENT_ACTIONS && *lsn != cur_lsn.lsn =>
+                {
+                    self.peek = Some(event);
+                    return Ok((
+                        ReplicationAction::TableAction {
+                            table: cur_table,
+                            actions,
+                            txid: None,
+                        },
+                        cur_lsn.into(),
+                    ));
+                }
+                // If we have no buffered actions, an `until` was passed, and the LSN is >= `until`,
+                // we report the log position
+                _ if actions.is_empty()
+                    && matches!(until, Some(until) if &ReplicationOffset::from(cur_lsn) >= until) =>
+                {
+                    return Ok((ReplicationAction::LogPosition, cur_lsn.into()));
+                }
+                _ => {}
             }
 
             trace!(?event);
@@ -547,7 +566,7 @@ impl Connector for PostgresWalConnector {
             }
 
             // Handle errors or extract the event and LSN.
-            let (mut event, lsn) = match event {
+            let mut event = match event {
                 Ok(e) => e,
                 // ReadySet will not snapshot tables with unsupported types (e.g., Postgres
                 // user defined types).
@@ -572,7 +591,7 @@ impl Connector for PostgresWalConnector {
             // Check if next event is for another table, in which case we have to flush the events
             // accumulated for this table and store the next event in `peek`.
             match &mut event {
-                WalEvent::Truncate { tables } => {
+                WalEvent::Truncate { tables, lsn } => {
                     let (matching, mut other_tables) =
                         tables.drain(..).partition::<Vec<_>, _>(|(schema, table)| {
                             cur_table.schema.as_deref() == Some(schema.as_str())
@@ -583,12 +602,10 @@ impl Connector for PostgresWalConnector {
                         invariant!(matching.is_empty());
                         if let Some((schema, name)) = other_tables.pop() {
                             if !other_tables.is_empty() {
-                                self.peek = Some(Ok((
-                                    WalEvent::Truncate {
-                                        tables: other_tables,
-                                    },
-                                    lsn,
-                                )));
+                                self.peek = Some(Ok(WalEvent::Truncate {
+                                    tables: other_tables,
+                                    lsn: *lsn,
+                                }));
                             }
 
                             actions.push(TableOperation::Truncate);
@@ -601,7 +618,7 @@ impl Connector for PostgresWalConnector {
                                     actions,
                                     txid: None,
                                 },
-                                PostgresPosition::from(lsn).into(),
+                                PostgresPosition::from(*lsn).into(),
                             ));
                         } else {
                             // Empty truncate op
@@ -609,12 +626,10 @@ impl Connector for PostgresWalConnector {
                         }
                     } else {
                         if !other_tables.is_empty() {
-                            self.peek = Some(Ok((
-                                WalEvent::Truncate {
-                                    tables: other_tables,
-                                },
-                                lsn,
-                            )));
+                            self.peek = Some(Ok(WalEvent::Truncate {
+                                tables: other_tables,
+                                lsn: *lsn,
+                            }));
                         }
 
                         if !matching.is_empty() {
@@ -640,7 +655,7 @@ impl Connector for PostgresWalConnector {
                         || cur_table.name != table.as_str() =>
                 {
                     if !actions.is_empty() {
-                        self.peek = Some(Ok((event, lsn)));
+                        self.peek = Some(Ok(event));
                         return Ok((
                             ReplicationAction::TableAction {
                                 table: cur_table,
@@ -659,10 +674,12 @@ impl Connector for PostgresWalConnector {
                 _ => {}
             }
 
-            cur_lsn = lsn.into();
+            if let Some(lsn) = event.lsn() {
+                cur_lsn = lsn.into();
+            }
 
             match event {
-                WalEvent::DdlEvent { ddl_event } => {
+                WalEvent::DdlEvent { ddl_event, lsn } => {
                     if actions.is_empty() {
                         return Ok((
                             ReplicationAction::DdlChange {
@@ -672,7 +689,7 @@ impl Connector for PostgresWalConnector {
                             PostgresPosition::from(lsn).into(),
                         ));
                     } else {
-                        self.peek = Some(Ok((WalEvent::DdlEvent { ddl_event }, lsn)));
+                        self.peek = Some(Ok(WalEvent::DdlEvent { ddl_event, lsn }));
                         return Ok((
                             ReplicationAction::TableAction {
                                 table: cur_table,
@@ -686,7 +703,7 @@ impl Connector for PostgresWalConnector {
                 WalEvent::WantsKeepaliveResponse => {
                     self.send_standby_status_update(last_pos.into())?;
                 }
-                WalEvent::Commit => {
+                WalEvent::Commit { lsn } => {
                     if !actions.is_empty() {
                         // On commit we flush, because there is no knowing when the next commit is
                         // coming
@@ -696,10 +713,10 @@ impl Connector for PostgresWalConnector {
                                 actions,
                                 txid: None,
                             },
-                            cur_lsn.into(),
+                            lsn.into(),
                         ));
                     } else {
-                        return Ok((ReplicationAction::LogPosition, cur_lsn.into()));
+                        return Ok((ReplicationAction::LogPosition, lsn.into()));
                     }
                 }
                 WalEvent::Insert { tuple, .. } => actions.push(TableOperation::Insert(tuple)),

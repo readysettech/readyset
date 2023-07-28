@@ -67,6 +67,21 @@ impl From<Lsn> for PostgresPosition {
     }
 }
 
+impl From<&Lsn> for ReplicationOffset {
+    fn from(lsn: &Lsn) -> Self {
+        ReplicationOffset {
+            replication_log_name: String::new(),
+            offset: lsn.0 as _,
+        }
+    }
+}
+
+impl From<Lsn> for ReplicationOffset {
+    fn from(lsn: Lsn) -> Self {
+        (&lsn).into()
+    }
+}
+
 impl Display for PostgresPosition {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.lsn)

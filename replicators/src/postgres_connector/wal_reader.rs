@@ -39,40 +39,66 @@ pub struct WalReader {
 #[derive(Debug)]
 pub(crate) enum WalEvent {
     WantsKeepaliveResponse,
-    Commit,
+    Commit {
+        lsn: Lsn,
+    },
     Insert {
         schema: String,
         table: String,
         tuple: Vec<DfValue>,
+        lsn: Lsn,
     },
     DeleteRow {
         schema: String,
         table: String,
         tuple: Vec<DfValue>,
+        lsn: Lsn,
     },
     DeleteByKey {
         schema: String,
         table: String,
         key: Vec<DfValue>,
+        lsn: Lsn,
     },
     UpdateRow {
         schema: String,
         table: String,
         old_tuple: Vec<DfValue>,
         new_tuple: Vec<DfValue>,
+        lsn: Lsn,
     },
     UpdateByKey {
         schema: String,
         table: String,
         key: Vec<DfValue>,
         set: Vec<readyset_client::Modification>,
+        lsn: Lsn,
     },
     Truncate {
         tables: Vec<(String, String)>,
+        lsn: Lsn,
     },
     DdlEvent {
         ddl_event: Box<DdlEvent>,
+        lsn: Lsn,
     },
+}
+
+impl WalEvent {
+    /// Returns the `Lsn` associated with `self` if `self` has an `Lsn`.
+    pub(crate) fn lsn(&self) -> Option<Lsn> {
+        match self {
+            Self::Insert { lsn, .. }
+            | Self::DeleteRow { lsn, .. }
+            | Self::DeleteByKey { lsn, .. }
+            | Self::UpdateRow { lsn, .. }
+            | Self::UpdateByKey { lsn, .. }
+            | Self::Truncate { lsn, .. }
+            | Self::DdlEvent { lsn, .. }
+            | Self::Commit { lsn, .. } => Some(*lsn),
+            Self::WantsKeepaliveResponse => None,
+        }
+    }
 }
 
 impl WalReader {
@@ -84,7 +110,7 @@ impl WalReader {
         }
     }
 
-    pub(crate) async fn next_event(&mut self) -> Result<(WalEvent, Lsn), WalError> {
+    pub(crate) async fn next_event(&mut self) -> Result<WalEvent, WalError> {
         let WalReader {
             wal,
             relations,
@@ -105,11 +131,11 @@ impl WalReader {
                 }
             };
 
-            let (end, record) = match data {
-                WalData::Keepalive { end, reply, .. } if reply == 1 => {
-                    return Ok((WalEvent::WantsKeepaliveResponse, end))
+            let (lsn, record) = match data {
+                WalData::Keepalive { reply, .. } if reply == 1 => {
+                    return Ok(WalEvent::WantsKeepaliveResponse);
                 }
-                WalData::XLogData { end, data, .. } => (end, data),
+                WalData::XLogData { start, data, .. } => (start, data),
                 msg => {
                     trace!(?msg, "Unhandled message");
                     // For any other message, just keep going
@@ -120,7 +146,7 @@ impl WalReader {
             trace!(?record);
 
             match record {
-                WalRecord::Commit { .. } => return Ok((WalEvent::Commit, end)),
+                WalRecord::Commit { lsn, .. } => return Ok(WalEvent::Commit { lsn }),
                 WalRecord::Relation(mapping) => {
                     // Store the relation in the hash map for future use
                     let id = mapping.id;
@@ -155,7 +181,7 @@ impl WalReader {
                         mapping,
                     }) = relations.get(&relation_id)
                     {
-                        return Ok((
+                        return Ok(
                             WalEvent::Insert {
                                 schema: schema.clone(),
                                 table: table.clone(),
@@ -171,9 +197,9 @@ impl WalReader {
                                         schema: schema.clone(),
                                         table: table.clone(),
                                     })?,
+                                lsn,
                             },
-                            end,
-                        ));
+                       );
                     } else {
                         debug!(
                             relation_id,
@@ -218,7 +244,7 @@ impl WalReader {
                             Ok(ddl_event) => ddl_event,
                         };
 
-                        return Ok((WalEvent::DdlEvent { ddl_event }, end));
+                        return Ok(WalEvent::DdlEvent { ddl_event, lsn });
                     }
                     // We only ever going to have a `key_tuple` *OR* `old_tuple` *OR* neither
                     if let Some(old_tuple) = old_tuple {
@@ -236,7 +262,7 @@ impl WalReader {
                             new_tuple.cols[pos] = old_tuple.cols[pos].clone();
                         }
 
-                        return Ok((
+                        return Ok(
                             WalEvent::UpdateRow {
                                 schema: schema.clone(),
                                 table: table.clone(),
@@ -264,12 +290,12 @@ impl WalReader {
                                         schema: schema.clone(),
                                         table: table.clone(),
                                     })?,
+                                lsn,
                             },
-                            end,
-                        ));
+                        );
                     } else if let Some(key_tuple) = key_tuple {
                         // This happens when the update is modifying the key column
-                        return Ok((
+                        return Ok(
                             WalEvent::UpdateByKey {
                                 schema: schema.clone(),
                                 table: table.clone(),
@@ -290,14 +316,14 @@ impl WalReader {
                                     .into_iter()
                                     .map(Into::into)
                                     .collect(),
+                                lsn,
                             },
-                            end,
-                        ));
+                        );
                     } else {
                         // This happens when the update is not modifying the key column and
                         // therefore it is possible to extract the
                         // key value from the tuple as is
-                        return Ok((
+                        return Ok(
                             WalEvent::UpdateByKey {
                                 schema: schema.clone(),
                                 table: table.clone(),
@@ -319,9 +345,9 @@ impl WalReader {
                                     .into_iter()
                                     .map(Into::into)
                                     .collect(),
+                                lsn,
                             },
-                            end,
-                        ));
+                        );
                     }
                 }
                 WalRecord::Delete {
@@ -339,7 +365,7 @@ impl WalReader {
                         if let Some(old_tuple) = old_tuple {
                             // This happens when there is no key defined for the table and `REPLICA
                             // IDENTITY` is set to `FULL`
-                            return Ok((
+                            return Ok(
                                 WalEvent::DeleteRow {
                                     schema: schema.clone(),
                                     table: table.clone(),
@@ -355,11 +381,11 @@ impl WalReader {
                                             schema: schema.clone(),
                                             table: table.clone(),
                                         })?,
+                                    lsn,
                                 },
-                                end,
-                            ));
+                            );
                         } else if let Some(key_tuple) = key_tuple {
-                            return Ok((
+                            return Ok(
                                 WalEvent::DeleteByKey {
                                     schema: schema.clone(),
                                     table: table.clone(),
@@ -375,9 +401,9 @@ impl WalReader {
                                             schema: schema.clone(),
                                             table: table.clone(),
                                         })?,
+                                    lsn
                                 },
-                                end,
-                            ));
+                            );
                         }
                     }
                 }
@@ -398,7 +424,7 @@ impl WalReader {
                         }
                         Ok(ddl_event) => ddl_event,
                     };
-                    return Ok((WalEvent::DdlEvent { ddl_event }, lsn));
+                    return Ok(WalEvent::DdlEvent { ddl_event, lsn });
                 }
                 WalRecord::Message { prefix, .. } => {
                     debug!("Message with ignored prefix {prefix:?}")
@@ -420,7 +446,7 @@ impl WalReader {
                         }
                     }
 
-                    return Ok((WalEvent::Truncate { tables }, end));
+                    return Ok(WalEvent::Truncate { tables, lsn });
                 }
                 WalRecord::Origin { .. } => {
                     // Just tells where the transaction originated
