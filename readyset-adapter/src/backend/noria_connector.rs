@@ -1014,9 +1014,12 @@ impl NoriaConnector {
             };
 
         if let Ok(Some(stats)) = authority.persistent_stats().await {
+            stats.last_controller_startup.iter().for_each(|time| {
+                status.push(("Last Started Controller".to_string(), time.to_string()))
+            });
             stats.last_completed_snapshot.iter().for_each(|time| {
                 status.push(("Last Completed Snapshot".to_string(), time.to_string()))
-            })
+            });
         }
 
         // Converts from ReadySetStatus -> Vec<(String, String)> -> QueryResult

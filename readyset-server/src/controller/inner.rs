@@ -9,7 +9,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use database_utils::UpstreamConfig;
 use dataflow::DomainIndex;
@@ -17,7 +17,8 @@ use failpoint_macros::failpoint;
 use futures::future::Fuse;
 use futures::FutureExt;
 use hyper::Method;
-use readyset_client::consensus::Authority;
+use readyset_client::consensus::{Authority, AuthorityControl};
+use readyset_client::debug::stats::PersistentStats;
 use readyset_client::recipe::{ExtendRecipeResult, ExtendRecipeSpec, MigrationStatus};
 use readyset_client::status::{ReadySetStatus, SnapshotStatus};
 use readyset_client::{SingleKeyEviction, WorkerDescriptor};
@@ -94,6 +95,25 @@ impl Leader {
         telemetry_sender: TelemetrySender,
         shutdown_rx: ShutdownReceiver,
     ) {
+        // Log the Controller startup
+        #[allow(clippy::unwrap_used)] // won't panic if UNIX_EPOCH is used
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+
+        if let Err(error) = self
+            .authority
+            .update_persistent_stats(|stats: Option<PersistentStats>| {
+                let mut stats = stats.unwrap_or_default();
+                stats.last_controller_startup = Some(now);
+                Ok(stats)
+            })
+            .await
+        {
+            warn!(%error, "Failed to persist stats in the Authority");
+        }
+
         // When the controller becomes the leader, we need to read updates
         // from the binlog.
         self.start_replication_task(
