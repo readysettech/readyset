@@ -46,7 +46,6 @@ use readyset_client::metrics::recorded;
 use readyset_client::{ReadySetHandle, ViewCreateRequest};
 use readyset_dataflow::Readers;
 use readyset_errors::ReadySetError;
-use readyset_server::metrics::{CompositeMetricsRecorder, MetricsRecorder};
 use readyset_server::worker::readers::{retry_misses, Ack, BlockingRead, ReadRequestHandler};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetryInitializer};
 use readyset_util::futures::abort_on_panic;
@@ -147,7 +146,7 @@ where
 #[clap(group(
     ArgGroup::new("metrics")
         .multiple(true)
-        .args(&["prometheus_metrics", "noria_metrics"]),
+        .args(&["prometheus_metrics"]),
 ), version = VERSION_STR_PRETTY)]
 #[group(skip)]
 pub struct Options {
@@ -241,9 +240,6 @@ pub struct Options {
     /// Enable recording and exposing Prometheus metrics
     #[clap(long, env = "PROMETHEUS_METRICS")]
     prometheus_metrics: bool,
-
-    #[clap(long, hide = true)]
-    noria_metrics: bool,
 
     /// Enable logging queries and execution metrics. This creates a histogram per unique query.
     /// Enabled by default if prometheus-metrics is enabled.
@@ -636,7 +632,7 @@ where
         ));
         rs_connect.in_scope(|| info!("Now capturing ctrl-c and SIGTERM events"));
 
-        let mut recorders = Vec::new();
+        let mut recorder = None;
         let prometheus_handle = if options.prometheus_metrics {
             let _guard = rt.enter();
             let database_label = match self.database_type {
@@ -644,28 +640,20 @@ where
                 DatabaseType::PostgreSQL => readyset_client_metrics::DatabaseType::Psql,
             };
 
-            let recorder = PrometheusBuilder::new()
+            let rec = PrometheusBuilder::new()
                 .add_global_label("upstream_db_type", database_label)
                 .add_global_label("deployment", &options.deployment)
                 .build_recorder();
 
-            let handle = recorder.handle();
-            recorders.push(MetricsRecorder::Prometheus(recorder));
+            let handle = rec.handle();
+            recorder = Some(rec);
             Some(handle)
         } else {
             None
         };
 
-        if options.noria_metrics {
-            recorders.push(MetricsRecorder::Noria(
-                readyset_server::NoriaMetricsRecorder::new(),
-            ));
-        }
-
-        if !recorders.is_empty() {
-            readyset_server::metrics::install_global_recorder(
-                CompositeMetricsRecorder::with_recorders(recorders),
-            )?;
+        if let Some(recorder) = recorder {
+            readyset_server::metrics::install_global_recorder(recorder)?;
         }
 
         rs_connect.in_scope(|| info!("PrometheusHandle created"));

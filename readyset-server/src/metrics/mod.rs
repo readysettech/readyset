@@ -1,19 +1,13 @@
 //! Support for recording and exporting in-memory metrics using the [`metrics`] crate
 
+use metrics_exporter_prometheus::PrometheusRecorder;
 use once_cell::sync::OnceCell;
 use thiserror::Error;
 
-pub use crate::metrics::composite_recorder::{CompositeMetricsRecorder, RecorderType};
-pub use crate::metrics::noria_recorder::NoriaMetricsRecorder;
-pub use crate::metrics::recorders::MetricsRecorder;
-
-mod composite_recorder;
-mod noria_recorder;
 mod prometheus_recorder;
-mod recorders;
 
 /// The type of the static, globally accessible metrics recorder.
-type GlobalRecorder = CompositeMetricsRecorder;
+type GlobalRecorder = PrometheusRecorder;
 static METRICS_RECORDER: OnceCell<&'static GlobalRecorder> = OnceCell::new();
 
 /// Error value returned from [`install_global_recorder`] if a metrics recorder is already set.

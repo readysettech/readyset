@@ -644,7 +644,7 @@ fn start_adapter_with_options(
         &log_level,
         "--eviction-policy",
         "lru",
-        "--noria-metrics",
+        "--prometheus-metrics",
         &database_type_flag,
     ];
 

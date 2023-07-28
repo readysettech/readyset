@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use dataflow::{DurabilityMode, PersistenceParameters};
+use metrics_exporter_prometheus::PrometheusBuilder;
 use nom_sql::Relation;
 use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use readyset_client::metrics::client::MetricsClient;
@@ -11,10 +12,7 @@ use readyset_client::metrics::{DumpedMetric, DumpedMetricValue, MetricsDump};
 use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_util::shutdown::ShutdownSender;
 
-use crate::metrics::{
-    get_global_recorder, install_global_recorder, CompositeMetricsRecorder, MetricsRecorder,
-    NoriaMetricsRecorder,
-};
+use crate::metrics::{get_global_recorder, install_global_recorder};
 use crate::{Builder, Handle, ReuseConfigType};
 
 // Settle time must be longer than the leader state check interval
@@ -144,10 +142,9 @@ pub async fn sleep() {
 /// register its metrics with the correct recorder, and none will be recorded
 pub fn register_metric_recorder() {
     if get_global_recorder().is_none() {
-        let rec = CompositeMetricsRecorder::with_recorders(vec![MetricsRecorder::Noria(
-            NoriaMetricsRecorder::new(),
-        )]);
-        install_global_recorder(rec).unwrap();
+        let recorder = PrometheusBuilder::new().build_recorder();
+
+        install_global_recorder(recorder).unwrap();
     }
 }
 

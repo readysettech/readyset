@@ -2,14 +2,11 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use clap::{Parser, ValueHint};
+use metrics_exporter_prometheus::PrometheusBuilder;
 use readyset_client::metrics::{recorded, MetricsDump};
 use readyset_client::recipe::changelist::ChangeList;
 use readyset_data::Dialect;
-use readyset_server::metrics::{
-    get_global_recorder, install_global_recorder, CompositeMetricsRecorder, MetricsRecorder,
-    RecorderType,
-};
-use readyset_server::NoriaMetricsRecorder;
+use readyset_server::metrics::{get_global_recorder, install_global_recorder, Render};
 
 #[derive(Parser)]
 #[clap(name = "snapshot_time")]
@@ -70,17 +67,14 @@ impl SnapshotBenchmark {
 }
 
 fn init_metrics_recorder() {
-    let rec = CompositeMetricsRecorder::with_recorders(vec![MetricsRecorder::Noria(
-        NoriaMetricsRecorder::new(),
-    )]);
-    install_global_recorder(rec).unwrap();
+    let recorder = PrometheusBuilder::new().build_recorder();
+    install_global_recorder(recorder).unwrap();
 }
 
 fn tables_size_metric_mib() -> f64 {
     let metrics_handle = get_global_recorder().unwrap();
 
-    let metrics: MetricsDump =
-        serde_json::from_str(&metrics_handle.render(RecorderType::Noria).unwrap()).unwrap();
+    let metrics: MetricsDump = serde_json::from_str(&metrics_handle.render()).unwrap();
 
     let base_sizes = &metrics.metrics[recorded::ESTIMATED_BASE_TABLE_SIZE_BYTES];
 

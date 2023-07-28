@@ -11,10 +11,8 @@ use metrics_exporter_prometheus::PrometheusBuilder;
 use readyset_alloc::ThreadBuildWrapper;
 use readyset_client::metrics::recorded;
 use readyset_server::consensus::AuthorityType;
-use readyset_server::metrics::{
-    install_global_recorder, CompositeMetricsRecorder, MetricsRecorder,
-};
-use readyset_server::{resolve_addr, Builder, NoriaMetricsRecorder, WorkerOptions};
+use readyset_server::metrics::install_global_recorder;
+use readyset_server::{resolve_addr, Builder, WorkerOptions};
 use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer};
 use readyset_version::*;
 use tracing::{error, info};
@@ -125,10 +123,6 @@ struct Options {
     #[clap(long, env = "PROMETHEUS_METRICS")]
     prometheus_metrics: bool,
 
-    /// Output noria metrics
-    #[clap(long, hide = true)]
-    pub noria_metrics: bool,
-
     #[clap(flatten)]
     tracing: readyset_tracing::Options,
 
@@ -176,18 +170,17 @@ fn main() -> anyhow::Result<()> {
         Either::Right(future::ok(opts.external_address.unwrap_or(opts.address)))
     };
 
-    let mut recs = Vec::new();
-    if opts.noria_metrics {
-        recs.push(MetricsRecorder::Noria(NoriaMetricsRecorder::new()));
-    }
+    let mut rec = None;
     if opts.prometheus_metrics {
-        recs.push(MetricsRecorder::Prometheus(
+        rec = Some(
             PrometheusBuilder::new()
                 .add_global_label("deployment", &opts.deployment)
                 .build_recorder(),
-        ));
+        );
     }
-    install_global_recorder(CompositeMetricsRecorder::with_recorders(recs)).unwrap();
+    if let Some(rec) = rec {
+        install_global_recorder(rec).unwrap();
+    }
 
     metrics::gauge!(
         recorded::READYSET_SERVER_VERSION,

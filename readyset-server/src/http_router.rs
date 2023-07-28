@@ -23,7 +23,7 @@ use tower::Service;
 use tracing::warn;
 
 use crate::controller::ControllerRequest;
-use crate::metrics::{get_global_recorder, Clear, RecorderType};
+use crate::metrics::{get_global_recorder, Clear, Render};
 use crate::worker::WorkerRequest;
 
 /// Routes requests from an HTTP server to noria server workers and controllers.
@@ -144,13 +144,13 @@ impl Service<Request<Body>> for NoriaServerHttpRouter {
                 Box::pin(async move { Ok(res.unwrap()) })
             }
             (&Method::GET, "/metrics") => {
-                let render = get_global_recorder().and_then(|r| r.render(RecorderType::Prometheus));
+                let render = get_global_recorder().map(|r| r.render());
                 let res = res.header(CONTENT_TYPE, "text/plain");
                 let res = match render {
                     Some(metrics) => res.body(hyper::Body::from(metrics)),
                     None => res
                         .status(404)
-                        .body(hyper::Body::from("Prometheus metrics were not enabled. To fix this, run Noria with --prometheus-metrics".to_string())),
+                        .body(hyper::Body::from("Prometheus metrics were not enabled. To fix this, run ReadySet with --prometheus-metrics".to_string())),
                 };
                 Box::pin(async move { Ok(res.unwrap()) })
             }
@@ -173,7 +173,7 @@ impl Service<Request<Body>> for NoriaServerHttpRouter {
                 })
             }
             (&Method::POST, "/metrics_dump") => {
-                let render = get_global_recorder().and_then(|r| r.render(RecorderType::Noria));
+                let render = get_global_recorder().map(|r| r.render());
                 let res = match render {
                     Some(metrics) => res
                         .header(CONTENT_TYPE, "application/json")
@@ -181,7 +181,7 @@ impl Service<Request<Body>> for NoriaServerHttpRouter {
                     None => res
                         .status(404)
                         .header(CONTENT_TYPE, "text/plain")
-                        .body(hyper::Body::from("Noria metrics were not enabled. To fix this, run Noria with --noria-metrics".to_string())),
+                        .body(hyper::Body::from("Prometheus metrics were not enabled. To fix this, run ReadySet with --prometheus-metrics".to_string())),
                 };
                 Box::pin(async move { Ok(res.unwrap()) })
             }

@@ -439,7 +439,6 @@ pub use readyset_client::*;
 
 pub use crate::builder::Builder;
 pub use crate::handle::Handle;
-pub use crate::metrics::NoriaMetricsRecorder;
 
 pub mod manual {
     pub use dataflow::node::special::Base;
