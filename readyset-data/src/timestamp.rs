@@ -5,7 +5,7 @@ use std::str::FromStr;
 
 use chrono::{Date, DateTime, Datelike, FixedOffset, NaiveDate, NaiveDateTime, Timelike};
 use proptest::arbitrary::Arbitrary;
-use readyset_errors::{ReadySetError, ReadySetResult};
+use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
 use crate::{DfType, DfValue};
@@ -234,23 +234,31 @@ impl FromStr for TimestampTz {
     fn from_str(ts: &str) -> anyhow::Result<TimestampTz> {
         match ts.strip_suffix(" BC") {
             Some(str_without_epoch) => {
-                let str_without_epoch = if str_without_epoch.starts_with(['-', '+']) {
-                    Cow::Borrowed(str_without_epoch)
-                } else {
-                    Cow::Owned(format!("+{str_without_epoch}"))
-                };
+                // This is a negative year coming from Postgres. Postgres uses the BC suffix, but
+                // chrono only supports non-positive proleptic Gregorian calendar years to
+                // represent years before 1. However, we can't just strip the suffix and parse
+                // before correcting for this, because BC leap years are all offset by 1 from their
+                // "absolute value" AD counterparts, due to there not being a year
+                // 0 in BC/AD-notated years; we used to do this but it failed to parse on leap days
+                // before the year 1. However, since we know the format used by Postgres, the
+                // simplest thing to do is just manually parse off the year and convert it to the
+                // corresponding negative year, then reassemble the date string and parse using
+                // the normal chrono routines.
+                let (year_str, rest) = str_without_epoch
+                    .split_once('-')
+                    .ok_or(internal_err!("Invalid date format"))?;
 
-                // This is a negative year coming from Postgres
+                let year = -(year_str.parse::<i32>()? - 1);
+                let neg_year_str = format!("{year}-{rest}");
+
                 if let Ok(dt) = DateTime::<FixedOffset>::parse_from_str(
-                    &str_without_epoch,
+                    &neg_year_str,
                     TIMESTAMP_TZ_PARSE_FORMAT,
                 ) {
-                    let year = dt.year();
-                    Ok(dt.with_year(-year + 1).unwrap_or(dt).into())
+                    Ok(dt.into())
                 } else {
-                    let d = NaiveDate::parse_from_str(&str_without_epoch, DATE_FORMAT)?;
-                    let year = d.year();
-                    Ok(d.with_year(-year + 1).unwrap_or(d).into())
+                    let d = NaiveDate::parse_from_str(&neg_year_str, DATE_FORMAT)?;
+                    Ok(d.into())
                 }
             }
             None => Self::from_str_no_bc(ts),
@@ -673,6 +681,17 @@ mod tests {
             chrono::FixedOffset::east(2 * 60 * 60)
                 .ymd(10000, 10, 19)
                 .and_hms(10, 23, 54)
+        );
+
+        #[allow(clippy::zero_prefixed_literal)]
+        let year_5_bce = -0004;
+        assert_eq!(
+            TimestampTz::from_str("0005-02-29 12:34:56+00 BC")
+                .unwrap()
+                .to_chrono(),
+            chrono::FixedOffset::east(0)
+                .ymd(year_5_bce, 2, 29)
+                .and_hms(12, 34, 56)
         );
     }
 }
