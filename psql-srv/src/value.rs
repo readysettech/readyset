@@ -61,6 +61,18 @@ impl<'a> FromSql<'a> for PsqlValue {
                 Type::INT4 => i32::from_sql(ty, raw).map(PsqlValue::Int),
                 Type::INT8 => i64::from_sql(ty, raw).map(PsqlValue::BigInt),
                 Type::INT2 => i16::from_sql(ty, raw).map(PsqlValue::SmallInt),
+                Type::OID
+                | Type::REGCLASS
+                | Type::REGCOLLATION
+                | Type::REGCONFIG
+                | Type::REGDICTIONARY
+                | Type::REGNAMESPACE
+                | Type::REGOPER
+                | Type::REGOPERATOR
+                | Type::REGPROC
+                | Type::REGPROCEDURE
+                | Type::REGROLE
+                | Type::REGTYPE => u32::from_sql(ty, raw).map(PsqlValue::Oid),
                 Type::FLOAT8 => f64::from_sql(ty, raw).map(PsqlValue::Double),
                 Type::FLOAT4 => f32::from_sql(ty, raw).map(PsqlValue::Float),
                 Type::NUMERIC => {
