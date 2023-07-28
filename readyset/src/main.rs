@@ -12,7 +12,7 @@ fn main() -> anyhow::Result<()> {
     match options.database_type()? {
         DatabaseType::MySQL => NoriaAdapter {
             description: "MySQL adapter for ReadySet.",
-            default_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 3306),
+            default_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 3307),
             connection_handler: MySqlHandler {
                 enable_statement_logging: options.tracing.statement_logging,
             },
@@ -23,7 +23,7 @@ fn main() -> anyhow::Result<()> {
         .run(options),
         DatabaseType::PostgreSQL => NoriaAdapter {
             description: "PostgreSQL adapter for ReadySet.",
-            default_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 3306),
+            default_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 5433),
             connection_handler: PsqlHandler::new(readyset::psql::Config {
                 options: options.psql_options.clone(),
                 enable_statement_logging: options.tracing.statement_logging,

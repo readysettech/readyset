@@ -134,6 +134,7 @@ where
 {
     pub description: &'static str,
     pub default_address: SocketAddr,
+    /// Address used to listen for incoming connections
     pub connection_handler: H,
     pub database_type: DatabaseType,
     /// SQL dialect to use when parsing queries
