@@ -1,6 +1,5 @@
 use std::collections::{hash_map, HashMap, HashSet};
 use std::mem;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -24,7 +23,7 @@ use readyset_errors::{internal_err, set_failpoint_return_err, ReadySetError, Rea
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 use readyset_util::select;
 use replication_offset::{ReplicationOffset, ReplicationOffsets};
-use tokio::sync::Notify;
+use tokio::sync::mpsc::UnboundedSender;
 use tracing::{debug, error, info, info_span, trace, warn, Instrument};
 use {mysql_async as mysql, tokio_postgres as pgsql};
 
@@ -35,6 +34,7 @@ use crate::postgres_connector::{
     PostgresWalConnector, PUBLICATION_NAME, REPLICATION_SLOT,
 };
 use crate::table_filter::TableFilter;
+use crate::ReplicatorMessage;
 
 /// Time to wait for requests to coalesce between snapshotting. Useful for preventing a series of
 /// DDL changes from thrashing snapshotting
@@ -162,7 +162,7 @@ impl NoriaAdapter {
     pub async fn start(
         noria: ReadySetHandle,
         mut config: UpstreamConfig,
-        mut notify: Option<Arc<Notify>>,
+        notification_channel: &UnboundedSender<ReplicatorMessage>,
         telemetry_sender: TelemetrySender,
         server_startup: bool,
         enable_statement_logging: bool,
@@ -189,7 +189,7 @@ impl NoriaAdapter {
                     options,
                     noria,
                     config,
-                    &mut notify,
+                    notification_channel,
                     resnapshot,
                     &telemetry_sender,
                     enable_statement_logging,
@@ -228,7 +228,7 @@ impl NoriaAdapter {
                     options,
                     noria,
                     config,
-                    &mut notify,
+                    notification_channel,
                     resnapshot,
                     &telemetry_sender,
                     tls_connector,
@@ -267,7 +267,7 @@ impl NoriaAdapter {
         mut mysql_options: mysql::Opts,
         mut noria: ReadySetHandle,
         mut config: UpstreamConfig,
-        ready_notify: &mut Option<Arc<Notify>>,
+        notification_channel: &UnboundedSender<ReplicatorMessage>,
         resnapshot: bool,
         telemetry_sender: &TelemetrySender,
         enable_statement_logging: bool,
@@ -434,7 +434,9 @@ impl NoriaAdapter {
             Some(max) if max > &current_pos => {
                 info!(start = %current_pos, end = %max, "Catching up");
                 let max = max.clone();
-                adapter.main_loop(&mut current_pos, Some(max)).await?;
+                adapter
+                    .main_loop(&mut current_pos, Some(max), notification_channel)
+                    .await?;
             }
             _ => {}
         }
@@ -442,12 +444,13 @@ impl NoriaAdapter {
         info!("MySQL connected");
         info!(binlog_position = %current_pos);
 
-        // Let waiters know that the initial snapshotting is complete.
-        if let Some(notify) = ready_notify.take() {
-            notify.notify_one();
-        }
+        // Let Controller know that the initial snapshotting is complete. Ignores the error, which
+        // will not occur unless the Controller dropped the rx half of this channel.
+        let _ = notification_channel.send(ReplicatorMessage::SnapshotDone);
 
-        adapter.main_loop(&mut current_pos, None).await?;
+        adapter
+            .main_loop(&mut current_pos, None, notification_channel)
+            .await?;
 
         unreachable!("`main_loop` will never stop with an Ok status if `until = None`");
     }
@@ -457,7 +460,7 @@ impl NoriaAdapter {
         pgsql_opts: pgsql::Config,
         mut noria: ReadySetHandle,
         mut config: UpstreamConfig,
-        ready_notify: &mut Option<Arc<Notify>>,
+        notification_channel: &UnboundedSender<ReplicatorMessage>,
         resnapshot: bool,
         telemetry_sender: &TelemetrySender,
         tls_connector: MakeTlsConnector,
@@ -656,17 +659,20 @@ impl NoriaAdapter {
 
         if min_pos != max_pos {
             info!(start = %min_pos, end = %max_pos, "Catching up");
-            adapter.main_loop(&mut min_pos, Some(max_pos)).await?;
+            adapter
+                .main_loop(&mut min_pos, Some(max_pos), notification_channel)
+                .await?;
         }
 
-        // Let waiters know that the initial snapshotting is complete.
-        if let Some(notify) = ready_notify.take() {
-            notify.notify_one();
-        }
+        // Let Controller know that the initial snapshotting is complete. Ignores the error, which
+        // will not occur unless the Controller dropped the rx half of this channel.
+        let _ = notification_channel.send(ReplicatorMessage::SnapshotDone);
 
         info!("Streaming replication started");
 
-        adapter.main_loop(&mut min_pos, None).await?;
+        adapter
+            .main_loop(&mut min_pos, None, notification_channel)
+            .await?;
 
         unreachable!("`main_loop` will never stop with an Ok status if `until = None`");
     }
@@ -936,7 +942,15 @@ impl NoriaAdapter {
         &mut self,
         position: &mut ReplicationOffset,
         until: Option<ReplicationOffset>,
+        notification_channel: &UnboundedSender<ReplicatorMessage>,
     ) -> ReadySetResult<()> {
+        // Notify the controller that we've started replication if we've entered the main (not
+        // catchup) replication loop.
+        if until.is_none() {
+            // Will not error unless the Controller has dropped the rx half of the channel
+            let _ = notification_channel.send(ReplicatorMessage::ReplicationStarted);
+        }
+
         loop {
             set_failpoint!(failpoints::UPSTREAM, |_| ReadySetResult::Err(
                 ReadySetError::ReplicationFailed(

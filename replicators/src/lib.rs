@@ -15,8 +15,19 @@ pub(crate) mod table_filter;
 use std::time::Duration;
 
 pub use noria_adapter::{cleanup, NoriaAdapter};
+use readyset_errors::ReadySetError;
 pub use replication_offset::mysql::MySqlPosition;
 pub use replication_offset::postgres::PostgresPosition;
+
+/// Event notifications sent from the replicator to the controller.
+pub enum ReplicatorMessage {
+    /// The replicator finished an initial base table snapshot
+    SnapshotDone,
+    /// The replicator finished startup and entered the main replication loop
+    ReplicationStarted,
+    /// The replicator encountered an unrecoverable error
+    Error(ReadySetError),
+}
 
 /// Provide a simplistic human-readable estimate for how much time remains to complete an operation
 pub(crate) fn estimate_remaining_time(elapsed: Duration, progress: f64, total: f64) -> String {

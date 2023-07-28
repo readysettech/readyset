@@ -258,7 +258,6 @@ mod view;
 use std::convert::TryFrom;
 use std::default::Default;
 pub mod recipe;
-pub mod replication;
 
 pub mod channel;
 #[allow(unreachable_pub)] // https://github.com/rust-lang/rust/issues/57411

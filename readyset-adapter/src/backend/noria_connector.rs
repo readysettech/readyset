@@ -944,13 +944,28 @@ impl NoriaConnector {
                 )],
             };
 
+        // Helper function for formatting
+        fn val_or_null<T: ToString>(val: Option<T>) -> String {
+            if let Some(v) = val {
+                v.to_string()
+            } else {
+                "NULL".to_string()
+            }
+        }
+
         if let Ok(Some(stats)) = authority.persistent_stats().await {
-            stats.last_controller_startup.iter().for_each(|time| {
-                status.push(("Last Started Controller".to_string(), time.to_string()))
-            });
-            stats.last_completed_snapshot.iter().for_each(|time| {
-                status.push(("Last Completed Snapshot".to_string(), time.to_string()))
-            });
+            status.push((
+                "Last Started Controller".to_string(),
+                val_or_null(stats.last_controller_startup),
+            ));
+            status.push((
+                "Last Completed Snapshot".to_string(),
+                val_or_null(stats.last_completed_snapshot),
+            ));
+            status.push((
+                "Last Started Replication".to_string(),
+                val_or_null(stats.last_started_replication),
+            ));
         }
 
         // Converts from ReadySetStatus -> Vec<(String, String)> -> QueryResult

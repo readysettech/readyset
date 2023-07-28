@@ -51,6 +51,8 @@ pub struct PersistentStats {
     pub last_controller_startup: Option<u64>,
     /// Time in millis when the last snapshot was completed.
     pub last_completed_snapshot: Option<u64>,
+    /// Time in millis when we last started the main replication loop.
+    pub last_started_replication: Option<u64>,
 }
 
 /// Statistics about the Soup data-flow.

@@ -28,11 +28,12 @@ use readyset_util::futures::abort_on_panic;
 use readyset_util::shutdown::ShutdownReceiver;
 use readyset_version::RELEASE_VERSION;
 use replication_offset::ReplicationOffset;
+use replicators::ReplicatorMessage;
 use reqwest::Url;
 use slotmap::{DefaultKey, Key, KeyData, SlotMap};
 use tokio::select;
 use tokio::sync::mpsc::UnboundedSender;
-use tokio::sync::{watch, Mutex, Notify};
+use tokio::sync::{watch, Mutex};
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
@@ -86,12 +87,11 @@ pub struct Leader {
 
 impl Leader {
     /// Run all tasks required to be the leader. This may spawn tasks that
-    /// may become ready asynchronously. Use the notification to indicate
-    /// to the Controller that the leader is ready to handle requests.
+    /// may become ready asynchronously. The notification channel is used to notify the Controller
+    /// of replication events.
     pub(super) async fn start(
         &mut self,
-        ready_notification: Arc<Notify>,
-        replication_error: UnboundedSender<ReadySetError>,
+        notification_channel: UnboundedSender<ReplicatorMessage>,
         telemetry_sender: TelemetrySender,
         shutdown_rx: ShutdownReceiver,
     ) {
@@ -116,13 +116,8 @@ impl Leader {
 
         // When the controller becomes the leader, we need to read updates
         // from the binlog.
-        self.start_replication_task(
-            ready_notification,
-            replication_error,
-            telemetry_sender,
-            shutdown_rx,
-        )
-        .await;
+        self.start_replication_task(notification_channel, telemetry_sender, shutdown_rx)
+            .await;
     }
 
     /// Start replication/binlog synchronization in an infinite loop
@@ -133,13 +128,15 @@ impl Leader {
     /// TODO: how to handle the case where we need a full new replica
     async fn start_replication_task(
         &mut self,
-        ready_notification: Arc<Notify>,
-        replication_error: UnboundedSender<ReadySetError>,
+        notification_channel: UnboundedSender<ReplicatorMessage>,
         telemetry_sender: TelemetrySender,
         mut shutdown_rx: ShutdownReceiver,
     ) {
         if self.replicator_config.upstream_db_url.is_none() {
-            ready_notification.notify_one();
+            // Controller must be notified that snapshot is completed even though we don't have an
+            // upstream db. This is only relevant for tests as users will not run without an
+            // upstream.
+            let _ = notification_channel.send(ReplicatorMessage::SnapshotDone);
             info!("No primary instance specified");
             return;
         }
@@ -165,7 +162,7 @@ impl Leader {
                     match replicators::NoriaAdapter::start(
                         noria,
                         config.clone(),
-                        Some(ready_notification.clone()),
+                        &notification_channel,
                         telemetry_sender.clone(),
                         server_startup,
                         replicator_statement_logging,
@@ -175,7 +172,8 @@ impl Leader {
                         // Unrecoverable errors, propagate the error the controller and kill the
                         // loop.
                         Err(err @ ReadySetError::RecipeInvariantViolated(_)) => {
-                            if let Err(e) = replication_error.send(err) {
+                            if let Err(e) = notification_channel.send(ReplicatorMessage::Error(err))
+                            {
                                 error!(error = %e, "Could not notify controller of critical error. The system may be in an invalid state");
                             }
                             break;

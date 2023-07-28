@@ -27,10 +27,11 @@ use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
 use readyset_telemetry_reporter::TelemetrySender;
 use readyset_util::select;
 use readyset_util::shutdown::ShutdownReceiver;
+use replicators::ReplicatorMessage;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender};
-use tokio::sync::{Notify, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tracing::{error, info, info_span, warn};
 use tracing_futures::Instrument;
 use url::Url;
@@ -221,20 +222,21 @@ impl Worker {
 /// Type alias for "a worker's URI" (as reported in a `RegisterPayload`).
 type WorkerIdentifier = Url;
 
-/// Channel that can be used to pass errors from the leader back to the controller so that we can
-/// gracefully kill the controller loop.
-pub struct ReplicationErrorChannel {
-    sender: UnboundedSender<ReadySetError>,
-    receiver: UnboundedReceiver<ReadySetError>,
+/// Channel used to notify the controller of replicator events. This channel conveys information on
+/// replicator status or allows us to gracefully kill the controller loop in the event of an
+/// unrecoverable replicator error.
+pub struct ReplicatorChannel {
+    sender: UnboundedSender<ReplicatorMessage>,
+    receiver: UnboundedReceiver<ReplicatorMessage>,
 }
 
-impl ReplicationErrorChannel {
+impl ReplicatorChannel {
     fn new() -> Self {
         let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
         Self { sender, receiver }
     }
 
-    fn sender(&self) -> UnboundedSender<ReadySetError> {
+    fn sender(&self) -> UnboundedSender<ReplicatorMessage> {
         self.sender.clone()
     }
 }
@@ -363,13 +365,9 @@ pub struct Controller {
     config: Config,
     /// Whether we are the leader and ready to handle requests.
     leader_ready: Arc<AtomicBool>,
-    /// A notify to be passed to leader's when created, used to notify the Controller that the
-    /// leader is ready to handle requests.
-    leader_ready_notification: Arc<Notify>,
 
-    /// Channel that the replication task, if it exists, can use to propagate updates back to
-    /// the parent controller.
-    replication_error_channel: ReplicationErrorChannel,
+    /// Channel used to notify the controller of replicator events.
+    replicator_channel: ReplicatorChannel,
 
     /// Provides the ability to report metrics to Segment
     telemetry_sender: TelemetrySender,
@@ -405,8 +403,7 @@ impl Controller {
             worker_descriptor,
             config,
             leader_ready: Arc::new(AtomicBool::new(false)),
-            leader_ready_notification: Arc::new(Notify::new()),
-            replication_error_channel: ReplicationErrorChannel::new(),
+            replicator_channel: ReplicatorChannel::new(),
             telemetry_sender,
             permissive_writes,
             shutdown_rx,
@@ -510,8 +507,7 @@ impl Controller {
 
                 leader
                     .start(
-                        self.leader_ready_notification.clone(),
-                        self.replication_error_channel.sender(),
+                        self.replicator_channel.sender(),
                         self.telemetry_sender.clone(),
                         self.shutdown_rx.clone(),
                     )
@@ -652,9 +648,41 @@ impl Controller {
                         }
                     }
                 }
-                req = self.replication_error_channel.receiver.recv() => {
+                req = self.replicator_channel.receiver.recv() => {
                     match req {
-                        Some(e) => return Err(e),
+                        Some(msg) => match msg {
+                            ReplicatorMessage::Error(e)=> return Err(e),
+                            ReplicatorMessage::SnapshotDone => {
+                                self.leader_ready.store(true, Ordering::Release);
+
+                                let now = SystemTime::now()
+                                        .duration_since(UNIX_EPOCH)
+                                        .unwrap()
+                                        .as_millis() as u64;
+
+                                if let Err(error) = self.authority.update_persistent_stats(|stats: Option<PersistentStats>| {
+                                    let mut stats = stats.unwrap_or_default();
+                                    stats.last_completed_snapshot = Some(now);
+                                    Ok(stats)
+                                }).await {
+                                    error!(%error, "Failed to persist status in the Authority");
+                                }
+                            },
+                            ReplicatorMessage::ReplicationStarted => {
+                                let now = SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .unwrap()
+                                .as_millis() as u64;
+                                if let Err(error) = self.authority.update_persistent_stats(|stats: Option<PersistentStats>| {
+                                    let mut stats = stats.unwrap_or_default();
+                                    stats.last_started_replication = Some(now);
+                                    Ok(stats)
+                                }).await {
+                                    error!(%error, "Failed to persist status in the Authority");
+                                }
+
+                            },
+                        },
                         _ => {
                             if self.shutdown_rx.signal_received() {
                                 // If we've encountered an error but the shutdown signal has been received, the
@@ -675,22 +703,6 @@ impl Controller {
                         // Recovery is done, so we can write back None (and avoid the whole
                         // rigamarole with .await'ing it)
                         leader.running_recovery = None;
-                    }
-                }
-                _ = self.leader_ready_notification.notified() => {
-                    self.leader_ready.store(true, Ordering::Release);
-
-                    let now = SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .unwrap()
-                            .as_millis() as u64;
-
-                    if let Err(error) = self.authority.update_persistent_stats(|stats: Option<PersistentStats>| {
-                        let mut stats = stats.unwrap_or_default();
-                        stats.last_completed_snapshot = Some(now);
-                        Ok(stats)
-                    }).await {
-                        error!(%error, "Failed to persist status in the Authority");
                     }
                 }
                 _ = self.shutdown_rx.recv() => {
