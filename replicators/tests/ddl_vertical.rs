@@ -22,6 +22,7 @@
 //! Note that this test suite requires the *exact* configuration specified in that docker-compose
 //! configuration, including the port, username, and password.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashSet};
 use std::fmt::{Debug, Display, Formatter, Result};
 use std::iter::once;
@@ -37,12 +38,14 @@ use proptest::{collection, sample};
 use proptest_stateful::{
     proptest_config_with_local_failure_persistence, ModelState, ProptestStatefulConfig,
 };
+use readyset_client::SingleKeyEviction;
 use readyset_client_test_helpers::psql_helpers::{self, PostgreSQLAdapter};
 use readyset_client_test_helpers::TestBuilder;
 use readyset_data::{DfValue, TimestampTz};
 use readyset_server::Handle;
 use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
+use tokio_postgres::config::Host;
 use tokio_postgres::{Client, Config, NoTls, Row};
 
 const SQL_NAME_REGEX: &str = "[a-zA-Z_][a-zA-Z0-9_]*";
@@ -194,6 +197,17 @@ enum Operation {
         type_name: String,
         value_name: String,
         new_name: String,
+    },
+    /// This operation triggers an eviction of a single key in ReadySet, using `inner` as the
+    /// payload for the /evict_single RPC.
+    ///
+    /// The payload is initialized to `None`, which triggers a random eviction the first time this
+    /// operation is run. `inner` is then updated with the `SingleKeyResult` returned by the
+    /// /evict_single RPC, so that if this operation is run again, we can trigger the same eviction
+    /// again. This behavior is necessary to ensure consistent results when attempting to reproduce
+    /// a failing test case.
+    Evict {
+        inner: RefCell<Option<SingleKeyEviction>>,
     },
 }
 
@@ -423,6 +437,7 @@ enum TestViewDef {
 }
 
 struct DDLTestRunContext {
+    rs_host: String,
     rs_conn: Client,
     pg_conn: Client,
     shutdown_tx: Option<ShutdownSender>, // Needs to be Option so we can move it out of the struct
@@ -475,7 +490,13 @@ impl ModelState for DDLModelState {
         // We can always create more tables or enum types, so start with those two generators:
         let create_table_strat = gen_create_table(self.enum_types.clone()).boxed();
         let create_enum_strat = gen_create_enum().boxed();
-        let mut possible_ops = vec![create_table_strat, create_enum_strat];
+        // We can also always try to issue an eviction:
+        let evict_strategy = Just(Operation::Evict {
+            inner: RefCell::new(None),
+        })
+        .boxed();
+
+        let mut possible_ops = vec![create_table_strat, create_enum_strat, evict_strategy];
 
         // If we have at least one table, we can do any of:
         //  * delete a table
@@ -715,6 +736,7 @@ impl ModelState for DDLModelState {
                     .unwrap();
                 *val_ref = new_name.clone();
             }
+            Operation::Evict { .. } => (),
         }
     }
 
@@ -835,6 +857,9 @@ impl ModelState for DDLModelState {
                 .enum_types
                 .get(type_name)
                 .map_or(false, |t| t.contains(value_name) && !t.contains(new_name)),
+            // Even if the key is shrunk out, evicting it is a no-op, so we don't need to worry
+            // about preconditions at all for evictions:
+            Operation::Evict { .. } => true,
         }
     }
 
@@ -849,12 +874,18 @@ impl ModelState for DDLModelState {
             .fallback(true)
             .build::<PostgreSQLAdapter>()
             .await;
+        // We need the raw hostname for eviction operations later:
+        let rs_host = match &opts.get_hosts()[0] {
+            Host::Tcp(host) => host.clone(),
+            _ => unreachable!(),
+        };
         let rs_conn = connect(opts).await;
 
         recreate_oracle_db().await;
         let pg_conn = connect(oracle_db_config()).await;
 
         DDLTestRunContext {
+            rs_host,
             rs_conn,
             pg_conn,
             _handle: handle,
@@ -1045,6 +1076,24 @@ impl ModelState for DDLModelState {
                 rs_conn.simple_query(&query).await.unwrap();
                 pg_conn.simple_query(&query).await.unwrap();
                 recreate_caches_using_type(type_name, &self.tables, rs_conn).await;
+            }
+            Operation::Evict { inner } => {
+                let client = reqwest::Client::new();
+                let body =
+                    bincode::serialize::<Option<SingleKeyEviction>>(&*inner.borrow()).unwrap();
+                let res = client
+                    .post(format!("http://{}:6033/evict_single", ctxt.rs_host))
+                    .body(body)
+                    .send()
+                    .await
+                    .unwrap();
+                if inner.borrow().is_none() {
+                    let eviction = bincode::deserialize::<Option<SingleKeyEviction>>(
+                        &res.bytes().await.unwrap(),
+                    )
+                    .unwrap();
+                    inner.replace(eviction);
+                }
             }
         }
         // If we change any previously created types, clear the client library type cache to

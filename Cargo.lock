@@ -5110,6 +5110,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "bincode",
  "bit-vec",
  "bytes",
  "chrono",
@@ -5143,6 +5144,7 @@ dependencies = [
  "readyset-telemetry-reporter",
  "readyset-tracing",
  "readyset-util",
+ "reqwest",
  "rust_decimal",
  "serde",
  "serde_json",
