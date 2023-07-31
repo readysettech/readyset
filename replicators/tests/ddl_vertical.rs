@@ -1243,8 +1243,8 @@ async fn recreate_caches_using_type(
 #[cfg_attr(not(feature = "ddl_vertical_tests"), ignore)]
 fn run_cases() {
     let config = ProptestStatefulConfig {
-        min_ops: 7,
-        max_ops: 13,
+        min_ops: 10,
+        max_ops: 20,
         test_case_timeout: Duration::from_secs(60),
         proptest_config: proptest_config_with_local_failure_persistence!(),
     };
