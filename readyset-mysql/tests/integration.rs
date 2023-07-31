@@ -36,6 +36,36 @@ async fn setup_telemetry() -> (TelemetryReporter, mysql_async::Opts, Handle, Shu
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "Reproduces known failure (REA-3207)"]
+async fn duplicate_join_key() {
+    let (opts, _handle, shutdown_tx) = setup().await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+
+    conn.query_drop("CREATE TABLE a (id int, PRIMARY KEY(id))")
+        .await
+        .unwrap();
+    conn.query_drop("CREATE TABLE b (id INT, a_id INT, PRIMARY KEY (id))")
+        .await
+        .unwrap();
+
+    conn.query_drop("INSERT INTO b VALUES (1, 99)")
+        .await
+        .unwrap();
+
+    conn.query_drop("SELECT a.id FROM a JOIN b on b.a_id = a.id WHERE a.id = -1")
+        .await
+        .unwrap();
+
+    conn.query_drop("INSERT INTO b VALUES (2, 99)")
+        .await
+        .unwrap();
+
+    conn.query_drop("DELETE FROM b WHERE id = 1").await.unwrap();
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn two_columns_with_same_name() {
     let (opts, _handle, shutdown_tx) = setup().await;
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
