@@ -30,7 +30,7 @@ use readyset_util::shutdown::ShutdownReceiver;
 use replicators::ReplicatorMessage;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{self, Receiver, Sender, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tracing::{error, info, info_span, warn};
 use tracing_futures::Instrument;
@@ -357,6 +357,10 @@ pub struct Controller {
     http_rx: Receiver<ControllerRequest>,
     /// Receives requests from the controller's `Handle`.
     handle_rx: Receiver<HandleRequest>,
+    /// Receives notifications that background tasks have failed
+    background_task_failed_rx: Receiver<ReadySetError>,
+    /// Clone to send notifications that background tasks have failed
+    background_task_failed_tx: Sender<ReadySetError>,
     /// A `ControllerDescriptor` that describes this server instance.
     our_descriptor: ControllerDescriptor,
     /// The descriptor of the worker this controller's server is running.
@@ -393,12 +397,15 @@ impl Controller {
     ) -> Self {
         // If we don't have an upstream, we allow permissive writes to base tables.
         let permissive_writes = config.replicator_config.upstream_db_url.is_none();
+        let (background_task_failed_tx, background_task_failed_rx) = mpsc::channel(1);
         Self {
             inner: Arc::new(LeaderHandle::new()),
             authority,
             worker_tx,
             http_rx: controller_rx,
             handle_rx,
+            background_task_failed_tx,
+            background_task_failed_rx,
             our_descriptor,
             worker_descriptor,
             config,
@@ -495,10 +502,12 @@ impl Controller {
             AuthorityUpdate::WonLeaderElection(state) => {
                 info!("won leader election, creating Leader");
                 gauge!(recorded::CONTROLLER_IS_LEADER, 1f64);
+                let background_task_failed_tx = self.background_task_failed_tx.clone();
                 let mut leader = Leader::new(
                     state,
                     self.our_descriptor.controller_uri.clone(),
                     self.authority.clone(),
+                    background_task_failed_tx,
                     self.config.replicator_statement_logging,
                     self.config.replicator_config.clone(),
                     self.config.worker_request_timeout,
@@ -703,6 +712,11 @@ impl Controller {
                         // Recovery is done, so we can write back None (and avoid the whole
                         // rigamarole with .await'ing it)
                         leader.running_recovery = None;
+                    }
+                }
+                err = self.background_task_failed_rx.recv() => {
+                    if let Some(err) = err {
+                        return Err(err)
                     }
                 }
                 _ = self.shutdown_rx.recv() => {

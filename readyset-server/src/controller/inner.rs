@@ -15,10 +15,11 @@ use database_utils::UpstreamConfig;
 use dataflow::DomainIndex;
 use failpoint_macros::failpoint;
 use futures::future::Fuse;
-use futures::FutureExt;
+use futures::{Future, FutureExt};
 use hyper::Method;
 use readyset_client::consensus::{Authority, AuthorityControl};
 use readyset_client::debug::stats::PersistentStats;
+use readyset_client::internal::ReplicaAddress;
 use readyset_client::recipe::{ExtendRecipeResult, ExtendRecipeSpec, MigrationStatus};
 use readyset_client::status::{ReadySetStatus, SnapshotStatus};
 use readyset_client::{SingleKeyEviction, WorkerDescriptor};
@@ -32,7 +33,7 @@ use replicators::ReplicatorMessage;
 use reqwest::Url;
 use slotmap::{DefaultKey, Key, KeyData, SlotMap};
 use tokio::select;
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::{self, UnboundedSender};
 use tokio::sync::{watch, Mutex};
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
@@ -81,6 +82,9 @@ pub struct Leader {
     /// a handle to the running migration is placed here, where it can be queried via an rpc to
     /// `/migration_status`.
     running_migrations: Mutex<SlotMap<DefaultKey, RunningMigration>>,
+
+    /// A channel that will be notified if a background task for the controller fails
+    pub(super) background_task_failed: mpsc::Sender<ReadySetError>,
 
     pub(super) running_recovery: Option<watch::Receiver<ReadySetResult<()>>>,
 }
@@ -577,6 +581,11 @@ impl Leader {
                 self.dataflow_state_handle.commit(writer, authority).await?;
                 return_serialized!(());
             }
+            (&Method::POST, "/domain_died") => {
+                let body = bincode::deserialize(&body)?;
+                self.handle_failed_domain(body).await?;
+                return_serialized!(());
+            }
             _ => Err(ReadySetError::UnknownEndpoint),
         }
     }
@@ -720,11 +729,105 @@ impl Leader {
             .await
     }
 
+    pub(super) async fn handle_failed_domain(&self, addr: ReplicaAddress) -> ReadySetResult<()> {
+        // It's important that this happens in the background not just for parallelism /
+        // performance, but because the worker thread blocks on this RPC completing before it can
+        // accept any additional domain requests from us - both the "run this domain" request that
+        // gets sent by the eventual recovery, and other domain requests which might already be
+        // holding on to a lock of the dataflow state handle (eg as part of a migration)
+
+        let dataflow_state_handle = Arc::clone(&self.dataflow_state_handle);
+        let authority = Arc::clone(&self.authority);
+        self.spawn_background_task(async move {
+            warn!(domain = %addr, "Handling failure of domain");
+            let mut writer = dataflow_state_handle.write().await;
+            let ds = writer.as_mut();
+
+            // 1. Remove the domain from our internal state
+            let Some(dh) = ds.domains.get_mut(&addr.domain_index) else {
+                warn!(domain = %addr, "Notified about failure of unknown domain");
+                return Ok(())
+            };
+            dh.remove_assignment(addr.shard, addr.replica);
+
+            let mut domains_to_recover = vec![addr.domain_index];
+
+            // 2. Kill and clean up any downstream domains
+            let downstream_domains = ds.downstream_domains(addr.domain_index)?;
+            if !downstream_domains.is_empty() {
+                info!(
+                    num_downstream_domains = downstream_domains.len(),
+                    "Killing domains downstream of failed domain"
+                );
+                domains_to_recover.extend(downstream_domains.iter().copied());
+                ds.kill_domains(downstream_domains).await?;
+            }
+
+            // 3. Try to recover all now-non-running domains
+            info!(?domains_to_recover, "Recovering domains");
+            #[allow(clippy::indexing_slicing)] // Internal data structure invariant
+            let domain_nodes: HashMap<_, HashSet<_>> = domains_to_recover
+                .into_iter()
+                .map(|d| (d, ds.domain_nodes[&d].values().copied().collect()))
+                .collect();
+            info!(num_domains = %domain_nodes.len(), "Recovering domains");
+            let dmp = ds.plan_recovery(&domain_nodes).await?;
+
+            if dmp.failed_placement().is_empty() {
+                info!("Finished planning recovery with all domains placed");
+            } else {
+                info!(
+                    num_unplaced_domains = dmp.failed_placement().len(),
+                    "Finished planning recovery with some domains unplaced"
+                );
+            }
+
+            dataflow_state_handle.commit(writer, &authority).await?;
+
+            // 4. Apply the plan for recovery.
+            let mut writer = dataflow_state_handle.write().await;
+            if let Err(error) = dmp.apply(writer.as_mut()).await {
+                error!(%error, "Error applying domain migration plan");
+                Err(error)
+            } else {
+                dataflow_state_handle.commit(writer, &authority).await?;
+                Ok(())
+            }
+        })
+        .await;
+        Ok(())
+    }
+
+    /// Spawn a background task which notifies the controller if it fails or panics
+    async fn spawn_background_task<F>(&self, fut: F)
+    where
+        F: Future<Output = ReadySetResult<()>> + Send + 'static,
+    {
+        let task = tokio::spawn(fut);
+
+        let failed_tx = self.background_task_failed.clone();
+        tokio::spawn(async move {
+            let send_res = match task.await {
+                Ok(Ok(())) => Ok(()),
+                Ok(Err(e)) => failed_tx.send(e).await,
+                Err(e) => failed_tx.send(internal_err!("{e}")).await,
+            };
+
+            if let Err(mpsc::error::SendError(error)) = send_res {
+                error!(
+                    %error,
+                    "Controller background task failed, but could not notify controller of error"
+                );
+            }
+        });
+    }
+
     /// Construct a new `Leader`
     pub(super) fn new(
         state: ControllerState,
         controller_uri: Url,
         authority: Arc<Authority>,
+        background_task_failed: mpsc::Sender<ReadySetError>,
         replicator_statement_logging: bool,
         replicator_config: UpstreamConfig,
         worker_request_timeout: Duration,
@@ -744,6 +847,7 @@ impl Leader {
             authority,
             worker_request_timeout,
             running_migrations: Default::default(),
+            background_task_failed,
             running_recovery: None,
         }
     }
