@@ -4651,6 +4651,7 @@ dependencies = [
  "deadpool-postgres",
  "derive_more",
  "failpoint-macros",
+ "hyper",
  "mysql_async",
  "nom-sql",
  "petgraph",
