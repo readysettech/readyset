@@ -26,7 +26,7 @@ use url::Url;
 use crate::consensus::{Authority, AuthorityControl};
 use crate::debug::info::GraphInfo;
 use crate::debug::stats;
-use crate::internal::DomainIndex;
+use crate::internal::{DomainIndex, ReplicaAddress};
 use crate::metrics::MetricsDump;
 use crate::recipe::changelist::ChangeList;
 use crate::recipe::{ExtendRecipeResult, ExtendRecipeSpec, MigrationStatus};
@@ -932,5 +932,13 @@ impl ReadySetHandle {
         action: String,
     ) -> impl Future<Output = ReadySetResult<()>> + '_ {
         self.rpc("failpoint", (name, action), self.request_timeout)
+    }
+
+    /// Notify the controller that a running domain replica has died
+    pub fn domain_died(
+        &mut self,
+        replica_address: ReplicaAddress,
+    ) -> impl Future<Output = ReadySetResult<()>> + '_ {
+        self.rpc("domain_died", replica_address, self.request_timeout)
     }
 }
