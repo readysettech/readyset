@@ -27,8 +27,8 @@ use dataflow::prelude::{ChannelCoordinator, DomainIndex, DomainNodes, Graph, Nod
 use dataflow::{
     DomainBuilder, DomainConfig, DomainRequest, NodeMap, Packet, PersistenceParameters, Sharding,
 };
-use futures::stream::{self, StreamExt, TryStreamExt};
-use futures::{FutureExt, TryStream};
+use futures::stream::{self, FuturesUnordered, StreamExt, TryStreamExt};
+use futures::{FutureExt, TryFutureExt, TryStream};
 use lazy_static::lazy_static;
 use metrics::{gauge, histogram};
 use nom_sql::{
@@ -60,7 +60,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, MutexGuard, RwLock, RwLockReadGuard};
 use tracing::{debug, error, info, instrument, trace, warn};
-use vec1::Vec1;
+use vec1::{vec1, Vec1};
 
 use super::migrate::DomainSettings;
 use super::replication::ReplicationStrategy;
@@ -1510,15 +1510,91 @@ impl DfState {
     }
 
     /// Remove all references to the given [`WorkerIdentifier`] from the runtime state of the
-    /// dataflow graph
-    pub(super) fn remove_worker(&mut self, wi: &WorkerIdentifier) {
+    /// dataflow graph, returning a list of replica addresses that were known to be running on those
+    /// workers
+    pub(super) fn remove_worker(&mut self, wi: &WorkerIdentifier) -> Vec<ReplicaAddress> {
         self.workers.remove(wi);
         self.read_addrs.remove(wi);
+        let mut res = vec![];
         for dh in self.domains.values_mut() {
             for replica_addr in dh.remove_worker(wi) {
                 self.channel_coordinator.remove(replica_addr);
+                res.push(replica_addr);
             }
         }
+        res
+    }
+
+    /// Return a set of domain indexes that are logically downstream of the given domain in the
+    /// graph
+    ///
+    /// NOTE: this is asymptotically kinda crappy right now, but ideally this is needed rarely
+    /// enough and our graphs are small enough in practice that that isn't a huge deal
+    pub(super) fn downstream_domains(
+        &self,
+        domain: DomainIndex,
+    ) -> ReadySetResult<HashSet<DomainIndex>> {
+        let mut res = HashSet::new();
+        for (_, ni) in
+            self.domain_nodes
+                .get(&domain)
+                .ok_or_else(|| ReadySetError::UnknownDomain {
+                    domain_index: domain.index(),
+                })?
+        {
+            let mut bfs = petgraph::visit::Bfs::new(&self.ingredients, *ni);
+            while let Some(ni) = bfs.next(&self.ingredients) {
+                let downstream_domain = self.ingredients[ni].domain();
+                if downstream_domain != domain {
+                    res.insert(downstream_domain);
+                }
+            }
+        }
+
+        Ok(res)
+    }
+
+    /// Send requests to whatever workers are running the given domain replicas to kill those
+    /// replicas, and remove them from runtime state.
+    pub(super) async fn kill_domains<I>(&mut self, domains: I) -> ReadySetResult<()>
+    where
+        I: IntoIterator<Item = DomainIndex>,
+    {
+        let mut workers_to_replicas: HashMap<_, Vec1<_>> = HashMap::new();
+        for di in domains {
+            let Some(dh) = self.domains.get(&di) else {
+                debug!(domain = %di, "domain not running, not killing");
+                continue
+            };
+
+            for (addr, wi) in dh.assignments() {
+                workers_to_replicas
+                    .entry(wi.clone())
+                    .and_modify(|v| v.push(addr))
+                    .or_insert_with(|| vec1![addr]);
+            }
+        }
+
+        let mut futs = FuturesUnordered::new();
+        for (worker_url, replicas) in workers_to_replicas {
+            let worker = self.workers.get(&worker_url).ok_or_else(|| {
+                internal_err!("Worker not found for url {worker_url} to kill domains")
+            })?;
+            futs.push(
+                worker
+                    .rpc(WorkerRequestKind::KillDomains(replicas.clone()))
+                    .map_ok(|()| replicas),
+            );
+        }
+        while let Some(r) = futs.next().await {
+            for killed_addr in r? {
+                if let Some(dh) = self.domains.get_mut(&killed_addr.domain_index) {
+                    dh.remove_assignment(killed_addr.shard, killed_addr.replica);
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// Runs all the necessary steps to recover the full [`DfState`], when said state only

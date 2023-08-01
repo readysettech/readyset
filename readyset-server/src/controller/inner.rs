@@ -7,7 +7,7 @@
     clippy::unreachable
 )]
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -679,10 +679,22 @@ impl Leader {
         let mut writer = self.dataflow_state_handle.write().await;
         let ds = writer.as_mut();
 
-        // Remove references to the worker from any internal state
+        // Remove references to the worker from any internal state, collecting downstream domains to
+        // kill
+        let mut downstream_domains = HashSet::new();
         for wi in failed {
             warn!(worker = %wi, "handling failure of worker");
-            ds.remove_worker(&wi);
+            for di in ds.remove_worker(&wi) {
+                downstream_domains.extend(ds.downstream_domains(di.domain_index)?);
+            }
+        }
+
+        if !downstream_domains.is_empty() {
+            info!(
+                num_downstream_domains = downstream_domains.len(),
+                "Killing domains downstream of failed worker"
+            );
+            ds.kill_domains(downstream_domains).await?;
         }
 
         self.dataflow_state_handle

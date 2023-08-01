@@ -65,6 +65,27 @@ impl DomainHandle {
         self.shards.get((shard, replica)).and_then(|r| r.as_ref())
     }
 
+    /// Construct an iterator over all the assigned workers for this domain handle, represented as
+    /// pairs of replica address and worker identifier.
+    ///
+    /// Any replicas that have not been scheduled onto a worker will not be yielded by the iterator
+    pub(super) fn assignments(&self) -> impl Iterator<Item = (ReplicaAddress, &WorkerIdentifier)> {
+        self.shards
+            .entries()
+            .filter_map(|((shard, replica), opt_wi)| {
+                opt_wi.as_ref().map(|wi| {
+                    (
+                        ReplicaAddress {
+                            shard,
+                            replica,
+                            domain_index: self.idx,
+                        },
+                        wi,
+                    )
+                })
+            })
+    }
+
     pub(super) fn is_assigned_to_worker(&self, worker: &WorkerIdentifier) -> bool {
         self.shards
             .cells()
@@ -94,6 +115,15 @@ impl DomainHandle {
                     None
                 }
             })
+    }
+
+    /// Remove the assignment, if any, for the given shard and replica
+    ///
+    /// # Panics
+    ///
+    /// Panics if the shard or replica index are out of bounds
+    pub(crate) fn remove_assignment(&mut self, shard: usize, replica: usize) {
+        self.shards[(shard, replica)] = None;
     }
 
     pub(super) async fn send_to_healthy_shard_replica<R>(
