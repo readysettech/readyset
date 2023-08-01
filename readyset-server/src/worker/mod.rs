@@ -32,6 +32,7 @@ use tokio::task::JoinError;
 use tokio::time::Interval;
 use tracing::{debug, error, info, info_span, trace, warn};
 use url::Url;
+use vec1::Vec1;
 
 use self::replica::Replica;
 use crate::coordination::{DomainDescriptor, RunDomainResponse};
@@ -61,6 +62,9 @@ pub enum WorkerRequestKind {
 
     /// Clear domains.
     ClearDomains,
+
+    /// Kill one or more domains running on this worker
+    KillDomains(Vec1<ReplicaAddress>),
 
     /// A set of domains has been started elsewhere in the distributed system.
     ///
@@ -115,7 +119,7 @@ pub struct DomainHandle {
     req_tx: Sender<WrappedDomainRequest>,
     /// Can be used to send an abort signal to the domain
     /// aborts automatically when dropped
-    _domain_abort: oneshot::Sender<()>,
+    abort: oneshot::Sender<()>,
 }
 
 /// Long-lived struct for tracking the currently allocated heap memory used by the current process
@@ -326,7 +330,7 @@ impl Worker {
                         .map(move |jh| (jh, replica_addr)),
                 );
 
-                let (_domain_abort, domain_abort_rx) = oneshot::channel::<()>();
+                let (abort, abort_rx) = oneshot::channel::<()>();
                 // Spawn the actual thread to run the domain
                 std::thread::Builder::new()
                     .name(format!("Domain {}", replica_addr))
@@ -336,25 +340,32 @@ impl Worker {
                         // This will happen either if the DomainHandle is dropped (and error is
                         // received) or an actual signal is sent on the
                         // channel
-                        let _ = runtime.block_on(domain_abort_rx);
+                        let _ = runtime.block_on(abort_rx);
                         runtime.shutdown_background();
                     })?;
 
-                self.domains.insert(
-                    replica_addr,
-                    DomainHandle {
-                        req_tx,
-                        _domain_abort,
-                    },
-                );
+                self.domains
+                    .insert(replica_addr, DomainHandle { req_tx, abort });
 
                 self.domain_wait_queue.push(jh);
 
-                span.in_scope(|| debug!(%bind_actual, %bind_external, "domain booted",));
+                span.in_scope(|| debug!(%bind_actual, %bind_external, "domain booted"));
                 let resp = RunDomainResponse {
                     external_addr: bind_external,
                 };
                 Ok(Some(bincode::serialize(&resp)?))
+            }
+            WorkerRequestKind::KillDomains(domains) => {
+                for addr in domains {
+                    match self.domains.remove(&addr) {
+                        Some(domain) => {
+                            info!(domain = %addr, "Aborting domain at request of controller");
+                            let _ = domain.abort.send(());
+                        }
+                        None => warn!(domain = %addr, "Asked to kill domain that is not running"),
+                    }
+                }
+                Ok(None)
             }
             WorkerRequestKind::GossipDomainInformation(domains) => {
                 for dd in domains {
