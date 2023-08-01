@@ -482,6 +482,7 @@ impl NoriaAdapter {
         let replication_offsets = noria.replication_offsets().await?;
         let pos = replication_offsets
             .max_offset()?
+            .map(Clone::clone)
             .map(TryInto::try_into)
             .transpose()?;
         let snapshot_report_interval_secs = config.snapshot_report_interval_secs;
