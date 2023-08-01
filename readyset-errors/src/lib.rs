@@ -301,13 +301,13 @@ pub enum ReadySetError {
         statement_id: u32,
     },
 
-    /// An internal invariant has been violated.
+    /// An internal error has occurred
     ///
     /// This is produced by the [`internal!`] and [`invariant!`] macros, as an alternative to
-    /// panicking the whole database.
+    /// panicking.
     /// It should **not** be used for errors we're expecting to be able to handle; this is
     /// a worst-case scenario.
-    #[error("Internal invariant violated: {0}")]
+    #[error("Internal error: {0}")]
     Internal(String),
 
     /// The user fed ReadySet bad input (and there's no more specific error).
@@ -982,7 +982,7 @@ macro_rules! invariant {
     };
     ($expr:expr) => {
         if !$expr {
-            $crate::internal!("assertion failed: {}", std::stringify!($expr));
+            $crate::internal!("invariant failed: {}", std::stringify!($expr));
         }
     };
 }
@@ -996,7 +996,7 @@ macro_rules! invariant_eq {
     ($expr:expr, $expr2:expr, $($tt:tt)*) => {
         if $expr != $expr2 {
             $crate::internal!(
-                "assertion failed: {} == {} ({});\nleft = {:?};\nright = {:?}",
+                "invariant failed: {} == {} ({});\nleft = {:?};\nright = {:?}",
                 std::stringify!($expr),
                 std::stringify!($expr2),
                 format_args!($($tt)*),
@@ -1008,7 +1008,7 @@ macro_rules! invariant_eq {
     ($expr:expr, $expr2:expr) => {
         if $expr != $expr2 {
             $crate::internal!(
-                "assertion failed: {} == {};\nleft = {:?};\nright = {:?}",
+                "invariant failed: {} == {};\nleft = {:?};\nright = {:?}",
                 std::stringify!($expr),
                 std::stringify!($expr2),
                 $expr,
@@ -1027,7 +1027,7 @@ macro_rules! invariant_ne {
     ($expr:expr, $expr2:expr, $($tt:tt)*) => {
         if $expr == $expr2 {
             $crate::internal!(
-                "assertion failed: {} != {} ({});\nleft = {:?};\nright = {:?}",
+                "invariant failed: {} != {} ({});\nleft = {:?};\nright = {:?}",
                 std::stringify!($expr),
                 std::stringify!($expr2),
                 format_args!($($tt)*),
@@ -1039,7 +1039,7 @@ macro_rules! invariant_ne {
     ($expr:expr, $expr2:expr) => {
         if $expr == $expr2 {
             $crate::internal!(
-                "assertion failed: {} != {};\nleft = {:?};\nright = {:?}",
+                "invariant failed: {} != {};\nleft = {:?};\nright = {:?}",
                 std::stringify!($expr),
                 std::stringify!($expr2),
                 $expr,
