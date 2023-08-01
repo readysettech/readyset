@@ -310,6 +310,10 @@ pub enum ReadySetError {
     #[error("Internal error: {0}")]
     Internal(String),
 
+    /// An error has occurred during an HTTP request
+    #[error("{0}")]
+    HttpError(String),
+
     /// The user fed ReadySet bad input (and there's no more specific error).
     #[error("Bad request: {0}")]
     BadRequest(String),
@@ -1144,6 +1148,7 @@ impl_from_to_string!(io::Error, IOError);
 impl_from_to_string!(tikv_jemalloc_ctl::Error, JemallocCtlError);
 impl_from_to_string!(consulrs::error::ClientError, ConsulError);
 impl_from_to_string!(tokio_native_tls::native_tls::Error, NativeTlsError);
+impl_from_to_string!(hyper::Error, HttpError);
 
 impl From<Size0Error> for ReadySetError {
     fn from(_: Size0Error) -> Self {

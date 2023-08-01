@@ -53,6 +53,130 @@ pub struct ControllerDescriptor {
     pub nonce: u64,
 }
 
+fn make_http_client(timeout: Option<Duration>) -> hyper::Client<hyper::client::HttpConnector> {
+    let mut http_connector = HttpConnector::new();
+    http_connector.set_connect_timeout(timeout);
+    hyper::Client::builder()
+        .http2_only(true)
+        // Sets to the keep alive default if request_timeout is not specified.
+        .http2_keep_alive_timeout(timeout.unwrap_or(Duration::from_secs(20)))
+        .build(http_connector)
+}
+
+/// Errors that can occur when making a request to a controller
+struct ControllerRequestError {
+    /// The error itself
+    error: ReadySetError,
+    /// Does this error mean that the controller URL used to make the request is invalid, and a new
+    /// URL should be retrieved from the authority
+    invalidate_url: bool,
+    /// Is this error permanent, meaning the request should not be retried?
+    permanent: bool,
+}
+
+impl<E> From<E> for ControllerRequestError
+where
+    ReadySetError: From<E>,
+{
+    fn from(error: E) -> Self {
+        Self {
+            error: error.into(),
+            invalidate_url: false,
+            permanent: true,
+        }
+    }
+}
+
+async fn controller_request(
+    url: &Url,
+    client: &hyper::Client<hyper::client::HttpConnector>,
+    req: ControllerRequest,
+    timeout: Duration,
+) -> Result<hyper::body::Bytes, ControllerRequestError> {
+    // FIXME(eta): error[E0277]: the trait bound `Uri: From<&Url>` is not satisfied
+    //             (if you try and use the `url` directly instead of stringifying)
+    #[allow(clippy::unwrap_used)]
+    let string_url = url.join(req.path)?.to_string();
+
+    let r = hyper::Request::post(string_url)
+        .body(hyper::Body::from(req.request.clone()))
+        .map_err(|e| internal_err!("http request failed: {}", e))?;
+
+    let res = match tokio::time::timeout(timeout, client.request(r)).await {
+        Ok(Ok(v)) => v,
+        Ok(Err(e)) => {
+            return Err(ControllerRequestError {
+                error: e.into(),
+                invalidate_url: true,
+                permanent: false,
+            })
+        }
+        Err(_) => {
+            internal!("request timeout reached!");
+        }
+    };
+
+    let status = res.status();
+    let body = hyper::body::to_bytes(res.into_body())
+        .await
+        .map_err(|he| internal_err!("hyper response failed: {}", he))?;
+
+    match status {
+        hyper::StatusCode::OK => Ok(body),
+        hyper::StatusCode::INTERNAL_SERVER_ERROR => {
+            let err: ReadySetError = bincode::deserialize(&body)?;
+            Err(err.into())
+        }
+        s => Err(ControllerRequestError {
+            error: internal_err!("HTTP status {s}"),
+            invalidate_url: s == hyper::StatusCode::SERVICE_UNAVAILABLE,
+            permanent: false,
+        }),
+    }
+}
+
+/// A direct handle to a controller instance running at a known URL, without access to an authority
+struct RawController {
+    url: Url,
+    client: hyper::Client<hyper::client::HttpConnector>,
+    request_timeout: Option<Duration>,
+}
+
+impl RawController {
+    /// Create a new handle to a controller instance with a known URL, optionally configured to use
+    /// the given timeout for requests
+    fn new(url: Url, request_timeout: Option<Duration>) -> Self {
+        Self {
+            url,
+            client: make_http_client(request_timeout),
+            request_timeout,
+        }
+    }
+}
+
+impl Service<ControllerRequest> for RawController {
+    type Response = hyper::body::Bytes;
+    type Error = ReadySetError;
+
+    type Future = impl Future<Output = Result<Self::Response, Self::Error>> + Send;
+
+    fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, req: ControllerRequest) -> Self::Future {
+        trace!(?req, "Issuing controller RPC");
+        let url = self.url.clone();
+        let client = self.client.clone();
+        let request_timeout = self.request_timeout.unwrap_or(Duration::MAX);
+        async move {
+            controller_request(&url, &client, req, request_timeout)
+                .await
+                .map_err(|e| e.error)
+        }
+    }
+}
+
 struct Controller {
     authority: Arc<Authority>,
     client: hyper::Client<hyper::client::HttpConnector>,
@@ -61,7 +185,7 @@ struct Controller {
     leader_url: Arc<RwLock<Option<Url>>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct ControllerRequest {
     path: &'static str,
     request: Vec<u8>,
@@ -98,8 +222,6 @@ impl Service<ControllerRequest> for Controller {
         let auth = self.authority.clone();
         let leader_url = self.leader_url.clone();
         let request_timeout = req.timeout.unwrap_or(Duration::MAX);
-        let path = req.path;
-        let body = req.request;
         let start = Instant::now();
         let mut last_error_desc: Option<String> = None;
 
@@ -115,10 +237,15 @@ impl Service<ControllerRequest> for Controller {
                         last_error_desc.unwrap_or_else(|| "(none)".into())
                     );
                 }
-                if url.is_none() {
-                    let descriptor: ControllerDescriptor =
-                        match tokio::time::timeout(request_timeout - elapsed, auth.get_leader())
-                            .await
+
+                let url_ = match &url {
+                    Some(u) => u,
+                    None => {
+                        let descriptor = match tokio::time::timeout(
+                            request_timeout - elapsed,
+                            auth.get_leader(),
+                        )
+                        .await
                         {
                             Ok(Ok(url)) => url,
                             Ok(Err(_)) | Err(_) => {
@@ -126,59 +253,32 @@ impl Service<ControllerRequest> for Controller {
                             }
                         };
 
-                    url = Some(descriptor.controller_uri);
-                }
-
-                // FIXME(eta): error[E0277]: the trait bound `Uri: From<&Url>` is not satisfied
-                //             (if you try and use the `url` directly instead of stringifying)
-                #[allow(clippy::unwrap_used)]
-                let string_url = url.as_ref().unwrap().join(path)?.to_string();
-                let r = hyper::Request::post(string_url)
-                    .body(hyper::Body::from(body.clone()))
-                    .map_err(|e| internal_err!("http request failed: {}", e))?;
-
-                let res = match tokio::time::timeout(request_timeout - elapsed, client.request(r))
-                    .await
-                {
-                    Ok(Ok(v)) => v,
-                    Ok(Err(e)) => {
-                        last_error_desc = Some(e.to_string());
-                        url = None;
-                        tokio::time::sleep(Duration::from_millis(100)).await;
-                        continue;
-                    }
-                    Err(_) => {
-                        internal!(
-                            "request timeout reached; last error: {}",
-                            last_error_desc.unwrap_or_else(|| "(none)".into())
-                        );
+                        url.insert(descriptor.controller_uri)
                     }
                 };
 
-                let status = res.status();
-                let body = hyper::body::to_bytes(res.into_body())
+                match controller_request(url_, &client, req.clone(), request_timeout - elapsed)
                     .await
-                    .map_err(|he| internal_err!("hyper response failed: {}", he))?;
-
-                match status {
-                    hyper::StatusCode::OK => {
-                        // If all went well update the leader url if it changed.
+                {
+                    Ok(res) => {
                         if url != original_url {
                             *leader_url.write() = url;
                         }
-
-                        return Ok(body);
+                        return Ok(res);
                     }
-                    hyper::StatusCode::INTERNAL_SERVER_ERROR => {
-                        let err: ReadySetError = bincode::deserialize(&body)?;
-                        return Err(err);
-                    }
-                    s => {
-                        last_error_desc = Some(format!("got status {}", s));
-                        if s == hyper::StatusCode::SERVICE_UNAVAILABLE {
-                            url = None;
+                    Err(ControllerRequestError {
+                        error,
+                        invalidate_url,
+                        permanent,
+                    }) => {
+                        if permanent {
+                            return Err(error);
                         }
 
+                        last_error_desc = Some(error.to_string());
+                        if invalidate_url {
+                            url = None
+                        }
                         tokio::time::sleep(Duration::from_millis(100)).await;
                     }
                 }
@@ -203,7 +303,7 @@ impl Service<ControllerRequest> for Controller {
 /// execute any futures returned from `ReadySetHandle` (that is, you cannot just call `.wait()`
 /// on them).
 pub struct ReadySetHandle {
-    handle: Buffer<Controller, ControllerRequest>,
+    handle: Buffer<tower::util::Either<Controller, RawController>, ControllerRequest>,
     domains: Arc<Mutex<HashMap<(SocketAddr, usize), TableRpc>>>,
     views: Arc<Mutex<HashMap<(SocketAddr, usize), ViewRpc>>>,
     tracer: tracing::Dispatch,
@@ -239,23 +339,36 @@ impl ReadySetHandle {
     ) -> Self {
         // need to use lazy otherwise current executor won't be known
         let tracer = tracing::dispatcher::get_default(|d| d.clone());
-        let mut http_connector = HttpConnector::new();
-        http_connector.set_connect_timeout(request_timeout);
         ReadySetHandle {
             views: Default::default(),
             domains: Default::default(),
             handle: Buffer::new(
-                Controller {
+                tower::util::Either::A(Controller {
                     authority,
-                    client: hyper::Client::builder()
-                        .http2_only(true)
-                        // Sets to the keep alive default if request_timeout is not specified.
-                        .http2_keep_alive_timeout(
-                            request_timeout.unwrap_or(Duration::from_secs(20)),
-                        )
-                        .build(http_connector),
+                    client: make_http_client(request_timeout),
                     leader_url: Arc::new(RwLock::new(None)),
-                },
+                }),
+                CONTROLLER_BUFFER_SIZE,
+            ),
+            tracer,
+            request_timeout,
+            migration_timeout,
+        }
+    }
+
+    /// Make a new controller handle for connecting directly to a controller running at the given
+    /// URL, without access to an authority
+    pub fn make_raw(
+        url: Url,
+        request_timeout: Option<Duration>,
+        migration_timeout: Option<Duration>,
+    ) -> Self {
+        let tracer = tracing::dispatcher::get_default(|d| d.clone());
+        ReadySetHandle {
+            views: Default::default(),
+            domains: Default::default(),
+            handle: Buffer::new(
+                tower::util::Either::B(RawController::new(url, request_timeout)),
                 CONTROLLER_BUFFER_SIZE,
             ),
             tracer,
