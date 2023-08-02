@@ -202,8 +202,9 @@ pub struct Options {
     #[clap(long, env = "ALLOW_UNAUTHENTICATED_CONNECTIONS")]
     allow_unauthenticated_connections: bool,
 
-    /// Specify the migration mode for ReadySet to use
-    #[clap(long, env = "QUERY_CACHING", default_value = "explicit")]
+    /// Specify the migration mode for ReadySet to use. The default "explicit" mode is the only
+    /// non-experimental mode.
+    #[clap(long, env = "QUERY_CACHING", default_value = "explicit", hide = true)]
     query_caching: MigrationStyle,
 
     /// Sets the maximum time in minutes that we will retry migrations for in the
