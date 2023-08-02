@@ -47,3 +47,18 @@ load("@rules_proto//proto:repositories.bzl", "rules_proto_dependencies", "rules_
 rules_proto_dependencies()
 
 rules_proto_toolchains()
+
+load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
+
+BAZEL_BATS_COMMIT_ID = "e85b43efc90133d5cd4ca807a811e9aa4006fb49"
+
+git_repository(
+    name = "bazel_bats",
+    remote = "https://github.com/filmil/bazel-bats",
+    commit = BAZEL_BATS_COMMIT_ID,
+    shallow_since = "1677540706 -0800",
+)
+
+load("@bazel_bats//:deps.bzl", "bazel_bats_dependencies")
+
+bazel_bats_dependencies()

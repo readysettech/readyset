@@ -1,0 +1,8 @@
+filegroup(
+    name = "chart_unit_tests",
+    srcs = glob([
+        "*.bash",
+        "*.bats",
+    ]),
+    visibility = ["//visibility:public"],
+)

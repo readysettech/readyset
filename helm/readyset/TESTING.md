@@ -2,7 +2,7 @@
 
 ## MacOS
 
-1. `brew install bazelisk helm kubernetes-cli go`
+1. `brew install bazelisk helm kubernetes-cli go bats-core yq`
 2. `cd helm/readyset`
 3. `bazel test //...`
 

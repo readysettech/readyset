@@ -78,14 +78,14 @@ spec:
                 curl http://127.0.0.1:8500/v1/health/node/$(hostname) \
                 2>/dev/null | grep -E '".+"'
         - name: readyset-adapter
-          image: {{ default (include "readyset.adapter.imageDefault" .) .Values.readyset.adapter.imageOverride }}
+          image: {{ default ( include "readyset.adapter.imageDefault" . ) .Values.readyset.adapter.imageOverride }}
           imagePullPolicy: IfNotPresent
           securityContext:
             runAsGroup: 1000
             runAsUser: 1000
           env:
             - name: LISTEN_ADDRESS
-              value: 0.0.0.0:{{ .Values.readyset.adapter.port | default (include "readyset.mysqlPort" . ) }}
+              value: 0.0.0.0:{{ ( include "readyset.adapter.port" . ) }}
             # Database ReadySet is proxying to
             - name: UPSTREAM_DB_URL
               valueFrom:
@@ -98,7 +98,7 @@ spec:
               value: "{{ required "readyset.deployment is a required value" .Values.readyset.deployment }}"
             # Identify this as a Helm deployment to TelemetryReporter
             - name: QUERY_CACHING
-              value: {{ (include "readyset.queryCachingMode" .) | default "explicit" }}
+              value: {{ ( include "readyset.queryCachingMode" . ) | default "explicit" }}
             - name: DEPLOYMENT_ENV
               value: "helm"
             - name: AUTHORITY_ADDRESS
@@ -106,7 +106,7 @@ spec:
             - name: AUTHORITY
               value: "consul"
             - name: METRICS_ADDRESS
-              value: "0.0.0.0:{{ .Values.readyset.adapter.httpPort | default (include "readyset.adapter.httpPort" . ) }}"
+              value: "0.0.0.0:{{ ( include "readyset.adapter.httpPort" . ) }}"
             - name: PROMETHEUS_METRICS
               value: "true"
             - name: QUERY_LOG
@@ -124,15 +124,17 @@ spec:
               value: {{ .Values.readyset.adapter.statementLogging | quote }}
             {{- end }}
           resources:
+            limits:
+              memory: {{ ( include "readyset.adapter.memory" . ) }}
             requests:
-              cpu: {{ default "500m" .Values.readyset.adapter.resources.requests.cpu }}
-              memory: {{ default "1Gi" .Values.readyset.adapter.resources.requests.memory }}
+              cpu: {{ ( include "readyset.adapter.cpu" . ) }}
+              memory: {{ ( include "readyset.adapter.memory" . ) }}
           ports:
-            - containerPort: {{ .Values.readyset.adapter.httpPort | default (include "readyset.adapter.httpPort" . ) }}
+            - containerPort: {{ ( include "readyset.adapter.httpPort" . ) }}
               name: monitoring
               protocol: TCP
-            - containerPort: {{ .Values.readyset.adapter.port | default (include "readyset.mysqlPort" . ) }}
-              name: {{ default "mysql" .Values.readyset.adapter.type}}
+            - containerPort: {{ ( include "readyset.adapter.port" . ) }}
+              name: {{ ( include "readyset.adapter.type" . ) }}
               protocol: TCP
           readinessProbe:
             exec:
@@ -140,14 +142,14 @@ spec:
               - /bin/sh
               - -ec
               - |
-                curl --fail http://127.0.0.1:{{ .Values.readyset.adapter.httpPort | default (include "readyset.adapter.httpPort" . ) }}/health
+                curl --fail http://127.0.0.1:{{ ( include "readyset.adapter.httpPort" . ) }}/health
           livenessProbe:
             exec:
               command:
               - /bin/sh
               - -ec
               - |
-                curl --fail http://127.0.0.1:{{ .Values.readyset.adapter.httpPort | default (include "readyset.adapter.httpPort" . ) }}/health
+                curl --fail http://127.0.0.1:{{ ( include "readyset.adapter.httpPort" . ) }}/health
             initialDelaySeconds: 5
             periodSeconds: 5
             failureThreshold: 2

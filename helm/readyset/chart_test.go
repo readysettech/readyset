@@ -40,7 +40,7 @@ func defaultOptions(namespace string, values map[string]string) *helm.Options {
 		ValuesFiles:    []string{"values.yaml"},
 		SetValues:      values,
 		KubectlOptions: k8s.NewKubectlOptions("", "", namespace),
-		Version:        "readyset-0.9.0",
+		Version:        "readyset-0.9.1",
 		Logger:         logger.Discard,
 		// ExtraArgs:         map[string][]string{"repoAdd": []string{"--repository-config", "testdata/test-repositories.yaml"}},
 		BuildDependencies: true,

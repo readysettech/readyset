@@ -2,20 +2,20 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: readyset-server
   namespace: {{ required "You must pass a namespace" (.Release.Namespace | quote) }}
+  name: readyset-server
   labels: {{ include "readyset.labels" . | nindent 4 }}
+  {{- if .Values.readyset.server.service.annotations }}
   annotations:
-    service.beta.kubernetes.io/aws-load-balancer-type: external
-    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
-    service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+    {{- include .Values.readyset.server.service.annotations | nindent 4 }}
+  {{- end }}
 spec:
-  type: LoadBalancer
+  type: {{ .Values.readyset.server.service.type | default "LoadBalancer" }}
   selector:
     app.kubernetes.io/name: "readyset"
     app.kubernetes.io/component: "server"
   ports:
     - name: monitoring
-      port: {{ .Values.readyset.server.httpPort | default (include "readyset.server.httpPort" . ) }}
-      targetPort: {{ .Values.readyset.server.httpPort | default (include "readyset.server.httpPort" . ) }}
+      port: {{ ( include "readyset.server.httpPort" . ) }}
+      targetPort: {{ ( include "readyset.server.httpPort" . ) }}
       protocol: TCP

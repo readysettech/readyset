@@ -6,17 +6,16 @@ APP VERSION: {{ .Chart.AppVersion }}
 
 Give the chart approximately 5 minutes to deploy. When the service is ready, you should see all pods up.
 
-{{- if eq .Values.readyset.adapter.type "mysql" }}
-For connecting to MySQL:
+The chart has been deployed with support for {{ title ( include "readyset.adapter.type" . ) | replace "sql" "SQL" }} databases.
 
-mysql \
-  -u $(kubectl get secret readyset-upstream-database -o jsonpath="{.data.username}" | base64 -d) \
-  -h $(kubectl get svc readyset-adapter --template {{ "\"{{ range (index .status.loadBalancer.ingress 0) }}{{.}}{{ end }}\"" }}) \
-  --password=$(kubectl get secret readyset-upstream-database -o jsonpath="{.data.password}" | base64 -d) \
-  --database=$(kubectl get secret readyset-upstream-database -o jsonpath="{.data.database}" | base64 -d)
+{{- if eq .Values.readyset.adapter.service.type "LoadBalancer" }}
 
-{{- else if eq .Values.readyset.adapter.type "postgresql" }}
-For connecting to PostgreSQL:
+You are using the default type of service for this Helm Chart which is "LoadBalancer", your cluster or cloud
+provider should be deploying a network load balancer in the background now. Please check they have been
+deployed and validate connectivity using the following command (Double check any firewall or security
+group configuration).
+
+{{- if eq ( include "readyset.adapter.type" . ) "postgresql" }}
 
 PGPASS=$(kubectl get secret readyset-upstream-database -o jsonpath="{.data.password}" | base64 -d) \
 psql \
@@ -24,4 +23,19 @@ psql \
   -h $(kubectl get svc readyset-adapter --template {{ "\"{{ range (index .status.loadBalancer.ingress 0) }}{{.}}{{ end }}\"" }}) \
   --dbname=$(kubectl get secret readyset-upstream-database -o jsonpath="{.data.database}" | base64 -d)
 
+{{- else if eq ( include "readyset.adapter.type" . ) "mysql" }}
+
+mysql \
+  -u $(kubectl get secret readyset-upstream-database -o jsonpath="{.data.username}" | base64 -d) \
+  -h $(kubectl get svc readyset-adapter --template {{ "\"{{ range (index .status.loadBalancer.ingress 0) }}{{.}}{{ end }}\"" }}) \
+  --password=$(kubectl get secret readyset-upstream-database -o jsonpath="{.data.password}" | base64 -d) \
+  --database=$(kubectl get secret readyset-upstream-database -o jsonpath="{.data.database}" | base64 -d)
+
+{{- end }}
+{{- else if eq .Values.readyset.adapter.service.type "ClusterIP" }}
+
+A "ClusterIP" Kubernetes service for this Helm Chart have been deployed, you should be able to
+access from other pods using the the following endpoint:
+
+{{ (include "readyset.adapter.type" . ) }}://readyset-adapter.{{ .Release.Namespace }}.svc.cluster.local
 {{- end }}

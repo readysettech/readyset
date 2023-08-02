@@ -5,9 +5,6 @@
 # will likely break things in unspectacular ways.
 readyset:
 
-  # readyset.databaseUri -- (required)
-  databaseUri:
-
   # readyset.deployment -- (required) A name that uniquely identifies the readyset-deployment
   deployment:
 
@@ -18,6 +15,10 @@ readyset:
   # readyset.adapter -- all configurable options for the readyset-adapter
   adapter:
 
+    # readyset.adapter.type -- (optional) Select the Readyset Adapter type.
+    # Accepted values: "postgresql" (default), "mysql".
+    type: "postgresql"
+
     # readyset.adapter.queryLogAdHoc -- (optional) Exposes queries to the prometheus exporter; Warning: increased probablility for high-cardinality series
     queryLogAdHoc: true
 
@@ -27,19 +28,41 @@ readyset:
     # readyset.adapter.ingressEnabled -- (optional) Whether to enable ingress as opposed to a LoadBalancer; Currently a noop
     ingressEnabled: true
 
-    # readyset.adapter.httpPort -- (optional) Port number the on which the adapter listens, serving a prometheus /metrics endpoint via HTTP
-    httpPort: 6034
-
     # readyset.adapter.imageRepository -- (optional) Specify the container repository URL without a trailing slash; Default: "public.ecr.aws/readyset"
     imageRepository: # "public.ecr.aws/readyset" # No trailing slash
 
     # readyset.adapter.imageTag -- (optional) Specify the readyset-adapter tag; Defaults to the current monthly release
     imageTag:
 
-    # readyset.adapter.port -- (optional) Port the application, or other SQL clients will connect to; Defaults to MySQL's port, 3306.
-    port: 3306 # Or 5432 for PostgreSQL
+    service:
+      # readyset.adapter.service.type (optional) Specify the type or Kubernetes Service to be deployed; Default: "LoadBalancer"
+      type: "LoadBalancer"
+      # readyset.adapter.service.annotations -- (optional) List of annotations to add to Readyset Adapter service resource.
+      #
+      # In case you are using AWS Load Balancer Controller in your cluster you can add such annotations here. Have in mind that
+      # AWS Load Balancer Controller > v2.2.0 defaults to an internal NLB.
+      #
+      # For example if you want to deploy an external NLB in AWS you could use the following example:
+      #
+      # annotations:
+      #   - service.beta.kubernetes.io/aws-load-balancer-type: external
+      #   - service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+      #   - service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+      annotations: {}
+
+      # readyset.adapter.service.port -- (optional) Port the application, or other SQL clients will connect to; Defaults to PostgreSQL's port, 5432.
+      port: 5432 # Or 3306 for MySQL
+
+      # readyset.adapter.service.httpPort -- (optional) Port number the on which the adapter listens, serving a prometheus /metrics endpoint via HTTP
+      httpPort: 6034
 
     # readyset.adapter.resources -- (optional) See https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+    #
+    # In the template we configure memory requests & limits with the same value to avoid Kubernetes OOM Kills.
+    # Also, we do not configure CPU limits to avoid Kubernetes CPU throttling.
+    #
+    # If readyset.resources.limits.memory is configured, it is used as readyset.resources.requests.memory value.
+    #
     resources:
       requests:
         storage: "50Gi"
@@ -47,23 +70,48 @@ readyset:
         memory: "2Gi"
       limits:
         storage: "1Ti"
-        cpu: "500m"
-        memory: "2Gi"
 
   # readyset.server -- all configurable options for the readyset-server
   server:
     # readyset.server.replicationTables -- (optional) Comma separated list of schema, table pairs delimited by a '.'
+    #
     # Example: To only replicate/snapshot all tables in the public schema, and only
     # mytable in the myschema schema, you would pass "public.*,myschema.mytable"
+    #
     # replicationTables:
 
     # readyset.server.statementLogging -- (optional) Writes all statements to the adapter log file
     statementLogging: false
 
-    # readyset.server.httpPort -- (optional) Port number the on which the adapter listens, serving a prometheus /metrics endpoint via HTTP
-    httpPort: 6033
+    service:
+      # readyset.server.service.type (optional) Specify the type or Kubernetes Service to be deployed; Default: "LoadBalancer"
+      type: "LoadBalancer"
+      # readyset.server.service.annotations -- (optional) List of annotations to add to Readyset Adapter service resource.
+      #
+      # In case you are using AWS Load Balancer Controller in your cluster you can add such annotations here. Have in mind that
+      # AWS Load Balancer Controller > v2.2.0 defaults to an internal NLB.
+      #
+      # For example if you want to deploy an external NLB in AWS you could use the following example:
+      #
+      # annotations:
+      #   - service.beta.kubernetes.io/aws-load-balancer-type: external
+      #   - service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+      #   - service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+      annotations: {}
 
-    # readyset.server.resources -- See https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+      # readyset.server.port -- (optional) Port the application, or other SQL clients will connect to; Defaults to PostgreSQL's port, 5432.
+      port: 5432 # Or 3306 for MySQL
+
+      # readyset.server.httpPort -- (optional) Port number the on which the adapter listens, serving a prometheus /metrics endpoint via HTTP
+      httpPort: 6033
+
+    # readyset.server.resources -- (optional) See https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+    #
+    # In the template we configure memory requests & limits with the same value to avoid Kubernetes OOM Kills.
+    # Also, we do not configure CPU limits to avoid Kubernetes CPU throttling.
+    #
+    # If readyset.resources.limits.memory is configured, it is used as readyset.resources.requests.memory value.
+    #
     resources:
       requests:
         storage: "100Gi"
@@ -71,8 +119,6 @@ readyset:
         memory: "4Gi"
       limits:
         storage: "1Ti"
-        cpu: "1000m"
-        memory: "4Gi"
 
     # readyset.server.imageRepository -- (optional) Specify the container repository URL without a trailing slash; Default: "public.ecr.aws/readyset"
     # imageRepository: # "public.ecr.aws/readyset" # No trailing slash
@@ -86,6 +132,10 @@ kubernetes:
   storageClass: # Leave empty to use default provisioner
 
 # This configures the underlying consul service with 3 replicas
+#
+# Make sure you are running this chart in a cluster with at least 3 scheduleable worker nodes,
+# as Consul Server pods have a PodAntiAffinity rule that prohibits sharing nodes for these pods.
+#
 # See: https://developer.hashicorp.com/consul/docs/k8s/helm for more information
 # on how to configure consul.
 consul:
@@ -110,3 +160,4 @@ consul:
       limits:
         memory: "1Gi"
         cpu: "500m"
+

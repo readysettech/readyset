@@ -3,7 +3,7 @@ name: readyset
 description: Official ReadySet Chart
 
 # Versions are expected to follow Semantic Versioning (https://semver.org/)
-version: 0.9.0
+version: 0.9.1
 
 # kubeVersion -- We'll aim to follow the same support Kubernetes offers with regard to supported versions; Currently this is a -2 minor version delta
 kubeVersion: ">=v1.25.0-0"
@@ -20,12 +20,12 @@ sources:
 home: https://readyset.io
 
 # appVersion is not expected to follow Semantic Versioning (https://semver.org)
-appVersion: "beta-2023-06-28"
+appVersion: "beta-2023-07-26"
 
 # maintainers -- Individuals responsible for ongoing maintenance of this chart
 maintainers:
-  - name: "Ian Meyer"
-    email: "ian@readyset.io"
+  - name: "Readyset"
+    email: "info@readyset.io"
 
 dependencies:
 - condition: consul.enabled

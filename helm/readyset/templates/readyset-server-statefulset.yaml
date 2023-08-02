@@ -20,7 +20,7 @@ spec:
         resources:
           requests:
             storage: {{ .Values.readyset.server.resources.requests.storage | default "50Gi" }}
-        storageClassName: {{ .Values.kubernetes.storageClass | default (include "readyset.defaultStorageClass" .) }}
+        storageClassName: {{ .Values.kubernetes.storageClass | default ( include "readyset.defaultStorageClass" . ) }}
   template:
     metadata:
       labels: {{ include "readyset.labels" . | nindent 8 }}
@@ -87,7 +87,7 @@ spec:
                 curl http://127.0.0.1:8500/v1/health/node/$(hostname) \
                 2>/dev/null | grep -E '".+"'
         - name: readyset-server
-          image: {{ default (include "readyset.server.imageDefault" .) .Values.readyset.server.imageOverride }}
+          image: {{ default ( include "readyset.server.imageDefault" . ) .Values.readyset.server.imageOverride }}
           env:
             # ReadySet Deployment Name (Unique per Consul Cluster)
             - name: DEPLOYMENT
@@ -95,8 +95,11 @@ spec:
             # ReadySet Server Configs
             - name: MIN_WORKERS
               value: "1"
+            # ReadySet Server Memory Limit, if process heap exceed this value (bytes)
+            # we will perform evictions. Given this container will only be dedicated
+            # to ReadySet Server we assing 95% of the configured memory.
             - name: READYSET_MEMORY_LIMIT
-              value: "0"
+              value: {{ mulf 0.95 ( include "readyset.server.memory" . ) | floor | toJson | quote }}
             # Await Consul Leader Election Before Launching
             - name: INIT_REQUIRE_LEADER
               value: "1"
@@ -142,17 +145,18 @@ spec:
           volumeMounts:
             - mountPath: /state
               name: state
+          # We configure memory requests & limits with the same value to avoid
+          # Kubernetes OOM Kills. Also, we do not configure CPU limits to avoid
+          # Kubernetes CPU throttling.
           resources:
-            limits: {}
+            limits:
+              memory: {{ ( include "readyset.server.memory" . ) }}
             requests:
-              cpu: {{ default 1 .Values.readyset.server.resources.requests.cpu }}
-              memory: {{ default "2Gi" .Values.readyset.server.resources.requests.memory }}
+              cpu: {{ ( include "readyset.server.cpu" . ) }}
+              memory: {{ ( include "readyset.server.memory" . ) }}
           ports:
-            - containerPort: {{ .Values.readyset.server.httpPort | default (include "readyset.server.httpPort" . ) }}
+            - containerPort: {{ ( include "readyset.server.httpPort" . ) }}
               name: monitoring
-              protocol: TCP
-            - containerPort: {{ .Values.readyset.adapter.port | default (include "readyset.mysqlPort" . ) }}
-              name: {{ default "mysql" .Values.readyset.adapter.type}}
               protocol: TCP
           readinessProbe:
             exec:
@@ -160,7 +164,7 @@ spec:
               - /bin/sh
               - -ec
               - |
-                curl --fail http://127.0.0.1:{{ .Values.readyset.server.httpPort | default (include "readyset.server.httpPort" .) }}/metrics
+                curl --fail http://127.0.0.1:{{ ( include "readyset.server.httpPort" . ) }}/metrics
       volumes:
         - configMap:
             items:
