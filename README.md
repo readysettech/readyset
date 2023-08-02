@@ -137,7 +137,7 @@ docker run -d \
 --volume='readyset:/state' \
 --pull=always \
 -e DEPLOYMENT_ENV=quickstart_github \
-public.ecr.aws/readyset/readyset:beta-2023-06-29 \
+public.ecr.aws/readyset/readyset:latest \
 --standalone \
 --deployment='github-postgres' \
 --database-type=postgresql \
@@ -158,7 +158,7 @@ docker run -d \
 --volume='readyset:/state' \
 --pull=always \
 -e DEPLOYMENT_ENV=quickstart_github \
-public.ecr.aws/readyset/readyset:beta-2023-06-29 \
+public.ecr.aws/readyset/readyset:latest  \
 --standalone \
 --deployment='github-mysql' \
 --database-type=mysql \
@@ -322,9 +322,9 @@ This section is for developers who want to build ReadySet from source as they wo
    **Postgres:**
 
    ```bash
-   PGPASSWORD=readyset psql
+   PGPASSWORD=readyset psql \
    --host=127.0.0.1 \
-   --port=5433 \
+   --port=5432 \
    --username=postgres \
    --dbname=testdb
    ```
@@ -334,7 +334,7 @@ This section is for developers who want to build ReadySet from source as they wo
    ```bash
    mysql \
    --host=127.0.0.1 \
-   --port=3307 \
+   --port=3306 \
    --user=root \
    --password=readyset \
    --database=testdb
