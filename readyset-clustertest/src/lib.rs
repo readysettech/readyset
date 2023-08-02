@@ -514,7 +514,7 @@ impl DeploymentBuilder {
             dry_run_migration_interval: None,
             query_max_failure_seconds: None,
             fallback_recovery_seconds: None,
-            views_polling_interval: Duration::from_secs(300),
+            views_polling_interval: Duration::from_secs(5),
             user: Some(user),
             pass: Some(pass),
             replicator_restart_timeout_secs: None,
