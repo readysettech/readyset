@@ -20,12 +20,12 @@ sources:
 home: https://readyset.io
 
 # appVersion is not expected to follow Semantic Versioning (https://semver.org)
-appVersion: "beta-2023-06-28"
+appVersion: "beta-2023-07-26"
 
 # maintainers -- Individuals responsible for ongoing maintenance of this chart
 maintainers:
-  - name: "Ian Meyer"
-    email: "ian@readyset.io"
+  - name: "Readyset"
+    email: "info@readyset.io"
 
 dependencies:
 - condition: consul.enabled

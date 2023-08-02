@@ -87,28 +87,87 @@ app.kubernetes.io/component: server
 readyset.adapter.httpPort -- Port for readyset-adapter
 */}}
 {{- define "readyset.adapter.httpPort" -}}
-6034
+{{- default 6034 .Values.readyset.adapter.httpPort -}}
+{{- end }}
+
+{{/*
+readyset.adapter.cpu -- CPUs configuration for readyset-adapter container
+*/}}
+{{- define "readyset.adapter.cpu" -}}
+{{- default "500m" .Values.readyset.adapter.resources.requests.cpu }}
+{{- end }}
+
+{{/*
+readyset.adapter.memory -- Default memory requirement for readyset-adapter
+
+We configure the container resources and limits to use the same value for memory,
+this is to avoid Kubernetes OOM.
+
+*/}}
+{{- define "readyset.adapter.memory" -}}
+{{ coalesce .Values.readyset.adapter.resources.limits.memory .Values.readyset.adapter.resources.requests.memory "2Gi" }}
+{{- end }}
+
+{{/*
+readyset.server.cpu -- CPUs configuration for readyset-server container
+*/}}
+{{- define "readyset.server.cpu" -}}
+{{- default 1 .Values.readyset.server.resources.requests.cpu }}
+{{- end }}
+
+{{/*
+readyset.server.memory -- Memory configuration for readyset-server container
+
+We configure the container resources and limits to use the same value for memory,
+this is to avoid Kubernetes OOM.
+
+If .Values.readyset.server.resources.limits.memory is defined it takes presedence,
+otherwise we use .Values.readyset.server.requests.memory, else we default to 4Gi.
+
+If the user configures just numbers we default to bytes (Kubernets default),
+otherwise we calculate the bytes number so we can then pass as env variable
+(READYSET_MEMORY_LIMIT) to the container so we can set a memory upper limit.
+
+*/}}
+{{- define "readyset.server.memory" -}}
+{{- $memory := coalesce .Values.readyset.server.resources.limits.memory .Values.readyset.server.resources.requests.memory "4Gi" }}
+{{- $memoryUnit := mustRegexFind "(k|Ki|m|Mi|M|Gi|G|Ti|T|Pi|P|Ei|E)$" $memory }}
+{{- $memorySize := mustRegexFind "^([0-9.]+)" $memory }}
+{{- $memoryUnitDict := dict "k" "1000" "Ki" "1024" "m" "1000000" "M" "1000000" "Mi" "1048576" "G" "1000000000" "Gi" "1073741824" "T" "1000000000000" "Ti" "1099511627776" "P" "1000000000000000" "Pi" "1125899906842624" "E" "1000000000000000000" "Ei" "1152921504606846976" }}
+{{- $memoryUnitInBytes := get $memoryUnitDict $memoryUnit }}
+{{- if not $memoryUnit }}
+{{- $memorySize -}}
+{{- else }}
+{{- mulf $memorySize $memoryUnitInBytes | floor | toJson }}
+{{- end }}
 {{- end }}
 
 {{/*
 readyset.server.httpPort -- Port for readyset-server
 */}}
 {{- define "readyset.server.httpPort" -}}
-6033
+{{- default 6033 .Values.readyset.server.httpPort -}}
 {{- end }}
 
 {{/*
-readyset.mysqlPort -- Port number for readyset-adapter
+readyset.adapter.type -- Readyset Adapter type ("postgresql" or "mysql")
 */}}
-{{- define "readyset.mysqlPort" -}}
-3306
+{{- define "readyset.adapter.type" -}}
+{{- $type := mustRegexFind "postgresql|mysql" (default "postgresql" .Values.readyset.adapter.type) }}
+{{- if not $type }}
+{{ fail "Must pass either 'mysql' or 'postgresql' to readyset.adapter.type" }}
+{{- else -}}
+{{- printf "%s" $type -}}
+{{- end -}}
 {{- end }}
 
-{{/*
-readyset.postgresqlPort -- Port number for readyset-adapter
-*/}}
-{{- define "readyset.postgresqlPort" -}}
-5432
+{{- define "readyset.adapter.port" -}}
+{{- $type := ( include "readyset.adapter.type" . ) }}
+{{- if eq $type "postgresql" -}}
+{{- default 5432 .Values.readyset.adapter.port -}}
+{{- else -}}
+{{- default 3306 .Values.readyset.adapter.port -}}
+{{- end -}}
 {{- end }}
 
 {{/*
@@ -132,7 +191,7 @@ readyset.queryCachingMode -- Ensure the value is one of the three currently acce
 
 {{- define "readyset.serviceAccountName" -}}
 {{- if .Values.serviceAccount.create -}}
-    {{ default (include "readyset.fullname" .) .Values.serviceAccount.name }}
+    {{ default ( include "readyset.fullname" . ) .Values.serviceAccount.name }}
 {{- else -}}
     {{ default "default" .Values.serviceAccount.name }}
 {{- end -}}

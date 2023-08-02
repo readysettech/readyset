@@ -5,21 +5,21 @@ metadata:
   namespace: {{ required "You must pass a namespace" (.Release.Namespace | quote) }}
   name: readyset-adapter
   labels: {{ include "readyset.labels" . | nindent 4 }}
+  {{- if .Values.readyset.adapter.service.annotations }}
   annotations:
-    service.beta.kubernetes.io/aws-load-balancer-type: external
-    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
-    service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+    {{- include .Values.readyset.adapter.service.annotations | nindent 4 }}
+  {{- end }}
 spec:
-  type: LoadBalancer
+  type: {{ .Values.readyset.adapter.service.type | default "LoadBalancer" }}
   selector:
     app.kubernetes.io/name: "readyset"
     app.kubernetes.io/component: "adapter"
   ports:
-    - name: {{ default "mysql" .Values.readyset.adapter.type | quote}}
-      port: {{ .Values.readyset.adapter.port | default (include "readyset.mysqlPort" . ) }}
-      targetPort: {{ .Values.readyset.adapter.port | default (include "readyset.mysqlPort" . ) }}
+    - name: {{ ( include "readyset.adapter.type" . ) }}
+      port: {{ ( include "readyset.adapter.port" . ) }}
+      targetPort: {{ ( include "readyset.adapter.port" . ) }}
       protocol: TCP
     - name: monitoring
-      port: {{ .Values.readyset.adapter.httpPort | default (include "readyset.adapter.httpPort" . ) }}
-      targetPort: {{ .Values.readyset.adapter.httpPort | default (include "readyset.adapter.httpPort" . ) }}
+      port: {{ ( include "readyset.adapter.httpPort" . ) }}
+      targetPort: {{ ( include "readyset.adapter.httpPort" . ) }}
       protocol: TCP
