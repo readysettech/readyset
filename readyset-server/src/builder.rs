@@ -57,8 +57,11 @@ impl Builder {
         deployment_dir: PathBuf,
     ) -> Self {
         let mut builder = Self::default();
-        if opts.memory > 0 {
-            builder.set_memory_limit(opts.memory, Duration::from_secs(opts.memory_check_freq));
+        if opts.memory_limit > 0 {
+            builder.set_memory_limit(
+                opts.memory_limit,
+                Duration::from_secs(opts.memory_check_freq),
+            );
         }
         builder.set_eviction_kind(opts.eviction_kind);
 

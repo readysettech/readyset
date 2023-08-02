@@ -95,7 +95,7 @@ spec:
             # ReadySet Server Configs
             - name: MIN_WORKERS
               value: "1"
-            - name: NORIA_MEMORY_BYTES
+            - name: READYSET_MEMORY_LIMIT
               value: "0"
             # Await Consul Leader Election Before Launching
             - name: INIT_REQUIRE_LEADER

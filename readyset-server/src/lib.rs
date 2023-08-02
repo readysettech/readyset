@@ -552,11 +552,13 @@ pub struct WorkerOptions {
     #[clap(long, default_value = "6")]
     pub persistence_threads: i32,
 
-    /// Memory, in bytes, available for partially materialized state (0 = unlimited)
-    #[clap(long, short = 'm', default_value = "0", env = "NORIA_MEMORY_BYTES")]
-    pub memory: usize,
+    /// Memory high water mark, in bytes. If process heap memory exceeds this value, we
+    /// will perform evictions from partially materialized state. (0 = unlimited)
+    #[clap(long, short = 'm', default_value = "0", env = "READYSET_MEMORY_LIMIT")]
+    pub memory_limit: usize,
 
-    /// Frequency at which to check the state size against the memory limit (in seconds)
+    /// Frequency at which to check the process heap allocation against the memory limit (in
+    /// seconds)
     #[clap(
         long = "memory-check-every",
         default_value = "1",
