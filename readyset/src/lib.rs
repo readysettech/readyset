@@ -245,11 +245,24 @@ pub struct Options {
     noria_metrics: bool,
 
     /// Enable logging queries and execution metrics. This creates a histogram per unique query.
-    #[clap(long, env = "QUERY_LOG", requires = "metrics")]
+    /// Enabled by default if prometheus-metrics is enabled.
+    #[clap(
+        long,
+        env = "QUERY_LOG",
+        requires = "metrics",
+        default_value_if("promethues-metrics", "true", Some("true"))
+    )]
     query_log: bool,
 
-    /// Enables logging ad-hoc queries in the query log. Useful for testing.
-    #[clap(long, hide = true, env = "QUERY_LOG_AD_HOC", requires = "query_log")]
+    /// Enables logging ad-hoc queries in the query log. Useful for testing. Enabled by default if
+    /// prometheus-metrics is enabled.
+    #[clap(
+        long,
+        hide = true,
+        env = "QUERY_LOG_AD_HOC",
+        requires = "query_log",
+        default_value_if("prometheus_metrics", "true", Some("true"))
+    )]
     query_log_ad_hoc: bool,
 
     /// Use the AWS EC2 metadata service to determine the external address of this noria adapter's
