@@ -16,6 +16,7 @@ async fn setup() -> (tokio_postgres::Config, Handle, ShutdownSender) {
 
 mod types {
     use std::fmt::Display;
+    use std::panic::RefUnwindSafe;
     use std::time::Duration;
 
     use cidr::IpInet;
@@ -31,6 +32,7 @@ mod types {
         arbitrary_json_without_f64, arbitrary_mac_address, arbitrary_naive_date,
         arbitrary_naive_time, arbitrary_systemtime, arbitrary_uuid,
     };
+    use readyset_util::eventually;
     use rust_decimal::Decimal;
     use tokio_postgres::types::{FromSql, ToSql};
     use tokio_postgres::NoTls;
@@ -41,7 +43,7 @@ mod types {
     async fn test_type_roundtrip<T, V>(type_name: T, val: V)
     where
         T: Display,
-        V: ToSql + Sync + PartialEq,
+        V: ToSql + Sync + PartialEq + RefUnwindSafe,
         for<'a> V: FromSql<'a>,
     {
         let (config, _handle, shutdown_tx) = setup().await;
@@ -58,14 +60,18 @@ mod types {
             .await
             .unwrap();
 
-        sleep().await;
-        sleep().await;
-
         // check values coming out of noria
-        let star_results = client.query("SELECT * FROM t", &[]).await.unwrap();
-
-        assert_eq!(star_results.len(), 1);
-        assert_eq!(star_results[0].get::<_, V>(0), val);
+        eventually!(run_test: {
+            client.query("SELECT * FROM t", &[])
+                .await
+                .unwrap()
+                .iter()
+                .map(|row| row.get::<_, V>(0))
+                .collect::<Vec<_>>()
+        }, then_assert: |star_results| {
+            assert_eq!(star_results.len(), 1);
+            assert_eq!(star_results[0], val);
+        });
 
         // check parameter parsing
         if type_name.to_string().as_str() != "json" {
