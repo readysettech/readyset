@@ -951,6 +951,30 @@ vertical_tests! {
         )
     );
 
+    successive_disjunction_diamonds(
+        // The idea here is to create a graph with multiple successive union diamonds, like this:
+        //   B
+        //  / \
+        // σ   σ
+        //  \ /
+        //   ⊎
+        //  / \
+        // σ   σ
+        //  \ /
+        //   ⊎
+        "SELECT id, name FROM posts WHERE
+         (score1 < 16384 OR score1 > 16384) AND
+         (score2 > 16384 OR score2 < 16384) AND
+         name = ?";
+        "posts" => (
+            "CREATE TABLE posts
+             (id INT, name TEXT, score1 SMALLINT, score2 SMALLINT, PRIMARY KEY (id))",
+            schema: [id: i32, name: String, score1: i16, score2: i16],
+            primary_key: 0,
+            key_columns: [1],
+        )
+    );
+
     // Join on a different key than the one in the WHERE clause. This is mainly meant to exercise
     // the eviction code by re-creating the kind of corner case described in section 4.5.2 of the
     // Noria thesis under the "Incongruent Joins" heading:
