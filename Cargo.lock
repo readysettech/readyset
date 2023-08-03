@@ -4749,6 +4749,7 @@ dependencies = [
  "derive_more",
  "fail",
  "failpoint-macros",
+ "futures",
  "futures-util",
  "itertools",
  "lazy_static",

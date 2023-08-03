@@ -42,6 +42,7 @@ readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter", feature
 readyset-server = { path = "../readyset-server" }
 test-utils = { path = "../test-utils" }
 chrono = "0.4.19"
+futures = "0.3"
 mysql = "23.0.1"
 paste = "1.0.5"
 proptest = "1.0.0"

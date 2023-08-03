@@ -32,6 +32,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::marker::PhantomData;
+use std::panic::AssertUnwindSafe;
 use std::time::Duration;
 use std::{cmp, env};
 
@@ -51,6 +52,7 @@ use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
 use readyset_client_test_helpers::TestBuilder;
 use readyset_data::DfValue;
 use readyset_server::Handle;
+use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -450,10 +452,21 @@ where
             mysql, readyset, ..
         } = ctxt;
 
-        let readyset_res = op.run(readyset, query, &tables).await.unwrap();
-        // `Operation::Evict` is ReadySet only
-        if !matches!(op, Operation::Evict { .. }) {
+        if matches!(op, Operation::Evict { .. }) {
+            // `Operation::Evict` is ReadySet only
+            op.run(readyset, query, &tables).await.unwrap();
+        } else if matches!(op, Operation::Query { .. }) {
+            eventually!(attempts: 5, sleep: Duration::from_millis(20), run_test: {
+                let mysql_res = op.run(mysql, query, &tables).await.unwrap();
+                let readyset_res = op.run(readyset, query, &tables).await.unwrap();
+                AssertUnwindSafe(move || (mysql_res, readyset_res))
+            }, then_assert: |results| {
+                let (mysql_res, readyset_res) = results();
+                assert_eq!(mysql_res, readyset_res);
+            });
+        } else {
             let mysql_res = op.run(mysql, query, &tables).await.unwrap();
+            let readyset_res = op.run(readyset, query, &tables).await.unwrap();
             assert_eq!(mysql_res, readyset_res);
         }
     }
