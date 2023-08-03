@@ -47,8 +47,6 @@ mod types {
         let (config, _handle, shutdown_tx) = setup().await;
         let mut client = connect(config).await;
 
-        sleep().await;
-
         client
             .simple_query(&format!("CREATE TABLE t (x {})", type_name))
             .await
