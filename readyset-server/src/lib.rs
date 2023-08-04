@@ -574,9 +574,9 @@ pub struct WorkerOptions {
     #[clap(long = "nopartial", hide = true)]
     pub no_partial: bool,
 
-    /// Forbid the creation of fully materialized nodes
-    #[clap(long, env = "FORBID_FULL_MATERIALIZATION")]
-    pub forbid_full_materialization: bool,
+    /// Allow the creation of fully materialized nodes.
+    #[clap(long, env = "ALLOW_FULL_MATERIALIZATION")]
+    pub allow_full_materialization: bool,
 
     /// Enable packet filters in egresses before readers
     #[clap(long, hide = true)]

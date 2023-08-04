@@ -8462,7 +8462,6 @@ async fn forbid_full_materialization() {
         let mut builder = Builder::for_tests();
         builder.set_sharding(Some(DEFAULT_SHARDING));
         builder.set_persistence(get_persistence_params("forbid_full_materialization"));
-        builder.forbid_full_materialization();
         builder
             .start_local_custom(Arc::new(Authority::from(LocalAuthority::new_with_store(
                 Arc::new(LocalAuthorityStore::new()),
